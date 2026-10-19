@@ -188,10 +188,14 @@ class _Header extends StatelessWidget {
         runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          HarnessBadge(harness: sleeve.harness),
+          HarnessBadge(
+            harness: sleeve.harness,
+            provider: sleeveProvider(sleeve),
+            local: isLocalModel(sleeve),
+          ),
           if (model.isNotEmpty)
             Text(model, style: Theme.of(context).textTheme.labelMedium),
-          if (isLocalModel(sleeve.harness, model)) const LocalModelBadge(),
+          if (isLocalModel(sleeve)) const LocalModelBadge(),
           StatusPill(key: const ValueKey('status-pill'), state: state),
           ContextMeter(tokens: tokens, window: window),
         ],

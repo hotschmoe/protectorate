@@ -202,17 +202,36 @@ void main() {
   });
 
   test('local model rule', () {
-    const cases = <(Harness, String, bool)>[
-      (Harness.HARNESS_PI, 'qwen3:8b', true),
-      (Harness.HARNESS_PI, 'ollama/llama3.1', true),
-      (Harness.HARNESS_PI, 'anthropic/claude-sonnet-5', false),
-      (Harness.HARNESS_PI, 'gpt-5', false),
-      (Harness.HARNESS_PI, '', false),
-      (Harness.HARNESS_CLAUDE, 'qwen3:8b', false),
-      (Harness.HARNESS_SHELL, '', false),
+    final cases = <(Sleeve, bool)>[
+      (
+        Sleeve(
+          harness: Harness.HARNESS_PI,
+          chat: ChatStatus(
+            model: 'qwen3:8b',
+            provider: 'vllm',
+            localModel: true,
+          ),
+        ),
+        true,
+      ),
+      (
+        Sleeve(
+          harness: Harness.HARNESS_PI,
+          chat: ChatStatus(model: 'deepseek-v4', provider: 'deepseek'),
+        ),
+        false,
+      ),
+      (
+        Sleeve(
+          harness: Harness.HARNESS_PI,
+          chat: ChatStatus(model: 'qwen3:8b'),
+        ),
+        false,
+      ),
+      (Sleeve(harness: Harness.HARNESS_SHELL), false),
     ];
-    for (final (h, m, want) in cases) {
-      expect(isLocalModel(h, m), want, reason: '$h $m');
+    for (final (s, want) in cases) {
+      expect(isLocalModel(s), want, reason: '$s');
     }
   });
 
@@ -307,6 +326,7 @@ void main() {
     Sleeve sleeve({
       Harness h = Harness.HARNESS_CLAUDE,
       String model = 'opus',
+      bool local = false,
     }) => Sleeve(
       name: 'alice',
       harness: h,
@@ -314,7 +334,7 @@ void main() {
       session: 'sleeve-alice',
       state: SleeveState.SLEEVE_STATE_RUNNING,
       mode: SleeveMode.SLEEVE_MODE_CHAT,
-      chat: ChatStatus(model: model),
+      chat: ChatStatus(model: model, localModel: local),
     );
 
     testWidgets('renders the transcript and sends, stops, responds', (
@@ -438,7 +458,11 @@ void main() {
           home: ChatScreen(
             hub: _hub,
             client: HubClient.withTransport(transport),
-            sleeve: sleeve(h: Harness.HARNESS_PI, model: 'qwen3:8b'),
+            sleeve: sleeve(
+              h: Harness.HARNESS_PI,
+              model: 'qwen3:8b',
+              local: true,
+            ),
           ),
         ),
       );
@@ -491,6 +515,8 @@ void main() {
           chat: ChatStatus(
             state: ChatState.CHAT_STATE_WORKING,
             model: 'qwen3:8b',
+            provider: 'vllm',
+            localModel: true,
             contextTokens: Int64(8000),
             contextWindow: Int64(32000),
           ),
@@ -505,6 +531,23 @@ void main() {
       expect(find.text('Open chat'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('open-pi1')));
       expect(log, ['open']);
+    });
+
+    testWidgets('pi on a hosted open model has no warning', (tester) async {
+      await pump(
+        tester,
+        Sleeve(
+          name: 'pi2',
+          harness: Harness.HARNESS_PI,
+          workspace: '/w/app',
+          state: SleeveState.SLEEVE_STATE_RUNNING,
+          mode: SleeveMode.SLEEVE_MODE_CHAT,
+          chat: ChatStatus(model: 'deepseek-v4-pro', provider: 'deepseek'),
+        ),
+        [],
+      );
+      expect(find.text('deepseek-v4-pro'), findsOneWidget);
+      expect(find.byKey(const ValueKey('local-model-badge')), findsNothing);
     });
 
     testWidgets('terminal-mode shell has no warning and opens terminal', (

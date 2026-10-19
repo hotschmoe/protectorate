@@ -71,6 +71,74 @@ class Tokens {
     ),
   };
 
+  // Colour of the party serving the model: the provider when known, the
+  // harness otherwise. A model served locally gets its own colour whatever
+  // the provider id is.
+  Accent model(Harness h, String provider, {bool local = false}) {
+    if (local) {
+      return _a(
+        const Color(0xFF2F6B73),
+        const Color(0xFFD6EEF1),
+        const Color(0xFF7FD3DE),
+        const Color(0xFF123C42),
+      );
+    }
+    final p = provider.toLowerCase();
+    bool is_(String prefix) => p.startsWith(prefix);
+    if (is_('anthropic')) return harness(Harness.HARNESS_CLAUDE);
+    if (is_('openai')) return harness(Harness.HARNESS_CODEX);
+    if (is_('xai')) return harness(Harness.HARNESS_GROK);
+    if (is_('deepseek')) {
+      return _a(
+        const Color(0xFF2A4FC0),
+        const Color(0xFFDCE5FF),
+        const Color(0xFF93AEFF),
+        const Color(0xFF1B2D6B),
+      );
+    }
+    if (is_('zai') || is_('z-ai') || is_('zhipu')) {
+      return _a(
+        const Color(0xFF5B3FC0),
+        const Color(0xFFE6DFFF),
+        const Color(0xFFBBA6FF),
+        const Color(0xFF30226B),
+      );
+    }
+    if (is_('moonshot') || is_('kimi')) {
+      return _a(
+        const Color(0xFF1F6FA8),
+        const Color(0xFFD5EAF8),
+        const Color(0xFF86C6F0),
+        const Color(0xFF123A57),
+      );
+    }
+    if (is_('minimax')) {
+      return _a(
+        const Color(0xFFB8421F),
+        const Color(0xFFFBDDD2),
+        const Color(0xFFFF9C80),
+        const Color(0xFF55200F),
+      );
+    }
+    if (is_('qwen') || is_('alibaba') || is_('dashscope')) {
+      return _a(
+        const Color(0xFF7A3FB0),
+        const Color(0xFFF0DDFB),
+        const Color(0xFFD9A8F5),
+        const Color(0xFF3E1A5C),
+      );
+    }
+    if (is_('openrouter')) {
+      return _a(
+        const Color(0xFF3F5A9A),
+        const Color(0xFFDDE4F5),
+        const Color(0xFFA6BAE8),
+        const Color(0xFF212F52),
+      );
+    }
+    return harness(h);
+  }
+
   Accent chatState(ChatState s) => switch (s) {
     ChatState.CHAT_STATE_AWAITING_APPROVAL => _a(
       const Color(0xFF8A5300),

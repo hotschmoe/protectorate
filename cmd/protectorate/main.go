@@ -131,7 +131,7 @@ func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
 	var listen, tmuxSocket, webDir string
 	var quotaInterval, deadRetention time.Duration
-	var localURLs []string
+	var localURLs, localModelHosts []string
 	var nodeInterval time.Duration
 	var nodeTokenFile string
 	var watch, toolDirs []string
@@ -172,6 +172,7 @@ func hubCmd() *cobra.Command {
 			h.Sessions = session.New(tmuxSocket)
 			h.DeadRetention = deadRetention
 			h.WebDir = webDir
+			h.LocalModelHosts = localModelHosts
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
 			ts, err := startTailnet(ctx, cmd.ErrOrStderr())
 			if err != nil {
@@ -199,6 +200,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")
 	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")
+	serve.Flags().StringSliceVar(&localModelHosts, "local-model-host", nil, "hostname of a model server of your own that the app flags as a local model, beyond private and tailnet addresses (repeatable)")
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
 	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")

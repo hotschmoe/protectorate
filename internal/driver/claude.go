@@ -310,7 +310,7 @@ func (s *claudeSession) emitUsage(u *claudeUsage, model string) {
 	}
 	out := Usage{
 		ContextTokens: u.In + u.CacheWrite + u.CacheRead, ContextWindow: s.window,
-		InputTokens: u.In, OutputTokens: u.Out, CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite, Model: model,
+		InputTokens: u.In, OutputTokens: u.Out, CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite, Model: model, Provider: "anthropic",
 	}
 	if u.CacheWrite+u.CacheRead > 0 {
 		out.CacheExpires = time.Now().Add(s.cacheTTL)

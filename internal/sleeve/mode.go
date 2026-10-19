@@ -22,6 +22,8 @@ type Chat struct {
 	State        string    `yaml:"state,omitempty"`
 	SessionID    string    `yaml:"session_id,omitempty"`
 	Model        string    `yaml:"model,omitempty"`
+	Provider     string    `yaml:"provider,omitempty"`
+	LocalModel   bool      `yaml:"local_model,omitempty"`
 	Context      uint64    `yaml:"context_tokens,omitempty"`
 	Window       uint64    `yaml:"context_window,omitempty"`
 	CacheExpires time.Time `yaml:"cache_expires,omitempty"`

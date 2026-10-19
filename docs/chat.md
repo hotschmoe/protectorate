@@ -39,8 +39,27 @@ scope; every call is covered by `chat_*`.
 
 `Sleeve.chat` (`ChatStatus`) is kept current: state, harness session id, model,
 `context_tokens` (the prompt size of the last model call), `context_window`,
-`cache_expires_at` (Claude only), `last_seq`. Every state change is published
-on EventService as `chat.state` (subject = sleeve name).
+`cache_expires_at` (Claude only), `last_seq`, `provider` and `local_model`.
+Every state change is published on EventService as `chat.state` (subject =
+sleeve name).
+
+Provider and local serving. Drivers report the provider with each usage
+update: claude `anthropic`, codex `openai`, grok `xai`. pi reports the
+`provider` and `baseUrl` of the `model` object in `get_state` (see
+`rpc-commands.md#model-object`), and the `provider` of each assistant
+message; a message with a different provider than `get_state` drops the
+`baseUrl`, since pi's message carries no endpoint. The hub sets `local_model`
+when the base URL host is loopback, private (RFC1918, fc00::/7 including the
+tailnet ULA fd7a:115c:a1e0::/48), link-local, CGNAT (100.64.0.0/10, tailnet),
+a single-label name, `.local`, `.localhost` or `.ts.net`, or a host or name in
+the node inventory or in `hub serve --local-model-host` (repeatable). No base URL (a named hosted provider) is never local, so
+DeepSeek, GLM, Kimi and the like over API keys show no warning. Like the model
+name, both fields are empty until the first model call. Example: a pi provider `hotschmoe-local` with baseUrl
+`https://llm.hotschmoe.com/v1` is a public DNS name for the user's own server,
+so it is local only with `--local-model-host llm.hotschmoe.com`; a provider
+`hotschmoe` at `http://192.168.10.5:18080/v1` is local by its private address.
+A tailnet with a custom
+MagicDNS suffix other than `.ts.net` is only recognised by IP or inventory entry.
 
 ## The log
 

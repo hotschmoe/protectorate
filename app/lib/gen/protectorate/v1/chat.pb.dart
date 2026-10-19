@@ -35,6 +35,8 @@ class ChatStatus extends $pb.GeneratedMessage {
     $0.Timestamp? cacheExpiresAt,
     $fixnum.Int64? lastSeq,
     $0.Timestamp? lastActivityAt,
+    $core.String? provider,
+    $core.bool? localModel,
   }) {
     final result = ChatStatus._();
     if (state != null) result.state = state;
@@ -45,6 +47,8 @@ class ChatStatus extends $pb.GeneratedMessage {
     if (cacheExpiresAt != null) result.cacheExpiresAt = cacheExpiresAt;
     if (lastSeq != null) result.lastSeq = lastSeq;
     if (lastActivityAt != null) result.lastActivityAt = lastActivityAt;
+    if (provider != null) result.provider = provider;
+    if (localModel != null) result.localModel = localModel;
     return result;
   }
 
@@ -78,6 +82,8 @@ class ChatStatus extends $pb.GeneratedMessage {
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOM<$0.Timestamp>(8, _omitFieldNames ? '' : 'lastActivityAt',
         subBuilder: $0.Timestamp.$_createMessage)
+    ..aOS(9, _omitFieldNames ? '' : 'provider')
+    ..aOB(10, _omitFieldNames ? '' : 'localModel')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -180,6 +186,30 @@ class ChatStatus extends $pb.GeneratedMessage {
   void clearLastActivityAt() => $_clearField(8);
   @$pb.TagNumber(8)
   $0.Timestamp ensureLastActivityAt() => $_ensure(7);
+
+  /// provider is who serves the model: anthropic, openai, xai, or the provider
+  /// id pi reports (deepseek, zai, openrouter, a custom name, ...). Empty until
+  /// the first model call.
+  @$pb.TagNumber(9)
+  $core.String get provider => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set provider($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasProvider() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearProvider() => $_clearField(9);
+
+  /// local_model is true when the model is served from this machine, the LAN
+  /// or the tailnet (a user-run LLM server) rather than a hosted API. The hub
+  /// decides it from the provider's base URL.
+  @$pb.TagNumber(10)
+  $core.bool get localModel => $_getBF(9);
+  @$pb.TagNumber(10)
+  set localModel($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasLocalModel() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearLocalModel() => $_clearField(10);
 }
 
 enum ChatEvent_Body {

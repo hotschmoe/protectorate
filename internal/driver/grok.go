@@ -129,7 +129,7 @@ func (s *grokSession) Send(_ context.Context, prompt string) error {
 		_ = json.Unmarshal(res, &r)
 		if u := r.Meta.Usage; u != nil && !s.perCall.Load() {
 			s.emit(Event{Kind: KindUsage, Usage: &Usage{
-				ContextTokens: u.In, InputTokens: u.In - u.Cached, OutputTokens: u.Out, CacheReadTokens: u.Cached,
+				ContextTokens: u.In, InputTokens: u.In - u.Cached, OutputTokens: u.Out, CacheReadTokens: u.Cached, Provider: "xai",
 			}})
 		}
 		s.settle(r.StopReason, res)
@@ -225,7 +225,7 @@ func (s *grokSession) onNote(method string, params, raw json.RawMessage) {
 		s.perCall.Store(true)
 		s.emit(Event{Kind: KindUsage, Usage: &Usage{
 			ContextTokens: u.In + u.CacheRead + u.CacheWrite, InputTokens: u.In, OutputTokens: u.Out,
-			CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite,
+			CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite, Provider: "xai",
 		}})
 	}
 }

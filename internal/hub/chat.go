@@ -69,6 +69,8 @@ type chatSleeve struct {
 	state      pb.ChatState
 	sessionID  string
 	model      string
+	provider   string
+	local      bool
 	context    uint64
 	window     uint64
 	cacheExp   time.Time
@@ -116,6 +118,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	s := &chatSleeve{m: m, name: name, log: lg, approvals: map[string]bool{}, keys: sendKeys{entries: map[string]*sendEntry{}}}
 	if c := info.Chat; c != nil {
 		s.sessionID, s.model, s.context, s.window = c.SessionID, c.Model, c.Context, c.Window
+		s.provider, s.local = c.Provider, c.LocalModel
 		s.cacheExp, s.activity = c.CacheExpires, c.LastActivity
 		s.used = c.SessionID != ""
 	}
@@ -197,7 +200,7 @@ func (m *chatManager) overlay(s *pb.Sleeve) {
 
 func (s *chatSleeve) statusLocked() *pb.ChatStatus {
 	st := &pb.ChatStatus{
-		State: s.state, HarnessSessionId: s.sessionID, Model: s.model,
+		State: s.state, HarnessSessionId: s.sessionID, Model: s.model, Provider: s.provider, LocalModel: s.local,
 		ContextTokens: s.context, ContextWindow: s.window, LastSeq: s.log.Last(),
 	}
 	if !s.cacheExp.IsZero() {
@@ -226,6 +229,7 @@ func (s *chatSleeve) persistLocked(force bool) {
 	st := s.statusLocked()
 	_, err := s.m.h.sleeves.SetChat(s.name, func(c *sleeve.Chat) {
 		c.State, c.Model, c.Context, c.Window = st.State.String(), st.Model, st.ContextTokens, st.ContextWindow
+		c.Provider, c.LocalModel = st.Provider, st.LocalModel
 		c.CacheExpires, c.LastActivity, c.LastSeq = s.cacheExp, s.activity, st.LastSeq
 		if c.SessionID == "" && s.used {
 			c.SessionID = s.sessionID
@@ -244,7 +248,7 @@ func (s *chatSleeve) publishLocked(force bool) {
 	s.lastPublish = now
 	st := s.statusLocked()
 	p, err := structpb.NewStruct(map[string]any{
-		"state": st.State.String(), "model": st.Model, "context_tokens": float64(st.ContextTokens),
+		"state": st.State.String(), "model": st.Model, "provider": st.Provider, "local_model": st.LocalModel, "context_tokens": float64(st.ContextTokens),
 		"context_window": float64(st.ContextWindow), "last_seq": float64(st.LastSeq),
 	})
 	if err == nil {
@@ -395,6 +399,10 @@ func (s *chatSleeve) handle(sess driver.Session, ev driver.Event) {
 		u := ev.Usage
 		if u.Model != "" {
 			s.model = u.Model
+		}
+		if u.Provider != "" {
+			s.provider = u.Provider
+			s.local = servedLocally(u.BaseURL, s.m.h.nodeHostnames())
 		}
 		if u.ContextWindow > 0 {
 			s.window = uint64(u.ContextWindow)

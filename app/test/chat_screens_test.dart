@@ -171,6 +171,8 @@ Sleeve _sleeve(
   SleeveMode mode = SleeveMode.SLEEVE_MODE_CHAT,
   double cpu = 30,
   int memMb = 900,
+  String provider = '',
+  bool local = false,
 }) => Sleeve(
   name: name,
   harness: h,
@@ -188,6 +190,8 @@ Sleeve _sleeve(
       : ChatStatus(
           state: st,
           model: model,
+          provider: provider,
+          localModel: local,
           contextTokens: Int64(ctx),
           contextWindow: Int64(win),
         ),
@@ -277,6 +281,19 @@ void main() {
                     win: 32000,
                     cpu: 8,
                     memMb: 600,
+                    provider: 'vllm',
+                    local: true,
+                  ),
+                  _sleeve(
+                    'research',
+                    Harness.HARNESS_PI,
+                    'deepseek-v4-pro',
+                    ChatState.CHAT_STATE_WORKING,
+                    ctx: 42000,
+                    win: 128000,
+                    cpu: 15,
+                    memMb: 700,
+                    provider: 'deepseek',
                   ),
                   _sleeve(
                     'ops',

@@ -289,7 +289,7 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 		s.tmu.Unlock()
 		s.emit(Event{Kind: KindUsage, Usage: &Usage{
 			ContextTokens: u.In, ContextWindow: p.Usage.Window, InputTokens: u.In - u.Cached, OutputTokens: u.Out,
-			CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite,
+			CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite, Provider: "openai",
 		}})
 	case "turn/completed":
 		s.setTurn("")
