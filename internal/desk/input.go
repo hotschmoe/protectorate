@@ -37,27 +37,64 @@ func vkEvent(k Key, up bool) keyInput {
 	return e
 }
 
-// typeGroups turns text into key presses, each a down and an up event sent in
-// its own call. A rune outside the BMP is two presses, one per UTF-16 unit.
-// Newline is Enter, tab is Tab, carriage return is dropped.
-func typeGroups(text string) [][]keyInput {
+const (
+	vkShift  = 0x10
+	vkReturn = 0x0D
+	vkTab    = 0x09
+)
+
+// layout maps characters to keys of one keyboard layout. key reports the
+// virtual key that produces r with at most Shift held; scan gives a key's
+// hardware scan code.
+type layout struct {
+	key  func(r rune) (vk uint16, shift, ok bool)
+	scan func(vk uint16) uint16
+}
+
+func (l layout) press(vk uint16, up bool) keyInput {
+	e := keyInput{typ: inputKeyboard, vk: vk, scan: l.scan(vk)}
+	if up {
+		e.flags |= keyUp
+	}
+	return e
+}
+
+// typeGroups plans the key events for text, one group per character, each sent
+// in its own call. Characters the layout produces are typed with real virtual
+// keys and Shift, as a keyboard would: applications such as Windows 11 Notepad
+// mangle runs of KEYEVENTF_UNICODE packets. Only characters the layout cannot
+// produce fall back to Unicode packets (a rune outside the BMP is two UTF-16
+// units). Newline is Enter, tab is Tab, carriage return is dropped.
+func typeGroups(text string, l layout) [][]keyInput {
 	var out [][]keyInput
 	for _, r := range text {
 		switch r {
 		case '\r':
+			continue
 		case '\n':
-			k := Key{VK: 0x0D}
-			out = append(out, []keyInput{vkEvent(k, false), vkEvent(k, true)})
+			out = append(out, []keyInput{l.press(vkReturn, false), l.press(vkReturn, true)})
+			continue
 		case '\t':
-			k := Key{VK: 0x09}
-			out = append(out, []keyInput{vkEvent(k, false), vkEvent(k, true)})
-		default:
-			for _, u := range utf16.Encode([]rune{r}) {
-				out = append(out, []keyInput{
-					{typ: inputKeyboard, scan: u, flags: keyUnicode},
-					{typ: inputKeyboard, scan: u, flags: keyUnicode | keyUp},
-				})
+			out = append(out, []keyInput{l.press(vkTab, false), l.press(vkTab, true)})
+			continue
+		}
+		if vk, shift, ok := l.key(r); ok {
+			var g []keyInput
+			if shift {
+				g = append(g, l.press(vkShift, false))
 			}
+			g = append(g, l.press(vk, false), l.press(vk, true))
+			if shift {
+				g = append(g, l.press(vkShift, true))
+			}
+			out = append(out, g)
+			continue
+		}
+		for _, u := range utf16.Encode([]rune{r}) {
+			out = append(out, []keyInput{
+				{typ: inputKeyboard, scan: u, flags: keyUnicode},
+				{typ: inputKeyboard, scan: u, flags: keyUnicode | keyUp},
+			})
 		}
 	}
 	return out

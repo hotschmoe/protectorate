@@ -138,10 +138,19 @@ and the fix: dismiss the prompt on the machine, or `node install --elevated`.
 process, integrity, the agent's integrity, and whether it blocks) without
 changing anything. `run` injects nothing and is not checked.
 
-`type` sends each character as its own down/up pair a few milliseconds apart:
-Windows 11 Notepad reads the Unicode character of every event in a batch from
-the last one, so batched text came out as repeated characters. Characters
-outside the BMP go as UTF-16 surrogate pairs, newline is Enter.
+`type` presses real keys, as a keyboard would: each character the foreground
+window's keyboard layout can produce (`VkKeyScanExW`) goes as virtual-key
+events with scan codes (`MapVirtualKeyExW`) and Shift where the layout needs it
+(Caps Lock is taken into account), one `SendInput` call per character, 5 ms
+apart. Windows 11 Notepad mangles runs of `KEYEVENTF_UNICODE` packets into
+repeated characters, so those are used only for characters the layout cannot
+produce (UTF-16 surrogate pairs for characters outside the BMP). Newline is
+Enter, tab is Tab. Characters that need AltGr or Ctrl on the layout also go as
+Unicode packets.
+
+`run` starts the program with `CreateProcess`, inheriting no handles and with
+`CREATE_NEW_CONSOLE`, so a console program (`cmd.exe /k ...`) gets its own
+visible console window instead of attaching to the agent's windowless one.
 
 ### Locked screens and unattended machines
 
