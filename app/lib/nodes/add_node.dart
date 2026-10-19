@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr/qr.dart';
 
+import '../clipboard.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/hub_client.dart';
 import '../screens/hub_shell.dart' show phoneBreakpoint;
@@ -191,8 +192,8 @@ class _AddNodeDialogState extends State<AddNodeDialog> {
   }
 
   Future<void> _copy(String text) async {
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
+    final ok = await copyText(context, text);
+    if (!ok || !mounted) return;
     setState(() => _copied = true);
     _copiedReset?.cancel();
     _copiedReset = Timer(const Duration(seconds: 2), () {
