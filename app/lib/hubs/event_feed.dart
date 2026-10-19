@@ -6,6 +6,11 @@ import '../gen/protectorate/v1/events.pb.dart';
 
 enum FeedState { connecting, live, retrying }
 
+Duration reconnectBackoff(int attempt, Duration initial, Duration max) {
+  final ms = initial.inMilliseconds << attempt.clamp(0, 16);
+  return Duration(milliseconds: ms.clamp(0, max.inMilliseconds));
+}
+
 typedef EventStreamFactory = Stream<Event> Function();
 
 class EventFeed extends ChangeNotifier {
@@ -59,10 +64,8 @@ class EventFeed extends ChangeNotifier {
     );
   }
 
-  Duration backoff(int attempt) {
-    final ms = initialDelay.inMilliseconds << attempt.clamp(0, 16);
-    return Duration(milliseconds: ms.clamp(0, maxDelay.inMilliseconds));
-  }
+  Duration backoff(int attempt) =>
+      reconnectBackoff(attempt, initialDelay, maxDelay);
 
   void _retry(Object? error) {
     if (_stopped) return;
