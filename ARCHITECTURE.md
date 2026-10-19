@@ -110,7 +110,8 @@ the admin API key and unix socket stay on the host filesystem; and Docker
 would add a daemon dependency and an extra failure domain to the one process
 every node depends on. The supervisor restarts it with 1s..30s backoff,
 SIGTERMs it on hub stop (SIGKILL after 10s) and appends its output to
-`tailnet/headscale.log` (not rotated; use logrotate with copytruncate). If the
+`tailnet/headscale.log`, rotated at 10 MiB into `.1`..`.3` by rename only (the
+oldest is replaced by rename-over; nothing is unlinked). If the
 hub is SIGKILLed the child is not reaped: run the hub under systemd
 (`KillMode=control-group`).
 

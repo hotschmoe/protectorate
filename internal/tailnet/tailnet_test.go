@@ -408,3 +408,36 @@ func TestSocketPathShort(t *testing.T) {
 		t.Fatalf("p = %s", p)
 	}
 }
+
+func TestRotatingLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "headscale.log")
+	l, err := openRotatingLog(path, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"aaaaaa", "bbbbbb", "cccccc", "dddddd"} {
+		if _, err := l.Write([]byte(s)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.Close()
+	want := map[string]string{path: "dddddd", path + ".1": "cccccc", path + ".2": "bbbbbb"}
+	for p, w := range want {
+		if got, err := os.ReadFile(p); err != nil || string(got) != w {
+			t.Errorf("%s = %q, %v; want %q", filepath.Base(p), got, err, w)
+		}
+	}
+	if _, err := os.Stat(path + ".3"); err == nil {
+		t.Error("kept more than 2 rotated files")
+	}
+
+	l2, err := openRotatingLog(path, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l2.Write([]byte("ee"))
+	l2.Close()
+	if got, _ := os.ReadFile(path); string(got) != "ddddddee" {
+		t.Errorf("reopen did not append: %q", got)
+	}
+}
