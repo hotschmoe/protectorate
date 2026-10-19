@@ -19,7 +19,7 @@ func deskResource(node string) string { return "desk:" + strings.ToLower(node) }
 func (h *Hub) requireDeskLease(node, leaseID string) error {
 	want := deskResource(node)
 	if leaseID == "" {
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("this command needs a lease on %s: acquire one with `protectorate lease acquire %s` and pass its id", want, want))
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("this command needs a lease on %s: acquire one with `protectorate lease acquire --node %s` and pass its id with --lease", want, want))
 	}
 	l, err := h.leases.Get(leaseID)
 	if err != nil {
