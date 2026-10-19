@@ -8,6 +8,10 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
+import '../gen/protectorate/v1/chat.pb.dart';
+import '../sleeves/sleeve_card.dart';
+import '../sleeves/sleeve_info.dart';
+import 'chat_screen.dart';
 import 'terminal_screen.dart';
 
 final _sleeveName = RegExp(r'^[a-z0-9][a-z0-9-]{0,39}$');
@@ -118,14 +122,16 @@ class _SleevesScreenState extends State<SleevesScreen> {
     }
   }
 
-  void _attach(Sleeve s) {
+  void _open(Sleeve s) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => TerminalScreen(
-          hub: widget.hub,
-          client: widget.client,
-          session: s.session,
-        ),
+        builder: (_) => effectiveMode(s) == SleeveMode.SLEEVE_MODE_CHAT
+            ? ChatScreen(hub: widget.hub, client: widget.client, sleeve: s)
+            : TerminalScreen(
+                hub: widget.hub,
+                client: widget.client,
+                session: s.session,
+              ),
       ),
     );
   }
@@ -158,49 +164,13 @@ class _SleevesScreenState extends State<SleevesScreen> {
                           padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
                           children: [
                             for (final s in _sleeves)
-                              Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      SleeveRow(sleeve: s),
-                                      Text(
-                                        s.workspace,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: cs.onSurfaceVariant,
-                                            ),
-                                      ),
-                                      OverflowBar(
-                                        alignment: MainAxisAlignment.end,
-                                        children: [
-                                          TextButton(
-                                            key: ValueKey('attach-${s.name}'),
-                                            onPressed:
-                                                s.state ==
-                                                    SleeveState
-                                                        .SLEEVE_STATE_RUNNING
-                                                ? () => _attach(s)
-                                                : null,
-                                            child: const Text('Attach'),
-                                          ),
-                                          TextButton(
-                                            key: ValueKey('kill-${s.name}'),
-                                            style: TextButton.styleFrom(
-                                              foregroundColor: cs.error,
-                                            ),
-                                            onPressed: () => _kill(s),
-                                            child: const Text('Kill'),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: SleeveCard(
+                                  sleeve: s,
+                                  now: DateTime.now(),
+                                  onOpen: () => _open(s),
+                                  onKill: () => _kill(s),
                                 ),
                               ),
                           ],

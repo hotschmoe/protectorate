@@ -45,6 +45,7 @@ class ChatController extends ChangeNotifier {
   StreamSubscription<ChatEvent>? _sub;
   Timer? _timer;
   bool _stopped = true;
+  bool _disposed = false;
 
   static int _counter = 0;
   static String _defaultRequestId() =>
@@ -111,7 +112,7 @@ class ChatController extends ChangeNotifier {
           await client.send(req);
           return;
         } on Object catch (e) {
-          if (attempt >= sendRetries || !isTransient(e) || _stopped) rethrow;
+          if (attempt >= sendRetries || !isTransient(e) || _disposed) rethrow;
           await Future<void>.delayed(
             reconnectBackoff(attempt, sendRetryDelay, maxDelay),
           );
@@ -119,7 +120,7 @@ class ChatController extends ChangeNotifier {
       }
     } finally {
       sending = false;
-      if (!_stopped) notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -137,6 +138,7 @@ class ChatController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _stopped = true;
     _timer?.cancel();
     _sub?.cancel();
