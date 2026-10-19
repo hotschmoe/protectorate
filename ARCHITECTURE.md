@@ -94,8 +94,8 @@ Costs:
   clients older than v1.80).
 
 Before production we need:
-- Headscale's embedded DERP + STUN (UDP 3478) on the hub,
-- TLS on the control URL,
+- DERP + STUN on the hub (done: `internal/tailnet/derp.go`),
+- TLS on the control URL (only needed for off-LAN privacy; DERP no longer depends on it),
 - a key-expiry policy for tagged nodes,
 - a real-device Android test (Android 11+ restricts netlink).
 
@@ -133,10 +133,11 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
   `name-mismatch` alert and a `node.name_mismatch` event.
 - Config lives in `tailnet/config.json`; headscale's `headscale.yaml` (JSON,
   which is valid YAML) and `policy.json` are regenerated from it on every start.
-  Embedded DERP + STUN are on, Tailscale's public DERP map is off
+  The hub's own DERP relay + STUN are on (headscale's embedded DERP is
+  always off, see below), Tailscale's public DERP map is off
   (`--public-derp` adds it). Use `http://LAN-IP:7480` for LAN-only; for
   anything off-LAN give headscale `--tls-cert/--tls-key` or terminate TLS in
-  a reverse proxy, and open UDP 3478 for STUN.
+  a reverse proxy, and open TCP 7483 (DERP) and UDP 3478 (STUN).
 - ACL (everything else is denied): `tag:hub -> tag:node:7475,22`,
   `tag:client -> tag:hub:7470`, and `tag:pool-X -> tag:pool-X:*` for each
   configured pool. Pools are the knob that lets chosen nodes reach each
@@ -164,8 +165,49 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
   bounds every phase of a request (30s dial attempt, 30s response headers,
   20s idle connections), and a poll that fails on the transport drops the
   pool and retries once on a fresh connection within the same fetch budget.
-  Embedded DERP needs TLS: with an `http://` control URL DERP clients fail the
-  TLS handshake, so there is no relay fallback and only direct UDP paths work.
+
+### DERP relay over a pinned self-signed certificate
+
+Tailscale clients always speak TLS to DERP, so headscale's embedded DERP
+(served on its plain-HTTP listener when `server_url` is `http://`) failed the
+handshake ("first record does not look like a TLS handshake") and there was
+no relay fallback: a node behind NAT or a phone on cellular data without a
+direct UDP path could never connect.
+
+Design: `hub serve` runs the DERP server in-process (`tailscale.com/derp/derpserver`)
+on `derp_listen` (default `0.0.0.0:7483`, TLS) plus a small STUN responder on
+`stun_listen` (UDP 3478). The hub generates an ECDSA self-signed certificate
+(`tailnet/derp_cert.pem`, 10 years, SAN = the `server_url` host; regenerated if
+missing, within 30 days of expiry, or the host changed) and a DERP node key
+(`derp_private.key`). `tailnet/derpmap.json` is regenerated on every start and
+passed to headscale as `derp.paths`; its node carries
+`CertName: "sha256-raw:<sha256 of the cert DER>"`, which tailscale's
+`derphttp` client verifies instead of a CA chain (hostname, expiry and hash
+are still checked). Headscale's own DERP is disabled. The DERP server admits
+only node keys headscale knows by asking headscale's `/verify` endpoint on
+loopback (fail closed), so it is not an open relay.
+
+The headscale DERP map file is decoded with a YAML library that ignores JSON
+tags (lowercased field names) and wants an integer region key, so the file is
+emitted as a YAML flow document, not plain JSON.
+
+Alternatives considered:
+- TLS-terminate headscale's whole listener with the self-signed cert: control
+  clients (tsnet `controlclient`, the Tailscale apps) verify the control URL
+  against the system roots and have no pinning hook, so every node and phone
+  would need the certificate installed. Rejected.
+- Headscale's embedded DERP with `tls_cert_path`: same control-trust problem,
+  because it serves DERP on the control listener.
+- A separate `derper` binary: a second supervised process and download for what
+  is a library already linked into the hub.
+- Requiring a domain and a public certificate: works, but the target is a home
+  or office hub with an IP address. It remains an option (`--tls-cert`).
+
+Tested by `TestDERPRelay` (`PROT_TAILNET_IT=1`): the hub and a node join over
+plain http, and with `TS_DEBUG_ALWAYS_USE_DERP` set (magicsock opens no UDP
+socket at all) traffic still flows and `Status` shows the peer on relay
+`protectorate` with an empty `CurAddr`. The same test without the knob reaches
+a direct path.
 
 SSH stays as the bootstrap and break-glass path (`spikes/ssh-agentless/`).
 
