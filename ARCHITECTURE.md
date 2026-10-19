@@ -4,8 +4,13 @@ Decisions as of 2026-10-19. Read `PROBLEMS.md` first; this document describes
 the system we build to solve those problems. Items marked `(spike)` are
 decisions that depend on an experiment still running; see "Spikes" below.
 
-Guiding rule: **lightweight is everything.** Let each vendor's harness do the
-AI work. We orchestrate; we do not wrap, patch or re-prompt.
+Guiding rules:
+- **Lightweight toward the harness.** Each LLM uses its own harness untouched.
+  We don't wrap, patch, proxy or re-prompt it. We only use its own
+  interfaces (TUI or official headless protocol) and its own config/auth.
+- **Correct, robust and fast everywhere else.** The hub, workspaces,
+  isolation, networking, nodes and API may be as sophisticated as correctness
+  requires. "Less code" is not a reason to pick a weaker design here.
 
 ---
 

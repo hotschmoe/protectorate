@@ -14,8 +14,14 @@ for the interview.
 - **Let the harness do the work.** Claude Code, Codex, Grok, Antigravity and pi
   are each built by teams tuning them for their own models. We do not modify
   them, wrap their prompts, or try to out-think them.
-- **Be as lightweight as possible.** Every layer we add is a layer that can get
-  in our own way. Default to "don't build it" until it hurts.
+- **Lightweight means hands-off toward the harnesses.** Each LLM uses its own
+  harness exactly as its vendor built it. We don't proxy model traffic, inject
+  prompts, replace tools or screen-scrape. We only use the harness's own
+  interfaces (its TUI, or its official headless protocol) and its own
+  config/auth.
+- **The orchestration layer above the harnesses is built to be correct,
+  robust and fast**, however much engineering that takes. That covers
+  workspaces, isolation, networking, nodes, scheduling, the API and the UI.
 - **One pane of glass** over accounts, machines, sessions and work.
 - **Everything is drivable from the CLI.** Anything the UI can do, the CLI can
   do, with machine-readable output. That lets an MCP server or bridge (Claude,
