@@ -111,6 +111,10 @@ func fakeClaude(f fakeIO) {
 			f.send(map[string]any{"type": "system", "subtype": "compact_boundary", "compact_metadata": map[string]any{"trigger": "auto", "pre_tokens": 900, "post_tokens": 90}})
 			text("compacted ok id=" + sid)
 			result("end_turn")
+		case strings.Contains(prompt, "synthetic"):
+			f.send(map[string]any{"type": "assistant", "message": map[string]any{"id": "msg_s", "model": "<synthetic>",
+				"content": []any{map[string]any{"type": "text", "text": "Not logged in"}}, "usage": map[string]any{"input_tokens": 0, "output_tokens": 0}}})
+			result("end_turn")
 		case strings.Contains(prompt, "sandboxed"):
 			text(fmt.Sprintf("args=%v", os.Args[1:]))
 			result("end_turn")

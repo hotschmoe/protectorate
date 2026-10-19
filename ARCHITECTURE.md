@@ -380,42 +380,53 @@ node) executes.
 - Source paths are resolved on the hub and are not confined to a directory:
   the scopes that admit `SubmitJob` are shell access to every node.
 
-## Harness sessions: attached and dispatched (spike: `spikes/drivers/`)
+## Harness sessions: chat and terminal (`internal/driver`, `internal/chatlog`, `docs/chat.md`)
 
 Decided 2026-10-20: a harness's official headless mode counts as its own
-harness, and it is the default way the user works. Library:
-`internal/driver`.
+harness, and it is the default way the user works. A sleeve has a mode fixed
+at spawn:
 
-- **Dispatched (default):** the harness's own headless protocol, supervised by
-  the hub and shown in the app as a chat view (planned: `ChatService`).
-- **Attached (advanced/fallback):** the normal TUI under tmux, in a sleeve,
-  through the xterm view. "Take over" closes the driver and resumes the same
-  native session id in the TUI, and back.
+- **Chat (default for agent harnesses):** the hub runs the harness's own
+  headless protocol through `internal/driver`, **inside the sleeve sandbox and
+  systemd scope** (the driver's `Command` hook wraps the argv with the same
+  `Plan` the terminal path uses), and normalizes what it emits into
+  `ChatEvent`s in an append-only per-sleeve log. Clients watch the log through
+  `ChatService`. There is no tmux session.
+- **Terminal:** the normal TUI under tmux through the xterm view
+  (`--mode terminal`, and always for shell and the orchestrator).
 
-| Harness | Protocol | Settled signal | Approval |
-|---------|----------|----------------|----------|
-| Claude | `claude -p` stream-json in/out, `--permission-prompt-tool stdio` | `result` | `control_request can_use_tool` |
-| Codex | app-server JSON-RPC, **via the user's daemon socket** | `turn/completed` | `item/*/requestApproval` |
-| Grok | `grok agent stdio` (ACP) | `session/prompt` response | `session/request_permission` |
-| pi | `pi --mode rpc` | `agent_settled` | none built in |
+There is no switching between the two: one owner per native session, and a
+sleeve stays in the mode it was spawned in.
 
-- **Handoff** works in both directions through native resume (`--resume`,
-  `codex resume`, `pi --session`). `{harness, cwd, session_id}` is enough to
-  resume.
-- **One owner per session id:** the hub enforces it. Only Codex enforces it
-  itself; the others let two writers corrupt the conversation.
-- **Codex:** its TUI runs through a user-level daemon that keeps the thread
-  locked, so the hub must drive that daemon's socket, not a private
-  `codex app-server`.
-- **Grok:** it honors the user's `permission_mode` config. Sending
-  `/always-approve off` on session open turns the gate on without changing
-  any config.
-- **pi:** it has no approval gate. Either treat it as ungated and rely on
-  sleeve isolation (preferred, keeps the harness untouched) or load an approval
-  extension.
-- **One protocol for all?** Not ACP: Claude, Codex and pi would each need a
-  third-party adapter. Use native drivers behind one small Go interface:
-  `Open(cwd, id) -> Session{Send, Events, Respond, Interrupt, Close}`.
+| Harness | Protocol | Settled signal | Approval | Native compaction |
+|---------|----------|----------------|----------|-------------------|
+| Claude | `claude -p` stream-json in/out, `--permission-prompt-tool stdio` | `result` | `control_request can_use_tool` | `/compact` user message, verified by `compact_boundary` |
+| Codex | `codex app-server` over stdio, one process per session | `turn/completed` | `item/*/requestApproval` | `thread/compact/start`, verified by the `contextCompaction` item |
+| Grok | `grok agent stdio` (ACP) | `session/prompt` response | `session/request_permission` | not verified over ACP: unsupported |
+| pi | `pi --mode rpc` | `agent_settled` | none built in | rpc `compact`, verified by the response |
+
+- **Inside a sleeve the sandbox is the boundary**, so each harness runs in its
+  own autonomous mode through official switches: Claude
+  `--permission-mode bypassPermissions`, Grok `/always-approve on`, Codex a
+  sleeve-owned `config.toml` (`approval_policy = "never"`,
+  `sandbox_mode = "danger-full-access"`; the user's config is not copied), pi
+  has no gate. Approval events appear only where a harness still asks.
+- **Native auto-compaction keeps each harness's defaults.** When a harness
+  compacts on its own, the driver reports a Compaction event with
+  `native=true`.
+- **Context numbers are per model call**, never turn sums: Claude from the
+  last `assistant` event (deduped by message id) plus the window from
+  `result.modelUsage`, Codex `tokenUsage.last`, pi `message_end.usage` plus the
+  model's window, Grok the `_x.ai/session_notification` usage (window
+  unknown).
+- **Codex runs per sleeve**: `CODEX_HOME` is the sleeve's, so its threads live
+  there, and the stdio app-server needs no daemon. A Codex TUI in a terminal
+  sleeve starts as `codex --disable daemon_auto_start` to avoid a per-sleeve
+  daemon install. The user's own Codex daemon is no longer driven by the hub.
+- **One owner per session id:** the hub enforces it (`driver.Owners`). Only
+  Codex enforces it itself.
+- **Grok:** it honors the user's `permission_mode` config outside sleeves;
+  host-side drivers send `/always-approve off`.
 
 ## Orchestrator
 

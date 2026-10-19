@@ -299,6 +299,9 @@ func (s *claudeSession) handle(raw []byte) {
 // the 1 hour bucket when Claude wrote any, otherwise 5 minutes, and carries
 // over to calls that only read the cache.
 func (s *claudeSession) emitUsage(u *claudeUsage, model string) {
+	if u.In+u.CacheWrite+u.CacheRead == 0 {
+		return // Claude's own synthetic messages, such as a login error
+	}
 	switch {
 	case u.CacheCreation.Ephemeral1h > 0:
 		s.cacheTTL = cacheTTL1h

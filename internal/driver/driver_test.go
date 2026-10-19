@@ -642,3 +642,15 @@ func TestCodexSandboxedLeavesPolicyToConfig(t *testing.T) {
 		s.Close()
 	}
 }
+
+func TestSyntheticMessageReportsNoUsage(t *testing.T) {
+	s := fixtures()[0].open(t, "")
+	if err := s.Send(ctx5(t), "synthetic"); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range until(t, s, KindSettled) {
+		if e.Kind == KindUsage && e.Usage.ContextTokens == 0 {
+			t.Fatalf("zero-context usage event: %+v", e.Usage)
+		}
+	}
+}
