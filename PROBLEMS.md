@@ -387,6 +387,75 @@ in the background (or by watching filesystem events), not per request.
 
 ---
 
+## P10. Large open models over API keys (DeepSeek, GLM, Kimi, ...)
+
+**Problem.** Besides subscriptions, we want large open models (DeepSeek, GLM,
+Kimi, Qwen, MiniMax and similar) through pay-per-token API keys. Do we add a
+harness for each, or run them in an existing one?
+
+`[note]` pi already covers this with no new harness. Its provider list
+(`references/secondary/pi/packages/coding-agent/docs/providers.md`) includes
+DeepSeek (`DEEPSEEK_API_KEY`), the ZAI/GLM coding plan (`ZAI_API_KEY`), Kimi
+for Coding, Moonshot, MiniMax, Qwen Token Plan, OpenRouter, Together,
+Fireworks, Groq and Cerebras, plus custom OpenAI-compatible endpoints (our
+local LLM server). So: one harness, many providers, chosen per sleeve.
+
+`[idea]` Keys live only on the hub (P2). pi can read a provider key from a
+command (`"key": "!cmd"` in `auth.json`), so a sleeve's pi config can point at
+`protectorate secret get <provider>`, scoped to that sleeve's token and
+audited, and the key is never written into the sleeve.
+
+`[note]` Consequences elsewhere:
+- Quota (P1): API keys are spend, not windows. Readers report balance or spend
+  where the provider has an endpoint (DeepSeek has a balance API), otherwise
+  UNKNOWN.
+- The app's "local model" warning must key on the provider (our local server
+  vs a remote API), not on "pi plus a non-frontier model name": DeepSeek via
+  API is remote and strong. Cards are coloured by provider as well as harness.
+- `[open]` Some of these vendors also document their models behind Claude Code
+  through an Anthropic-compatible base URL. That is official config, but it
+  mixes vendors inside the Claude harness and its config dir. Default: pi.
+
+---
+
+## P11. Windows-only programs driven by agents (ArchiCAD, ENERCALC)
+
+**Problem.** We will often use programs such as ArchiCAD and ENERCALC that
+need Windows, with Claude or Grok driving them. Today that is SSH to the
+Windows machine. Keep that, or build a tool into the single pane of glass?
+
+`[note]` Two separate questions:
+1. **Reaching the machine.** This is P2/P3: the hub holds the keys and the
+   tailnet reaches the node. Let the sleeve use plain `ssh` (its own tools),
+   but with a short-lived SSH certificate the hub signs for that sleeve and
+   that node, valid for the length of a lease, instead of a long-lived private
+   key inside the sleeve. Windows OpenSSH accepts user CAs
+   (`TrustedUserCAKeys`). Revocation is the lease expiring.
+2. **Driving a GUI program.** SSH sessions on Windows run outside the
+   logged-in desktop (no visible windows, and we already saw processes started
+   over SSH behave inconsistently), so SSH alone cannot click or screenshot
+   ArchiCAD. Something must run inside the interactive session: the node agent
+   started at logon (`service windows-task`).
+
+`[idea]` Layered, most deterministic first:
+- **The program's own API** where it has one (ArchiCAD has a JSON interface
+  on localhost and a Python package; ENERCALC's automation surface is
+  unverified). Agents call it through `ssh` or `job run`. Repeatable and cheap.
+- **Files in, files out**: put inputs, run a batch/export, fetch results. Also
+  deterministic.
+- **Screen and input** only as a fallback: the node agent in the desktop
+  session exposes `protectorate desk screenshot|click|type|key|run` for the
+  harness's own computer-use. Screenshots are files the harness reads; no MCP
+  or harness changes needed.
+- The desktop is one shared resource with licensed seats, so it is **leased**
+  (P9): one sleeve drives a node's desktop at a time, and the phone app can
+  show the current screen.
+
+`[open]` Which ArchiCAD and ENERCALC workflows are first, and whether they can
+be done through APIs and files without the GUI.
+
+---
+
 ## Emerging shape
 
 The problems reduce to a handful of primitives:

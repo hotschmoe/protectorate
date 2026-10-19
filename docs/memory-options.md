@@ -195,6 +195,20 @@ model behaviours. Never bust a harness's native prompt cache without reason.
    the shape of mcp_agent_mail, or a separate coordinator (deterministic
    server, light model or a decision model on the local LLM server) so the
    orchestrator stays clear of routing.
+   Proposal (2026-10-20, not yet agreed): the coordinator is hub code, not a
+   sleeve. A directory of sleeves and projects (git remote and package names
+   read from go.mod, package.json, Cargo.toml, pyproject); a hub mailbox
+   (`protectorate msg send|reply|ack|inbox`) delivered into the target's chat
+   at its next idle as an ordinary user message that says how to reply
+   (appending does not bust the cache, and AGENTS.md needs nothing); unacked
+   messages retry once, then escalate to the orchestrator. Hardware stays on
+   leases with a queue, never negotiated between agents. Cross-project
+   dependencies come from the manifests: an upstream release notifies
+   dependents with facts (versions, commits, changed public files) or files a
+   backlog item, and a downstream request becomes an upstream backlog item
+   linked to a thread that closes on release. A decision model (local vLLM
+   D3 or Jev) is optional and only for fuzzy calls: interrupt or wait, route
+   an unaddressed request, merge duplicates.
 6. **The orchestrator resleeves without confirmation** at this stage.
    Deterministic watchers ping it on quota levels, problems and idle. It needs
    tools that say whether an action busts the cache and whether to trigger the
