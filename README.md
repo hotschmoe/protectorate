@@ -36,5 +36,6 @@ Flags: `--hub` (env `PROTECTORATE_HUB`), `--json`. State dir override: `PROTECTO
 
 ## Docs
 
+- [docs/install.md](docs/install.md): hub, node and phone setup, service definitions
 - [PROBLEMS.md](PROBLEMS.md): what hurts and why
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system we are building

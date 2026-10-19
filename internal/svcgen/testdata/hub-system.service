@@ -1,0 +1,20 @@
+[Unit]
+Description=Protectorate hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ops
+Environment="PROTECTORATE_HOME=/home/ops/.protectorate"
+Environment="PROTECTORATE_TMUX_SOCKET=protectorate"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/local/bin/protectorate hub serve --listen 0.0.0.0:7470 --web "/srv/web root"
+Restart=on-failure
+RestartSec=5
+# A SIGKILLed hub must not orphan the headscale child it supervises.
+KillMode=control-group
+# hub drain plus headscale SIGTERM grace (10s) before SIGKILL.
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

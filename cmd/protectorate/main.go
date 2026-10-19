@@ -29,7 +29,7 @@ import (
 var version = "dev"
 
 func main() {
-	if err := newRoot().ExecuteContext(context.Background()); err != nil {
+	if err := runMain(context.Background(), func(ctx context.Context) error { return newRoot().ExecuteContext(ctx) }); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -77,7 +77,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 

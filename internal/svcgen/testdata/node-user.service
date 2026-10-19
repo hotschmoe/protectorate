@@ -1,0 +1,16 @@
+[Unit]
+Description=Protectorate node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment="PROTECTORATE_HOME=/home/ops/.protectorate"
+Environment="PATH=%h/.local/bin:%h/go/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/local/bin/protectorate node serve --watch /var/cache/build
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
