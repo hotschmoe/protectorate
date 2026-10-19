@@ -189,6 +189,7 @@ func onNode(name string) *pb.JobTarget {
 
 func TestMain(m *testing.M) {
 	jobtest.Run()
+	jobtest.QuietGit()
 	os.Exit(m.Run())
 }
 

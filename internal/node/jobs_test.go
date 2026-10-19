@@ -77,6 +77,7 @@ func newJobs(t *testing.T, slots int) *Jobs {
 
 func TestMain(m *testing.M) {
 	jobtest.Run()
+	jobtest.QuietGit()
 	os.Exit(m.Run())
 }
 
