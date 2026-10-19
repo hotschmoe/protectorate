@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -49,6 +50,10 @@ var (
 //	repos/<key>/       persistent git worktree of one hub repository
 //	jobs/<id>/         scratch space of one job, removed when it ends
 type Jobs struct {
+	// Probe, when set before the first job or metrics poll, replaces probing
+	// the host for isolation and elevation (tests).
+	Probe func() *pb.JobIsolation
+
 	dir   string
 	slots chan struct{}
 
@@ -56,6 +61,21 @@ type Jobs struct {
 	uploads map[string]*upload
 	runs    map[string]*jobRun
 	repos   map[string]chan struct{}
+
+	isoOnce sync.Once
+	iso     *pb.JobIsolation
+}
+
+// Isolation reports how this node isolates and elevates jobs, probed once.
+func (j *Jobs) Isolation() *pb.JobIsolation {
+	j.isoOnce.Do(func() {
+		if j.Probe != nil {
+			j.iso = j.Probe()
+		} else {
+			j.iso = probeIsolation()
+		}
+	})
+	return proto.Clone(j.iso).(*pb.JobIsolation)
 }
 
 type upload struct {
@@ -345,7 +365,11 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 	if err != nil {
 		return setupFailed(err)
 	}
-	if err := send(&pb.JobEvent{Event: &pb.JobEvent_Started{Started: &pb.JobStarted{WorkspaceReused: reused}}}); err != nil {
+	argv, label, err := j.commandFor(req)
+	if err != nil {
+		return setupFailed(err)
+	}
+	if err := send(&pb.JobEvent{Event: &pb.JobEvent_Started{Started: &pb.JobStarted{WorkspaceReused: reused, Isolation: label}}}); err != nil {
 		return err
 	}
 
@@ -353,7 +377,7 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 	if timeout <= 0 {
 		timeout = defaultJobTimeout
 	}
-	fin := j.execute(runCtx, r, req, workdir, jobDir, timeout, send)
+	fin := j.execute(runCtx, r, req, argv, workdir, jobDir, timeout, send)
 	if fin.End == pb.JobEnd_JOB_END_EXITED || fin.End == pb.JobEnd_JOB_END_TIMED_OUT {
 		if err := sendArtifacts(runCtx, workdir, req.ArtifactGlobs, send); err != nil && fin.Error == "" {
 			fin.Error = "send artifacts: " + err.Error()
@@ -445,16 +469,45 @@ func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
-func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
-	cmd := exec.Command(req.Command[0], req.Command[1:]...)
-	cmd.Dir = workdir
-	cmd.Env = append(os.Environ(), "PROTECTORATE_JOB_ID="+req.JobId, "PROTECTORATE_JOB_DIR="+jobDir)
+// jobEnvKeys are the variables every job gets besides the requested ones.
+var jobEnvKeys = []string{"PROTECTORATE_JOB_ID", "PROTECTORATE_JOB_DIR"}
+
+// envKeys returns the job's variable names, sorted, the node's own first.
+func envKeys(req *pb.RunJobRequest) []string {
 	keys := make([]string, 0, len(req.Env))
 	for k := range req.Env {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	for _, k := range keys {
+	return append(append([]string(nil), jobEnvKeys...), keys...)
+}
+
+// commandFor returns the argv that runs req's command in its mode and the
+// isolation label reported to the hub.
+func (j *Jobs) commandFor(req *pb.RunJobRequest) ([]string, string, error) {
+	iso := j.Isolation()
+	switch req.Mode {
+	case pb.JobMode_JOB_MODE_ADMIN:
+		if iso.Admin == "" {
+			return nil, "", fmt.Errorf("this node cannot run admin jobs: %s", iso.Note)
+		}
+		argv, err := adminArgv(iso.Admin, req.Command, envKeys(req))
+		return argv, iso.Admin, err
+	case pb.JobMode_JOB_MODE_PLAIN:
+		return req.Command, "plain", nil
+	}
+	label := iso.Sandbox
+	if iso.Note != "" {
+		label += ": " + iso.Note
+	}
+	return req.Command, label, nil
+}
+
+func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = workdir
+	cmd.Env = append(os.Environ(), "PROTECTORATE_JOB_ID="+req.JobId, "PROTECTORATE_JOB_DIR="+jobDir)
+	for _, k := range envKeys(req)[len(jobEnvKeys):] {
 		cmd.Env = append(cmd.Env, k+"="+req.Env[k])
 	}
 	w := &logWriter{send: send, onFail: r.cancel}

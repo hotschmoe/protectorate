@@ -16,13 +16,13 @@ import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
 import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
-    as $3;
+    as $4;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $1;
 
 import 'chat.pbjson.dart' as $5;
 import 'desk.pbjson.dart' as $0;
-import 'job.pbjson.dart' as $4;
+import 'job.pbjson.dart' as $3;
 import 'sleeve.pbjson.dart' as $2;
 
 @$core.Deprecated('Use updatePhaseDescriptor instead')
@@ -651,6 +651,14 @@ const NodeMetrics$json = {
       '6': '.protectorate.v1.AcceleratorMetrics',
       '10': 'npus'
     },
+    {
+      '1': 'jobs',
+      '3': 17,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.JobIsolation',
+      '10': 'jobs'
+    },
   ],
 };
 
@@ -668,7 +676,8 @@ final $typed_data.Uint8List nodeMetricsDescriptor = $convert.base64Decode(
     'EuQ29udGFpbmVyRW5naW5lUgZlbmdpbmUSNwoKd2F0Y2hfZGlycxgNIAMoCzIYLnByb3RlY3Rv'
     'cmF0ZS52MS5EaXJTaXplUgl3YXRjaERpcnMSGgoId2FybmluZ3MYDiADKAlSCHdhcm5pbmdzEj'
     'EKB3NsZWV2ZXMYDyADKAsyFy5wcm90ZWN0b3JhdGUudjEuU2xlZXZlUgdzbGVldmVzEjcKBG5w'
-    'dXMYECADKAsyIy5wcm90ZWN0b3JhdGUudjEuQWNjZWxlcmF0b3JNZXRyaWNzUgRucHVz');
+    'dXMYECADKAsyIy5wcm90ZWN0b3JhdGUudjEuQWNjZWxlcmF0b3JNZXRyaWNzUgRucHVzEjEKBG'
+    'pvYnMYESABKAsyHS5wcm90ZWN0b3JhdGUudjEuSm9iSXNvbGF0aW9uUgRqb2Jz');
 
 @$core.Deprecated('Use cpuMetricsDescriptor instead')
 const CpuMetrics$json = {
@@ -1517,28 +1526,29 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DiskBucket': DiskBucket$json,
   '.protectorate.v1.ContainerMetrics': ContainerMetrics$json,
   '.protectorate.v1.DirSize': DirSize$json,
-  '.google.protobuf.Duration': $3.Duration$json,
+  '.google.protobuf.Duration': $4.Duration$json,
   '.protectorate.v1.Sleeve': $2.Sleeve$json,
   '.protectorate.v1.SleeveLimits': $2.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $2.SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
+  '.protectorate.v1.JobIsolation': $3.JobIsolation$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
-  '.protectorate.v1.PrepareJobRequest': $4.PrepareJobRequest$json,
-  '.protectorate.v1.PrepareJobResponse': $4.PrepareJobResponse$json,
-  '.protectorate.v1.UploadJobDataRequest': $4.UploadJobDataRequest$json,
-  '.protectorate.v1.UploadJobDataResponse': $4.UploadJobDataResponse$json,
-  '.protectorate.v1.RunJobRequest': $4.RunJobRequest$json,
-  '.protectorate.v1.RunJobRequest.EnvEntry': $4.RunJobRequest_EnvEntry$json,
-  '.protectorate.v1.JobEvent': $4.JobEvent$json,
-  '.protectorate.v1.JobStarted': $4.JobStarted$json,
-  '.protectorate.v1.JobOutput': $4.JobOutput$json,
-  '.protectorate.v1.JobArtifactChunk': $4.JobArtifactChunk$json,
-  '.protectorate.v1.JobFinished': $4.JobFinished$json,
+  '.protectorate.v1.PrepareJobRequest': $3.PrepareJobRequest$json,
+  '.protectorate.v1.PrepareJobResponse': $3.PrepareJobResponse$json,
+  '.protectorate.v1.UploadJobDataRequest': $3.UploadJobDataRequest$json,
+  '.protectorate.v1.UploadJobDataResponse': $3.UploadJobDataResponse$json,
+  '.protectorate.v1.RunJobRequest': $3.RunJobRequest$json,
+  '.protectorate.v1.RunJobRequest.EnvEntry': $3.RunJobRequest_EnvEntry$json,
+  '.protectorate.v1.JobEvent': $3.JobEvent$json,
+  '.protectorate.v1.JobStarted': $3.JobStarted$json,
+  '.protectorate.v1.JobOutput': $3.JobOutput$json,
+  '.protectorate.v1.JobArtifactChunk': $3.JobArtifactChunk$json,
+  '.protectorate.v1.JobFinished': $3.JobFinished$json,
   '.protectorate.v1.NodeAgentServiceCancelJobRequest':
-      $4.NodeAgentServiceCancelJobRequest$json,
+      $3.NodeAgentServiceCancelJobRequest$json,
   '.protectorate.v1.NodeAgentServiceCancelJobResponse':
-      $4.NodeAgentServiceCancelJobResponse$json,
+      $3.NodeAgentServiceCancelJobResponse$json,
   '.protectorate.v1.PutFileRequest': PutFileRequest$json,
   '.protectorate.v1.FileChunk': FileChunk$json,
   '.protectorate.v1.FileTrailer': FileTrailer$json,
@@ -1698,12 +1708,13 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DiskBucket': DiskBucket$json,
   '.protectorate.v1.ContainerMetrics': ContainerMetrics$json,
   '.protectorate.v1.DirSize': DirSize$json,
-  '.google.protobuf.Duration': $3.Duration$json,
+  '.google.protobuf.Duration': $4.Duration$json,
   '.protectorate.v1.Sleeve': $2.Sleeve$json,
   '.protectorate.v1.SleeveLimits': $2.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $2.SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
+  '.protectorate.v1.JobIsolation': $3.JobIsolation$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,

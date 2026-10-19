@@ -16,12 +16,12 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
-    as $3;
+    as $4;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $1;
 
 import 'desk.pb.dart' as $0;
-import 'job.pb.dart' as $4;
+import 'job.pb.dart' as $3;
 import 'node.pbenum.dart';
 import 'sleeve.pb.dart' as $2;
 
@@ -1656,6 +1656,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? warnings,
     $core.Iterable<$2.Sleeve>? sleeves,
     $core.Iterable<AcceleratorMetrics>? npus,
+    $3.JobIsolation? jobs,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -1674,6 +1675,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     if (warnings != null) result.warnings.addAll(warnings);
     if (sleeves != null) result.sleeves.addAll(sleeves);
     if (npus != null) result.npus.addAll(npus);
+    if (jobs != null) result.jobs = jobs;
     return result;
   }
 
@@ -1716,6 +1718,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
         subBuilder: $2.Sleeve.$_createMessage)
     ..pPM<AcceleratorMetrics>(16, _omitFieldNames ? '' : 'npus',
         subBuilder: AcceleratorMetrics.$_createMessage)
+    ..aOM<$3.JobIsolation>(17, _omitFieldNames ? '' : 'jobs',
+        subBuilder: $3.JobIsolation.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1863,6 +1867,19 @@ class NodeMetrics extends $pb.GeneratedMessage {
   /// npus lists neural processing units.
   @$pb.TagNumber(16)
   $pb.PbList<AcceleratorMetrics> get npus => $_getList(15);
+
+  /// jobs is how this node isolates and elevates jobs; unset when it runs
+  /// none.
+  @$pb.TagNumber(17)
+  $3.JobIsolation get jobs => $_getN(16);
+  @$pb.TagNumber(17)
+  set jobs($3.JobIsolation value) => $_setField(17, value);
+  @$pb.TagNumber(17)
+  $core.bool hasJobs() => $_has(16);
+  @$pb.TagNumber(17)
+  void clearJobs() => $_clearField(17);
+  @$pb.TagNumber(17)
+  $3.JobIsolation ensureJobs() => $_ensure(16);
 }
 
 class CpuMetrics extends $pb.GeneratedMessage {
@@ -3085,7 +3102,7 @@ class DirSize extends $pb.GeneratedMessage {
     $core.String? path,
     $fixnum.Int64? sizeBytes,
     $1.Timestamp? measuredAt,
-    $3.Duration? took,
+    $4.Duration? took,
     $core.bool? complete,
     $core.String? error,
   }) {
@@ -3117,8 +3134,8 @@ class DirSize extends $pb.GeneratedMessage {
     ..aInt64(2, _omitFieldNames ? '' : 'sizeBytes')
     ..aOM<$1.Timestamp>(3, _omitFieldNames ? '' : 'measuredAt',
         subBuilder: $1.Timestamp.$_createMessage)
-    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'took',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(4, _omitFieldNames ? '' : 'took',
+        subBuilder: $4.Duration.$_createMessage)
     ..aOB(5, _omitFieldNames ? '' : 'complete')
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..hasRequiredFields = false;
@@ -3173,15 +3190,15 @@ class DirSize extends $pb.GeneratedMessage {
   $1.Timestamp ensureMeasuredAt() => $_ensure(2);
 
   @$pb.TagNumber(4)
-  $3.Duration get took => $_getN(3);
+  $4.Duration get took => $_getN(3);
   @$pb.TagNumber(4)
-  set took($3.Duration value) => $_setField(4, value);
+  set took($4.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasTook() => $_has(3);
   @$pb.TagNumber(4)
   void clearTook() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureTook() => $_ensure(3);
+  $4.Duration ensureTook() => $_ensure(3);
 
   /// complete is false when the time budget ended the walk early; size_bytes
   /// is then a lower bound.
@@ -3499,7 +3516,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     NodeMetrics? metrics,
     NodeFreshness? freshness,
     $1.Timestamp? fetchedAt,
-    $3.Duration? age,
+    $4.Duration? age,
     $core.String? error,
     $core.Iterable<NodeAlert>? alerts,
     $0.DeskState? desk,
@@ -3544,8 +3561,8 @@ class NodeStatus extends $pb.GeneratedMessage {
         enumValues: NodeFreshness.values)
     ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'fetchedAt',
         subBuilder: $1.Timestamp.$_createMessage)
-    ..aOM<$3.Duration>(5, _omitFieldNames ? '' : 'age',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(5, _omitFieldNames ? '' : 'age',
+        subBuilder: $4.Duration.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..pPM<NodeAlert>(7, _omitFieldNames ? '' : 'alerts',
         subBuilder: NodeAlert.$_createMessage)
@@ -3621,15 +3638,15 @@ class NodeStatus extends $pb.GeneratedMessage {
   $1.Timestamp ensureFetchedAt() => $_ensure(3);
 
   @$pb.TagNumber(5)
-  $3.Duration get age => $_getN(4);
+  $4.Duration get age => $_getN(4);
   @$pb.TagNumber(5)
-  set age($3.Duration value) => $_setField(5, value);
+  set age($4.Duration value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasAge() => $_has(4);
   @$pb.TagNumber(5)
   void clearAge() => $_clearField(5);
   @$pb.TagNumber(5)
-  $3.Duration ensureAge() => $_ensure(4);
+  $4.Duration ensureAge() => $_ensure(4);
 
   /// error is the failure of the most recent poll, empty if it succeeded.
   @$pb.TagNumber(6)
@@ -3914,7 +3931,7 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
     $core.String? name,
     RemoveJobs? jobs,
     $core.bool? uninstall,
-    $3.Duration? waitTimeout,
+    $4.Duration? waitTimeout,
   }) {
     final result = RemoveNodeRequest._();
     if (name != null) result.name = name;
@@ -3942,8 +3959,8 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
     ..aE<RemoveJobs>(2, _omitFieldNames ? '' : 'jobs',
         enumValues: RemoveJobs.values)
     ..aOB(3, _omitFieldNames ? '' : 'uninstall')
-    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'waitTimeout',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(4, _omitFieldNames ? '' : 'waitTimeout',
+        subBuilder: $4.Duration.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3999,15 +4016,15 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
 
   /// wait_timeout bounds REMOVE_JOBS_WAIT; unset means 1h.
   @$pb.TagNumber(4)
-  $3.Duration get waitTimeout => $_getN(3);
+  $4.Duration get waitTimeout => $_getN(3);
   @$pb.TagNumber(4)
-  set waitTimeout($3.Duration value) => $_setField(4, value);
+  set waitTimeout($4.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasWaitTimeout() => $_has(3);
   @$pb.TagNumber(4)
   void clearWaitTimeout() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureWaitTimeout() => $_ensure(3);
+  $4.Duration ensureWaitTimeout() => $_ensure(3);
 }
 
 class RemoveNodeProgress extends $pb.GeneratedMessage {
@@ -4202,7 +4219,7 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
     $core.String? name,
     $core.String? tier,
     $core.Iterable<$core.String>? pools,
-    $3.Duration? ttl,
+    $4.Duration? ttl,
     $core.String? installUrl,
   }) {
     final result = InviteNodeRequest._();
@@ -4231,8 +4248,8 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aOS(2, _omitFieldNames ? '' : 'tier')
     ..pPS(3, _omitFieldNames ? '' : 'pools')
-    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'ttl',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(4, _omitFieldNames ? '' : 'ttl',
+        subBuilder: $4.Duration.$_createMessage)
     ..aOS(5, _omitFieldNames ? '' : 'installUrl')
     ..hasRequiredFields = false;
 
@@ -4284,15 +4301,15 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
 
   /// ttl is how long the key can be redeemed; unset means 1h, at most 24h.
   @$pb.TagNumber(4)
-  $3.Duration get ttl => $_getN(3);
+  $4.Duration get ttl => $_getN(3);
   @$pb.TagNumber(4)
-  set ttl($3.Duration value) => $_setField(4, value);
+  set ttl($4.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasTtl() => $_has(3);
   @$pb.TagNumber(4)
   void clearTtl() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureTtl() => $_ensure(3);
+  $4.Duration ensureTtl() => $_ensure(3);
 
   /// install_url is the hub URL the new machine downloads from. Empty means
   /// the hub's --public-url, else the URL this request was sent to.
@@ -4708,37 +4725,37 @@ class NodeAgentServiceApi {
   /// PrepareJob tells the hub what the node already holds for a git job: whether
   /// it has the commit and which commits it knows, so the hub can send a
   /// smaller bundle.
-  $async.Future<$4.PrepareJobResponse> prepareJob(
-          $pb.ClientContext? ctx, $4.PrepareJobRequest request) =>
-      _client.invoke<$4.PrepareJobResponse>(ctx, 'NodeAgentService',
-          'PrepareJob', request, $4.PrepareJobResponse());
+  $async.Future<$3.PrepareJobResponse> prepareJob(
+          $pb.ClientContext? ctx, $3.PrepareJobRequest request) =>
+      _client.invoke<$3.PrepareJobResponse>(ctx, 'NodeAgentService',
+          'PrepareJob', request, $3.PrepareJobResponse());
 
   /// UploadJobData appends one chunk of a job's source (a git bundle or an
   /// artifact file). Chunks must arrive in order; the last one carries the
   /// SHA-256 of the whole upload.
-  $async.Future<$4.UploadJobDataResponse> uploadJobData(
-          $pb.ClientContext? ctx, $4.UploadJobDataRequest request) =>
-      _client.invoke<$4.UploadJobDataResponse>(ctx, 'NodeAgentService',
-          'UploadJobData', request, $4.UploadJobDataResponse());
+  $async.Future<$3.UploadJobDataResponse> uploadJobData(
+          $pb.ClientContext? ctx, $3.UploadJobDataRequest request) =>
+      _client.invoke<$3.UploadJobDataResponse>(ctx, 'NodeAgentService',
+          'UploadJobData', request, $3.UploadJobDataResponse());
 
   /// RunJob checks the source out, runs the command and streams its output;
   /// matching artifacts follow the exit. The job dies with the stream: if the
   /// caller disconnects, the process tree is killed.
-  $async.Future<$4.JobEvent> runJob(
-          $pb.ClientContext? ctx, $4.RunJobRequest request) =>
-      _client.invoke<$4.JobEvent>(
-          ctx, 'NodeAgentService', 'RunJob', request, $4.JobEvent());
+  $async.Future<$3.JobEvent> runJob(
+          $pb.ClientContext? ctx, $3.RunJobRequest request) =>
+      _client.invoke<$3.JobEvent>(
+          ctx, 'NodeAgentService', 'RunJob', request, $3.JobEvent());
 
   /// CancelJob kills a running job's process tree.
-  $async.Future<$4.NodeAgentServiceCancelJobResponse> cancelJob(
+  $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
           $pb.ClientContext? ctx,
-          $4.NodeAgentServiceCancelJobRequest request) =>
-      _client.invoke<$4.NodeAgentServiceCancelJobResponse>(
+          $3.NodeAgentServiceCancelJobRequest request) =>
+      _client.invoke<$3.NodeAgentServiceCancelJobResponse>(
           ctx,
           'NodeAgentService',
           'CancelJob',
           request,
-          $4.NodeAgentServiceCancelJobResponse());
+          $3.NodeAgentServiceCancelJobResponse());
 
   /// PutFile receives one chunk of a file or directory transfer into the
   /// node's file root. The hub relays the caller's chunks unchanged.

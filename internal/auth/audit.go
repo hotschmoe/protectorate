@@ -22,6 +22,10 @@ type Entry struct {
 	Subject   string    `json:"subject,omitempty"`
 	Outcome   string    `json:"outcome"`
 	Code      string    `json:"code,omitempty"`
+	// Task is the task of the admin grant that made the call.
+	Task string `json:"task,omitempty"`
+	// Detail is what the handler added, such as a job's node and mode.
+	Detail string `json:"detail,omitempty"`
 }
 
 const (

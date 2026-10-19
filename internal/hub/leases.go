@@ -739,7 +739,7 @@ func (m *NodeMonitor) careGate(ctx context.Context, name string) error {
 		return nil
 	}
 	p := auth.PrincipalFrom(ctx)
-	if p.AdminOn(info.Name) {
+	if p.CareAdmin(info.Name) {
 		return nil
 	}
 	who := "this caller"

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,9 @@ type Token struct {
 	Expires   *time.Time `yaml:"expires,omitempty"`
 	LastUsed  *time.Time `yaml:"last_used,omitempty"`
 	RevokedAt *time.Time `yaml:"revoked,omitempty"`
+	// Task and MintedBy are set on an admin grant.
+	Task     string `yaml:"task,omitempty"`
+	MintedBy string `yaml:"minted_by,omitempty"`
 }
 
 type tokenFile struct {
@@ -102,6 +106,11 @@ func (s *Store) Create(name string, scopes []string, ttl time.Duration, now time
 	if err != nil {
 		return Token{}, "", err
 	}
+	return s.create(Token{Name: name, Scopes: scopes}, ttl, now)
+}
+
+// create stores t, with validated scopes, under a new id and secret.
+func (s *Store) create(t Token, ttl time.Duration, now time.Time) (Token, string, error) {
 	id, err := randHex(4)
 	if err != nil {
 		return Token{}, "", err
@@ -111,7 +120,7 @@ func (s *Store) Create(name string, scopes []string, ttl time.Duration, now time
 		return Token{}, "", err
 	}
 	secret := SecretPrefix + raw
-	t := Token{ID: id, Name: name, Hash: hashSecret(secret), Scopes: scopes, Created: now.UTC()}
+	t.ID, t.Hash, t.Created = id, hashSecret(secret), now.UTC()
 	if ttl > 0 {
 		exp := now.Add(ttl).UTC()
 		t.Expires = &exp
@@ -124,6 +133,35 @@ func (s *Store) Create(name string, scopes []string, ttl time.Duration, now time
 		return Token{}, "", err
 	}
 	return t, secret, nil
+}
+
+// Grant is a request for an admin grant: job_* and node_admin:<Node>.
+type Grant struct {
+	Node, Task, MintedBy string
+	TTL                  time.Duration
+}
+
+// MaxGrantTTL bounds an admin grant's lifetime.
+const MaxGrantTTL = 24 * time.Hour
+
+// CreateGrant issues an admin grant, named "grant:<node>". The secret is
+// returned once and not retained.
+func (s *Store) CreateGrant(g Grant, now time.Time) (Token, string, error) {
+	switch {
+	case strings.TrimSpace(g.Task) == "":
+		return Token{}, "", errors.New("a grant needs a task saying what it is for")
+	case len(g.Task) > 500:
+		return Token{}, "", errors.New("task is longer than 500 bytes")
+	case g.TTL <= 0 || g.TTL > MaxGrantTTL:
+		return Token{}, "", fmt.Errorf("grant ttl must be positive and at most %s", MaxGrantTTL)
+	case g.MintedBy == "":
+		return Token{}, "", errors.New("a grant needs its minter")
+	}
+	scopes, err := GrantScopes(g.Node)
+	if err != nil {
+		return Token{}, "", err
+	}
+	return s.create(Token{Name: "grant:" + g.Node, Scopes: scopes, Task: strings.TrimSpace(g.Task), MintedBy: g.MintedBy}, g.TTL, now)
 }
 
 // Lookup authenticates a secret. Every stored hash is compared in constant

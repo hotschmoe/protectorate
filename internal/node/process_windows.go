@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 )
 
 var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
@@ -78,4 +80,24 @@ func StartDetached(exe string, args []string) error {
 		return err
 	}
 	return cmd.Process.Release()
+}
+
+// probeIsolation reports how this node runs jobs: in a job object under the
+// agent's own account, elevated when the agent is.
+func probeIsolation() *pb.JobIsolation {
+	iso := &pb.JobIsolation{Sandbox: "job-object", Note: "unisolated: jobs run as the agent's account in a job object"}
+	if windows.GetCurrentProcessToken().IsElevated() {
+		iso.Admin = "elevated"
+	} else {
+		iso.Note += "; no admin jobs: the agent does not run elevated"
+	}
+	return iso
+}
+
+// adminArgv runs command with the agent's own elevated token.
+func adminArgv(admin string, command, _ []string) ([]string, error) {
+	if admin != "elevated" {
+		return nil, fmt.Errorf("unknown elevation %q", admin)
+	}
+	return command, nil
 }

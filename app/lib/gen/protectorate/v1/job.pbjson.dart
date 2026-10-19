@@ -22,6 +22,22 @@ import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
 
 import 'lease.pbjson.dart' as $0;
 
+@$core.Deprecated('Use jobModeDescriptor instead')
+const JobMode$json = {
+  '1': 'JobMode',
+  '2': [
+    {'1': 'JOB_MODE_UNSPECIFIED', '2': 0},
+    {'1': 'JOB_MODE_SANDBOXED', '2': 1},
+    {'1': 'JOB_MODE_PLAIN', '2': 2},
+    {'1': 'JOB_MODE_ADMIN', '2': 3},
+  ],
+};
+
+/// Descriptor for `JobMode`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List jobModeDescriptor = $convert.base64Decode(
+    'CgdKb2JNb2RlEhgKFEpPQl9NT0RFX1VOU1BFQ0lGSUVEEAASFgoSSk9CX01PREVfU0FOREJPWE'
+    'VEEAESEgoOSk9CX01PREVfUExBSU4QAhISCg5KT0JfTU9ERV9BRE1JThAD');
+
 @$core.Deprecated('Use jobStateDescriptor instead')
 const JobState$json = {
   '1': 'JobState',
@@ -60,6 +76,21 @@ final $typed_data.Uint8List jobEndDescriptor = $convert.base64Decode(
     'CgZKb2JFbmQSFwoTSk9CX0VORF9VTlNQRUNJRklFRBAAEhIKDkpPQl9FTkRfRVhJVEVEEAESFQ'
     'oRSk9CX0VORF9USU1FRF9PVVQQAhIUChBKT0JfRU5EX0NBTkNFTEVEEAMSEQoNSk9CX0VORF9F'
     'UlJPUhAE');
+
+@$core.Deprecated('Use jobIsolationDescriptor instead')
+const JobIsolation$json = {
+  '1': 'JobIsolation',
+  '2': [
+    {'1': 'sandbox', '3': 1, '4': 1, '5': 9, '10': 'sandbox'},
+    {'1': 'note', '3': 2, '4': 1, '5': 9, '10': 'note'},
+    {'1': 'admin', '3': 3, '4': 1, '5': 9, '10': 'admin'},
+  ],
+};
+
+/// Descriptor for `JobIsolation`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List jobIsolationDescriptor = $convert.base64Decode(
+    'CgxKb2JJc29sYXRpb24SGAoHc2FuZGJveBgBIAEoCVIHc2FuZGJveBISCgRub3RlGAIgASgJUg'
+    'Rub3RlEhQKBWFkbWluGAMgASgJUgVhZG1pbg==');
 
 @$core.Deprecated('Use jobTargetDescriptor instead')
 const JobTarget$json = {
@@ -192,6 +223,7 @@ const SubmitJobRequest$json = {
     },
     {'1': 'artifact_globs', '3': 6, '4': 3, '5': 9, '10': 'artifactGlobs'},
     {'1': 'request_id', '3': 7, '4': 1, '5': 9, '10': 'requestId'},
+    {'1': 'admin', '3': 8, '4': 1, '5': 8, '10': 'admin'},
   ],
   '3': [SubmitJobRequest_EnvEntry$json],
 };
@@ -214,8 +246,8 @@ final $typed_data.Uint8List submitJobRequestDescriptor = $convert.base64Decode(
     '90ZWN0b3JhdGUudjEuU3VibWl0Sm9iUmVxdWVzdC5FbnZFbnRyeVIDZW52EjMKB3RpbWVvdXQY'
     'BSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQSJQoOYXJ0aWZhY3RfZ2'
     'xvYnMYBiADKAlSDWFydGlmYWN0R2xvYnMSHQoKcmVxdWVzdF9pZBgHIAEoCVIJcmVxdWVzdElk'
-    'GjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgJUgV2YWx1ZToCOA'
-    'E=');
+    'EhQKBWFkbWluGAggASgIUgVhZG1pbho2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIUCg'
+    'V2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
 
 @$core.Deprecated('Use getJobRequestDescriptor instead')
 const GetJobRequest$json = {
@@ -465,6 +497,16 @@ const Job$json = {
     },
     {'1': 'artifact_bytes', '3': 21, '4': 1, '5': 4, '10': 'artifactBytes'},
     {'1': 'log_bytes', '3': 22, '4': 1, '5': 4, '10': 'logBytes'},
+    {
+      '1': 'mode',
+      '3': 23,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.JobMode',
+      '10': 'mode'
+    },
+    {'1': 'isolation', '3': 24, '4': 1, '5': 9, '10': 'isolation'},
+    {'1': 'task', '3': 25, '4': 1, '5': 9, '10': 'task'},
   ],
   '8': [
     {'1': '_gpu_index'},
@@ -489,8 +531,9 @@ final $typed_data.Uint8List jobDescriptor = $convert.base64Decode(
     'EoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvblIHcnVuVGltZRIpChB3b3Jrc3BhY2VfcmV1'
     'c2VkGBMgASgIUg93b3Jrc3BhY2VSZXVzZWQSOgoJYXJ0aWZhY3RzGBQgAygLMhwucHJvdGVjdG'
     '9yYXRlLnYxLkpvYkFydGlmYWN0UglhcnRpZmFjdHMSJQoOYXJ0aWZhY3RfYnl0ZXMYFSABKARS'
-    'DWFydGlmYWN0Qnl0ZXMSGwoJbG9nX2J5dGVzGBYgASgEUghsb2dCeXRlc0IMCgpfZ3B1X2luZG'
-    'V4');
+    'DWFydGlmYWN0Qnl0ZXMSGwoJbG9nX2J5dGVzGBYgASgEUghsb2dCeXRlcxIsCgRtb2RlGBcgAS'
+    'gOMhgucHJvdGVjdG9yYXRlLnYxLkpvYk1vZGVSBG1vZGUSHAoJaXNvbGF0aW9uGBggASgJUglp'
+    'c29sYXRpb24SEgoEdGFzaxgZIAEoCVIEdGFza0IMCgpfZ3B1X2luZGV4');
 
 @$core.Deprecated('Use prepareJobRequestDescriptor instead')
 const PrepareJobRequest$json = {
@@ -581,6 +624,14 @@ const RunJobRequest$json = {
     {'1': 'artifact_globs', '3': 9, '4': 3, '5': 9, '10': 'artifactGlobs'},
     {'1': 'artifact_archive', '3': 10, '4': 1, '5': 8, '10': 'artifactArchive'},
     {'1': 'workdir', '3': 11, '4': 1, '5': 9, '10': 'workdir'},
+    {
+      '1': 'mode',
+      '3': 12,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.JobMode',
+      '10': 'mode'
+    },
   ],
   '3': [RunJobRequest_EnvEntry$json],
 };
@@ -604,21 +655,23 @@ final $typed_data.Uint8List runJobRequestDescriptor = $convert.base64Decode(
     'djEuUnVuSm9iUmVxdWVzdC5FbnZFbnRyeVIDZW52EjMKB3RpbWVvdXQYCCABKAsyGS5nb29nbG'
     'UucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQSJQoOYXJ0aWZhY3RfZ2xvYnMYCSADKAlSDWFy'
     'dGlmYWN0R2xvYnMSKQoQYXJ0aWZhY3RfYXJjaGl2ZRgKIAEoCFIPYXJ0aWZhY3RBcmNoaXZlEh'
-    'gKB3dvcmtkaXIYCyABKAlSB3dvcmtkaXIaNgoIRW52RW50cnkSEAoDa2V5GAEgASgJUgNrZXkS'
-    'FAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AQ==');
+    'gKB3dvcmtkaXIYCyABKAlSB3dvcmtkaXISLAoEbW9kZRgMIAEoDjIYLnByb3RlY3RvcmF0ZS52'
+    'MS5Kb2JNb2RlUgRtb2RlGjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGA'
+    'IgASgJUgV2YWx1ZToCOAE=');
 
 @$core.Deprecated('Use jobStartedDescriptor instead')
 const JobStarted$json = {
   '1': 'JobStarted',
   '2': [
     {'1': 'workspace_reused', '3': 1, '4': 1, '5': 8, '10': 'workspaceReused'},
+    {'1': 'isolation', '3': 2, '4': 1, '5': 9, '10': 'isolation'},
   ],
 };
 
 /// Descriptor for `JobStarted`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List jobStartedDescriptor = $convert.base64Decode(
-    'CgpKb2JTdGFydGVkEikKEHdvcmtzcGFjZV9yZXVzZWQYASABKAhSD3dvcmtzcGFjZVJldXNlZA'
-    '==');
+    'CgpKb2JTdGFydGVkEikKEHdvcmtzcGFjZV9yZXVzZWQYASABKAhSD3dvcmtzcGFjZVJldXNlZB'
+    'IcCglpc29sYXRpb24YAiABKAlSCWlzb2xhdGlvbg==');
 
 @$core.Deprecated('Use jobOutputDescriptor instead')
 const JobOutput$json = {

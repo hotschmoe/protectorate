@@ -167,7 +167,9 @@ func firstSentence(s string, limit int) string {
 // them are dropped, so a new kill-style RPC is never granted by accident.
 // session_* is deliberately absent: session creation starts host processes
 // outside any sandbox. Poe starts work only through sandboxed sleeves.
-var DefaultGrants = []string{"backlog_*", "lease_*", "sleeve_spawn_sleeve"}
+// grant_admin works only on a hub started with --orchestrator-admin-grants,
+// and only for shared nodes.
+var DefaultGrants = []string{"backlog_*", "lease_*", "sleeve_spawn_sleeve", "grant_admin"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of

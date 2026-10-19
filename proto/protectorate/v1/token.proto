@@ -30,14 +30,41 @@ service TokenService {
   }
 }
 
+// GrantService mints task-scoped admin grants: short-lived tokens whose
+// scopes are job_* and node_admin:<node>. The owner may grant any node (or a
+// glob over node names); the orchestrator's token may grant one shared node
+// by name, and only when the hub runs with --orchestrator-admin-grants. Every
+// call made with a grant is audited with its task.
+service GrantService {
+  // Admin mints a grant. The secret is returned once.
+  rpc Admin(GrantServiceAdminRequest) returns (GrantServiceAdminResponse);
+}
+
+message GrantServiceAdminRequest {
+  // node is a node name, or (owner only) a path.Match glob over node names.
+  string node = 1;
+  // ttl is the grant's lifetime; unset means 4h, at most 24h.
+  google.protobuf.Duration ttl = 2;
+  // task says what the grant is for, e.g. "update the kids' machine". It is
+  // stored with the token and written to every audit line the grant causes.
+  string task = 3;
+}
+
+message GrantServiceAdminResponse {
+  TokenInfo token = 1;
+  // secret is the bearer token. It is shown only in this response.
+  string secret = 2;
+}
+
 // TokenInfo describes an issued token. It never carries the secret.
 message TokenInfo {
   // id is the stable identifier used to revoke the token and in audit lines.
   string id = 1;
   // name is the label given at creation.
   string name = 2;
-  // scopes are the grants: tool-name globs such as "session_*", or the
-  // special scopes read, events, terminal and terminal:readonly.
+  // scopes are the grants: tool-name globs such as "session_*", the special
+  // scopes read, events, terminal and terminal:readonly, and on an admin
+  // grant node_admin:<node>.
   repeated string scopes = 3;
   google.protobuf.Timestamp created_at = 4;
   // expires_at is unset for a token that never expires.
@@ -47,6 +74,10 @@ message TokenInfo {
   google.protobuf.Timestamp last_used_at = 6;
   // revoked_at is unset while the token is not revoked.
   google.protobuf.Timestamp revoked_at = 7;
+  // task is set on an admin grant: what it was minted for.
+  string task = 8;
+  // minted_by names who minted an admin grant: "owner" or a token name.
+  string minted_by = 9;
 }
 
 message CreateTokenRequest {

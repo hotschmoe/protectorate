@@ -1709,7 +1709,10 @@ type NodeMetrics struct {
 	// hub's own node has any.
 	Sleeves []*Sleeve `protobuf:"bytes,15,rep,name=sleeves,proto3" json:"sleeves,omitempty"`
 	// npus lists neural processing units.
-	Npus          []*AcceleratorMetrics `protobuf:"bytes,16,rep,name=npus,proto3" json:"npus,omitempty"`
+	Npus []*AcceleratorMetrics `protobuf:"bytes,16,rep,name=npus,proto3" json:"npus,omitempty"`
+	// jobs is how this node isolates and elevates jobs; unset when it runs
+	// none.
+	Jobs          *JobIsolation `protobuf:"bytes,17,opt,name=jobs,proto3" json:"jobs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1852,6 +1855,13 @@ func (x *NodeMetrics) GetSleeves() []*Sleeve {
 func (x *NodeMetrics) GetNpus() []*AcceleratorMetrics {
 	if x != nil {
 		return x.Npus
+	}
+	return nil
+}
+
+func (x *NodeMetrics) GetJobs() *JobIsolation {
+	if x != nil {
+		return x.Jobs
 	}
 	return nil
 }
@@ -3975,7 +3985,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x04part\"\x13\n" +
 	"\x11GetMetricsRequest\"@\n" +
 	"\x13WatchMetricsRequest\x12)\n" +
-	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\xcd\x05\n" +
+	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\x80\x06\n" +
 	"\vNodeMetrics\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +
@@ -3994,7 +4004,8 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"watch_dirs\x18\r \x03(\v2\x18.protectorate.v1.DirSizeR\twatchDirs\x12\x1a\n" +
 	"\bwarnings\x18\x0e \x03(\tR\bwarnings\x121\n" +
 	"\asleeves\x18\x0f \x03(\v2\x17.protectorate.v1.SleeveR\asleeves\x127\n" +
-	"\x04npus\x18\x10 \x03(\v2#.protectorate.v1.AcceleratorMetricsR\x04npus\"\xc8\x01\n" +
+	"\x04npus\x18\x10 \x03(\v2#.protectorate.v1.AcceleratorMetricsR\x04npus\x121\n" +
+	"\x04jobs\x18\x11 \x01(\v2\x1d.protectorate.v1.JobIsolationR\x04jobs\"\xc8\x01\n" +
 	"\n" +
 	"CpuMetrics\x12#\n" +
 	"\rlogical_cores\x18\x01 \x01(\x05R\flogicalCores\x12#\n" +
@@ -4341,17 +4352,18 @@ var file_protectorate_v1_node_proto_goTypes = []any{
 	(*DeskUse)(nil),                           // 55: protectorate.v1.DeskUse
 	(*timestamppb.Timestamp)(nil),             // 56: google.protobuf.Timestamp
 	(*Sleeve)(nil),                            // 57: protectorate.v1.Sleeve
-	(*durationpb.Duration)(nil),               // 58: google.protobuf.Duration
-	(*PrepareJobRequest)(nil),                 // 59: protectorate.v1.PrepareJobRequest
-	(*UploadJobDataRequest)(nil),              // 60: protectorate.v1.UploadJobDataRequest
-	(*RunJobRequest)(nil),                     // 61: protectorate.v1.RunJobRequest
-	(*NodeAgentServiceCancelJobRequest)(nil),  // 62: protectorate.v1.NodeAgentServiceCancelJobRequest
-	(*DeskActionRequest)(nil),                 // 63: protectorate.v1.DeskActionRequest
-	(*PrepareJobResponse)(nil),                // 64: protectorate.v1.PrepareJobResponse
-	(*UploadJobDataResponse)(nil),             // 65: protectorate.v1.UploadJobDataResponse
-	(*JobEvent)(nil),                          // 66: protectorate.v1.JobEvent
-	(*NodeAgentServiceCancelJobResponse)(nil), // 67: protectorate.v1.NodeAgentServiceCancelJobResponse
-	(*DeskActionResponse)(nil),                // 68: protectorate.v1.DeskActionResponse
+	(*JobIsolation)(nil),                      // 58: protectorate.v1.JobIsolation
+	(*durationpb.Duration)(nil),               // 59: google.protobuf.Duration
+	(*PrepareJobRequest)(nil),                 // 60: protectorate.v1.PrepareJobRequest
+	(*UploadJobDataRequest)(nil),              // 61: protectorate.v1.UploadJobDataRequest
+	(*RunJobRequest)(nil),                     // 62: protectorate.v1.RunJobRequest
+	(*NodeAgentServiceCancelJobRequest)(nil),  // 63: protectorate.v1.NodeAgentServiceCancelJobRequest
+	(*DeskActionRequest)(nil),                 // 64: protectorate.v1.DeskActionRequest
+	(*PrepareJobResponse)(nil),                // 65: protectorate.v1.PrepareJobResponse
+	(*UploadJobDataResponse)(nil),             // 66: protectorate.v1.UploadJobDataResponse
+	(*JobEvent)(nil),                          // 67: protectorate.v1.JobEvent
+	(*NodeAgentServiceCancelJobResponse)(nil), // 68: protectorate.v1.NodeAgentServiceCancelJobResponse
+	(*DeskActionResponse)(nil),                // 69: protectorate.v1.DeskActionResponse
 }
 var file_protectorate_v1_node_proto_depIdxs = []int32{
 	53, // 0: protectorate.v1.GetDeskStateRequest.policy:type_name -> protectorate.v1.DeskPolicy
@@ -4376,92 +4388,93 @@ var file_protectorate_v1_node_proto_depIdxs = []int32{
 	36, // 19: protectorate.v1.NodeMetrics.watch_dirs:type_name -> protectorate.v1.DirSize
 	57, // 20: protectorate.v1.NodeMetrics.sleeves:type_name -> protectorate.v1.Sleeve
 	31, // 21: protectorate.v1.NodeMetrics.npus:type_name -> protectorate.v1.AcceleratorMetrics
-	33, // 22: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
-	56, // 23: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
-	35, // 24: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
-	34, // 25: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
-	34, // 26: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
-	34, // 27: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
-	34, // 28: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
-	56, // 29: protectorate.v1.ContainerMetrics.created_at:type_name -> google.protobuf.Timestamp
-	56, // 30: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
-	58, // 31: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
-	3,  // 32: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
-	38, // 33: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
-	26, // 34: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
-	2,  // 35: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
-	56, // 36: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
-	58, // 37: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
-	37, // 38: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
-	54, // 39: protectorate.v1.NodeStatus.desk:type_name -> protectorate.v1.DeskState
-	55, // 40: protectorate.v1.NodeStatus.desk_inputs:type_name -> protectorate.v1.DeskUse
-	39, // 41: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
-	38, // 42: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
-	4,  // 43: protectorate.v1.RemoveNodeRequest.jobs:type_name -> protectorate.v1.RemoveJobs
-	58, // 44: protectorate.v1.RemoveNodeRequest.wait_timeout:type_name -> google.protobuf.Duration
-	5,  // 45: protectorate.v1.RemoveNodeProgress.phase:type_name -> protectorate.v1.RemovePhase
-	58, // 46: protectorate.v1.InviteNodeRequest.ttl:type_name -> google.protobuf.Duration
-	6,  // 47: protectorate.v1.InstallCommand.platform:type_name -> protectorate.v1.InstallPlatform
-	38, // 48: protectorate.v1.InviteNodeResponse.node:type_name -> protectorate.v1.NodeInfo
-	56, // 49: protectorate.v1.InviteNodeResponse.expires_at:type_name -> google.protobuf.Timestamp
-	49, // 50: protectorate.v1.InviteNodeResponse.commands:type_name -> protectorate.v1.InstallCommand
-	7,  // 51: protectorate.v1.NodeSetupProgress.stage:type_name -> protectorate.v1.NodeSetupStage
-	39, // 52: protectorate.v1.NodeSetupProgress.status:type_name -> protectorate.v1.NodeStatus
-	24, // 53: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
-	25, // 54: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
-	59, // 55: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
-	60, // 56: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
-	61, // 57: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
-	62, // 58: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
-	19, // 59: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
-	21, // 60: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
-	63, // 61: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
-	15, // 62: protectorate.v1.NodeAgentService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
-	9,  // 63: protectorate.v1.NodeAgentService.GetDeskState:input_type -> protectorate.v1.GetDeskStateRequest
-	46, // 64: protectorate.v1.NodeAgentService.Uninstall:input_type -> protectorate.v1.UninstallRequest
-	40, // 65: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
-	42, // 66: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
-	43, // 67: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
-	44, // 68: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
-	48, // 69: protectorate.v1.NodeService.InviteNode:input_type -> protectorate.v1.InviteNodeRequest
-	51, // 70: protectorate.v1.NodeService.WatchNodeSetup:input_type -> protectorate.v1.WatchNodeSetupRequest
-	19, // 71: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
-	21, // 72: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
-	15, // 73: protectorate.v1.NodeService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
-	13, // 74: protectorate.v1.NodeService.UpdateNode:input_type -> protectorate.v1.UpdateNodeRequest
-	10, // 75: protectorate.v1.NodeService.SetDeskPolicy:input_type -> protectorate.v1.SetDeskPolicyRequest
-	11, // 76: protectorate.v1.NodeService.GetDeskPolicy:input_type -> protectorate.v1.GetDeskPolicyRequest
-	8,  // 77: protectorate.v1.NodeService.SetNodeTier:input_type -> protectorate.v1.SetNodeTierRequest
-	26, // 78: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
-	26, // 79: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
-	64, // 80: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
-	65, // 81: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
-	66, // 82: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
-	67, // 83: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
-	20, // 84: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
-	23, // 85: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
-	68, // 86: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
-	16, // 87: protectorate.v1.NodeAgentService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
-	54, // 88: protectorate.v1.NodeAgentService.GetDeskState:output_type -> protectorate.v1.DeskState
-	47, // 89: protectorate.v1.NodeAgentService.Uninstall:output_type -> protectorate.v1.UninstallResponse
-	41, // 90: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
-	39, // 91: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
-	38, // 92: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
-	45, // 93: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeProgress
-	50, // 94: protectorate.v1.NodeService.InviteNode:output_type -> protectorate.v1.InviteNodeResponse
-	52, // 95: protectorate.v1.NodeService.WatchNodeSetup:output_type -> protectorate.v1.NodeSetupProgress
-	20, // 96: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
-	23, // 97: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
-	16, // 98: protectorate.v1.NodeService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
-	14, // 99: protectorate.v1.NodeService.UpdateNode:output_type -> protectorate.v1.UpdateNodeProgress
-	12, // 100: protectorate.v1.NodeService.SetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
-	12, // 101: protectorate.v1.NodeService.GetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
-	38, // 102: protectorate.v1.NodeService.SetNodeTier:output_type -> protectorate.v1.NodeInfo
-	78, // [78:103] is the sub-list for method output_type
-	53, // [53:78] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	58, // 22: protectorate.v1.NodeMetrics.jobs:type_name -> protectorate.v1.JobIsolation
+	33, // 23: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
+	56, // 24: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
+	35, // 25: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
+	34, // 26: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
+	34, // 27: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
+	34, // 28: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
+	34, // 29: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
+	56, // 30: protectorate.v1.ContainerMetrics.created_at:type_name -> google.protobuf.Timestamp
+	56, // 31: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
+	59, // 32: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
+	3,  // 33: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
+	38, // 34: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
+	26, // 35: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
+	2,  // 36: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
+	56, // 37: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
+	59, // 38: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
+	37, // 39: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
+	54, // 40: protectorate.v1.NodeStatus.desk:type_name -> protectorate.v1.DeskState
+	55, // 41: protectorate.v1.NodeStatus.desk_inputs:type_name -> protectorate.v1.DeskUse
+	39, // 42: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
+	38, // 43: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
+	4,  // 44: protectorate.v1.RemoveNodeRequest.jobs:type_name -> protectorate.v1.RemoveJobs
+	59, // 45: protectorate.v1.RemoveNodeRequest.wait_timeout:type_name -> google.protobuf.Duration
+	5,  // 46: protectorate.v1.RemoveNodeProgress.phase:type_name -> protectorate.v1.RemovePhase
+	59, // 47: protectorate.v1.InviteNodeRequest.ttl:type_name -> google.protobuf.Duration
+	6,  // 48: protectorate.v1.InstallCommand.platform:type_name -> protectorate.v1.InstallPlatform
+	38, // 49: protectorate.v1.InviteNodeResponse.node:type_name -> protectorate.v1.NodeInfo
+	56, // 50: protectorate.v1.InviteNodeResponse.expires_at:type_name -> google.protobuf.Timestamp
+	49, // 51: protectorate.v1.InviteNodeResponse.commands:type_name -> protectorate.v1.InstallCommand
+	7,  // 52: protectorate.v1.NodeSetupProgress.stage:type_name -> protectorate.v1.NodeSetupStage
+	39, // 53: protectorate.v1.NodeSetupProgress.status:type_name -> protectorate.v1.NodeStatus
+	24, // 54: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
+	25, // 55: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
+	60, // 56: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
+	61, // 57: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
+	62, // 58: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
+	63, // 59: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
+	19, // 60: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	21, // 61: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	64, // 62: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
+	15, // 63: protectorate.v1.NodeAgentService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
+	9,  // 64: protectorate.v1.NodeAgentService.GetDeskState:input_type -> protectorate.v1.GetDeskStateRequest
+	46, // 65: protectorate.v1.NodeAgentService.Uninstall:input_type -> protectorate.v1.UninstallRequest
+	40, // 66: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
+	42, // 67: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
+	43, // 68: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
+	44, // 69: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
+	48, // 70: protectorate.v1.NodeService.InviteNode:input_type -> protectorate.v1.InviteNodeRequest
+	51, // 71: protectorate.v1.NodeService.WatchNodeSetup:input_type -> protectorate.v1.WatchNodeSetupRequest
+	19, // 72: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	21, // 73: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	15, // 74: protectorate.v1.NodeService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
+	13, // 75: protectorate.v1.NodeService.UpdateNode:input_type -> protectorate.v1.UpdateNodeRequest
+	10, // 76: protectorate.v1.NodeService.SetDeskPolicy:input_type -> protectorate.v1.SetDeskPolicyRequest
+	11, // 77: protectorate.v1.NodeService.GetDeskPolicy:input_type -> protectorate.v1.GetDeskPolicyRequest
+	8,  // 78: protectorate.v1.NodeService.SetNodeTier:input_type -> protectorate.v1.SetNodeTierRequest
+	26, // 79: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
+	26, // 80: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
+	65, // 81: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
+	66, // 82: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
+	67, // 83: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
+	68, // 84: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
+	20, // 85: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	23, // 86: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	69, // 87: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
+	16, // 88: protectorate.v1.NodeAgentService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
+	54, // 89: protectorate.v1.NodeAgentService.GetDeskState:output_type -> protectorate.v1.DeskState
+	47, // 90: protectorate.v1.NodeAgentService.Uninstall:output_type -> protectorate.v1.UninstallResponse
+	41, // 91: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
+	39, // 92: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
+	38, // 93: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
+	45, // 94: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeProgress
+	50, // 95: protectorate.v1.NodeService.InviteNode:output_type -> protectorate.v1.InviteNodeResponse
+	52, // 96: protectorate.v1.NodeService.WatchNodeSetup:output_type -> protectorate.v1.NodeSetupProgress
+	20, // 97: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	23, // 98: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	16, // 99: protectorate.v1.NodeService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
+	14, // 100: protectorate.v1.NodeService.UpdateNode:output_type -> protectorate.v1.UpdateNodeProgress
+	12, // 101: protectorate.v1.NodeService.SetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
+	12, // 102: protectorate.v1.NodeService.GetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
+	38, // 103: protectorate.v1.NodeService.SetNodeTier:output_type -> protectorate.v1.NodeInfo
+	79, // [79:104] is the sub-list for method output_type
+	54, // [54:79] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_node_proto_init() }

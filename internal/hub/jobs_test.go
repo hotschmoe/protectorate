@@ -3,6 +3,9 @@ package hub
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,6 +65,10 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// "root" elevation runs the command unchanged, so admin jobs run as the
+	// test user and never call sudo.
+	remote.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Admin: "root"} }
+	local.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Note: "no admin jobs: test"} }
 	peerFiles, err := node.NewFiles(filepath.Join(t.TempDir(), "peer-files"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +83,7 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	peerClock.advance(24 * time.Hour)
 	e := &jobEnv{home: home, remote: remote, peerRoot: peerFiles.Root(), hubRoot: hubFiles.Root(), peerDesk: peerDesk, hubDesk: hubDesk, peerGuard: peerGuard, peerClock: peerClock, tn: newRecordingAdmin()}
 	agent := &node.Agent{
-		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock", Jobs: remote}),
 		Authorize: node.TokenAuthorizer(agentToken),
 		Jobs:      remote,
 		Files:     peerFiles,
@@ -96,7 +103,7 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 		t.Fatal(err)
 	}
 	h := New("test", testToken)
-	h.SetNodes(NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+	h.SetNodes(NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock", Jobs: local}),
 		NodeOptions{Interval: 100 * time.Millisecond, Token: agentToken}))
 	h.EnableNodeOps(hubFiles, &node.Desk{D: hubDesk})
 	if err := h.EnableJobs(home, local); err != nil {
@@ -782,24 +789,40 @@ func TestCareTierEnforcement(t *testing.T) {
 	if _, err := e.h.nodes.inv.SetTier("peer", TierCare); err != nil {
 		t.Fatal(err)
 	}
-	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	// Real grants carry only job_* besides node_admin. These tokens are
+	// written as stored records so each also holds the scopes of the other
+	// gates, which checks the care gate alone on every path.
+	type stored struct {
+		secret, by string
+		scopes     []string
+	}
+	work := []string{"job_*", "lease_*", "desk_*", "node_put_*"}
+	toks := map[string]stored{
+		"plain":              {"ptk_plain", "", work},
+		"grant":              {"ptk_grant", auth.MintedByOwner, append([]string{"node_admin:pe*"}, work...)},
+		"other grant":        {"ptk_other", auth.MintedByOwner, append([]string{"node_admin:kidsbox"}, work...)},
+		"orchestrator grant": {"ptk_orch", "orchestrator-poe", append([]string{"node_admin:peer"}, work...)},
+	}
+	var yml strings.Builder
+	yml.WriteString("tokens:\n")
+	clients := map[string]*http.Client{"owner": {Transport: bearer{testToken}}}
+	i := 0
+	for who, tk := range toks {
+		i++
+		sum := sha256.Sum256([]byte(tk.secret))
+		fmt.Fprintf(&yml, "  - id: t%d\n    name: %q\n    hash: %s\n    scopes: [%s]\n    created: 2026-10-20T00:00:00Z\n    minted_by: %q\n    task: %q\n",
+			i, who, hex.EncodeToString(sum[:]), `"`+strings.Join(tk.scopes, `", "`)+`"`, tk.by, map[bool]string{true: "test", false: ""}[tk.by != ""])
+		clients[who] = &http.Client{Transport: bearer{tk.secret}}
+	}
+	path := filepath.Join(e.home, "tokens.yaml")
+	writeFile(t, path, []byte(yml.String()), 0o600)
+	store, err := auth.OpenStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.h.SetAuth(auth.New(testToken, store, nil))
 	srv := httptest.NewServer(e.h.Handler())
 	t.Cleanup(srv.Close)
-	work := []string{"job_*", "lease_*", "desk_*", "node_put_*"}
-	mint := func(scopes ...string) *http.Client {
-		_, secret, err := store.Create("t", append(scopes, work...), time.Hour, time.Now())
-		if err != nil {
-			t.Fatal(err)
-		}
-		return &http.Client{Transport: bearer{secret}}
-	}
-	clients := map[string]*http.Client{
-		"owner": {Transport: bearer{testToken}}, "plain": mint(), "grant": mint("node_admin:pe*"), "other grant": mint("node_admin:kidsbox"),
-	}
 	ctx := context.Background()
 	ttl := durationpb.New(time.Minute)
 	src := filepath.Join(t.TempDir(), "f.txt")
@@ -844,11 +867,11 @@ func TestCareTierEnforcement(t *testing.T) {
 		action string
 		want   map[string]connect.Code
 	}{
-		{"job on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied}},
-		{"selector job", map[string]connect.Code{"owner": ok, "plain": ok, "grant": ok, "other grant": ok}},
+		{"job on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied, "orchestrator grant": denied}},
+		{"selector job", map[string]connect.Code{"owner": ok, "plain": ok, "grant": ok, "other grant": ok, "orchestrator grant": ok}},
 		{"lease care node", map[string]connect.Code{"owner": refused, "plain": refused, "grant": refused, "other grant": refused}},
-		{"lease care desktop", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied}},
-		{"put file on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied}},
+		{"lease care desktop", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied, "orchestrator grant": denied}},
+		{"put file on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied, "orchestrator grant": denied}},
 	}
 	for _, tt := range tests {
 		for who, want := range tt.want {

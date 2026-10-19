@@ -23,18 +23,38 @@ func (e *DeniedError) Error() string {
 	return fmt.Sprintf("token %q lacks the required scope: %s", e.Name, e.Need)
 }
 
-// Principal is an authenticated caller.
+// Principal is an authenticated caller. Task and MintedBy are set for an
+// admin grant.
 type Principal struct {
-	ID     string
-	Name   string
-	Owner  bool
-	Scopes []string
+	ID       string
+	Name     string
+	Owner    bool
+	Scopes   []string
+	Task     string
+	MintedBy string
 }
 
-// AdminOn reports whether p may work on care node node and run admin jobs
-// there: the owner, or a node_admin grant matching it.
+// GetTask is p's grant task, empty for a nil principal.
+func (p *Principal) GetTask() string {
+	if p == nil {
+		return ""
+	}
+	return p.Task
+}
+
+// MintedByOwner is Token.MintedBy for a grant the owner minted.
+const MintedByOwner = "owner"
+
+// AdminOn reports whether p may run admin jobs on node: the owner, or a
+// node_admin grant matching it.
 func (p *Principal) AdminOn(node string) bool {
 	return p != nil && (p.Owner || AdminOn(p.Scopes, node))
+}
+
+// CareAdmin reports whether p may work on node when it is tier care: the
+// owner, or a node_admin grant matching it that the owner minted.
+func (p *Principal) CareAdmin(node string) bool {
+	return p != nil && (p.Owner || (p.MintedBy == MintedByOwner && AdminOn(p.Scopes, node)))
 }
 
 // Actor is the audit label: "owner" or "token:<name>".
@@ -50,7 +70,36 @@ type ctxKey int
 const (
 	principalKey ctxKey = iota
 	tailnetKey
+	noteKey
 )
+
+// note is what a handler adds to its call's audit line.
+type note struct{ subject, detail string }
+
+// WithNote prepares ctx for Annotate; the interceptor calls it per audited
+// call and reads the note back with NoteFrom.
+func WithNote(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noteKey, &note{})
+}
+
+// Annotate sets the subject (when not empty) and a detail of the call's
+// audit line. Never pass secrets or request bodies.
+func Annotate(ctx context.Context, subject, detail string) {
+	if n, ok := ctx.Value(noteKey).(*note); ok {
+		if subject != "" {
+			n.subject = subject
+		}
+		n.detail = detail
+	}
+}
+
+// NoteFrom returns what Annotate recorded in ctx.
+func NoteFrom(ctx context.Context) (subject, detail string) {
+	if n, ok := ctx.Value(noteKey).(*note); ok {
+		return n.subject, n.detail
+	}
+	return "", ""
+}
 
 // WithTailnet records the WhoIs identity that admitted a request.
 func WithTailnet(ctx context.Context, identity string) context.Context {
@@ -104,7 +153,7 @@ func (a *Authorizer) Authenticate(secret string) (*Principal, error) {
 	if err != nil {
 		return nil, ErrUnauthenticated
 	}
-	return &Principal{ID: t.ID, Name: t.Name, Scopes: t.Scopes}, nil
+	return &Principal{ID: t.ID, Name: t.Name, Scopes: t.Scopes, Task: t.Task, MintedBy: t.MintedBy}, nil
 }
 
 // Method looks up a Connect procedure; unknown procedures are denied.
@@ -169,7 +218,13 @@ func (a *Authorizer) Record(ctx context.Context, p *Principal, procedure, subjec
 		Code:      code,
 	}
 	if p != nil {
-		e.Actor, e.TokenID = p.Actor(), p.ID
+		e.Actor, e.TokenID, e.Task = p.Actor(), p.ID, p.Task
+	}
+	if s, d := NoteFrom(ctx); s != "" || d != "" {
+		if s != "" {
+			e.Subject = s
+		}
+		e.Detail = d
 	}
 	if err != nil {
 		e.Outcome = OutcomeError

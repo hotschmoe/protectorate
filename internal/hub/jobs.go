@@ -2,6 +2,7 @@ package hub
 
 import (
 	"archive/zip"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -29,6 +30,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
@@ -443,6 +445,63 @@ func (m *JobManager) place(ctx context.Context, target *pb.JobTarget, repo strin
 	return n, gpu, nil
 }
 
+// jobMode decides how the node runs the command: admin when asked for and
+// allowed, plain (the agent's user, unsandboxed) on a care node, which the
+// job maintains, sandboxed everywhere else.
+func (m *JobManager) jobMode(ctx context.Context, req *pb.SubmitJobRequest, n *pb.NodeInfo) (pb.JobMode, error) {
+	if !req.Admin {
+		if n.Tier == TierCare {
+			return pb.JobMode_JOB_MODE_PLAIN, nil
+		}
+		return pb.JobMode_JOB_MODE_SANDBOXED, nil
+	}
+	if req.Target.GetSelector() != nil {
+		return 0, invalid("an admin job names its node (or a lease), not a selector")
+	}
+	if p := auth.PrincipalFrom(ctx); !p.AdminOn(n.Name) {
+		return 0, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("admin jobs on %s need an admin grant for it (protectorate grant admin --node %s --task \"...\")", n.Name, n.Name))
+	}
+	st, err := m.nodes.Status(n.Name)
+	if err != nil {
+		return 0, nodeErr(err)
+	}
+	iso := st.Metrics.GetJobs()
+	if iso == nil {
+		return 0, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s does not report whether it can run admin jobs: update its agent", n.Name))
+	}
+	if iso.Admin == "" {
+		return 0, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s cannot run admin jobs: %s", n.Name, cmp.Or(iso.Note, "it has no way to elevate")))
+	}
+	return pb.JobMode_JOB_MODE_ADMIN, nil
+}
+
+// maxAuditCommand bounds the command text kept in an audit line.
+const maxAuditCommand = 512
+
+// jobAudit is the audit detail of a submitted job. The command is kept for
+// admin jobs and for jobs under a grant, whose every command is audited.
+func jobAudit(node string, mode pb.JobMode, command []string, withCommand bool) string {
+	d := "node " + node + ", " + modeLabel(mode)
+	if withCommand {
+		c := strconv.Quote(strings.Join(command, " "))
+		if len(c) > maxAuditCommand {
+			c = c[:maxAuditCommand] + "..."
+		}
+		d += ", command " + c
+	}
+	return d
+}
+
+func modeLabel(mode pb.JobMode) string {
+	switch mode {
+	case pb.JobMode_JOB_MODE_ADMIN:
+		return "admin (elevated, unsandboxed)"
+	case pb.JobMode_JOB_MODE_PLAIN:
+		return "plain (agent user, unsandboxed)"
+	}
+	return "sandboxed"
+}
+
 func newJobID() (string, error) {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -479,10 +538,16 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
+	mode, err := m.jobMode(ctx, req, n)
+	if err != nil {
+		return nil, err
+	}
+	p := auth.PrincipalFrom(ctx)
 	id, err := newJobID()
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	auth.Annotate(ctx, id, jobAudit(n.Name, mode, req.Command, mode == pb.JobMode_JOB_MODE_ADMIN || p.GetTask() != ""))
 	dir := filepath.Join(m.dir, id)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -499,7 +564,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	job := &pb.Job{
 		Id: id, State: pb.JobState_JOB_STATE_PREPARING, Target: req.Target, Node: n.Name, Source: src,
 		Command: req.Command, EnvKeys: envKeys, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
-		SubmittedAt: timestamppb.Now(),
+		SubmittedAt: timestamppb.Now(), Mode: mode, Task: p.GetTask(),
 	}
 	if gpu != nil {
 		g := int32(*gpu)
@@ -531,7 +596,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	run := &pb.RunJobRequest{
 		JobId: id, Command: req.Command, Env: env, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
 		RepoKey: plan.key, Commit: plan.commit, ArtifactName: plan.name,
-		ArtifactArchive: plan.dir != "", Workdir: plan.workdir,
+		ArtifactArchive: plan.dir != "", Workdir: plan.workdir, Mode: mode,
 	}
 	snap := proto.Clone(job).(*pb.Job)
 	m.wg.Add(1)
@@ -733,6 +798,7 @@ func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *
 		case *pb.JobEvent_Started:
 			m.update(e, func(j *pb.Job) {
 				j.State, j.StartedAt, j.WorkspaceReused = pb.JobState_JOB_STATE_RUNNING, timestamppb.Now(), v.Started.WorkspaceReused
+				j.Isolation = v.Started.Isolation
 			})
 		case *pb.JobEvent_Output:
 			m.appendLog(e, v.Output.Data)

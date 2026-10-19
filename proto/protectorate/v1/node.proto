@@ -395,6 +395,9 @@ message NodeMetrics {
   repeated Sleeve sleeves = 15;
   // npus lists neural processing units.
   repeated AcceleratorMetrics npus = 16;
+  // jobs is how this node isolates and elevates jobs; unset when it runs
+  // none.
+  JobIsolation jobs = 17;
 }
 
 message CpuMetrics {

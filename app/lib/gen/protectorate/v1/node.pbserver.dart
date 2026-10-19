@@ -16,7 +16,7 @@ import 'dart:core' as $core;
 import 'package:protobuf/protobuf.dart' as $pb;
 
 import 'desk.pb.dart' as $0;
-import 'job.pb.dart' as $4;
+import 'job.pb.dart' as $3;
 import 'node.pb.dart' as $6;
 import 'node.pbjson.dart';
 
@@ -27,14 +27,14 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.GetMetricsRequest request);
   $async.Future<$6.NodeMetrics> watchMetrics(
       $pb.ServerContext ctx, $6.WatchMetricsRequest request);
-  $async.Future<$4.PrepareJobResponse> prepareJob(
-      $pb.ServerContext ctx, $4.PrepareJobRequest request);
-  $async.Future<$4.UploadJobDataResponse> uploadJobData(
-      $pb.ServerContext ctx, $4.UploadJobDataRequest request);
-  $async.Future<$4.JobEvent> runJob(
-      $pb.ServerContext ctx, $4.RunJobRequest request);
-  $async.Future<$4.NodeAgentServiceCancelJobResponse> cancelJob(
-      $pb.ServerContext ctx, $4.NodeAgentServiceCancelJobRequest request);
+  $async.Future<$3.PrepareJobResponse> prepareJob(
+      $pb.ServerContext ctx, $3.PrepareJobRequest request);
+  $async.Future<$3.UploadJobDataResponse> uploadJobData(
+      $pb.ServerContext ctx, $3.UploadJobDataRequest request);
+  $async.Future<$3.JobEvent> runJob(
+      $pb.ServerContext ctx, $3.RunJobRequest request);
+  $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
+      $pb.ServerContext ctx, $3.NodeAgentServiceCancelJobRequest request);
   $async.Future<$6.PutFileResponse> putFile(
       $pb.ServerContext ctx, $6.PutFileRequest request);
   $async.Future<$6.GetFileResponse> getFile(
@@ -55,13 +55,13 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       case 'WatchMetrics':
         return $6.WatchMetricsRequest();
       case 'PrepareJob':
-        return $4.PrepareJobRequest();
+        return $3.PrepareJobRequest();
       case 'UploadJobData':
-        return $4.UploadJobDataRequest();
+        return $3.UploadJobDataRequest();
       case 'RunJob':
-        return $4.RunJobRequest();
+        return $3.RunJobRequest();
       case 'CancelJob':
-        return $4.NodeAgentServiceCancelJobRequest();
+        return $3.NodeAgentServiceCancelJobRequest();
       case 'PutFile':
         return $6.PutFileRequest();
       case 'GetFile':
@@ -87,13 +87,13 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       case 'WatchMetrics':
         return watchMetrics(ctx, request as $6.WatchMetricsRequest);
       case 'PrepareJob':
-        return prepareJob(ctx, request as $4.PrepareJobRequest);
+        return prepareJob(ctx, request as $3.PrepareJobRequest);
       case 'UploadJobData':
-        return uploadJobData(ctx, request as $4.UploadJobDataRequest);
+        return uploadJobData(ctx, request as $3.UploadJobDataRequest);
       case 'RunJob':
-        return runJob(ctx, request as $4.RunJobRequest);
+        return runJob(ctx, request as $3.RunJobRequest);
       case 'CancelJob':
-        return cancelJob(ctx, request as $4.NodeAgentServiceCancelJobRequest);
+        return cancelJob(ctx, request as $3.NodeAgentServiceCancelJobRequest);
       case 'PutFile':
         return putFile(ctx, request as $6.PutFileRequest);
       case 'GetFile':

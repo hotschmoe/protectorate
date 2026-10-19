@@ -41,6 +41,15 @@ func validNodeAdmin(s string) error {
 	return nil
 }
 
+// GrantScopes are the scopes of an admin grant for node (a node name or glob).
+func GrantScopes(node string) ([]string, error) {
+	scope := ScopeNodeAdminPrefix + node
+	if err := validNodeAdmin(scope); err != nil {
+		return nil, err
+	}
+	return validateScopes([]string{"job_*", scope})
+}
+
 // AdminOn reports whether scopes hold a node_admin grant matching node.
 func AdminOn(scopes []string, node string) bool {
 	for _, s := range scopes {
@@ -59,8 +68,18 @@ var specialScopes = map[string]bool{
 
 // ValidateScopes normalizes scopes (sorted, deduplicated) and rejects an empty
 // list, malformed globs and globs that match no grantable tool, which are
-// almost always typos that would otherwise silently grant nothing.
+// almost always typos that would otherwise silently grant nothing. node_admin
+// scopes are refused: they exist only on grants (Store.CreateGrant).
 func ValidateScopes(scopes []string) ([]string, error) {
+	for _, s := range scopes {
+		if _, ok := nodeAdminGlob(s); ok {
+			return nil, fmt.Errorf("scope %q is only issued per task: protectorate grant admin --node <node> --task ...", s)
+		}
+	}
+	return validateScopes(scopes)
+}
+
+func validateScopes(scopes []string) ([]string, error) {
 	if len(scopes) == 0 {
 		return nil, errors.New("at least one scope is required")
 	}

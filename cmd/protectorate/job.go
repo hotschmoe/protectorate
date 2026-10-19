@@ -140,6 +140,7 @@ func jobRunCmd(o *opts) *cobra.Command {
 	var on, gitSrc, artifact, workdir string
 	var globs, envPairs []string
 	var timeout time.Duration
+	var admin bool
 	c := &cobra.Command{
 		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
@@ -167,7 +168,7 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 			if err != nil {
 				return err
 			}
-			req := &pb.SubmitJobRequest{Target: target, Command: args, ArtifactGlobs: globs, Timeout: durationpb.New(timeout)}
+			req := &pb.SubmitJobRequest{Target: target, Command: args, ArtifactGlobs: globs, Timeout: durationpb.New(timeout), Admin: admin}
 			if req.Env, err = parseEnv(envPairs); err != nil {
 				return err
 			}
@@ -206,6 +207,7 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 	f.StringArrayVar(&globs, "artifact-glob", nil, "fetch files matching this glob back to the hub (repeatable)")
 	f.StringArrayVarP(&envPairs, "env", "e", nil, "environment variable KEY=VALUE (repeatable)")
 	f.DurationVar(&timeout, "timeout", time.Hour, "kill the command after this long (at most 24h)")
+	f.BoolVar(&admin, "admin", false, "run elevated (sudo -n on Linux, the agent's elevated token on Windows), unsandboxed; needs a named node and an admin grant for it")
 	return c
 }
 
@@ -428,6 +430,10 @@ func jobShowCmd(o *opts) *cobra.Command {
 			j := res.Msg
 			return o.out(cmd).print(j, func(w io.Writer) {
 				fmt.Fprintf(w, "id\t%s\nstate\t%s\nnode\t%s\ncommand\t%s\n", j.Id, jobStateName(j.State), j.Node, strings.Join(j.Command, " "))
+				fmt.Fprintf(w, "mode\t%s\nisolation\t%s\n", jobModeName(j.Mode), orDash(j.Isolation))
+				if j.Task != "" {
+					fmt.Fprintf(w, "task\t%s\n", j.Task)
+				}
 				switch k := j.Source.GetKind().(type) {
 				case *pb.JobSource_Git:
 					fmt.Fprintf(w, "source\tgit %s@%s\n", k.Git.Repo, k.Git.Commit)
@@ -444,6 +450,13 @@ func jobShowCmd(o *opts) *cobra.Command {
 			})
 		},
 	}
+}
+
+func jobModeName(m pb.JobMode) string {
+	if m == pb.JobMode_JOB_MODE_UNSPECIFIED {
+		m = pb.JobMode_JOB_MODE_SANDBOXED
+	}
+	return strings.ToLower(strings.TrimPrefix(m.String(), "JOB_MODE_"))
 }
 
 func jobCancelCmd(o *opts) *cobra.Command {

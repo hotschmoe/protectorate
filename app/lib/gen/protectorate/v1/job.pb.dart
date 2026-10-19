@@ -27,6 +27,96 @@ export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'job.pbenum.dart';
 
+/// JobIsolation is what a node can do for jobs, reported in its metrics.
+class JobIsolation extends $pb.GeneratedMessage {
+  factory JobIsolation({
+    $core.String? sandbox,
+    $core.String? note,
+    $core.String? admin,
+  }) {
+    final result = JobIsolation._();
+    if (sandbox != null) result.sandbox = sandbox;
+    if (note != null) result.note = note;
+    if (admin != null) result.admin = admin;
+    return result;
+  }
+
+  JobIsolation._();
+
+  factory JobIsolation.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JobIsolation()..mergeFromBuffer(data, registry);
+  factory JobIsolation.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JobIsolation()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'JobIsolation',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: JobIsolation.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sandbox')
+    ..aOS(2, _omitFieldNames ? '' : 'note')
+    ..aOS(3, _omitFieldNames ? '' : 'admin')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JobIsolation clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JobIsolation copyWith(void Function(JobIsolation) updates) =>
+      super.copyWith((message) => updates(message as JobIsolation))
+          as JobIsolation;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use JobIsolation() / JobIsolation.new instead')
+  static JobIsolation create() => JobIsolation._();
+  static $pb.GeneratedMessage $_createMessage() => JobIsolation._();
+  @$core.override
+  JobIsolation createEmptyInstance() => JobIsolation._();
+  @$core.pragma('dart2js:noInline')
+  static JobIsolation getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<JobIsolation>(
+          JobIsolation.$_createMessage);
+  static JobIsolation? _defaultInstance;
+
+  /// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "bwrap" (Linux:
+  /// bwrap in a systemd user scope), "runner" (Windows: the
+  /// protectorate-runner account in a job object), "job-object" (Windows:
+  /// the agent's own account in a job object, unisolated) or "none".
+  @$pb.TagNumber(1)
+  $core.String get sandbox => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sandbox($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSandbox() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSandbox() => $_clearField(1);
+
+  /// note says why isolation is missing or partial.
+  @$pb.TagNumber(2)
+  $core.String get note => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set note($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasNote() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearNote() => $_clearField(2);
+
+  /// admin is how admin jobs elevate: "sudo", "root" or "elevated"; empty
+  /// when this node cannot run them.
+  @$pb.TagNumber(3)
+  $core.String get admin => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set admin($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasAdmin() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearAdmin() => $_clearField(3);
+}
+
 enum JobTarget_Target { leaseId, node, selector, notSet }
 
 /// JobTarget says where a job runs. Nodes of tier "care" are never picked
@@ -386,6 +476,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     $1.Duration? timeout,
     $core.Iterable<$core.String>? artifactGlobs,
     $core.String? requestId,
+    $core.bool? admin,
   }) {
     final result = SubmitJobRequest._();
     if (target != null) result.target = target;
@@ -395,6 +486,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     if (timeout != null) result.timeout = timeout;
     if (artifactGlobs != null) result.artifactGlobs.addAll(artifactGlobs);
     if (requestId != null) result.requestId = requestId;
+    if (admin != null) result.admin = admin;
     return result;
   }
 
@@ -426,6 +518,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
         subBuilder: $1.Duration.$_createMessage)
     ..pPS(6, _omitFieldNames ? '' : 'artifactGlobs')
     ..aOS(7, _omitFieldNames ? '' : 'requestId')
+    ..aOB(8, _omitFieldNames ? '' : 'admin')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -513,6 +606,19 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
   $core.bool hasRequestId() => $_has(6);
   @$pb.TagNumber(7)
   void clearRequestId() => $_clearField(7);
+
+  /// admin runs the command elevated (sudo -n on Linux, the agent's own
+  /// elevated token on Windows). It needs a named node or a lease (not a
+  /// selector), a node that reports it can elevate, and the owner token or a
+  /// node_admin grant for the node. Admin jobs are never sandboxed.
+  @$pb.TagNumber(8)
+  $core.bool get admin => $_getBF(7);
+  @$pb.TagNumber(8)
+  set admin($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasAdmin() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearAdmin() => $_clearField(8);
 }
 
 class GetJobRequest extends $pb.GeneratedMessage {
@@ -1138,6 +1244,9 @@ class Job extends $pb.GeneratedMessage {
     $core.Iterable<JobArtifact>? artifacts,
     $fixnum.Int64? artifactBytes,
     $fixnum.Int64? logBytes,
+    JobMode? mode,
+    $core.String? isolation,
+    $core.String? task,
   }) {
     final result = Job._();
     if (id != null) result.id = id;
@@ -1162,6 +1271,9 @@ class Job extends $pb.GeneratedMessage {
     if (artifacts != null) result.artifacts.addAll(artifacts);
     if (artifactBytes != null) result.artifactBytes = artifactBytes;
     if (logBytes != null) result.logBytes = logBytes;
+    if (mode != null) result.mode = mode;
+    if (isolation != null) result.isolation = isolation;
+    if (task != null) result.task = task;
     return result;
   }
 
@@ -1217,6 +1329,9 @@ class Job extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         22, _omitFieldNames ? '' : 'logBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aE<JobMode>(23, _omitFieldNames ? '' : 'mode', enumValues: JobMode.values)
+    ..aOS(24, _omitFieldNames ? '' : 'isolation')
+    ..aOS(25, _omitFieldNames ? '' : 'task')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1440,6 +1555,36 @@ class Job extends $pb.GeneratedMessage {
   $core.bool hasLogBytes() => $_has(21);
   @$pb.TagNumber(22)
   void clearLogBytes() => $_clearField(22);
+
+  @$pb.TagNumber(23)
+  JobMode get mode => $_getN(22);
+  @$pb.TagNumber(23)
+  set mode(JobMode value) => $_setField(23, value);
+  @$pb.TagNumber(23)
+  $core.bool hasMode() => $_has(22);
+  @$pb.TagNumber(23)
+  void clearMode() => $_clearField(23);
+
+  /// isolation is how the node ran the command, as it reported at start, e.g.
+  /// "bwrap", "none: bwrap is not installed", "sudo".
+  @$pb.TagNumber(24)
+  $core.String get isolation => $_getSZ(23);
+  @$pb.TagNumber(24)
+  set isolation($core.String value) => $_setString(23, value);
+  @$pb.TagNumber(24)
+  $core.bool hasIsolation() => $_has(23);
+  @$pb.TagNumber(24)
+  void clearIsolation() => $_clearField(24);
+
+  /// task is the task of the admin grant the job was submitted with.
+  @$pb.TagNumber(25)
+  $core.String get task => $_getSZ(24);
+  @$pb.TagNumber(25)
+  set task($core.String value) => $_setString(24, value);
+  @$pb.TagNumber(25)
+  $core.bool hasTask() => $_has(24);
+  @$pb.TagNumber(25)
+  void clearTask() => $_clearField(25);
 }
 
 class PrepareJobRequest extends $pb.GeneratedMessage {
@@ -1778,6 +1923,7 @@ class RunJobRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? artifactGlobs,
     $core.bool? artifactArchive,
     $core.String? workdir,
+    JobMode? mode,
   }) {
     final result = RunJobRequest._();
     if (jobId != null) result.jobId = jobId;
@@ -1791,6 +1937,7 @@ class RunJobRequest extends $pb.GeneratedMessage {
     if (artifactGlobs != null) result.artifactGlobs.addAll(artifactGlobs);
     if (artifactArchive != null) result.artifactArchive = artifactArchive;
     if (workdir != null) result.workdir = workdir;
+    if (mode != null) result.mode = mode;
     return result;
   }
 
@@ -1824,6 +1971,7 @@ class RunJobRequest extends $pb.GeneratedMessage {
     ..pPS(9, _omitFieldNames ? '' : 'artifactGlobs')
     ..aOB(10, _omitFieldNames ? '' : 'artifactArchive')
     ..aOS(11, _omitFieldNames ? '' : 'workdir')
+    ..aE<JobMode>(12, _omitFieldNames ? '' : 'mode', enumValues: JobMode.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1937,14 +2085,25 @@ class RunJobRequest extends $pb.GeneratedMessage {
   $core.bool hasWorkdir() => $_has(10);
   @$pb.TagNumber(11)
   void clearWorkdir() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  JobMode get mode => $_getN(11);
+  @$pb.TagNumber(12)
+  set mode(JobMode value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasMode() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearMode() => $_clearField(12);
 }
 
 class JobStarted extends $pb.GeneratedMessage {
   factory JobStarted({
     $core.bool? workspaceReused,
+    $core.String? isolation,
   }) {
     final result = JobStarted._();
     if (workspaceReused != null) result.workspaceReused = workspaceReused;
+    if (isolation != null) result.isolation = isolation;
     return result;
   }
 
@@ -1963,6 +2122,7 @@ class JobStarted extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: JobStarted.$_createMessage)
     ..aOB(1, _omitFieldNames ? '' : 'workspaceReused')
+    ..aOS(2, _omitFieldNames ? '' : 'isolation')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1993,6 +2153,16 @@ class JobStarted extends $pb.GeneratedMessage {
   $core.bool hasWorkspaceReused() => $_has(0);
   @$pb.TagNumber(1)
   void clearWorkspaceReused() => $_clearField(1);
+
+  /// isolation is how the command runs, as in Job.isolation.
+  @$pb.TagNumber(2)
+  $core.String get isolation => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set isolation($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasIsolation() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearIsolation() => $_clearField(2);
 }
 
 class JobOutput extends $pb.GeneratedMessage {

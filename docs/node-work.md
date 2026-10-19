@@ -75,6 +75,41 @@ this.
   "update the kids' machine"); the orchestrator cannot grant itself admin on
   a `care` node.
 
+**(built)**
+
+- `protectorate grant admin --node kidsbox --ttl 4h --task "update kids
+  machine" [--out FILE]` (`GrantService.Admin`, tool `grant_admin`) mints a
+  token named `grant:<node>` with scopes `job_*` and `node_admin:<node>`,
+  default 4h, at most 24h, recording the task and who minted it (`token ls`
+  shows both; `token revoke <id>` ends it early). The secret is printed once,
+  or written 0600 to `--out`. `node_admin` scopes exist only on grants:
+  `token create` refuses them.
+- Who may mint: the owner, for any node or a glob over node names. The
+  orchestrator's token (it holds `grant_admin`) only for one `shared` node by
+  name, and only on a hub started with `--orchestrator-admin-grants` (off by
+  default). A grant the orchestrator minted never opens a `care` node, even
+  if the node turns `care` later; only an owner-minted grant does. Anyone
+  else is refused whatever their scopes.
+- `job run --admin` (`SubmitJobRequest.admin`) needs a named node or lease
+  (not a selector), the owner token or a grant matching the node, and a node
+  that reports it can elevate (`JobIsolation.admin` in its metrics, `node
+  show`): `sudo` when `sudo -n true` succeeds (probed once per agent start;
+  it shows in the node's auth log), `root` when the agent is root, and on
+  Windows `elevated` only when the agent itself runs elevated. Otherwise the
+  submit fails with failed_precondition and the node's reason. Linux runs
+  `sudo -n --preserve-env=<the job's variable names> -- <cmd>`, so values
+  never reach the process list; Windows runs the command with the agent's
+  elevated token in the job object.
+- Jobs record `mode` (sandboxed, plain, admin), the `isolation` the node
+  reported at start and the grant's `task` (`job show`). A non-admin job on
+  a `care` node runs plain: as the agent's user, unsandboxed, because
+  maintaining that machine (nmcli, journalctl) needs its real system.
+- Audit: every call made with a grant is audited, reads and streams
+  included, with the grant's `task` on the line. `SubmitJob` lines carry the
+  job id as subject and a detail with the node and mode; admin jobs and jobs
+  under a grant also carry the command (quoted, cut at 512 bytes; env values
+  never). `audit tail` prints both.
+
 Scenario: "update the kids' machine and check its wifi". The hub mints a task
 token `job_*` + `node_admin:kidsbox` for 4h. The agent runs read-only checks
 as plain jobs (`nmcli -f all dev wifi`, `iw dev <if> link`,

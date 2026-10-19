@@ -43,6 +43,34 @@ service JobService {
   }
 }
 
+// JobMode is how the node runs a job's command.
+enum JobMode {
+  // JOB_MODE_UNSPECIFIED is treated as JOB_MODE_SANDBOXED.
+  JOB_MODE_UNSPECIFIED = 0;
+  // JOB_MODE_SANDBOXED isolates the command as far as the node can (see
+  // JobIsolation): the job on a shared node.
+  JOB_MODE_SANDBOXED = 1;
+  // JOB_MODE_PLAIN runs it as the agent's user, unsandboxed: a job on a care
+  // node under a grant, which maintains that machine.
+  JOB_MODE_PLAIN = 2;
+  // JOB_MODE_ADMIN runs it elevated and unsandboxed.
+  JOB_MODE_ADMIN = 3;
+}
+
+// JobIsolation is what a node can do for jobs, reported in its metrics.
+message JobIsolation {
+  // sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "bwrap" (Linux:
+  // bwrap in a systemd user scope), "runner" (Windows: the
+  // protectorate-runner account in a job object), "job-object" (Windows:
+  // the agent's own account in a job object, unisolated) or "none".
+  string sandbox = 1;
+  // note says why isolation is missing or partial.
+  string note = 2;
+  // admin is how admin jobs elevate: "sudo", "root" or "elevated"; empty
+  // when this node cannot run them.
+  string admin = 3;
+}
+
 enum JobState {
   JOB_STATE_UNSPECIFIED = 0;
   // JOB_STATE_PREPARING: choosing a node, shipping the source, waiting for a
@@ -125,6 +153,11 @@ message SubmitJobRequest {
   // that lost the response can still find or cancel the job (CancelJob
   // request_id). Empty means no deduplication.
   string request_id = 7;
+  // admin runs the command elevated (sudo -n on Linux, the agent's own
+  // elevated token on Windows). It needs a named node or a lease (not a
+  // selector), a node that reports it can elevate, and the owner token or a
+  // node_admin grant for the node. Admin jobs are never sandboxed.
+  bool admin = 8;
 }
 
 message GetJobRequest {
@@ -221,6 +254,12 @@ message Job {
   repeated JobArtifact artifacts = 20;
   uint64 artifact_bytes = 21;
   uint64 log_bytes = 22;
+  JobMode mode = 23;
+  // isolation is how the node ran the command, as it reported at start, e.g.
+  // "bwrap", "none: bwrap is not installed", "sudo".
+  string isolation = 24;
+  // task is the task of the admin grant the job was submitted with.
+  string task = 25;
 }
 
 message PrepareJobRequest {
@@ -271,10 +310,13 @@ message RunJobRequest {
   bool artifact_archive = 10;
   // workdir is relative to the job directory; only valid with an archive.
   string workdir = 11;
+  JobMode mode = 12;
 }
 
 message JobStarted {
   bool workspace_reused = 1;
+  // isolation is how the command runs, as in Job.isolation.
+  string isolation = 2;
 }
 
 message JobOutput {

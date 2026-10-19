@@ -74,12 +74,12 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 	if err := inv.WriteHosts(); err != nil {
 		return fmt.Errorf("write hosts.md: %w", err)
 	}
-	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch})
-	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client, Peers: peers}))
 	local, err := node.NewJobs(filepath.Join(home, "local-jobs"), 1)
 	if err != nil {
 		return err
 	}
+	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch, Jobs: local})
+	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client, Peers: peers}))
 	files, err := node.NewFiles(filepath.Join(home, "node-files"), false)
 	if err != nil {
 		return err
@@ -337,7 +337,7 @@ func nodeServeCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "node agent: the updated binary never confirmed; rolled back to the previous one and restarting")
 				return nil
 			}
-			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow})
+			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow, Jobs: a.Jobs})
 			tsDir := filepath.Join(home, "tsnet")
 			if tailnet.Joined(tsDir) {
 				n, err := tailnet.OpenNode(ctx, tsDir)

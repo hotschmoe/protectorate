@@ -14,6 +14,13 @@ terminal, and the tailnet listener. Nothing else reads a token.
   recovered. Each token has id, name, scopes, created, expires (optional),
   last_used (persisted at most about once a minute) and revoked.
 
+- **Admin grants**: tokens minted per task by `protectorate grant admin`
+  (`GrantService.Admin`): scopes `job_*` and `node_admin:<node>`, default 4h,
+  at most 24h, stored with the task and the minter. The owner mints them for
+  any node; the orchestrator only for a `shared` node by name and only when
+  the hub runs with `--orchestrator-admin-grants`. Every call made with a
+  grant is audited with its task. See [node-work.md](node-work.md).
+
 - **Sleeve tokens**: minted by the hub itself for every sleeve at spawn (name
   `sleeve:<name>`, scopes `read`, `backlog_*`, `directory_*`, `lease_*`,
   `message_*`), written into the sleeve's home, revoked on kill and replaced on
@@ -39,7 +46,7 @@ is implied (`read` does not include `events`; no glob includes the terminal).
 | `terminal` | the WebSocket terminal, read-write or read-only |
 | `terminal:readonly` | the terminal only with `readonly=1` |
 | `terminal:host` | the terminal, also read-write on sessions outside a sleeve sandbox (shell as the hub user) |
-| `node_admin:<glob>` | work on `care` nodes whose name the glob matches (jobs, files, desktop), never an RPC by itself; see [node-work.md](node-work.md) |
+| `node_admin:<glob>` | only on admin grants (`grant admin`, never `token create`): work on `care` nodes whose name the glob matches when the owner minted the grant, and `job run --admin` there; never an RPC by itself; see [node-work.md](node-work.md) |
 | `<glob>` | `path.Match` glob over tool names |
 
 The canonical glob form is the MCP tool name: the snake_case service name
@@ -116,8 +123,12 @@ with mode 0600. Logged: every mutating RPC (any RPC not marked
 terminal attach. Not logged: reads and event streams. Fields: `time`, `actor`
 (`owner`, `token:<name>` or `unauthenticated`), `token_id`, `tailnet`,
 `procedure`, `subject` (the request's `name` or `id`, nothing else from the
-body), `outcome` (`ok`, `denied`, `error`) and `code` (Connect code).
-Secrets and request bodies are never written. `protectorate audit tail [-n 50]`
+body, or what the handler names, such as a new job's id), `outcome` (`ok`,
+`denied`, `error`), `code` (Connect code), `task` (the admin grant's task)
+and `detail` (what the handler adds: a job's node and mode, and for admin
+jobs and jobs under a grant the command, cut at 512 bytes). Secrets, env
+values and other request bodies are never written. Calls made with an admin
+grant are logged whether or not they mutate. `protectorate audit tail [-n 50]`
 reads it on the hub machine.
 
 Limits to keep in mind:

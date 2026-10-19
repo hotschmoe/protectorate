@@ -15,11 +15,181 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
-    as $1;
-import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
+    as $1;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+class GrantServiceAdminRequest extends $pb.GeneratedMessage {
+  factory GrantServiceAdminRequest({
+    $core.String? node,
+    $0.Duration? ttl,
+    $core.String? task,
+  }) {
+    final result = GrantServiceAdminRequest._();
+    if (node != null) result.node = node;
+    if (ttl != null) result.ttl = ttl;
+    if (task != null) result.task = task;
+    return result;
+  }
+
+  GrantServiceAdminRequest._();
+
+  factory GrantServiceAdminRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GrantServiceAdminRequest()..mergeFromBuffer(data, registry);
+  factory GrantServiceAdminRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GrantServiceAdminRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GrantServiceAdminRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GrantServiceAdminRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'node')
+    ..aOM<$0.Duration>(2, _omitFieldNames ? '' : 'ttl',
+        subBuilder: $0.Duration.$_createMessage)
+    ..aOS(3, _omitFieldNames ? '' : 'task')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GrantServiceAdminRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GrantServiceAdminRequest copyWith(
+          void Function(GrantServiceAdminRequest) updates) =>
+      super.copyWith((message) => updates(message as GrantServiceAdminRequest))
+          as GrantServiceAdminRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GrantServiceAdminRequest() / GrantServiceAdminRequest.new instead')
+  static GrantServiceAdminRequest create() => GrantServiceAdminRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GrantServiceAdminRequest._();
+  @$core.override
+  GrantServiceAdminRequest createEmptyInstance() =>
+      GrantServiceAdminRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GrantServiceAdminRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GrantServiceAdminRequest>(
+          GrantServiceAdminRequest.$_createMessage);
+  static GrantServiceAdminRequest? _defaultInstance;
+
+  /// node is a node name, or (owner only) a path.Match glob over node names.
+  @$pb.TagNumber(1)
+  $core.String get node => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set node($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasNode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearNode() => $_clearField(1);
+
+  /// ttl is the grant's lifetime; unset means 4h, at most 24h.
+  @$pb.TagNumber(2)
+  $0.Duration get ttl => $_getN(1);
+  @$pb.TagNumber(2)
+  set ttl($0.Duration value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTtl() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTtl() => $_clearField(2);
+  @$pb.TagNumber(2)
+  $0.Duration ensureTtl() => $_ensure(1);
+
+  /// task says what the grant is for, e.g. "update the kids' machine". It is
+  /// stored with the token and written to every audit line the grant causes.
+  @$pb.TagNumber(3)
+  $core.String get task => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set task($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTask() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTask() => $_clearField(3);
+}
+
+class GrantServiceAdminResponse extends $pb.GeneratedMessage {
+  factory GrantServiceAdminResponse({
+    TokenInfo? token,
+    $core.String? secret,
+  }) {
+    final result = GrantServiceAdminResponse._();
+    if (token != null) result.token = token;
+    if (secret != null) result.secret = secret;
+    return result;
+  }
+
+  GrantServiceAdminResponse._();
+
+  factory GrantServiceAdminResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GrantServiceAdminResponse()..mergeFromBuffer(data, registry);
+  factory GrantServiceAdminResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GrantServiceAdminResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GrantServiceAdminResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GrantServiceAdminResponse.$_createMessage)
+    ..aOM<TokenInfo>(1, _omitFieldNames ? '' : 'token',
+        subBuilder: TokenInfo.$_createMessage)
+    ..aOS(2, _omitFieldNames ? '' : 'secret')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GrantServiceAdminResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GrantServiceAdminResponse copyWith(
+          void Function(GrantServiceAdminResponse) updates) =>
+      super.copyWith((message) => updates(message as GrantServiceAdminResponse))
+          as GrantServiceAdminResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GrantServiceAdminResponse() / GrantServiceAdminResponse.new instead')
+  static GrantServiceAdminResponse create() => GrantServiceAdminResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      GrantServiceAdminResponse._();
+  @$core.override
+  GrantServiceAdminResponse createEmptyInstance() =>
+      GrantServiceAdminResponse._();
+  @$core.pragma('dart2js:noInline')
+  static GrantServiceAdminResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GrantServiceAdminResponse>(
+          GrantServiceAdminResponse.$_createMessage);
+  static GrantServiceAdminResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  TokenInfo get token => $_getN(0);
+  @$pb.TagNumber(1)
+  set token(TokenInfo value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasToken() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearToken() => $_clearField(1);
+  @$pb.TagNumber(1)
+  TokenInfo ensureToken() => $_ensure(0);
+
+  /// secret is the bearer token. It is shown only in this response.
+  @$pb.TagNumber(2)
+  $core.String get secret => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set secret($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSecret() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSecret() => $_clearField(2);
+}
 
 /// TokenInfo describes an issued token. It never carries the secret.
 class TokenInfo extends $pb.GeneratedMessage {
@@ -27,10 +197,12 @@ class TokenInfo extends $pb.GeneratedMessage {
     $core.String? id,
     $core.String? name,
     $core.Iterable<$core.String>? scopes,
-    $0.Timestamp? createdAt,
-    $0.Timestamp? expiresAt,
-    $0.Timestamp? lastUsedAt,
-    $0.Timestamp? revokedAt,
+    $1.Timestamp? createdAt,
+    $1.Timestamp? expiresAt,
+    $1.Timestamp? lastUsedAt,
+    $1.Timestamp? revokedAt,
+    $core.String? task,
+    $core.String? mintedBy,
   }) {
     final result = TokenInfo._();
     if (id != null) result.id = id;
@@ -40,6 +212,8 @@ class TokenInfo extends $pb.GeneratedMessage {
     if (expiresAt != null) result.expiresAt = expiresAt;
     if (lastUsedAt != null) result.lastUsedAt = lastUsedAt;
     if (revokedAt != null) result.revokedAt = revokedAt;
+    if (task != null) result.task = task;
+    if (mintedBy != null) result.mintedBy = mintedBy;
     return result;
   }
 
@@ -60,14 +234,16 @@ class TokenInfo extends $pb.GeneratedMessage {
     ..aOS(1, _omitFieldNames ? '' : 'id')
     ..aOS(2, _omitFieldNames ? '' : 'name')
     ..pPS(3, _omitFieldNames ? '' : 'scopes')
-    ..aOM<$0.Timestamp>(4, _omitFieldNames ? '' : 'createdAt',
-        subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$0.Timestamp>(5, _omitFieldNames ? '' : 'expiresAt',
-        subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$0.Timestamp>(6, _omitFieldNames ? '' : 'lastUsedAt',
-        subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$0.Timestamp>(7, _omitFieldNames ? '' : 'revokedAt',
-        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'createdAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(5, _omitFieldNames ? '' : 'expiresAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(6, _omitFieldNames ? '' : 'lastUsedAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(7, _omitFieldNames ? '' : 'revokedAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOS(8, _omitFieldNames ? '' : 'task')
+    ..aOS(9, _omitFieldNames ? '' : 'mintedBy')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -110,65 +286,86 @@ class TokenInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearName() => $_clearField(2);
 
-  /// scopes are the grants: tool-name globs such as "session_*", or the
-  /// special scopes read, events, terminal and terminal:readonly.
+  /// scopes are the grants: tool-name globs such as "session_*", the special
+  /// scopes read, events, terminal and terminal:readonly, and on an admin
+  /// grant node_admin:<node>.
   @$pb.TagNumber(3)
   $pb.PbList<$core.String> get scopes => $_getList(2);
 
   @$pb.TagNumber(4)
-  $0.Timestamp get createdAt => $_getN(3);
+  $1.Timestamp get createdAt => $_getN(3);
   @$pb.TagNumber(4)
-  set createdAt($0.Timestamp value) => $_setField(4, value);
+  set createdAt($1.Timestamp value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasCreatedAt() => $_has(3);
   @$pb.TagNumber(4)
   void clearCreatedAt() => $_clearField(4);
   @$pb.TagNumber(4)
-  $0.Timestamp ensureCreatedAt() => $_ensure(3);
+  $1.Timestamp ensureCreatedAt() => $_ensure(3);
 
   /// expires_at is unset for a token that never expires.
   @$pb.TagNumber(5)
-  $0.Timestamp get expiresAt => $_getN(4);
+  $1.Timestamp get expiresAt => $_getN(4);
   @$pb.TagNumber(5)
-  set expiresAt($0.Timestamp value) => $_setField(5, value);
+  set expiresAt($1.Timestamp value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasExpiresAt() => $_has(4);
   @$pb.TagNumber(5)
   void clearExpiresAt() => $_clearField(5);
   @$pb.TagNumber(5)
-  $0.Timestamp ensureExpiresAt() => $_ensure(4);
+  $1.Timestamp ensureExpiresAt() => $_ensure(4);
 
   /// last_used_at is unset until the token authenticates once. It is
   /// persisted at most about once a minute.
   @$pb.TagNumber(6)
-  $0.Timestamp get lastUsedAt => $_getN(5);
+  $1.Timestamp get lastUsedAt => $_getN(5);
   @$pb.TagNumber(6)
-  set lastUsedAt($0.Timestamp value) => $_setField(6, value);
+  set lastUsedAt($1.Timestamp value) => $_setField(6, value);
   @$pb.TagNumber(6)
   $core.bool hasLastUsedAt() => $_has(5);
   @$pb.TagNumber(6)
   void clearLastUsedAt() => $_clearField(6);
   @$pb.TagNumber(6)
-  $0.Timestamp ensureLastUsedAt() => $_ensure(5);
+  $1.Timestamp ensureLastUsedAt() => $_ensure(5);
 
   /// revoked_at is unset while the token is not revoked.
   @$pb.TagNumber(7)
-  $0.Timestamp get revokedAt => $_getN(6);
+  $1.Timestamp get revokedAt => $_getN(6);
   @$pb.TagNumber(7)
-  set revokedAt($0.Timestamp value) => $_setField(7, value);
+  set revokedAt($1.Timestamp value) => $_setField(7, value);
   @$pb.TagNumber(7)
   $core.bool hasRevokedAt() => $_has(6);
   @$pb.TagNumber(7)
   void clearRevokedAt() => $_clearField(7);
   @$pb.TagNumber(7)
-  $0.Timestamp ensureRevokedAt() => $_ensure(6);
+  $1.Timestamp ensureRevokedAt() => $_ensure(6);
+
+  /// task is set on an admin grant: what it was minted for.
+  @$pb.TagNumber(8)
+  $core.String get task => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set task($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasTask() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearTask() => $_clearField(8);
+
+  /// minted_by names who minted an admin grant: "owner" or a token name.
+  @$pb.TagNumber(9)
+  $core.String get mintedBy => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set mintedBy($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasMintedBy() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearMintedBy() => $_clearField(9);
 }
 
 class CreateTokenRequest extends $pb.GeneratedMessage {
   factory CreateTokenRequest({
     $core.String? name,
     $core.Iterable<$core.String>? scopes,
-    $1.Duration? ttl,
+    $0.Duration? ttl,
   }) {
     final result = CreateTokenRequest._();
     if (name != null) result.name = name;
@@ -193,8 +390,8 @@ class CreateTokenRequest extends $pb.GeneratedMessage {
       createEmptyInstance: CreateTokenRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..pPS(2, _omitFieldNames ? '' : 'scopes')
-    ..aOM<$1.Duration>(3, _omitFieldNames ? '' : 'ttl',
-        subBuilder: $1.Duration.$_createMessage)
+    ..aOM<$0.Duration>(3, _omitFieldNames ? '' : 'ttl',
+        subBuilder: $0.Duration.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -235,15 +432,15 @@ class CreateTokenRequest extends $pb.GeneratedMessage {
 
   /// ttl is the lifetime from now; zero means the token never expires.
   @$pb.TagNumber(3)
-  $1.Duration get ttl => $_getN(2);
+  $0.Duration get ttl => $_getN(2);
   @$pb.TagNumber(3)
-  set ttl($1.Duration value) => $_setField(3, value);
+  set ttl($0.Duration value) => $_setField(3, value);
   @$pb.TagNumber(3)
   $core.bool hasTtl() => $_has(2);
   @$pb.TagNumber(3)
   void clearTtl() => $_clearField(3);
   @$pb.TagNumber(3)
-  $1.Duration ensureTtl() => $_ensure(2);
+  $0.Duration ensureTtl() => $_ensure(2);
 }
 
 class CreateTokenResponse extends $pb.GeneratedMessage {
@@ -564,6 +761,23 @@ class TokenServiceApi {
           $pb.ClientContext? ctx, RevokeTokenRequest request) =>
       _client.invoke<RevokeTokenResponse>(
           ctx, 'TokenService', 'RevokeToken', request, RevokeTokenResponse());
+}
+
+/// GrantService mints task-scoped admin grants: short-lived tokens whose
+/// scopes are job_* and node_admin:<node>. The owner may grant any node (or a
+/// glob over node names); the orchestrator's token may grant one shared node
+/// by name, and only when the hub runs with --orchestrator-admin-grants. Every
+/// call made with a grant is audited with its task.
+class GrantServiceApi {
+  final $pb.RpcClient _client;
+
+  GrantServiceApi(this._client);
+
+  /// Admin mints a grant. The secret is returned once.
+  $async.Future<GrantServiceAdminResponse> admin(
+          $pb.ClientContext? ctx, GrantServiceAdminRequest request) =>
+      _client.invoke<GrantServiceAdminResponse>(
+          ctx, 'GrantService', 'Admin', request, GrantServiceAdminResponse());
 }
 
 const $core.bool _omitFieldNames =

@@ -514,6 +514,35 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Admin mints a grant. The secret is returned once.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "node is a node name, or (owner only) a path.Match glob over node names.",
+          "type": "string"
+        },
+        "task": {
+          "description": "task says what the grant is for, e.g. \"update the kids' machine\". It is stored with the token and written to every audit line the grant causes.",
+          "type": "string"
+        },
+        "ttl": {
+          "description": "ttl is the grant's lifetime; unset means 4h, at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "grant_admin"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -611,6 +640,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "admin": {
+          "description": "admin runs the command elevated (sudo -n on Linux, the agent's own elevated token on Windows). It needs a named node or a lease (not a selector), a node that reports it can elevate, and the owner token or a node_admin grant for the node. Admin jobs are never sandboxed.",
+          "type": "boolean"
+        },
         "artifactGlobs": {
           "description": "artifact_globs select files, relative to the working directory, that are sent back to $PROTECTORATE_HOME/jobs/\u003cid\u003e/artifacts/. A glob that matches a directory takes the files below it.",
           "items": {
