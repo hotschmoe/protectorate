@@ -60,5 +60,5 @@ protectorate pair                               # QR code for the phone app
 - [PROBLEMS.md](PROBLEMS.md): what hurts and why
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system and the decisions behind it
 - [docs/install.md](docs/install.md): hub, node and phone setup
-- [docs/desk.md](docs/desk.md), [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md), [docs/coordination.md](docs/coordination.md)
+- [docs/node-work.md](docs/node-work.md) (tiers, jobs, admin grants, sandboxes, toolchains: design), [docs/desk.md](docs/desk.md), [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md), [docs/coordination.md](docs/coordination.md)
 - `spikes/`: the experiments behind each decision, with measurements
