@@ -280,7 +280,7 @@ class NodeCard extends StatelessWidget {
           width: down || stale ? 2 : 1,
         ),
       ),
-      color: down ? cs.errorContainer.withValues(alpha: 0.35) : null,
+      color: down ? cs.errorContainer.withValues(alpha: 0.18) : null,
       child: InkWell(
         onTap: onTap,
         child: Padding(
