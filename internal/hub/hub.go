@@ -20,13 +20,13 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/backlog"
+	"github.com/hotschmoe/protectorate/internal/codec"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
 
@@ -38,6 +38,7 @@ type Hub struct {
 	started time.Time
 	seq     atomic.Uint64
 	quota   *QuotaCache
+	nodes   *NodeMonitor
 	events  eventBus
 
 	Sessions     *session.Manager
@@ -72,6 +73,13 @@ func New(version, token string) *Hub {
 	return h
 }
 
+// SetNodes installs the node monitor and enables NodeService. Call before
+// Handler or Serve.
+func (h *Hub) SetNodes(m *NodeMonitor) {
+	m.publish = h.emit
+	h.nodes = m
+}
+
 // SetQuota installs the quota cache and publishes its updates as
 // "quota.updated" events. Call before Handler or Serve.
 func (h *Hub) SetQuota(c *QuotaCache) {
@@ -92,11 +100,15 @@ func (h *Hub) publishQuota(pq *pb.ProviderQuota) {
 	if err != nil {
 		return
 	}
+	h.emit("quota.updated", pq.Provider, payload)
+}
+
+func (h *Hub) emit(kind, subject string, payload *structpb.Struct) {
 	h.events.publish(&pb.Event{
 		Id:      strconv.FormatUint(h.seq.Add(1), 10),
 		Time:    timestamppb.Now(),
-		Kind:    "quota.updated",
-		Subject: pq.Provider,
+		Kind:    kind,
+		Subject: subject,
 		Payload: payload,
 	})
 }
@@ -133,38 +145,11 @@ func (b *eventBus) publish(e *pb.Event) {
 	}
 }
 
-// strictJSON replaces connect's JSON codec so unknown request fields are an
-// error instead of being silently dropped.
-type strictJSON struct{}
-
-func (strictJSON) Name() string { return "json" }
-
-func (strictJSON) Marshal(m any) ([]byte, error) {
-	pm, ok := m.(proto.Message)
-	if !ok {
-		return nil, fmt.Errorf("%T is not a proto message", m)
-	}
-	return protojson.Marshal(pm)
-}
-
-func (strictJSON) Unmarshal(data []byte, m any) error {
-	pm, ok := m.(proto.Message)
-	if !ok {
-		return fmt.Errorf("%T is not a proto message", m)
-	}
-	if len(data) == 0 {
-		return errors.New("zero-length payload is not a valid JSON object")
-	}
-	return protojson.UnmarshalOptions{DiscardUnknown: false}.Unmarshal(data, pm)
-}
-
-func (strictJSON) IsBinary() bool { return false }
-
 // Handler serves every service behind the bearer-token interceptor.
 func (h *Hub) Handler() http.Handler {
 	opts := connect.WithHandlerOptions(
 		connect.WithInterceptors(authInterceptor{token: h.token}),
-		connect.WithCodec(strictJSON{}),
+		connect.WithCodec(codec.StrictJSON{}),
 	)
 	mux := http.NewServeMux()
 	mux.Handle(protectoratev1connect.NewHubServiceHandler(h, opts))
@@ -173,6 +158,9 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
+	if h.nodes != nil {
+		mux.Handle(protectoratev1connect.NewNodeServiceHandler(h, opts))
+	}
 	if h.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
 	}
@@ -204,6 +192,19 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener) error {
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); h.WatchSessions(ctx) }()
 	defer func() { <-watchDone }()
+
+	if h.nodes != nil {
+		nodesDone := make(chan struct{})
+		nodesCtx, stopNodes := context.WithCancel(ctx)
+		defer func() {
+			stopNodes()
+			<-nodesDone
+		}()
+		go func() {
+			defer close(nodesDone)
+			h.nodes.Run(nodesCtx)
+		}()
+	}
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()

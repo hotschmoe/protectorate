@@ -76,7 +76,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), nodeCmd(o), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 
@@ -92,6 +92,9 @@ func hubCmd() *cobra.Command {
 	var listen, tmuxSocket, webDir string
 	var quotaInterval time.Duration
 	var localURLs []string
+	var nodeInterval time.Duration
+	var nodeToken string
+	var watch []string
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -116,9 +119,18 @@ func hubCmd() *cobra.Command {
 			h.Sessions = session.New(tmuxSocket)
 			h.WebDir = webDir
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
+			if nodeToken == "" {
+				nodeToken = os.Getenv(nodeTokenEnv)
+			}
+			if err := attachNodes(h, nodeInterval, nodeToken, watch); err != nil {
+				return err
+			}
 			return h.Serve(ctx, l)
 		},
 	}
+	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
+	serve.Flags().StringVar(&nodeToken, "node-token", "", "bearer token presented to node agents (env "+nodeTokenEnv+")")
+	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")
 	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")
