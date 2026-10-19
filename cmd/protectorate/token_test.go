@@ -138,14 +138,14 @@ func TestPairMintsScopedDeviceToken(t *testing.T) {
 		t.Fatalf("no device token in link:\n%s", out)
 	}
 	ls, err := runCLI(url, "token", "ls")
-	if err != nil || !strings.Contains(ls, "pair: phone") || !strings.Contains(ls, "[backlog_* events read session_* sleeve_* terminal]") {
+	if err != nil || !strings.Contains(ls, "pair: phone") || !strings.Contains(ls, "[backlog_* chat_* events read session_* sleeve_* terminal]") {
 		t.Fatalf("%v\n%s", err, ls)
 	}
 	if _, err := runCLI(url, "pair", "--name", "tablet", "--host-shell"); err != nil {
 		t.Fatal(err)
 	}
 	ls, err = runCLI(url, "token", "ls")
-	if err != nil || !strings.Contains(ls, "[backlog_* events read session_* sleeve_* terminal terminal:host]") {
+	if err != nil || !strings.Contains(ls, "[backlog_* chat_* events read session_* sleeve_* terminal terminal:host]") {
 		t.Fatalf("--host-shell did not add terminal:host: %v\n%s", err, ls)
 	}
 	t.Setenv(tokenEnv, m[1])

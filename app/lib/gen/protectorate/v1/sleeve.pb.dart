@@ -508,8 +508,7 @@ class Sleeve extends $pb.GeneratedMessage {
   @$pb.TagNumber(14)
   void clearMode() => $_clearField(14);
 
-  /// chat is set for agent harnesses in either mode, so the session id and
-  /// context usage survive a switch to the terminal.
+  /// chat is set for sleeves in chat mode.
   @$pb.TagNumber(15)
   $1.ChatStatus get chat => $_getN(14);
   @$pb.TagNumber(15)
@@ -1035,7 +1034,7 @@ class KillSleeveResponse extends $pb.GeneratedMessage {
 /// memory limits. In chat mode (the default for agent harnesses) the harness
 /// runs its official headless protocol and is driven through ChatService. In
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
-/// WebSocket terminal work on it. Sleeves are Linux-only.
+/// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
 /// and "sleeve.oom" (subject = sleeve name).
 class SleeveServiceApi {

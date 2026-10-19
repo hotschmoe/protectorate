@@ -36,33 +36,12 @@ func TestResolveMode(t *testing.T) {
 	}
 }
 
-func TestTUIArgs(t *testing.T) {
-	tests := []struct {
-		name  string
-		h     Harness
-		extra []string
-		id    string
-		want  []string
-	}{
-		{"claude resume", Claude, []string{"-x"}, "abc", []string{"-x", "--resume", "abc"}},
-		{"codex new", Codex, nil, "", []string{"--disable", "daemon_auto_start"}},
-		{"codex resume", Codex, []string{"-m", "o3"}, "t1", []string{"--disable", "daemon_auto_start", "-m", "o3", "resume", "t1"}},
-		{"grok resume", Grok, nil, "g1", []string{"--resume", "g1"}},
-		{"pi resume", Pi, nil, "p1", []string{"--session", "p1"}},
-		{"grok new", Grok, nil, "", nil},
-		{"claude user resume", Claude, []string{"--continue"}, "", []string{"--continue"}},
+func TestTerminalArgs(t *testing.T) {
+	if got := terminalArgs(Codex, []string{"-m", "o3"}); !reflect.DeepEqual(got, []string{"--disable", "daemon_auto_start", "-m", "o3"}) {
+		t.Errorf("codex: %v", got)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, id, err := tuiArgs(tc.h, tc.extra, tc.id)
-			if err != nil || !reflect.DeepEqual(got, tc.want) || id != tc.id {
-				t.Fatalf("got %v %q %v, want %v %q", got, id, err, tc.want, tc.id)
-			}
-		})
-	}
-	got, id, err := tuiArgs(Claude, nil, "")
-	if err != nil || len(got) != 2 || got[0] != "--session-id" || got[1] != id || len(id) != 36 {
-		t.Fatalf("new claude tui: %v %q %v", got, id, err)
+	if got := terminalArgs(Claude, []string{"-x"}); !reflect.DeepEqual(got, []string{"-x"}) {
+		t.Errorf("claude: %v", got)
 	}
 }
 

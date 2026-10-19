@@ -51,7 +51,7 @@ type Info struct {
 	// Mode is how the harness runs. A record without one is a terminal
 	// sleeve from before modes existed.
 	Mode Mode `yaml:"mode,omitempty"`
-	// Chat is set for agent harnesses in either mode.
+	// Chat is set for sleeves in chat mode.
 	Chat   *Chat     `yaml:"chat,omitempty"`
 	CPU    uint32    `yaml:"cpu_percent,omitempty"`
 	Memory uint64    `yaml:"memory_bytes,omitempty"`
@@ -295,12 +295,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, err
 	}
 	args := req.Args
-	var sessionID string
 	if mode == ModeTerminal {
-		args, sessionID, err = tuiArgs(req.Harness, req.Args, "")
-		if err != nil {
-			return Info{}, err
-		}
+		args = terminalArgs(req.Harness, req.Args)
 	}
 	spec := Spec{Name: req.Name, Harness: req.Harness, Args: args, Workspace: ws, Env: req.Env, Limits: req.Limits}
 	launch, err := m.cfg.Plan(spec, bin)
@@ -328,8 +324,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if mode == ModeTerminal {
 		info.Session = SessionName(req.Name)
 	}
-	if req.Harness != Shell {
-		info.Chat = &Chat{SessionID: sessionID}
+	if mode == ModeChat {
+		info.Chat = &Chat{}
 	}
 	e := &entry{Info: info}
 	m.mu.Lock()

@@ -203,33 +203,6 @@
   },
   {
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "SetMode switches a sleeve between chat and terminal (\"take over\"). The current driver is closed first, then the other mode resumes the same native session id.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "enum": [
-            "SLEEVE_MODE_UNSPECIFIED",
-            "SLEEVE_MODE_CHAT",
-            "SLEEVE_MODE_TERMINAL"
-          ],
-          "type": "string"
-        },
-        "sleeve": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "chat_set_mode"
-  },
-  {
-    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true

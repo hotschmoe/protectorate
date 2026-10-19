@@ -188,8 +188,8 @@ type Options struct {
 	// put the harness in its sandbox. stdio stays connected to the harness.
 	Command func(bin string, args []string) ([]string, error)
 	// Sandboxed says the caller isolates the harness, so the driver runs it
-	// in its own autonomous permission mode and raises native
-	// auto-compaction, using only the harness's official flags and commands.
+	// in its own autonomous permission mode, using only the harness's
+	// official flags and commands.
 	Sandboxed bool
 
 	release func()

@@ -620,7 +620,7 @@ func TestSandboxedFlags(t *testing.T) {
 		}
 		return joinText(until(t, s, KindSettled))
 	}
-	if got := open(true); !strings.Contains(got, "bypassPermissions") || !strings.Contains(got, "--autocompact 1M") {
+	if got := open(true); !strings.Contains(got, "bypassPermissions") || strings.Contains(got, "autocompact") {
 		t.Fatalf("sandboxed args: %s", got)
 	}
 	if got := open(false); strings.Contains(got, "bypassPermissions") {

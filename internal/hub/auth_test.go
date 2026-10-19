@@ -544,3 +544,29 @@ func TestSpawnSleeveReservesOrchestratorName(t *testing.T) {
 		})
 	}
 }
+
+func TestChatScopes(t *testing.T) {
+	a := auth.New(testToken, nil, nil)
+	read := &auth.Principal{Name: "r", Scopes: []string{"read"}}
+	chat := &auth.Principal{Name: "c", Scopes: []string{"chat_*"}}
+	tests := []struct {
+		method string
+		p      *auth.Principal
+		ok     bool
+	}{
+		{"Watch", read, true},
+		{"Watch", chat, true},
+		{"Send", read, false},
+		{"Send", chat, true},
+		{"Interrupt", chat, true},
+		{"Respond", read, false},
+		{"Compact", chat, true},
+		{"Compact", read, false},
+	}
+	for _, tc := range tests {
+		err := a.AuthorizeProcedure(tc.p, "/protectorate.v1.ChatService/"+tc.method)
+		if (err == nil) != tc.ok {
+			t.Errorf("%s as %s: err = %v, want ok=%v", tc.method, tc.p.Name, err, tc.ok)
+		}
+	}
+}

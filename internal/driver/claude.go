@@ -24,9 +24,8 @@ type claudeSession struct {
 }
 
 const (
-	claudeAutocompact = "1M"
-	cacheTTL5m        = 5 * time.Minute
-	cacheTTL1h        = time.Hour
+	cacheTTL5m = 5 * time.Minute
+	cacheTTL1h = time.Hour
 )
 
 func newUUID() (string, error) {
@@ -46,7 +45,6 @@ func openClaude(_ context.Context, cwd, sessionID string, opts Options) (Session
 	}
 	if opts.Sandboxed {
 		args[len(args)-1] = "bypassPermissions"
-		args = append(args, "--autocompact", claudeAutocompact)
 	}
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)

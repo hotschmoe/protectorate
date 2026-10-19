@@ -122,7 +122,7 @@ protectorate audit tail -n 50
 Every command takes the token from `--token-file`, then env
 `PROTECTORATE_TOKEN`, then the local owner token file, so a scoped token also
 works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
-mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `backlog_*`,
+mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `chat_*`, `backlog_*`,
 90 days) instead of embedding the owner token.
 
 ## Shared node token

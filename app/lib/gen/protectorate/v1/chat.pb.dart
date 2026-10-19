@@ -1943,127 +1943,13 @@ class CompactResponse extends $pb.GeneratedMessage {
   Compaction ensureCompaction() => $_ensure(0);
 }
 
-class SetModeRequest extends $pb.GeneratedMessage {
-  factory SetModeRequest({
-    $core.String? sleeve,
-    SleeveMode? mode,
-  }) {
-    final result = SetModeRequest._();
-    if (sleeve != null) result.sleeve = sleeve;
-    if (mode != null) result.mode = mode;
-    return result;
-  }
-
-  SetModeRequest._();
-
-  factory SetModeRequest.fromBuffer($core.List<$core.int> data,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      SetModeRequest()..mergeFromBuffer(data, registry);
-  factory SetModeRequest.fromJson($core.String json,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      SetModeRequest()..mergeFromJson(json, registry);
-
-  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'SetModeRequest',
-      package:
-          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
-      createEmptyInstance: SetModeRequest.$_createMessage)
-    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
-    ..aE<SleeveMode>(2, _omitFieldNames ? '' : 'mode',
-        enumValues: SleeveMode.values)
-    ..hasRequiredFields = false;
-
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  SetModeRequest clone() => deepCopy();
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  SetModeRequest copyWith(void Function(SetModeRequest) updates) =>
-      super.copyWith((message) => updates(message as SetModeRequest))
-          as SetModeRequest;
-
-  @$core.override
-  $pb.BuilderInfo get info_ => _i;
-
-  @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use SetModeRequest() / SetModeRequest.new instead')
-  static SetModeRequest create() => SetModeRequest._();
-  static $pb.GeneratedMessage $_createMessage() => SetModeRequest._();
-  @$core.override
-  SetModeRequest createEmptyInstance() => SetModeRequest._();
-  @$core.pragma('dart2js:noInline')
-  static SetModeRequest getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SetModeRequest>(
-          SetModeRequest.$_createMessage);
-  static SetModeRequest? _defaultInstance;
-
-  @$pb.TagNumber(1)
-  $core.String get sleeve => $_getSZ(0);
-  @$pb.TagNumber(1)
-  set sleeve($core.String value) => $_setString(0, value);
-  @$pb.TagNumber(1)
-  $core.bool hasSleeve() => $_has(0);
-  @$pb.TagNumber(1)
-  void clearSleeve() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  SleeveMode get mode => $_getN(1);
-  @$pb.TagNumber(2)
-  set mode(SleeveMode value) => $_setField(2, value);
-  @$pb.TagNumber(2)
-  $core.bool hasMode() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearMode() => $_clearField(2);
-}
-
-class SetModeResponse extends $pb.GeneratedMessage {
-  factory SetModeResponse() => SetModeResponse._();
-
-  SetModeResponse._();
-
-  factory SetModeResponse.fromBuffer($core.List<$core.int> data,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      SetModeResponse()..mergeFromBuffer(data, registry);
-  factory SetModeResponse.fromJson($core.String json,
-          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      SetModeResponse()..mergeFromJson(json, registry);
-
-  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'SetModeResponse',
-      package:
-          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
-      createEmptyInstance: SetModeResponse.$_createMessage)
-    ..hasRequiredFields = false;
-
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  SetModeResponse clone() => deepCopy();
-  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  SetModeResponse copyWith(void Function(SetModeResponse) updates) =>
-      super.copyWith((message) => updates(message as SetModeResponse))
-          as SetModeResponse;
-
-  @$core.override
-  $pb.BuilderInfo get info_ => _i;
-
-  @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use SetModeResponse() / SetModeResponse.new instead')
-  static SetModeResponse create() => SetModeResponse._();
-  static $pb.GeneratedMessage $_createMessage() => SetModeResponse._();
-  @$core.override
-  SetModeResponse createEmptyInstance() => SetModeResponse._();
-  @$core.pragma('dart2js:noInline')
-  static SetModeResponse getDefault() =>
-      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SetModeResponse>(
-          SetModeResponse.$_createMessage);
-  static SetModeResponse? _defaultInstance;
-}
-
 /// ChatService drives a sleeve in chat mode: the harness runs its own official
 /// headless protocol inside the sleeve and the hub normalizes what it emits
 /// into ChatEvents. The hub keeps each sleeve's events in an append-only log,
 /// so any number of clients can watch and a reconnecting client resumes from
 /// the last seq it saw. The harness's own session store stays the full record;
-/// the log is the view. Only one driver owns a native session at a time, so a
-/// sleeve is either in chat mode or in terminal mode (SetMode switches, keeping
-/// the native session id).
+/// the log is the view. A sleeve is in chat mode for life, or in terminal mode
+/// and then has no chat.
 class ChatServiceApi {
   final $pb.RpcClient _client;
 
@@ -2104,14 +1990,6 @@ class ChatServiceApi {
           $pb.ClientContext? ctx, CompactRequest request) =>
       _client.invoke<CompactResponse>(
           ctx, 'ChatService', 'Compact', request, CompactResponse());
-
-  /// SetMode switches a sleeve between chat and terminal ("take over"). The
-  /// current driver is closed first, then the other mode resumes the same
-  /// native session id.
-  $async.Future<SetModeResponse> setMode(
-          $pb.ClientContext? ctx, SetModeRequest request) =>
-      _client.invoke<SetModeResponse>(
-          ctx, 'ChatService', 'SetMode', request, SetModeResponse());
 }
 
 const $core.bool _omitFieldNames =

@@ -12,9 +12,8 @@ import "chat.connect.spec.dart" as specs;
 /// into ChatEvents. The hub keeps each sleeve's events in an append-only log,
 /// so any number of clients can watch and a reconnecting client resumes from
 /// the last seq it saw. The harness's own session store stays the full record;
-/// the log is the view. Only one driver owns a native session at a time, so a
-/// sleeve is either in chat mode or in terminal mode (SetMode switches, keeping
-/// the native session id).
+/// the log is the view. A sleeve is in chat mode for life, or in terminal mode
+/// and then has no chat.
 extension type ChatServiceClient (connect.Transport _transport) {
   /// Watch replays the sleeve's events after after_seq, then streams new ones
   /// until the client disconnects or the sleeve is killed.
@@ -104,26 +103,6 @@ extension type ChatServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.ChatService.compact,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  /// SetMode switches a sleeve between chat and terminal ("take over"). The
-  /// current driver is closed first, then the other mode resumes the same
-  /// native session id.
-  Future<protectoratev1chat.SetModeResponse> setMode(
-    protectoratev1chat.SetModeRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.ChatService.setMode,
       input,
       signal: signal,
       headers: headers,

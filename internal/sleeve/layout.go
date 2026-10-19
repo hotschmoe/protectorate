@@ -32,10 +32,6 @@ const claudeSeed = "{\"hasCompletedOnboarding\":true}\n"
 // and sandbox; the user's config.toml, with its trust and model, is not copied.
 const codexSeed = "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n"
 
-// Grok compacts only close to a full window; the compaction between tasks is
-// ours to trigger.
-const grokSeed = "[session]\nauto_compact_threshold_percent = 95\n"
-
 // layout paths on the host live under the sleeve's home; the same paths
 // relative to $HOME are what the harness sees.
 func (c Config) layout(name string, h Harness) Layout {
@@ -65,7 +61,6 @@ func (c Config) layout(name string, h Harness) Layout {
 	case Grok:
 		shared()
 		l.Dirs = append(l.Dirs, host(".grok"))
-		l.Seeds = append(l.Seeds, Seed{host(".grok/config.toml"), grokSeed})
 		l.Links = append(l.Links,
 			Link{host(".grok/auth.json"), filepath.Join(auth, "auth.json")},
 			Link{host(".grok/auth.json.lock"), filepath.Join(auth, "auth.json.lock")})

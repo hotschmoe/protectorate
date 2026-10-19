@@ -327,8 +327,7 @@ type Sleeve struct {
 	// few milliseconds of the kill may still be reported as a plain exit 137.
 	OomKilled bool       `protobuf:"varint,13,opt,name=oom_killed,json=oomKilled,proto3" json:"oom_killed,omitempty"`
 	Mode      SleeveMode `protobuf:"varint,14,opt,name=mode,proto3,enum=protectorate.v1.SleeveMode" json:"mode,omitempty"`
-	// chat is set for agent harnesses in either mode, so the session id and
-	// context usage survive a switch to the terminal.
+	// chat is set for sleeves in chat mode.
 	Chat          *ChatStatus `protobuf:"bytes,15,opt,name=chat,proto3" json:"chat,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
