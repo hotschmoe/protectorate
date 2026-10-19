@@ -5,30 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
-	"time"
-
-	"github.com/coder/websocket"
 )
 
-// codexSession talks to the user's Codex app-server daemon over its control
-// socket (WebSocket on a unix socket). A private `codex app-server` cannot
-// resume a thread the daemon already holds, and the daemon is never started,
-// stopped or restarted from here.
+// codexSession drives `codex app-server` over stdio, one process per
+// session, speaking JSON-RPC lines. Inside a sleeve the per-sleeve CODEX_HOME
+// holds the thread, so the process, its config and its threads are all the
+// sleeve's own.
 type codexSession struct {
 	*core
-	conn *websocket.Conn
-	rpc  *rpcPeer
-	wmu  sync.Mutex
-	ctx  context.Context
-	stop context.CancelFunc
+	p   *proc
+	rpc *rpcPeer
 
 	tmu    sync.Mutex
 	turnID string
+	// context bookkeeping for compaction records
+	ctxTokens   int64
+	compactPost int64
 }
 
 type codexPending struct {
@@ -37,52 +30,24 @@ type codexPending struct {
 	params json.RawMessage
 }
 
-func codexSocketPath(opts Options) (string, error) {
-	p := opts.CodexSocket
-	if p == "" {
-		home := os.Getenv("CODEX_HOME")
-		if home == "" {
-			h, err := os.UserHomeDir()
-			if err != nil {
-				return "", err
-			}
-			home = filepath.Join(h, ".codex")
-		}
-		p = filepath.Join(home, "app-server-control", "app-server-control.sock")
-	}
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		p = r
-	}
-	return p, nil
-}
-
 func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Session, error) {
-	sock, err := codexSocketPath(opts)
+	p, err := startProc(opts.bin("codex"), []string{"app-server"}, cwd, opts)
 	if err != nil {
 		return nil, fmt.Errorf("open codex: %w", err)
 	}
-	hc := &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", sock)
-		},
-	}}
-	conn, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{HTTPClient: hc})
-	if err != nil {
-		return nil, fmt.Errorf("open codex: connect daemon socket %s: %w", sock, err)
-	}
-	conn.SetReadLimit(maxLine)
-	s := &codexSession{core: newCore(Codex, opts), conn: conn}
-	s.ctx, s.stop = context.WithCancel(context.Background())
-	s.rpc = newRPCPeer(s.write)
+	s := &codexSession{core: newCore(Codex, opts), p: p}
+	s.rpc = newRPCPeer(p.writeJSON)
 	s.rpc.onNote = s.onNote
 	s.rpc.onReq = s.onRequest
-	go s.readLoop()
+	go p.run(s.core, s.rpc.handle)
+	go func() {
+		<-s.done
+		s.rpc.close()
+	}()
 
 	fail := func(err error) (Session, error) {
 		s.markShut()
-		s.stop()
-		_ = conn.CloseNow()
+		p.stop(opts.stopTimeout())
 		<-s.done
 		return nil, fmt.Errorf("open codex: %w", err)
 	}
@@ -95,7 +60,10 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 	if err := s.rpc.notify("initialized", nil); err != nil {
 		return fail(err)
 	}
-	params := map[string]any{"cwd": cwd, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}
+	params := map[string]any{"cwd": cwd}
+	if !opts.Sandboxed {
+		params["approvalPolicy"], params["sandbox"] = "untrusted", "workspace-write"
+	}
 	method := "thread/start"
 	if sessionID != "" {
 		method = "thread/resume"
@@ -116,36 +84,6 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 	}
 	s.setID(r.Thread.ID)
 	return s, nil
-}
-
-func (s *codexSession) write(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
-	defer cancel()
-	s.wmu.Lock()
-	defer s.wmu.Unlock()
-	return s.conn.Write(ctx, websocket.MessageText, b)
-}
-
-func (s *codexSession) readLoop() {
-	var rerr error
-	for {
-		_, data, err := s.conn.Read(s.ctx)
-		if err != nil {
-			rerr = err
-			break
-		}
-		s.rpc.handle(data)
-	}
-	s.rpc.close()
-	code, tail := 0, ""
-	if !s.shutting() {
-		code, tail = 1, fmt.Sprintf("daemon connection closed: %v", rerr)
-	}
-	s.finish(code, tail)
 }
 
 func (s *codexSession) setTurn(id string) {
@@ -229,16 +167,28 @@ func (s *codexSession) Interrupt(ctx context.Context) error {
 	return err
 }
 
-// Close unsubscribes from the thread and drops the connection; the daemon
-// itself keeps running.
+// Compact starts a compaction turn and waits for the contextCompaction item
+// and the turn that carries it to complete.
+func (s *codexSession) Compact(ctx context.Context) (Compaction, error) {
+	ch, err := s.startCompact()
+	if err != nil {
+		return Compaction{}, err
+	}
+	if _, err := s.rpc.call(ctx, "thread/compact/start", map[string]any{"threadId": s.SessionID()}); err != nil {
+		s.resolveCompact(err)
+		return Compaction{}, fmt.Errorf("codex compact: %w", (<-ch).err)
+	}
+	return s.waitCompact(ctx, ch)
+}
+
+// Close unsubscribes from the thread, then closes stdin so the app-server
+// exits and the thread is free for a TUI to resume.
 func (s *codexSession) Close() error {
 	if s.markShut() {
 		ctx, cancel := context.WithTimeout(context.Background(), s.opts.stopTimeout())
 		_, _ = s.rpc.call(ctx, "thread/unsubscribe", map[string]any{"threadId": s.SessionID()})
 		cancel()
-		_ = s.conn.Close(websocket.StatusNormalClosure, "")
-		s.stop()
-		_ = s.conn.CloseNow()
+		s.p.stop(s.opts.stopTimeout())
 	}
 	<-s.done
 	return nil
@@ -247,6 +197,7 @@ func (s *codexSession) Close() error {
 func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 	var p struct {
 		ThreadID string `json:"threadId"`
+		ItemID   string `json:"itemId"`
 		Delta    string `json:"delta"`
 		Turn     struct {
 			ID     string `json:"id"`
@@ -256,17 +207,23 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 			} `json:"error"`
 		} `json:"turn"`
 		Item struct {
-			Type    string `json:"type"`
-			ID      string `json:"id"`
-			Command string `json:"command"`
-			Tool    string `json:"tool"`
+			Type             string `json:"type"`
+			ID               string `json:"id"`
+			Command          string `json:"command"`
+			Tool             string `json:"tool"`
+			AggregatedOutput string `json:"aggregatedOutput"`
+			ExitCode         *int   `json:"exitCode"`
+			Status           string `json:"status"`
 		} `json:"item"`
 		Usage struct {
 			Last struct {
-				In     int64 `json:"inputTokens"`
-				Out    int64 `json:"outputTokens"`
-				Cached int64 `json:"cachedInputTokens"`
+				In         int64 `json:"inputTokens"`
+				Out        int64 `json:"outputTokens"`
+				Cached     int64 `json:"cachedInputTokens"`
+				CacheWrite int64 `json:"cacheWriteInputTokens"`
+				Total      int64 `json:"totalTokens"`
 			} `json:"last"`
+			Window int64 `json:"modelContextWindow"`
 		} `json:"tokenUsage"`
 	}
 	if json.Unmarshal(params, &p) != nil {
@@ -281,11 +238,19 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 		s.setTurn(p.Turn.ID)
 	case "item/agentMessage/delta":
 		if p.Delta != "" {
-			s.emit(Event{Kind: KindText, Text: p.Delta})
+			s.emit(Event{Kind: KindText, Text: p.Delta, MessageID: p.ItemID})
+		}
+	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+		if p.Delta != "" {
+			s.emit(Event{Kind: KindText, Text: p.Delta, MessageID: p.ItemID, Thinking: true})
 		}
 	case "item/started":
 		switch p.Item.Type {
 		case "userMessage", "agentMessage", "reasoning":
+		case "contextCompaction":
+			s.tmu.Lock()
+			s.compactPost = 0
+			s.tmu.Unlock()
 		default:
 			name, input := p.Item.Type, json.RawMessage(nil)
 			if p.Item.Command != "" {
@@ -296,12 +261,40 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 			}
 			s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: p.Item.ID, Name: name, Input: input}, Raw: raw})
 		}
+	case "item/completed":
+		switch p.Item.Type {
+		case "commandExecution":
+			failed := p.Item.Status == "failed" || p.Item.ExitCode != nil && *p.Item.ExitCode != 0
+			ev := toolResult(p.Item.ID, p.Item.AggregatedOutput, failed)
+			ev.Raw = raw
+			s.emit(ev)
+		case "contextCompaction":
+			s.tmu.Lock()
+			c := Compaction{TokensBefore: s.ctxTokens, TokensAfter: s.compactPost, Native: !s.compactPending()}
+			s.ctxTokens = s.compactPost
+			s.tmu.Unlock()
+			s.noteBoundary(c)
+			s.emit(Event{Kind: KindCompaction, Compaction: &c, Raw: raw})
+		}
 	case "thread/tokenUsage/updated":
 		u := p.Usage.Last
-		s.emit(Event{Kind: KindUsage, Usage: &Usage{InputTokens: u.In, OutputTokens: u.Out, CachedTokens: u.Cached}})
+		s.tmu.Lock()
+		s.compactPost = u.Total
+		s.tmu.Unlock()
+		if u.In == 0 {
+			return
+		}
+		s.tmu.Lock()
+		s.ctxTokens = u.In
+		s.tmu.Unlock()
+		s.emit(Event{Kind: KindUsage, Usage: &Usage{
+			ContextTokens: u.In, ContextWindow: p.Usage.Window, InputTokens: u.In - u.Cached, OutputTokens: u.Out,
+			CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite,
+		}})
 	case "turn/completed":
 		s.setTurn("")
 		stop := "end_turn"
+		var terr error
 		switch p.Turn.Status {
 		case "interrupted":
 			stop = "cancelled"
@@ -311,7 +304,14 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 			if p.Turn.Error != nil {
 				msg = p.Turn.Error.Message
 			}
-			s.emit(Event{Kind: KindError, Text: msg, Raw: raw})
+			terr = errors.New(msg)
+			if !s.compactPending() {
+				s.emit(Event{Kind: KindError, Text: msg, Raw: raw})
+			}
+		}
+		if s.compactPending() {
+			s.resolveCompact(terr)
+			return
 		}
 		s.settle(stop, raw)
 	}

@@ -5,17 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/coder/websocket"
 )
 
 // The fakes replay the message shapes recorded in spikes/drivers. The stdio
@@ -64,6 +59,8 @@ func runFake(mode string) {
 		fakePi(f)
 	case "grok":
 		fakeGrok(f)
+	case "codex":
+		fakeCodex(f)
 	case "hang":
 		select {}
 	case "stubborn":
@@ -80,13 +77,22 @@ func fakeClaude(f fakeIO) {
 	if os.Getenv("DRIVER_FAKE_STDERR") != "" {
 		fmt.Fprint(os.Stderr, strings.Repeat("e", 100000))
 	}
+	n := 0
+	usage := map[string]any{"input_tokens": 2, "output_tokens": 6, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 100,
+		"cache_creation": map[string]any{"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 100}}
+	assistant := func(id string, blocks ...any) {
+		f.send(map[string]any{"type": "assistant", "message": map[string]any{"id": id, "model": "claude-fake", "content": blocks, "usage": usage}})
+	}
 	text := func(s string) {
-		f.send(map[string]any{"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": s}}}})
+		n++
+		assistant(fmt.Sprintf("msg_%d", n), map[string]any{"type": "text", "text": s})
 	}
 	result := func(stop string) {
 		f.send(map[string]any{"type": "result", "subtype": "success", "stop_reason": stop, "session_id": sid, "total_cost_usd": 0.01,
-			"usage": map[string]any{"input_tokens": 2, "output_tokens": 6, "cache_read_input_tokens": 44}})
+			"modelUsage": map[string]any{"claude-fake": map[string]any{"contextWindow": 1000000}},
+			"usage":      map[string]any{"input_tokens": 99, "output_tokens": 99, "cache_read_input_tokens": 99}})
 	}
+	compacts := 0
 	for {
 		m := f.read()
 		if m["type"] != "user" {
@@ -95,6 +101,19 @@ func fakeClaude(f fakeIO) {
 		prompt, _ := m["message"].(map[string]any)["content"].(string)
 		f.send(map[string]any{"type": "system", "subtype": "init", "session_id": sid})
 		switch {
+		case prompt == "/compact":
+			compacts++
+			if compacts == 1 {
+				f.send(map[string]any{"type": "system", "subtype": "compact_boundary", "compact_metadata": map[string]any{"trigger": "manual", "pre_tokens": 12546, "post_tokens": 1278}})
+			}
+			result("end_turn")
+		case strings.Contains(prompt, "autocompact"):
+			f.send(map[string]any{"type": "system", "subtype": "compact_boundary", "compact_metadata": map[string]any{"trigger": "auto", "pre_tokens": 900, "post_tokens": 90}})
+			text("compacted ok id=" + sid)
+			result("end_turn")
+		case strings.Contains(prompt, "sandboxed"):
+			text(fmt.Sprintf("args=%v", os.Args[1:]))
+			result("end_turn")
 		case strings.Contains(prompt, "die"):
 			os.Exit(3)
 		case strings.Contains(prompt, "slow"):
@@ -121,7 +140,12 @@ func fakeClaude(f fakeIO) {
 			}
 			result("end_turn")
 		default:
-			text("ok id=" + sid)
+			n++
+			id := fmt.Sprintf("msg_%d", n)
+			assistant(id, map[string]any{"type": "thinking", "thinking": "hmm"}, map[string]any{"type": "text", "text": "ok id=" + sid})
+			assistant(id, map[string]any{"type": "tool_use", "id": "toolu_0", "name": "Bash", "input": map[string]any{"command": "ls"}})
+			f.send(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "tool_result", "tool_use_id": "toolu_0", "content": []any{map[string]any{"type": "text", "text": "a.txt"}}}}}})
 			result("end_turn")
 		}
 	}
@@ -135,12 +159,24 @@ func fakePi(f fakeIO) {
 	delta := func(s string) {
 		f.send(map[string]any{"type": "message_update", "assistantMessageEvent": map[string]any{"type": "text_delta", "delta": s}})
 	}
+	compacts := 0
 	for {
 		m := f.read()
 		id := m["id"]
 		switch m["type"] {
 		case "get_state":
-			f.send(map[string]any{"id": id, "type": "response", "command": "get_state", "success": true, "data": map[string]any{"sessionId": sid}})
+			f.send(map[string]any{"id": id, "type": "response", "command": "get_state", "success": true, "data": map[string]any{"sessionId": sid, "model": map[string]any{"id": "pi-fake", "contextWindow": 200000}}})
+		case "compact":
+			compacts++
+			if compacts == 1 {
+				f.send(map[string]any{"type": "compaction_start", "reason": "manual"})
+				f.send(map[string]any{"type": "compaction_end", "reason": "manual", "aborted": false, "result": map[string]any{"tokensBefore": 150, "estimatedTokensAfter": 30}})
+				f.send(map[string]any{"id": id, "type": "response", "command": "compact", "success": true, "data": map[string]any{"tokensBefore": 150, "estimatedTokensAfter": 30}})
+			} else {
+				f.send(map[string]any{"type": "compaction_start", "reason": "manual"})
+				f.send(map[string]any{"type": "compaction_end", "reason": "manual", "aborted": false})
+				f.send(map[string]any{"id": id, "type": "response", "command": "compact", "success": false, "error": "Nothing to compact (session too small)"})
+			}
 		case "prompt":
 			prompt, _ := m["message"].(string)
 			f.send(map[string]any{"id": id, "type": "response", "command": "prompt", "success": true, "data": map[string]any{"disposition": "started"}})
@@ -162,9 +198,13 @@ func fakePi(f fakeIO) {
 					}
 				}
 			default:
+				f.send(map[string]any{"type": "message_start", "message": map[string]any{"role": "assistant"}})
 				f.send(map[string]any{"type": "tool_execution_start", "toolCallId": "c1", "toolName": "write", "args": map[string]any{"path": "a"}})
+				f.send(map[string]any{"type": "tool_execution_end", "toolCallId": "c1", "toolName": "write", "isError": true,
+					"result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "denied"}}}})
 				delta("ok id=" + sid)
-				f.send(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "usage": map[string]any{"input": 3, "output": 4, "totalTokens": 7}}})
+				f.send(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "model": "pi-fake",
+					"usage": map[string]any{"input": 3, "output": 4, "cacheRead": 10, "cacheWrite": 2, "totalTokens": 19}}})
 				f.send(map[string]any{"type": "agent_end"})
 				f.send(map[string]any{"type": "agent_settled", "aborted": false})
 			}
@@ -227,6 +267,13 @@ func fakeGrok(f fakeIO) {
 				}
 				reply(map[string]any{"stopReason": "end_turn"})
 			default:
+				f.send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": sid,
+					"update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "tc1", "title": "ls", "rawInput": map[string]any{"command": "ls"}}}})
+				f.send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": sid,
+					"update": map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "tc1", "status": "completed",
+						"content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "a.txt"}}}}}})
+				f.send(map[string]any{"jsonrpc": "2.0", "method": "_x.ai/session_notification", "params": map[string]any{"sessionId": sid,
+					"update": map[string]any{"usage": map[string]any{"input_tokens": 100, "output_tokens": 3, "cache_read_input_tokens": 28, "cache_creation_input_tokens": 0}}}})
 				chunk("ok id=" + sid)
 				reply(map[string]any{"stopReason": "end_turn", "_meta": map[string]any{"usage": map[string]any{"inputTokens": 9, "outputTokens": 2}}})
 			}
@@ -234,108 +281,77 @@ func fakeGrok(f fakeIO) {
 	}
 }
 
-// fakeCodex is an in-process daemon: a WebSocket server on a unix socket.
-func fakeCodex(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "cxs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sock := filepath.Join(dir, "d.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := websocket.Accept(w, r, nil)
-		if err != nil {
-			return
-		}
-		serveFakeCodex(r.Context(), c)
-	})}
-	go srv.Serve(ln)
-	t.Cleanup(func() { srv.Close() })
-	return sock
-}
-
-func serveFakeCodex(ctx context.Context, c *websocket.Conn) {
-	defer c.CloseNow()
-	send := func(v any) {
-		b, _ := json.Marshal(v)
-		_ = c.Write(ctx, websocket.MessageText, b)
-	}
-	read := func() map[string]any {
-		_, b, err := c.Read(ctx)
-		if err != nil {
-			return nil
-		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
-		return m
-	}
+func fakeCodex(f fakeIO) {
 	tid := "cx-new-1"
+	compacts := 0
 	note := func(method string, p map[string]any) {
 		p["threadId"] = tid
-		send(map[string]any{"method": method, "params": p})
+		f.send(map[string]any{"method": method, "params": p})
 	}
 	complete := func(status string) {
 		note("turn/completed", map[string]any{"turn": map[string]any{"id": "t1", "status": status}})
 	}
 	for {
-		m := read()
-		if m == nil {
-			return
-		}
+		m := f.read()
 		id := m["id"]
 		params, _ := m["params"].(map[string]any)
-		reply := func(res any) { send(map[string]any{"id": id, "result": res}) }
+		reply := func(res any) { f.send(map[string]any{"id": id, "result": res}) }
 		switch m["method"] {
 		case "initialize", "thread/unsubscribe":
 			reply(map[string]any{})
 		case "thread/start":
+			if os.Getenv("DRIVER_FAKE_POLICY") != "" {
+				_, hasPolicy := params["approvalPolicy"]
+				if hasPolicy {
+					tid = "cx-policy-set"
+				}
+			}
 			reply(map[string]any{"thread": map[string]any{"id": tid}})
 		case "thread/resume":
 			tid, _ = params["threadId"].(string)
 			if tid == "locked" {
-				send(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": "thread locked already has an active writer"}})
+				f.send(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": "thread locked already has an active writer"}})
 				continue
 			}
 			reply(map[string]any{"thread": map[string]any{"id": tid}})
+		case "thread/compact/start":
+			reply(map[string]any{})
+			compacts++
+			note("turn/started", map[string]any{"turn": map[string]any{"id": "t2"}})
+			note("item/started", map[string]any{"item": map[string]any{"type": "contextCompaction", "id": "cc1"}})
+			if compacts == 1 {
+				note("thread/tokenUsage/updated", map[string]any{"tokenUsage": map[string]any{"last": map[string]any{"inputTokens": 0, "totalTokens": 700}}})
+				note("item/completed", map[string]any{"item": map[string]any{"type": "contextCompaction", "id": "cc1"}})
+			}
+			complete("completed")
 		case "turn/start":
 			text := params["input"].([]any)[0].(map[string]any)["text"].(string)
 			reply(map[string]any{"turn": map[string]any{"id": "t1"}})
 			note("turn/started", map[string]any{"turn": map[string]any{"id": "t1"}})
 			switch {
 			case strings.Contains(text, "die"):
-				c.CloseNow()
-				return
+				os.Exit(3)
 			case strings.Contains(text, "slow"):
 				for {
-					n := read()
-					if n == nil {
-						return
-					}
+					n := f.read()
 					if n["method"] == "turn/steer" {
-						send(map[string]any{"id": n["id"], "result": map[string]any{"turnId": "t1"}})
+						f.send(map[string]any{"id": n["id"], "result": map[string]any{"turnId": "t1"}})
 						note("item/agentMessage/delta", map[string]any{"delta": "steered"})
 						complete("completed")
 						break
 					}
 					if n["method"] == "turn/interrupt" {
-						send(map[string]any{"id": n["id"], "result": map[string]any{}})
+						f.send(map[string]any{"id": n["id"], "result": map[string]any{}})
 						complete("interrupted")
 						break
 					}
 				}
 			case strings.Contains(text, "approve"):
-				send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{
+				f.send(map[string]any{"id": 0, "method": "item/commandExecution/requestApproval", "params": map[string]any{
 					"threadId": tid, "turnId": "t1", "itemId": "exec-1", "command": "touch hello.txt"}})
 				var resp map[string]any
 				for {
-					if resp = read(); resp == nil {
-						return
-					}
-					if resp["id"] == float64(0) {
+					if resp = f.read(); resp["id"] == float64(0) {
 						break
 					}
 				}
@@ -343,8 +359,10 @@ func serveFakeCodex(ctx context.Context, c *websocket.Conn) {
 				complete("completed")
 			default:
 				note("item/started", map[string]any{"item": map[string]any{"type": "commandExecution", "id": "exec-0", "command": "ls"}})
-				note("item/agentMessage/delta", map[string]any{"delta": "ok id=" + tid})
-				note("thread/tokenUsage/updated", map[string]any{"tokenUsage": map[string]any{"last": map[string]any{"inputTokens": 5, "outputTokens": 1, "cachedInputTokens": 2}}})
+				note("item/completed", map[string]any{"item": map[string]any{"type": "commandExecution", "id": "exec-0", "aggregatedOutput": strings.Repeat("x", MaxToolOutput+10), "exitCode": 1}})
+				note("item/agentMessage/delta", map[string]any{"delta": "ok id=" + tid, "itemId": "am1"})
+				note("thread/tokenUsage/updated", map[string]any{"tokenUsage": map[string]any{"modelContextWindow": 258400,
+					"last": map[string]any{"inputTokens": 5, "outputTokens": 1, "cachedInputTokens": 2, "totalTokens": 6}}})
 				complete("completed")
 			}
 		}
@@ -368,20 +386,7 @@ func fixtures() []fixture {
 			return s
 		}}
 	}
-	return []fixture{
-		stdio(Claude),
-		{Codex, func(t *testing.T, id string) Session {
-			t.Helper()
-			s, err := Open(ctx5(t), Codex, t.TempDir(), id, Options{CodexSocket: fakeCodex(t), StopTimeout: time.Second})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { s.Close() })
-			return s
-		}},
-		stdio(Grok),
-		stdio(Pi),
-	}
+	return []fixture{stdio(Claude), stdio(Codex), stdio(Grok), stdio(Pi)}
 }
 
 func ctx5(t *testing.T) context.Context {

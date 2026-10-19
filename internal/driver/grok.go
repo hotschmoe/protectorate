@@ -17,6 +17,8 @@ type grokSession struct {
 	p    *proc
 	rpc  *rpcPeer
 	live atomic.Bool
+	// perCall is set once a turn reported usage per model call.
+	perCall atomic.Bool
 }
 
 type acpOption struct {
@@ -70,12 +72,16 @@ func openGrok(ctx context.Context, cwd, sessionID string, opts Options) (Session
 		return fail(err)
 	}
 	s.setID(sessionID)
-	wait, err := s.startPrompt("/always-approve off")
+	gate := "/always-approve off"
+	if opts.Sandboxed {
+		gate = "/always-approve on"
+	}
+	wait, err := s.startPrompt(gate)
 	if err == nil {
 		_, err = wait(ctx)
 	}
 	if err != nil {
-		return fail(fmt.Errorf("disable auto-approve: %w", err))
+		return fail(fmt.Errorf("%s: %w", gate, err))
 	}
 	return s, nil
 }
@@ -92,6 +98,7 @@ func (s *grokSession) Send(_ context.Context, prompt string) error {
 		return err
 	}
 	s.live.Store(true)
+	s.perCall.Store(false)
 	wait, err := s.startPrompt(prompt)
 	if err != nil {
 		s.endTurn()
@@ -120,8 +127,10 @@ func (s *grokSession) Send(_ context.Context, prompt string) error {
 			} `json:"_meta"`
 		}
 		_ = json.Unmarshal(res, &r)
-		if u := r.Meta.Usage; u != nil {
-			s.emit(Event{Kind: KindUsage, Usage: &Usage{InputTokens: u.In, OutputTokens: u.Out, CachedTokens: u.Cached}})
+		if u := r.Meta.Usage; u != nil && !s.perCall.Load() {
+			s.emit(Event{Kind: KindUsage, Usage: &Usage{
+				ContextTokens: u.In, InputTokens: u.In - u.Cached, OutputTokens: u.Out, CacheReadTokens: u.Cached,
+			}})
 		}
 		s.settle(r.StopReason, res)
 	}()
@@ -169,6 +178,12 @@ func (s *grokSession) Interrupt(context.Context) error {
 	return s.rpc.notify("session/cancel", map[string]any{"sessionId": s.SessionID()})
 }
 
+// Compact is not verified for Grok over ACP: the documented /compact slash
+// command has not been observed to run or report through this protocol.
+func (s *grokSession) Compact(context.Context) (Compaction, error) {
+	return Compaction{}, ErrUnsupported
+}
+
 func (s *grokSession) Close() error {
 	if s.markShut() {
 		s.p.stop(s.opts.stopTimeout())
@@ -183,31 +198,94 @@ type grokPending struct {
 }
 
 func (s *grokSession) onNote(method string, params, raw json.RawMessage) {
-	if method != "session/update" || !s.live.Load() {
+	if !s.live.Load() {
 		return
 	}
+	switch method {
+	case "session/update":
+		s.onUpdate(params, raw)
+	case "_x.ai/session_notification":
+		var p struct {
+			Update struct {
+				Usage *struct {
+					In         int64 `json:"input_tokens"`
+					Out        int64 `json:"output_tokens"`
+					CacheRead  int64 `json:"cache_read_input_tokens"`
+					CacheWrite int64 `json:"cache_creation_input_tokens"`
+				} `json:"usage"`
+			} `json:"update"`
+		}
+		if json.Unmarshal(params, &p) != nil || p.Update.Usage == nil {
+			return
+		}
+		u := p.Update.Usage
+		if u.In+u.CacheRead+u.CacheWrite == 0 {
+			return
+		}
+		s.perCall.Store(true)
+		s.emit(Event{Kind: KindUsage, Usage: &Usage{
+			ContextTokens: u.In + u.CacheRead + u.CacheWrite, InputTokens: u.In, OutputTokens: u.Out,
+			CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite,
+		}})
+	}
+}
+
+func (s *grokSession) onUpdate(params, raw json.RawMessage) {
 	var p struct {
 		Update struct {
-			Kind    string `json:"sessionUpdate"`
-			Content struct {
-				Text string `json:"text"`
-			} `json:"content"`
-			ID    string          `json:"toolCallId"`
-			Title string          `json:"title"`
-			Input json.RawMessage `json:"rawInput"`
+			Kind      string          `json:"sessionUpdate"`
+			MessageID string          `json:"messageId"`
+			Content   json.RawMessage `json:"content"`
+			ID        string          `json:"toolCallId"`
+			Title     string          `json:"title"`
+			Status    string          `json:"status"`
+			Input     json.RawMessage `json:"rawInput"`
+			RawOutput json.RawMessage `json:"rawOutput"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(params, &p) != nil {
 		return
 	}
 	raw = append([]byte(nil), raw...)
-	switch p.Update.Kind {
-	case "agent_message_chunk":
-		if p.Update.Content.Text != "" {
-			s.emit(Event{Kind: KindText, Text: p.Update.Content.Text})
+	u := p.Update
+	switch u.Kind {
+	case "agent_message_chunk", "agent_thought_chunk":
+		var c struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(u.Content, &c) == nil && c.Text != "" {
+			s.emit(Event{Kind: KindText, Text: c.Text, MessageID: u.MessageID, Thinking: u.Kind == "agent_thought_chunk"})
 		}
 	case "tool_call":
-		s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: p.Update.ID, Name: p.Update.Title, Input: p.Update.Input}, Raw: raw})
+		s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: u.ID, Name: u.Title, Input: u.Input}, Raw: raw})
+	case "tool_call_update":
+		if u.Status != "completed" && u.Status != "failed" {
+			return
+		}
+		var items []struct {
+			Content struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		_ = json.Unmarshal(u.Content, &items)
+		var parts []string
+		for _, c := range items {
+			if c.Content.Text != "" {
+				parts = append(parts, c.Content.Text)
+			}
+		}
+		out := strings.Join(parts, "\n")
+		if out == "" && len(u.RawOutput) > 0 {
+			var str string
+			if json.Unmarshal(u.RawOutput, &str) == nil {
+				out = str
+			} else {
+				out = string(u.RawOutput)
+			}
+		}
+		ev := toolResult(u.ID, out, u.Status == "failed")
+		ev.Raw = raw
+		s.emit(ev)
 	}
 }
 

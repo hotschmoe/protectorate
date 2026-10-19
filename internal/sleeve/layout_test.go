@@ -173,3 +173,19 @@ func TestLayoutEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestHarnessConfigSeeds(t *testing.T) {
+	linuxHost(t)
+	c := layoutConfig(t)
+	for h, tc := range map[Harness]struct{ file, want string }{
+		Codex: {".codex/config.toml", codexSeed},
+		Grok:  {".grok/config.toml", grokSeed},
+	} {
+		if err := c.layout("s", h).Apply(); err != nil {
+			t.Fatal(err)
+		}
+		if got := mustRead(t, filepath.Join(c.sleeveHome("s"), tc.file)); got != tc.want {
+			t.Errorf("%s seed = %q", h, got)
+		}
+	}
+}
