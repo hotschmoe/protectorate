@@ -21,6 +21,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/hub"
+	"github.com/hotschmoe/protectorate/internal/quota"
 )
 
 var version = "dev"
@@ -74,13 +75,15 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), statusCmd(o), eventsCmd(o), apiCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), eventsCmd(o), apiCmd(o), versionCmd(o))
 	return root
 }
 
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
 	var listen string
+	var quotaInterval time.Duration
+	var localURLs []string
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -97,11 +100,42 @@ func hubCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 			defer stop()
 			fmt.Fprintf(cmd.ErrOrStderr(), "hub %s listening on %s\n", version, l.Addr())
-			return hub.New(version, tok).Serve(ctx, l)
+			readers := []quota.Reader{quota.NewClaude(), quota.NewCodex(), quota.NewGrok(), quota.NewAntigravity()}
+			for _, u := range localURLs {
+				readers = append(readers, quota.NewLocal(u))
+			}
+			h := hub.New(version, tok)
+			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
+			return h.Serve(ctx, l)
 		},
 	}
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
+	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")
+	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")
 	c.AddCommand(serve)
+	return c
+}
+
+func quotaCmd(o *opts) *cobra.Command {
+	var refresh bool
+	c := &cobra.Command{
+		Use:   "quota",
+		Short: "Show subscription usage, resets and projected unused capacity",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			hc, err := o.httpClient()
+			if err != nil {
+				return err
+			}
+			res, err := protectoratev1connect.NewQuotaServiceClient(hc, o.hubURL).
+				GetQuota(cmd.Context(), connect.NewRequest(&pb.GetQuotaRequest{Refresh: refresh}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) { writeQuota(w, res.Msg, time.Now()) })
+		},
+	}
+	c.Flags().BoolVar(&refresh, "refresh", false, "force an immediate read (rate-limited per provider)")
 	return c
 }
 

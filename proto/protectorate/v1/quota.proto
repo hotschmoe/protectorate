@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// QuotaService reports subscription usage. Updates are also announced on
+// EventService as events with kind "quota.updated" (subject = provider,
+// payload = the ProviderQuota in proto-JSON form).
+service QuotaService {
+  rpc GetQuota(GetQuotaRequest) returns (GetQuotaResponse);
+}
+
+message GetQuotaRequest {
+  // refresh forces an immediate read of each provider, rate-limited per
+  // provider; providers read too recently keep their cached data.
+  bool refresh = 1;
+}
+
+message GetQuotaResponse {
+  repeated ProviderQuota quotas = 1;
+}
+
+enum Freshness {
+  FRESHNESS_UNSPECIFIED = 0;
+  // FRESHNESS_FRESH: the last good read is recent.
+  FRESHNESS_FRESH = 1;
+  // FRESHNESS_STALE: only an old good read exists; windows are that old data
+  // and must not be treated as current capacity.
+  FRESHNESS_STALE = 2;
+  // FRESHNESS_UNKNOWN: no read has ever succeeded. There is no data; this is
+  // not spare capacity.
+  FRESHNESS_UNKNOWN = 3;
+}
+
+message ProviderQuota {
+  string provider = 1;
+  string plan = 2;
+  string source = 3;
+  Freshness freshness = 4;
+  // fetched_at is when the last good read completed; unset when UNKNOWN.
+  google.protobuf.Timestamp fetched_at = 5;
+  // age is the time since fetched_at at response time; unset when UNKNOWN.
+  google.protobuf.Duration age = 6;
+  // error is the failure of the most recent read, empty if it succeeded.
+  string error = 7;
+  // checked_at is when the most recent read was attempted.
+  google.protobuf.Timestamp checked_at = 8;
+  repeated QuotaWindow windows = 9;
+  repeated ResetCredit resets = 10;
+  repeated string models = 11;
+  google.protobuf.Duration latency = 12;
+}
+
+message QuotaWindow {
+  string name = 1;
+  double used_percent = 2;
+  google.protobuf.Timestamp resets_at = 3;
+  // window_seconds is the window length when known, else 0.
+  int64 window_seconds = 4;
+  // estimated_unused_percent_at_reset is an ESTIMATE of the percent still
+  // unused when the window resets, assuming usage keeps the average pace it
+  // had from window start to fetched_at. Unset when the window length or
+  // reset time is unknown, the window is too young for a pace, or it has
+  // already reset.
+  optional double estimated_unused_percent_at_reset = 5;
+}
+
+message ResetCredit {
+  string kind = 1;
+  int32 count = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}

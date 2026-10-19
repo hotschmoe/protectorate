@@ -6,8 +6,13 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"text/tabwriter"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/hub"
 )
 
@@ -65,4 +70,44 @@ func TestCLI(t *testing.T) {
 			t.Fatal("expected error")
 		}
 	})
+}
+
+func TestWriteQuota(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	proj := 41.0
+	resp := &pb.GetQuotaResponse{Quotas: []*pb.ProviderQuota{
+		{
+			Provider: "claude", Plan: "max", Freshness: pb.Freshness_FRESHNESS_FRESH,
+			Windows: []*pb.QuotaWindow{{Name: "5h", UsedPercent: 30, ResetsAt: timestamppb.New(now.Add(150 * time.Minute)), EstimatedUnusedPercentAtReset: &proj}},
+			Resets:  []*pb.ResetCredit{{Kind: "credit", Count: 2, ExpiresAt: timestamppb.New(now.Add(72 * time.Hour))}},
+		},
+		{
+			Provider: "codex", Plan: "plus", Freshness: pb.Freshness_FRESHNESS_STALE, Age: durationpb.New(25 * time.Minute),
+			Windows: []*pb.QuotaWindow{{Name: "7d", UsedPercent: 10, ResetsAt: timestamppb.New(now.Add(48 * time.Hour))}},
+			Error:   "HTTP 500",
+		},
+		{Provider: "grok", Freshness: pb.Freshness_FRESHNESS_UNKNOWN, Error: "credentials expired"},
+	}}
+	var buf bytes.Buffer
+	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+	writeQuota(tw, resp, now)
+	tw.Flush()
+	out := buf.String()
+	for _, want := range []string{
+		"claude", "30.0%", "2h30m", "~41%", "fresh",
+		"STALE (25m old)", "2d00h",
+		"UNKNOWN",
+		"claude: 2 reset credit(s) [credit], expires in 3d00h",
+		"codex: last read failed: HTTP 500",
+		"grok: last read failed: credentials expired",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "grok ") && (!strings.Contains(line, "?") || strings.Contains(line, "%")) {
+			t.Errorf("unknown provider row must show ? and no percentages: %q", line)
+		}
+	}
 }
