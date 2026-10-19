@@ -439,7 +439,7 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
    logged-in desktop (no visible windows, and we already saw processes started
    over SSH behave inconsistently), so SSH alone cannot click or screenshot
    ArchiCAD. Something must run inside the interactive session: the node agent
-   started at logon (`service windows-task`).
+   started at logon (`node install`).
 
 `[decided]` Layered, most deterministic first (commands in `docs/desk.md`):
 - **The program's own API** where it has one (ArchiCAD has a JSON interface
@@ -454,7 +454,7 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
   for the harness's own computer-use (Windows only, syscalls only, no cgo).
   Screenshots are files the harness reads; no MCP or harness changes needed.
   It refuses with `failed_precondition` unless the agent runs in the logged-in
-  user's session (`service windows-task`, trigger logon).
+  user's session (`node install`, a logon task).
 - The desktop is one shared resource with licensed seats, so it is **leased**
   (P9) as `desk:<node>`: one sleeve drives a node's desktop at a time (the
   mutating commands check the lease; screenshot and windows do not), and the

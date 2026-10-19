@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/desk"
+	"github.com/hotschmoe/protectorate/internal/hub"
 )
 
 const deskLeaseEnv = "PROTECTORATE_DESK_LEASE"
@@ -37,11 +39,14 @@ func deskCmd(o *opts) *cobra.Command {
 		Short: "Drive the interactive desktop of a Windows node",
 		Long: `Screen and input commands for programs that only have a GUI. They work only
 when the node agent runs in the logged-in user's desktop session
-(protectorate service windows-task, trigger logon); in a service or SSH
+(protectorate node install, a logon task); in a service or SSH
 session they fail with a message saying so.
 
-screenshot and windows need no lease. click, move, type, key and run need a
-lease on the node's desktop:
+screenshot and windows need no lease. click, move, type, key and run need the
+node's desktop to be yours. Without --lease the hub takes a 2 minute lease for
+you when the desktop is free, renews it on each further command from the same
+token, and prints its id on stderr; when someone else holds it the command
+fails naming the holder and the expiry. For a long session take an explicit one:
 
   protectorate lease acquire --node desk:<node> --ttl 30m
   protectorate desk <node> --lease <id> click 400 300
@@ -65,7 +70,7 @@ arguments or negative numbers: desk win1 --lease L run -- notepad.exe a.txt`,
 		},
 	}
 	fl := c.Flags()
-	fl.StringVar(&f.lease, "lease", "", "lease id on desk:<node>, for click, move, type, key and run (or env "+deskLeaseEnv+")")
+	fl.StringVar(&f.lease, "lease", "", "lease id on desk:<node> (default: the hub leases the desktop for 2 minutes per command; or env "+deskLeaseEnv+")")
 	fl.StringVarP(&f.output, "output", "o", "", "screenshot file (default screenshot.png)")
 	fl.StringVar(&f.button, "button", "left", "mouse button for click: left, right or middle")
 	fl.BoolVar(&f.double, "double", false, "double-click")
@@ -192,9 +197,19 @@ func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceCl
 		if err != nil {
 			return err
 		}
+		noteAutoLease(cmd, res.Header())
 		return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "started\tpid %d\n", res.Msg.Pid) })
 	}
 	return nil
+}
+
+// noteAutoLease tells the user about a lease the hub took on their behalf.
+func noteAutoLease(cmd *cobra.Command, h http.Header) {
+	id := h.Get(hub.DeskLeaseHeader)
+	if id == "" {
+		return
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "desk lease %s (auto, renewed by each desk command, expires %s)\n", id, h.Get(hub.DeskLeaseExpiresHeader))
 }
 
 func inputResult(cmd *cobra.Command, o *opts, verb string) func(*connect.Response[pb.InputResponse], error) error {
@@ -202,6 +217,7 @@ func inputResult(cmd *cobra.Command, o *opts, verb string) func(*connect.Respons
 		if err != nil {
 			return err
 		}
+		noteAutoLease(cmd, res.Header())
 		return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "%s\tok\n", verb) })
 	}
 }

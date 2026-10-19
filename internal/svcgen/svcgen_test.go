@@ -46,10 +46,13 @@ var (
 func TestGolden(t *testing.T) {
 	sysHub := hubSpec
 	sysHub.User = "ops"
+	elevated := winSpec
+	elevated.Elevated, elevated.WinUser = true, `OFFICE\ops`
 	cases := []struct {
 		name string
 		gen  func() (string, error)
 	}{
+		{"node-logon-elevated.xml", func() (string, error) { return TaskXML(elevated, TriggerLogon) }},
 		{"hub-user.service", func() (string, error) { return Systemd(hubSpec) }},
 		{"hub-system.service", func() (string, error) { return Systemd(sysHub) }},
 		{"node-user.service", func() (string, error) { return Systemd(nodeSpec) }},
@@ -79,6 +82,9 @@ func TestValidation(t *testing.T) {
 	}
 	if _, err := TaskXML(nodeSpec, "weekly"); err == nil {
 		t.Error("bad trigger accepted")
+	}
+	if _, err := TaskXML(hubSpec, TriggerLogon); err == nil {
+		t.Error("hub accepted as scheduled task")
 	}
 	if _, err := WindowsService(hubSpec, ""); err == nil {
 		t.Error("hub accepted as windows service")

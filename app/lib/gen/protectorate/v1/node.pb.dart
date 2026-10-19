@@ -29,6 +29,204 @@ export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'node.pbenum.dart';
 
+class ApplyUpdateRequest extends $pb.GeneratedMessage {
+  factory ApplyUpdateRequest({
+    $core.String? name,
+    $core.bool? allowFamily,
+    $core.String? path,
+    $fixnum.Int64? size,
+    $core.String? sha256,
+  }) {
+    final result = ApplyUpdateRequest._();
+    if (name != null) result.name = name;
+    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (path != null) result.path = path;
+    if (size != null) result.size = size;
+    if (sha256 != null) result.sha256 = sha256;
+    return result;
+  }
+
+  ApplyUpdateRequest._();
+
+  factory ApplyUpdateRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ApplyUpdateRequest()..mergeFromBuffer(data, registry);
+  factory ApplyUpdateRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ApplyUpdateRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ApplyUpdateRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ApplyUpdateRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOS(3, _omitFieldNames ? '' : 'path')
+    ..a<$fixnum.Int64>(4, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(5, _omitFieldNames ? '' : 'sha256')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ApplyUpdateRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ApplyUpdateRequest copyWith(void Function(ApplyUpdateRequest) updates) =>
+      super.copyWith((message) => updates(message as ApplyUpdateRequest))
+          as ApplyUpdateRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ApplyUpdateRequest() / ApplyUpdateRequest.new instead')
+  static ApplyUpdateRequest create() => ApplyUpdateRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyUpdateRequest._();
+  @$core.override
+  ApplyUpdateRequest createEmptyInstance() => ApplyUpdateRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ApplyUpdateRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ApplyUpdateRequest>(
+          ApplyUpdateRequest.$_createMessage);
+  static ApplyUpdateRequest? _defaultInstance;
+
+  /// name is the node name; the agent ignores it.
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get allowFamily => $_getBF(1);
+  @$pb.TagNumber(2)
+  set allowFamily($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAllowFamily() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAllowFamily() => $_clearField(2);
+
+  /// path is where PutFile put the new binary, as PutFile reported it.
+  @$pb.TagNumber(3)
+  $core.String get path => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set path($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPath() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPath() => $_clearField(3);
+
+  /// size and sha256 (hex) are what the node must find at path.
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get size => $_getI64(3);
+  @$pb.TagNumber(4)
+  set size($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasSize() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearSize() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get sha256 => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set sha256($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasSha256() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearSha256() => $_clearField(5);
+}
+
+class ApplyUpdateResponse extends $pb.GeneratedMessage {
+  factory ApplyUpdateResponse({
+    $core.String? version,
+    $core.String? previousVersion,
+    $core.String? restart,
+  }) {
+    final result = ApplyUpdateResponse._();
+    if (version != null) result.version = version;
+    if (previousVersion != null) result.previousVersion = previousVersion;
+    if (restart != null) result.restart = restart;
+    return result;
+  }
+
+  ApplyUpdateResponse._();
+
+  factory ApplyUpdateResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ApplyUpdateResponse()..mergeFromBuffer(data, registry);
+  factory ApplyUpdateResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ApplyUpdateResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ApplyUpdateResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ApplyUpdateResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'version')
+    ..aOS(2, _omitFieldNames ? '' : 'previousVersion')
+    ..aOS(3, _omitFieldNames ? '' : 'restart')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ApplyUpdateResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ApplyUpdateResponse copyWith(void Function(ApplyUpdateResponse) updates) =>
+      super.copyWith((message) => updates(message as ApplyUpdateResponse))
+          as ApplyUpdateResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core
+      .Deprecated('Use ApplyUpdateResponse() / ApplyUpdateResponse.new instead')
+  static ApplyUpdateResponse create() => ApplyUpdateResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ApplyUpdateResponse._();
+  @$core.override
+  ApplyUpdateResponse createEmptyInstance() => ApplyUpdateResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ApplyUpdateResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ApplyUpdateResponse>(
+          ApplyUpdateResponse.$_createMessage);
+  static ApplyUpdateResponse? _defaultInstance;
+
+  /// version is what the new binary reports; the node's agent_version becomes
+  /// this once it has restarted.
+  @$pb.TagNumber(1)
+  $core.String get version => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set version($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasVersion() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearVersion() => $_clearField(1);
+
+  /// previous_version is what the node ran before.
+  @$pb.TagNumber(2)
+  $core.String get previousVersion => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set previousVersion($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPreviousVersion() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPreviousVersion() => $_clearField(2);
+
+  /// restart is how the node restarts: "systemd", "task", "termux", "exit"
+  /// (a supervisor restarts it) or "re-exec".
+  @$pb.TagNumber(3)
+  $core.String get restart => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set restart($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasRestart() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearRestart() => $_clearField(3);
+}
+
 /// FileChunk is a slice of the uncompressed stream, zstd-compressed only when
 /// that made it smaller.
 class FileChunk extends $pb.GeneratedMessage {
@@ -3066,6 +3264,13 @@ class NodeAgentServiceApi {
           $pb.ClientContext? ctx, $4.DeskActionRequest request) =>
       _client.invoke<$4.DeskActionResponse>(ctx, 'NodeAgentService',
           'DeskAction', request, $4.DeskActionResponse());
+
+  /// ApplyUpdate swaps the agent's binary for a file already transferred into
+  /// its file root and restarts the agent. See NodeService.ApplyUpdate.
+  $async.Future<ApplyUpdateResponse> applyUpdate(
+          $pb.ClientContext? ctx, ApplyUpdateRequest request) =>
+      _client.invoke<ApplyUpdateResponse>(ctx, 'NodeAgentService',
+          'ApplyUpdate', request, ApplyUpdateResponse());
 }
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -3123,6 +3328,19 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, GetFileRequest request) =>
       _client.invoke<GetFileResponse>(
           ctx, 'NodeService', 'GetFile', request, GetFileResponse());
+
+  /// ApplyUpdate installs a new agent binary that PutFile placed in the node's
+  /// file root. The node verifies size and SHA-256, runs the file's
+  /// `version --json`, swaps it in keeping exactly one previous binary
+  /// (<exe>.old) and restarts itself through its startup registration, or by
+  /// re-executing. It answers before restarting. The new binary is on trial:
+  /// unless the hub reaches it, the node rolls back to the previous binary.
+  /// Only the owner token may call it. The hub's own node cannot be updated
+  /// this way.
+  $async.Future<ApplyUpdateResponse> applyUpdate(
+          $pb.ClientContext? ctx, ApplyUpdateRequest request) =>
+      _client.invoke<ApplyUpdateResponse>(
+          ctx, 'NodeService', 'ApplyUpdate', request, ApplyUpdateResponse());
 }
 
 const $core.bool _omitFieldNames =

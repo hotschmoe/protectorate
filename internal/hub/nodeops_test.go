@@ -282,6 +282,128 @@ func TestFileScopesAndAudit(t *testing.T) {
 	}
 }
 
+func TestDeskAutoLease(t *testing.T) {
+	e := newJobEnv(t, 1)
+	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	au := auth.NewAudit(filepath.Join(e.home, "audit"))
+	t.Cleanup(func() { au.Close() })
+	e.h.SetAuth(auth.New(testToken, store, au))
+	hs := httptest.NewServer(e.h.Handler())
+	t.Cleanup(hs.Close)
+	ctx := context.Background()
+	mint := func(name string) protectoratev1connect.DeskServiceClient {
+		_, secret, err := store.Create(name, []string{"desk_*", "lease_*"}, time.Hour, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return protectoratev1connect.NewDeskServiceClient(&http.Client{Transport: bearer{secret}}, hs.URL)
+	}
+	alice, bob := mint("alice"), mint("bob")
+	target := func(lease string) *pb.DeskTarget { return &pb.DeskTarget{Name: "peer", LeaseId: lease} }
+	click := func(c protectoratev1connect.DeskServiceClient, lease string) (*connect.Response[pb.InputResponse], error) {
+		return c.Click(ctx, connect.NewRequest(&pb.ClickRequest{Target: target(lease), X: 1, Y: 2}))
+	}
+	holder := func() *pb.Lease {
+		for _, l := range e.h.leases.List() {
+			if l.Resource == "desk:peer" {
+				return l
+			}
+		}
+		return nil
+	}
+	shift := func(d time.Duration) {
+		e.h.leases.mu.Lock()
+		defer e.h.leases.mu.Unlock()
+		prev := e.h.leases.now
+		e.h.leases.now = func() time.Time { return prev().Add(d) }
+	}
+
+	res, err := click(alice, "")
+	if err != nil {
+		t.Fatalf("first click without a lease: %v", err)
+	}
+	id := res.Header().Get(DeskLeaseHeader)
+	l := holder()
+	if l == nil || l.Id != id || l.Holder != "auto:token:alice" || l.Ttl.AsDuration() != autoDeskTTL {
+		t.Fatalf("auto lease = %v, header %q", l, id)
+	}
+	if res.Header().Get(DeskLeaseExpiresHeader) == "" {
+		t.Error("expiry header missing")
+	}
+
+	if _, err := click(bob, ""); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "auto:token:alice") || !strings.Contains(err.Error(), "expires in") {
+		t.Fatalf("other caller: %v", err)
+	}
+	if _, err := click(bob, id); err != nil {
+		t.Fatalf("holding the id is the proof: %v", err)
+	}
+	if _, err := bob.Screenshot(ctx, connect.NewRequest(&pb.ScreenshotRequest{Target: target("")})); err != nil {
+		t.Fatalf("screenshot needs no lease: %v", err)
+	}
+
+	shift(90 * time.Second)
+	res, err = click(alice, "")
+	if err != nil || res.Header().Get(DeskLeaseHeader) != id {
+		t.Fatalf("same caller must renew its lease: %v %v", res, err)
+	}
+	shift(90 * time.Second)
+	if holder() == nil {
+		t.Fatal("lease expired although it was renewed 90s ago")
+	}
+	shift(31 * time.Second)
+	if holder() != nil {
+		t.Fatal("auto lease outlived its ttl")
+	}
+	if res, err = click(bob, ""); err != nil || res.Header().Get(DeskLeaseHeader) == id {
+		t.Fatalf("free again after expiry: %v %v", res, err)
+	}
+
+	t.Run("explicit lease is not auto", func(t *testing.T) {
+		lc := protectoratev1connect.NewLeaseServiceClient(&http.Client{Transport: bearer{testToken}}, hs.URL)
+		if l := holder(); l != nil {
+			if _, err := lc.ReleaseLease(ctx, connect.NewRequest(&pb.ReleaseLeaseRequest{Id: l.Id})); err != nil {
+				t.Fatal(err)
+			}
+		}
+		long, err := lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "desk:peer"}, Holder: "me", Ttl: durationpb.New(time.Hour)}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := click(alice, ""); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "me") {
+			t.Fatalf("explicit lease must block auto: %v", err)
+		}
+		res, err := click(alice, long.Msg.Id)
+		if err != nil || res.Header().Get(DeskLeaseHeader) != "" {
+			t.Fatalf("explicit lease use: %v %v", res, err)
+		}
+		if got := holder().ExpiresAt.AsTime(); !got.Equal(long.Msg.ExpiresAt.AsTime()) {
+			t.Errorf("explicit lease renewed by use: %v != %v", got, long.Msg.ExpiresAt.AsTime())
+		}
+	})
+
+	t.Run("node failure frees a fresh lease", func(t *testing.T) {
+		lc := protectoratev1connect.NewLeaseServiceClient(&http.Client{Transport: bearer{testToken}}, hs.URL)
+		_, _ = lc.ReleaseLease(ctx, connect.NewRequest(&pb.ReleaseLeaseRequest{Id: holder().Id}))
+		e.peerDesk.mu.Lock()
+		e.peerDesk.ready = desk.ErrNotInteractive
+		e.peerDesk.mu.Unlock()
+		defer func() {
+			e.peerDesk.mu.Lock()
+			e.peerDesk.ready = nil
+			e.peerDesk.mu.Unlock()
+		}()
+		if _, err := click(alice, ""); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Fatalf("err = %v", err)
+		}
+		if holder() != nil {
+			t.Error("failed command left an auto lease behind")
+		}
+	})
+}
+
 func TestDeskLeaseRule(t *testing.T) {
 	e := newJobEnv(t, 1)
 	hc := &http.Client{Transport: bearer{testToken}}
@@ -307,9 +429,6 @@ func TestDeskLeaseRule(t *testing.T) {
 	wins, err := dc.ListWindows(ctx, connect.NewRequest(&pb.ListWindowsRequest{Target: target("")}))
 	if err != nil || len(wins.Msg.Windows) != 1 || wins.Msg.Windows[0].Title != "ArchiCAD" {
 		t.Fatalf("windows without lease: %v %v", wins, err)
-	}
-	if err := click(""); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "desk:peer") {
-		t.Fatalf("click without lease: %v", err)
 	}
 	nodeLease, err := acquire("peer")
 	if err != nil {
@@ -416,4 +535,26 @@ func zstdDecode(b []byte) ([]byte, error) {
 	}
 	defer d.Close()
 	return d.DecodeAll(b, nil)
+}
+
+func TestApplyUpdateRelay(t *testing.T) {
+	e := newJobEnv(t, 1)
+	nc := protectoratev1connect.NewNodeServiceClient(&http.Client{Transport: bearer{testToken}}, e.srv.URL)
+	tests := []struct {
+		name string
+		node string
+		want connect.Code
+	}{
+		{"hub's own node", "hubhost", connect.CodeFailedPrecondition},
+		{"agent without an updater", "peer", connect.CodeUnimplemented},
+		{"unknown node", "ghost", connect.CodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := nc.ApplyUpdate(context.Background(), connect.NewRequest(&pb.ApplyUpdateRequest{Name: tt.node, Path: "p", Size: 1, Sha256: "00"}))
+			if connect.CodeOf(err) != tt.want {
+				t.Fatalf("err = %v, want %s", err, tt.want)
+			}
+		})
+	}
 }

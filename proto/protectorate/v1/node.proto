@@ -55,6 +55,10 @@ service NodeAgentService {
   // DeskAction runs one desktop command in the node agent's interactive
   // session. See DeskService.
   rpc DeskAction(DeskActionRequest) returns (DeskActionResponse);
+
+  // ApplyUpdate swaps the agent's binary for a file already transferred into
+  // its file root and restarts the agent. See NodeService.ApplyUpdate.
+  rpc ApplyUpdate(ApplyUpdateRequest) returns (ApplyUpdateResponse);
 }
 
 // NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -96,6 +100,40 @@ service NodeService {
   // GetFile streams a file or directory from a node: a header, chunks and a
   // trailer with the size and SHA-256 the receiver must verify.
   rpc GetFile(GetFileRequest) returns (stream GetFileResponse);
+
+  // ApplyUpdate installs a new agent binary that PutFile placed in the node's
+  // file root. The node verifies size and SHA-256, runs the file's
+  // `version --json`, swaps it in keeping exactly one previous binary
+  // (<exe>.old) and restarts itself through its startup registration, or by
+  // re-executing. It answers before restarting. The new binary is on trial:
+  // unless the hub reaches it, the node rolls back to the previous binary.
+  // Only the owner token may call it. The hub's own node cannot be updated
+  // this way.
+  rpc ApplyUpdate(ApplyUpdateRequest) returns (ApplyUpdateResponse) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+}
+
+message ApplyUpdateRequest {
+  // name is the node name; the agent ignores it.
+  string name = 1;
+  bool allow_family = 2;
+  // path is where PutFile put the new binary, as PutFile reported it.
+  string path = 3;
+  // size and sha256 (hex) are what the node must find at path.
+  uint64 size = 4;
+  string sha256 = 5;
+}
+
+message ApplyUpdateResponse {
+  // version is what the new binary reports; the node's agent_version becomes
+  // this once it has restarted.
+  string version = 1;
+  // previous_version is what the node ran before.
+  string previous_version = 2;
+  // restart is how the node restarts: "systemd", "task", "termux", "exit"
+  // (a supervisor restarts it) or "re-exec".
+  string restart = 3;
 }
 
 enum FileKind {

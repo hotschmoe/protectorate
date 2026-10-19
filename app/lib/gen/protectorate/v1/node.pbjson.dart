@@ -76,6 +76,40 @@ final $typed_data.Uint8List alertKindDescriptor = $convert.base64Decode(
     'lTS19QRVJDRU5UEAESGwoXQUxFUlRfS0lORF9NRU1fUFJFU1NVUkUQAhIaChZBTEVSVF9LSU5E'
     'X1VOUkVBQ0hBQkxFEAMSHAoYQUxFUlRfS0lORF9OQU1FX01JU01BVENIEAQ=');
 
+@$core.Deprecated('Use applyUpdateRequestDescriptor instead')
+const ApplyUpdateRequest$json = {
+  '1': 'ApplyUpdateRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'path', '3': 3, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'size', '3': 4, '4': 1, '5': 4, '10': 'size'},
+    {'1': 'sha256', '3': 5, '4': 1, '5': 9, '10': 'sha256'},
+  ],
+};
+
+/// Descriptor for `ApplyUpdateRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List applyUpdateRequestDescriptor = $convert.base64Decode(
+    'ChJBcHBseVVwZGF0ZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIhCgxhbGxvd19mYW1pbH'
+    'kYAiABKAhSC2FsbG93RmFtaWx5EhIKBHBhdGgYAyABKAlSBHBhdGgSEgoEc2l6ZRgEIAEoBFIE'
+    'c2l6ZRIWCgZzaGEyNTYYBSABKAlSBnNoYTI1Ng==');
+
+@$core.Deprecated('Use applyUpdateResponseDescriptor instead')
+const ApplyUpdateResponse$json = {
+  '1': 'ApplyUpdateResponse',
+  '2': [
+    {'1': 'version', '3': 1, '4': 1, '5': 9, '10': 'version'},
+    {'1': 'previous_version', '3': 2, '4': 1, '5': 9, '10': 'previousVersion'},
+    {'1': 'restart', '3': 3, '4': 1, '5': 9, '10': 'restart'},
+  ],
+};
+
+/// Descriptor for `ApplyUpdateResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List applyUpdateResponseDescriptor = $convert.base64Decode(
+    'ChNBcHBseVVwZGF0ZVJlc3BvbnNlEhgKB3ZlcnNpb24YASABKAlSB3ZlcnNpb24SKQoQcHJldm'
+    'lvdXNfdmVyc2lvbhgCIAEoCVIPcHJldmlvdXNWZXJzaW9uEhgKB3Jlc3RhcnQYAyABKAlSB3Jl'
+    'c3RhcnQ=');
+
 @$core.Deprecated('Use fileChunkDescriptor instead')
 const FileChunk$json = {
   '1': 'FileChunk',
@@ -923,6 +957,11 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '2': '.protectorate.v1.DeskActionRequest',
       '3': '.protectorate.v1.DeskActionResponse'
     },
+    {
+      '1': 'ApplyUpdate',
+      '2': '.protectorate.v1.ApplyUpdateRequest',
+      '3': '.protectorate.v1.ApplyUpdateResponse'
+    },
   ],
   '3': {},
 };
@@ -985,6 +1024,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DeskWindow': $4.DeskWindow$json,
   '.protectorate.v1.InputResponse': $4.InputResponse$json,
   '.protectorate.v1.RunResponse': $4.RunResponse$json,
+  '.protectorate.v1.ApplyUpdateRequest': ApplyUpdateRequest$json,
+  '.protectorate.v1.ApplyUpdateResponse': ApplyUpdateResponse$json,
 };
 
 /// Descriptor for `NodeAgentService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -1003,7 +1044,9 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     '5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlc3BvbnNlEk4KB0dldEZpbGUSHy5wcm90ZWN0b3Jh'
     'dGUudjEuR2V0RmlsZVJlcXVlc3QaIC5wcm90ZWN0b3JhdGUudjEuR2V0RmlsZVJlc3BvbnNlMA'
     'ESVQoKRGVza0FjdGlvbhIiLnByb3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVxdWVzdBojLnBy'
-    'b3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVzcG9uc2UaBJC1GAE=');
+    'b3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVzcG9uc2USWAoLQXBwbHlVcGRhdGUSIy5wcm90ZW'
+    'N0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBk'
+    'YXRlUmVzcG9uc2UaBJC1GAE=');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',
@@ -1041,6 +1084,12 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '2': '.protectorate.v1.GetFileRequest',
       '3': '.protectorate.v1.GetFileResponse',
       '6': true
+    },
+    {
+      '1': 'ApplyUpdate',
+      '2': '.protectorate.v1.ApplyUpdateRequest',
+      '3': '.protectorate.v1.ApplyUpdateResponse',
+      '4': {}
     },
   ],
 };
@@ -1080,6 +1129,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetFileRequest': GetFileRequest$json,
   '.protectorate.v1.GetFileResponse': GetFileResponse$json,
   '.protectorate.v1.FileHeader': FileHeader$json,
+  '.protectorate.v1.ApplyUpdateRequest': ApplyUpdateRequest$json,
+  '.protectorate.v1.ApplyUpdateResponse': ApplyUpdateResponse$json,
 };
 
 /// Descriptor for `NodeService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -1093,4 +1144,5 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'b2RlUmVzcG9uc2USTAoHUHV0RmlsZRIfLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVxdWVzdB'
     'ogLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVzcG9uc2USTgoHR2V0RmlsZRIfLnByb3RlY3Rv'
     'cmF0ZS52MS5HZXRGaWxlUmVxdWVzdBogLnByb3RlY3RvcmF0ZS52MS5HZXRGaWxlUmVzcG9uc2'
-    'UwAQ==');
+    'UwARJeCgtBcHBseVVwZGF0ZRIjLnByb3RlY3RvcmF0ZS52MS5BcHBseVVwZGF0ZVJlcXVlc3Qa'
+    'JC5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXNwb25zZSIEoLUYAQ==');

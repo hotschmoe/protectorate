@@ -112,8 +112,33 @@ func TestCheckInteractive(t *testing.T) {
 			if !errors.Is(err, ErrNotInteractive) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v", err)
 			}
-			if !strings.Contains(err.Error(), "protectorate service windows-task") && tc.name != "probe failed" {
+			if !strings.Contains(err.Error(), "protectorate node install") && tc.name != "probe failed" {
 				t.Fatalf("error does not name the fix: %v", err)
+			}
+		})
+	}
+}
+
+func TestClassifyInputDesktop(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		err  error
+		want ScreenState
+	}{
+		{"default desktop", "Default", nil, ScreenUnlocked},
+		{"case folded", "default", nil, ScreenUnlocked},
+		{"logon desktop", "Winlogon", nil, ScreenLocked},
+		{"screen saver", "Screen-saver", nil, ScreenLocked},
+		{"access denied", "", ErrInputDesktopDenied, ScreenLocked},
+		{"wrapped denied", "", errors.Join(errors.New("x"), ErrInputDesktopDenied), ScreenLocked},
+		{"other error", "", errors.New("boom"), ScreenUnknown},
+		{"unknown name", "Other", nil, ScreenUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifyInputDesktop(tt.in, tt.err); got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
 			}
 		})
 	}

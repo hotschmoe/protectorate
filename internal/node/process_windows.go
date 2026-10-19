@@ -60,3 +60,22 @@ func (t *procTree) interrupt() bool { return false }
 func (t *procTree) kill() { _ = windows.TerminateJobObject(t.job, 1) }
 
 func (t *procTree) close() { _ = windows.CloseHandle(t.job) }
+
+// StartDetached starts exe with no console, in its own process group and
+// outside this process's job object where Windows allows, so it outlives this
+// process. It does not wait.
+func StartDetached(exe string, args []string) error {
+	const flags = windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW
+	cmd := exec.Command(exe, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags | windows.CREATE_BREAKAWAY_FROM_JOB}
+	err := cmd.Start()
+	if err != nil {
+		cmd = exec.Command(exe, args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags}
+		err = cmd.Start()
+	}
+	if err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -230,9 +229,7 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 			if name == "" {
 				name = tailnet.SanitizeLabel(node.Hostname())
 			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 90*time.Second)
-			defer cancel()
-			if err := tailnet.Join(ctx, filepath.Join(home, "tsnet"), control, key, name); err != nil {
+			if err := enrollNode(cmd.Context(), home, control, key, name); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "joined as %s; run `protectorate node serve`\n", name)

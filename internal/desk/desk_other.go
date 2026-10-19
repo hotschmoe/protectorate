@@ -24,3 +24,6 @@ func (u unsupported) Move(int, int) error                  { return u.Ready() }
 func (u unsupported) Type(string) error                    { return u.Ready() }
 func (u unsupported) Key(Chord) error                      { return u.Ready() }
 func (u unsupported) Run(string, []string) (uint32, error) { return 0, u.Ready() }
+
+// InputDesktop reports the desktop receiving input; Windows only.
+func InputDesktop() (string, error) { return "", ErrUnsupported }

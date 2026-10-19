@@ -33,11 +33,24 @@ func TaskXML(s Spec, trigger string) (string, error) {
 	if err := s.validate(); err != nil {
 		return "", err
 	}
+	if s.Role != RoleNode {
+		return "", fmt.Errorf("only the node agent runs as a scheduled task")
+	}
 	var trig, principal string
+	hide := false
 	switch trigger {
 	case TriggerLogon:
-		trig = "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>"
-		principal = "<LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel>"
+		level := "LeastPrivilege"
+		if s.Elevated {
+			level = "HighestAvailable"
+		}
+		user := ""
+		if s.WinUser != "" {
+			user = "<UserId>" + html.EscapeString(s.WinUser) + "</UserId>"
+		}
+		trig = "<LogonTrigger><Enabled>true</Enabled>" + user + "</LogonTrigger>"
+		principal = user + "<LogonType>InteractiveToken</LogonType><RunLevel>" + level + "</RunLevel>"
+		hide = true
 	case TriggerBoot:
 		trig = "<BootTrigger><Enabled>true</Enabled></BootTrigger>"
 		principal = "<UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel>"
@@ -45,14 +58,15 @@ func TaskXML(s Spec, trigger string) (string, error) {
 		return "", fmt.Errorf("trigger must be %s or %s, got %q", TriggerLogon, TriggerBoot, trigger)
 	}
 
-	command := s.Binary
-	args := strings.TrimSpace(winJoin(append([]string{s.Role, "serve"}, s.Args...)))
+	words := []string{s.Role, "serve"}
 	if s.Home != "" {
-		// cmd /c strips one outer quote pair, so the inner quotes stay plain.
-		inner := fmt.Sprintf("set PROTECTORATE_HOME=%s&& \"%s\" %s", s.Home, s.Binary, args)
-		command = "cmd.exe"
-		args = "/c \"" + inner + "\""
+		words = append(words, "--home", s.Home)
 	}
+	words = append(words, s.Args...)
+	if hide {
+		words = append(words, "--hide-console")
+	}
+	command, args := s.Binary, winJoin(words)
 
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n")
@@ -80,11 +94,11 @@ func TaskXML(s Spec, trigger string) (string, error) {
 // TaskNotes explains how to register the task XML.
 func TaskNotes(s Spec, trigger, xmlPath string) string {
 	var b strings.Builder
-	b.WriteString("Register (not run for you; boot triggers need an elevated prompt):\n")
-	fmt.Fprintf(&b, "  schtasks /Create /TN %s /XML %s\n", winQuote(s.Name()), winQuote(xmlPath))
+	b.WriteString("Register (not run for you; boot triggers and --elevated need an elevated prompt):\n")
+	fmt.Fprintf(&b, "  schtasks /Create /TN %s /XML %s /F\n", winQuote(s.Name()), winQuote(xmlPath))
 	fmt.Fprintf(&b, "  schtasks /Run /TN %s\n", winQuote(s.Name()))
 	if trigger == TriggerLogon {
-		b.WriteString("A logon task runs in the interactive session and may show a console window; use the Windows service for a headless node.\n")
+		b.WriteString("A logon task runs in the interactive session, which desk commands need; the agent hides its console window.\n")
 	}
 	return b.String()
 }

@@ -92,9 +92,38 @@ func CheckInteractive(s Session, probeErr error) error {
 	case probeErr != nil:
 		return fmt.Errorf("%w: cannot inspect the session: %v", ErrNotInteractive, probeErr)
 	case s.ID == 0:
-		return fmt.Errorf("%w: this process runs in session 0 (a service or an SSH session), which has no visible desktop; start the node agent in the logged-in user's session with `protectorate service windows-task` (trigger: logon)", ErrNotInteractive)
+		return fmt.Errorf("%w: this process runs in session 0 (a service or an SSH session), which has no visible desktop; start the node agent in the logged-in user's session with `protectorate node install` (a logon task)", ErrNotInteractive)
 	case !strings.EqualFold(s.WindowStation, "WinSta0"):
-		return fmt.Errorf("%w: this process runs on window station %q, not the interactive WinSta0; start the node agent in the logged-in user's session with `protectorate service windows-task` (trigger: logon)", ErrNotInteractive, s.WindowStation)
+		return fmt.Errorf("%w: this process runs on window station %q, not the interactive WinSta0; start the node agent in the logged-in user's session with `protectorate node install` (a logon task)", ErrNotInteractive, s.WindowStation)
 	}
 	return nil
+}
+
+// ErrInputDesktopDenied means the desktop receiving input could not be
+// opened. A locked screen, the logon screen and UAC prompts all do that.
+var ErrInputDesktopDenied = errors.New("input desktop is not accessible")
+
+// ScreenState says whether input can reach the user's desktop.
+type ScreenState int
+
+const (
+	ScreenUnknown ScreenState = iota
+	ScreenUnlocked
+	ScreenLocked
+)
+
+// ClassifyInputDesktop reads the result of InputDesktop: only the "Default"
+// desktop takes input for the logged-in user's programs.
+func ClassifyInputDesktop(name string, err error) ScreenState {
+	switch {
+	case errors.Is(err, ErrInputDesktopDenied):
+		return ScreenLocked
+	case err != nil:
+		return ScreenUnknown
+	case strings.EqualFold(name, "Default"):
+		return ScreenUnlocked
+	case strings.EqualFold(name, "Winlogon"), strings.EqualFold(name, "Screen-saver"):
+		return ScreenLocked
+	}
+	return ScreenUnknown
 }

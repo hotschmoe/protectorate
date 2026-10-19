@@ -79,8 +79,8 @@ class DeskTarget extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  /// lease_id names a live lease on "desk:<name>"; required by mutating
-  /// commands.
+  /// lease_id names a live lease on "desk:<name>". Optional for mutating
+  /// commands: when empty the hub leases the desktop for the caller.
   @$pb.TagNumber(2)
   $core.String get leaseId => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -1328,12 +1328,16 @@ class DeskActionResponse extends $pb.GeneratedMessage {
 
 /// DeskService drives the interactive desktop of a node, for programs that
 /// only have a GUI. It works only when the node agent runs in the logged-in
-/// user's session (`protectorate service windows-task`); otherwise calls fail
+/// user's session (`protectorate node install`); otherwise calls fail
 /// with FAILED_PRECONDITION. Only Windows nodes implement it.
 ///
 /// The desktop is a lease resource named "desk:<node>". Every command that
-/// changes the desktop (click, move, type, key, run) must name a live lease on
-/// it; screenshot and windows do not. Coordinates are pixels of the
+/// changes the desktop (click, move, type, key, run) runs under a live lease on
+/// it; screenshot and windows need none. A command that names no lease makes
+/// the hub take a 2 minute lease for the caller when the desktop is free (the
+/// id and expiry come back in the Protectorate-Desk-Lease and
+/// Protectorate-Desk-Lease-Expires response headers), renew the caller's own,
+/// or refuse when another holder has it. Coordinates are pixels of the
 /// screenshot, whose origin is the top-left of the virtual screen.
 class DeskServiceApi {
   final $pb.RpcClient _client;

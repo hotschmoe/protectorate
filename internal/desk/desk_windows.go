@@ -3,6 +3,7 @@
 package desk
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"os/exec"
@@ -34,6 +35,8 @@ var (
 	pGetWindowThreadProcessID = user32.NewProc("GetWindowThreadProcessId")
 	pGetProcessWindowStation  = user32.NewProc("GetProcessWindowStation")
 	pGetUserObjectInformation = user32.NewProc("GetUserObjectInformationW")
+	pOpenInputDesktop         = user32.NewProc("OpenInputDesktop")
+	pCloseDesktop             = user32.NewProc("CloseDesktop")
 
 	pCreateCompatibleDC     = gdi32.NewProc("CreateCompatibleDC")
 	pCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
@@ -353,4 +356,25 @@ func (winDesk) Run(program string, args []string) (uint32, error) {
 	pid := uint32(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
 	return pid, nil
+}
+
+const desktopReadObjects = 0x0001
+
+// InputDesktop returns the name of the desktop that currently receives
+// input, or ErrInputDesktopDenied when it cannot be opened (locked screen).
+func InputDesktop() (string, error) {
+	h, _, e := pOpenInputDesktop.Call(0, 0, desktopReadObjects)
+	if h == 0 {
+		if errors.Is(e, windows.ERROR_ACCESS_DENIED) {
+			return "", ErrInputDesktopDenied
+		}
+		return "", fmt.Errorf("open input desktop: %w", e)
+	}
+	defer pCloseDesktop.Call(h)
+	var buf [256]uint16
+	var n uint32
+	if r, _, e := pGetUserObjectInformation.Call(h, uoiName, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)*2), uintptr(unsafe.Pointer(&n))); r == 0 {
+		return "", fmt.Errorf("name input desktop: %w", e)
+	}
+	return windows.UTF16ToString(buf[:]), nil
 }
