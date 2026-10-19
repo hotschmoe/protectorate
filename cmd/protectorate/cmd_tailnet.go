@@ -14,8 +14,10 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
@@ -87,6 +89,69 @@ func hubTailnetCmd() *cobra.Command {
 
 	c.AddCommand(install, init)
 	return c
+}
+
+func tailnetCmd(o *opts) *cobra.Command {
+	c := &cobra.Command{Use: "tailnet", Short: "Inspect the hub's tailnet"}
+	c.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Show the hub's tailnet identity and how it reaches each peer",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			hc, err := o.httpClient()
+			if err != nil {
+				return err
+			}
+			res, err := protectoratev1connect.NewTailnetServiceClient(hc, o.hubURL).
+				GetStatus(cmd.Context(), connect.NewRequest(&pb.TailnetServiceGetStatusRequest{}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) { writeTailnetStatus(w, res.Msg, time.Now()) })
+		},
+	})
+	return c
+}
+
+// peerPath says how the hub reaches a peer: the direct UDP address, the DERP
+// region, or nothing yet.
+func peerPath(p *pb.TailnetPeer) string {
+	switch {
+	case p.DirectAddr != "":
+		return "direct " + p.DirectAddr
+	case p.Relay != "":
+		return "DERP " + p.Relay
+	}
+	return "-"
+}
+
+func writeTailnetStatus(w io.Writer, r *pb.TailnetServiceGetStatusResponse, now time.Time) {
+	if s := r.Self; s != nil {
+		fmt.Fprintf(w, "hub\t%s\n", s.Name)
+		fmt.Fprintf(w, "ips\t%s\n", strings.Join(s.Ips, ", "))
+		fmt.Fprintf(w, "tags\t%s\n", orDash(strings.Join(s.Tags, ", ")))
+	}
+	fmt.Fprintf(w, "state\t%s\n", r.BackendState)
+	for _, h := range r.Health {
+		fmt.Fprintf(w, "health\t%s\n", h)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "PEER\tIPS\tTAGS\tONLINE\tPATH\tHANDSHAKE\tLAST SEEN\tRX\tTX")
+	ago := func(ts *timestamppb.Timestamp) string {
+		if ts == nil {
+			return "-"
+		}
+		return fmtDur(now.Sub(ts.AsTime())) + " ago"
+	}
+	for _, p := range r.Peers {
+		online := "no"
+		if p.Online {
+			online = "yes"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.Name, strings.Join(p.Ips, ","),
+			orDash(strings.Join(p.Tags, ",")), online, peerPath(p), ago(p.LastHandshake), ago(p.LastSeen),
+			fmtBytes(p.RxBytes), fmtBytes(p.TxBytes))
+	}
 }
 
 // admin connects to the running hub's headscale.
@@ -317,6 +382,7 @@ func startTailnet(ctx context.Context, logw io.Writer) (tailnetHub, error) {
 		Extra:  []hub.Extra{{Listener: ln, Identify: svc.Net.IdentifyAPI()}},
 		Client: svc.Net.HTTPClient(),
 		Peers:  func(ctx context.Context) ([]hub.Peer, error) { return peers(ctx, svc.Admin) },
+		Status: svc.Net.Status,
 		Close:  func() { svc.Close() },
 	}, nil
 }
@@ -327,6 +393,7 @@ type tailnetHub struct {
 	Extra  []hub.Extra
 	Client *http.Client
 	Peers  func(context.Context) ([]hub.Peer, error)
+	Status func(context.Context) (*pb.TailnetServiceGetStatusResponse, error)
 	Close  func()
 }
 

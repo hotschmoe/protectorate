@@ -44,6 +44,8 @@ type Hub struct {
 	jobs    *JobManager
 	events  eventBus
 
+	tailnetStatus func(context.Context) (*pb.TailnetServiceGetStatusResponse, error)
+
 	Sessions    *session.Manager
 	SessionPoll time.Duration
 	// DeadRetention is how long an exited session is kept before the hub
@@ -187,6 +189,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTokenServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewTailnetServiceHandler(tailnetService{h}, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
 	if h.sleeves != nil {
