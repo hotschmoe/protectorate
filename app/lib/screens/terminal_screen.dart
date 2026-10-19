@@ -9,6 +9,7 @@ import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../terminal/compose_box.dart';
 import '../terminal/extra_keys.dart';
+import '../terminal/terminal_style.dart';
 import '../terminal/terminal_protocol.dart';
 import 'history_screen.dart';
 
@@ -137,7 +138,13 @@ class _TerminalScreenState extends State<TerminalScreen>
       body: SafeArea(
         child: Column(
           children: [
-            Expanded(child: TerminalView(_terminal, autofocus: true)),
+            Expanded(
+              child: TerminalView(
+                _terminal,
+                autofocus: true,
+                textStyle: terminalTextStyle,
+              ),
+            ),
             ExtraKeysBar(modifiers: _modifiers, onInput: _send),
             ComposeBox(onSend: _sendCompose),
           ],

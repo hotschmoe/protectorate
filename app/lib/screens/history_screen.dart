@@ -3,6 +3,7 @@ import 'package:xterm/xterm.dart';
 
 import '../gen/protectorate/v1/session.pb.dart';
 import '../hubs/hub_client.dart';
+import '../terminal/terminal_style.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.client, required this.session});
@@ -74,7 +75,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
         children: [
           if (_loading) const LinearProgressIndicator(),
           if (_error != null) ListTile(title: Text(_error!)),
-          Expanded(child: TerminalView(_terminal, readOnly: true)),
+          Expanded(
+            child: TerminalView(
+              _terminal,
+              readOnly: true,
+              textStyle: terminalTextStyle,
+            ),
+          ),
         ],
       ),
     );

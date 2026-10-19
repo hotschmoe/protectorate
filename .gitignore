@@ -3,3 +3,5 @@ references/
 /bin/
 *.test
 .claude/worktrees/
+
+/e2e-out/
