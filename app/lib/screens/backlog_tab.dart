@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import '../gen/protectorate/v1/backlog.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/panel.dart';
 
 class BacklogTab extends StatefulWidget {
   const BacklogTab({super.key, required this.client, required this.feed});
@@ -81,6 +84,7 @@ class _BacklogTabState extends State<BacklogTab> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Tokens.of(context);
     final groups = <String, List<Item>>{};
     for (final it in _items) {
       groups.putIfAbsent(it.project, () => []).add(it);
@@ -92,40 +96,76 @@ class _BacklogTabState extends State<BacklogTab> {
         key: const ValueKey('add-item'),
         onPressed: _add,
         icon: const Icon(Icons.add),
-        label: const Text('Add item'),
+        label: const Text('ADD ITEM'),
       ),
       body: Column(
         children: [
-          if (_loading) const LinearProgressIndicator(),
+          if (_loading) const BusyBar(),
           if (_error != null)
-            ListTile(
-              leading: const Icon(Icons.error_outline),
-              title: Text('$_error'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: NoteStrip('$_error', tone: Tone.alarm),
             ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 88),
+                padding: const EdgeInsets.fromLTRB(
+                  Tokens.gap,
+                  Tokens.gap,
+                  Tokens.gap,
+                  96,
+                ),
                 children: [
                   if (!_loading && _error == null && _items.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Center(
-                        child: Text('Backlog is empty. Add an item to begin.'),
-                      ),
-                    ),
-                  for (final p in projects) ...[
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                      child: Text(
-                        p.isEmpty ? '(no project)' : p,
-                        style: Theme.of(context).textTheme.titleSmall,
+                      padding: const EdgeInsets.all(32),
+                      child: Center(
+                        child: Text(
+                          'Backlog is empty. Add an item to begin.',
+                          style: t.small(),
+                        ),
                       ),
                     ),
-                    for (final it in groups[p]!) _row(it),
-                  ],
+                  for (final p in projects)
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: Tokens.contentMaxWidth,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: Tokens.gap),
+                          child: Panel(
+                            padding: const EdgeInsets.all(4),
+                            trailing: Text(
+                              '${groups[p]!.where((i) => i.state != ItemState.ITEM_STATE_DONE).length} OPEN',
+                              style: t.legend(),
+                            ),
+                            legend: '${groups[p]!.length} ITEMS',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    10,
+                                    8,
+                                    10,
+                                    6,
+                                  ),
+                                  child: Text(
+                                    p.isEmpty ? '(no project)' : p,
+                                    style: t.title(),
+                                  ),
+                                ),
+                                for (var i = 0; i < groups[p]!.length; i++)
+                                  _row(t, i, groups[p]![i]),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -135,7 +175,7 @@ class _BacklogTabState extends State<BacklogTab> {
     );
   }
 
-  Widget _row(Item it) {
+  Widget _row(Tokens t, int i, Item it) {
     final done = it.state == ItemState.ITEM_STATE_DONE;
     final title = it.title.isEmpty ? it.issueUrl : it.title;
     final bits = [
@@ -143,62 +183,51 @@ class _BacklogTabState extends State<BacklogTab> {
       if (it.harness.isNotEmpty && it.harness != 'any') it.harness,
       if (it.hasClaim()) 'claimed by ${it.claim.by}',
     ];
-    return ListTile(
+    final (label, tone) = switch (it.state) {
+      ItemState.ITEM_STATE_TODO => ('TODO', Tone.lit),
+      ItemState.ITEM_STATE_CLAIMED => ('CLAIMED', Tone.info),
+      ItemState.ITEM_STATE_DONE => ('DONE', Tone.ok),
+      _ => ('?', Tone.dim),
+    };
+    return BarRow(
       key: ValueKey('item-${it.id}'),
-      title: Text(
-        title,
-        style: done
-            ? const TextStyle(decoration: TextDecoration.lineThrough)
-            : null,
-      ),
-      subtitle: bits.isEmpty ? null : Text(bits.join('  ')),
-      leading: _StateChip(it.state),
-      trailing: done
-          ? null
-          : IconButton(
+      index: i,
+      padding: const EdgeInsets.fromLTRB(10, 4, 0, 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 82,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Annunciator(label: label, tone: tone, lit: !done),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: done
+                      ? t
+                            .data(t.p.dim)
+                            .copyWith(decoration: TextDecoration.lineThrough)
+                      : t.data(t.p.emph),
+                ),
+                if (bits.isNotEmpty) Text(bits.join('  '), style: t.small()),
+              ],
+            ),
+          ),
+          if (!done)
+            IconButton(
               tooltip: 'Mark done',
               icon: const Icon(Icons.check_circle_outline),
               onPressed: () => _done(it),
-            ),
-    );
-  }
-}
-
-class _StateChip extends StatelessWidget {
-  const _StateChip(this.state);
-
-  final ItemState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final (label, bg, fg) = switch (state) {
-      ItemState.ITEM_STATE_TODO => (
-        'todo',
-        scheme.secondaryContainer,
-        scheme.onSecondaryContainer,
+            )
+          else
+            const SizedBox(width: Tokens.touch),
+        ],
       ),
-      ItemState.ITEM_STATE_CLAIMED => (
-        'claimed',
-        scheme.tertiaryContainer,
-        scheme.onTertiaryContainer,
-      ),
-      ItemState.ITEM_STATE_DONE => (
-        'done',
-        scheme.surfaceContainerHighest,
-        scheme.onSurfaceVariant,
-      ),
-      _ => ('?', scheme.surfaceContainerHighest, scheme.onSurfaceVariant),
-    };
-    return Container(
-      width: 64,
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(label, style: TextStyle(color: fg, fontSize: 12)),
     );
   }
 }
@@ -254,7 +283,7 @@ class _AddItemDialogState extends State<_AddItemDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: const Text('CANCEL'),
         ),
         FilledButton(
           key: const ValueKey('item-add'),
@@ -270,7 +299,7 @@ class _AddItemDialogState extends State<_AddItemDialog> {
               ),
             );
           },
-          child: const Text('Add'),
+          child: const Text('ADD'),
         ),
       ],
     );

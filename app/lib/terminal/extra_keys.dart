@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/tokens.dart';
+
 enum ExtraKey {
   esc('Esc', '\x1b'),
   tab('Tab', '\t'),
@@ -63,8 +65,10 @@ class ExtraKeysBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = Tokens.of(context);
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      color: t.p.frame,
+      shape: Border(top: BorderSide(color: t.p.bezel)),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: ListenableBuilder(
@@ -102,18 +106,20 @@ class _KeyButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final t = Tokens.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-      child: TextButton(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 6),
+      child: OutlinedButton(
         key: ValueKey('key-$label'),
-        style: TextButton.styleFrom(
-          minimumSize: const Size(44, 40),
-          backgroundColor: selected ? scheme.primary : null,
-          foregroundColor: selected ? scheme.onPrimary : null,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(48, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          backgroundColor: selected ? t.tint(t.p.info) : t.p.glass,
+          foregroundColor: selected ? t.p.info : t.p.lit,
+          side: BorderSide(color: selected ? t.p.info : t.p.bezelHi),
         ),
         onPressed: onPressed,
-        child: Text(label),
+        child: Text(label.toUpperCase()),
       ),
     );
   }

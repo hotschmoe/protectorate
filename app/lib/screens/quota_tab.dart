@@ -6,6 +6,10 @@ import '../gen/protectorate/v1/events.pb.dart';
 import '../gen/protectorate/v1/quota.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/meter.dart';
+import '../vfd/panel.dart';
 
 const quotaEventKind = 'quota.updated';
 
@@ -90,25 +94,45 @@ class _QuotaTabState extends State<QuotaTab> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Tokens.of(context);
     final providers = _quotas.keys.toList()..sort();
     return Column(
       children: [
-        if (_loading) const LinearProgressIndicator(),
+        if (_loading) const BusyBar(),
         if (_error != null)
-          ListTile(
-            leading: const Icon(Icons.error_outline),
-            title: Text('$_error'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: NoteStrip('$_error', tone: Tone.alarm),
           ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => _load(true),
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(8),
-              children: [
-                for (final p in providers)
-                  ProviderCard(quota: _quotas[p]!, now: _now()),
-              ],
+            child: LayoutBuilder(
+              builder: (context, box) {
+                const pad = Tokens.gap;
+                final cols = (box.maxWidth / 460).floor().clamp(1, 4);
+                final w = (box.maxWidth - 2 * pad - (cols - 1) * pad) / cols;
+                return SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(pad),
+                  child: providers.isEmpty && !_loading
+                      ? Center(child: Text('NO PROVIDERS', style: t.legend()))
+                      : Wrap(
+                          spacing: pad,
+                          runSpacing: pad,
+                          children: [
+                            for (final p in providers)
+                              SizedBox(
+                                width: w,
+                                child: ProviderCard(
+                                  quota: _quotas[p]!,
+                                  now: _now(),
+                                ),
+                              ),
+                          ],
+                        ),
+                );
+              },
             ),
           ),
         ),
@@ -116,6 +140,44 @@ class _QuotaTabState extends State<QuotaTab> {
     );
   }
 }
+
+List<(String, String)> countdownParts(Duration d) {
+  if (d.isNegative) return [('--', 'DUE')];
+  String two(int n) => n.toString().padLeft(2, '0');
+  if (d.inDays > 0) return [('${d.inDays}', 'D'), (two(d.inHours % 24), 'H')];
+  if (d.inHours > 0) {
+    return [('${d.inHours}', 'H'), (two(d.inMinutes % 60), 'M')];
+  }
+  return [('${d.inMinutes}', 'M')];
+}
+
+bool quotaUnknown(ProviderQuota q) =>
+    q.freshness != Freshness.FRESHNESS_FRESH &&
+    q.freshness != Freshness.FRESHNESS_STALE;
+
+Tone quotaTone(ProviderQuota q) => switch (q.freshness) {
+  Freshness.FRESHNESS_FRESH => Tone.ok,
+  Freshness.FRESHNESS_STALE => Tone.warn,
+  _ => Tone.alarm,
+};
+
+String quotaBadge(ProviderQuota q) {
+  switch (q.freshness) {
+    case Freshness.FRESHNESS_FRESH:
+      return 'FRESH';
+    case Freshness.FRESHNESS_STALE:
+      final secs = q.age.seconds.toInt();
+      return secs == 0
+          ? 'STALE'
+          : 'STALE ${formatCountdown(Duration(seconds: secs))}';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+String windowSemantics(QuotaWindow w, DateTime now) =>
+    '${w.name}: ${w.usedPercent.toStringAsFixed(0)}% used'
+    '${w.hasResetsAt() ? ', resets in ${formatCountdown(w.resetsAt.toDateTime().difference(now))}' : ''}';
 
 class ProviderCard extends StatelessWidget {
   const ProviderCard({super.key, required this.quota, required this.now});
@@ -125,98 +187,132 @@ class ProviderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final unknown =
-        quota.freshness != Freshness.FRESHNESS_FRESH &&
-        quota.freshness != Freshness.FRESHNESS_STALE;
+    final t = Tokens.of(context);
+    final unknown = quotaUnknown(quota);
     final stale = quota.freshness == Freshness.FRESHNESS_STALE;
-    return Card(
+    return Panel(
       key: ValueKey('provider-${quota.provider}'),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    quota.plan.isEmpty
-                        ? quota.provider
-                        : '${quota.provider} (${quota.plan})',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Chip(
-                  key: ValueKey('freshness-${quota.provider}'),
-                  label: Text(_badge()),
-                  backgroundColor: unknown
-                      ? scheme.errorContainer
-                      : stale
-                      ? scheme.tertiaryContainer
-                      : scheme.secondaryContainer,
-                ),
-              ],
+      legend: [
+        quota.provider.toUpperCase(),
+        if (quota.plan.isNotEmpty) quota.plan.toUpperCase(),
+      ].join('  '),
+      tone: unknown ? Tone.alarm : null,
+      trailing: LampLegend(
+        key: ValueKey('freshness-${quota.provider}'),
+        label: quotaBadge(quota),
+        tone: quotaTone(quota),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (quota.error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(quota.error, style: t.data(t.p.alarm)),
             ),
-            if (quota.error.isNotEmpty)
-              Text(quota.error, style: TextStyle(color: scheme.error)),
-            if (unknown)
-              const Text('No data. This is not spare capacity.')
-            else ...[
-              if (stale)
-                const Text('Stale data; may not reflect current usage.'),
-              for (final w in quota.windows) _window(context, w, stale),
-              for (final r in quota.resets)
-                Text(
-                  '${r.kind}: ${r.count} reset credit(s)'
-                  '${r.hasExpiresAt() ? ', expires in ${formatCountdown(r.expiresAt.toDateTime().difference(now))}' : ''}',
+          if (unknown) ...[
+            const SegmentMeter(percent: null),
+            const SizedBox(height: 10),
+            Text(
+              'No data. This is not spare capacity.',
+              style: t.data(t.p.alarm),
+            ),
+          ] else ...[
+            if (stale)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  'Stale data; may not reflect current usage.',
+                  style: t.small(t.p.warn),
                 ),
-            ],
+              ),
+            for (final w in quota.windows) _window(t, w, stale),
+            for (final r in quota.resets)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Annunciator(label: 'RESET x${r.count}', tone: Tone.info),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${r.kind}${r.hasExpiresAt() ? ', expires in ${formatCountdown(r.expiresAt.toDateTime().difference(now))}' : ''}',
+                        style: t.small(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  String _badge() {
-    switch (quota.freshness) {
-      case Freshness.FRESHNESS_FRESH:
-        return 'fresh';
-      case Freshness.FRESHNESS_STALE:
-        final secs = quota.age.seconds.toInt();
-        return secs == 0
-            ? 'stale'
-            : 'stale ${formatCountdown(Duration(seconds: secs))}';
-      default:
-        return 'unknown';
-    }
-  }
-
-  Widget _window(BuildContext context, QuotaWindow w, bool stale) {
-    final used = (w.usedPercent / 100).clamp(0.0, 1.0);
-    final resets = w.hasResetsAt()
-        ? 'resets in ${formatCountdown(w.resetsAt.toDateTime().difference(now))}'
-        : 'reset unknown';
-    final projected = w.hasEstimatedUnusedPercentAtReset()
-        ? ', ~${w.estimatedUnusedPercentAtReset.toStringAsFixed(0)}% unused at reset (est.)'
-        : '';
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Opacity(
-        opacity: stale ? 0.55 : 1,
+  Widget _window(Tokens t, QuotaWindow w, bool stale) {
+    final pct = w.usedPercent;
+    final level = t.levelTone(pct);
+    final color = stale
+        ? t.p.dim
+        : level == Tone.lit
+        ? t.p.emph
+        : t.tone(level);
+    return Semantics(
+      label: windowSemantics(w, now),
+      container: true,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('${w.name}: ${w.usedPercent.toStringAsFixed(0)}% used'),
-            const SizedBox(height: 4),
-            LinearProgressIndicator(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: ReadoutTile(
+                    legend: '${w.name.toUpperCase()} WINDOW',
+                    readout: SegmentReadout(
+                      value: pct.toStringAsFixed(0),
+                      unit: '% USED',
+                      size: Tokens.readoutL,
+                      color: color,
+                    ),
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('RESETS IN', style: t.legend()),
+                    const SizedBox(height: 6),
+                    w.hasResetsAt()
+                        ? SegmentReadout.parts(
+                            parts: countdownParts(
+                              w.resetsAt.toDateTime().difference(now),
+                            ),
+                            size: Tokens.readoutM,
+                            color: stale ? t.p.dim : t.p.info,
+                          )
+                        : Text('UNKNOWN', style: t.legend(t.p.warn)),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SegmentMeter(
               key: ValueKey('bar-${w.name}'),
-              value: used,
+              percent: pct,
+              dim: stale,
+              height: 12,
             ),
-            Text(
-              '$resets$projected',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            if (w.hasEstimatedUnusedPercentAtReset())
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '~${w.estimatedUnusedPercentAtReset.toStringAsFixed(0)}% unused at reset (est.)',
+                  style: t.small(),
+                ),
+              ),
           ],
         ),
       ),

@@ -404,7 +404,7 @@ void main() {
       expect(find.text('fix the bug'), findsOneWidget);
       expect(find.textContaining('Looking at it.'), findsOneWidget);
       expect(find.text('x := 1'), findsOneWidget);
-      expect(find.text('Needs approval'), findsOneWidget);
+      expect(find.text('NEEDS APPROVAL'), findsOneWidget);
       expect(find.text('50.0k / 200k'), findsOneWidget);
       expect(find.byKey(const ValueKey('stop')), findsOneWidget);
 
@@ -469,8 +469,8 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.byKey(const ValueKey('local-model-badge')), findsOneWidget);
-      expect(find.textContaining('Compacted 120k to 18.0k'), findsOneWidget);
-      expect(find.text('Idle'), findsOneWidget);
+      expect(find.textContaining('COMPACTED 120k TO 18.0k'), findsOneWidget);
+      expect(find.text('IDLE'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('chat-menu')));
       await tester.pump(const Duration(milliseconds: 400));
       final compact = tester.widget<PopupMenuItem<Object>>(
@@ -525,10 +525,10 @@ void main() {
       );
       expect(find.text('qwen3:8b'), findsOneWidget);
       expect(find.byKey(const ValueKey('local-model-badge')), findsOneWidget);
-      expect(find.text('Working'), findsOneWidget);
+      expect(find.text('WORKING'), findsOneWidget);
       expect(find.text('8.0k / 32.0k'), findsOneWidget);
       expect(find.text('1.00 GB / 4.00 GB'), findsOneWidget);
-      expect(find.text('Open chat'), findsOneWidget);
+      expect(find.text('OPEN CHAT'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('open-pi1')));
       expect(log, ['open']);
     });
@@ -564,8 +564,8 @@ void main() {
         [],
       );
       expect(find.byKey(const ValueKey('local-model-badge')), findsNothing);
-      expect(find.text('Open terminal'), findsOneWidget);
-      expect(find.text('Running'), findsOneWidget);
+      expect(find.text('OPEN TERMINAL'), findsOneWidget);
+      expect(find.text('RUNNING'), findsOneWidget);
     });
   });
 }

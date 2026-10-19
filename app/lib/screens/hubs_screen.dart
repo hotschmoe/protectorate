@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../theme/tokens.dart';
+import '../vfd/panel.dart';
 import 'hub_shell.dart';
 
 class HubsScreen extends StatelessWidget {
@@ -22,59 +24,119 @@ class HubsScreen extends StatelessWidget {
     if (result != null) await store.upsert(result);
   }
 
+  void _open(BuildContext context, HubProfile hub) =>
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => HubShell(hub: hub, clientFactory: clientFactory),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
+    final t = Tokens.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Hubs')),
+      appBar: AppBar(title: const Text('Protectorate')),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
         key: const ValueKey('add-hub'),
         onPressed: () => _edit(context),
         icon: const Icon(Icons.add),
-        label: const Text('Add hub'),
+        label: const Text('ADD HUB'),
       ),
       body: ListenableBuilder(
         listenable: store,
         builder: (context, _) {
           final hubs = store.hubs;
-          if (hubs.isEmpty) {
-            return const Center(child: Text('No hubs yet. Add one to begin.'));
-          }
           return ListView(
+            padding: const EdgeInsets.fromLTRB(
+              Tokens.gap,
+              Tokens.gapL,
+              Tokens.gap,
+              96,
+            ),
             children: [
-              for (final hub in hubs)
-                ListTile(
-                  leading: const Icon(Icons.hub),
-                  title: Text(hub.name),
-                  subtitle: Text(hub.baseUrl),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          HubShell(hub: hub, clientFactory: clientFactory),
-                    ),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: Tokens.contentMaxWidth,
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Edit',
-                        icon: const Icon(Icons.edit),
-                        onPressed: () => _edit(context, hub),
-                      ),
-                      IconButton(
-                        tooltip: 'Remove',
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => store.remove(hub.id),
-                      ),
-                    ],
+                  child: Panel(
+                    legend: 'HUBS',
+                    trailing: Text('${hubs.length} PAIRED', style: t.legend()),
+                    padding: const EdgeInsets.all(4),
+                    child: hubs.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              children: [
+                                Text('NO HUBS', style: t.legend()),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'No hubs yet. Add one, or scan the QR code from protectorate pair.',
+                                  textAlign: TextAlign.center,
+                                  style: t.small(),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Column(
+                            children: [
+                              for (var i = 0; i < hubs.length; i++)
+                                _row(context, t, i, hubs[i]),
+                            ],
+                          ),
                   ),
                 ),
+              ),
             ],
           );
         },
       ),
     );
   }
+
+  Widget _row(BuildContext context, Tokens t, int i, HubProfile hub) => InkWell(
+    key: ValueKey('hub-${hub.id}'),
+    borderRadius: BorderRadius.circular(Tokens.innerRadius),
+    onTap: () => _open(context, hub),
+    child: BarRow(
+      index: i,
+      padding: const EdgeInsets.fromLTRB(14, 8, 0, 8),
+      child: Row(
+        children: [
+          Icon(Icons.hub_outlined, color: t.p.lit, size: 22),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hub.name, style: t.title()),
+                const SizedBox(height: 2),
+                Text(
+                  hub.baseUrl,
+                  style: t.small(),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (hub.token.isEmpty)
+                  Text('NO TOKEN', style: t.legend(t.p.warn)),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Edit',
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () => _edit(context, hub),
+          ),
+          IconButton(
+            tooltip: 'Remove',
+            color: t.p.alarm,
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => store.remove(hub.id),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _HubDialog extends StatefulWidget {
@@ -154,12 +216,12 @@ class _HubDialogState extends State<_HubDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: const Text('CANCEL'),
         ),
         FilledButton(
           key: const ValueKey('hub-save'),
           onPressed: _save,
-          child: const Text('Save'),
+          child: const Text('SAVE'),
         ),
       ],
     );

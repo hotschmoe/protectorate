@@ -7,6 +7,10 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/meter.dart';
+import '../vfd/panel.dart';
 import 'nodes_tab.dart';
 import 'sleeves_screen.dart';
 
@@ -18,6 +22,7 @@ class NodeDetailScreen extends StatefulWidget {
     required this.feed,
     required this.name,
     this.now,
+    this.history,
   });
 
   final HubProfile hub;
@@ -25,6 +30,7 @@ class NodeDetailScreen extends StatefulWidget {
   final EventFeed feed;
   final String name;
   final DateTime Function()? now;
+  final NodeHistory? history;
 
   @override
   State<NodeDetailScreen> createState() => _NodeDetailScreenState();
@@ -37,6 +43,8 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
   StreamSubscription<dynamic>? _sub;
   Timer? _poll;
   Timer? _tick;
+
+  late final NodeHistory _history = widget.history ?? NodeHistory();
 
   DateTime _now() => (widget.now ?? DateTime.now)();
 
@@ -68,6 +76,7 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
       final s = await widget.client.node.getNode(
         GetNodeRequest(name: widget.name),
       );
+      _history.record(s);
       if (mounted) {
         setState(() {
           _status = s;
@@ -96,13 +105,18 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
       ),
       body: s == null
           ? (_error != null
-                ? Center(child: Text('$_error'))
-                : const LinearProgressIndicator())
+                ? Padding(
+                    padding: const EdgeInsets.all(Tokens.gap),
+                    child: NoteStrip('$_error', tone: Tone.alarm),
+                  )
+                : const BusyBar())
           : NodeDetail(
               status: s,
               age: statusAge(s, _receivedAt, _now()),
               now: _now(),
               error: _error,
+              cpuHistory: _history.cpu(widget.name),
+              memHistory: _history.mem(widget.name),
               onManageSleeves: s.node.local
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -127,6 +141,8 @@ class NodeDetail extends StatelessWidget {
     required this.now,
     this.error,
     this.onManageSleeves,
+    this.cpuHistory = const [],
+    this.memHistory = const [],
   });
 
   final VoidCallback? onManageSleeves;
@@ -134,11 +150,14 @@ class NodeDetail extends StatelessWidget {
   final Duration age;
   final DateTime now;
   final Object? error;
+  final List<double?> cpuHistory;
+  final List<double?> memHistory;
+
+  static const _wide = 1000.0;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
+    final t = Tokens.of(context);
     final f = status.freshness;
     final down = f == NodeFreshness.NODE_FRESHNESS_UNREACHABLE;
     final stale = f == NodeFreshness.NODE_FRESHNESS_STALE;
@@ -146,136 +165,103 @@ class NodeDetail extends StatelessWidget {
     final dim = stale || down;
     final badges = alertBadges(status);
 
-    final sections = <Widget>[
+    final head = <Widget>[
       Wrap(
-        spacing: 8,
-        runSpacing: 4,
+        spacing: 12,
+        runSpacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          StatusBadge(
+          FreshnessLamp(
             key: const ValueKey('freshness'),
-            text: freshnessLabel(f, age),
-            sev: freshnessSeverity(context, f),
+            freshness: f,
+            age: age,
           ),
-          for (final b in badges)
-            StatusBadge(
-              text: b.label,
-              sev: b.critical
-                  ? severityFor(context, 100)
-                  : severityFor(context, warnPercent),
-            ),
+          if (badges.isNotEmpty) AlertStrip(badges: badges),
           Text(
             [
               status.node.address,
               if (status.node.tier.isNotEmpty) status.node.tier,
               ...status.node.tags,
             ].join('  '),
-            style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            style: t.small(),
           ),
         ],
       ),
       if (error != null)
-        _Note('Refresh failed, showing the last result: $error', cs.error),
-      if (status.error.isNotEmpty) _Note(status.error, cs.error),
+        NoteStrip(
+          'Refresh failed, showing the last result: $error',
+          tone: Tone.alarm,
+        ),
+      if (status.error.isNotEmpty) NoteStrip(status.error, tone: Tone.alarm),
       if (down)
-        _Note(
+        NoteStrip(
           m == null
               ? 'This node has never been reached. No metrics.'
               : 'Unreachable. The figures below are from ${formatAge(age)} and are not current.',
-          cs.error,
+          tone: Tone.alarm,
         ),
       if (stale)
-        _Note(
+        NoteStrip(
           'Last poll failed. Figures are from ${formatAge(age)} and may be outdated.',
-          severityFor(context, warnPercent).fill,
         ),
     ];
 
+    final left = <Widget>[];
+    final right = <Widget>[];
     if (m != null) {
-      sections.addAll([
-        _Section(
-          'Host',
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                [
-                  '${m.os}/${m.arch}',
-                  m.platform,
-                  'agent ${m.agentVersion}',
-                  'up ${formatUptime(m.uptimeSeconds.toInt())}',
-                ].where((e) => e.isNotEmpty).join('  '),
-                style: text.bodySmall,
-              ),
-              const SizedBox(height: 6),
-              PercentBar(
-                key: const ValueKey('cpu'),
-                label: 'CPU',
-                percent: m.cpu.usagePercent,
-                trailing:
-                    '${formatPercent(m.cpu.usagePercent)}  ${m.cpu.logicalCores}c',
-                dim: dim,
-              ),
-              if (m.cpu.hasLoad1())
-                Padding(
-                  padding: const EdgeInsets.only(left: 44),
-                  child: Text(
-                    'load ${m.cpu.load1.toStringAsFixed(2)} ${m.cpu.load5.toStringAsFixed(2)} ${m.cpu.load15.toStringAsFixed(2)}',
-                    style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                ),
-              PercentBar(
-                key: const ValueKey('mem'),
-                label: 'MEM',
-                percent: m.memory.usedPercent,
-                trailing:
-                    '${formatBytes(m.memory.usedBytes.toInt())} / ${formatBytes(m.memory.totalBytes.toInt())}',
-                dim: dim,
-              ),
-              if (m.memory.swapTotalBytes > 0)
-                PercentBar(
-                  key: const ValueKey('swap'),
-                  label: 'SWAP',
-                  percent: m.memory.swapUsedPercent,
-                  trailing:
-                      '${formatBytes(m.memory.swapUsedBytes.toInt())} / ${formatBytes(m.memory.swapTotalBytes.toInt())}',
-                  dim: dim,
-                ),
-            ],
-          ),
+      left.addAll([
+        _HostPanel(
+          m: m,
+          dim: dim,
+          cpuHistory: cpuHistory,
+          memHistory: memHistory,
         ),
         if (m.warnings.isNotEmpty)
-          _Section(
-            'Collection warnings',
-            Column(
+          Panel(
+            legend: 'COLLECTION WARNINGS',
+            tone: Tone.warn,
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [for (final w in m.warnings) Text(w)],
+              children: [
+                for (final w in m.warnings) Text(w, style: t.data(t.p.warn)),
+              ],
             ),
           ),
-        _Section(
-          'Filesystems',
-          m.filesystems.isEmpty
-              ? const Text('None reported.')
+        Panel(
+          legend: 'FILESYSTEMS',
+          trailing: Text('${m.filesystems.length}', style: t.legend()),
+          child: m.filesystems.isEmpty
+              ? Text('None reported.', style: t.small())
               : Column(
                   children: [
                     for (final fs in m.filesystems)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              '${fs.mount}  ${fs.device} ${fs.fstype}',
-                              style: text.bodySmall,
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: fs.mount,
+                                    style: t.data(t.p.emph),
+                                  ),
+                                  TextSpan(
+                                    text: '  ${fs.device} ${fs.fstype}',
+                                    style: t.small(),
+                                  ),
+                                ],
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
-                            PercentBar(
+                            MeterRow(
                               key: ValueKey('fs-${fs.mount}'),
                               label: '',
-                              labelWidth: 0,
-                              trailingWidth: 200,
+                              labelChars: 0,
+                              valueChars: 24,
                               percent: fs.usedPercent,
-                              trailing:
+                              value:
                                   '${formatPercent(fs.usedPercent)}  ${formatBytes(fs.usedBytes.toInt())} / ${formatBytes(fs.totalBytes.toInt())}',
                               dim: dim,
                             ),
@@ -285,42 +271,45 @@ class NodeDetail extends StatelessWidget {
                   ],
                 ),
         ),
-        _Section(
-          'GPUs',
-          m.gpus.isEmpty
-              ? const Text('None.')
+        Panel(
+          legend: 'GPUS',
+          trailing: Text('${m.gpus.length}', style: t.legend()),
+          child: m.gpus.isEmpty
+              ? Text('None.', style: t.small())
               : Column(
                   children: [
                     for (final g in m.gpus)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
                               '#${g.index} ${g.vendor} ${g.name}${g.temperatureCelsius >= 0 ? '  ${g.temperatureCelsius.round()} C' : ''}',
-                              style: text.bodySmall,
+                              style: t.data(t.p.emph),
                             ),
-                            PercentBar(
-                              label: 'Util',
+                            MeterRow(
+                              label: 'UTIL',
                               percent: g.utilizationPercent >= 0
                                   ? g.utilizationPercent
                                   : null,
-                              trailing: g.utilizationPercent >= 0
+                              value: g.utilizationPercent >= 0
                                   ? formatPercent(g.utilizationPercent)
                                   : 'n/a',
                               dim: dim,
+                              valueChars: 17,
                             ),
-                            PercentBar(
+                            MeterRow(
                               label: 'VRAM',
                               percent: g.memoryTotalBytes > 0
                                   ? g.memoryUsedBytes.toInt() *
                                         100 /
                                         g.memoryTotalBytes.toInt()
                                   : null,
-                              trailing:
+                              value:
                                   '${formatBytes(g.memoryUsedBytes.toInt())} / ${formatBytes(g.memoryTotalBytes.toInt())}',
                               dim: dim,
+                              valueChars: 17,
                             ),
                           ],
                         ),
@@ -328,120 +317,239 @@ class NodeDetail extends StatelessWidget {
                   ],
                 ),
         ),
-        _Section(
-          m.hasEngine()
-              ? 'Container engine: ${m.engine.kind} ${m.engine.version}'
-              : 'Container engine',
-          m.hasEngine()
+        Panel(
+          legend: 'TOP DISK OFFENDERS',
+          child: _Offenders(offenders: topOffenders(m)),
+        ),
+      ]);
+      right.addAll([
+        Panel(
+          legend: m.hasEngine()
+              ? 'CONTAINER ENGINE  ${m.engine.kind} ${m.engine.version}'
+                    .toUpperCase()
+              : 'CONTAINER ENGINE',
+          child: m.hasEngine()
               ? _EngineDisk(engine: m.engine, now: now)
-              : const Text('No container engine reachable.'),
+              : Text('No container engine reachable.', style: t.small()),
         ),
         if (m.hasEngine())
-          _Section(
-            'Containers (${m.engine.containers.length}), by writable layer',
-            _ContainerTable(containers: containersBySize(m)),
+          Panel(
+            legend: 'CONTAINERS BY WRITABLE LAYER',
+            trailing: Text('${m.engine.containers.length}', style: t.legend()),
+            child: _ContainerTable(containers: containersBySize(m)),
           ),
         if (m.sleeves.isNotEmpty || onManageSleeves != null)
-          _Section(
-            'Sleeves (${m.sleeves.length}), by workspace size',
-            Column(
+          Panel(
+            legend: 'SLEEVES BY WORKSPACE SIZE',
+            trailing: Text('${m.sleeves.length}', style: t.legend()),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (m.sleeves.isEmpty) const Text('No sleeves.'),
+                if (m.sleeves.isEmpty) Text('No sleeves.', style: t.small()),
                 for (final s in sleevesBySize(m))
                   SleeveRow(sleeve: s, dim: dim),
                 if (onManageSleeves != null)
                   Align(
                     alignment: Alignment.centerRight,
-                    child: TextButton.icon(
+                    child: OutlinedButton(
                       key: const ValueKey('manage-sleeves'),
                       onPressed: onManageSleeves,
-                      icon: const Icon(Icons.settings_ethernet),
-                      label: const Text('Manage sleeves'),
+                      child: const Text('MANAGE SLEEVES'),
                     ),
                   ),
               ],
             ),
           ),
-        _Section(
-          'Watched directories',
-          m.watchDirs.isEmpty
-              ? const Text('None configured.')
+        Panel(
+          legend: 'WATCHED DIRECTORIES',
+          child: m.watchDirs.isEmpty
+              ? Text('None configured.', style: t.small())
               : Column(
                   children: [
-                    for (final d in m.watchDirs) _WatchRow(dir: d, now: now),
+                    for (var i = 0; i < m.watchDirs.length; i++)
+                      _WatchRow(index: i, dir: m.watchDirs[i], now: now),
                   ],
                 ),
         ),
-        _Section('Top disk offenders', _Offenders(offenders: topOffenders(m))),
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
             'Cleanup actions are not available yet. They will require explicit confirmation.',
             key: const ValueKey('cleanup-note'),
-            style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            style: t.small(),
           ),
         ),
       ]);
     }
 
-    return LayoutBuilder(
-      builder: (context, box) => Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: ListView(
-            padding: const EdgeInsets.all(12),
-            children: [
-              for (final s in sections)
-                Padding(padding: const EdgeInsets.only(bottom: 10), child: s),
-            ],
+    Widget gapped(List<Widget> ws) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final w in ws)
+          Padding(
+            padding: const EdgeInsets.only(bottom: Tokens.gap),
+            child: w,
           ),
-        ),
-      ),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, box) {
+        final wide = box.maxWidth >= _wide;
+        if (!wide) {
+          return ListView(
+            padding: const EdgeInsets.all(Tokens.gap),
+            children: [
+              for (final w in [...head, ...left, ...right])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: Tokens.gap),
+                  child: w,
+                ),
+            ],
+          );
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(Tokens.gapL),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: Tokens.boardMaxWidth),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  gapped(head),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: gapped(left)),
+                      const SizedBox(width: Tokens.gapL),
+                      Expanded(child: gapped(right)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-class _Note extends StatelessWidget {
-  const _Note(this.text, this.color);
+class _HostPanel extends StatelessWidget {
+  const _HostPanel({
+    required this.m,
+    required this.dim,
+    required this.cpuHistory,
+    required this.memHistory,
+  });
 
-  final String text;
-  final Color color;
+  final NodeMetrics m;
+  final bool dim;
+  final List<double?> cpuHistory;
+  final List<double?> memHistory;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        border: Border.all(color: color, width: 1.5),
-        borderRadius: BorderRadius.circular(8),
+    final t = Tokens.of(context);
+    final gpu = summarizeGpus(m);
+    final legendW = 4 * (11 * Tokens.monoAdvance + 1.4) + 8;
+    Widget hist(String label, List<double?> samples) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          SizedBox(
+            width: legendW,
+            child: Text(label, style: t.legend()),
+          ),
+          Expanded(
+            child: DotMatrixGraph(samples: samples, dim: dim),
+          ),
+        ],
       ),
-      child: Text(text),
     );
-  }
-}
-
-class _Section extends StatelessWidget {
-  const _Section(this.title, this.child);
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            child,
-          ],
+    return Panel(
+      legend: 'HOST',
+      trailing: Flexible(
+        child: Text(
+          [
+            '${m.os}/${m.arch}',
+            m.platform,
+            'agent ${m.agentVersion}',
+            'up ${formatUptime(m.uptimeSeconds.toInt())}',
+          ].where((e) => e.isNotEmpty).join('  '),
+          style: t.small(t.p.legend),
+          overflow: TextOverflow.ellipsis,
         ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, box) {
+              final n = gpu?.utilPercent != null ? 3 : 2;
+              final size = ((box.maxWidth - (n - 1) * 12) / n).clamp(
+                96.0,
+                150.0,
+              );
+              return Wrap(
+                alignment: WrapAlignment.spaceEvenly,
+                spacing: 12,
+                children: [
+                  ArcGauge(
+                    percent: m.cpu.usagePercent,
+                    value: m.cpu.usagePercent.round().toString(),
+                    unit: '%',
+                    caption: 'CPU ${m.cpu.logicalCores}C',
+                    size: size,
+                    dim: dim,
+                  ),
+                  ArcGauge(
+                    percent: m.memory.usedPercent,
+                    value: m.memory.usedPercent.round().toString(),
+                    unit: '%',
+                    caption: 'MEM',
+                    size: size,
+                    dim: dim,
+                  ),
+                  if (gpu?.utilPercent != null)
+                    ArcGauge(
+                      percent: gpu!.utilPercent,
+                      value: gpu.utilPercent!.round().toString(),
+                      unit: '%',
+                      caption: gpu.count > 1 ? 'GPU x${gpu.count}' : 'GPU',
+                      size: size,
+                      dim: dim,
+                    ),
+                ],
+              );
+            },
+          ),
+          if (m.cpu.hasLoad1())
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 6),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: legendW,
+                    child: Text('LOAD', style: t.legend()),
+                  ),
+                  SegmentReadout.parts(
+                    size: Tokens.readoutM,
+                    color: t.p.lit,
+                    parts: [
+                      (m.cpu.load1.toStringAsFixed(2), '1M'),
+                      (m.cpu.load5.toStringAsFixed(2), '5M'),
+                      (m.cpu.load15.toStringAsFixed(2), '15M'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ...nodeMeters(m, dim: dim, detail: true),
+          if (cpuHistory.length > 1) hist('CPU', cpuHistory),
+          if (memHistory.length > 1) hist('MEM', memHistory),
+        ],
       ),
     );
   }
@@ -455,9 +563,9 @@ class _EngineDisk extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
+    final t = Tokens.of(context);
     if (!engine.hasDisk()) {
-      return const Text('Disk usage not measured yet.');
+      return Text('Disk usage not measured yet.', style: t.small());
     }
     final d = engine.disk;
     final rows = [
@@ -469,33 +577,37 @@ class _EngineDisk extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final r in rows)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
+        for (var i = 0; i < rows.length; i++)
+          BarRow(
+            index: i,
             child: Row(
-              key: ValueKey('engine-${r.$1}'),
+              key: ValueKey('engine-${rows[i].$1}'),
               children: [
-                Expanded(flex: 3, child: Text(r.$1)),
+                Expanded(
+                  flex: 3,
+                  child: Text(rows[i].$1, style: t.data(t.p.emph)),
+                ),
                 Expanded(
                   flex: 2,
                   child: Text(
-                    '${r.$2.count} items',
-                    style: text.bodySmall,
+                    '${rows[i].$2.count} items',
+                    style: t.small(),
                     textAlign: TextAlign.end,
                   ),
                 ),
                 Expanded(
                   flex: 3,
                   child: Text(
-                    formatBytes(r.$2.sizeBytes.toInt()),
+                    formatBytes(rows[i].$2.sizeBytes.toInt()),
+                    style: t.data(),
                     textAlign: TextAlign.end,
                   ),
                 ),
                 Expanded(
                   flex: 4,
                   child: Text(
-                    '${formatBytes(r.$2.reclaimableBytes.toInt())} reclaimable',
-                    style: text.bodySmall,
+                    '${formatBytes(rows[i].$2.reclaimableBytes.toInt())} reclaimable',
+                    style: t.small(),
                     textAlign: TextAlign.end,
                   ),
                 ),
@@ -504,12 +616,10 @@ class _EngineDisk extends StatelessWidget {
           ),
         if (engine.hasDiskMeasuredAt())
           Padding(
-            padding: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.only(top: 6, left: 8),
             child: Text(
               'measured ${formatAge(now.difference(engine.diskMeasuredAt.toDateTime()))}',
-              style: text.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+              style: t.small(),
             ),
           ),
       ],
@@ -526,67 +636,76 @@ class _ContainerTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-    if (containers.isEmpty) return const Text('No containers.');
+    final t = Tokens.of(context);
+    if (containers.isEmpty) return Text('No containers.', style: t.small());
     final now = DateTime.now();
-    final head = text.labelSmall!.copyWith(color: cs.onSurfaceVariant);
     Widget cell(String s, int flex, {TextStyle? style, bool end = true}) =>
         Expanded(
           flex: flex,
           child: Text(
             s,
-            style: style ?? text.bodySmall,
+            style: style ?? t.data(),
             textAlign: end ? TextAlign.end : TextAlign.start,
             overflow: TextOverflow.ellipsis,
           ),
         );
+    final head = t.legend();
     return Column(
       children: [
-        Row(
-          children: [
-            cell('Name', 5, style: head, end: false),
-            cell('CPU', 2, style: head),
-            cell('Mem', 3, style: head),
-            cell('Writable', 3, style: head),
-            cell('Age', 2, style: head),
-          ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+          child: Row(
+            children: [
+              cell('NAME', 5, style: head, end: false),
+              cell('CPU', 2, style: head),
+              cell('MEM', 3, style: head),
+              cell('WRITABLE', 3, style: head),
+              cell('AGE', 2, style: head),
+            ],
+          ),
         ),
-        const Divider(height: 8),
-        for (final c in containers)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
+        for (var i = 0; i < containers.length; i++)
+          BarRow(
+            index: i,
             child: Row(
-              key: ValueKey('container-${c.name}'),
+              key: ValueKey('container-${containers[i].name}'),
               children: [
                 cell(
-                  _isRunning(c) ? c.name : '${c.name} (${c.state})',
+                  _isRunning(containers[i])
+                      ? containers[i].name
+                      : '${containers[i].name} (${containers[i].state})',
                   5,
                   end: false,
+                  style: t.data(_isRunning(containers[i]) ? t.p.emph : t.p.dim),
                 ),
                 cell(
-                  !_isRunning(c)
+                  !_isRunning(containers[i])
                       ? '-'
-                      : c.statsError.isNotEmpty
+                      : containers[i].statsError.isNotEmpty
                       ? 'err'
-                      : '${c.cpuPercent.toStringAsFixed(1)}%',
+                      : '${containers[i].cpuPercent.toStringAsFixed(1)}%',
                   2,
                 ),
                 cell(
-                  _isRunning(c) ? formatBytes(c.memoryUsedBytes.toInt()) : '-',
-                  3,
-                ),
-                cell(
-                  c.writableLayerBytes > 0
-                      ? formatBytes(c.writableLayerBytes.toInt())
+                  _isRunning(containers[i])
+                      ? formatBytes(containers[i].memoryUsedBytes.toInt())
                       : '-',
                   3,
                 ),
                 cell(
-                  c.hasCreatedAt()
-                      ? formatAge(now.difference(c.createdAt.toDateTime()))
+                  containers[i].writableLayerBytes > 0
+                      ? formatBytes(containers[i].writableLayerBytes.toInt())
+                      : '-',
+                  3,
+                ),
+                cell(
+                  containers[i].hasCreatedAt()
+                      ? formatAge(
+                          now.difference(containers[i].createdAt.toDateTime()),
+                        )
                       : '-',
                   2,
+                  style: t.small(),
                 ),
               ],
             ),
@@ -597,20 +716,20 @@ class _ContainerTable extends StatelessWidget {
 }
 
 class _WatchRow extends StatelessWidget {
-  const _WatchRow({required this.dir, required this.now});
+  const _WatchRow({required this.index, required this.dir, required this.now});
 
+  final int index;
   final DirSize dir;
   final DateTime now;
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
+    final t = Tokens.of(context);
     final measured = dir.hasMeasuredAt()
         ? 'measured ${formatAge(now.difference(dir.measuredAt.toDateTime()))}'
         : 'not measured';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+    return BarRow(
+      index: index,
       child: Row(
         key: ValueKey('watch-${dir.path}'),
         children: [
@@ -618,22 +737,23 @@ class _WatchRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(dir.path, overflow: TextOverflow.ellipsis),
+                Text(
+                  dir.path,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.data(t.p.emph),
+                ),
                 Text(
                   dir.error.isNotEmpty
                       ? dir.error
                       : '$measured${dir.complete ? '' : ', partial walk'}',
-                  style: text.bodySmall?.copyWith(
-                    color: dir.error.isNotEmpty
-                        ? cs.error
-                        : cs.onSurfaceVariant,
-                  ),
+                  style: t.small(dir.error.isNotEmpty ? t.p.alarm : null),
                 ),
               ],
             ),
           ),
           Text(
             '${dir.complete ? '' : '>= '}${formatBytes(dir.sizeBytes.toInt())}',
+            style: t.data(),
           ),
         ],
       ),
@@ -647,47 +767,66 @@ class _Offenders extends StatelessWidget {
   final List<Offender> offenders;
 
   static const _kind = {
-    OffenderKind.container: 'container',
-    OffenderKind.engine: 'engine',
-    OffenderKind.watchedDir: 'dir',
-    OffenderKind.sleeve: 'sleeve',
+    OffenderKind.container: 'CONTAINER',
+    OffenderKind.engine: 'ENGINE',
+    OffenderKind.watchedDir: 'DIR',
+    OffenderKind.sleeve: 'SLEEVE',
   };
 
   @override
   Widget build(BuildContext context) {
-    if (offenders.isEmpty) return const Text('Nothing measured yet.');
-    final text = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
+    final t = Tokens.of(context);
+    if (offenders.isEmpty)
+      return Text('Nothing measured yet.', style: t.small());
     final max = offenders.first.bytes;
     return Column(
       children: [
         for (var i = 0; i < offenders.length; i++)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Column(
               key: ValueKey('offender-$i'),
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Text('${i + 1}. ', style: text.bodySmall),
+                    SizedBox(
+                      width: 24,
+                      child: Text('${i + 1}', style: t.legend()),
+                    ),
                     Expanded(
-                      child: Text(
-                        '${offenders[i].label}  (${_kind[offenders[i].kind]}${offenders[i].detail.isEmpty ? '' : ', ${offenders[i].detail}'})',
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: offenders[i].label,
+                              style: t.data(t.p.emph),
+                            ),
+                            TextSpan(
+                              text: '  ${_kind[offenders[i].kind]}',
+                              style: t.legend(),
+                            ),
+                            if (offenders[i].detail.isNotEmpty)
+                              TextSpan(
+                                text: '  ${offenders[i].detail}',
+                                style: t.small(),
+                              ),
+                          ],
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Text(formatBytes(offenders[i].bytes)),
+                    Text(formatBytes(offenders[i].bytes), style: t.data()),
                   ],
                 ),
-                const SizedBox(height: 2),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(
-                    minHeight: 5,
-                    value: offenders[i].bytes / max,
-                    color: cs.tertiary,
-                    backgroundColor: cs.surfaceContainerHighest,
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 24),
+                  child: SegmentMeter(
+                    percent: offenders[i].bytes * 100 / max,
+                    segments: 40,
+                    height: 6,
+                    tone: Tone.info,
                   ),
                 ),
               ],

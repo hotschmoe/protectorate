@@ -11,6 +11,8 @@ import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../sleeves/sleeve_info.dart';
 import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import 'sleeves_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -28,9 +30,63 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
+class _ChatScreenState extends State<ChatScreen> {
+  (ChatState, int, int)? _live;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= chatPaneBreakpoint;
+    final chat = ChatView(
+      client: widget.client,
+      sleeve: widget.sleeve,
+      onState: wide
+          ? (st, tokens, window) => setState(() => _live = (st, tokens, window))
+          : null,
+    );
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.sleeve.name)),
+      body: SafeArea(
+        child: wide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: chat),
+                  VerticalDivider(width: 1, color: t.p.bezel),
+                  SizedBox(
+                    width: 300,
+                    child: SleeveStatusPane(sleeve: widget.sleeve, live: _live),
+                  ),
+                ],
+              )
+            : chat,
+      ),
+    );
+  }
+}
+
+const chatPaneBreakpoint = 1100.0;
+
 enum _Menu { compact }
 
-class _ChatScreenState extends State<ChatScreen> {
+// The transcript, its status strip and the composer for one sleeve.
+class ChatView extends StatefulWidget {
+  const ChatView({
+    super.key,
+    required this.client,
+    required this.sleeve,
+    this.onState,
+  });
+
+  final HubClient client;
+  final Sleeve sleeve;
+  final void Function(ChatState state, int tokens, int window)? onState;
+
+  @override
+  State<ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends State<ChatView> {
   late final ChatController _chat;
   final _input = TextEditingController();
 
@@ -42,11 +98,23 @@ class _ChatScreenState extends State<ChatScreen> {
       sleeve: widget.sleeve.name,
     );
     if (widget.sleeve.hasChat()) _chat.transcript.seed(widget.sleeve.chat);
+    _chat.addListener(_report);
     _chat.start();
+  }
+
+  // Deferred, because the controller can notify while the tree builds.
+  void _report() {
+    if (widget.onState == null) return;
+    Future.microtask(() {
+      if (!mounted) return;
+      final tr = _chat.transcript;
+      widget.onState?.call(_chat.state, tr.contextTokens, tr.contextWindow);
+    });
   }
 
   @override
   void dispose() {
+    _chat.removeListener(_report);
     _chat.dispose();
     _input.dispose();
     super.dispose();
@@ -79,18 +147,25 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Tokens.of(context);
     return ListenableBuilder(
       listenable: _chat,
       builder: (context, _) {
         final tr = _chat.transcript;
         final model = widget.sleeve.hasChat() ? widget.sleeve.chat.model : '';
         final items = tr.items.reversed.toList();
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(widget.sleeve.name),
-            actions: [
-              PopupMenuButton<_Menu>(
+        return Column(
+          children: [
+            _Header(
+              sleeve: widget.sleeve,
+              model: model,
+              state: _chat.state,
+              tokens: tr.contextTokens,
+              window: tr.contextWindow,
+              menu: PopupMenuButton<_Menu>(
                 key: const ValueKey('chat-menu'),
+                tooltip: 'Chat actions',
+                icon: Icon(Icons.more_vert, color: t.p.dim),
                 onSelected: (m) => switch (m) {
                   _Menu.compact => _run(_chat.compact),
                 },
@@ -99,60 +174,51 @@ class _ChatScreenState extends State<ChatScreen> {
                     key: const ValueKey('menu-compact'),
                     value: _Menu.compact,
                     enabled: _chat.canCompact,
-                    child: const Text('Compact'),
+                    child: const Text('COMPACT CONTEXT'),
                   ),
                 ],
               ),
-            ],
-          ),
-          body: SafeArea(
-            child: Column(
-              children: [
-                _Header(
-                  sleeve: widget.sleeve,
-                  model: model,
-                  state: _chat.state,
-                  tokens: tr.contextTokens,
-                  window: tr.contextWindow,
-                ),
-                if (_chat.feedState == FeedState.retrying)
-                  const LinearProgressIndicator(
-                    key: ValueKey('reconnecting'),
-                    minHeight: 2,
-                  ),
-                Expanded(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: Tokens.contentMaxWidth,
-                      ),
-                      child: items.isEmpty
-                          ? const Center(child: Text('No messages yet.'))
-                          : ListView.separated(
-                              key: const ValueKey('transcript'),
-                              reverse: true,
-                              padding: const EdgeInsets.all(Tokens.gap),
-                              itemCount: items.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: Tokens.gap),
-                              itemBuilder: (_, i) => buildChatItem(
-                                items[i],
-                                onRespond: (id, allow) =>
-                                    _run(() => _chat.respond(id, allow)),
-                              ),
-                            ),
-                    ),
-                  ),
-                ),
-                _Composer(
-                  controller: _input,
-                  working: _chat.working,
-                  onSend: _send,
-                  onStop: () => _run(_chat.interrupt),
-                ),
-              ],
             ),
-          ),
+            if (_chat.feedState == FeedState.retrying)
+              const BusyBar(key: ValueKey('reconnecting'), tone: Tone.warn),
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: Tokens.contentMaxWidth,
+                  ),
+                  child: items.isEmpty
+                      ? Center(
+                          child: Text('NO MESSAGES YET', style: t.legend()),
+                        )
+                      : ListView.separated(
+                          key: const ValueKey('transcript'),
+                          reverse: true,
+                          padding: const EdgeInsets.fromLTRB(
+                            Tokens.gapL,
+                            Tokens.gapL,
+                            Tokens.gapL,
+                            Tokens.gapL,
+                          ),
+                          itemCount: items.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: Tokens.gapL),
+                          itemBuilder: (_, i) => buildChatItem(
+                            items[i],
+                            onRespond: (id, allow) =>
+                                _run(() => _chat.respond(id, allow)),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            _Composer(
+              controller: _input,
+              working: _chat.working,
+              onSend: _send,
+              onStop: () => _run(_chat.interrupt),
+            ),
+          ],
         );
       },
     );
@@ -166,6 +232,7 @@ class _Header extends StatelessWidget {
     required this.state,
     required this.tokens,
     required this.window,
+    required this.menu,
   });
 
   final Sleeve sleeve;
@@ -173,32 +240,64 @@ class _Header extends StatelessWidget {
   final ChatState state;
   final int tokens;
   final int window;
+  final Widget menu;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = Tokens.of(context);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: Tokens.gap, vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: cs.outlineVariant)),
+        color: t.p.frame,
+        border: Border(bottom: BorderSide(color: t.p.bezel)),
       ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          HarnessBadge(
-            harness: sleeve.harness,
-            provider: sleeveProvider(sleeve),
-            local: isLocalModel(sleeve),
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: Tokens.contentMaxWidth),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(Tokens.gapL, 0, 4, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        HarnessBadge(
+                          harness: sleeve.harness,
+                          provider: sleeveProvider(sleeve),
+                          local: isLocalModel(sleeve),
+                        ),
+                        if (model.isNotEmpty)
+                          Text(model, style: t.data(t.p.emph)),
+                        if (isLocalModel(sleeve)) const LocalModelBadge(),
+                      ],
+                    ),
+                  ),
+                  StateLamp(
+                    key: const ValueKey('status-pill'),
+                    state: state,
+                    big: true,
+                  ),
+                  menu,
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8, right: 12),
+                child: ContextMeter(
+                  tokens: tokens,
+                  window: window,
+                  width: null,
+                ),
+              ),
+            ],
           ),
-          if (model.isNotEmpty)
-            Text(model, style: Theme.of(context).textTheme.labelMedium),
-          if (isLocalModel(sleeve)) const LocalModelBadge(),
-          StatusPill(key: const ValueKey('status-pill'), state: state),
-          ContextMeter(tokens: tokens, window: window),
-        ],
+        ),
       ),
     );
   }
@@ -219,62 +318,95 @@ class _Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = Tokens.of(context);
+    final none = const OutlineInputBorder(borderSide: BorderSide.none);
     return Container(
       decoration: BoxDecoration(
-        color: cs.surface,
-        border: Border(top: BorderSide(color: cs.outlineVariant)),
+        color: t.p.frame,
+        border: Border(top: BorderSide(color: t.p.bezel)),
       ),
-      padding: const EdgeInsets.fromLTRB(Tokens.gap, 8, Tokens.gap, 8),
+      padding: const EdgeInsets.fromLTRB(Tokens.gap, 10, Tokens.gap, 10),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: Tokens.contentMaxWidth),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter): onSend,
-                  },
-                  child: TextField(
-                    key: const ValueKey('composer'),
-                    controller: controller,
-                    minLines: 1,
-                    maxLines: 6,
-                    textCapitalization: TextCapitalization.sentences,
-                    keyboardType: TextInputType.multiline,
-                    decoration: InputDecoration(
-                      hintText: working ? 'Steer the agent' : 'Message',
-                      filled: true,
-                      fillColor: cs.surfaceContainerHighest,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(22),
-                        borderSide: BorderSide.none,
+          child: Container(
+            decoration: BoxDecoration(
+              color: t.p.glass,
+              border: Border.all(color: t.p.bezelHi),
+              borderRadius: BorderRadius.circular(Tokens.bezelRadius - 3),
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 11),
+                  child: Text(
+                    '>',
+                    style: t.title(working ? t.p.info : t.p.lit),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: CallbackShortcuts(
+                    bindings: {
+                      const SingleActivator(LogicalKeyboardKey.enter): onSend,
+                    },
+                    child: TextField(
+                      key: const ValueKey('composer'),
+                      controller: controller,
+                      minLines: 1,
+                      maxLines: 6,
+                      style: t.body(t.p.emph),
+                      cursorWidth: 8,
+                      cursorColor: t.p.lit.withValues(alpha: 0.85),
+                      textCapitalization: TextCapitalization.sentences,
+                      keyboardType: TextInputType.multiline,
+                      decoration: InputDecoration(
+                        hintText: working ? 'steer the agent' : 'message',
+                        hintStyle: t.body(t.p.dim.withValues(alpha: 0.7)),
+                        border: none,
+                        enabledBorder: none,
+                        focusedBorder: none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 12,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              if (working)
-                IconButton.filledTonal(
-                  key: const ValueKey('stop'),
-                  tooltip: 'Stop',
-                  onPressed: onStop,
-                  icon: const Icon(Icons.stop_rounded),
+                const SizedBox(width: 6),
+                if (working) ...[
+                  Tooltip(
+                    message: 'Stop',
+                    child: OutlinedButton(
+                      key: const ValueKey('stop'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: t.p.alarm,
+                        side: BorderSide(
+                          color: t.p.alarm.withValues(alpha: 0.7),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                      onPressed: onStop,
+                      child: const Text('STOP'),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Tooltip(
+                  message: 'Send',
+                  child: FilledButton(
+                    key: const ValueKey('send'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                    ),
+                    onPressed: onSend,
+                    child: const Text('SEND'),
+                  ),
                 ),
-              IconButton.filled(
-                key: const ValueKey('send'),
-                tooltip: 'Send',
-                onPressed: onSend,
-                icon: const Icon(Icons.arrow_upward_rounded),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

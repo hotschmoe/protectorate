@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/tokens.dart';
+
 class ComposeBox extends StatefulWidget {
   const ComposeBox({super.key, required this.onSend});
 
@@ -27,7 +29,9 @@ class _ComposeBoxState extends State<ComposeBox> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final t = Tokens.of(context);
+    return Container(
+      color: t.p.frame,
       padding: const EdgeInsets.all(8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -39,19 +43,19 @@ class _ComposeBoxState extends State<ComposeBox> {
               minLines: 2,
               maxLines: 8,
               keyboardType: TextInputType.multiline,
-              decoration: const InputDecoration(
-                hintText: 'Compose prompt',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
+              style: t.body(t.p.emph),
+              cursorWidth: 8,
+              decoration: const InputDecoration(hintText: 'compose prompt'),
             ),
           ),
           const SizedBox(width: 8),
-          IconButton.filled(
-            key: const ValueKey('compose-send'),
-            tooltip: 'Send',
-            icon: const Icon(Icons.send),
-            onPressed: _send,
+          Tooltip(
+            message: 'Send',
+            child: FilledButton(
+              key: const ValueKey('compose-send'),
+              onPressed: _send,
+              child: const Text('SEND'),
+            ),
           ),
         ],
       ),

@@ -11,6 +11,9 @@ import '../terminal/compose_box.dart';
 import '../terminal/extra_keys.dart';
 import '../terminal/terminal_style.dart';
 import '../terminal/terminal_protocol.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/panel.dart';
 import 'history_screen.dart';
 
 class TerminalScreen extends StatefulWidget {
@@ -157,7 +160,17 @@ class _TerminalScreenState extends State<TerminalScreen>
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Center(
-              child: Text(_readOnly ? '$_status (read-only)' : _status),
+              child: LampLegend(
+                key: const ValueKey('terminal-status'),
+                label: (_readOnly ? '$_status  read-only' : _status)
+                    .toUpperCase(),
+                tone: switch (_status) {
+                  'connected' => _readOnly ? Tone.info : Tone.ok,
+                  'connecting' => Tone.info,
+                  'closed' => Tone.dim,
+                  _ => Tone.alarm,
+                },
+              ),
             ),
           ),
         ],
@@ -166,23 +179,34 @@ class _TerminalScreenState extends State<TerminalScreen>
         child: Column(
           children: [
             if (_offerReadOnly)
-              MaterialBanner(
-                content: const Text(
-                  'Typing into a session outside a sleeve needs a device '
-                  'paired with --host-shell. You can still watch it.',
+              Padding(
+                padding: const EdgeInsets.all(Tokens.gap),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: NoteStrip(
+                        'Typing into a session outside a sleeve needs a device '
+                        'paired with --host-shell. You can still watch it.',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: _reconnectReadOnly,
+                      child: const Text('VIEW READ-ONLY'),
+                    ),
+                  ],
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: _reconnectReadOnly,
-                    child: const Text('View read-only'),
-                  ),
-                ],
               ),
             Expanded(
-              child: TerminalView(
-                _terminal,
-                autofocus: true,
-                textStyle: terminalTextStyle,
+              child: Container(
+                color: Tokens.of(context).p.glass,
+                padding: const EdgeInsets.all(6),
+                child: TerminalView(
+                  _terminal,
+                  autofocus: true,
+                  textStyle: terminalTextStyle,
+                  theme: terminalTheme(context),
+                ),
               ),
             ),
             if (!_readOnly) ...[
