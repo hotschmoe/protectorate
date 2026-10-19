@@ -295,10 +295,57 @@ func TestStreamableHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ms := httptest.NewServer(HTTPHandler(srv))
+	const bridgeToken = "bridge-secret"
+	ms := httptest.NewServer(HTTPHandler(srv, bridgeToken))
 	t.Cleanup(ms.Close)
+
+	denied := []struct {
+		name   string
+		header string
+	}{
+		{"no header", ""},
+		{"wrong token", "Bearer nope"},
+		{"wrong scheme", "Basic " + bridgeToken},
+		{"bare token", bridgeToken},
+		{"prefix of token", "Bearer bridge"},
+		{"empty bearer", "Bearer "},
+	}
+	for _, tt := range denied {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodPost, ms.URL, strings.NewReader("{}"))
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status = %d", res.StatusCode)
+			}
+		})
+	}
+	t.Run("empty configured token denies all", func(t *testing.T) {
+		open := httptest.NewServer(HTTPHandler(srv, ""))
+		defer open.Close()
+		req, _ := http.NewRequest(http.MethodPost, open.URL, strings.NewReader("{}"))
+		req.Header.Set("Authorization", "Bearer ")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d", res.StatusCode)
+		}
+	})
+
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).
-		Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: ms.URL}, nil)
+		Connect(context.Background(), &mcp.StreamableClientTransport{
+			Endpoint:   ms.URL,
+			HTTPClient: &http.Client{Transport: headerToken(bridgeToken)},
+		}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,4 +353,12 @@ func TestStreamableHTTP(t *testing.T) {
 	if text, isErr := call(t, cs, "hub_get_status", nil); isErr || !strings.Contains(text, `"version":"test"`) {
 		t.Fatalf("%q %v", text, isErr)
 	}
+}
+
+type headerToken string
+
+func (h headerToken) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+string(h))
+	return http.DefaultTransport.RoundTrip(r)
 }

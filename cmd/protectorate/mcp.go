@@ -31,10 +31,11 @@ What the bridge may actually do is set by its token: run it with a scoped token
 create'. See docs/mcp.md and docs/auth.md.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			hc, err := o.httpClient()
+			tok, err := o.token()
 			if err != nil {
 				return err
 			}
+			hc := &http.Client{Transport: bearer{tok: tok, next: http.DefaultTransport}}
 			srv, err := mcpbridge.NewServer(mcpbridge.Config{
 				HubURL: o.hubURL, HTTPClient: hc, Version: version, Filter: f,
 			})
@@ -51,10 +52,10 @@ create'. See docs/mcp.md and docs/auth.md.`,
 				return err
 			}
 			if host, _, _ := net.SplitHostPort(l.Addr().String()); !net.ParseIP(host).IsLoopback() {
-				fmt.Fprintln(cmd.ErrOrStderr(), "warning: MCP HTTP endpoint has no authentication and acts with its token; bind to loopback")
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: MCP HTTP endpoint is not on loopback; the bearer token crosses the network in cleartext, so bind to loopback or a tailnet address")
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "mcp listening on http://%s\n", l.Addr())
-			hs := &http.Server{Handler: mcpbridge.HTTPHandler(srv), ReadHeaderTimeout: 10 * time.Second}
+			hs := &http.Server{Handler: mcpbridge.HTTPHandler(srv, tok), ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				<-ctx.Done()
 				sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -67,7 +68,7 @@ create'. See docs/mcp.md and docs/auth.md.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&httpAddr, "http", "", "serve streamable HTTP on this address instead of stdio, e.g. 127.0.0.1:7480")
+	c.Flags().StringVar(&httpAddr, "http", "", "serve streamable HTTP on this address instead of stdio, e.g. 127.0.0.1:7480; clients must send the bridge's token as a bearer")
 	c.Flags().StringSliceVar(&f.Allow, "allow", nil, "glob of tool names to serve (default: read-only tools); repeatable")
 	c.Flags().StringSliceVar(&f.Deny, "deny", nil, "glob of tool names to hide; wins over --allow; repeatable")
 	return c

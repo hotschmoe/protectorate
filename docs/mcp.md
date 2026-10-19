@@ -83,11 +83,18 @@ Streamable HTTP, for bridges that cannot spawn a process:
 
 ```
 protectorate mcp --http 127.0.0.1:7480
-claude mcp add --transport http protectorate http://127.0.0.1:7480
+claude mcp add --transport http protectorate http://127.0.0.1:7480 \
+  --header "Authorization: Bearer $(cat $PROTECTORATE_HOME/token)"
 ```
 
-The HTTP endpoint has no authentication of its own and acts with the bridge's token.
-Keep it on loopback.
+Every HTTP request must carry the bridge's own hub token as a bearer, or it
+gets 401. The endpoint acts with that token, so only a caller who already holds
+it can use it; this reuses the existing token machinery instead of adding a
+second secret. Requiring the bearer was chosen over only refusing non-loopback
+binds because a loopback bind still lets any local process or user, and any
+web page that can reach localhost, drive the bridge. Non-loopback binds stay
+allowed with a warning, since the token then crosses the network in cleartext:
+use a tailnet address.
 
 ## Example tool list (`--allow '*'`)
 

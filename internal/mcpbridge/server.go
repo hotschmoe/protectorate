@@ -2,6 +2,8 @@ package mcpbridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,9 +50,22 @@ func NewServer(cfg Config) (*mcp.Server, error) {
 	return srv, nil
 }
 
-// HTTPHandler serves the same tools over streamable HTTP.
-func HTTPHandler(srv *mcp.Server) http.Handler {
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+// HTTPHandler serves the same tools over streamable HTTP. Every request must
+// present token, the credential the bridge itself uses against the hub, as a
+// bearer: reaching the endpoint must not be enough to inherit its authority.
+func HTTPHandler(srv *mcp.Server, token string) http.Handler {
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	want := sha256.Sum256([]byte(token))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		sum := sha256.Sum256([]byte(got))
+		if token == "" || !ok || subtle.ConstantTimeCompare(sum[:], want[:]) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "missing or invalid bearer token", http.StatusUnauthorized)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	})
 }
 
 func annotations(def ToolDef) *mcp.ToolAnnotations {
