@@ -690,5 +690,19 @@
       "type": "object"
     },
     "name": "sleeve_spawn_sleeve"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetStatus returns the hub's tailnet identity and every peer it knows. FAILED_PRECONDITION when the tailnet is not enabled on this hub.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "tailnet_get_status"
   }
 ]
