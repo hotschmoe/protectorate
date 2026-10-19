@@ -323,6 +323,12 @@ class NodeDetail extends StatelessWidget {
             age: age,
           ),
           if (badges.isNotEmpty) AlertStrip(badges: badges),
+          if (isCareNode(status))
+            const Annunciator(
+              key: ValueKey('tier-care'),
+              label: 'CARE',
+              tone: Tone.info,
+            ),
           Text(
             [
               status.node.address,

@@ -35,13 +35,13 @@ class JobTarget extends $pb.GeneratedMessage {
     $core.String? leaseId,
     $core.String? node,
     $0.NodeSelector? selector,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
   }) {
     final result = JobTarget._();
     if (leaseId != null) result.leaseId = leaseId;
     if (node != null) result.node = node;
     if (selector != null) result.selector = selector;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     return result;
   }
 
@@ -70,7 +70,7 @@ class JobTarget extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'node')
     ..aOM<$0.NodeSelector>(3, _omitFieldNames ? '' : 'selector',
         subBuilder: $0.NodeSelector.$_createMessage)
-    ..aOB(4, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(4, _omitFieldNames ? '' : 'allowCare')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -134,15 +134,15 @@ class JobTarget extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $0.NodeSelector ensureSelector() => $_ensure(2);
 
-  /// allow_family admits nodes of tier "family".
+  /// allow_care admits nodes of tier "care".
   @$pb.TagNumber(4)
-  $core.bool get allowFamily => $_getBF(3);
+  $core.bool get allowCare => $_getBF(3);
   @$pb.TagNumber(4)
-  set allowFamily($core.bool value) => $_setBool(3, value);
+  set allowCare($core.bool value) => $_setBool(3, value);
   @$pb.TagNumber(4)
-  $core.bool hasAllowFamily() => $_has(3);
+  $core.bool hasAllowCare() => $_has(3);
   @$pb.TagNumber(4)
-  void clearAllowFamily() => $_clearField(4);
+  void clearAllowCare() => $_clearField(4);
 }
 
 /// GitSource ships one commit of a repository on the hub.

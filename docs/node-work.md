@@ -22,11 +22,21 @@ built yet unless marked **(built)**.
 
 A `care` node can never be relied on for work: the scheduler and lease
 selection skip it, and `--on <care node>` is refused unless the token carries
-an explicit grant for that node. Today the tiers are named `server|family`
-and every node was enrolled as `server`; the migration renames them to
-`shared|care` (tags `tag:tier-shared|care`, flags, docs) in one change, and
-`kidsbox` moves to `care`. "Pool" stays the name of tailnet reachability
-groups (`tag:pool-X`), which is a different thing.
+an explicit grant for that node. "Pool" stays the name of tailnet
+reachability groups (`tag:pool-X`), which is a different thing.
+
+**(built)** The tiers were named `server|family` until 2026-10-20 and every
+node was enrolled as `server`. They are now `shared|care` everywhere: the
+inventory (`nodes.yaml`, `hosts.md`), the tailnet tags `tag:tier-shared|care`
+(the policy owns only these), `node invite --tier`, `node add --tier`, the
+`allow_care` request fields and `--allow-care` flags, `node show`, and the
+app. `protectorate node tier <name> shared|care` (owner only,
+`NodeService.SetNodeTier`) retags the machine through headscale's API, keeping
+its other tags and dropping any other `tag:tier-*`, then records the tier;
+the hub's own node is always `shared`, and an invited node that has not
+joined is re-invited with `--tier` instead. Headscale keeps a retired
+`tag:tier-server` on a machine after the policy stops owning it, so nodes
+keep working until `node tier` retags them.
 
 ## Jobs today (built)
 

@@ -34,10 +34,25 @@ type recordingAdmin struct {
 	expired  []uint64
 	revoked  []string
 	enrolled map[string]bool
+	tiers    map[string]string
+	tierErr  error
 }
 
 func newRecordingAdmin() *recordingAdmin {
-	return &recordingAdmin{invites: map[uint64]string{}, enrolled: map[string]bool{}}
+	return &recordingAdmin{invites: map[uint64]string{}, enrolled: map[string]bool{}, tiers: map[string]string{}}
+}
+
+func (a *recordingAdmin) SetTier(_ context.Context, name, tier string) (bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.tierErr != nil {
+		return false, a.tierErr
+	}
+	if !a.enrolled[name] {
+		return false, nil
+	}
+	a.tiers[name] = tier
+	return true, nil
 }
 
 func (a *recordingAdmin) ControlURL() string { return "http://hs.lan:7480" }
@@ -215,7 +230,7 @@ func TestInviteNodeRecordsAndReissues(t *testing.T) {
 	e := newInviteEnv(t, true)
 	c := e.client(testToken)
 	ctx := context.Background()
-	res, err := c.InviteNode(ctx, connect.NewRequest(&pb.InviteNodeRequest{Name: "office", Tier: "family", Pools: []string{"gpu"}}))
+	res, err := c.InviteNode(ctx, connect.NewRequest(&pb.InviteNodeRequest{Name: "office", Tier: "care", Pools: []string{"gpu"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,11 +246,11 @@ func TestInviteNodeRecordsAndReissues(t *testing.T) {
 	if d := time.Until(r.ExpiresAt.AsTime()); d < 59*time.Minute || d > time.Hour {
 		t.Errorf("expires in %s", d)
 	}
-	if got := e.tn.invites[1]; got != "family gpu" {
+	if got := e.tn.invites[1]; got != "care gpu" {
 		t.Errorf("invited as %q", got)
 	}
 	info, err := e.h.nodes.inv.Get("office")
-	if err != nil || !info.Invited || info.InviteKeyId != 1 || info.Tier != "family" || !slices.Equal(info.Tags, []string{"pool-gpu"}) {
+	if err != nil || !info.Invited || info.InviteKeyId != 1 || info.Tier != "care" || !slices.Equal(info.Tags, []string{"pool-gpu"}) {
 		t.Fatalf("inventory %v %v", info, err)
 	}
 
@@ -479,6 +494,62 @@ func TestRemoveNodeDrains(t *testing.T) {
 				if !drained {
 					t.Errorf("no draining step with the running job: %v", r.steps)
 				}
+			}
+		})
+	}
+}
+
+func TestSetNodeTier(t *testing.T) {
+	e := newInviteEnv(t, true)
+	ctx := context.Background()
+	star := e.mint(t, "*")
+	e.tn.enroll("peer")
+	if _, err := e.h.nodes.inv.Add(&pb.NodeInfo{Name: "byaddr", Address: "10.0.0.9"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.client(testToken).InviteNode(ctx, connect.NewRequest(&pb.InviteNodeRequest{Name: "fresh"})); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		tok      string
+		node     string
+		tier     string
+		tierErr  error
+		want     connect.Code
+		wantTag  string
+		wantTier string
+	}{
+		{"star token is not the owner", star, "peer", "care", nil, connect.CodePermissionDenied, "", "shared"},
+		{"bad tier", testToken, "peer", "family", nil, connect.CodeInvalidArgument, "", "shared"},
+		{"unknown node", testToken, "ghost", "care", nil, connect.CodeNotFound, "", ""},
+		{"hub's own node", testToken, testSelf.Name, "care", nil, connect.CodeFailedPrecondition, "", ""},
+		{"invited, not joined", testToken, "fresh", "care", nil, connect.CodeFailedPrecondition, "", "shared"},
+		{"tailnet fails, inventory unchanged", testToken, "peer", "care", errors.New("headscale down"), connect.CodeUnavailable, "", "shared"},
+		{"enrolled node retagged", testToken, "peer", "care", nil, 0, "care", "care"},
+		{"node outside the tailnet", testToken, "byaddr", "CARE", nil, 0, "", "care"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e.tn.mu.Lock()
+			e.tn.tierErr = tt.tierErr
+			delete(e.tn.tiers, tt.node)
+			e.tn.mu.Unlock()
+			res, err := e.client(tt.tok).SetNodeTier(ctx, connect.NewRequest(&pb.SetNodeTierRequest{Name: tt.node, Tier: tt.tier}))
+			if code(err) != tt.want {
+				t.Fatalf("code %v (%v), want %v", code(err), err, tt.want)
+			}
+			if err == nil && res.Msg.Tier != tt.wantTier {
+				t.Fatalf("response tier %q", res.Msg.Tier)
+			}
+			e.tn.mu.Lock()
+			tag := e.tn.tiers[tt.node]
+			e.tn.mu.Unlock()
+			if tag != tt.wantTag {
+				t.Fatalf("tailnet tier %q, want %q", tag, tt.wantTag)
+			}
+			if info, err := e.h.nodes.inv.Get(tt.node); err == nil && info.Tier != tt.wantTier {
+				t.Fatalf("inventory tier %q, want %q", info.Tier, tt.wantTier)
 			}
 		})
 	}

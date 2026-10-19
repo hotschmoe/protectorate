@@ -168,7 +168,7 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     NodeSelector? selector,
     $core.String? holder,
     $0.Duration? ttl,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
     $core.bool? wait,
     $core.int? priority,
   }) {
@@ -177,7 +177,7 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     if (selector != null) result.selector = selector;
     if (holder != null) result.holder = holder;
     if (ttl != null) result.ttl = ttl;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     if (wait != null) result.wait = wait;
     if (priority != null) result.priority = priority;
     return result;
@@ -210,7 +210,7 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     ..aOS(3, _omitFieldNames ? '' : 'holder')
     ..aOM<$0.Duration>(4, _omitFieldNames ? '' : 'ttl',
         subBuilder: $0.Duration.$_createMessage)
-    ..aOB(5, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(5, _omitFieldNames ? '' : 'allowCare')
     ..aOB(6, _omitFieldNames ? '' : 'wait')
     ..aI(7, _omitFieldNames ? '' : 'priority')
     ..hasRequiredFields = false;
@@ -289,15 +289,15 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $0.Duration ensureTtl() => $_ensure(3);
 
-  /// allow_family admits nodes of tier "family", which are skipped otherwise.
+  /// allow_care admits nodes of tier "care", which are skipped otherwise.
   @$pb.TagNumber(5)
-  $core.bool get allowFamily => $_getBF(4);
+  $core.bool get allowCare => $_getBF(4);
   @$pb.TagNumber(5)
-  set allowFamily($core.bool value) => $_setBool(4, value);
+  set allowCare($core.bool value) => $_setBool(4, value);
   @$pb.TagNumber(5)
-  $core.bool hasAllowFamily() => $_has(4);
+  $core.bool hasAllowCare() => $_has(4);
   @$pb.TagNumber(5)
-  void clearAllowFamily() => $_clearField(5);
+  void clearAllowCare() => $_clearField(5);
 
   /// wait queues the caller when the resource is held instead of failing.
   @$pb.TagNumber(6)

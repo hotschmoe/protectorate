@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -299,6 +300,38 @@ func (a *Admin) InviteNode(ctx context.Context, name, tier string, pools []strin
 		tags = append(tags, PoolTag(p))
 	}
 	return a.Invite(ctx, name, tags, ttl)
+}
+
+// SetTier replaces the tier tag of the enrolled machine called name, keeping
+// its other tags. It reports false when no machine of that name is enrolled.
+func (a *Admin) SetTier(ctx context.Context, name, tier string) (bool, error) {
+	if !slices.Contains(Tiers, tier) {
+		return false, fmt.Errorf("tier must be one of %s", strings.Join(Tiers, ", "))
+	}
+	n, err := a.find(ctx, name)
+	if errors.Is(err, errNoNode) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	tags := retier(n.Tags, tier)
+	if err := a.call(ctx, http.MethodPost, "/api/v1/node/"+strconv.FormatUint(n.ID, 10)+"/tags", map[string][]string{"tags": tags}, nil); err != nil {
+		return false, fmt.Errorf("tag node %s: %w", name, err)
+	}
+	return true, nil
+}
+
+// retier returns tags with every tier tag replaced by the one for tier.
+func retier(tags []string, tier string) []string {
+	out := []string{TierTag(tier)}
+	for _, t := range tags {
+		if !strings.HasPrefix(t, tierTagPrefix) {
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SanitizeLabel lowercases s into a DNS label, replacing other runes with '-'.

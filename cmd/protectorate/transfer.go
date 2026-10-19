@@ -16,14 +16,14 @@ import (
 )
 
 type transferFlags struct {
-	overwrite, noCompress, allowFamily bool
+	overwrite, noCompress, allowCare bool
 }
 
 func (t *transferFlags) bind(c *cobra.Command) {
 	f := c.Flags()
 	f.BoolVarP(&t.overwrite, "force", "f", false, "replace an existing destination")
 	f.BoolVar(&t.noCompress, "no-compress", false, "send chunks uncompressed (already-compressed data is detected and sent as is anyway)")
-	f.BoolVar(&t.allowFamily, "allow-family", false, "allow nodes of tier family")
+	f.BoolVar(&t.allowCare, "allow-care", false, "allow nodes of tier care")
 }
 
 func nodePutCmd(o *opts) *cobra.Command {
@@ -62,7 +62,7 @@ type putClient interface {
 }
 
 func putFile(ctx context.Context, cl putClient, name, local, remote string, tf transferFlags) (*pb.PutFileResponse, int64, uint64, error) {
-	base := &pb.PutFileRequest{Name: name, AllowFamily: tf.allowFamily, Path: remote, Overwrite: tf.overwrite}
+	base := &pb.PutFileRequest{Name: name, AllowCare: tf.allowCare, Path: remote, Overwrite: tf.overwrite}
 	return node.Push(local, !tf.noCompress, base, func(req *pb.PutFileRequest) (*pb.PutFileResponse, error) {
 		r, err := cl.PutFile(ctx, connect.NewRequest(req))
 		if err != nil {
@@ -109,7 +109,7 @@ type getClient interface {
 }
 
 func getFile(ctx context.Context, cl getClient, node, remote, local string, tf transferFlags) (t *pb.FileTrailer, wire int64, err error) {
-	stream, err := cl.GetFile(ctx, connect.NewRequest(&pb.GetFileRequest{Name: node, AllowFamily: tf.allowFamily, Path: remote, NoCompress: tf.noCompress}))
+	stream, err := cl.GetFile(ctx, connect.NewRequest(&pb.GetFileRequest{Name: node, AllowCare: tf.allowCare, Path: remote, NoCompress: tf.noCompress}))
 	if err != nil {
 		return nil, 0, err
 	}

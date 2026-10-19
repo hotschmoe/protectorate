@@ -97,6 +97,8 @@ const (
 	// NodeServiceGetDeskPolicyProcedure is the fully-qualified name of the NodeService's GetDeskPolicy
 	// RPC.
 	NodeServiceGetDeskPolicyProcedure = "/protectorate.v1.NodeService/GetDeskPolicy"
+	// NodeServiceSetNodeTierProcedure is the fully-qualified name of the NodeService's SetNodeTier RPC.
+	NodeServiceSetNodeTierProcedure = "/protectorate.v1.NodeService/SetNodeTier"
 )
 
 // NodeAgentServiceClient is a client for the protectorate.v1.NodeAgentService service.
@@ -576,6 +578,10 @@ type NodeServiceClient interface {
 	// GetDeskPolicy returns a node's policy, its current evaluation and who
 	// holds the desktop lease.
 	GetDeskPolicy(context.Context, *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error)
+	// SetNodeTier changes a node's tier in the inventory and its
+	// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+	// owner token may call it. The hub's own node is always "shared".
+	SetNodeTier(context.Context, *connect.Request[v1.SetNodeTierRequest]) (*connect.Response[v1.NodeInfo], error)
 }
 
 // NewNodeServiceClient constructs a client for the protectorate.v1.NodeService service. By default,
@@ -664,6 +670,12 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("GetDeskPolicy")),
 			connect.WithClientOptions(opts...),
 		),
+		setNodeTier: connect.NewClient[v1.SetNodeTierRequest, v1.NodeInfo](
+			httpClient,
+			baseURL+NodeServiceSetNodeTierProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("SetNodeTier")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -681,6 +693,7 @@ type nodeServiceClient struct {
 	updateNode     *connect.Client[v1.UpdateNodeRequest, v1.UpdateNodeProgress]
 	setDeskPolicy  *connect.Client[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus]
 	getDeskPolicy  *connect.Client[v1.GetDeskPolicyRequest, v1.DeskPolicyStatus]
+	setNodeTier    *connect.Client[v1.SetNodeTierRequest, v1.NodeInfo]
 }
 
 // ListNodes calls protectorate.v1.NodeService.ListNodes.
@@ -741,6 +754,11 @@ func (c *nodeServiceClient) SetDeskPolicy(ctx context.Context, req *connect.Requ
 // GetDeskPolicy calls protectorate.v1.NodeService.GetDeskPolicy.
 func (c *nodeServiceClient) GetDeskPolicy(ctx context.Context, req *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {
 	return c.getDeskPolicy.CallUnary(ctx, req)
+}
+
+// SetNodeTier calls protectorate.v1.NodeService.SetNodeTier.
+func (c *nodeServiceClient) SetNodeTier(ctx context.Context, req *connect.Request[v1.SetNodeTierRequest]) (*connect.Response[v1.NodeInfo], error) {
+	return c.setNodeTier.CallUnary(ctx, req)
 }
 
 // NodeServiceHandler is an implementation of the protectorate.v1.NodeService service.
@@ -810,6 +828,10 @@ type NodeServiceHandler interface {
 	// GetDeskPolicy returns a node's policy, its current evaluation and who
 	// holds the desktop lease.
 	GetDeskPolicy(context.Context, *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error)
+	// SetNodeTier changes a node's tier in the inventory and its
+	// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+	// owner token may call it. The hub's own node is always "shared".
+	SetNodeTier(context.Context, *connect.Request[v1.SetNodeTierRequest]) (*connect.Response[v1.NodeInfo], error)
 }
 
 // NewNodeServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -894,6 +916,12 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("GetDeskPolicy")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeServiceSetNodeTierHandler := connect.NewUnaryHandler(
+		NodeServiceSetNodeTierProcedure,
+		svc.SetNodeTier,
+		connect.WithSchema(nodeServiceMethods.ByName("SetNodeTier")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeServiceListNodesProcedure:
@@ -920,6 +948,8 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServiceSetDeskPolicyHandler.ServeHTTP(w, r)
 		case NodeServiceGetDeskPolicyProcedure:
 			nodeServiceGetDeskPolicyHandler.ServeHTTP(w, r)
+		case NodeServiceSetNodeTierProcedure:
+			nodeServiceSetNodeTierHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -975,4 +1005,8 @@ func (UnimplementedNodeServiceHandler) SetDeskPolicy(context.Context, *connect.R
 
 func (UnimplementedNodeServiceHandler) GetDeskPolicy(context.Context, *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.GetDeskPolicy is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) SetNodeTier(context.Context, *connect.Request[v1.SetNodeTierRequest]) (*connect.Response[v1.NodeInfo], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.SetNodeTier is not implemented"))
 }

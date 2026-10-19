@@ -388,6 +388,14 @@ class NodeCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       const Annunciator(label: 'REMOVING', tone: Tone.warn),
                     ],
+                    if (isCareNode(status)) ...[
+                      const SizedBox(width: 8),
+                      const Annunciator(
+                        key: ValueKey('tier-care'),
+                        label: 'CARE',
+                        tone: Tone.info,
+                      ),
+                    ],
                   ],
                 ),
               ),

@@ -141,6 +141,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.SetDeskPolicyRequest request);
   $async.Future<$6.DeskPolicyStatus> getDeskPolicy(
       $pb.ServerContext ctx, $6.GetDeskPolicyRequest request);
+  $async.Future<$6.NodeInfo> setNodeTier(
+      $pb.ServerContext ctx, $6.SetNodeTierRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -168,6 +170,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return $6.SetDeskPolicyRequest();
       case 'GetDeskPolicy':
         return $6.GetDeskPolicyRequest();
+      case 'SetNodeTier':
+        return $6.SetNodeTierRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -200,6 +204,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return setDeskPolicy(ctx, request as $6.SetDeskPolicyRequest);
       case 'GetDeskPolicy':
         return getDeskPolicy(ctx, request as $6.GetDeskPolicyRequest);
+      case 'SetNodeTier':
+        return setNodeTier(ctx, request as $6.SetNodeTierRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

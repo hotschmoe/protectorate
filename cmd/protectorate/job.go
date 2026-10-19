@@ -50,8 +50,8 @@ func jobCmd(o *opts) *cobra.Command {
 
 // parseTarget reads --on: a lease id, a selector such as os=windows,arch=amd64
 // or gpu:adreno, or a node name. Node names have no '=' or ':'.
-func parseTarget(on string, allowFamily bool) (*pb.JobTarget, error) {
-	t := &pb.JobTarget{AllowFamily: allowFamily}
+func parseTarget(on string, allowCare bool) (*pb.JobTarget, error) {
+	t := &pb.JobTarget{AllowCare: allowCare}
 	switch {
 	case on == "":
 		return nil, errors.New("--on is required: a node, a lease id or a selector like os=windows,arch=amd64")
@@ -140,7 +140,7 @@ func jobRunCmd(o *opts) *cobra.Command {
 	var on, gitSrc, artifact, workdir string
 	var globs, envPairs []string
 	var timeout time.Duration
-	var allowFamily bool
+	var allowCare bool
 	c := &cobra.Command{
 		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
@@ -164,7 +164,7 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 			if cmd.ArgsLenAtDash() != 0 {
 				return errors.New("usage: job run [flags] -- <cmd...>")
 			}
-			target, err := parseTarget(on, allowFamily)
+			target, err := parseTarget(on, allowCare)
 			if err != nil {
 				return err
 			}
@@ -207,7 +207,7 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 	f.StringArrayVar(&globs, "artifact-glob", nil, "fetch files matching this glob back to the hub (repeatable)")
 	f.StringArrayVarP(&envPairs, "env", "e", nil, "environment variable KEY=VALUE (repeatable)")
 	f.DurationVar(&timeout, "timeout", time.Hour, "kill the command after this long (at most 24h)")
-	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")
+	f.BoolVar(&allowCare, "allow-care", false, "allow nodes of tier care")
 	return c
 }
 
@@ -502,7 +502,7 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 func jobTestCrossCmd(o *opts) *cobra.Command {
 	var goos, goarch, on string
 	var timeout time.Duration
-	var allowFamily bool
+	var allowCare bool
 	c := &cobra.Command{
 		Use:   "test-cross --goos <os> --goarch <arch> <packages...> [-- <test flags>]",
 		Short: "Compile Go tests here and run the test binaries on a matching node",
@@ -524,7 +524,7 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 			if len(pkgArgs) == 0 {
 				return errors.New("name at least one package")
 			}
-			return testCross(cmd, o, goos, goarch, on, timeout, allowFamily, pkgArgs, testArgs)
+			return testCross(cmd, o, goos, goarch, on, timeout, allowCare, pkgArgs, testArgs)
 		},
 	}
 	f := c.Flags()
@@ -532,13 +532,13 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 	f.StringVar(&goarch, "goarch", "", "target GOARCH (required)")
 	f.StringVar(&on, "on", "", "run on this node or lease instead of picking a matching node")
 	f.DurationVar(&timeout, "timeout", 10*time.Minute, "per-package run timeout")
-	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")
+	f.BoolVar(&allowCare, "allow-care", false, "allow nodes of tier care")
 	_ = c.MarkFlagRequired("goos")
 	_ = c.MarkFlagRequired("goarch")
 	return c
 }
 
-func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout time.Duration, allowFamily bool, patterns, testArgs []string) error {
+func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout time.Duration, allowCare bool, patterns, testArgs []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	jobCtx, lose := context.WithCancelCause(ctx)
@@ -590,7 +590,7 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout tim
 	}
 	var target *pb.JobTarget
 	if on != "" {
-		if target, err = parseTarget(on, allowFamily); err != nil {
+		if target, err = parseTarget(on, allowCare); err != nil {
 			return err
 		}
 	} else {
@@ -600,7 +600,7 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout tim
 		}
 		res, err := lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{
 			Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{Os: goos, Arch: goarch}},
-			Holder: defaultHolder() + " test-cross", Ttl: durationpb.New(testCrossLeaseTTL), AllowFamily: allowFamily,
+			Holder: defaultHolder() + " test-cross", Ttl: durationpb.New(testCrossLeaseTTL), AllowCare: allowCare,
 		}))
 		if err != nil {
 			return fmt.Errorf("find a %s/%s node: %w", goos, goarch, err)

@@ -152,8 +152,8 @@ type JobTarget struct {
 	//	*JobTarget_Node
 	//	*JobTarget_Selector
 	Target isJobTarget_Target `protobuf_oneof:"target"`
-	// allow_family admits nodes of tier "family".
-	AllowFamily   bool `protobuf:"varint,4,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	// allow_care admits nodes of tier "care".
+	AllowCare     bool `protobuf:"varint,4,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -222,9 +222,9 @@ func (x *JobTarget) GetSelector() *NodeSelector {
 	return nil
 }
 
-func (x *JobTarget) GetAllowFamily() bool {
+func (x *JobTarget) GetAllowCare() bool {
 	if x != nil {
-		return x.AllowFamily
+		return x.AllowCare
 	}
 	return false
 }
@@ -2050,12 +2050,13 @@ var File_protectorate_v1_job_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\n" +
-	"\x19protectorate/v1/job.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bprotectorate/v1/lease.proto\"\xa8\x01\n" +
+	"\x19protectorate/v1/job.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bprotectorate/v1/lease.proto\"\xa4\x01\n" +
 	"\tJobTarget\x12\x1b\n" +
 	"\blease_id\x18\x01 \x01(\tH\x00R\aleaseId\x12\x14\n" +
 	"\x04node\x18\x02 \x01(\tH\x00R\x04node\x12;\n" +
-	"\bselector\x18\x03 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12!\n" +
-	"\fallow_family\x18\x04 \x01(\bR\vallowFamilyB\b\n" +
+	"\bselector\x18\x03 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12\x1d\n" +
+	"\n" +
+	"allow_care\x18\x04 \x01(\bR\tallowCareB\b\n" +
 	"\x06target\"7\n" +
 	"\tGitSource\x12\x12\n" +
 	"\x04repo\x18\x01 \x01(\tR\x04repo\x12\x16\n" +

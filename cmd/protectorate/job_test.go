@@ -31,7 +31,7 @@ func TestParseTarget(t *testing.T) {
 			s := j.GetSelector()
 			return s.Os == "windows" && s.Arch == "amd64" && s.MinFreeMemoryBytes == 8<<30 && s.GpuVramBytes == 24<<30
 		}, false},
-		{"os=windows", func(j *pb.JobTarget) bool { return j.AllowFamily }, false},
+		{"os=windows", func(j *pb.JobTarget) bool { return j.AllowCare }, false},
 		{"gpu:adreno", func(j *pb.JobTarget) bool { return j.GetSelector().GetGpu() == "adreno" }, false},
 		{"os=windows,npu:hexagon,gpu:Arc Pro", func(j *pb.JobTarget) bool {
 			s := j.GetSelector()

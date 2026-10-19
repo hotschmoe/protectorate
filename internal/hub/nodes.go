@@ -115,7 +115,7 @@ func NewNodeMonitor(inv *Inventory, self *pb.NodeInfo, local *node.Collector, op
 
 // LocalNodeInfo describes this machine as the hub's own node.
 func LocalNodeInfo(name, osName, arch string) *pb.NodeInfo {
-	return &pb.NodeInfo{Name: strings.ToLower(name), Address: "local", Os: osName, Arch: arch, Tier: TierServer, Local: true}
+	return &pb.NodeInfo{Name: strings.ToLower(name), Address: "local", Os: osName, Arch: arch, Tier: TierShared, Local: true}
 }
 
 // Run polls immediately and then every Interval until ctx is done.
@@ -534,6 +534,43 @@ func (h *Hub) AddNode(_ context.Context, req *connect.Request[pb.AddNodeRequest]
 		return nil, nodeErr(err)
 	}
 	h.nodes.kick(info)
+	return connect.NewResponse(info), nil
+}
+
+// SetNodeTier retags the node on the tailnet first, then records the tier, so
+// the inventory never claims a tier the network does not carry. A node that
+// is not enrolled (added by address) only changes in the inventory.
+func (h *Hub) SetNodeTier(ctx context.Context, req *connect.Request[pb.SetNodeTierRequest]) (*connect.Response[pb.NodeInfo], error) {
+	name, tier := strings.ToLower(strings.TrimSpace(req.Msg.Name)), strings.ToLower(strings.TrimSpace(req.Msg.Tier))
+	if !ValidTier(tier) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("tier must be %s or %s", TierShared, TierCare))
+	}
+	if name == h.nodes.self.Name {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is the hub's own node, which is always %s", name, TierShared))
+	}
+	prev, err := h.nodes.inv.Get(name)
+	if err != nil {
+		return nil, nodeErr(err)
+	}
+	if prev.Invited {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is invited but has not joined: invite it again with --tier %s", name, tier))
+	}
+	retagged := false
+	if h.tnAdmin != nil {
+		if retagged, err = h.tnAdmin.SetTier(ctx, name, tier); err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("retag %s on the tailnet: %w", name, err))
+		}
+	}
+	info, err := h.nodes.inv.SetTier(name, tier)
+	if err != nil {
+		if retagged {
+			if _, rerr := h.tnAdmin.SetTier(context.WithoutCancel(ctx), name, prev.Tier); rerr != nil {
+				log.Printf("node tier %s: put the tailnet tag back to %s: %v", name, prev.Tier, rerr)
+			}
+		}
+		return nil, nodeErr(err)
+	}
+	h.emit("node.tier", name, nil)
 	return connect.NewResponse(info), nil
 }
 

@@ -240,7 +240,7 @@ func TestSubmitKeyWaitHonorsContext(t *testing.T) {
 }
 
 func TestExpiredLeaseIsReselectable(t *testing.T) {
-	statuses := []*pb.NodeStatus{status("win1", TierServer, pb.NodeFreshness_NODE_FRESHNESS_FRESH, "windows", "amd64", 10, 10, 8, 8<<30)}
+	statuses := []*pb.NodeStatus{status("win1", TierShared, pb.NodeFreshness_NODE_FRESHNESS_FRESH, "windows", "amd64", 10, 10, 8, 8<<30)}
 	sel := &pb.NodeSelector{Os: "windows"}
 	tests := []struct {
 		name    string

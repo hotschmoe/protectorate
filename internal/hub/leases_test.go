@@ -256,17 +256,17 @@ func TestPickNode(t *testing.T) {
 	none := func(string, *int) *pb.Lease { return nil }
 	noJobs := func(string) int { return 0 }
 	fleet := []*pb.NodeStatus{
-		status("busy-win", TierServer, fresh, "windows", "amd64", 90, 50, 8, 8*gib),
-		status("idle-win", TierServer, fresh, "windows", "amd64", 10, 40, 8, 16*gib),
-		status("stale-win", TierServer, stale, "windows", "amd64", 0, 0, 8, 32*gib),
-		status("family-win", TierFamily, fresh, "windows", "amd64", 1, 1, 8, 32*gib),
-		status("arm-linux", TierServer, fresh, "linux", "arm64", 5, 20, 8, 4*gib),
-		status("gpu-box", TierServer, fresh, "linux", "amd64", 50, 50, 16, 64*gib, gpu(0, 20*gib, 24*gib), gpu(1, 2*gib, 24*gib)),
+		status("busy-win", TierShared, fresh, "windows", "amd64", 90, 50, 8, 8*gib),
+		status("idle-win", TierShared, fresh, "windows", "amd64", 10, 40, 8, 16*gib),
+		status("stale-win", TierShared, stale, "windows", "amd64", 0, 0, 8, 32*gib),
+		status("care-win", TierCare, fresh, "windows", "amd64", 1, 1, 8, 32*gib),
+		status("arm-linux", TierShared, fresh, "linux", "arm64", 5, 20, 8, 4*gib),
+		status("gpu-box", TierShared, fresh, "linux", "amd64", 50, 50, 16, 64*gib, gpu(0, 20*gib, 24*gib), gpu(1, 2*gib, 24*gib)),
 	}
 	tests := []struct {
 		name    string
 		sel     *pb.NodeSelector
-		family  bool
+		care    bool
 		busy    func(string) int
 		blocked func(string, *int) *pb.Lease
 		warm    map[string]bool
@@ -276,7 +276,7 @@ func TestPickNode(t *testing.T) {
 	}{
 		{name: "least loaded matching os", sel: &pb.NodeSelector{Os: "windows"}, want: "idle-win", wantGPU: -1},
 		{name: "case insensitive", sel: &pb.NodeSelector{Os: "Windows", Arch: "AMD64"}, want: "idle-win", wantGPU: -1},
-		{name: "family allowed", sel: &pb.NodeSelector{Os: "windows"}, family: true, want: "family-win", wantGPU: -1},
+		{name: "care allowed", sel: &pb.NodeSelector{Os: "windows"}, care: true, want: "care-win", wantGPU: -1},
 		{name: "arch filter", sel: &pb.NodeSelector{Arch: "arm64"}, want: "arm-linux", wantGPU: -1},
 		{name: "min free memory", sel: &pb.NodeSelector{Os: "windows", MinFreeMemoryBytes: 12 * gib}, want: "idle-win", wantGPU: -1},
 		{name: "memory too high", sel: &pb.NodeSelector{MinFreeMemoryBytes: 128 * gib}, wantErr: "no node matches"},
@@ -328,7 +328,7 @@ func TestPickNode(t *testing.T) {
 			if blocked == nil {
 				blocked = none
 			}
-			node, g, err := pickNode(fleet, tt.sel, tt.family, busy, blocked, tt.warm)
+			node, g, err := pickNode(fleet, tt.sel, tt.care, busy, blocked, tt.warm)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || connect.CodeOf(err) != connect.CodeFailedPrecondition {
 					t.Fatalf("err = %v, want %q", err, tt.wantErr)
@@ -352,13 +352,13 @@ func TestPickNode(t *testing.T) {
 func TestNodeFitsAccelerators(t *testing.T) {
 	none := func(string, *int) *pb.Lease { return nil }
 	fresh := pb.NodeFreshness_NODE_FRESHNESS_FRESH
-	snap := status("snap", TierServer, fresh, "windows", "arm64", 5, 30, 12, 16*gib,
+	snap := status("snap", TierShared, fresh, "windows", "arm64", 5, 30, 12, 16*gib,
 		&pb.GpuMetrics{Index: 0, Vendor: "qualcomm", Name: "Qualcomm Adreno X2-90 GPU", Integrated: true})
 	snap.Metrics.Npus = []*pb.AcceleratorMetrics{{Kind: "npu", Vendor: "qualcomm", Name: "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU"}}
-	office := status("office", TierServer, fresh, "windows", "amd64", 5, 30, 20, 16*gib,
+	office := status("office", TierShared, fresh, "windows", "amd64", 5, 30, 20, 16*gib,
 		&pb.GpuMetrics{Index: 0, Vendor: "intel", Name: "Intel Arc Pro B50 Graphics", MemoryUsedBytes: proto.Uint64(3 * gib), MemoryTotalBytes: 16 * gib},
 		&pb.GpuMetrics{Index: 1, Vendor: "intel", Name: "Intel Graphics", Integrated: true})
-	llm := status("llm", TierServer, fresh, "linux", "amd64", 5, 30, 32, 64*gib,
+	llm := status("llm", TierShared, fresh, "linux", "amd64", 5, 30, 32, 64*gib,
 		&pb.GpuMetrics{Index: 0, Vendor: "intel", Name: "Battlemage G31 [Intel Graphics]", MemoryTotalBytes: 32 * gib},
 		&pb.GpuMetrics{Index: 1, Vendor: "intel", Name: "Battlemage G31 [Intel Graphics]", MemoryTotalBytes: 32 * gib})
 	tests := []struct {

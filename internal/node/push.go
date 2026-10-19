@@ -20,7 +20,7 @@ func newTransferID() (string, error) {
 }
 
 // Push sends the file or directory at local as a chunked transfer through
-// send. base carries the destination (Name, AllowFamily, Path, Overwrite);
+// send. base carries the destination (Name, AllowCare, Path, Overwrite);
 // Push fills in the transfer id, kind, mode, offsets and chunks. progress, if
 // set, is called with the uncompressed bytes sent so far after each chunk.
 // wire counts the bytes actually sent, after compression.
@@ -40,7 +40,7 @@ func Push(local string, compress bool, base *pb.PutFileRequest, send func(*pb.Pu
 		kind = pb.FileKind_FILE_KIND_DIRECTORY
 	}
 	call := func(req *pb.PutFileRequest) (*pb.PutFileResponse, error) {
-		req.Name, req.AllowFamily, req.TransferId, req.Path, req.Kind, req.Mode, req.Overwrite = base.Name, base.AllowFamily, id, base.Path, kind, h.Mode, base.Overwrite
+		req.Name, req.AllowCare, req.TransferId, req.Path, req.Kind, req.Mode, req.Overwrite = base.Name, base.AllowCare, id, base.Path, kind, h.Mode, base.Overwrite
 		return send(req)
 	}
 	for {

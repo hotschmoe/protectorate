@@ -24,9 +24,11 @@ import (
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
+// Tiers. A shared node is part of the compute pool; a care node is a machine
+// kept for a person and is never scheduled or leased.
 const (
-	TierServer = "server"
-	TierFamily = "family"
+	TierShared = "shared"
+	TierCare   = "care"
 )
 
 var (
@@ -114,7 +116,7 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 	n.Tier = strings.ToLower(strings.TrimSpace(n.Tier))
 	n.Notes = strings.TrimSpace(n.Notes)
 	if n.Tier == "" {
-		n.Tier = TierServer
+		n.Tier = TierShared
 	}
 	switch {
 	case !nodeNameRe.MatchString(n.Name):
@@ -123,8 +125,8 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 		return nil, fmt.Errorf("%w: %s: address %q must be host, host:port or http(s)://host[:port] with no path or credentials", ErrInvalidNode, n.Name, n.Addr)
 	case n.SSH != "" && !sshAliasRe.MatchString(n.SSH):
 		return nil, fmt.Errorf("%w: %s: ssh alias %q has invalid characters", ErrInvalidNode, n.Name, n.SSH)
-	case n.Tier != TierServer && n.Tier != TierFamily:
-		return nil, fmt.Errorf("%w: %s: tier %q must be %q or %q", ErrInvalidNode, n.Name, n.Tier, TierServer, TierFamily)
+	case !ValidTier(n.Tier):
+		return nil, fmt.Errorf("%w: %s: tier %q must be %q or %q", ErrInvalidNode, n.Name, n.Tier, TierShared, TierCare)
 	}
 	tags := make([]string, 0, len(n.Tags))
 	seen := map[string]bool{}
@@ -142,6 +144,9 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 	n.Tags = tags
 	return &n, nil
 }
+
+// ValidTier reports whether t names a tier.
+func ValidTier(t string) bool { return t == TierShared || t == TierCare }
 
 // validNodeAddr accepts only a bare host or IP with an optional port and an
 // optional http or https scheme. The node token is sent to this address, so
@@ -269,6 +274,28 @@ func (i *Inventory) Remove(name string) error {
 	return fmt.Errorf("%w: %s", ErrNodeNotFound, name)
 }
 
+// SetTier changes a stored node's tier.
+func (i *Inventory) SetTier(name, tier string) (*pb.NodeInfo, error) {
+	if !ValidTier(tier) {
+		return nil, fmt.Errorf("%w: tier %q must be %q or %q", ErrInvalidNode, tier, TierShared, TierCare)
+	}
+	name = strings.ToLower(name)
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for k, r := range i.nodes {
+		if r.Name != name {
+			continue
+		}
+		next := append([]nodeRecord(nil), i.nodes...)
+		next[k].Tier = tier
+		if err := i.commit(next); err != nil {
+			return nil, err
+		}
+		return next[k].info(), nil
+	}
+	return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, name)
+}
+
 // SetPlatform records the os/arch a node reported; it is a no-op when equal.
 func (i *Inventory) SetPlatform(name, osName, arch string) error {
 	i.mu.Lock()
@@ -341,7 +368,7 @@ func renderHosts(local *pb.NodeInfo, nodes []nodeRecord) []byte {
 	}
 	b.WriteString("\n")
 	b.WriteString("- Reach a node with `ssh <SSH alias>` when one is set.\n")
-	b.WriteString("- Tiers: `server` (machines for unattended work), `family` (machines used by people).\n")
+	b.WriteString("- Tiers: `shared` (the compute pool: jobs and leases, sandboxed), `care` (a machine kept for a person: never scheduled or leased).\n")
 	b.WriteString("- Live CPU, GPU, memory and disk per node: `protectorate node ls`, `protectorate node show <name>`.\n")
 	return b.Bytes()
 }

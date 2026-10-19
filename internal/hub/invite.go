@@ -31,6 +31,9 @@ type TailnetAdmin interface {
 	// Revoke expires and deletes an enrolled machine; false means none has
 	// that name.
 	Revoke(ctx context.Context, name string) (bool, error)
+	// SetTier replaces the tier tag of an enrolled machine; false means none
+	// has that name.
+	SetTier(ctx context.Context, name, tier string) (bool, error)
 }
 
 // SetTailnetAdmin enables InviteNode, the install scripts and the tailnet
@@ -61,9 +64,9 @@ func (h *Hub) InviteNode(ctx context.Context, req *connect.Request[pb.InviteNode
 	if h.tnAdmin == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errNoTailnet)
 	}
-	tier := cmp.Or(m.Tier, TierServer)
-	if tier != TierServer && tier != TierFamily {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("tier must be %s or %s", TierServer, TierFamily))
+	tier := cmp.Or(m.Tier, TierShared)
+	if !ValidTier(tier) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("tier must be %s or %s", TierShared, TierCare))
 	}
 	ttl := defaultInviteTTL
 	if m.Ttl != nil {

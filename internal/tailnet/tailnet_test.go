@@ -227,7 +227,7 @@ func TestPolicy(t *testing.T) {
 			if !slices.Equal(got, tt.rules) {
 				t.Errorf("rules\n got %v\nwant %v", got, tt.rules)
 			}
-			for _, tag := range []string{TagHub, TagNode, TagClient, TierTag("server"), TierTag("family")} {
+			for _, tag := range []string{TagHub, TagNode, TagClient, TierTag("shared"), TierTag("care")} {
 				if len(p.TagOwners[tag]) == 0 {
 					t.Errorf("tag %s has no owner", tag)
 				}
@@ -281,7 +281,7 @@ func TestIdentify(t *testing.T) {
 		{"multi-tag with hub", whoFake(&tailcfg.Node{Name: "h.ts.net.", Tags: []string{TagNode, TagHub}}, nil), []string{TagHub}, true},
 		{"client allowed on api", whoFake(&tailcfg.Node{Name: "phone.ts.net.", Tags: []string{TagClient}}, nil), []string{TagHub, TagClient}, true},
 		{"hub allowed on api", whoFake(&tailcfg.Node{Name: "hub.ts.net.", Tags: []string{TagHub}}, nil), []string{TagHub, TagClient}, true},
-		{"node rejected on api", whoFake(&tailcfg.Node{Tags: []string{TagNode, TierTag("server")}}, nil), []string{TagHub, TagClient}, false},
+		{"node rejected on api", whoFake(&tailcfg.Node{Tags: []string{TagNode, TierTag("shared")}}, nil), []string{TagHub, TagClient}, false},
 		{"pool tag alone rejected", whoFake(&tailcfg.Node{Tags: []string{PoolTag("build")}}, nil), []string{TagHub, TagClient}, false},
 		{"whois error fails closed", whoFake(nil, errors.New("boom")), []string{TagHub}, false},
 		{"no node fails closed", whoFake(nil, nil), []string{TagHub}, false},
@@ -599,6 +599,29 @@ func TestQuietDERPLog(t *testing.T) {
 			quietDERPLog(func(string, ...any) { n++ })(tt.format, tt.args...)
 			if (n == 1) != tt.logged {
 				t.Fatalf("logged %d times, want logged=%v", n, tt.logged)
+			}
+		})
+	}
+}
+
+func TestRetier(t *testing.T) {
+	tests := []struct {
+		name string
+		tags []string
+		tier string
+		want []string
+	}{
+		{"replace", []string{TagNode, TierTag("shared"), PoolTag("gpu")}, "care", []string{TagNode, PoolTag("gpu"), TierTag("care")}},
+		{"same", []string{TagNode, TierTag("care")}, "care", []string{TagNode, TierTag("care")}},
+		{"none yet", []string{TagNode}, "shared", []string{TagNode, TierTag("shared")}},
+		{"retired tier tag dropped", []string{TagNode, "tag:tier-server"}, "shared", []string{TagNode, TierTag("shared")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := retier(tt.tags, tt.tier)
+			slices.Sort(tt.want)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("retier(%v, %s) = %v, want %v", tt.tags, tt.tier, got, tt.want)
 			}
 		})
 	}

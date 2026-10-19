@@ -169,6 +169,20 @@ final $typed_data.Uint8List nodeSetupStageDescriptor = $convert.base64Decode(
     'ChhOT0RFX1NFVFVQX1NUQUdFX01FVFJJQ1MQAxIaChZOT0RFX1NFVFVQX1NUQUdFX1JFQURZEA'
     'QSHgoaTk9ERV9TRVRVUF9TVEFHRV9BVFRFTlRJT04QBQ==');
 
+@$core.Deprecated('Use setNodeTierRequestDescriptor instead')
+const SetNodeTierRequest$json = {
+  '1': 'SetNodeTierRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'tier', '3': 2, '4': 1, '5': 9, '10': 'tier'},
+  ],
+};
+
+/// Descriptor for `SetNodeTierRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List setNodeTierRequestDescriptor = $convert.base64Decode(
+    'ChJTZXROb2RlVGllclJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRISCgR0aWVyGAIgASgJUg'
+    'R0aWVy');
+
 @$core.Deprecated('Use getDeskStateRequestDescriptor instead')
 const GetDeskStateRequest$json = {
   '1': 'GetDeskStateRequest',
@@ -195,7 +209,7 @@ const SetDeskPolicyRequest$json = {
   '1': 'SetDeskPolicyRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 2, '4': 1, '5': 8, '10': 'allowCare'},
     {
       '1': 'policy',
       '3': 3,
@@ -209,23 +223,23 @@ const SetDeskPolicyRequest$json = {
 
 /// Descriptor for `SetDeskPolicyRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List setDeskPolicyRequestDescriptor = $convert.base64Decode(
-    'ChRTZXREZXNrUG9saWN5UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbW'
-    'lseRgCIAEoCFILYWxsb3dGYW1pbHkSMwoGcG9saWN5GAMgASgLMhsucHJvdGVjdG9yYXRlLnYx'
-    'LkRlc2tQb2xpY3lSBnBvbGljeQ==');
+    'ChRTZXREZXNrUG9saWN5UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEh0KCmFsbG93X2Nhcm'
+    'UYAiABKAhSCWFsbG93Q2FyZRIzCgZwb2xpY3kYAyABKAsyGy5wcm90ZWN0b3JhdGUudjEuRGVz'
+    'a1BvbGljeVIGcG9saWN5');
 
 @$core.Deprecated('Use getDeskPolicyRequestDescriptor instead')
 const GetDeskPolicyRequest$json = {
   '1': 'GetDeskPolicyRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 2, '4': 1, '5': 8, '10': 'allowCare'},
   ],
 };
 
 /// Descriptor for `GetDeskPolicyRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List getDeskPolicyRequestDescriptor = $convert.base64Decode(
-    'ChRHZXREZXNrUG9saWN5UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbW'
-    'lseRgCIAEoCFILYWxsb3dGYW1pbHk=');
+    'ChRHZXREZXNrUG9saWN5UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEh0KCmFsbG93X2Nhcm'
+    'UYAiABKAhSCWFsbG93Q2FyZQ==');
 
 @$core.Deprecated('Use deskPolicyStatusDescriptor instead')
 const DeskPolicyStatus$json = {
@@ -271,15 +285,15 @@ const UpdateNodeRequest$json = {
   '1': 'UpdateNodeRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 2, '4': 1, '5': 8, '10': 'allowCare'},
     {'1': 'force', '3': 3, '4': 1, '5': 8, '10': 'force'},
   ],
 };
 
 /// Descriptor for `UpdateNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List updateNodeRequestDescriptor = $convert.base64Decode(
-    'ChFVcGRhdGVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbWlseR'
-    'gCIAEoCFILYWxsb3dGYW1pbHkSFAoFZm9yY2UYAyABKAhSBWZvcmNl');
+    'ChFVcGRhdGVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEh0KCmFsbG93X2NhcmUYAi'
+    'ABKAhSCWFsbG93Q2FyZRIUCgVmb3JjZRgDIAEoCFIFZm9yY2U=');
 
 @$core.Deprecated('Use updateNodeProgressDescriptor instead')
 const UpdateNodeProgress$json = {
@@ -315,7 +329,7 @@ const ApplyUpdateRequest$json = {
   '1': 'ApplyUpdateRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 2, '4': 1, '5': 8, '10': 'allowCare'},
     {'1': 'path', '3': 3, '4': 1, '5': 9, '10': 'path'},
     {'1': 'size', '3': 4, '4': 1, '5': 4, '10': 'size'},
     {'1': 'sha256', '3': 5, '4': 1, '5': 9, '10': 'sha256'},
@@ -324,9 +338,9 @@ const ApplyUpdateRequest$json = {
 
 /// Descriptor for `ApplyUpdateRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List applyUpdateRequestDescriptor = $convert.base64Decode(
-    'ChJBcHBseVVwZGF0ZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIhCgxhbGxvd19mYW1pbH'
-    'kYAiABKAhSC2FsbG93RmFtaWx5EhIKBHBhdGgYAyABKAlSBHBhdGgSEgoEc2l6ZRgEIAEoBFIE'
-    'c2l6ZRIWCgZzaGEyNTYYBSABKAlSBnNoYTI1Ng==');
+    'ChJBcHBseVVwZGF0ZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIdCgphbGxvd19jYXJlGA'
+    'IgASgIUglhbGxvd0NhcmUSEgoEcGF0aBgDIAEoCVIEcGF0aBISCgRzaXplGAQgASgEUgRzaXpl'
+    'EhYKBnNoYTI1NhgFIAEoCVIGc2hhMjU2');
 
 @$core.Deprecated('Use applyUpdateResponseDescriptor instead')
 const ApplyUpdateResponse$json = {
@@ -379,7 +393,7 @@ const PutFileRequest$json = {
   '1': 'PutFileRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 2, '4': 1, '5': 8, '10': 'allowCare'},
     {'1': 'transfer_id', '3': 3, '4': 1, '5': 9, '10': 'transferId'},
     {'1': 'path', '3': 4, '4': 1, '5': 9, '10': 'path'},
     {
@@ -415,13 +429,13 @@ const PutFileRequest$json = {
 
 /// Descriptor for `PutFileRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List putFileRequestDescriptor = $convert.base64Decode(
-    'Cg5QdXRGaWxlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbWlseRgCIA'
-    'EoCFILYWxsb3dGYW1pbHkSHwoLdHJhbnNmZXJfaWQYAyABKAlSCnRyYW5zZmVySWQSEgoEcGF0'
-    'aBgEIAEoCVIEcGF0aBItCgRraW5kGAUgASgOMhkucHJvdGVjdG9yYXRlLnYxLkZpbGVLaW5kUg'
-    'RraW5kEhIKBG1vZGUYBiABKA1SBG1vZGUSHAoJb3ZlcndyaXRlGAcgASgIUglvdmVyd3JpdGUS'
-    'FgoGb2Zmc2V0GAggASgEUgZvZmZzZXQSMAoFY2h1bmsYCSABKAsyGi5wcm90ZWN0b3JhdGUudj'
-    'EuRmlsZUNodW5rUgVjaHVuaxISCgRsYXN0GAogASgIUgRsYXN0EjYKB3RyYWlsZXIYCyABKAsy'
-    'HC5wcm90ZWN0b3JhdGUudjEuRmlsZVRyYWlsZXJSB3RyYWlsZXI=');
+    'Cg5QdXRGaWxlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEh0KCmFsbG93X2NhcmUYAiABKA'
+    'hSCWFsbG93Q2FyZRIfCgt0cmFuc2Zlcl9pZBgDIAEoCVIKdHJhbnNmZXJJZBISCgRwYXRoGAQg'
+    'ASgJUgRwYXRoEi0KBGtpbmQYBSABKA4yGS5wcm90ZWN0b3JhdGUudjEuRmlsZUtpbmRSBGtpbm'
+    'QSEgoEbW9kZRgGIAEoDVIEbW9kZRIcCglvdmVyd3JpdGUYByABKAhSCW92ZXJ3cml0ZRIWCgZv'
+    'ZmZzZXQYCCABKARSBm9mZnNldBIwCgVjaHVuaxgJIAEoCzIaLnByb3RlY3RvcmF0ZS52MS5GaW'
+    'xlQ2h1bmtSBWNodW5rEhIKBGxhc3QYCiABKAhSBGxhc3QSNgoHdHJhaWxlchgLIAEoCzIcLnBy'
+    'b3RlY3RvcmF0ZS52MS5GaWxlVHJhaWxlclIHdHJhaWxlcg==');
 
 @$core.Deprecated('Use putFileResponseDescriptor instead')
 const PutFileResponse$json = {
@@ -443,7 +457,7 @@ const GetFileRequest$json = {
   '1': 'GetFileRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 2, '4': 1, '5': 8, '10': 'allowCare'},
     {'1': 'path', '3': 3, '4': 1, '5': 9, '10': 'path'},
     {'1': 'no_compress', '3': 4, '4': 1, '5': 8, '10': 'noCompress'},
   ],
@@ -451,9 +465,9 @@ const GetFileRequest$json = {
 
 /// Descriptor for `GetFileRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List getFileRequestDescriptor = $convert.base64Decode(
-    'Cg5HZXRGaWxlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbWlseRgCIA'
-    'EoCFILYWxsb3dGYW1pbHkSEgoEcGF0aBgDIAEoCVIEcGF0aBIfCgtub19jb21wcmVzcxgEIAEo'
-    'CFIKbm9Db21wcmVzcw==');
+    'Cg5HZXRGaWxlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEh0KCmFsbG93X2NhcmUYAiABKA'
+    'hSCWFsbG93Q2FyZRISCgRwYXRoGAMgASgJUgRwYXRoEh8KC25vX2NvbXByZXNzGAQgASgIUgpu'
+    'b0NvbXByZXNz');
 
 @$core.Deprecated('Use fileHeaderDescriptor instead')
 const FileHeader$json = {
@@ -1648,6 +1662,12 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '2': '.protectorate.v1.GetDeskPolicyRequest',
       '3': '.protectorate.v1.DeskPolicyStatus'
     },
+    {
+      '1': 'SetNodeTier',
+      '2': '.protectorate.v1.SetNodeTierRequest',
+      '3': '.protectorate.v1.NodeInfo',
+      '4': {}
+    },
   ],
 };
 
@@ -1702,6 +1722,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SetDeskPolicyRequest': SetDeskPolicyRequest$json,
   '.protectorate.v1.DeskPolicyStatus': DeskPolicyStatus$json,
   '.protectorate.v1.GetDeskPolicyRequest': GetDeskPolicyRequest$json,
+  '.protectorate.v1.SetNodeTierRequest': SetNodeTierRequest$json,
 };
 
 /// Descriptor for `NodeService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -1725,4 +1746,6 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'ZXNzIgSgtRgBMAESXwoNU2V0RGVza1BvbGljeRIlLnByb3RlY3RvcmF0ZS52MS5TZXREZXNrUG'
     '9saWN5UmVxdWVzdBohLnByb3RlY3RvcmF0ZS52MS5EZXNrUG9saWN5U3RhdHVzIgSgtRgBElkK'
     'DUdldERlc2tQb2xpY3kSJS5wcm90ZWN0b3JhdGUudjEuR2V0RGVza1BvbGljeVJlcXVlc3QaIS'
-    '5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGljeVN0YXR1cw==');
+    '5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGljeVN0YXR1cxJTCgtTZXROb2RlVGllchIjLnByb3Rl'
+    'Y3RvcmF0ZS52MS5TZXROb2RlVGllclJlcXVlc3QaGS5wcm90ZWN0b3JhdGUudjEuTm9kZUluZm'
+    '8iBKC1GAE=');

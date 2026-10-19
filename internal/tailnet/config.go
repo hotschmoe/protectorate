@@ -239,11 +239,13 @@ type aclRule struct {
 // PoolTag is the tag that puts a node into build pool name.
 func PoolTag(name string) string { return "tag:pool-" + name }
 
-// TierTag is the tag recording a node's trust tier (server or family).
-func TierTag(tier string) string { return "tag:tier-" + tier }
+// TierTag is the tag recording a node's tier (shared or care).
+func TierTag(tier string) string { return tierTagPrefix + tier }
 
-// Tiers are the accepted values of `node invite --tier`.
-var Tiers = []string{"server", "family"}
+const tierTagPrefix = "tag:tier-"
+
+// Tiers are the accepted values of `node invite --tier` and `node tier`.
+var Tiers = []string{"shared", "care"}
 
 // Policy renders the ACL policy. Anything not accepted below is denied.
 //

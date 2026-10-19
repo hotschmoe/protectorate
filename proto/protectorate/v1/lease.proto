@@ -69,8 +69,8 @@ message AcquireLeaseRequest {
   string holder = 3;
   // ttl is how long the lease lives without a renewal; at most 24h.
   google.protobuf.Duration ttl = 4;
-  // allow_family admits nodes of tier "family", which are skipped otherwise.
-  bool allow_family = 5;
+  // allow_care admits nodes of tier "care", which are skipped otherwise.
+  bool allow_care = 5;
   // wait queues the caller when the resource is held instead of failing.
   bool wait = 6;
   // priority orders the queue: larger first, then first come first served.

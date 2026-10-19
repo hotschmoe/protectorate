@@ -66,8 +66,8 @@ message JobTarget {
     // selector picks the least-loaded fresh matching node that is not leased.
     NodeSelector selector = 3;
   }
-  // allow_family admits nodes of tier "family".
-  bool allow_family = 4;
+  // allow_care admits nodes of tier "care".
+  bool allow_care = 4;
 }
 
 // GitSource ships one commit of a repository on the hub.

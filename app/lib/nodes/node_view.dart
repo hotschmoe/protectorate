@@ -307,6 +307,11 @@ List<Sleeve> sleevesBySize(NodeMetrics m) {
   return list;
 }
 
+// A care node is a machine kept for a person: never scheduled or leased.
+const tierCare = 'care';
+
+bool isCareNode(NodeStatus s) => s.node.tier == tierCare;
+
 class AlertBadge {
   const AlertBadge(this.label, this.critical);
 

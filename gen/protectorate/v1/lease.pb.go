@@ -177,8 +177,8 @@ type AcquireLeaseRequest struct {
 	Holder string `protobuf:"bytes,3,opt,name=holder,proto3" json:"holder,omitempty"`
 	// ttl is how long the lease lives without a renewal; at most 24h.
 	Ttl *durationpb.Duration `protobuf:"bytes,4,opt,name=ttl,proto3" json:"ttl,omitempty"`
-	// allow_family admits nodes of tier "family", which are skipped otherwise.
-	AllowFamily bool `protobuf:"varint,5,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	// allow_care admits nodes of tier "care", which are skipped otherwise.
+	AllowCare bool `protobuf:"varint,5,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
 	// wait queues the caller when the resource is held instead of failing.
 	Wait bool `protobuf:"varint,6,opt,name=wait,proto3" json:"wait,omitempty"`
 	// priority orders the queue: larger first, then first come first served.
@@ -256,9 +256,9 @@ func (x *AcquireLeaseRequest) GetTtl() *durationpb.Duration {
 	return nil
 }
 
-func (x *AcquireLeaseRequest) GetAllowFamily() bool {
+func (x *AcquireLeaseRequest) GetAllowCare() bool {
 	if x != nil {
-		return x.AllowFamily
+		return x.AllowCare
 	}
 	return false
 }
@@ -638,13 +638,14 @@ const file_protectorate_v1_lease_proto_rawDesc = "" +
 	"\x15min_free_memory_bytes\x18\x03 \x01(\x04R\x12minFreeMemoryBytes\x12$\n" +
 	"\x0egpu_vram_bytes\x18\x04 \x01(\x04R\fgpuVramBytes\x12\x10\n" +
 	"\x03gpu\x18\x05 \x01(\tR\x03gpu\x12\x10\n" +
-	"\x03npu\x18\x06 \x01(\tR\x03npu\"\x92\x02\n" +
+	"\x03npu\x18\x06 \x01(\tR\x03npu\"\x8e\x02\n" +
 	"\x13AcquireLeaseRequest\x12\x1c\n" +
 	"\bresource\x18\x01 \x01(\tH\x00R\bresource\x12;\n" +
 	"\bselector\x18\x02 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12\x16\n" +
 	"\x06holder\x18\x03 \x01(\tR\x06holder\x12+\n" +
-	"\x03ttl\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\x12!\n" +
-	"\fallow_family\x18\x05 \x01(\bR\vallowFamily\x12\x12\n" +
+	"\x03ttl\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\x12\x1d\n" +
+	"\n" +
+	"allow_care\x18\x05 \x01(\bR\tallowCare\x12\x12\n" +
 	"\x04wait\x18\x06 \x01(\bR\x04wait\x12\x1a\n" +
 	"\bpriority\x18\a \x01(\x05R\bpriorityB\b\n" +
 	"\x06target\"P\n" +

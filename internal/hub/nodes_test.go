@@ -36,7 +36,7 @@ func TestInventory(t *testing.T) {
 		in      *pb.NodeInfo
 		wantErr error
 	}{
-		{"ok", &pb.NodeInfo{Name: "GPU-Box", Address: "gpu-box", SshAlias: "gpu", Tier: "server", Tags: []string{"GPU", "gpu", "cuda"}, Notes: "4090"}, nil},
+		{"ok", &pb.NodeInfo{Name: "GPU-Box", Address: "gpu-box", SshAlias: "gpu", Tier: "shared", Tags: []string{"GPU", "gpu", "cuda"}, Notes: "4090"}, nil},
 		{"default tier", &pb.NodeInfo{Name: "media", Address: "10.0.0.5:7475"}, nil},
 		{"duplicate", &pb.NodeInfo{Name: "gpu-box", Address: "x"}, ErrNodeExists},
 		{"hub name reserved", &pb.NodeInfo{Name: "hubhost", Address: "x"}, ErrNodeExists},
@@ -59,7 +59,7 @@ func TestInventory(t *testing.T) {
 	}
 
 	got := inv.List()
-	if len(got) != 2 || got[0].Name != "gpu-box" || got[1].Name != "media" || got[1].Tier != TierServer {
+	if len(got) != 2 || got[0].Name != "gpu-box" || got[1].Name != "media" || got[1].Tier != TierShared {
 		t.Fatalf("list = %v", got)
 	}
 	if strings.Join(got[0].Tags, ",") != "cuda,gpu" {
@@ -83,7 +83,7 @@ func TestInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"hubhost (this machine, hub)", "| gpu-box | linux/amd64 | gpu-box | gpu | server | cuda, gpu | 4090 |", "| media | ? |"} {
+	for _, want := range []string{"hubhost (this machine, hub)", "| gpu-box | linux/amd64 | gpu-box | gpu | shared | cuda, gpu | 4090 |", "| media | ? |"} {
 		if !strings.Contains(string(hosts), want) {
 			t.Errorf("hosts.md missing %q:\n%s", want, hosts)
 		}
@@ -351,7 +351,7 @@ func TestNodeServiceEndToEnd(t *testing.T) {
 		return connect.NewRequest(&pb.AddNodeRequest{Node: n})
 	}
 
-	if _, err := cl.AddNode(ctx, req(&pb.NodeInfo{Name: "peer", Address: strings.TrimPrefix(agentSrv.URL, "http://"), Tier: "family"})); err != nil {
+	if _, err := cl.AddNode(ctx, req(&pb.NodeInfo{Name: "peer", Address: strings.TrimPrefix(agentSrv.URL, "http://"), Tier: "care"})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cl.AddNode(ctx, req(&pb.NodeInfo{Name: "peer", Address: "x"})); connect.CodeOf(err) != connect.CodeAlreadyExists {
@@ -411,14 +411,14 @@ func TestInvitedNodeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Address: "box", Tier: "family", Tags: []string{"pool-gpu"}, Invited: true, InviteKeyId: 7, Notes: "n"}); err != nil {
+	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Address: "box", Tier: "care", Tags: []string{"pool-gpu"}, Invited: true, InviteKeyId: 7, Notes: "n"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Tier: "server", Invited: true, InviteKeyId: 8}); err != nil {
+	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Tier: "shared", Invited: true, InviteKeyId: 8}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := inv.Get("box")
-	if got.Address != "box" || got.Tier != "server" || got.Notes != "n" || !got.Invited || got.InviteKeyId != 8 || len(got.Tags) != 0 {
+	if got.Address != "box" || got.Tier != "shared" || got.Notes != "n" || !got.Invited || got.InviteKeyId != 8 || len(got.Tags) != 0 {
 		t.Fatalf("upsert = %v", got)
 	}
 	reopened, err := OpenInventory(dir, testSelf)

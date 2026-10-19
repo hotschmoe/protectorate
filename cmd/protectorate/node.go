@@ -90,7 +90,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
-	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o))
+	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o), nodeTierCmd(o))
 	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
 }
@@ -165,11 +165,34 @@ func nodeAddCmd(o *opts) *cobra.Command {
 	f := c.Flags()
 	f.StringVar(&n.Address, "addr", "", "tailnet name or address of the node agent (port 7475 assumed)")
 	f.StringVar(&n.SshAlias, "ssh", "", "ssh host alias for break-glass access")
-	f.StringVar(&n.Tier, "tier", hub.TierServer, "policy tier: server or family")
+	f.StringVar(&n.Tier, "tier", hub.TierShared, "tier: shared (the compute pool) or care (a machine kept for a person, never scheduled)")
 	f.StringSliceVar(&n.Tags, "tag", nil, "tag (repeatable)")
 	f.StringVar(&n.Notes, "notes", "", "free-form notes")
 	_ = c.MarkFlagRequired("addr")
 	return c
+}
+
+func nodeTierCmd(o *opts) *cobra.Command {
+	return &cobra.Command{
+		Use:   "tier <name> shared|care",
+		Short: "Change a node's tier (owner only)",
+		Long: `Moves a node between the tiers: shared (the compute pool: jobs and leases,
+sandboxed) and care (a machine kept for a person: never scheduled or leased,
+used only under an admin grant for it). The hub retags the machine on the
+tailnet (tag:tier-<tier>) and then records the tier in its inventory.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cl, err := o.nodeClient()
+			if err != nil {
+				return err
+			}
+			res, err := cl.SetNodeTier(cmd.Context(), connect.NewRequest(&pb.SetNodeTierRequest{Name: args[0], Tier: args[1]}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "%s is now tier %s\n", res.Msg.Name, res.Msg.Tier) })
+		},
+	}
 }
 
 var removeJobs = map[string]pb.RemoveJobs{

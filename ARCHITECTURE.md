@@ -119,7 +119,8 @@ hub is SIGKILLed the child is not reaped: run the hub under systemd
 protectorate hub tailnet install
 protectorate hub tailnet init --server-url https://hs.example.com [--pool build] [--key-expiry-days 180]
 protectorate hub serve                       # starts headscale + joins as tag:hub
-protectorate node invite <name> [--tier server|family] [--pool build] [--expires 1h]
+protectorate node invite <name> [--tier shared|care] [--pool build] [--expires 1h]
+protectorate node tier <name> shared|care   # owner only: inventory and tag:tier-<tier>
 PROTECTORATE_ENROLL_KEY=KEY protectorate node join --control URL [--name N]   # on the node, then `node serve`
 protectorate node rm <name> [--jobs wait|cancel] [--uninstall]
 protectorate node revoke|renew <name>
@@ -150,8 +151,9 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
 - ACL (everything else is denied): `tag:hub -> tag:node:7475,22`,
   `tag:client -> tag:hub:7470`, and `tag:pool-X -> tag:pool-X:*` for each
   configured pool. Pools are the knob that lets chosen nodes reach each
-  other (`init --pool`, `node invite --pool`). `tag:tier-server|family`
-  records the trust tier on the node for hub policy.
+  other (`init --pool`, `node invite --pool`). `tag:tier-shared|care`
+  records the node's tier (docs/node-work.md); `node tier` changes it through
+  headscale's API and the inventory together.
 - Enrollment keys are single-use, tagged and short-lived, created through
   headscale's REST API with an API key (0600, auto-recreated on expiry).
 - Key expiry: headscale leaves tagged nodes unexpiring, so the hub applies
@@ -249,7 +251,7 @@ explicitly.
 - Nodes serve their own Connect API on their tailnet address, and the hub calls
   them directly. No reverse channels.
 - `WhoIs` on each request gives the caller's identity, so a node only obeys
-  the hub. Headscale ACLs add network-level rules (family PCs can't reach each
+  the hub. Headscale ACLs add network-level rules (`care` PCs can't reach each
   other, nodes can't reach the hub's admin API).
 - Phones and laptops can join the same tailnet with the stock Tailscale app
   pointed at Headscale, so the office VPN isn't needed.
@@ -345,7 +347,7 @@ node) executes.
   submit still on its way is refused (aborted). Keys are lost on a hub restart,
   which also fails every running job.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
-  unreachable, never tier `family` unless `allow_family`, matching os, arch,
+  unreachable, never tier `care` unless `allow_care`, matching os, arch,
   free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`
   text, (for GPUs) free VRAM, and not under a conflicting lease.
   Load is `(cpu% + mem%)/2` plus one core's worth per job already placed, so a

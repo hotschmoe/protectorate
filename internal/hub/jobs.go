@@ -408,7 +408,7 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 		}
 	case *pb.JobTarget_Node:
 		name = strings.ToLower(t.Node)
-		if err := m.nodes.namedNode(name, nil, target.AllowFamily); err != nil {
+		if err := m.nodes.namedNode(name, nil, target.AllowCare); err != nil {
 			return nil, nil, err
 		}
 		if l := m.leases.NodeLease(name); l != nil {
@@ -421,7 +421,7 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 			}
 			return m.leases.Blocked(node, gpu)
 		}
-		name, gpu, err = pickNode(m.nodes.Statuses(), t.Selector, target.AllowFamily, m.busy, blocked, m.warmNodes(repo))
+		name, gpu, err = pickNode(m.nodes.Statuses(), t.Selector, target.AllowCare, m.busy, blocked, m.warmNodes(repo))
 		if err != nil {
 			return nil, nil, err
 		}

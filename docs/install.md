@@ -63,7 +63,7 @@ curl -fsSL 'http://HUB:7470/install.sh' | PROTECTORATE_ENROLL_KEY='KEY' sh -s --
 
 The Windows script refuses an elevated PowerShell: the agent becomes a logon task of the signed-in user and runs in that user's desktop session, which is what desk commands need, and it says so as it installs. `install.sh --print-target` prints the build it would fetch and exits. `/install.sh`, `/install.ps1` and `/dl/...` are the only unauthenticated endpoints besides the web app's files; none of them carries a secret. Everything that issues keys or removes nodes is owner-only.
 
-From the CLI the same invite is `protectorate node invite <name> [--tier family] [--pool P] [--expires 2h] [--url http://HUB:7470]`, which prints the lines for each platform and the manual `node install` line.
+From the CLI the same invite is `protectorate node invite <name> [--tier care] [--pool P] [--expires 2h] [--url http://HUB:7470]`, which prints the lines for each platform and the manual `node install` line.
 
 A node that never joined shows as PENDING. Its detail page offers REISSUE KEY (a new key; the old one stops working) and CANCEL INVITE (the key is expired and the entry removed).
 

@@ -29,6 +29,77 @@ export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'node.pbenum.dart';
 
+class SetNodeTierRequest extends $pb.GeneratedMessage {
+  factory SetNodeTierRequest({
+    $core.String? name,
+    $core.String? tier,
+  }) {
+    final result = SetNodeTierRequest._();
+    if (name != null) result.name = name;
+    if (tier != null) result.tier = tier;
+    return result;
+  }
+
+  SetNodeTierRequest._();
+
+  factory SetNodeTierRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetNodeTierRequest()..mergeFromBuffer(data, registry);
+  factory SetNodeTierRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetNodeTierRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SetNodeTierRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SetNodeTierRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'tier')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetNodeTierRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetNodeTierRequest copyWith(void Function(SetNodeTierRequest) updates) =>
+      super.copyWith((message) => updates(message as SetNodeTierRequest))
+          as SetNodeTierRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SetNodeTierRequest() / SetNodeTierRequest.new instead')
+  static SetNodeTierRequest create() => SetNodeTierRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SetNodeTierRequest._();
+  @$core.override
+  SetNodeTierRequest createEmptyInstance() => SetNodeTierRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SetNodeTierRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SetNodeTierRequest>(
+          SetNodeTierRequest.$_createMessage);
+  static SetNodeTierRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  /// tier is "shared" or "care".
+  @$pb.TagNumber(2)
+  $core.String get tier => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set tier($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTier() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTier() => $_clearField(2);
+}
+
 class GetDeskStateRequest extends $pb.GeneratedMessage {
   factory GetDeskStateRequest({
     $0.DeskPolicy? policy,
@@ -109,12 +180,12 @@ class GetDeskStateRequest extends $pb.GeneratedMessage {
 class SetDeskPolicyRequest extends $pb.GeneratedMessage {
   factory SetDeskPolicyRequest({
     $core.String? name,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
     $0.DeskPolicy? policy,
   }) {
     final result = SetDeskPolicyRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     if (policy != null) result.policy = policy;
     return result;
   }
@@ -134,7 +205,7 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: SetDeskPolicyRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOM<$0.DeskPolicy>(3, _omitFieldNames ? '' : 'policy',
         subBuilder: $0.DeskPolicy.$_createMessage)
     ..hasRequiredFields = false;
@@ -172,13 +243,13 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
   void clearName() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
+  $core.bool get allowCare => $_getBF(1);
   @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
+  set allowCare($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
+  $core.bool hasAllowCare() => $_has(1);
   @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
+  void clearAllowCare() => $_clearField(2);
 
   /// policy unset clears the policy: the desktop is always available again.
   @$pb.TagNumber(3)
@@ -196,11 +267,11 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
 class GetDeskPolicyRequest extends $pb.GeneratedMessage {
   factory GetDeskPolicyRequest({
     $core.String? name,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
   }) {
     final result = GetDeskPolicyRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     return result;
   }
 
@@ -219,7 +290,7 @@ class GetDeskPolicyRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetDeskPolicyRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -255,13 +326,13 @@ class GetDeskPolicyRequest extends $pb.GeneratedMessage {
   void clearName() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
+  $core.bool get allowCare => $_getBF(1);
   @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
+  set allowCare($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
+  $core.bool hasAllowCare() => $_has(1);
   @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
+  void clearAllowCare() => $_clearField(2);
 }
 
 class DeskPolicyStatus extends $pb.GeneratedMessage {
@@ -366,12 +437,12 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
 class UpdateNodeRequest extends $pb.GeneratedMessage {
   factory UpdateNodeRequest({
     $core.String? name,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
     $core.bool? force,
   }) {
     final result = UpdateNodeRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     if (force != null) result.force = force;
     return result;
   }
@@ -391,7 +462,7 @@ class UpdateNodeRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: UpdateNodeRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOB(3, _omitFieldNames ? '' : 'force')
     ..hasRequiredFields = false;
 
@@ -427,13 +498,13 @@ class UpdateNodeRequest extends $pb.GeneratedMessage {
   void clearName() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
+  $core.bool get allowCare => $_getBF(1);
   @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
+  set allowCare($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
+  $core.bool hasAllowCare() => $_has(1);
   @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
+  void clearAllowCare() => $_clearField(2);
 
   /// force sends the binary even when the node reports the hub's version.
   @$pb.TagNumber(3)
@@ -591,14 +662,14 @@ class UpdateNodeProgress extends $pb.GeneratedMessage {
 class ApplyUpdateRequest extends $pb.GeneratedMessage {
   factory ApplyUpdateRequest({
     $core.String? name,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
     $core.String? path,
     $fixnum.Int64? size,
     $core.String? sha256,
   }) {
     final result = ApplyUpdateRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     if (path != null) result.path = path;
     if (size != null) result.size = size;
     if (sha256 != null) result.sha256 = sha256;
@@ -620,7 +691,7 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ApplyUpdateRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOS(3, _omitFieldNames ? '' : 'path')
     ..a<$fixnum.Int64>(4, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
@@ -660,13 +731,13 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
   void clearName() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
+  $core.bool get allowCare => $_getBF(1);
   @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
+  set allowCare($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
+  $core.bool hasAllowCare() => $_has(1);
   @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
+  void clearAllowCare() => $_clearField(2);
 
   /// path is where PutFile put the new binary, as PutFile reported it.
   @$pb.TagNumber(3)
@@ -958,7 +1029,7 @@ class FileTrailer extends $pb.GeneratedMessage {
 class PutFileRequest extends $pb.GeneratedMessage {
   factory PutFileRequest({
     $core.String? name,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
     $core.String? transferId,
     $core.String? path,
     FileKind? kind,
@@ -971,7 +1042,7 @@ class PutFileRequest extends $pb.GeneratedMessage {
   }) {
     final result = PutFileRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     if (transferId != null) result.transferId = transferId;
     if (path != null) result.path = path;
     if (kind != null) result.kind = kind;
@@ -999,7 +1070,7 @@ class PutFileRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: PutFileRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOS(3, _omitFieldNames ? '' : 'transferId')
     ..aOS(4, _omitFieldNames ? '' : 'path')
     ..aE<FileKind>(5, _omitFieldNames ? '' : 'kind',
@@ -1048,13 +1119,13 @@ class PutFileRequest extends $pb.GeneratedMessage {
   void clearName() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
+  $core.bool get allowCare => $_getBF(1);
   @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
+  set allowCare($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
+  $core.bool hasAllowCare() => $_has(1);
   @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
+  void clearAllowCare() => $_clearField(2);
 
   /// transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
   @$pb.TagNumber(3)
@@ -1239,13 +1310,13 @@ class PutFileResponse extends $pb.GeneratedMessage {
 class GetFileRequest extends $pb.GeneratedMessage {
   factory GetFileRequest({
     $core.String? name,
-    $core.bool? allowFamily,
+    $core.bool? allowCare,
     $core.String? path,
     $core.bool? noCompress,
   }) {
     final result = GetFileRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (allowCare != null) result.allowCare = allowCare;
     if (path != null) result.path = path;
     if (noCompress != null) result.noCompress = noCompress;
     return result;
@@ -1266,7 +1337,7 @@ class GetFileRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetFileRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOS(3, _omitFieldNames ? '' : 'path')
     ..aOB(4, _omitFieldNames ? '' : 'noCompress')
     ..hasRequiredFields = false;
@@ -1303,13 +1374,13 @@ class GetFileRequest extends $pb.GeneratedMessage {
   void clearName() => $_clearField(1);
 
   @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
+  $core.bool get allowCare => $_getBF(1);
   @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
+  set allowCare($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
+  $core.bool hasAllowCare() => $_has(1);
   @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
+  void clearAllowCare() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.String get path => $_getSZ(2);
@@ -3441,7 +3512,8 @@ class NodeInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   void clearSshAlias() => $_clearField(6);
 
-  /// tier is "server" or "family" and drives future command gating.
+  /// tier is "shared" (the compute pool) or "care" (a machine kept for a
+  /// person, never scheduled or leased).
   @$pb.TagNumber(7)
   $core.String get tier => $_getSZ(6);
   @$pb.TagNumber(7)
@@ -4268,7 +4340,7 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  /// tier is "server" (default) or "family".
+  /// tier is "shared" (default) or "care".
   @$pb.TagNumber(2)
   $core.String get tier => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -4905,6 +4977,14 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, GetDeskPolicyRequest request) =>
       _client.invoke<DeskPolicyStatus>(
           ctx, 'NodeService', 'GetDeskPolicy', request, DeskPolicyStatus());
+
+  /// SetNodeTier changes a node's tier in the inventory and its
+  /// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+  /// owner token may call it. The hub's own node is always "shared".
+  $async.Future<NodeInfo> setNodeTier(
+          $pb.ClientContext? ctx, SetNodeTierRequest request) =>
+      _client.invoke<NodeInfo>(
+          ctx, 'NodeService', 'SetNodeTier', request, NodeInfo());
 }
 
 const $core.bool _omitFieldNames =

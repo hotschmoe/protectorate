@@ -44,14 +44,14 @@ const DeskTarget$json = {
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
     {'1': 'lease_id', '3': 2, '4': 1, '5': 9, '10': 'leaseId'},
-    {'1': 'allow_family', '3': 3, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'allow_care', '3': 3, '4': 1, '5': 8, '10': 'allowCare'},
   ],
 };
 
 /// Descriptor for `DeskTarget`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List deskTargetDescriptor = $convert.base64Decode(
     'CgpEZXNrVGFyZ2V0EhIKBG5hbWUYASABKAlSBG5hbWUSGQoIbGVhc2VfaWQYAiABKAlSB2xlYX'
-    'NlSWQSIQoMYWxsb3dfZmFtaWx5GAMgASgIUgthbGxvd0ZhbWlseQ==');
+    'NlSWQSHQoKYWxsb3dfY2FyZRgDIAEoCFIJYWxsb3dDYXJl');
 
 @$core.Deprecated('Use screenshotRequestDescriptor instead')
 const ScreenshotRequest$json = {

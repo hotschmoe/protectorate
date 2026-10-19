@@ -222,7 +222,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -261,7 +262,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -297,7 +299,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -330,7 +333,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -363,7 +367,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -411,7 +416,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -444,7 +450,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -477,7 +484,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -698,8 +706,8 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "description": "allow_family admits nodes of tier \"family\".",
+            "allowCare": {
+              "description": "allow_care admits nodes of tier \"care\".",
               "type": "boolean"
             },
             "leaseId": {
@@ -764,8 +772,8 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowFamily": {
-          "description": "allow_family admits nodes of tier \"family\", which are skipped otherwise.",
+        "allowCare": {
+          "description": "allow_care admits nodes of tier \"care\", which are skipped otherwise.",
           "type": "boolean"
         },
         "holder": {
@@ -1029,7 +1037,7 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowFamily": {
+        "allowCare": {
           "type": "boolean"
         },
         "name": {
@@ -1083,7 +1091,7 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowFamily": {
+        "allowCare": {
           "type": "boolean"
         },
         "chunk": {

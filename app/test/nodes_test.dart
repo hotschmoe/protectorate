@@ -72,8 +72,9 @@ NodeStatus _status(
   NodeMetrics? metrics,
   List<NodeAlert> alerts = const [],
   String error = '',
+  String tier = 'shared',
 }) => NodeStatus(
-  node: NodeInfo(name: name, address: '$name:7475'),
+  node: NodeInfo(name: name, address: '$name:7475', tier: tier),
   metrics: metrics,
   freshness: f,
   alerts: alerts,
@@ -109,6 +110,29 @@ void main() {
       expect(find.text('docker: 2 containers'), findsOneWidget);
       expect(find.textContaining('DISK'), findsOneWidget);
       expect(find.byKey(const ValueKey('alert-DISK 40% /data')), findsNothing);
+    });
+
+    testWidgets('tier badge marks care nodes only', (t) async {
+      for (final (tier, want) in [
+        ('care', findsOneWidget),
+        ('shared', findsNothing),
+      ]) {
+        await t.pumpWidget(
+          _host(
+            NodeCard(
+              status: _status(
+                'kidsbox',
+                NodeFreshness.NODE_FRESHNESS_FRESH,
+                metrics: _metrics(),
+                tier: tier,
+              ),
+              age: const Duration(seconds: 3),
+              onTap: () {},
+            ),
+          ),
+        );
+        expect(find.byKey(const ValueKey('tier-care')), want, reason: tier);
+      }
     });
 
     testWidgets('stale node is labeled with its age', (t) async {

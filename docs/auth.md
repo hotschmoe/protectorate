@@ -74,7 +74,8 @@ scopes. The RPC form covers anything that runs code as the hub's OS user or
 aims the hub's credentials: `CreateSession` and `RespawnSession` (the command
 is unsandboxed and could read `$PROTECTORATE_HOME/token`), `AddNode` (the
 hub polls the address with the node token), `InviteNode` (it issues a tailnet
-enrollment key) and `RemoveNode` (it revokes a node and can make it uninstall). Owner-only RPCs match no scope
+enrollment key), `RemoveNode` (it revokes a node and can make it uninstall)
+and `SetNodeTier` (it decides which machines jobs may reach). Owner-only RPCs match no scope
 glob, so granting them is rejected at token creation; `*` and `session_*` do
 not include them.
 
