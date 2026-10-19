@@ -3,14 +3,17 @@ syntax = "proto3";
 package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/chat.proto";
 import "protectorate/v1/options.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
 // SleeveService manages sleeves on the hub machine: one workspace plus one
 // harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
-// memory limits. Each sleeve is a tmux session ("sleeve-<name>"), so
-// CapturePane and the WebSocket terminal work on it. Sleeves are Linux-only.
+// memory limits. In chat mode (the default for agent harnesses) the harness
+// runs its official headless protocol and is driven through ChatService. In
+// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
+// WebSocket terminal work on it. Sleeves are Linux-only.
 // Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
 // and "sleeve.oom" (subject = sleeve name).
 service SleeveService {
@@ -108,6 +111,10 @@ message Sleeve {
   // read from the cgroup before it disappears; a harness that dies within a
   // few milliseconds of the kill may still be reported as a plain exit 137.
   bool oom_killed = 13;
+  SleeveMode mode = 14;
+  // chat is set for agent harnesses in either mode, so the session id and
+  // context usage survive a switch to the terminal.
+  ChatStatus chat = 15;
 }
 
 message SpawnSleeveRequest {
@@ -121,6 +128,7 @@ message SpawnSleeveRequest {
   SleeveLimits limits = 5;
   // env holds extra environment variables for the harness.
   map<string, string> env = 6;
+  SleeveMode mode = 7;
 }
 
 message SpawnSleeveResponse {

@@ -18,6 +18,8 @@ import 'dart:typed_data' as $typed_data;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
+import 'chat.pbjson.dart' as $1;
+
 @$core.Deprecated('Use harnessDescriptor instead')
 const Harness$json = {
   '1': 'Harness',
@@ -186,6 +188,22 @@ const Sleeve$json = {
     },
     {'1': 'exit_signal', '3': 12, '4': 1, '5': 5, '10': 'exitSignal'},
     {'1': 'oom_killed', '3': 13, '4': 1, '5': 8, '10': 'oomKilled'},
+    {
+      '1': 'mode',
+      '3': 14,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.SleeveMode',
+      '10': 'mode'
+    },
+    {
+      '1': 'chat',
+      '3': 15,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ChatStatus',
+      '10': 'chat'
+    },
   ],
   '8': [
     {'1': '_exit_code'},
@@ -203,7 +221,9 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'djEuU2xlZXZlVXNhZ2VSBXVzYWdlEhIKBGFyZ3MYCSADKAlSBGFyZ3MSNwoJZXhpdGVkX2F0GA'
     'ogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIIZXhpdGVkQXQSIAoJZXhpdF9jb2Rl'
     'GAsgASgFSABSCGV4aXRDb2RliAEBEh8KC2V4aXRfc2lnbmFsGAwgASgFUgpleGl0U2lnbmFsEh'
-    '0KCm9vbV9raWxsZWQYDSABKAhSCW9vbUtpbGxlZEIMCgpfZXhpdF9jb2Rl');
+    '0KCm9vbV9raWxsZWQYDSABKAhSCW9vbUtpbGxlZBIvCgRtb2RlGA4gASgOMhsucHJvdGVjdG9y'
+    'YXRlLnYxLlNsZWV2ZU1vZGVSBG1vZGUSLwoEY2hhdBgPIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
+    '5DaGF0U3RhdHVzUgRjaGF0QgwKCl9leGl0X2NvZGU=');
 
 @$core.Deprecated('Use spawnSleeveRequestDescriptor instead')
 const SpawnSleeveRequest$json = {
@@ -236,6 +256,14 @@ const SpawnSleeveRequest$json = {
       '6': '.protectorate.v1.SpawnSleeveRequest.EnvEntry',
       '10': 'env'
     },
+    {
+      '1': 'mode',
+      '3': 7,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.SleeveMode',
+      '10': 'mode'
+    },
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -256,8 +284,9 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'ABKAlSCXdvcmtzcGFjZRIyCgdoYXJuZXNzGAMgASgOMhgucHJvdGVjdG9yYXRlLnYxLkhhcm5l'
     'c3NSB2hhcm5lc3MSEgoEYXJncxgEIAMoCVIEYXJncxI1CgZsaW1pdHMYBSABKAsyHS5wcm90ZW'
     'N0b3JhdGUudjEuU2xlZXZlTGltaXRzUgZsaW1pdHMSPgoDZW52GAYgAygLMiwucHJvdGVjdG9y'
-    'YXRlLnYxLlNwYXduU2xlZXZlUmVxdWVzdC5FbnZFbnRyeVIDZW52GjYKCEVudkVudHJ5EhAKA2'
-    'tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgJUgV2YWx1ZToCOAE=');
+    'YXRlLnYxLlNwYXduU2xlZXZlUmVxdWVzdC5FbnZFbnRyeVIDZW52Ei8KBG1vZGUYByABKA4yGy'
+    '5wcm90ZWN0b3JhdGUudjEuU2xlZXZlTW9kZVIEbW9kZRo2CghFbnZFbnRyeRIQCgNrZXkYASAB'
+    'KAlSA2tleRIUCgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {
@@ -401,6 +430,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Sleeve': Sleeve$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.SleeveUsage': SleeveUsage$json,
+  '.protectorate.v1.ChatStatus': $1.ChatStatus$json,
   '.protectorate.v1.ListSleevesRequest': ListSleevesRequest$json,
   '.protectorate.v1.ListSleevesResponse': ListSleevesResponse$json,
   '.protectorate.v1.GetSleeveRequest': GetSleeveRequest$json,

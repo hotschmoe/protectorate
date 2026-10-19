@@ -20,6 +20,7 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
+import 'chat.pbjson.dart' as $4;
 import 'job.pbjson.dart' as $3;
 import 'sleeve.pbjson.dart' as $1;
 
@@ -734,6 +735,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Sleeve': $1.Sleeve$json,
   '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
+  '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
   '.protectorate.v1.PrepareJobRequest': $3.PrepareJobRequest$json,
   '.protectorate.v1.PrepareJobResponse': $3.PrepareJobResponse$json,
@@ -817,6 +819,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Sleeve': $1.Sleeve$json,
   '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
+  '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,

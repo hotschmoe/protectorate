@@ -8,8 +8,10 @@ import "sleeve.pb.dart" as protectoratev1sleeve;
 
 /// SleeveService manages sleeves on the hub machine: one workspace plus one
 /// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
-/// memory limits. Each sleeve is a tmux session ("sleeve-<name>"), so
-/// CapturePane and the WebSocket terminal work on it. Sleeves are Linux-only.
+/// memory limits. In chat mode (the default for agent harnesses) the harness
+/// runs its official headless protocol and is driven through ChatService. In
+/// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
+/// WebSocket terminal work on it. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
 /// and "sleeve.oom" (subject = sleeve name).
 abstract final class SleeveService {

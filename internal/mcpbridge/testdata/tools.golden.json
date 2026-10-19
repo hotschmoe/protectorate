@@ -112,6 +112,124 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Compact runs the harness's own native compaction between turns. It fails with failed_precondition while a turn is running or an approval is pending, and returns after the harness has confirmed the compaction.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_compact"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Interrupt cancels the running turn. It is a no-op when the harness is idle.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_interrupt"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Respond answers a pending approval.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_respond"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Send delivers a user message. It starts a turn when the harness is idle; during a turn it steers that turn on harnesses that support it and fails with failed_precondition on the rest. Retrying with the same request_id returns the original result instead of sending twice.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_send"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "SetMode switches a sleeve between chat and terminal (\"take over\"). The current driver is closed first, then the other mode resumes the same native session id.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "SLEEVE_MODE_UNSPECIFIED",
+            "SLEEVE_MODE_CHAT",
+            "SLEEVE_MODE_TERMINAL"
+          ],
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_set_mode"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -686,6 +804,14 @@
             }
           },
           "type": "object"
+        },
+        "mode": {
+          "enum": [
+            "SLEEVE_MODE_UNSPECIFIED",
+            "SLEEVE_MODE_CHAT",
+            "SLEEVE_MODE_TERMINAL"
+          ],
+          "type": "string"
         },
         "name": {
           "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",

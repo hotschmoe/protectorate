@@ -18,6 +18,7 @@ import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
+import 'chat.pb.dart' as $1;
 import 'sleeve.pbenum.dart';
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
@@ -289,6 +290,8 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.int? exitCode,
     $core.int? exitSignal,
     $core.bool? oomKilled,
+    $1.SleeveMode? mode,
+    $1.ChatStatus? chat,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -304,6 +307,8 @@ class Sleeve extends $pb.GeneratedMessage {
     if (exitCode != null) result.exitCode = exitCode;
     if (exitSignal != null) result.exitSignal = exitSignal;
     if (oomKilled != null) result.oomKilled = oomKilled;
+    if (mode != null) result.mode = mode;
+    if (chat != null) result.chat = chat;
     return result;
   }
 
@@ -340,6 +345,10 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aI(11, _omitFieldNames ? '' : 'exitCode')
     ..aI(12, _omitFieldNames ? '' : 'exitSignal')
     ..aOB(13, _omitFieldNames ? '' : 'oomKilled')
+    ..aE<$1.SleeveMode>(14, _omitFieldNames ? '' : 'mode',
+        enumValues: $1.SleeveMode.values)
+    ..aOM<$1.ChatStatus>(15, _omitFieldNames ? '' : 'chat',
+        subBuilder: $1.ChatStatus.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -489,6 +498,28 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasOomKilled() => $_has(12);
   @$pb.TagNumber(13)
   void clearOomKilled() => $_clearField(13);
+
+  @$pb.TagNumber(14)
+  $1.SleeveMode get mode => $_getN(13);
+  @$pb.TagNumber(14)
+  set mode($1.SleeveMode value) => $_setField(14, value);
+  @$pb.TagNumber(14)
+  $core.bool hasMode() => $_has(13);
+  @$pb.TagNumber(14)
+  void clearMode() => $_clearField(14);
+
+  /// chat is set for agent harnesses in either mode, so the session id and
+  /// context usage survive a switch to the terminal.
+  @$pb.TagNumber(15)
+  $1.ChatStatus get chat => $_getN(14);
+  @$pb.TagNumber(15)
+  set chat($1.ChatStatus value) => $_setField(15, value);
+  @$pb.TagNumber(15)
+  $core.bool hasChat() => $_has(14);
+  @$pb.TagNumber(15)
+  void clearChat() => $_clearField(15);
+  @$pb.TagNumber(15)
+  $1.ChatStatus ensureChat() => $_ensure(14);
 }
 
 class SpawnSleeveRequest extends $pb.GeneratedMessage {
@@ -499,6 +530,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? args,
     SleeveLimits? limits,
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
+    $1.SleeveMode? mode,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -507,6 +539,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (args != null) result.args.addAll(args);
     if (limits != null) result.limits = limits;
     if (env != null) result.env.addEntries(env);
+    if (mode != null) result.mode = mode;
     return result;
   }
 
@@ -536,6 +569,8 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
         keyFieldType: $pb.PbFieldType.OS,
         valueFieldType: $pb.PbFieldType.OS,
         packageName: const $pb.PackageName('protectorate.v1'))
+    ..aE<$1.SleeveMode>(7, _omitFieldNames ? '' : 'mode',
+        enumValues: $1.SleeveMode.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -607,6 +642,15 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   /// env holds extra environment variables for the harness.
   @$pb.TagNumber(6)
   $pb.PbMap<$core.String, $core.String> get env => $_getMap(5);
+
+  @$pb.TagNumber(7)
+  $1.SleeveMode get mode => $_getN(6);
+  @$pb.TagNumber(7)
+  set mode($1.SleeveMode value) => $_setField(7, value);
+  @$pb.TagNumber(7)
+  $core.bool hasMode() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearMode() => $_clearField(7);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -988,8 +1032,10 @@ class KillSleeveResponse extends $pb.GeneratedMessage {
 
 /// SleeveService manages sleeves on the hub machine: one workspace plus one
 /// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
-/// memory limits. Each sleeve is a tmux session ("sleeve-<name>"), so
-/// CapturePane and the WebSocket terminal work on it. Sleeves are Linux-only.
+/// memory limits. In chat mode (the default for agent harnesses) the harness
+/// runs its official headless protocol and is driven through ChatService. In
+/// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
+/// WebSocket terminal work on it. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
 /// and "sleeve.oom" (subject = sleeve name).
 class SleeveServiceApi {

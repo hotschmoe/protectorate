@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// ChatService drives a sleeve in chat mode: the harness runs its own official
+// headless protocol inside the sleeve and the hub normalizes what it emits
+// into ChatEvents. The hub keeps each sleeve's events in an append-only log,
+// so any number of clients can watch and a reconnecting client resumes from
+// the last seq it saw. The harness's own session store stays the full record;
+// the log is the view. Only one driver owns a native session at a time, so a
+// sleeve is either in chat mode or in terminal mode (SetMode switches, keeping
+// the native session id).
+service ChatService {
+  // Watch replays the sleeve's events after after_seq, then streams new ones
+  // until the client disconnects or the sleeve is killed.
+  rpc Watch(WatchRequest) returns (stream ChatEvent) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Send delivers a user message. It starts a turn when the harness is idle;
+  // during a turn it steers that turn on harnesses that support it and fails
+  // with failed_precondition on the rest. Retrying with the same request_id
+  // returns the original result instead of sending twice.
+  rpc Send(SendRequest) returns (SendResponse);
+
+  // Interrupt cancels the running turn. It is a no-op when the harness is idle.
+  rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+
+  // Respond answers a pending approval.
+  rpc Respond(RespondRequest) returns (RespondResponse);
+
+  // Compact runs the harness's own native compaction between turns. It fails
+  // with failed_precondition while a turn is running or an approval is
+  // pending, and returns after the harness has confirmed the compaction.
+  rpc Compact(CompactRequest) returns (CompactResponse);
+
+  // SetMode switches a sleeve between chat and terminal ("take over"). The
+  // current driver is closed first, then the other mode resumes the same
+  // native session id.
+  rpc SetMode(SetModeRequest) returns (SetModeResponse);
+}
+
+enum SleeveMode {
+  // UNSPECIFIED on spawn means CHAT for agent harnesses and TERMINAL for
+  // HARNESS_SHELL.
+  SLEEVE_MODE_UNSPECIFIED = 0;
+  SLEEVE_MODE_CHAT = 1;
+  SLEEVE_MODE_TERMINAL = 2;
+}
+
+// ChatState is the single status shown for a chat, highest priority first:
+// a pending approval outranks a running turn, which outranks idle.
+enum ChatState {
+  CHAT_STATE_UNSPECIFIED = 0;
+  CHAT_STATE_AWAITING_APPROVAL = 1;
+  CHAT_STATE_WORKING = 2;
+  CHAT_STATE_COMPACTING = 3;
+  // IDLE: the last turn settled and the harness waits for input.
+  CHAT_STATE_IDLE = 4;
+  CHAT_STATE_FAILED = 5;
+  CHAT_STATE_EXITED = 6;
+}
+
+// ChatStatus is the live summary kept on the Sleeve.
+message ChatStatus {
+  ChatState state = 1;
+  // harness_session_id is the harness-native id used for resume.
+  string harness_session_id = 2;
+  string model = 3;
+  // context_tokens is the prompt size of the last model call (what fills the
+  // window), not a sum over the turn.
+  uint64 context_tokens = 4;
+  uint64 context_window = 5;
+  // cache_expires_at is when the harness's prompt cache goes cold if no new
+  // turn starts, when the harness reports it.
+  google.protobuf.Timestamp cache_expires_at = 6;
+  uint64 last_seq = 7;
+  google.protobuf.Timestamp last_activity_at = 8;
+}
+
+message ChatEvent {
+  // seq increases by one per event within a sleeve, starting at 1.
+  uint64 seq = 1;
+  google.protobuf.Timestamp time = 2;
+  oneof body {
+    UserMessage user = 10;
+    AssistantText text = 11;
+    ToolCall tool_call = 12;
+    ToolResult tool_result = 13;
+    ApprovalRequest approval = 14;
+    ApprovalResolved approval_resolved = 15;
+    UsageUpdate usage = 16;
+    TurnSettled settled = 17;
+    Compaction compaction = 18;
+    ChatError error = 19;
+    StateChange state = 20;
+  }
+}
+
+message UserMessage {
+  string text = 1;
+  // from is who sent it: "owner", "token:<name>" or "hub" for messages the
+  // hub composes (a resleeve handoff prompt).
+  string from = 2;
+}
+
+// AssistantText is streamed as deltas; consecutive deltas with the same
+// message_id form one message. The stored log coalesces them once the message
+// is complete, so a replay sends whole messages.
+message AssistantText {
+  string message_id = 1;
+  string delta = 2;
+  // thinking marks reasoning text, shown collapsed.
+  bool thinking = 3;
+}
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  // input_json is the tool input as the harness reported it.
+  string input_json = 3;
+}
+
+message ToolResult {
+  string tool_call_id = 1;
+  // output is truncated by the hub to a bounded size; truncated says so.
+  string output = 2;
+  bool is_error = 3;
+  bool truncated = 4;
+}
+
+message ApprovalRequest {
+  string id = 1;
+  string kind = 2;
+  string summary = 3;
+}
+
+message ApprovalResolved {
+  string id = 1;
+  bool allow = 2;
+  string by = 3;
+}
+
+message UsageUpdate {
+  uint64 context_tokens = 1;
+  uint64 context_window = 2;
+  uint64 input_tokens = 3;
+  uint64 output_tokens = 4;
+  uint64 cache_read_tokens = 5;
+  uint64 cache_write_tokens = 6;
+  google.protobuf.Timestamp cache_expires_at = 7;
+}
+
+message TurnSettled {
+  string stop_reason = 1;
+}
+
+message Compaction {
+  uint64 tokens_before = 1;
+  uint64 tokens_after = 2;
+  // native is true for compaction the harness started on its own.
+  bool native = 3;
+}
+
+message ChatError {
+  string text = 1;
+}
+
+message StateChange {
+  ChatState state = 1;
+}
+
+message WatchRequest {
+  string sleeve = 1;
+  uint64 after_seq = 2;
+}
+
+message SendRequest {
+  string sleeve = 1;
+  string text = 2;
+  string request_id = 3;
+}
+
+message SendResponse {
+  // seq is the UserMessage event recording this send.
+  uint64 seq = 1;
+}
+
+message InterruptRequest {
+  string sleeve = 1;
+}
+
+message InterruptResponse {}
+
+message RespondRequest {
+  string sleeve = 1;
+  string approval_id = 2;
+  bool allow = 3;
+  string note = 4;
+}
+
+message RespondResponse {}
+
+message CompactRequest {
+  string sleeve = 1;
+}
+
+message CompactResponse {
+  Compaction compaction = 1;
+}
+
+message SetModeRequest {
+  string sleeve = 1;
+  SleeveMode mode = 2;
+}
+
+message SetModeResponse {}

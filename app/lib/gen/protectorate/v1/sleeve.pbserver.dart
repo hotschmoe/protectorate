@@ -15,31 +15,31 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'sleeve.pb.dart' as $1;
+import 'sleeve.pb.dart' as $2;
 import 'sleeve.pbjson.dart';
 
 export 'sleeve.pb.dart';
 
 abstract class SleeveServiceBase extends $pb.GeneratedService {
-  $async.Future<$1.SpawnSleeveResponse> spawnSleeve(
-      $pb.ServerContext ctx, $1.SpawnSleeveRequest request);
-  $async.Future<$1.ListSleevesResponse> listSleeves(
-      $pb.ServerContext ctx, $1.ListSleevesRequest request);
-  $async.Future<$1.GetSleeveResponse> getSleeve(
-      $pb.ServerContext ctx, $1.GetSleeveRequest request);
-  $async.Future<$1.KillSleeveResponse> killSleeve(
-      $pb.ServerContext ctx, $1.KillSleeveRequest request);
+  $async.Future<$2.SpawnSleeveResponse> spawnSleeve(
+      $pb.ServerContext ctx, $2.SpawnSleeveRequest request);
+  $async.Future<$2.ListSleevesResponse> listSleeves(
+      $pb.ServerContext ctx, $2.ListSleevesRequest request);
+  $async.Future<$2.GetSleeveResponse> getSleeve(
+      $pb.ServerContext ctx, $2.GetSleeveRequest request);
+  $async.Future<$2.KillSleeveResponse> killSleeve(
+      $pb.ServerContext ctx, $2.KillSleeveRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'SpawnSleeve':
-        return $1.SpawnSleeveRequest();
+        return $2.SpawnSleeveRequest();
       case 'ListSleeves':
-        return $1.ListSleevesRequest();
+        return $2.ListSleevesRequest();
       case 'GetSleeve':
-        return $1.GetSleeveRequest();
+        return $2.GetSleeveRequest();
       case 'KillSleeve':
-        return $1.KillSleeveRequest();
+        return $2.KillSleeveRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -49,13 +49,13 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'SpawnSleeve':
-        return spawnSleeve(ctx, request as $1.SpawnSleeveRequest);
+        return spawnSleeve(ctx, request as $2.SpawnSleeveRequest);
       case 'ListSleeves':
-        return listSleeves(ctx, request as $1.ListSleevesRequest);
+        return listSleeves(ctx, request as $2.ListSleevesRequest);
       case 'GetSleeve':
-        return getSleeve(ctx, request as $1.GetSleeveRequest);
+        return getSleeve(ctx, request as $2.GetSleeveRequest);
       case 'KillSleeve':
-        return killSleeve(ctx, request as $1.KillSleeveRequest);
+        return killSleeve(ctx, request as $2.KillSleeveRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
