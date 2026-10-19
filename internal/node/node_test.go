@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -433,5 +434,54 @@ func TestAndroidSystemMount(t *testing.T) {
 		if got := androidSystemMount(mount); got != want {
 			t.Errorf("androidSystemMount(%q) = %v, want %v", mount, got, want)
 		}
+	}
+}
+
+func TestFSProberBlockedMount(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := map[string]int{}
+	pr := newFSProber()
+	pr.timeout = 20 * time.Millisecond
+	pr.run = func(ctx context.Context, p disk.PartitionStat) fsResult {
+		mu.Lock()
+		calls[p.Mountpoint]++
+		mu.Unlock()
+		if p.Mountpoint == "/dead" {
+			<-release
+		}
+		return fsResult{fs: &pb.FilesystemMetrics{Mount: p.Mountpoint}}
+	}
+	dead := disk.PartitionStat{Mountpoint: "/dead"}
+	live := disk.PartitionStat{Mountpoint: "/live"}
+	ctx := context.Background()
+
+	if r := pr.probe(ctx, dead); r.err == nil || !strings.Contains(r.err.Error(), "timed out") {
+		t.Fatalf("first probe = %+v, want timeout", r)
+	}
+	for i := 0; i < 3; i++ {
+		if r := pr.probe(ctx, dead); r.err == nil || !strings.Contains(r.err.Error(), "stale") {
+			t.Fatalf("repeat probe = %+v, want stale", r)
+		}
+		if r := pr.probe(ctx, live); r.err != nil || r.fs == nil {
+			t.Fatalf("live probe = %+v", r)
+		}
+	}
+	mu.Lock()
+	if calls["/dead"] != 1 || calls["/live"] != 3 {
+		t.Fatalf("calls = %v, want one dead and three live", calls)
+	}
+	mu.Unlock()
+
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if r := pr.probe(ctx, dead); r.err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("mount stayed stale after the probe returned")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

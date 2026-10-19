@@ -58,6 +58,7 @@ func (o Options) withDefaults() Options {
 type Collector struct {
 	opts   Options
 	docker *dockerClient
+	probes *fsProber
 
 	collectMu sync.Mutex
 	last      *pb.NodeMetrics
@@ -74,7 +75,7 @@ type Collector struct {
 
 func NewCollector(opts Options) *Collector {
 	opts = opts.withDefaults()
-	return &Collector{opts: opts, docker: newDockerClient(opts.DockerHost)}
+	return &Collector{opts: opts, docker: newDockerClient(opts.DockerHost), probes: newFSProber()}
 }
 
 // Run measures the slow-changing figures now and then every SlowInterval
@@ -178,7 +179,7 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 		mu.Unlock()
 	})
 	run(func() {
-		fs, errs := filesystemMetrics(ctx)
+		fs, errs := filesystemMetrics(ctx, c.probes)
 		mu.Lock()
 		m.Filesystems = fs
 		mu.Unlock()
@@ -353,12 +354,76 @@ func androidSystemMount(mount string) bool {
 	return false
 }
 
+type fsResult struct {
+	fs  *pb.FilesystemMetrics
+	err error
+}
+
+const fsProbeTimeout = 5 * time.Second
+
+// fsProber runs at most one probe per mount. Dead network mounts can block
+// stat and statfs forever and a blocked syscall cannot be cancelled, so a
+// mount whose probe is still outstanding is reported stale instead of
+// spawning another goroutine behind it.
+type fsProber struct {
+	run     func(ctx context.Context, p disk.PartitionStat) fsResult
+	timeout time.Duration
+
+	mu          sync.Mutex
+	outstanding map[string]bool
+}
+
+func newFSProber() *fsProber {
+	return &fsProber{run: statFilesystem, timeout: fsProbeTimeout, outstanding: map[string]bool{}}
+}
+
+func (f *fsProber) probe(ctx context.Context, p disk.PartitionStat) fsResult {
+	f.mu.Lock()
+	if f.outstanding[p.Mountpoint] {
+		f.mu.Unlock()
+		return fsResult{err: fmt.Errorf("%s: stale, previous probe still blocked", p.Mountpoint)}
+	}
+	f.outstanding[p.Mountpoint] = true
+	f.mu.Unlock()
+
+	uctx, cancel := context.WithTimeout(ctx, f.timeout)
+	defer cancel()
+	ch := make(chan fsResult, 1)
+	go func() {
+		r := f.run(uctx, p)
+		f.mu.Lock()
+		delete(f.outstanding, p.Mountpoint)
+		f.mu.Unlock()
+		ch <- r
+	}()
+	select {
+	case r := <-ch:
+		return r
+	case <-uctx.Done():
+		return fsResult{err: fmt.Errorf("%s: timed out", p.Mountpoint)}
+	}
+}
+
+func statFilesystem(ctx context.Context, p disk.PartitionStat) fsResult {
+	if fi, err := os.Stat(p.Mountpoint); err == nil && !fi.IsDir() {
+		return fsResult{}
+	}
+	u, err := disk.UsageWithContext(ctx, p.Mountpoint)
+	if err != nil {
+		return fsResult{err: fmt.Errorf("%s: %w", p.Mountpoint, err)}
+	}
+	return fsResult{fs: &pb.FilesystemMetrics{
+		Mount: p.Mountpoint, Device: p.Device, Fstype: p.Fstype,
+		TotalBytes: u.Total, UsedBytes: u.Used, FreeBytes: u.Free, UsedPercent: u.UsedPercent,
+	}}
+}
+
 type fsKey struct {
 	device string
 	total  uint64
 }
 
-func filesystemMetrics(ctx context.Context) ([]*pb.FilesystemMetrics, []error) {
+func filesystemMetrics(ctx context.Context, pr *fsProber) ([]*pb.FilesystemMetrics, []error) {
 	parts, err := disk.PartitionsWithContext(ctx, true)
 	if err != nil {
 		parts = nil
@@ -377,41 +442,13 @@ func filesystemMetrics(ctx context.Context) ([]*pb.FilesystemMetrics, []error) {
 		cands = []disk.PartitionStat{{Mountpoint: root, Device: root, Fstype: "unknown"}}
 	}
 
-	type result struct {
-		fs  *pb.FilesystemMetrics
-		err error
-	}
-	results := make([]result, len(cands))
+	results := make([]fsResult, len(cands))
 	var wg sync.WaitGroup
 	for i, p := range cands {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Dead network mounts can block statfs forever, so each probe is
-			// abandoned after a deadline.
-			uctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-			ch := make(chan result, 1)
-			go func() {
-				if fi, err := os.Stat(p.Mountpoint); err == nil && !fi.IsDir() {
-					ch <- result{}
-					return
-				}
-				u, err := disk.UsageWithContext(uctx, p.Mountpoint)
-				if err != nil {
-					ch <- result{err: fmt.Errorf("%s: %w", p.Mountpoint, err)}
-					return
-				}
-				ch <- result{fs: &pb.FilesystemMetrics{
-					Mount: p.Mountpoint, Device: p.Device, Fstype: p.Fstype,
-					TotalBytes: u.Total, UsedBytes: u.Used, FreeBytes: u.Free, UsedPercent: u.UsedPercent,
-				}}
-			}()
-			select {
-			case results[i] = <-ch:
-			case <-uctx.Done():
-				results[i] = result{err: fmt.Errorf("%s: timed out", p.Mountpoint)}
-			}
+			results[i] = pr.probe(ctx, p)
 		}()
 	}
 	wg.Wait()
