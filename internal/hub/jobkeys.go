@@ -79,14 +79,12 @@ func checkRequestID(key string) error {
 
 var errCanceledBeforeSubmit = connect.NewError(connect.CodeAborted, fmt.Errorf("the submit was canceled by its request_id before it reached the hub"))
 
-// submitKeyed runs submit once per key. A repeat returns the job of the first
-// call, waiting for it if it is still in flight.
-func (m *JobManager) submitKeyed(ctx context.Context, req *pb.SubmitJobRequest) (*pb.Job, error) {
-	key := req.RequestId
+// submit runs create once per key. A repeat returns the job of the first call
+// as get reports it now, waiting for the first call if it is still in flight.
+func (k *submitKeys) submit(ctx context.Context, key string, create func() (*pb.Job, error), get func(id string) (*pb.Job, error)) (*pb.Job, error) {
 	if err := checkRequestID(key); err != nil {
 		return nil, err
 	}
-	k := m.keys
 	k.mu.Lock()
 	k.sweepLocked()
 	if e := k.entries[key]; e != nil {
@@ -97,7 +95,7 @@ func (m *JobManager) submitKeyed(ctx context.Context, req *pb.SubmitJobRequest) 
 		if e.err != nil {
 			return nil, e.err
 		}
-		return m.snapshotOf(e.id)
+		return get(e.id)
 	}
 	if len(k.entries) >= maxRequestIDs {
 		k.mu.Unlock()
@@ -107,7 +105,7 @@ func (m *JobManager) submitKeyed(ctx context.Context, req *pb.SubmitJobRequest) 
 	k.entries[key] = e
 	k.mu.Unlock()
 
-	j, err := m.submit(ctx, req)
+	j, err := create()
 
 	k.mu.Lock()
 	switch {
@@ -126,24 +124,14 @@ func (m *JobManager) submitKeyed(ctx context.Context, req *pb.SubmitJobRequest) 
 	return j, err
 }
 
-func (m *JobManager) snapshotOf(id string) (*pb.Job, error) {
-	e, err := m.get(id)
-	if err != nil {
-		return nil, err
-	}
-	j, _ := e.snapshot()
-	return j, nil
-}
-
-// cancelKeyed cancels the job a submit key refers to. A submit still in
-// flight is awaited, so the job exists by the time it is canceled. A key the
-// hub has not seen is remembered as canceled, so a submit that is still on
-// its way is refused.
-func (m *JobManager) cancelKeyed(ctx context.Context, key string) (*pb.Job, error) {
+// cancel cancels the job a key refers to. A submit still in flight is
+// awaited, so the job exists by the time it is canceled. A key the hub has not
+// seen is remembered as canceled, so a submit that is still on its way is
+// refused.
+func (k *submitKeys) cancel(ctx context.Context, key string, cancel func(id string) (*pb.Job, error)) (*pb.Job, error) {
 	if err := checkRequestID(key); err != nil {
 		return nil, err
 	}
-	k := m.keys
 	k.mu.Lock()
 	k.sweepLocked()
 	e := k.entries[key]
@@ -160,5 +148,14 @@ func (m *JobManager) cancelKeyed(ctx context.Context, key string) (*pb.Job, erro
 	if e.err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no job for request_id %q: %w", key, e.err))
 	}
-	return m.Cancel(ctx, e.id)
+	return cancel(e.id)
+}
+
+func (m *JobManager) snapshotOf(id string) (*pb.Job, error) {
+	e, err := m.get(id)
+	if err != nil {
+		return nil, err
+	}
+	j, _ := e.snapshot()
+	return j, nil
 }

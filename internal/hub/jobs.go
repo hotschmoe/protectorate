@@ -444,7 +444,7 @@ func newJobID() (string, error) {
 // background.
 func (m *JobManager) Submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.Job, error) {
 	if req.RequestId != "" {
-		return m.submitKeyed(ctx, req)
+		return m.keys.submit(ctx, req.RequestId, func() (*pb.Job, error) { return m.submit(ctx, req) }, m.snapshotOf)
 	}
 	return m.submit(ctx, req)
 }
@@ -973,7 +973,7 @@ func (h *Hub) CancelJob(ctx context.Context, req *connect.Request[pb.CancelJobRe
 	case (id == "") == (key == ""):
 		return nil, invalid("set exactly one of id and request_id")
 	case key != "":
-		j, err = h.jobs.cancelKeyed(ctx, key)
+		j, err = h.jobs.keys.cancel(ctx, key, func(id string) (*pb.Job, error) { return h.jobs.Cancel(ctx, id) })
 	default:
 		j, err = h.jobs.Cancel(ctx, id)
 	}
