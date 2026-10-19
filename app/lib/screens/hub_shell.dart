@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/events.pb.dart';
+import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import 'overview_tab.dart';
+import 'quota_tab.dart';
 import 'sessions_tab.dart';
 
 const phoneBreakpoint = 600.0;
@@ -32,10 +35,20 @@ class HubShell extends StatefulWidget {
 
 class _HubShellState extends State<HubShell> {
   late final HubClient _client = widget.clientFactory(widget.hub);
+  late final EventFeed _feed = EventFeed(
+    () => _client.events.subscribe(SubscribeRequest()),
+  )..start();
   int _index = 0;
 
+  @override
+  void dispose() {
+    _feed.dispose();
+    super.dispose();
+  }
+
   Widget _body() => switch (_index) {
-        0 => OverviewTab(client: _client),
+        0 => OverviewTab(client: _client, feed: _feed),
+        1 => QuotaTab(client: _client, feed: _feed),
         2 => SessionsTab(hub: widget.hub),
         _ => _Placeholder(title: _destinations[_index].label),
       };

@@ -2,11 +2,15 @@ import 'dart:async';
 
 import 'package:connectrpc/test.dart';
 import 'package:flutter/material.dart';
+import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/quota.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/quota.pb.dart';
+import 'package:protectorate/screens/quota_tab.dart';
 import 'package:protectorate/hubs/event_feed.dart';
 import 'package:protectorate/hubs/hub_client.dart';
 import 'package:protectorate/hubs/hub_profile.dart';
@@ -28,6 +32,14 @@ HubClient _fakeClient(HubProfile p, {void Function(String?)? onAuth}) {
         onAuth?.call(ctx.requestHeaders.get('authorization')?.first);
         return GetStatusResponse(hostname: 'box', os: 'linux', arch: 'arm64', version: 'v1');
       })
+      .unary(QuotaService.getQuota, (GetQuotaRequest r, ctx) => GetQuotaResponse(quotas: [
+            ProviderQuota(
+              provider: 'claude',
+              freshness: Freshness.FRESHNESS_FRESH,
+              windows: [QuotaWindow(name: '5h', usedPercent: 40)],
+            ),
+            ProviderQuota(provider: 'gemini', freshness: Freshness.FRESHNESS_UNKNOWN),
+          ]))
       .server(EventService.subscribe, (SubscribeRequest r, ctx) async* {
         yield Event(kind: 'session.started', subject: 'alice');
         await Completer<void>().future;
@@ -90,7 +102,9 @@ void main() {
       expect(find.text('box (linux/arm64)'), findsOneWidget);
       await tester.tap(find.text('Quota'));
       await tester.pumpAndSettle();
-      expect(find.text('Quota: not wired yet'), findsOneWidget);
+      expect(find.text('5h: 40% used'), findsOneWidget);
+      expect(find.text('No data. This is not spare capacity.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('bar-5h')), findsOneWidget);
     });
 
     testWidgets('desktop width uses navigation rail', (tester) async {
@@ -131,6 +145,16 @@ void main() {
       expect(feed.backoff(3), const Duration(milliseconds: 80));
       expect(feed.backoff(30), const Duration(seconds: 30));
     });
+  });
+
+  test('quota event payload decodes', () {
+    final q = ProviderQuota(provider: 'claude', plan: 'max', freshness: Freshness.FRESHNESS_STALE);
+    final e = Event(kind: 'quota.updated', subject: 'claude');
+    e.payload = Struct()..mergeFromProto3Json(q.toProto3Json());
+    final back = quotaFromEvent(e)!;
+    expect(back.plan, 'max');
+    expect(back.freshness, Freshness.FRESHNESS_STALE);
+    expect(quotaFromEvent(Event(kind: 'other')), isNull);
   });
 
   group('extra keys', () {

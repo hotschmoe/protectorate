@@ -4,6 +4,7 @@ import 'package:connectrpc/protocol/connect.dart' as protocol;
 
 import '../gen/protectorate/v1/events.connect.client.dart';
 import '../gen/protectorate/v1/hub.connect.client.dart';
+import '../gen/protectorate/v1/quota.connect.client.dart';
 import 'hub_profile.dart';
 import 'http_client_io.dart' if (dart.library.js_interop) 'http_client_web.dart';
 
@@ -30,8 +31,10 @@ class HubClient {
 
   HubClient.withTransport(Transport transport)
       : hub = HubServiceClient(transport),
-        events = EventServiceClient(transport);
+        events = EventServiceClient(transport),
+        quota = QuotaServiceClient(transport);
 
   final HubServiceClient hub;
   final EventServiceClient events;
+  final QuotaServiceClient quota;
 }

@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '../gen/protectorate/v1/events.pb.dart';
 import '../gen/protectorate/v1/hub.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 
 class OverviewTab extends StatefulWidget {
-  const OverviewTab({super.key, required this.client});
+  const OverviewTab({super.key, required this.client, required this.feed});
 
   final HubClient client;
+  final EventFeed feed;
 
   @override
   State<OverviewTab> createState() => _OverviewTabState();
@@ -16,18 +16,10 @@ class OverviewTab extends StatefulWidget {
 
 class _OverviewTabState extends State<OverviewTab> {
   late Future<GetStatusResponse> _status = _loadStatus();
-  late final EventFeed _feed = EventFeed(
-    () => widget.client.events.subscribe(SubscribeRequest()),
-  )..start();
+  EventFeed get _feed => widget.feed;
 
   Future<GetStatusResponse> _loadStatus() =>
       widget.client.hub.getStatus(GetStatusRequest());
-
-  @override
-  void dispose() {
-    _feed.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {

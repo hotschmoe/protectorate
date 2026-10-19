@@ -21,6 +21,7 @@ class EventFeed extends ChangeNotifier {
   final Duration initialDelay;
   final Duration maxDelay;
 
+  final _incoming = StreamController<Event>.broadcast();
   final List<Event> _events = [];
   FeedState _state = FeedState.connecting;
   Object? _lastError;
@@ -29,6 +30,7 @@ class EventFeed extends ChangeNotifier {
   Timer? _timer;
   bool _stopped = true;
 
+  Stream<Event> get incoming => _incoming.stream;
   List<Event> get events => List.unmodifiable(_events);
   FeedState get state => _state;
   Object? get lastError => _lastError;
@@ -47,6 +49,7 @@ class EventFeed extends ChangeNotifier {
         _attempt = 0;
         _lastError = null;
         _events.insert(0, e);
+        _incoming.add(e);
         if (_events.length > maxEvents) _events.removeLast();
         _setState(FeedState.live);
       },
@@ -89,6 +92,7 @@ class EventFeed extends ChangeNotifier {
   @override
   void dispose() {
     stop();
+    _incoming.close();
     super.dispose();
   }
 }
