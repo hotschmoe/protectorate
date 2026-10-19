@@ -754,6 +754,11 @@ func (h *Hub) AcquireLease(ctx context.Context, req *connect.Request[pb.AcquireL
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("set resource or selector"))
 	}
 	holder, notify := leaseCaller(ctx, m.Holder)
+	if desk, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(m.GetResource())), "desk:"); ok && m.GetSelector() == nil {
+		if err := h.gateDesk(ctx, desk, true); err != nil {
+			return nil, err
+		}
+	}
 	var lease *pb.Lease
 	var err error
 	if m.Wait {
@@ -829,6 +834,9 @@ func (h *Hub) acquireDesk(node string, allowFamily bool, blocked func(string, *i
 		return "", nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid resource desk:%s", node))
 	}
 	if err := h.nodes.namedNode(node, nil, allowFamily); err != nil {
+		return "", nil, err
+	}
+	if err := h.gateDesk(context.Background(), node, false); err != nil {
 		return "", nil, err
 	}
 	res := deskResource(node)

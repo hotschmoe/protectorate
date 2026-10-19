@@ -493,7 +493,11 @@ func (m *NodeMonitor) kick(n *pb.NodeInfo) {
 }
 
 func (h *Hub) ListNodes(context.Context, *connect.Request[pb.ListNodesRequest]) (*connect.Response[pb.ListNodesResponse], error) {
-	return connect.NewResponse(&pb.ListNodesResponse{Nodes: h.nodes.Statuses()}), nil
+	nodes := h.nodes.Statuses()
+	for i, s := range nodes {
+		nodes[i] = h.withDesk(s)
+	}
+	return connect.NewResponse(&pb.ListNodesResponse{Nodes: nodes}), nil
 }
 
 func (h *Hub) GetNode(_ context.Context, req *connect.Request[pb.GetNodeRequest]) (*connect.Response[pb.NodeStatus], error) {
@@ -501,7 +505,7 @@ func (h *Hub) GetNode(_ context.Context, req *connect.Request[pb.GetNodeRequest]
 	if err != nil {
 		return nil, nodeErr(err)
 	}
-	return connect.NewResponse(s), nil
+	return connect.NewResponse(h.withDesk(s)), nil
 }
 
 func (h *Hub) AddNode(_ context.Context, req *connect.Request[pb.AddNodeRequest]) (*connect.Response[pb.NodeInfo], error) {

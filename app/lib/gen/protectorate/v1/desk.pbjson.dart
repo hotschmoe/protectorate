@@ -15,6 +15,29 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+@$core.Deprecated('Use deskReasonDescriptor instead')
+const DeskReason$json = {
+  '1': 'DeskReason',
+  '2': [
+    {'1': 'DESK_REASON_UNSPECIFIED', '2': 0},
+    {'1': 'DESK_REASON_AVAILABLE', '2': 1},
+    {'1': 'DESK_REASON_OUTSIDE_WINDOW', '2': 2},
+    {'1': 'DESK_REASON_USER_ACTIVE', '2': 3},
+    {'1': 'DESK_REASON_NOT_INTERACTIVE', '2': 4},
+    {'1': 'DESK_REASON_LOCKED', '2': 5},
+    {'1': 'DESK_REASON_UNSUPPORTED', '2': 6},
+    {'1': 'DESK_REASON_UNKNOWN', '2': 7},
+  ],
+};
+
+/// Descriptor for `DeskReason`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List deskReasonDescriptor = $convert.base64Decode(
+    'CgpEZXNrUmVhc29uEhsKF0RFU0tfUkVBU09OX1VOU1BFQ0lGSUVEEAASGQoVREVTS19SRUFTT0'
+    '5fQVZBSUxBQkxFEAESHgoaREVTS19SRUFTT05fT1VUU0lERV9XSU5ET1cQAhIbChdERVNLX1JF'
+    'QVNPTl9VU0VSX0FDVElWRRADEh8KG0RFU0tfUkVBU09OX05PVF9JTlRFUkFDVElWRRAEEhYKEk'
+    'RFU0tfUkVBU09OX0xPQ0tFRBAFEhsKF0RFU0tfUkVBU09OX1VOU1VQUE9SVEVEEAYSFwoTREVT'
+    'S19SRUFTT05fVU5LTk9XThAH');
+
 @$core.Deprecated('Use deskTargetDescriptor instead')
 const DeskTarget$json = {
   '1': 'DeskTarget',
@@ -395,6 +418,80 @@ final $typed_data.Uint8List deskActionResponseDescriptor = $convert.base64Decode
     'I2CgVpbnB1dBgDIAEoCzIeLnByb3RlY3RvcmF0ZS52MS5JbnB1dFJlc3BvbnNlSABSBWlucHV0'
     'EjAKA3J1bhgEIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5SdW5SZXNwb25zZUgAUgNydW5CCAoGcm'
     'VzdWx0');
+
+@$core.Deprecated('Use deskPolicyDescriptor instead')
+const DeskPolicy$json = {
+  '1': 'DeskPolicy',
+  '2': [
+    {'1': 'window', '3': 1, '4': 1, '5': 9, '10': 'window'},
+    {
+      '1': 'idle',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'idle'
+    },
+    {'1': 'timezone', '3': 3, '4': 1, '5': 9, '10': 'timezone'},
+    {'1': 'lock_after', '3': 4, '4': 1, '5': 8, '10': 'lockAfter'},
+  ],
+};
+
+/// Descriptor for `DeskPolicy`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List deskPolicyDescriptor = $convert.base64Decode(
+    'CgpEZXNrUG9saWN5EhYKBndpbmRvdxgBIAEoCVIGd2luZG93Ei0KBGlkbGUYAiABKAsyGS5nb2'
+    '9nbGUucHJvdG9idWYuRHVyYXRpb25SBGlkbGUSGgoIdGltZXpvbmUYAyABKAlSCHRpbWV6b25l'
+    'Eh0KCmxvY2tfYWZ0ZXIYBCABKAhSCWxvY2tBZnRlcg==');
+
+@$core.Deprecated('Use deskStateDescriptor instead')
+const DeskState$json = {
+  '1': 'DeskState',
+  '2': [
+    {'1': 'available', '3': 1, '4': 1, '5': 8, '10': 'available'},
+    {
+      '1': 'reason',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.DeskReason',
+      '10': 'reason'
+    },
+    {'1': 'detail', '3': 3, '4': 1, '5': 9, '10': 'detail'},
+    {
+      '1': 'last_input',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'lastInput'
+    },
+    {
+      '1': 'evaluated_at',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'evaluatedAt'
+    },
+    {
+      '1': 'policy',
+      '3': 6,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.DeskPolicy',
+      '10': 'policy'
+    },
+  ],
+};
+
+/// Descriptor for `DeskState`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List deskStateDescriptor = $convert.base64Decode(
+    'CglEZXNrU3RhdGUSHAoJYXZhaWxhYmxlGAEgASgIUglhdmFpbGFibGUSMwoGcmVhc29uGAIgAS'
+    'gOMhsucHJvdGVjdG9yYXRlLnYxLkRlc2tSZWFzb25SBnJlYXNvbhIWCgZkZXRhaWwYAyABKAlS'
+    'BmRldGFpbBI5CgpsYXN0X2lucHV0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcF'
+    'IJbGFzdElucHV0Ej0KDGV2YWx1YXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1l'
+    'c3RhbXBSC2V2YWx1YXRlZEF0EjMKBnBvbGljeRgGIAEoCzIbLnByb3RlY3RvcmF0ZS52MS5EZX'
+    'NrUG9saWN5UgZwb2xpY3k=');
 
 const $core.Map<$core.String, $core.dynamic> DeskServiceBase$json = {
   '1': 'DeskService',

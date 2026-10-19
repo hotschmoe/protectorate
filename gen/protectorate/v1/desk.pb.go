@@ -9,6 +9,8 @@ package protectoratev1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -20,6 +22,73 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+type DeskReason int32
+
+const (
+	DeskReason_DESK_REASON_UNSPECIFIED DeskReason = 0
+	// AVAILABLE: no policy applies, or the policy allows agents now.
+	DeskReason_DESK_REASON_AVAILABLE       DeskReason = 1
+	DeskReason_DESK_REASON_OUTSIDE_WINDOW  DeskReason = 2
+	DeskReason_DESK_REASON_USER_ACTIVE     DeskReason = 3
+	DeskReason_DESK_REASON_NOT_INTERACTIVE DeskReason = 4
+	DeskReason_DESK_REASON_LOCKED          DeskReason = 5
+	DeskReason_DESK_REASON_UNSUPPORTED     DeskReason = 6
+	// DESK_REASON_UNKNOWN: the node has not reported (an older agent, or the
+	// poll failed).
+	DeskReason_DESK_REASON_UNKNOWN DeskReason = 7
+)
+
+// Enum value maps for DeskReason.
+var (
+	DeskReason_name = map[int32]string{
+		0: "DESK_REASON_UNSPECIFIED",
+		1: "DESK_REASON_AVAILABLE",
+		2: "DESK_REASON_OUTSIDE_WINDOW",
+		3: "DESK_REASON_USER_ACTIVE",
+		4: "DESK_REASON_NOT_INTERACTIVE",
+		5: "DESK_REASON_LOCKED",
+		6: "DESK_REASON_UNSUPPORTED",
+		7: "DESK_REASON_UNKNOWN",
+	}
+	DeskReason_value = map[string]int32{
+		"DESK_REASON_UNSPECIFIED":     0,
+		"DESK_REASON_AVAILABLE":       1,
+		"DESK_REASON_OUTSIDE_WINDOW":  2,
+		"DESK_REASON_USER_ACTIVE":     3,
+		"DESK_REASON_NOT_INTERACTIVE": 4,
+		"DESK_REASON_LOCKED":          5,
+		"DESK_REASON_UNSUPPORTED":     6,
+		"DESK_REASON_UNKNOWN":         7,
+	}
+)
+
+func (x DeskReason) Enum() *DeskReason {
+	p := new(DeskReason)
+	*p = x
+	return p
+}
+
+func (x DeskReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DeskReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_desk_proto_enumTypes[0].Descriptor()
+}
+
+func (DeskReason) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_desk_proto_enumTypes[0]
+}
+
+func (x DeskReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DeskReason.Descriptor instead.
+func (DeskReason) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{0}
+}
 
 type DeskTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1027,11 +1096,179 @@ func (*DeskActionResponse_Input) isDeskActionResponse_Result() {}
 
 func (*DeskActionResponse_Run) isDeskActionResponse_Result() {}
 
+// DeskPolicy says when a node's desktop may be driven by agents. Without a
+// policy the desktop is always available. With one, it is available only
+// inside the window and after the user has had no physical input (injected
+// input, such as the node's own desk commands, does not count) for idle.
+type DeskPolicy struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// window is "HH:MM-HH:MM" in the policy's time zone; start after end spans
+	// midnight ("19:00-07:00").
+	Window string               `protobuf:"bytes,1,opt,name=window,proto3" json:"window,omitempty"`
+	Idle   *durationpb.Duration `protobuf:"bytes,2,opt,name=idle,proto3" json:"idle,omitempty"`
+	// timezone is an IANA name; empty means the node's local time.
+	Timezone string `protobuf:"bytes,3,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	// lock_after locks the workstation when the window ends and when an agent
+	// lease ends inside the window with no other lease following within a
+	// minute. It never locks while the user is active.
+	LockAfter     bool `protobuf:"varint,4,opt,name=lock_after,json=lockAfter,proto3" json:"lock_after,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeskPolicy) Reset() {
+	*x = DeskPolicy{}
+	mi := &file_protectorate_v1_desk_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeskPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeskPolicy) ProtoMessage() {}
+
+func (x *DeskPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_desk_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeskPolicy.ProtoReflect.Descriptor instead.
+func (*DeskPolicy) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *DeskPolicy) GetWindow() string {
+	if x != nil {
+		return x.Window
+	}
+	return ""
+}
+
+func (x *DeskPolicy) GetIdle() *durationpb.Duration {
+	if x != nil {
+		return x.Idle
+	}
+	return nil
+}
+
+func (x *DeskPolicy) GetTimezone() string {
+	if x != nil {
+		return x.Timezone
+	}
+	return ""
+}
+
+func (x *DeskPolicy) GetLockAfter() bool {
+	if x != nil {
+		return x.LockAfter
+	}
+	return false
+}
+
+// DeskState is a node's evaluation of its policy at one moment.
+type DeskState struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Available bool                   `protobuf:"varint,1,opt,name=available,proto3" json:"available,omitempty"`
+	Reason    DeskReason             `protobuf:"varint,2,opt,name=reason,proto3,enum=protectorate.v1.DeskReason" json:"reason,omitempty"`
+	// detail is a sentence for people, e.g. "physical input 3m ago, idle 15m
+	// required".
+	Detail string `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	// last_input is the last physical keyboard or mouse input the node saw; unset
+	// when it has seen none since the agent started.
+	LastInput   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_input,json=lastInput,proto3" json:"last_input,omitempty"`
+	EvaluatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=evaluated_at,json=evaluatedAt,proto3" json:"evaluated_at,omitempty"`
+	// policy is the policy the node evaluated; unset when none applies.
+	Policy        *DeskPolicy `protobuf:"bytes,6,opt,name=policy,proto3" json:"policy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeskState) Reset() {
+	*x = DeskState{}
+	mi := &file_protectorate_v1_desk_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeskState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeskState) ProtoMessage() {}
+
+func (x *DeskState) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_desk_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeskState.ProtoReflect.Descriptor instead.
+func (*DeskState) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *DeskState) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+func (x *DeskState) GetReason() DeskReason {
+	if x != nil {
+		return x.Reason
+	}
+	return DeskReason_DESK_REASON_UNSPECIFIED
+}
+
+func (x *DeskState) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *DeskState) GetLastInput() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastInput
+	}
+	return nil
+}
+
+func (x *DeskState) GetEvaluatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EvaluatedAt
+	}
+	return nil
+}
+
+func (x *DeskState) GetPolicy() *DeskPolicy {
+	if x != nil {
+		return x.Policy
+	}
+	return nil
+}
+
 var File_protectorate_v1_desk_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/desk.proto\x12\x0fprotectorate.v1\"^\n" +
+	"\x1aprotectorate/v1/desk.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"^\n" +
 	"\n" +
 	"DeskTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
@@ -1099,7 +1336,32 @@ const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\flist_windows\x18\x02 \x01(\v2$.protectorate.v1.ListWindowsResponseH\x00R\vlistWindows\x126\n" +
 	"\x05input\x18\x03 \x01(\v2\x1e.protectorate.v1.InputResponseH\x00R\x05input\x120\n" +
 	"\x03run\x18\x04 \x01(\v2\x1c.protectorate.v1.RunResponseH\x00R\x03runB\b\n" +
-	"\x06result2\x98\x04\n" +
+	"\x06result\"\x8e\x01\n" +
+	"\n" +
+	"DeskPolicy\x12\x16\n" +
+	"\x06window\x18\x01 \x01(\tR\x06window\x12-\n" +
+	"\x04idle\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x04idle\x12\x1a\n" +
+	"\btimezone\x18\x03 \x01(\tR\btimezone\x12\x1d\n" +
+	"\n" +
+	"lock_after\x18\x04 \x01(\bR\tlockAfter\"\xa5\x02\n" +
+	"\tDeskState\x12\x1c\n" +
+	"\tavailable\x18\x01 \x01(\bR\tavailable\x123\n" +
+	"\x06reason\x18\x02 \x01(\x0e2\x1b.protectorate.v1.DeskReasonR\x06reason\x12\x16\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\x129\n" +
+	"\n" +
+	"last_input\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tlastInput\x12=\n" +
+	"\fevaluated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vevaluatedAt\x123\n" +
+	"\x06policy\x18\x06 \x01(\v2\x1b.protectorate.v1.DeskPolicyR\x06policy*\xf0\x01\n" +
+	"\n" +
+	"DeskReason\x12\x1b\n" +
+	"\x17DESK_REASON_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15DESK_REASON_AVAILABLE\x10\x01\x12\x1e\n" +
+	"\x1aDESK_REASON_OUTSIDE_WINDOW\x10\x02\x12\x1b\n" +
+	"\x17DESK_REASON_USER_ACTIVE\x10\x03\x12\x1f\n" +
+	"\x1bDESK_REASON_NOT_INTERACTIVE\x10\x04\x12\x16\n" +
+	"\x12DESK_REASON_LOCKED\x10\x05\x12\x1b\n" +
+	"\x17DESK_REASON_UNSUPPORTED\x10\x06\x12\x17\n" +
+	"\x13DESK_REASON_UNKNOWN\x10\a2\x98\x04\n" +
 	"\vDeskService\x12U\n" +
 	"\n" +
 	"Screenshot\x12\".protectorate.v1.ScreenshotRequest\x1a#.protectorate.v1.ScreenshotResponse\x12X\n" +
@@ -1122,63 +1384,74 @@ func file_protectorate_v1_desk_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_desk_proto_rawDescData
 }
 
-var file_protectorate_v1_desk_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_protectorate_v1_desk_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_protectorate_v1_desk_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_protectorate_v1_desk_proto_goTypes = []any{
-	(*DeskTarget)(nil),          // 0: protectorate.v1.DeskTarget
-	(*ScreenshotRequest)(nil),   // 1: protectorate.v1.ScreenshotRequest
-	(*ScreenshotResponse)(nil),  // 2: protectorate.v1.ScreenshotResponse
-	(*ListWindowsRequest)(nil),  // 3: protectorate.v1.ListWindowsRequest
-	(*DeskWindow)(nil),          // 4: protectorate.v1.DeskWindow
-	(*ListWindowsResponse)(nil), // 5: protectorate.v1.ListWindowsResponse
-	(*ClickRequest)(nil),        // 6: protectorate.v1.ClickRequest
-	(*MoveRequest)(nil),         // 7: protectorate.v1.MoveRequest
-	(*TypeRequest)(nil),         // 8: protectorate.v1.TypeRequest
-	(*KeyRequest)(nil),          // 9: protectorate.v1.KeyRequest
-	(*RunRequest)(nil),          // 10: protectorate.v1.RunRequest
-	(*InputResponse)(nil),       // 11: protectorate.v1.InputResponse
-	(*RunResponse)(nil),         // 12: protectorate.v1.RunResponse
-	(*DeskActionRequest)(nil),   // 13: protectorate.v1.DeskActionRequest
-	(*DeskActionResponse)(nil),  // 14: protectorate.v1.DeskActionResponse
+	(DeskReason)(0),               // 0: protectorate.v1.DeskReason
+	(*DeskTarget)(nil),            // 1: protectorate.v1.DeskTarget
+	(*ScreenshotRequest)(nil),     // 2: protectorate.v1.ScreenshotRequest
+	(*ScreenshotResponse)(nil),    // 3: protectorate.v1.ScreenshotResponse
+	(*ListWindowsRequest)(nil),    // 4: protectorate.v1.ListWindowsRequest
+	(*DeskWindow)(nil),            // 5: protectorate.v1.DeskWindow
+	(*ListWindowsResponse)(nil),   // 6: protectorate.v1.ListWindowsResponse
+	(*ClickRequest)(nil),          // 7: protectorate.v1.ClickRequest
+	(*MoveRequest)(nil),           // 8: protectorate.v1.MoveRequest
+	(*TypeRequest)(nil),           // 9: protectorate.v1.TypeRequest
+	(*KeyRequest)(nil),            // 10: protectorate.v1.KeyRequest
+	(*RunRequest)(nil),            // 11: protectorate.v1.RunRequest
+	(*InputResponse)(nil),         // 12: protectorate.v1.InputResponse
+	(*RunResponse)(nil),           // 13: protectorate.v1.RunResponse
+	(*DeskActionRequest)(nil),     // 14: protectorate.v1.DeskActionRequest
+	(*DeskActionResponse)(nil),    // 15: protectorate.v1.DeskActionResponse
+	(*DeskPolicy)(nil),            // 16: protectorate.v1.DeskPolicy
+	(*DeskState)(nil),             // 17: protectorate.v1.DeskState
+	(*durationpb.Duration)(nil),   // 18: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
 }
 var file_protectorate_v1_desk_proto_depIdxs = []int32{
-	0,  // 0: protectorate.v1.ScreenshotRequest.target:type_name -> protectorate.v1.DeskTarget
-	0,  // 1: protectorate.v1.ListWindowsRequest.target:type_name -> protectorate.v1.DeskTarget
-	4,  // 2: protectorate.v1.ListWindowsResponse.windows:type_name -> protectorate.v1.DeskWindow
-	0,  // 3: protectorate.v1.ClickRequest.target:type_name -> protectorate.v1.DeskTarget
-	0,  // 4: protectorate.v1.MoveRequest.target:type_name -> protectorate.v1.DeskTarget
-	0,  // 5: protectorate.v1.TypeRequest.target:type_name -> protectorate.v1.DeskTarget
-	0,  // 6: protectorate.v1.KeyRequest.target:type_name -> protectorate.v1.DeskTarget
-	0,  // 7: protectorate.v1.RunRequest.target:type_name -> protectorate.v1.DeskTarget
-	1,  // 8: protectorate.v1.DeskActionRequest.screenshot:type_name -> protectorate.v1.ScreenshotRequest
-	3,  // 9: protectorate.v1.DeskActionRequest.list_windows:type_name -> protectorate.v1.ListWindowsRequest
-	6,  // 10: protectorate.v1.DeskActionRequest.click:type_name -> protectorate.v1.ClickRequest
-	7,  // 11: protectorate.v1.DeskActionRequest.move:type_name -> protectorate.v1.MoveRequest
-	8,  // 12: protectorate.v1.DeskActionRequest.type:type_name -> protectorate.v1.TypeRequest
-	9,  // 13: protectorate.v1.DeskActionRequest.key:type_name -> protectorate.v1.KeyRequest
-	10, // 14: protectorate.v1.DeskActionRequest.run:type_name -> protectorate.v1.RunRequest
-	2,  // 15: protectorate.v1.DeskActionResponse.screenshot:type_name -> protectorate.v1.ScreenshotResponse
-	5,  // 16: protectorate.v1.DeskActionResponse.list_windows:type_name -> protectorate.v1.ListWindowsResponse
-	11, // 17: protectorate.v1.DeskActionResponse.input:type_name -> protectorate.v1.InputResponse
-	12, // 18: protectorate.v1.DeskActionResponse.run:type_name -> protectorate.v1.RunResponse
-	1,  // 19: protectorate.v1.DeskService.Screenshot:input_type -> protectorate.v1.ScreenshotRequest
-	3,  // 20: protectorate.v1.DeskService.ListWindows:input_type -> protectorate.v1.ListWindowsRequest
-	6,  // 21: protectorate.v1.DeskService.Click:input_type -> protectorate.v1.ClickRequest
-	7,  // 22: protectorate.v1.DeskService.Move:input_type -> protectorate.v1.MoveRequest
-	8,  // 23: protectorate.v1.DeskService.Type:input_type -> protectorate.v1.TypeRequest
-	9,  // 24: protectorate.v1.DeskService.Key:input_type -> protectorate.v1.KeyRequest
-	10, // 25: protectorate.v1.DeskService.Run:input_type -> protectorate.v1.RunRequest
-	2,  // 26: protectorate.v1.DeskService.Screenshot:output_type -> protectorate.v1.ScreenshotResponse
-	5,  // 27: protectorate.v1.DeskService.ListWindows:output_type -> protectorate.v1.ListWindowsResponse
-	11, // 28: protectorate.v1.DeskService.Click:output_type -> protectorate.v1.InputResponse
-	11, // 29: protectorate.v1.DeskService.Move:output_type -> protectorate.v1.InputResponse
-	11, // 30: protectorate.v1.DeskService.Type:output_type -> protectorate.v1.InputResponse
-	11, // 31: protectorate.v1.DeskService.Key:output_type -> protectorate.v1.InputResponse
-	12, // 32: protectorate.v1.DeskService.Run:output_type -> protectorate.v1.RunResponse
-	26, // [26:33] is the sub-list for method output_type
-	19, // [19:26] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	1,  // 0: protectorate.v1.ScreenshotRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 1: protectorate.v1.ListWindowsRequest.target:type_name -> protectorate.v1.DeskTarget
+	5,  // 2: protectorate.v1.ListWindowsResponse.windows:type_name -> protectorate.v1.DeskWindow
+	1,  // 3: protectorate.v1.ClickRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 4: protectorate.v1.MoveRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 5: protectorate.v1.TypeRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 6: protectorate.v1.KeyRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 7: protectorate.v1.RunRequest.target:type_name -> protectorate.v1.DeskTarget
+	2,  // 8: protectorate.v1.DeskActionRequest.screenshot:type_name -> protectorate.v1.ScreenshotRequest
+	4,  // 9: protectorate.v1.DeskActionRequest.list_windows:type_name -> protectorate.v1.ListWindowsRequest
+	7,  // 10: protectorate.v1.DeskActionRequest.click:type_name -> protectorate.v1.ClickRequest
+	8,  // 11: protectorate.v1.DeskActionRequest.move:type_name -> protectorate.v1.MoveRequest
+	9,  // 12: protectorate.v1.DeskActionRequest.type:type_name -> protectorate.v1.TypeRequest
+	10, // 13: protectorate.v1.DeskActionRequest.key:type_name -> protectorate.v1.KeyRequest
+	11, // 14: protectorate.v1.DeskActionRequest.run:type_name -> protectorate.v1.RunRequest
+	3,  // 15: protectorate.v1.DeskActionResponse.screenshot:type_name -> protectorate.v1.ScreenshotResponse
+	6,  // 16: protectorate.v1.DeskActionResponse.list_windows:type_name -> protectorate.v1.ListWindowsResponse
+	12, // 17: protectorate.v1.DeskActionResponse.input:type_name -> protectorate.v1.InputResponse
+	13, // 18: protectorate.v1.DeskActionResponse.run:type_name -> protectorate.v1.RunResponse
+	18, // 19: protectorate.v1.DeskPolicy.idle:type_name -> google.protobuf.Duration
+	0,  // 20: protectorate.v1.DeskState.reason:type_name -> protectorate.v1.DeskReason
+	19, // 21: protectorate.v1.DeskState.last_input:type_name -> google.protobuf.Timestamp
+	19, // 22: protectorate.v1.DeskState.evaluated_at:type_name -> google.protobuf.Timestamp
+	16, // 23: protectorate.v1.DeskState.policy:type_name -> protectorate.v1.DeskPolicy
+	2,  // 24: protectorate.v1.DeskService.Screenshot:input_type -> protectorate.v1.ScreenshotRequest
+	4,  // 25: protectorate.v1.DeskService.ListWindows:input_type -> protectorate.v1.ListWindowsRequest
+	7,  // 26: protectorate.v1.DeskService.Click:input_type -> protectorate.v1.ClickRequest
+	8,  // 27: protectorate.v1.DeskService.Move:input_type -> protectorate.v1.MoveRequest
+	9,  // 28: protectorate.v1.DeskService.Type:input_type -> protectorate.v1.TypeRequest
+	10, // 29: protectorate.v1.DeskService.Key:input_type -> protectorate.v1.KeyRequest
+	11, // 30: protectorate.v1.DeskService.Run:input_type -> protectorate.v1.RunRequest
+	3,  // 31: protectorate.v1.DeskService.Screenshot:output_type -> protectorate.v1.ScreenshotResponse
+	6,  // 32: protectorate.v1.DeskService.ListWindows:output_type -> protectorate.v1.ListWindowsResponse
+	12, // 33: protectorate.v1.DeskService.Click:output_type -> protectorate.v1.InputResponse
+	12, // 34: protectorate.v1.DeskService.Move:output_type -> protectorate.v1.InputResponse
+	12, // 35: protectorate.v1.DeskService.Type:output_type -> protectorate.v1.InputResponse
+	12, // 36: protectorate.v1.DeskService.Key:output_type -> protectorate.v1.InputResponse
+	13, // 37: protectorate.v1.DeskService.Run:output_type -> protectorate.v1.RunResponse
+	31, // [31:38] is the sub-list for method output_type
+	24, // [24:31] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_desk_proto_init() }
@@ -1206,13 +1479,14 @@ func file_protectorate_v1_desk_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_desk_proto_rawDesc), len(file_protectorate_v1_desk_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   15,
+			NumEnums:      1,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_protectorate_v1_desk_proto_goTypes,
 		DependencyIndexes: file_protectorate_v1_desk_proto_depIdxs,
+		EnumInfos:         file_protectorate_v1_desk_proto_enumTypes,
 		MessageInfos:      file_protectorate_v1_desk_proto_msgTypes,
 	}.Build()
 	File_protectorate_v1_desk_proto = out.File

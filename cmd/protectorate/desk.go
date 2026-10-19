@@ -69,6 +69,7 @@ arguments or negative numbers: desk win1 --lease L run -- notepad.exe a.txt`,
 			return runDesk(cmd, o, cl, args[0], act, f)
 		},
 	}
+	c.AddCommand(deskPolicyCmd(o))
 	fl := c.Flags()
 	fl.StringVar(&f.lease, "lease", "", "lease id on desk:<node> (default: the hub leases the desktop for 2 minutes per command; or env "+deskLeaseEnv+")")
 	fl.StringVarP(&f.output, "output", "o", "", "screenshot file (default screenshot.png)")

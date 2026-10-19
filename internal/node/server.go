@@ -228,3 +228,17 @@ func (a *Agent) ApplyUpdate(ctx context.Context, req *connect.Request[pb.ApplyUp
 	}
 	return connect.NewResponse(res), nil
 }
+
+func (a *Agent) GetDeskState(_ context.Context, req *connect.Request[pb.GetDeskStateRequest]) (*connect.Response[pb.DeskState], error) {
+	if a.Desk == nil || a.Desk.Guard == nil {
+		return nil, errNoDesk
+	}
+	g := a.Desk.Guard
+	if err := g.SetPolicy(req.Msg.Policy); err != nil {
+		return nil, deskErr(err)
+	}
+	if req.Msg.LeaseEnded {
+		g.LeaseEnded()
+	}
+	return connect.NewResponse(g.State()), nil
+}

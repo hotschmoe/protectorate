@@ -105,6 +105,16 @@ abstract final class NodeAgentService {
     protectoratev1node.ApplyUpdateRequest.new,
     protectoratev1node.ApplyUpdateResponse.new,
   );
+
+  /// GetDeskState adopts the desk policy the hub sends (none clears it) and
+  /// evaluates it now. The node enforces the policy itself on every input
+  /// command, so the hub's view can be a few seconds old without harm.
+  static const getDeskState = connect.Spec(
+    '/$name/GetDeskState',
+    connect.StreamType.unary,
+    protectoratev1node.GetDeskStateRequest.new,
+    protectoratev1desk.DeskState.new,
+  );
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -188,5 +198,24 @@ abstract final class NodeService {
     connect.StreamType.unary,
     protectoratev1node.ApplyUpdateRequest.new,
     protectoratev1node.ApplyUpdateResponse.new,
+  );
+
+  /// SetDeskPolicy sets or clears (policy unset) when agents may drive a
+  /// node's desktop. Only the owner token may call it. The hub keeps the
+  /// policy and sends it to the node, which enforces it.
+  static const setDeskPolicy = connect.Spec(
+    '/$name/SetDeskPolicy',
+    connect.StreamType.unary,
+    protectoratev1node.SetDeskPolicyRequest.new,
+    protectoratev1node.DeskPolicyStatus.new,
+  );
+
+  /// GetDeskPolicy returns a node's policy, its current evaluation and who
+  /// holds the desktop lease.
+  static const getDeskPolicy = connect.Spec(
+    '/$name/GetDeskPolicy',
+    connect.StreamType.unary,
+    protectoratev1node.GetDeskPolicyRequest.new,
+    protectoratev1node.DeskPolicyStatus.new,
   );
 }

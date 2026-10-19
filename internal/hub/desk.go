@@ -49,6 +49,11 @@ type deskLease struct {
 // free, renews the caller's own, and refuses when someone else holds it.
 func (h *Hub) admitDesk(ctx context.Context, node, leaseID string, allowFamily bool) (*deskLease, error) {
 	want := deskResource(node)
+	if leaseID == "" {
+		if err := h.gateDesk(ctx, node, true); err != nil {
+			return nil, err
+		}
+	}
 	if leaseID != "" {
 		l, err := h.leases.Get(leaseID)
 		if err != nil {
@@ -116,6 +121,9 @@ func (h *Hub) deskDo(ctx context.Context, t *pb.DeskTarget, mutating bool, act *
 		}
 	}
 	res, err := ops.Desk(ctx, act)
+	if err != nil && deskRefusal(err) {
+		h.endDeskLeases(strings.ToLower(t.Name), err.Error())
+	}
 	if err != nil && dl != nil && dl.fresh {
 		_ = h.leases.Release(dl.lease.Id)
 		return nil, nil, err

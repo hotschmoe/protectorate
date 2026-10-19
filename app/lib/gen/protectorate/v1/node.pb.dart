@@ -16,18 +16,344 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
-    as $2;
+    as $3;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
-    as $0;
+    as $1;
 
-import 'desk.pb.dart' as $4;
-import 'job.pb.dart' as $3;
+import 'desk.pb.dart' as $0;
+import 'job.pb.dart' as $4;
 import 'node.pbenum.dart';
-import 'sleeve.pb.dart' as $1;
+import 'sleeve.pb.dart' as $2;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'node.pbenum.dart';
+
+class GetDeskStateRequest extends $pb.GeneratedMessage {
+  factory GetDeskStateRequest({
+    $0.DeskPolicy? policy,
+    $core.bool? leaseEnded,
+  }) {
+    final result = GetDeskStateRequest._();
+    if (policy != null) result.policy = policy;
+    if (leaseEnded != null) result.leaseEnded = leaseEnded;
+    return result;
+  }
+
+  GetDeskStateRequest._();
+
+  factory GetDeskStateRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetDeskStateRequest()..mergeFromBuffer(data, registry);
+  factory GetDeskStateRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetDeskStateRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetDeskStateRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetDeskStateRequest.$_createMessage)
+    ..aOM<$0.DeskPolicy>(1, _omitFieldNames ? '' : 'policy',
+        subBuilder: $0.DeskPolicy.$_createMessage)
+    ..aOB(2, _omitFieldNames ? '' : 'leaseEnded')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetDeskStateRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetDeskStateRequest copyWith(void Function(GetDeskStateRequest) updates) =>
+      super.copyWith((message) => updates(message as GetDeskStateRequest))
+          as GetDeskStateRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core
+      .Deprecated('Use GetDeskStateRequest() / GetDeskStateRequest.new instead')
+  static GetDeskStateRequest create() => GetDeskStateRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetDeskStateRequest._();
+  @$core.override
+  GetDeskStateRequest createEmptyInstance() => GetDeskStateRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetDeskStateRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetDeskStateRequest>(
+          GetDeskStateRequest.$_createMessage);
+  static GetDeskStateRequest? _defaultInstance;
+
+  /// policy is the policy to enforce; unset means always available.
+  @$pb.TagNumber(1)
+  $0.DeskPolicy get policy => $_getN(0);
+  @$pb.TagNumber(1)
+  set policy($0.DeskPolicy value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPolicy() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPolicy() => $_clearField(1);
+  @$pb.TagNumber(1)
+  $0.DeskPolicy ensurePolicy() => $_ensure(0);
+
+  /// lease_ended tells the node an agent's desktop lease just ended, so that
+  /// with lock_after it can lock the workstation after a minute of quiet.
+  @$pb.TagNumber(2)
+  $core.bool get leaseEnded => $_getBF(1);
+  @$pb.TagNumber(2)
+  set leaseEnded($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasLeaseEnded() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearLeaseEnded() => $_clearField(2);
+}
+
+class SetDeskPolicyRequest extends $pb.GeneratedMessage {
+  factory SetDeskPolicyRequest({
+    $core.String? name,
+    $core.bool? allowFamily,
+    $0.DeskPolicy? policy,
+  }) {
+    final result = SetDeskPolicyRequest._();
+    if (name != null) result.name = name;
+    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (policy != null) result.policy = policy;
+    return result;
+  }
+
+  SetDeskPolicyRequest._();
+
+  factory SetDeskPolicyRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetDeskPolicyRequest()..mergeFromBuffer(data, registry);
+  factory SetDeskPolicyRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetDeskPolicyRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SetDeskPolicyRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SetDeskPolicyRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOM<$0.DeskPolicy>(3, _omitFieldNames ? '' : 'policy',
+        subBuilder: $0.DeskPolicy.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetDeskPolicyRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetDeskPolicyRequest copyWith(void Function(SetDeskPolicyRequest) updates) =>
+      super.copyWith((message) => updates(message as SetDeskPolicyRequest))
+          as SetDeskPolicyRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use SetDeskPolicyRequest() / SetDeskPolicyRequest.new instead')
+  static SetDeskPolicyRequest create() => SetDeskPolicyRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SetDeskPolicyRequest._();
+  @$core.override
+  SetDeskPolicyRequest createEmptyInstance() => SetDeskPolicyRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SetDeskPolicyRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SetDeskPolicyRequest>(
+          SetDeskPolicyRequest.$_createMessage);
+  static SetDeskPolicyRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get allowFamily => $_getBF(1);
+  @$pb.TagNumber(2)
+  set allowFamily($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAllowFamily() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAllowFamily() => $_clearField(2);
+
+  /// policy unset clears the policy: the desktop is always available again.
+  @$pb.TagNumber(3)
+  $0.DeskPolicy get policy => $_getN(2);
+  @$pb.TagNumber(3)
+  set policy($0.DeskPolicy value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPolicy() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPolicy() => $_clearField(3);
+  @$pb.TagNumber(3)
+  $0.DeskPolicy ensurePolicy() => $_ensure(2);
+}
+
+class GetDeskPolicyRequest extends $pb.GeneratedMessage {
+  factory GetDeskPolicyRequest({
+    $core.String? name,
+    $core.bool? allowFamily,
+  }) {
+    final result = GetDeskPolicyRequest._();
+    if (name != null) result.name = name;
+    if (allowFamily != null) result.allowFamily = allowFamily;
+    return result;
+  }
+
+  GetDeskPolicyRequest._();
+
+  factory GetDeskPolicyRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetDeskPolicyRequest()..mergeFromBuffer(data, registry);
+  factory GetDeskPolicyRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetDeskPolicyRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetDeskPolicyRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetDeskPolicyRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetDeskPolicyRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetDeskPolicyRequest copyWith(void Function(GetDeskPolicyRequest) updates) =>
+      super.copyWith((message) => updates(message as GetDeskPolicyRequest))
+          as GetDeskPolicyRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetDeskPolicyRequest() / GetDeskPolicyRequest.new instead')
+  static GetDeskPolicyRequest create() => GetDeskPolicyRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetDeskPolicyRequest._();
+  @$core.override
+  GetDeskPolicyRequest createEmptyInstance() => GetDeskPolicyRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetDeskPolicyRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetDeskPolicyRequest>(
+          GetDeskPolicyRequest.$_createMessage);
+  static GetDeskPolicyRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get allowFamily => $_getBF(1);
+  @$pb.TagNumber(2)
+  set allowFamily($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAllowFamily() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAllowFamily() => $_clearField(2);
+}
+
+class DeskPolicyStatus extends $pb.GeneratedMessage {
+  factory DeskPolicyStatus({
+    $0.DeskPolicy? policy,
+    $0.DeskState? state,
+    $core.String? holder,
+  }) {
+    final result = DeskPolicyStatus._();
+    if (policy != null) result.policy = policy;
+    if (state != null) result.state = state;
+    if (holder != null) result.holder = holder;
+    return result;
+  }
+
+  DeskPolicyStatus._();
+
+  factory DeskPolicyStatus.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskPolicyStatus()..mergeFromBuffer(data, registry);
+  factory DeskPolicyStatus.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskPolicyStatus()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DeskPolicyStatus',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DeskPolicyStatus.$_createMessage)
+    ..aOM<$0.DeskPolicy>(1, _omitFieldNames ? '' : 'policy',
+        subBuilder: $0.DeskPolicy.$_createMessage)
+    ..aOM<$0.DeskState>(2, _omitFieldNames ? '' : 'state',
+        subBuilder: $0.DeskState.$_createMessage)
+    ..aOS(3, _omitFieldNames ? '' : 'holder')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskPolicyStatus clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskPolicyStatus copyWith(void Function(DeskPolicyStatus) updates) =>
+      super.copyWith((message) => updates(message as DeskPolicyStatus))
+          as DeskPolicyStatus;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DeskPolicyStatus() / DeskPolicyStatus.new instead')
+  static DeskPolicyStatus create() => DeskPolicyStatus._();
+  static $pb.GeneratedMessage $_createMessage() => DeskPolicyStatus._();
+  @$core.override
+  DeskPolicyStatus createEmptyInstance() => DeskPolicyStatus._();
+  @$core.pragma('dart2js:noInline')
+  static DeskPolicyStatus getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<DeskPolicyStatus>(
+          DeskPolicyStatus.$_createMessage);
+  static DeskPolicyStatus? _defaultInstance;
+
+  /// policy is unset when the node has none.
+  @$pb.TagNumber(1)
+  $0.DeskPolicy get policy => $_getN(0);
+  @$pb.TagNumber(1)
+  set policy($0.DeskPolicy value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPolicy() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPolicy() => $_clearField(1);
+  @$pb.TagNumber(1)
+  $0.DeskPolicy ensurePolicy() => $_ensure(0);
+
+  /// state is unset when the node has not reported.
+  @$pb.TagNumber(2)
+  $0.DeskState get state => $_getN(1);
+  @$pb.TagNumber(2)
+  set state($0.DeskState value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasState() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearState() => $_clearField(2);
+  @$pb.TagNumber(2)
+  $0.DeskState ensureState() => $_ensure(1);
+
+  /// holder is who holds the desktop lease now, empty if nobody.
+  @$pb.TagNumber(3)
+  $core.String get holder => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set holder($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasHolder() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearHolder() => $_clearField(3);
+}
 
 class ApplyUpdateRequest extends $pb.GeneratedMessage {
   factory ApplyUpdateRequest({
@@ -1088,7 +1414,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     $core.String? platform,
     $core.String? agentVersion,
     $fixnum.Int64? uptimeSeconds,
-    $0.Timestamp? collectedAt,
+    $1.Timestamp? collectedAt,
     CpuMetrics? cpu,
     MemoryMetrics? memory,
     $core.Iterable<FilesystemMetrics>? filesystems,
@@ -1096,7 +1422,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     ContainerEngine? engine,
     $core.Iterable<DirSize>? watchDirs,
     $core.Iterable<$core.String>? warnings,
-    $core.Iterable<$1.Sleeve>? sleeves,
+    $core.Iterable<$2.Sleeve>? sleeves,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -1137,8 +1463,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
     ..aOS(4, _omitFieldNames ? '' : 'platform')
     ..aOS(5, _omitFieldNames ? '' : 'agentVersion')
     ..aInt64(6, _omitFieldNames ? '' : 'uptimeSeconds')
-    ..aOM<$0.Timestamp>(7, _omitFieldNames ? '' : 'collectedAt',
-        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(7, _omitFieldNames ? '' : 'collectedAt',
+        subBuilder: $1.Timestamp.$_createMessage)
     ..aOM<CpuMetrics>(8, _omitFieldNames ? '' : 'cpu',
         subBuilder: CpuMetrics.$_createMessage)
     ..aOM<MemoryMetrics>(9, _omitFieldNames ? '' : 'memory',
@@ -1152,8 +1478,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
     ..pPM<DirSize>(13, _omitFieldNames ? '' : 'watchDirs',
         subBuilder: DirSize.$_createMessage)
     ..pPS(14, _omitFieldNames ? '' : 'warnings')
-    ..pPM<$1.Sleeve>(15, _omitFieldNames ? '' : 'sleeves',
-        subBuilder: $1.Sleeve.$_createMessage)
+    ..pPM<$2.Sleeve>(15, _omitFieldNames ? '' : 'sleeves',
+        subBuilder: $2.Sleeve.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1234,15 +1560,15 @@ class NodeMetrics extends $pb.GeneratedMessage {
   void clearUptimeSeconds() => $_clearField(6);
 
   @$pb.TagNumber(7)
-  $0.Timestamp get collectedAt => $_getN(6);
+  $1.Timestamp get collectedAt => $_getN(6);
   @$pb.TagNumber(7)
-  set collectedAt($0.Timestamp value) => $_setField(7, value);
+  set collectedAt($1.Timestamp value) => $_setField(7, value);
   @$pb.TagNumber(7)
   $core.bool hasCollectedAt() => $_has(6);
   @$pb.TagNumber(7)
   void clearCollectedAt() => $_clearField(7);
   @$pb.TagNumber(7)
-  $0.Timestamp ensureCollectedAt() => $_ensure(6);
+  $1.Timestamp ensureCollectedAt() => $_ensure(6);
 
   @$pb.TagNumber(8)
   CpuMetrics get cpu => $_getN(7);
@@ -1295,7 +1621,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
   /// sleeves lists the sleeves running on this node with their usage; only the
   /// hub's own node has any.
   @$pb.TagNumber(15)
-  $pb.PbList<$1.Sleeve> get sleeves => $_getList(14);
+  $pb.PbList<$2.Sleeve> get sleeves => $_getList(14);
 }
 
 class CpuMetrics extends $pb.GeneratedMessage {
@@ -1820,7 +2146,7 @@ class ContainerEngine extends $pb.GeneratedMessage {
     $core.String? kind,
     $core.String? version,
     EngineDiskUsage? disk,
-    $0.Timestamp? diskMeasuredAt,
+    $1.Timestamp? diskMeasuredAt,
     $core.Iterable<ContainerMetrics>? containers,
   }) {
     final result = ContainerEngine._();
@@ -1850,8 +2176,8 @@ class ContainerEngine extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'version')
     ..aOM<EngineDiskUsage>(3, _omitFieldNames ? '' : 'disk',
         subBuilder: EngineDiskUsage.$_createMessage)
-    ..aOM<$0.Timestamp>(4, _omitFieldNames ? '' : 'diskMeasuredAt',
-        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'diskMeasuredAt',
+        subBuilder: $1.Timestamp.$_createMessage)
     ..pPM<ContainerMetrics>(5, _omitFieldNames ? '' : 'containers',
         subBuilder: ContainerMetrics.$_createMessage)
     ..hasRequiredFields = false;
@@ -1909,15 +2235,15 @@ class ContainerEngine extends $pb.GeneratedMessage {
   EngineDiskUsage ensureDisk() => $_ensure(2);
 
   @$pb.TagNumber(4)
-  $0.Timestamp get diskMeasuredAt => $_getN(3);
+  $1.Timestamp get diskMeasuredAt => $_getN(3);
   @$pb.TagNumber(4)
-  set diskMeasuredAt($0.Timestamp value) => $_setField(4, value);
+  set diskMeasuredAt($1.Timestamp value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasDiskMeasuredAt() => $_has(3);
   @$pb.TagNumber(4)
   void clearDiskMeasuredAt() => $_clearField(4);
   @$pb.TagNumber(4)
-  $0.Timestamp ensureDiskMeasuredAt() => $_ensure(3);
+  $1.Timestamp ensureDiskMeasuredAt() => $_ensure(3);
 
   @$pb.TagNumber(5)
   $pb.PbList<ContainerMetrics> get containers => $_getList(4);
@@ -2122,7 +2448,7 @@ class ContainerMetrics extends $pb.GeneratedMessage {
     $fixnum.Int64? writableLayerBytes,
     $fixnum.Int64? rootfsBytes,
     $core.String? statsError,
-    $0.Timestamp? createdAt,
+    $1.Timestamp? createdAt,
   }) {
     final result = ContainerMetrics._();
     if (id != null) result.id = id;
@@ -2170,8 +2496,8 @@ class ContainerMetrics extends $pb.GeneratedMessage {
     ..aInt64(9, _omitFieldNames ? '' : 'writableLayerBytes')
     ..aInt64(10, _omitFieldNames ? '' : 'rootfsBytes')
     ..aOS(11, _omitFieldNames ? '' : 'statsError')
-    ..aOM<$0.Timestamp>(12, _omitFieldNames ? '' : 'createdAt',
-        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(12, _omitFieldNames ? '' : 'createdAt',
+        subBuilder: $1.Timestamp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2301,23 +2627,23 @@ class ContainerMetrics extends $pb.GeneratedMessage {
   /// created_at is when the container was created; stopped containers are
   /// listed too and carry no cpu or memory figures.
   @$pb.TagNumber(12)
-  $0.Timestamp get createdAt => $_getN(11);
+  $1.Timestamp get createdAt => $_getN(11);
   @$pb.TagNumber(12)
-  set createdAt($0.Timestamp value) => $_setField(12, value);
+  set createdAt($1.Timestamp value) => $_setField(12, value);
   @$pb.TagNumber(12)
   $core.bool hasCreatedAt() => $_has(11);
   @$pb.TagNumber(12)
   void clearCreatedAt() => $_clearField(12);
   @$pb.TagNumber(12)
-  $0.Timestamp ensureCreatedAt() => $_ensure(11);
+  $1.Timestamp ensureCreatedAt() => $_ensure(11);
 }
 
 class DirSize extends $pb.GeneratedMessage {
   factory DirSize({
     $core.String? path,
     $fixnum.Int64? sizeBytes,
-    $0.Timestamp? measuredAt,
-    $2.Duration? took,
+    $1.Timestamp? measuredAt,
+    $3.Duration? took,
     $core.bool? complete,
     $core.String? error,
   }) {
@@ -2347,10 +2673,10 @@ class DirSize extends $pb.GeneratedMessage {
       createEmptyInstance: DirSize.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'path')
     ..aInt64(2, _omitFieldNames ? '' : 'sizeBytes')
-    ..aOM<$0.Timestamp>(3, _omitFieldNames ? '' : 'measuredAt',
-        subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'took',
-        subBuilder: $2.Duration.$_createMessage)
+    ..aOM<$1.Timestamp>(3, _omitFieldNames ? '' : 'measuredAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'took',
+        subBuilder: $3.Duration.$_createMessage)
     ..aOB(5, _omitFieldNames ? '' : 'complete')
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..hasRequiredFields = false;
@@ -2394,26 +2720,26 @@ class DirSize extends $pb.GeneratedMessage {
   void clearSizeBytes() => $_clearField(2);
 
   @$pb.TagNumber(3)
-  $0.Timestamp get measuredAt => $_getN(2);
+  $1.Timestamp get measuredAt => $_getN(2);
   @$pb.TagNumber(3)
-  set measuredAt($0.Timestamp value) => $_setField(3, value);
+  set measuredAt($1.Timestamp value) => $_setField(3, value);
   @$pb.TagNumber(3)
   $core.bool hasMeasuredAt() => $_has(2);
   @$pb.TagNumber(3)
   void clearMeasuredAt() => $_clearField(3);
   @$pb.TagNumber(3)
-  $0.Timestamp ensureMeasuredAt() => $_ensure(2);
+  $1.Timestamp ensureMeasuredAt() => $_ensure(2);
 
   @$pb.TagNumber(4)
-  $2.Duration get took => $_getN(3);
+  $3.Duration get took => $_getN(3);
   @$pb.TagNumber(4)
-  set took($2.Duration value) => $_setField(4, value);
+  set took($3.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasTook() => $_has(3);
   @$pb.TagNumber(4)
   void clearTook() => $_clearField(4);
   @$pb.TagNumber(4)
-  $2.Duration ensureTook() => $_ensure(3);
+  $3.Duration ensureTook() => $_ensure(3);
 
   /// complete is false when the time budget ended the walk early; size_bytes
   /// is then a lower bound.
@@ -2729,10 +3055,12 @@ class NodeStatus extends $pb.GeneratedMessage {
     NodeInfo? node,
     NodeMetrics? metrics,
     NodeFreshness? freshness,
-    $0.Timestamp? fetchedAt,
-    $2.Duration? age,
+    $1.Timestamp? fetchedAt,
+    $3.Duration? age,
     $core.String? error,
     $core.Iterable<NodeAlert>? alerts,
+    $0.DeskState? desk,
+    $core.String? deskHolder,
   }) {
     final result = NodeStatus._();
     if (node != null) result.node = node;
@@ -2742,6 +3070,8 @@ class NodeStatus extends $pb.GeneratedMessage {
     if (age != null) result.age = age;
     if (error != null) result.error = error;
     if (alerts != null) result.alerts.addAll(alerts);
+    if (desk != null) result.desk = desk;
+    if (deskHolder != null) result.deskHolder = deskHolder;
     return result;
   }
 
@@ -2765,13 +3095,16 @@ class NodeStatus extends $pb.GeneratedMessage {
         subBuilder: NodeMetrics.$_createMessage)
     ..aE<NodeFreshness>(3, _omitFieldNames ? '' : 'freshness',
         enumValues: NodeFreshness.values)
-    ..aOM<$0.Timestamp>(4, _omitFieldNames ? '' : 'fetchedAt',
-        subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$2.Duration>(5, _omitFieldNames ? '' : 'age',
-        subBuilder: $2.Duration.$_createMessage)
+    ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'fetchedAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<$3.Duration>(5, _omitFieldNames ? '' : 'age',
+        subBuilder: $3.Duration.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..pPM<NodeAlert>(7, _omitFieldNames ? '' : 'alerts',
         subBuilder: NodeAlert.$_createMessage)
+    ..aOM<$0.DeskState>(8, _omitFieldNames ? '' : 'desk',
+        subBuilder: $0.DeskState.$_createMessage)
+    ..aOS(9, _omitFieldNames ? '' : 'deskHolder')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2827,26 +3160,26 @@ class NodeStatus extends $pb.GeneratedMessage {
   void clearFreshness() => $_clearField(3);
 
   @$pb.TagNumber(4)
-  $0.Timestamp get fetchedAt => $_getN(3);
+  $1.Timestamp get fetchedAt => $_getN(3);
   @$pb.TagNumber(4)
-  set fetchedAt($0.Timestamp value) => $_setField(4, value);
+  set fetchedAt($1.Timestamp value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasFetchedAt() => $_has(3);
   @$pb.TagNumber(4)
   void clearFetchedAt() => $_clearField(4);
   @$pb.TagNumber(4)
-  $0.Timestamp ensureFetchedAt() => $_ensure(3);
+  $1.Timestamp ensureFetchedAt() => $_ensure(3);
 
   @$pb.TagNumber(5)
-  $2.Duration get age => $_getN(4);
+  $3.Duration get age => $_getN(4);
   @$pb.TagNumber(5)
-  set age($2.Duration value) => $_setField(5, value);
+  set age($3.Duration value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasAge() => $_has(4);
   @$pb.TagNumber(5)
   void clearAge() => $_clearField(5);
   @$pb.TagNumber(5)
-  $2.Duration ensureAge() => $_ensure(4);
+  $3.Duration ensureAge() => $_ensure(4);
 
   /// error is the failure of the most recent poll, empty if it succeeded.
   @$pb.TagNumber(6)
@@ -2860,6 +3193,28 @@ class NodeStatus extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(7)
   $pb.PbList<NodeAlert> get alerts => $_getList(6);
+
+  /// desk is the node's desktop availability; unset for nodes that never
+  /// reported it. desk_holder is who holds the desktop lease, if anyone.
+  @$pb.TagNumber(8)
+  $0.DeskState get desk => $_getN(7);
+  @$pb.TagNumber(8)
+  set desk($0.DeskState value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasDesk() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearDesk() => $_clearField(8);
+  @$pb.TagNumber(8)
+  $0.DeskState ensureDesk() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  $core.String get deskHolder => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set deskHolder($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasDeskHolder() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearDeskHolder() => $_clearField(9);
 }
 
 class ListNodesRequest extends $pb.GeneratedMessage {
@@ -3213,37 +3568,37 @@ class NodeAgentServiceApi {
   /// PrepareJob tells the hub what the node already holds for a git job: whether
   /// it has the commit and which commits it knows, so the hub can send a
   /// smaller bundle.
-  $async.Future<$3.PrepareJobResponse> prepareJob(
-          $pb.ClientContext? ctx, $3.PrepareJobRequest request) =>
-      _client.invoke<$3.PrepareJobResponse>(ctx, 'NodeAgentService',
-          'PrepareJob', request, $3.PrepareJobResponse());
+  $async.Future<$4.PrepareJobResponse> prepareJob(
+          $pb.ClientContext? ctx, $4.PrepareJobRequest request) =>
+      _client.invoke<$4.PrepareJobResponse>(ctx, 'NodeAgentService',
+          'PrepareJob', request, $4.PrepareJobResponse());
 
   /// UploadJobData appends one chunk of a job's source (a git bundle or an
   /// artifact file). Chunks must arrive in order; the last one carries the
   /// SHA-256 of the whole upload.
-  $async.Future<$3.UploadJobDataResponse> uploadJobData(
-          $pb.ClientContext? ctx, $3.UploadJobDataRequest request) =>
-      _client.invoke<$3.UploadJobDataResponse>(ctx, 'NodeAgentService',
-          'UploadJobData', request, $3.UploadJobDataResponse());
+  $async.Future<$4.UploadJobDataResponse> uploadJobData(
+          $pb.ClientContext? ctx, $4.UploadJobDataRequest request) =>
+      _client.invoke<$4.UploadJobDataResponse>(ctx, 'NodeAgentService',
+          'UploadJobData', request, $4.UploadJobDataResponse());
 
   /// RunJob checks the source out, runs the command and streams its output;
   /// matching artifacts follow the exit. The job dies with the stream: if the
   /// caller disconnects, the process tree is killed.
-  $async.Future<$3.JobEvent> runJob(
-          $pb.ClientContext? ctx, $3.RunJobRequest request) =>
-      _client.invoke<$3.JobEvent>(
-          ctx, 'NodeAgentService', 'RunJob', request, $3.JobEvent());
+  $async.Future<$4.JobEvent> runJob(
+          $pb.ClientContext? ctx, $4.RunJobRequest request) =>
+      _client.invoke<$4.JobEvent>(
+          ctx, 'NodeAgentService', 'RunJob', request, $4.JobEvent());
 
   /// CancelJob kills a running job's process tree.
-  $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
+  $async.Future<$4.NodeAgentServiceCancelJobResponse> cancelJob(
           $pb.ClientContext? ctx,
-          $3.NodeAgentServiceCancelJobRequest request) =>
-      _client.invoke<$3.NodeAgentServiceCancelJobResponse>(
+          $4.NodeAgentServiceCancelJobRequest request) =>
+      _client.invoke<$4.NodeAgentServiceCancelJobResponse>(
           ctx,
           'NodeAgentService',
           'CancelJob',
           request,
-          $3.NodeAgentServiceCancelJobResponse());
+          $4.NodeAgentServiceCancelJobResponse());
 
   /// PutFile receives one chunk of a file or directory transfer into the
   /// node's file root. The hub relays the caller's chunks unchanged.
@@ -3260,10 +3615,10 @@ class NodeAgentServiceApi {
 
   /// DeskAction runs one desktop command in the node agent's interactive
   /// session. See DeskService.
-  $async.Future<$4.DeskActionResponse> deskAction(
-          $pb.ClientContext? ctx, $4.DeskActionRequest request) =>
-      _client.invoke<$4.DeskActionResponse>(ctx, 'NodeAgentService',
-          'DeskAction', request, $4.DeskActionResponse());
+  $async.Future<$0.DeskActionResponse> deskAction(
+          $pb.ClientContext? ctx, $0.DeskActionRequest request) =>
+      _client.invoke<$0.DeskActionResponse>(ctx, 'NodeAgentService',
+          'DeskAction', request, $0.DeskActionResponse());
 
   /// ApplyUpdate swaps the agent's binary for a file already transferred into
   /// its file root and restarts the agent. See NodeService.ApplyUpdate.
@@ -3271,6 +3626,14 @@ class NodeAgentServiceApi {
           $pb.ClientContext? ctx, ApplyUpdateRequest request) =>
       _client.invoke<ApplyUpdateResponse>(ctx, 'NodeAgentService',
           'ApplyUpdate', request, ApplyUpdateResponse());
+
+  /// GetDeskState adopts the desk policy the hub sends (none clears it) and
+  /// evaluates it now. The node enforces the policy itself on every input
+  /// command, so the hub's view can be a few seconds old without harm.
+  $async.Future<$0.DeskState> getDeskState(
+          $pb.ClientContext? ctx, GetDeskStateRequest request) =>
+      _client.invoke<$0.DeskState>(
+          ctx, 'NodeAgentService', 'GetDeskState', request, $0.DeskState());
 }
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -3341,6 +3704,21 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, ApplyUpdateRequest request) =>
       _client.invoke<ApplyUpdateResponse>(
           ctx, 'NodeService', 'ApplyUpdate', request, ApplyUpdateResponse());
+
+  /// SetDeskPolicy sets or clears (policy unset) when agents may drive a
+  /// node's desktop. Only the owner token may call it. The hub keeps the
+  /// policy and sends it to the node, which enforces it.
+  $async.Future<DeskPolicyStatus> setDeskPolicy(
+          $pb.ClientContext? ctx, SetDeskPolicyRequest request) =>
+      _client.invoke<DeskPolicyStatus>(
+          ctx, 'NodeService', 'SetDeskPolicy', request, DeskPolicyStatus());
+
+  /// GetDeskPolicy returns a node's policy, its current evaluation and who
+  /// holds the desktop lease.
+  $async.Future<DeskPolicyStatus> getDeskPolicy(
+          $pb.ClientContext? ctx, GetDeskPolicyRequest request) =>
+      _client.invoke<DeskPolicyStatus>(
+          ctx, 'NodeService', 'GetDeskPolicy', request, DeskPolicyStatus());
 }
 
 const $core.bool _omitFieldNames =

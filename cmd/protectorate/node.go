@@ -249,7 +249,17 @@ func nodeServeCmd() *cobra.Command {
 			if a.Files, err = node.NewFiles(fileRoot, fileUnconfined); err != nil {
 				return err
 			}
-			a.Desk = &node.Desk{D: desk.New()}
+			dd := desk.New()
+			guard, err := node.NewDeskGuard(dd, home)
+			if err != nil {
+				return err
+			}
+			a.Desk = &node.Desk{D: dd, Guard: guard}
+			go func() {
+				if err := guard.Run(ctx); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "node agent: desk input monitor: %v (the desk policy treats the user as active since the agent started)\n", err)
+				}
+			}()
 			a.Updater = &node.Updater{Files: a.Files, Exe: exe, Version: version, Supervision: node.DetectSupervision(runningAsService()),
 				Restart: func(k node.RestartKind) {
 					select {
