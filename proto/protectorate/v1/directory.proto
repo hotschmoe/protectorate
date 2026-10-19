@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// DirectoryService answers which projects the sleeves work on and how they
+// depend on each other. The hub builds it deterministically from each sleeve
+// workspace's git remote and package manifests (go.mod, package.json,
+// Cargo.toml, pyproject.toml), on spawn and on a slow interval. A project is
+// identified by its normalized git remote, or by "path:<workspace>" without
+// one. Project A depends on project B when one of A's dependencies is a
+// package B provides. A project stays listed, with no owners, after its last
+// sleeve is gone.
+service DirectoryService {
+  // ListProjects returns every known project, optionally only those a sleeve
+  // works on.
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetProject returns one project by id, "owner/repo" or bare name. A name
+  // that several projects share is an error that lists them.
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message ListProjectsRequest {
+  // sleeve keeps only the projects this sleeve works on.
+  string sleeve = 1;
+}
+
+message ListProjectsResponse {
+  repeated DirectoryProject projects = 1;
+}
+
+message GetProjectRequest {
+  string project = 1;
+}
+
+message GetProjectResponse {
+  DirectoryProject project = 1;
+}
+
+// DirectoryProject is one project with its resolved edges.
+message DirectoryProject {
+  // id is the normalized remote ("github.com/owner/repo") or "path:<dir>".
+  string id = 1;
+  string name = 2;
+  // display is "owner/repo" when the remote has one, else the name.
+  string display = 3;
+  string remote = 4;
+  // owners are the live sleeves working on the project.
+  repeated ProjectOwner owners = 5;
+  // provides lists the packages the project publishes, as "<ecosystem>:<name>"
+  // with ecosystem go, npm, cargo or pypi.
+  repeated string provides = 6;
+  // dependency_count is how many external packages the project depends on.
+  uint32 dependency_count = 7;
+  // depends_on are the known projects this one depends on.
+  repeated ProjectEdge depends_on = 8;
+  // dependents are the known projects that depend on this one.
+  repeated ProjectEdge dependents = 9;
+  // default_branch and latest_tag are the last release state the hub saw.
+  string default_branch = 10;
+  string latest_tag = 11;
+}
+
+message ProjectOwner {
+  string sleeve = 1;
+  string workspace = 2;
+  // branch is empty on a detached HEAD.
+  string branch = 3;
+  string head = 4;
+}
+
+// ProjectEdge links to another project through the packages named in via.
+message ProjectEdge {
+  string project = 1;
+  string display = 2;
+  repeated string via = 3;
+}

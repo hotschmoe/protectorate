@@ -235,6 +235,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		info, _ = h.sleeves.Get(info.Name)
 	}
 	h.scanSessions(ctx)
+	h.pokeCoord()
 	return connect.NewResponse(&pb.SpawnSleeveResponse{Sleeve: h.sleeveProto(info)}), nil
 }
 
@@ -261,5 +262,6 @@ func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeve
 	}
 	h.dropIdentity(req.Msg.Name, "")
 	h.scanSessions(ctx)
+	h.pokeCoord()
 	return connect.NewResponse(&pb.KillSleeveResponse{}), nil
 }

@@ -45,7 +45,7 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs []string) error {
 		return fmt.Errorf("open sleeves: %w", err)
 	}
 	h.SetSleeves(m)
-	return nil
+	return h.EnableCoordination(home)
 }
 
 func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {

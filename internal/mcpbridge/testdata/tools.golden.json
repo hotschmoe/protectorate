@@ -207,6 +207,43 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
+    "description": "GetProject returns one project by id, \"owner/repo\" or bare name. A name that several projects share is an error that lists them.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "directory_get_project"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListProjects returns every known project, optionally only those a sleeve works on.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "description": "sleeve keeps only the projects this sleeve works on.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "directory_list_projects"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "description": "GetStatus returns the hub version, host platform and uptime.",
     "inputSchema": {
       "additionalProperties": false,
