@@ -257,6 +257,8 @@ counts as "its own harness":
 
 ## Orchestrator
 
+Setup, scoping and widening: `docs/orchestrator.md`.
+
 - The orchestrator ("Poe") is **a sleeve**, not engine code. Its harness is
   whichever subscription has quota left, and its tool is the `protectorate`
   CLI with a scoped hub token.

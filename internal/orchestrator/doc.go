@@ -86,6 +86,7 @@ func RenderAgents(din DocInput) []byte {
 	w("- Use `--json` whenever you parse output.\n")
 	w("- Never run a destructive action (killing a sleeve or session, removing a node, anything irreversible) without the user's explicit approval in this conversation, even if your token would allow it. Ask first and say what it will affect.\n")
 	w("- Do not try to widen your own permissions or work around a `permission_denied`. Report it to the user instead.\n")
+	w("- Start work only with `protectorate sleeve spawn`, which runs in a sandbox. Raw sessions run outside any sandbox and are not granted to you.\n")
 	w("- Unknown or stale quota is not spare capacity. Prefer fresh data; run `protectorate quota suggest --refresh` when in doubt.\n")
 	w("- Work donated to public repositories lands in a review inbox (a branch on a fork plus a summary). Nothing public goes out without the user's approval.\n")
 	w("- This sandbox holds no SSH keys or harness credentials. `hosts.md` lists the user's machines for reference only.\n\n")
