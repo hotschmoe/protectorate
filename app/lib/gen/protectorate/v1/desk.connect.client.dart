@@ -56,6 +56,29 @@ extension type DeskServiceClient (connect.Transport _transport) {
     );
   }
 
+  /// Foreground reports the window that receives keystrokes now, with its
+  /// process and integrity level. Read-only. Windows drops input injected into
+  /// a window of a higher integrity level than the agent's without any error,
+  /// so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the
+  /// foreground window (or, for the mouse, the window under the pointer) is
+  /// higher; this shows what is in the way.
+  Future<protectoratev1desk.ForegroundResponse> foreground(
+    protectoratev1desk.ForegroundRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.DeskService.foreground,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
   /// Click moves the pointer and clicks. Needs a desk lease.
   Future<protectoratev1desk.InputResponse> click(
     protectoratev1desk.ClickRequest input, {

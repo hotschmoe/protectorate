@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"image"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
-	"unicode/utf16"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -33,6 +34,10 @@ var (
 	pIsWindowVisible          = user32.NewProc("IsWindowVisible")
 	pIsIconic                 = user32.NewProc("IsIconic")
 	pGetWindowThreadProcessID = user32.NewProc("GetWindowThreadProcessId")
+	pGetForegroundWindow      = user32.NewProc("GetForegroundWindow")
+	pWindowFromPoint          = user32.NewProc("WindowFromPoint")
+	pGetAncestor              = user32.NewProc("GetAncestor")
+	pGetCursorPos             = user32.NewProc("GetCursorPos")
 	pGetProcessWindowStation  = user32.NewProc("GetProcessWindowStation")
 	pGetUserObjectInformation = user32.NewProc("GetUserObjectInformationW")
 	pOpenInputDesktop         = user32.NewProc("OpenInputDesktop")
@@ -58,8 +63,7 @@ const (
 	srcCopy    = 0x00CC0020
 	captureBlt = 0x40000000
 
-	inputMouse    = 0
-	inputKeyboard = 1
+	inputMouse = 0
 
 	mouseLeftDown   = 0x0002
 	mouseLeftUp     = 0x0004
@@ -67,10 +71,6 @@ const (
 	mouseRightUp    = 0x0010
 	mouseMiddleDown = 0x0020
 	mouseMiddleUp   = 0x0040
-
-	keyExtended = 0x0001
-	keyUp       = 0x0002
-	keyUnicode  = 0x0004
 
 	uoiName = 2
 )
@@ -84,17 +84,6 @@ type mouseInput struct {
 	flags     uint32
 	time      uint32
 	extra     uintptr
-}
-
-type keyInput struct {
-	typ   uint32
-	_     uint32
-	vk    uint16
-	scan  uint16
-	flags uint32
-	time  uint32
-	extra uintptr
-	_     [8]byte
 }
 
 var (
@@ -113,6 +102,8 @@ type bitmapInfoHeader struct {
 }
 
 type rect struct{ left, top, right, bottom int32 }
+
+type point struct{ x, y int32 }
 
 // New returns the Windows desktop driver. It never fails: Ready reports
 // whether this process can actually reach a desktop.
@@ -197,16 +188,24 @@ var (
 	enumResults *[]Window
 )
 
+func windowTitle(hwnd uintptr) string {
+	n, _, _ := pGetWindowTextLengthW.Call(hwnd)
+	if n == 0 {
+		return ""
+	}
+	buf := make([]uint16, n+1)
+	pGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return windows.UTF16ToString(buf)
+}
+
 var enumProc = syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 	if v, _, _ := pIsWindowVisible.Call(hwnd); v == 0 {
 		return 1
 	}
-	n, _, _ := pGetWindowTextLengthW.Call(hwnd)
-	if n == 0 {
+	title := windowTitle(hwnd)
+	if title == "" {
 		return 1
 	}
-	buf := make([]uint16, n+1)
-	pGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
 	var r rect
 	if ok, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r))); ok == 0 {
 		return 1
@@ -216,7 +215,7 @@ var enumProc = syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 	iconic, _, _ := pIsIconic.Call(hwnd)
 	x0, y0 := origin()
 	*enumResults = append(*enumResults, Window{
-		Title: windows.UTF16ToString(buf), X: int(r.left) - x0, Y: int(r.top) - y0,
+		Title: title, X: int(r.left) - x0, Y: int(r.top) - y0,
 		Width: int(r.right - r.left), Height: int(r.bottom - r.top), PID: pid, Minimized: iconic != 0,
 	})
 	return 1
@@ -254,14 +253,28 @@ func keyEvents(events []keyInput) error {
 }
 
 func (winDesk) Move(x, y int) error {
+	w, h := metric(smCXVirtualScreen), metric(smCYVirtualScreen)
+	if x < 0 || y < 0 || x >= w || y >= h {
+		return fmt.Errorf("%w: (%d, %d) is outside the %dx%d screen", ErrInvalid, x, y, w, h)
+	}
 	x0, y0 := origin()
 	if r, _, e := pSetCursorPos.Call(uintptr(x+x0), uintptr(y+y0)); r == 0 {
 		return fmt.Errorf("SetCursorPos: %w", e)
+	}
+	var p point
+	if r, _, e := pGetCursorPos.Call(uintptr(unsafe.Pointer(&p))); r == 0 {
+		return fmt.Errorf("GetCursorPos: %w", e)
+	}
+	if int(p.x) != x+x0 || int(p.y) != y+y0 {
+		return fmt.Errorf("%w: asked for the pointer at (%d, %d) but it is at (%d, %d); something else is holding or moving it", ErrBlocked, x, y, int(p.x)-x0, int(p.y)-y0)
 	}
 	return nil
 }
 
 func (d winDesk) Click(x, y int, b Button, double bool) error {
+	if err := d.reach(true, x, y); err != nil {
+		return err
+	}
 	if err := d.Move(x, y); err != nil {
 		return err
 	}
@@ -290,18 +303,10 @@ func btoi(b bool) int {
 	return 0
 }
 
-func vkEvent(k Key, up bool) keyInput {
-	e := keyInput{typ: inputKeyboard, vk: k.VK}
-	if k.Extended {
-		e.flags |= keyExtended
+func (d winDesk) Key(c Chord) error {
+	if err := d.reach(false, 0, 0); err != nil {
+		return err
 	}
-	if up {
-		e.flags |= keyUp
-	}
-	return e
-}
-
-func (winDesk) Key(c Chord) error {
 	var ev []keyInput
 	for _, m := range c.Modifiers {
 		ev = append(ev, vkEvent(m, false))
@@ -313,33 +318,22 @@ func (winDesk) Key(c Chord) error {
 	return keyEvents(ev)
 }
 
-func (winDesk) Type(text string) error {
-	var ev []keyInput
-	for _, r := range text {
-		switch r {
-		case '\r':
-			continue
-		case '\n':
-			k := Key{VK: 0x0D}
-			ev = append(ev, vkEvent(k, false), vkEvent(k, true))
-			continue
-		case '\t':
-			k := Key{VK: 0x09}
-			ev = append(ev, vkEvent(k, false), vkEvent(k, true))
-			continue
-		}
-		for _, u := range utf16.Encode([]rune{r}) {
-			ev = append(ev,
-				keyInput{typ: inputKeyboard, scan: u, flags: keyUnicode},
-				keyInput{typ: inputKeyboard, scan: u, flags: keyUnicode | keyUp})
-		}
+// typePacing separates the key presses of Type: applications that translate
+// the Unicode packets lazily (Windows 11 Notepad) read the last character of a
+// batch for every event in it.
+const typePacing = 3 * time.Millisecond
+
+func (d winDesk) Type(text string) error {
+	if err := d.reach(false, 0, 0); err != nil {
+		return err
 	}
-	for len(ev) > 0 {
-		n := min(len(ev), 256)
-		if err := keyEvents(ev[:n]); err != nil {
+	for i, g := range typeGroups(text) {
+		if i > 0 {
+			time.Sleep(typePacing)
+		}
+		if err := keyEvents(g); err != nil {
 			return err
 		}
-		ev = ev[n:]
 	}
 	return nil
 }
@@ -377,4 +371,97 @@ func InputDesktop() (string, error) {
 		return "", fmt.Errorf("name input desktop: %w", e)
 	}
 	return windows.UTF16ToString(buf[:]), nil
+}
+
+var ownIntegrity = sync.OnceValue(func() Integrity {
+	i, err := tokenIntegrity(windows.GetCurrentProcessToken())
+	if err != nil {
+		return IntegrityMedium
+	}
+	return i
+})
+
+func tokenIntegrity(t windows.Token) (Integrity, error) {
+	var n uint32
+	if err := windows.GetTokenInformation(t, windows.TokenIntegrityLevel, nil, 0, &n); !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+		return 0, fmt.Errorf("size of the integrity label: %w", err)
+	}
+	buf := make([]byte, n)
+	if err := windows.GetTokenInformation(t, windows.TokenIntegrityLevel, &buf[0], n, &n); err != nil {
+		return 0, fmt.Errorf("read the integrity label: %w", err)
+	}
+	sid := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0])).Label.Sid
+	return Integrity(sid.SubAuthority(uint32(sid.SubAuthorityCount()) - 1)), nil
+}
+
+// processInfo reads the executable name and integrity level of a process.
+// Only a process of a higher integrity level than the agent refuses both
+// handles, so access denied marks the result unreadable.
+func processInfo(pid uint32) (name string, level Integrity, unreadable bool) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", 0, errors.Is(err, windows.ERROR_ACCESS_DENIED)
+	}
+	defer windows.CloseHandle(h)
+	var buf [windows.MAX_PATH * 4]uint16
+	size := uint32(len(buf))
+	if windows.QueryFullProcessImageName(h, 0, &buf[0], &size) == nil {
+		full := windows.UTF16ToString(buf[:size])
+		name = full[strings.LastIndexByte(full, '\\')+1:]
+	}
+	var tok windows.Token
+	if err := windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok); err != nil {
+		return name, 0, errors.Is(err, windows.ERROR_ACCESS_DENIED)
+	}
+	defer tok.Close()
+	level, err = tokenIntegrity(tok)
+	return name, level, errors.Is(err, windows.ERROR_ACCESS_DENIED)
+}
+
+func windowInfo(hwnd uintptr) Foreground {
+	f := Foreground{AgentIntegrity: ownIntegrity()}
+	if hwnd == 0 {
+		return f
+	}
+	pGetWindowThreadProcessID.Call(hwnd, uintptr(unsafe.Pointer(&f.PID)))
+	if f.PID == 0 {
+		return f
+	}
+	f.Title = windowTitle(hwnd)
+	f.Process, f.Integrity, f.Unreadable = processInfo(f.PID)
+	return f
+}
+
+func (winDesk) Foreground() (Foreground, error) {
+	hwnd, _, _ := pGetForegroundWindow.Call()
+	return windowInfo(hwnd), nil
+}
+
+const gaRoot = 2
+
+// reach fails before any input is injected when Windows would drop it: the
+// screen is locked or on a secure desktop, the foreground window is above
+// the agent's integrity level, or, for a click, so is the window under the
+// target point. SendInput reports success in all of these cases.
+func (d winDesk) reach(mouse bool, x, y int) error {
+	name, err := InputDesktop()
+	if ClassifyInputDesktop(name, err) == ScreenLocked {
+		return fmt.Errorf("%w: the input desktop is not the user's (locked screen, logon screen or a UAC prompt on the secure desktop); the user must unlock or answer it first", ErrBlocked)
+	}
+	fg, _ := d.Foreground()
+	if err := CheckReach(fg, "foreground window"); err != nil {
+		return err
+	}
+	if !mouse {
+		return nil
+	}
+	x0, y0 := origin()
+	pt := uintptr(uint32(int32(x+x0))) | uintptr(uint32(int32(y+y0)))<<32
+	hwnd, _, _ := pWindowFromPoint.Call(pt)
+	if hwnd != 0 {
+		if root, _, _ := pGetAncestor.Call(hwnd, gaRoot); root != 0 {
+			hwnd = root
+		}
+	}
+	return CheckReach(windowInfo(hwnd), "window under the pointer")
 }

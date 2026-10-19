@@ -147,6 +147,14 @@ func (h *Hub) ListWindows(ctx context.Context, req *connect.Request[pb.ListWindo
 	return connect.NewResponse(res.GetListWindows()), nil
 }
 
+func (h *Hub) Foreground(ctx context.Context, req *connect.Request[pb.ForegroundRequest]) (*connect.Response[pb.ForegroundResponse], error) {
+	res, _, err := h.deskDo(ctx, req.Msg.Target, false, &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Foreground{Foreground: req.Msg}})
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res.GetForeground()), nil
+}
+
 func (h *Hub) deskInput(ctx context.Context, t *pb.DeskTarget, act *pb.DeskActionRequest) (*connect.Response[pb.InputResponse], error) {
 	_, dl, err := h.deskDo(ctx, t, true, act)
 	if err != nil {

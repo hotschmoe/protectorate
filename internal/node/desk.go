@@ -21,7 +21,7 @@ type Desk struct {
 
 func deskErr(err error) error {
 	switch {
-	case errors.Is(err, desk.ErrNotInteractive):
+	case errors.Is(err, desk.ErrNotInteractive), errors.Is(err, desk.ErrBlocked):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case errors.Is(err, desk.ErrUnsupported):
 		return connect.NewError(connect.CodeUnimplemented, err)
@@ -62,6 +62,18 @@ func (d *Desk) Do(_ context.Context, req *pb.DeskActionRequest) (*pb.DeskActionR
 			out.Windows = append(out.Windows, &pb.DeskWindow{Title: w.Title, X: int32(w.X), Y: int32(w.Y), Width: int32(w.Width), Height: int32(w.Height), Pid: w.PID, Minimized: w.Minimized})
 		}
 		return &pb.DeskActionResponse{Result: &pb.DeskActionResponse_ListWindows{ListWindows: out}}, nil
+	case *pb.DeskActionRequest_Foreground:
+		if err := d.D.Ready(); err != nil {
+			return nil, deskErr(err)
+		}
+		f, err := d.D.Foreground()
+		if err != nil {
+			return nil, deskErr(err)
+		}
+		return &pb.DeskActionResponse{Result: &pb.DeskActionResponse_Foreground{Foreground: &pb.ForegroundResponse{
+			Title: f.Title, Pid: f.PID, Process: f.Process, Integrity: f.IntegrityName(),
+			AgentIntegrity: f.AgentIntegrity.String(), Blocks: f.Blocks(),
+		}}}, nil
 	case *pb.DeskActionRequest_Click:
 		b, err := desk.ParseButton(a.Click.Button)
 		if err != nil {

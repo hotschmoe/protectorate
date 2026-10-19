@@ -159,13 +159,13 @@ func TestWindowsTaskHasNoShellWrapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	x := string(find(steps, stepWrite, `C:\h\protectorate-node.xml`).Content)
-	for _, want := range []string{`<Command>C:\L\Programs\protectorate\protectorate.exe</Command>`, `node serve --home C:\h --watch D:\b --hide-console`} {
+	for _, want := range []string{`<Command>%SystemRoot%\System32\conhost.exe</Command>`, `<Arguments>--headless C:\L\Programs\protectorate\protectorate.exe node serve --home C:\h --watch D:\b</Arguments>`} {
 		if !strings.Contains(x, want) {
 			t.Errorf("xml lacks %q:\n%s", want, x)
 		}
 	}
-	if strings.Contains(x, "cmd.exe") {
-		t.Error("cmd.exe wrapper present")
+	if strings.Contains(x, "cmd.exe") || strings.Contains(x, "hide-console") {
+		t.Error("cmd.exe wrapper or hide-console present")
 	}
 }
 

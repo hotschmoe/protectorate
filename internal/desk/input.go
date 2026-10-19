@@ -3,7 +3,65 @@ package desk
 import (
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 )
+
+const (
+	inputKeyboard = 1
+
+	keyExtended = 0x0001
+	keyUp       = 0x0002
+	keyUnicode  = 0x0004
+)
+
+// keyInput is the keyboard INPUT of SendInput on the 64-bit targets.
+type keyInput struct {
+	typ   uint32
+	_     uint32
+	vk    uint16
+	scan  uint16
+	flags uint32
+	time  uint32
+	extra uintptr
+	_     [8]byte
+}
+
+func vkEvent(k Key, up bool) keyInput {
+	e := keyInput{typ: inputKeyboard, vk: k.VK}
+	if k.Extended {
+		e.flags |= keyExtended
+	}
+	if up {
+		e.flags |= keyUp
+	}
+	return e
+}
+
+// typeGroups turns text into key presses, each a down and an up event sent in
+// its own call. A rune outside the BMP is two presses, one per UTF-16 unit.
+// Newline is Enter, tab is Tab, carriage return is dropped.
+func typeGroups(text string) [][]keyInput {
+	var out [][]keyInput
+	for _, r := range text {
+		switch r {
+		case '\r':
+		case '\n':
+			k := Key{VK: 0x0D}
+			out = append(out, []keyInput{vkEvent(k, false), vkEvent(k, true)})
+		case '\t':
+			k := Key{VK: 0x09}
+			out = append(out, []keyInput{vkEvent(k, false), vkEvent(k, true)})
+		default:
+			for _, u := range utf16.Encode([]rune{r}) {
+				out = append(out, []keyInput{
+					{typ: inputKeyboard, scan: u, flags: keyUnicode},
+					{typ: inputKeyboard, scan: u, flags: keyUnicode | keyUp},
+				})
+			}
+		}
+	}
+	return out
+}
 
 // Flags of the low-level keyboard and mouse hook structures. Input that
 // SendInput (or any other program) injected carries them; only input that did

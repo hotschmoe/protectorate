@@ -27,6 +27,7 @@ func TestParseDeskArgs(t *testing.T) {
 		wantErr string
 	}{
 		{"screenshot", "screenshot", nil, deskFlags{}, func(a *pb.DeskActionRequest) bool { return a.GetScreenshot() != nil }, ""},
+		{"foreground", "foreground", nil, deskFlags{}, func(a *pb.DeskActionRequest) bool { return a.GetForeground() != nil }, ""},
 		{"windows", "windows", nil, deskFlags{}, func(a *pb.DeskActionRequest) bool { return a.GetListWindows() != nil }, ""},
 		{"click", "click", []string{"10", "-20"}, deskFlags{button: "right", double: true}, func(a *pb.DeskActionRequest) bool {
 			c := a.GetClick()

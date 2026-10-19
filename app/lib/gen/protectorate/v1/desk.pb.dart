@@ -495,6 +495,192 @@ class ListWindowsResponse extends $pb.GeneratedMessage {
   $pb.PbList<DeskWindow> get windows => $_getList(0);
 }
 
+class ForegroundRequest extends $pb.GeneratedMessage {
+  factory ForegroundRequest({
+    DeskTarget? target,
+  }) {
+    final result = ForegroundRequest._();
+    if (target != null) result.target = target;
+    return result;
+  }
+
+  ForegroundRequest._();
+
+  factory ForegroundRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ForegroundRequest()..mergeFromBuffer(data, registry);
+  factory ForegroundRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ForegroundRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ForegroundRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ForegroundRequest.$_createMessage)
+    ..aOM<DeskTarget>(1, _omitFieldNames ? '' : 'target',
+        subBuilder: DeskTarget.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ForegroundRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ForegroundRequest copyWith(void Function(ForegroundRequest) updates) =>
+      super.copyWith((message) => updates(message as ForegroundRequest))
+          as ForegroundRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ForegroundRequest() / ForegroundRequest.new instead')
+  static ForegroundRequest create() => ForegroundRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ForegroundRequest._();
+  @$core.override
+  ForegroundRequest createEmptyInstance() => ForegroundRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ForegroundRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ForegroundRequest>(
+          ForegroundRequest.$_createMessage);
+  static ForegroundRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  DeskTarget get target => $_getN(0);
+  @$pb.TagNumber(1)
+  set target(DeskTarget value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasTarget() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearTarget() => $_clearField(1);
+  @$pb.TagNumber(1)
+  DeskTarget ensureTarget() => $_ensure(0);
+}
+
+class ForegroundResponse extends $pb.GeneratedMessage {
+  factory ForegroundResponse({
+    $core.String? title,
+    $core.int? pid,
+    $core.String? process,
+    $core.String? integrity,
+    $core.String? agentIntegrity,
+    $core.bool? blocks,
+  }) {
+    final result = ForegroundResponse._();
+    if (title != null) result.title = title;
+    if (pid != null) result.pid = pid;
+    if (process != null) result.process = process;
+    if (integrity != null) result.integrity = integrity;
+    if (agentIntegrity != null) result.agentIntegrity = agentIntegrity;
+    if (blocks != null) result.blocks = blocks;
+    return result;
+  }
+
+  ForegroundResponse._();
+
+  factory ForegroundResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ForegroundResponse()..mergeFromBuffer(data, registry);
+  factory ForegroundResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ForegroundResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ForegroundResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ForegroundResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'title')
+    ..aI(2, _omitFieldNames ? '' : 'pid', fieldType: $pb.PbFieldType.OU3)
+    ..aOS(3, _omitFieldNames ? '' : 'process')
+    ..aOS(4, _omitFieldNames ? '' : 'integrity')
+    ..aOS(5, _omitFieldNames ? '' : 'agentIntegrity')
+    ..aOB(6, _omitFieldNames ? '' : 'blocks')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ForegroundResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ForegroundResponse copyWith(void Function(ForegroundResponse) updates) =>
+      super.copyWith((message) => updates(message as ForegroundResponse))
+          as ForegroundResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ForegroundResponse() / ForegroundResponse.new instead')
+  static ForegroundResponse create() => ForegroundResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ForegroundResponse._();
+  @$core.override
+  ForegroundResponse createEmptyInstance() => ForegroundResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ForegroundResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ForegroundResponse>(
+          ForegroundResponse.$_createMessage);
+  static ForegroundResponse? _defaultInstance;
+
+  /// title is empty when no window has the foreground.
+  @$pb.TagNumber(1)
+  $core.String get title => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set title($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasTitle() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearTitle() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get pid => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set pid($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPid() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPid() => $_clearField(2);
+
+  /// process is the executable's base name, empty when it cannot be read.
+  @$pb.TagNumber(3)
+  $core.String get process => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set process($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasProcess() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearProcess() => $_clearField(3);
+
+  /// integrity is "untrusted", "low", "medium", "high", "system" or
+  /// "protected", or "unreadable" when the process token cannot be opened
+  /// (which only a higher-integrity process does to this agent).
+  @$pb.TagNumber(4)
+  $core.String get integrity => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set integrity($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasIntegrity() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearIntegrity() => $_clearField(4);
+
+  /// agent_integrity is the integrity level of the node agent itself.
+  @$pb.TagNumber(5)
+  $core.String get agentIntegrity => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set agentIntegrity($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasAgentIntegrity() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearAgentIntegrity() => $_clearField(5);
+
+  /// blocks is true when injected input would not reach this window.
+  @$pb.TagNumber(6)
+  $core.bool get blocks => $_getBF(5);
+  @$pb.TagNumber(6)
+  set blocks($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasBlocks() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearBlocks() => $_clearField(6);
+}
+
 class ClickRequest extends $pb.GeneratedMessage {
   factory ClickRequest({
     DeskTarget? target,
@@ -1019,6 +1205,7 @@ enum DeskActionRequest_Action {
   type,
   key,
   run,
+  foreground,
   notSet
 }
 
@@ -1033,6 +1220,7 @@ class DeskActionRequest extends $pb.GeneratedMessage {
     TypeRequest? type,
     KeyRequest? key,
     RunRequest? run,
+    ForegroundRequest? foreground,
   }) {
     final result = DeskActionRequest._();
     if (screenshot != null) result.screenshot = screenshot;
@@ -1042,6 +1230,7 @@ class DeskActionRequest extends $pb.GeneratedMessage {
     if (type != null) result.type = type;
     if (key != null) result.key = key;
     if (run != null) result.run = run;
+    if (foreground != null) result.foreground = foreground;
     return result;
   }
 
@@ -1063,6 +1252,7 @@ class DeskActionRequest extends $pb.GeneratedMessage {
     5: DeskActionRequest_Action.type,
     6: DeskActionRequest_Action.key,
     7: DeskActionRequest_Action.run,
+    8: DeskActionRequest_Action.foreground,
     0: DeskActionRequest_Action.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -1070,7 +1260,7 @@ class DeskActionRequest extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: DeskActionRequest.$_createMessage)
-    ..oo(0, [1, 2, 3, 4, 5, 6, 7])
+    ..oo(0, [1, 2, 3, 4, 5, 6, 7, 8])
     ..aOM<ScreenshotRequest>(1, _omitFieldNames ? '' : 'screenshot',
         subBuilder: ScreenshotRequest.$_createMessage)
     ..aOM<ListWindowsRequest>(2, _omitFieldNames ? '' : 'listWindows',
@@ -1085,6 +1275,8 @@ class DeskActionRequest extends $pb.GeneratedMessage {
         subBuilder: KeyRequest.$_createMessage)
     ..aOM<RunRequest>(7, _omitFieldNames ? '' : 'run',
         subBuilder: RunRequest.$_createMessage)
+    ..aOM<ForegroundRequest>(8, _omitFieldNames ? '' : 'foreground',
+        subBuilder: ForegroundRequest.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1116,6 +1308,7 @@ class DeskActionRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
+  @$pb.TagNumber(8)
   DeskActionRequest_Action whichAction() =>
       _DeskActionRequest_ActionByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
@@ -1125,6 +1318,7 @@ class DeskActionRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
   @$pb.TagNumber(7)
+  @$pb.TagNumber(8)
   void clearAction() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1203,9 +1397,27 @@ class DeskActionRequest extends $pb.GeneratedMessage {
   void clearRun() => $_clearField(7);
   @$pb.TagNumber(7)
   RunRequest ensureRun() => $_ensure(6);
+
+  @$pb.TagNumber(8)
+  ForegroundRequest get foreground => $_getN(7);
+  @$pb.TagNumber(8)
+  set foreground(ForegroundRequest value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasForeground() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearForeground() => $_clearField(8);
+  @$pb.TagNumber(8)
+  ForegroundRequest ensureForeground() => $_ensure(7);
 }
 
-enum DeskActionResponse_Result { screenshot, listWindows, input, run, notSet }
+enum DeskActionResponse_Result {
+  screenshot,
+  listWindows,
+  input,
+  run,
+  foreground,
+  notSet
+}
 
 class DeskActionResponse extends $pb.GeneratedMessage {
   factory DeskActionResponse({
@@ -1213,12 +1425,14 @@ class DeskActionResponse extends $pb.GeneratedMessage {
     ListWindowsResponse? listWindows,
     InputResponse? input,
     RunResponse? run,
+    ForegroundResponse? foreground,
   }) {
     final result = DeskActionResponse._();
     if (screenshot != null) result.screenshot = screenshot;
     if (listWindows != null) result.listWindows = listWindows;
     if (input != null) result.input = input;
     if (run != null) result.run = run;
+    if (foreground != null) result.foreground = foreground;
     return result;
   }
 
@@ -1237,6 +1451,7 @@ class DeskActionResponse extends $pb.GeneratedMessage {
     2: DeskActionResponse_Result.listWindows,
     3: DeskActionResponse_Result.input,
     4: DeskActionResponse_Result.run,
+    5: DeskActionResponse_Result.foreground,
     0: DeskActionResponse_Result.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -1244,7 +1459,7 @@ class DeskActionResponse extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: DeskActionResponse.$_createMessage)
-    ..oo(0, [1, 2, 3, 4])
+    ..oo(0, [1, 2, 3, 4, 5])
     ..aOM<ScreenshotResponse>(1, _omitFieldNames ? '' : 'screenshot',
         subBuilder: ScreenshotResponse.$_createMessage)
     ..aOM<ListWindowsResponse>(2, _omitFieldNames ? '' : 'listWindows',
@@ -1253,6 +1468,8 @@ class DeskActionResponse extends $pb.GeneratedMessage {
         subBuilder: InputResponse.$_createMessage)
     ..aOM<RunResponse>(4, _omitFieldNames ? '' : 'run',
         subBuilder: RunResponse.$_createMessage)
+    ..aOM<ForegroundResponse>(5, _omitFieldNames ? '' : 'foreground',
+        subBuilder: ForegroundResponse.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1281,12 +1498,14 @@ class DeskActionResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   @$pb.TagNumber(3)
   @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
   DeskActionResponse_Result whichResult() =>
       _DeskActionResponse_ResultByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(1)
   @$pb.TagNumber(2)
   @$pb.TagNumber(3)
   @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
   void clearResult() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -1332,6 +1551,17 @@ class DeskActionResponse extends $pb.GeneratedMessage {
   void clearRun() => $_clearField(4);
   @$pb.TagNumber(4)
   RunResponse ensureRun() => $_ensure(3);
+
+  @$pb.TagNumber(5)
+  ForegroundResponse get foreground => $_getN(4);
+  @$pb.TagNumber(5)
+  set foreground(ForegroundResponse value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasForeground() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearForeground() => $_clearField(5);
+  @$pb.TagNumber(5)
+  ForegroundResponse ensureForeground() => $_ensure(4);
 }
 
 /// DeskPolicy says when a node's desktop may be driven by agents. Without a
@@ -1600,6 +1830,17 @@ class DeskServiceApi {
           $pb.ClientContext? ctx, ListWindowsRequest request) =>
       _client.invoke<ListWindowsResponse>(
           ctx, 'DeskService', 'ListWindows', request, ListWindowsResponse());
+
+  /// Foreground reports the window that receives keystrokes now, with its
+  /// process and integrity level. Read-only. Windows drops input injected into
+  /// a window of a higher integrity level than the agent's without any error,
+  /// so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the
+  /// foreground window (or, for the mouse, the window under the pointer) is
+  /// higher; this shows what is in the way.
+  $async.Future<ForegroundResponse> foreground(
+          $pb.ClientContext? ctx, ForegroundRequest request) =>
+      _client.invoke<ForegroundResponse>(
+          ctx, 'DeskService', 'Foreground', request, ForegroundResponse());
 
   /// Click moves the pointer and clicks. Needs a desk lease.
   $async.Future<InputResponse> click(

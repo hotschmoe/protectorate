@@ -27,6 +27,14 @@ service DeskService {
   // ListWindows lists visible top-level windows, topmost first.
   rpc ListWindows(ListWindowsRequest) returns (ListWindowsResponse);
 
+  // Foreground reports the window that receives keystrokes now, with its
+  // process and integrity level. Read-only. Windows drops input injected into
+  // a window of a higher integrity level than the agent's without any error,
+  // so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the
+  // foreground window (or, for the mouse, the window under the pointer) is
+  // higher; this shows what is in the way.
+  rpc Foreground(ForegroundRequest) returns (ForegroundResponse);
+
   // Click moves the pointer and clicks. Needs a desk lease.
   rpc Click(ClickRequest) returns (InputResponse);
 
@@ -83,6 +91,26 @@ message ListWindowsResponse {
   repeated DeskWindow windows = 1;
 }
 
+message ForegroundRequest {
+  DeskTarget target = 1;
+}
+
+message ForegroundResponse {
+  // title is empty when no window has the foreground.
+  string title = 1;
+  uint32 pid = 2;
+  // process is the executable's base name, empty when it cannot be read.
+  string process = 3;
+  // integrity is "untrusted", "low", "medium", "high", "system" or
+  // "protected", or "unreadable" when the process token cannot be opened
+  // (which only a higher-integrity process does to this agent).
+  string integrity = 4;
+  // agent_integrity is the integrity level of the node agent itself.
+  string agent_integrity = 5;
+  // blocks is true when injected input would not reach this window.
+  bool blocks = 6;
+}
+
 message ClickRequest {
   DeskTarget target = 1;
   int32 x = 2;
@@ -131,6 +159,7 @@ message DeskActionRequest {
     TypeRequest type = 5;
     KeyRequest key = 6;
     RunRequest run = 7;
+    ForegroundRequest foreground = 8;
   }
 }
 
@@ -140,6 +169,7 @@ message DeskActionResponse {
     ListWindowsResponse list_windows = 2;
     InputResponse input = 3;
     RunResponse run = 4;
+    ForegroundResponse foreground = 5;
   }
 }
 

@@ -148,6 +148,46 @@ final $typed_data.Uint8List listWindowsResponseDescriptor = $convert.base64Decod
     'ChNMaXN0V2luZG93c1Jlc3BvbnNlEjUKB3dpbmRvd3MYASADKAsyGy5wcm90ZWN0b3JhdGUudj'
     'EuRGVza1dpbmRvd1IHd2luZG93cw==');
 
+@$core.Deprecated('Use foregroundRequestDescriptor instead')
+const ForegroundRequest$json = {
+  '1': 'ForegroundRequest',
+  '2': [
+    {
+      '1': 'target',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.DeskTarget',
+      '10': 'target'
+    },
+  ],
+};
+
+/// Descriptor for `ForegroundRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List foregroundRequestDescriptor = $convert.base64Decode(
+    'ChFGb3JlZ3JvdW5kUmVxdWVzdBIzCgZ0YXJnZXQYASABKAsyGy5wcm90ZWN0b3JhdGUudjEuRG'
+    'Vza1RhcmdldFIGdGFyZ2V0');
+
+@$core.Deprecated('Use foregroundResponseDescriptor instead')
+const ForegroundResponse$json = {
+  '1': 'ForegroundResponse',
+  '2': [
+    {'1': 'title', '3': 1, '4': 1, '5': 9, '10': 'title'},
+    {'1': 'pid', '3': 2, '4': 1, '5': 13, '10': 'pid'},
+    {'1': 'process', '3': 3, '4': 1, '5': 9, '10': 'process'},
+    {'1': 'integrity', '3': 4, '4': 1, '5': 9, '10': 'integrity'},
+    {'1': 'agent_integrity', '3': 5, '4': 1, '5': 9, '10': 'agentIntegrity'},
+    {'1': 'blocks', '3': 6, '4': 1, '5': 8, '10': 'blocks'},
+  ],
+};
+
+/// Descriptor for `ForegroundResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List foregroundResponseDescriptor = $convert.base64Decode(
+    'ChJGb3JlZ3JvdW5kUmVzcG9uc2USFAoFdGl0bGUYASABKAlSBXRpdGxlEhAKA3BpZBgCIAEoDV'
+    'IDcGlkEhgKB3Byb2Nlc3MYAyABKAlSB3Byb2Nlc3MSHAoJaW50ZWdyaXR5GAQgASgJUglpbnRl'
+    'Z3JpdHkSJwoPYWdlbnRfaW50ZWdyaXR5GAUgASgJUg5hZ2VudEludGVncml0eRIWCgZibG9ja3'
+    'MYBiABKAhSBmJsb2Nrcw==');
+
 @$core.Deprecated('Use clickRequestDescriptor instead')
 const ClickRequest$json = {
   '1': 'ClickRequest',
@@ -347,6 +387,15 @@ const DeskActionRequest$json = {
       '9': 0,
       '10': 'run'
     },
+    {
+      '1': 'foreground',
+      '3': 8,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ForegroundRequest',
+      '9': 0,
+      '10': 'foreground'
+    },
   ],
   '8': [
     {'1': 'action'},
@@ -362,7 +411,9 @@ final $typed_data.Uint8List deskActionRequestDescriptor = $convert.base64Decode(
     'bW92ZRgEIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Nb3ZlUmVxdWVzdEgAUgRtb3ZlEjIKBHR5cG'
     'UYBSABKAsyHC5wcm90ZWN0b3JhdGUudjEuVHlwZVJlcXVlc3RIAFIEdHlwZRIvCgNrZXkYBiAB'
     'KAsyGy5wcm90ZWN0b3JhdGUudjEuS2V5UmVxdWVzdEgAUgNrZXkSLwoDcnVuGAcgASgLMhsucH'
-    'JvdGVjdG9yYXRlLnYxLlJ1blJlcXVlc3RIAFIDcnVuQggKBmFjdGlvbg==');
+    'JvdGVjdG9yYXRlLnYxLlJ1blJlcXVlc3RIAFIDcnVuEkQKCmZvcmVncm91bmQYCCABKAsyIi5w'
+    'cm90ZWN0b3JhdGUudjEuRm9yZWdyb3VuZFJlcXVlc3RIAFIKZm9yZWdyb3VuZEIICgZhY3Rpb2'
+    '4=');
 
 @$core.Deprecated('Use deskActionResponseDescriptor instead')
 const DeskActionResponse$json = {
@@ -404,6 +455,15 @@ const DeskActionResponse$json = {
       '9': 0,
       '10': 'run'
     },
+    {
+      '1': 'foreground',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ForegroundResponse',
+      '9': 0,
+      '10': 'foreground'
+    },
   ],
   '8': [
     {'1': 'result'},
@@ -416,8 +476,9 @@ final $typed_data.Uint8List deskActionResponseDescriptor = $convert.base64Decode
     '52MS5TY3JlZW5zaG90UmVzcG9uc2VIAFIKc2NyZWVuc2hvdBJJCgxsaXN0X3dpbmRvd3MYAiAB'
     'KAsyJC5wcm90ZWN0b3JhdGUudjEuTGlzdFdpbmRvd3NSZXNwb25zZUgAUgtsaXN0V2luZG93cx'
     'I2CgVpbnB1dBgDIAEoCzIeLnByb3RlY3RvcmF0ZS52MS5JbnB1dFJlc3BvbnNlSABSBWlucHV0'
-    'EjAKA3J1bhgEIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5SdW5SZXNwb25zZUgAUgNydW5CCAoGcm'
-    'VzdWx0');
+    'EjAKA3J1bhgEIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5SdW5SZXNwb25zZUgAUgNydW4SRQoKZm'
+    '9yZWdyb3VuZBgFIAEoCzIjLnByb3RlY3RvcmF0ZS52MS5Gb3JlZ3JvdW5kUmVzcG9uc2VIAFIK'
+    'Zm9yZWdyb3VuZEIICgZyZXN1bHQ=');
 
 @$core.Deprecated('Use deskPolicyDescriptor instead')
 const DeskPolicy$json = {
@@ -507,6 +568,11 @@ const $core.Map<$core.String, $core.dynamic> DeskServiceBase$json = {
       '3': '.protectorate.v1.ListWindowsResponse'
     },
     {
+      '1': 'Foreground',
+      '2': '.protectorate.v1.ForegroundRequest',
+      '3': '.protectorate.v1.ForegroundResponse'
+    },
+    {
       '1': 'Click',
       '2': '.protectorate.v1.ClickRequest',
       '3': '.protectorate.v1.InputResponse'
@@ -543,6 +609,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ListWindowsRequest': ListWindowsRequest$json,
   '.protectorate.v1.ListWindowsResponse': ListWindowsResponse$json,
   '.protectorate.v1.DeskWindow': DeskWindow$json,
+  '.protectorate.v1.ForegroundRequest': ForegroundRequest$json,
+  '.protectorate.v1.ForegroundResponse': ForegroundResponse$json,
   '.protectorate.v1.ClickRequest': ClickRequest$json,
   '.protectorate.v1.InputResponse': InputResponse$json,
   '.protectorate.v1.MoveRequest': MoveRequest$json,
@@ -557,10 +625,12 @@ final $typed_data.Uint8List deskServiceDescriptor = $convert.base64Decode(
     'CgtEZXNrU2VydmljZRJVCgpTY3JlZW5zaG90EiIucHJvdGVjdG9yYXRlLnYxLlNjcmVlbnNob3'
     'RSZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYxLlNjcmVlbnNob3RSZXNwb25zZRJYCgtMaXN0V2lu'
     'ZG93cxIjLnByb3RlY3RvcmF0ZS52MS5MaXN0V2luZG93c1JlcXVlc3QaJC5wcm90ZWN0b3JhdG'
-    'UudjEuTGlzdFdpbmRvd3NSZXNwb25zZRJGCgVDbGljaxIdLnByb3RlY3RvcmF0ZS52MS5DbGlj'
-    'a1JlcXVlc3QaHi5wcm90ZWN0b3JhdGUudjEuSW5wdXRSZXNwb25zZRJECgRNb3ZlEhwucHJvdG'
-    'VjdG9yYXRlLnYxLk1vdmVSZXF1ZXN0Gh4ucHJvdGVjdG9yYXRlLnYxLklucHV0UmVzcG9uc2US'
-    'RAoEVHlwZRIcLnByb3RlY3RvcmF0ZS52MS5UeXBlUmVxdWVzdBoeLnByb3RlY3RvcmF0ZS52MS'
-    '5JbnB1dFJlc3BvbnNlEkIKA0tleRIbLnByb3RlY3RvcmF0ZS52MS5LZXlSZXF1ZXN0Gh4ucHJv'
-    'dGVjdG9yYXRlLnYxLklucHV0UmVzcG9uc2USQAoDUnVuEhsucHJvdGVjdG9yYXRlLnYxLlJ1bl'
-    'JlcXVlc3QaHC5wcm90ZWN0b3JhdGUudjEuUnVuUmVzcG9uc2U=');
+    'UudjEuTGlzdFdpbmRvd3NSZXNwb25zZRJVCgpGb3JlZ3JvdW5kEiIucHJvdGVjdG9yYXRlLnYx'
+    'LkZvcmVncm91bmRSZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYxLkZvcmVncm91bmRSZXNwb25zZR'
+    'JGCgVDbGljaxIdLnByb3RlY3RvcmF0ZS52MS5DbGlja1JlcXVlc3QaHi5wcm90ZWN0b3JhdGUu'
+    'djEuSW5wdXRSZXNwb25zZRJECgRNb3ZlEhwucHJvdGVjdG9yYXRlLnYxLk1vdmVSZXF1ZXN0Gh'
+    '4ucHJvdGVjdG9yYXRlLnYxLklucHV0UmVzcG9uc2USRAoEVHlwZRIcLnByb3RlY3RvcmF0ZS52'
+    'MS5UeXBlUmVxdWVzdBoeLnByb3RlY3RvcmF0ZS52MS5JbnB1dFJlc3BvbnNlEkIKA0tleRIbLn'
+    'Byb3RlY3RvcmF0ZS52MS5LZXlSZXF1ZXN0Gh4ucHJvdGVjdG9yYXRlLnYxLklucHV0UmVzcG9u'
+    'c2USQAoDUnVuEhsucHJvdGVjdG9yYXRlLnYxLlJ1blJlcXVlc3QaHC5wcm90ZWN0b3JhdGUudj'
+    'EuUnVuUmVzcG9uc2U=');

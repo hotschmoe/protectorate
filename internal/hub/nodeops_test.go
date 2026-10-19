@@ -50,6 +50,9 @@ func (f *fakeDesk) Ready() error { return f.ready }
 func (f *fakeDesk) Screenshot() (*image.RGBA, error) {
 	return image.NewRGBA(image.Rect(0, 0, 4, 3)), f.rec("screenshot")
 }
+func (f *fakeDesk) Foreground() (desk.Foreground, error) {
+	return desk.Foreground{Title: "Windows Security", PID: 9, Process: "consent.exe", Integrity: desk.IntegritySystem, AgentIntegrity: desk.IntegrityMedium}, f.rec("foreground")
+}
 func (f *fakeDesk) Windows() ([]desk.Window, error) {
 	return []desk.Window{{Title: "ArchiCAD", X: 1, Y: 2, Width: 300, Height: 200, PID: 42}}, f.rec("windows")
 }
@@ -426,6 +429,10 @@ func TestDeskLeaseRule(t *testing.T) {
 	if err != nil || shot.Msg.Width != 4 || shot.Msg.Height != 3 || !bytes.HasPrefix(shot.Msg.Png, []byte("\x89PNG")) {
 		t.Fatalf("screenshot without lease: %v %v", shot, err)
 	}
+	fg, err := dc.Foreground(ctx, connect.NewRequest(&pb.ForegroundRequest{Target: target("")}))
+	if err != nil || fg.Msg.Integrity != "system" || !fg.Msg.Blocks || fg.Msg.Process != "consent.exe" {
+		t.Errorf("foreground = %v, %v", fg, err)
+	}
 	wins, err := dc.ListWindows(ctx, connect.NewRequest(&pb.ListWindowsRequest{Target: target("")}))
 	if err != nil || len(wins.Msg.Windows) != 1 || wins.Msg.Windows[0].Title != "ArchiCAD" {
 		t.Fatalf("windows without lease: %v %v", wins, err)
@@ -487,7 +494,7 @@ func TestDeskLeaseRule(t *testing.T) {
 	if err != nil || run.Msg.Pid != 7 {
 		t.Fatalf("run: %v %v", run, err)
 	}
-	want := []string{"screenshot", "windows", "click", "type hi", "key", "move", "run calc.exe"}
+	want := []string{"screenshot", "foreground", "windows", "click", "type hi", "key", "move", "run calc.exe"}
 	if got := e.peerDesk.got(); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("peer desk calls = %v, want %v (denied commands must not reach the node)", got, want)
 	}

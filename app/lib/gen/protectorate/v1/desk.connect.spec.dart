@@ -38,6 +38,19 @@ abstract final class DeskService {
     protectoratev1desk.ListWindowsResponse.new,
   );
 
+  /// Foreground reports the window that receives keystrokes now, with its
+  /// process and integrity level. Read-only. Windows drops input injected into
+  /// a window of a higher integrity level than the agent's without any error,
+  /// so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the
+  /// foreground window (or, for the mouse, the window under the pointer) is
+  /// higher; this shows what is in the way.
+  static const foreground = connect.Spec(
+    '/$name/Foreground',
+    connect.StreamType.unary,
+    protectoratev1desk.ForegroundRequest.new,
+    protectoratev1desk.ForegroundResponse.new,
+  );
+
   /// Click moves the pointer and clicks. Needs a desk lease.
   static const click = connect.Spec(
     '/$name/Click',

@@ -20,6 +20,10 @@ var (
 	ErrUnsupported = errors.New("desktop control is not implemented on this OS")
 	// ErrInvalid marks bad arguments.
 	ErrInvalid = errors.New("invalid argument")
+	// ErrBlocked means input would not reach its target: Windows drops it
+	// without an error when the target is a higher-integrity window (UIPI),
+	// and the secure desktop and a locked screen take none.
+	ErrBlocked = errors.New("input would not reach its target")
 )
 
 // Window is a visible top-level window in screenshot coordinates.
@@ -29,6 +33,73 @@ type Window struct {
 	Width, Height int
 	PID           uint32
 	Minimized     bool
+}
+
+// Integrity is a Windows mandatory integrity level (the RID of the token's
+// integrity SID).
+type Integrity uint32
+
+const (
+	IntegrityUntrusted Integrity = 0x0000
+	IntegrityLow       Integrity = 0x1000
+	IntegrityMedium    Integrity = 0x2000
+	IntegrityHigh      Integrity = 0x3000
+	IntegritySystem    Integrity = 0x4000
+	IntegrityProtected Integrity = 0x5000
+)
+
+func (i Integrity) String() string {
+	switch {
+	case i >= IntegrityProtected:
+		return "protected"
+	case i >= IntegritySystem:
+		return "system"
+	case i >= IntegrityHigh:
+		return "high"
+	case i >= IntegrityMedium:
+		return "medium"
+	case i >= IntegrityLow:
+		return "low"
+	}
+	return "untrusted"
+}
+
+// Foreground is the top-level window that has the keyboard focus, or the one
+// under a point, with the process that owns it. PID is 0 when there is no such
+// window. Unreadable means the owner's token could not be opened, which only a
+// process of a higher integrity level does to the agent. AgentIntegrity is the
+// level of the process that injects input.
+type Foreground struct {
+	Title          string
+	PID            uint32
+	Process        string
+	Integrity      Integrity
+	Unreadable     bool
+	AgentIntegrity Integrity
+}
+
+// IntegrityName is the level as shown to users.
+func (f Foreground) IntegrityName() string {
+	if f.Unreadable {
+		return "unreadable"
+	}
+	return f.Integrity.String()
+}
+
+// Blocks reports whether Windows drops input the agent injects into f.
+func (f Foreground) Blocks() bool {
+	return f.PID != 0 && (f.Unreadable || f.Integrity > f.AgentIntegrity)
+}
+
+// CheckReach returns an ErrBlocked error naming the window and the fix when
+// the agent's input cannot reach f. what says how f was found, for example
+// "foreground window".
+func CheckReach(f Foreground, what string) error {
+	if !f.Blocks() {
+		return nil
+	}
+	return fmt.Errorf("%w: the %s %q (%s, pid %d, integrity %s) is above this agent (integrity %s), and Windows silently drops input injected into it; dismiss or close it on the machine (for example a Windows Security or firewall prompt), or reinstall the agent elevated with `protectorate node install --elevated` from a terminal opened with Run as administrator",
+		ErrBlocked, what, f.Title, f.Process, f.PID, f.IntegrityName(), f.AgentIntegrity)
 }
 
 // Button is a mouse button.
@@ -47,6 +118,8 @@ type Desktop interface {
 	Ready() error
 	Screenshot() (*image.RGBA, error)
 	Windows() ([]Window, error)
+	// Foreground reports the window that receives keystrokes now.
+	Foreground() (Foreground, error)
 	Click(x, y int, b Button, double bool) error
 	Move(x, y int) error
 	Type(text string) error

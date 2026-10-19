@@ -25,6 +25,8 @@ abstract class DeskServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $2.ScreenshotRequest request);
   $async.Future<$2.ListWindowsResponse> listWindows(
       $pb.ServerContext ctx, $2.ListWindowsRequest request);
+  $async.Future<$2.ForegroundResponse> foreground(
+      $pb.ServerContext ctx, $2.ForegroundRequest request);
   $async.Future<$2.InputResponse> click(
       $pb.ServerContext ctx, $2.ClickRequest request);
   $async.Future<$2.InputResponse> move(
@@ -42,6 +44,8 @@ abstract class DeskServiceBase extends $pb.GeneratedService {
         return $2.ScreenshotRequest();
       case 'ListWindows':
         return $2.ListWindowsRequest();
+      case 'Foreground':
+        return $2.ForegroundRequest();
       case 'Click':
         return $2.ClickRequest();
       case 'Move':
@@ -64,6 +68,8 @@ abstract class DeskServiceBase extends $pb.GeneratedService {
         return screenshot(ctx, request as $2.ScreenshotRequest);
       case 'ListWindows':
         return listWindows(ctx, request as $2.ListWindowsRequest);
+      case 'Foreground':
+        return foreground(ctx, request as $2.ForegroundRequest);
       case 'Click':
         return click(ctx, request as $2.ClickRequest);
       case 'Move':
