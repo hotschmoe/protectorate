@@ -9,7 +9,7 @@ import "backlog.connect.spec.dart" as specs;
 
 /// BacklogService fronts the markdown file at $PROTECTORATE_HOME/backlog.md.
 /// Mutations publish backlog.* events on EventService.
-extension type BacklogServiceClient (connect.Transport _transport) {
+extension type BacklogServiceClient(connect.Transport _transport) {
   /// ListItems returns backlog items, optionally filtered by project, state
   /// and harness.
   Future<protectoratev1backlog.ListItemsResponse> listItems(

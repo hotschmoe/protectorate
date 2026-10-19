@@ -6,10 +6,16 @@ import '../hubs/hub_profile.dart';
 import 'terminal_screen.dart';
 
 class SessionsTab extends StatefulWidget {
-  const SessionsTab({super.key, required this.hub, required this.client});
+  const SessionsTab({
+    super.key,
+    required this.hub,
+    required this.client,
+    this.openSession,
+  });
 
   final HubProfile hub;
   final HubClient client;
+  final String? openSession;
 
   @override
   State<SessionsTab> createState() => _SessionsTabState();
@@ -24,6 +30,12 @@ class _SessionsTabState extends State<SessionsTab> {
   void initState() {
     super.initState();
     _refresh();
+    final target = widget.openSession;
+    if (target != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _open(target);
+      });
+    }
   }
 
   Future<void> _refresh() async {

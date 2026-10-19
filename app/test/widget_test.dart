@@ -4,6 +4,8 @@ import 'package:connectrpc/test.dart';
 import 'package:flutter/material.dart';
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
@@ -30,6 +32,20 @@ const _hub = HubProfile(
 
 HubClient _fakeClient(HubProfile p, {void Function(String?)? onAuth}) {
   final transport = FakeTransportBuilder()
+      .unary(
+        BacklogService.listItems,
+        (ListItemsRequest r, ctx) => ListItemsResponse(
+          items: [
+            Item(
+              id: 'a1',
+              project: 'acme/app',
+              title: 'fix login',
+              priority: 2,
+              state: ItemState.ITEM_STATE_TODO,
+            ),
+          ],
+        ),
+      )
       .unary(HubService.getStatus, (GetStatusRequest r, ctx) {
         onAuth?.call(ctx.requestHeaders.get('authorization')?.first);
         return GetStatusResponse(
@@ -156,7 +172,8 @@ void main() {
       expect(find.byType(NavigationBar), findsNothing);
       await tester.tap(find.text('Backlog'));
       await tester.pumpAndSettle();
-      expect(find.text('Backlog: not wired yet'), findsOneWidget);
+      expect(find.text('acme/app'), findsOneWidget);
+      expect(find.text('fix login'), findsOneWidget);
     });
   });
 

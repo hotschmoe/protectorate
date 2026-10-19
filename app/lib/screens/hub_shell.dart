@@ -5,29 +5,44 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import 'overview_tab.dart';
+import 'backlog_tab.dart';
 import 'quota_tab.dart';
 import 'sessions_tab.dart';
 
 const phoneBreakpoint = 600.0;
 
 class _Destination {
-  const _Destination(this.label, this.icon);
+  const _Destination(this.id, this.label, this.icon);
+  final String id;
   final String label;
   final IconData icon;
 }
 
 const _destinations = [
-  _Destination('Overview', Icons.dashboard),
-  _Destination('Quota', Icons.speed),
-  _Destination('Sessions', Icons.terminal),
-  _Destination('Backlog', Icons.checklist),
+  _Destination('overview', 'Overview', Icons.dashboard),
+  _Destination('quota', 'Quota', Icons.speed),
+  _Destination('sessions', 'Sessions', Icons.terminal),
+  _Destination('backlog', 'Backlog', Icons.checklist),
 ];
 
+int tabIndex(String? id) {
+  final i = _destinations.indexWhere((d) => d.id == id);
+  return i < 0 ? 0 : i;
+}
+
 class HubShell extends StatefulWidget {
-  const HubShell({super.key, required this.hub, required this.clientFactory});
+  const HubShell({
+    super.key,
+    required this.hub,
+    required this.clientFactory,
+    this.initialTab,
+    this.openSession,
+  });
 
   final HubProfile hub;
   final HubClient Function(HubProfile) clientFactory;
+  final String? initialTab;
+  final String? openSession;
 
   @override
   State<HubShell> createState() => _HubShellState();
@@ -38,7 +53,7 @@ class _HubShellState extends State<HubShell> {
   late final EventFeed _feed = EventFeed(
     () => _client.events.subscribe(SubscribeRequest()),
   )..start();
-  int _index = 0;
+  late int _index = tabIndex(widget.initialTab);
 
   @override
   void dispose() {
@@ -49,8 +64,12 @@ class _HubShellState extends State<HubShell> {
   Widget _body() => switch (_index) {
     0 => OverviewTab(client: _client, feed: _feed),
     1 => QuotaTab(client: _client, feed: _feed),
-    2 => SessionsTab(hub: widget.hub, client: _client),
-    _ => _Placeholder(title: _destinations[_index].label),
+    2 => SessionsTab(
+      hub: widget.hub,
+      client: _client,
+      openSession: widget.openSession,
+    ),
+    _ => BacklogTab(client: _client, feed: _feed),
   };
 
   @override
@@ -90,14 +109,4 @@ class _HubShellState extends State<HubShell> {
             ),
     );
   }
-}
-
-class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) =>
-      Center(child: Text('$title: not wired yet'));
 }
