@@ -50,6 +50,44 @@ func harnessFromProto(h pb.Harness) sleeve.Harness {
 	return ""
 }
 
+func modeFromProto(m pb.SleeveMode) sleeve.Mode {
+	switch m {
+	case pb.SleeveMode_SLEEVE_MODE_CHAT:
+		return sleeve.ModeChat
+	case pb.SleeveMode_SLEEVE_MODE_TERMINAL:
+		return sleeve.ModeTerminal
+	}
+	return ""
+}
+
+func modeToProto(m sleeve.Mode) pb.SleeveMode {
+	if m == sleeve.ModeChat {
+		return pb.SleeveMode_SLEEVE_MODE_CHAT
+	}
+	return pb.SleeveMode_SLEEVE_MODE_TERMINAL
+}
+
+func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
+	if c == nil {
+		return nil
+	}
+	s := &pb.ChatStatus{
+		State:            pb.ChatState(pb.ChatState_value[c.State]),
+		HarnessSessionId: c.SessionID,
+		Model:            c.Model,
+		ContextTokens:    c.Context,
+		ContextWindow:    c.Window,
+		LastSeq:          c.LastSeq,
+	}
+	if !c.CacheExpires.IsZero() {
+		s.CacheExpiresAt = timestamppb.New(c.CacheExpires)
+	}
+	if !c.LastActivity.IsZero() {
+		s.LastActivityAt = timestamppb.New(c.LastActivity)
+	}
+	return s
+}
+
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
 		Name:      i.Name,
@@ -58,6 +96,8 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Session:   i.Session,
 		CreatedAt: timestamppb.New(i.Created),
 		Args:      i.Args,
+		Mode:      modeToProto(i.Mode),
+		Chat:      chatToProto(i.Chat),
 		Limits:    &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
 		State:     pb.SleeveState_SLEEVE_STATE_RUNNING,
 		Usage: &pb.SleeveUsage{
@@ -127,7 +167,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 	}
 	r := sleeve.SpawnRequest{
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
-		Args: m.Args, Env: m.Env,
+		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode),
 	}
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}

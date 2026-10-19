@@ -542,11 +542,11 @@ func TestLaunchKeepsEnvAndArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.UserHome = filepath.Join(t.TempDir(), "u")
-	argv, err := c.launch(info, []string{"-p", "--resume", "abc"})
+	launch, err := c.launch(info, []string{"-p", "--resume", "abc"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(argv, " ")
+	joined := strings.Join(launch.Argv, " ")
 	for _, want := range []string{"systemd-run", "prot-sleeve-chat1", "bwrap", "--args 3", bin + " -p --resume abc"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv lacks %q: %s", want, joined)

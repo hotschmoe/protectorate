@@ -94,8 +94,14 @@ func parseSize(s string) (uint64, error) {
 	return uint64(f * float64(mult)), nil
 }
 
+var sleeveModes = map[string]pb.SleeveMode{
+	"":         pb.SleeveMode_SLEEVE_MODE_UNSPECIFIED,
+	"chat":     pb.SleeveMode_SLEEVE_MODE_CHAT,
+	"terminal": pb.SleeveMode_SLEEVE_MODE_TERMINAL,
+}
+
 func sleeveSpawnCmd(o *opts) *cobra.Command {
-	var workspace, harness, mem string
+	var workspace, harness, mem, mode string
 	var cpu uint32
 	var env []string
 	c := &cobra.Command{
@@ -104,7 +110,9 @@ func sleeveSpawnCmd(o *opts) *cobra.Command {
 		Long: `Start a harness (claude, codex, grok, pi or shell) in a sandbox with its own
 process namespace and CPU/memory limits. The workspace is a directory on the
 hub or a git URL to clone. --cpu is a percentage of one core (200 = two cores).
-For the shell harness, arguments after -- are the command to run.`,
+For the shell harness, arguments after -- are the command to run. Agent
+harnesses start in chat mode (drive them with 'protectorate chat'); use
+--mode terminal for the TUI under tmux.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, extra := args[0], args[1:]
@@ -116,6 +124,10 @@ For the shell harness, arguments after -- are the command to run.`,
 			h, ok := harnessNames[harness]
 			if !ok {
 				return fmt.Errorf("unknown harness %q, want claude, codex, grok, pi or shell", harness)
+			}
+			sleeveMode, ok := sleeveModes[mode]
+			if !ok {
+				return fmt.Errorf("unknown mode %q, want chat or terminal", mode)
 			}
 			if workspace == "" {
 				return errors.New("--workspace is required")
@@ -148,7 +160,7 @@ For the shell harness, arguments after -- are the command to run.`,
 				return err
 			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
-				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap,
+				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode,
 			}))
 			if err != nil {
 				return err
@@ -163,6 +175,7 @@ For the shell harness, arguments after -- are the command to run.`,
 	c.Flags().Uint32Var(&cpu, "cpu", 0, "CPU limit in percent of one core (0 = unlimited)")
 	c.Flags().StringVar(&mem, "mem", "", "memory limit such as 512M or 8G (empty = unlimited)")
 	c.Flags().StringArrayVar(&env, "env", nil, "environment variable K=V (repeatable)")
+	c.Flags().StringVar(&mode, "mode", "", "chat or terminal (default: chat for agent harnesses, terminal for shell)")
 	return c
 }
 
