@@ -133,7 +133,7 @@ func hubCmd() *cobra.Command {
 	var quotaInterval, deadRetention time.Duration
 	var localURLs []string
 	var nodeInterval time.Duration
-	var nodeToken string
+	var nodeTokenFile string
 	var watch, toolDirs []string
 	serve := &cobra.Command{
 		Use:   "serve",
@@ -178,10 +178,11 @@ func hubCmd() *cobra.Command {
 				return err
 			}
 			defer ts.Close()
-			if nodeToken == "" {
-				nodeToken = os.Getenv(nodeTokenEnv)
+			nodeTok, err := nodeToken(nodeTokenFile)
+			if err != nil {
+				return err
 			}
-			if err := attachNodes(h, nodeInterval, nodeToken, watch, ts.Client, ts.Peers); err != nil {
+			if err := attachNodes(h, nodeInterval, nodeTok, watch, ts.Client, ts.Peers); err != nil {
 				return err
 			}
 			if err := attachSleeves(ctx, h, toolDirs); err != nil {
@@ -191,7 +192,7 @@ func hubCmd() *cobra.Command {
 		},
 	}
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
-	serve.Flags().StringVar(&nodeToken, "node-token", "", "bearer token presented to node agents (env "+nodeTokenEnv+")")
+	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")

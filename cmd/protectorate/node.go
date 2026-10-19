@@ -28,6 +28,24 @@ import (
 
 const nodeTokenEnv = "PROTECTORATE_NODE_TOKEN"
 
+// nodeToken resolves the shared node-agent bearer: the file if given, else
+// env PROTECTORATE_NODE_TOKEN, else empty. Secrets are never flags, which
+// would show in the process list.
+func nodeToken(file string) (string, error) {
+	if file == "" {
+		return strings.TrimSpace(os.Getenv(nodeTokenEnv)), nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("read node token file: %w", err)
+	}
+	tok := strings.TrimSpace(string(b))
+	if tok == "" {
+		return "", fmt.Errorf("node token file %s is empty", file)
+	}
+	return tok, nil
+}
+
 var invalidNameChars = regexp.MustCompile(`[^a-z0-9._-]+`)
 
 // localNodeName is the hub's own node name: the hostname made inventory-safe.
@@ -167,7 +185,7 @@ func nodeRmCmd(o *opts) *cobra.Command {
 }
 
 func nodeServeCmd() *cobra.Command {
-	var listen, token, jobDir string
+	var listen, tokenFile, jobDir string
 	var watch []string
 	var slow time.Duration
 	var jobSlots int
@@ -208,11 +226,12 @@ func nodeServeCmd() *cobra.Command {
 				go n.KeepHubReachable(ctx, func(f string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), "tailnet: "+f+"\n", args...) })
 				fmt.Fprintf(cmd.ErrOrStderr(), "node agent %s serving on the tailnet, port %d (hub only)\n", version, node.DefaultPort)
 			} else {
-				if token == "" {
-					token = os.Getenv(nodeTokenEnv)
+				token, err := nodeToken(tokenFile)
+				if err != nil {
+					return err
 				}
 				if token == "" {
-					return fmt.Errorf("not enrolled in a tailnet and no token: run `protectorate node join`, or pass --token or set %s", nodeTokenEnv)
+					return fmt.Errorf("not enrolled in a tailnet and no token: run `protectorate node join`, or pass --node-token-file or set %s", nodeTokenEnv)
 				}
 				if l, err = net.Listen("tcp", listen); err != nil {
 					return err
@@ -225,7 +244,7 @@ func nodeServeCmd() *cobra.Command {
 	}
 	f := c.Flags()
 	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
-	f.StringVar(&token, "token", "", "bearer token the hub must present when not enrolled in a tailnet (env "+nodeTokenEnv+")")
+	f.StringVar(&tokenFile, "node-token-file", "", "file holding the bearer token the hub must present when not enrolled in a tailnet (or the token itself in env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")
 	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs)")
 	f.IntVar(&jobSlots, "job-concurrency", 1, "jobs that may run at once; 0 refuses jobs")

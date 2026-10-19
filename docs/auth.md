@@ -122,3 +122,12 @@ Every command takes the token from `--token-file`, then env
 works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
 mints a device token (`read`, `events`, `terminal`, `session_*`, `backlog_*`,
 90 days) instead of embedding the owner token.
+
+## Shared node token
+
+Outside a tailnet, the hub and its node agents share a bearer. It is never a
+flag, because arguments are readable by every local user in the process list.
+Give `hub serve` and `node serve` `--node-token-file PATH` (mode 0600), or set
+env `PROTECTORATE_NODE_TOKEN`. The file wins over the env. The one-time
+enrollment key in `node join --key` is still an argument; it expires (default
+1h) and the process exits once joined.

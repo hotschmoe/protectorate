@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -192,5 +195,72 @@ func TestFmtBytes(t *testing.T) {
 		if got := fmtBytes(tt.in); got != tt.want {
 			t.Errorf("fmtBytes(%d) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestNodeToken(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	tests := []struct {
+		name    string
+		file    string
+		env     string
+		want    string
+		wantErr bool
+	}{
+		{"none", "", "", "", false},
+		{"env", "", " from-env\n", "from-env", false},
+		{"file", write("tok", "from-file\n"), "", "from-file", false},
+		{"file beats env", write("tok2", "from-file"), "from-env", "from-file", false},
+		{"empty file", write("empty", " \n"), "from-env", "", true},
+		{"missing file", filepath.Join(dir, "missing"), "from-env", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(nodeTokenEnv, tt.env)
+			got, err := nodeToken(tt.file)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("nodeToken = %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestNoSecretFlags(t *testing.T) {
+	serve := func(c *cobra.Command) *cobra.Command {
+		for _, sub := range c.Commands() {
+			if sub.Name() == "serve" {
+				return sub
+			}
+		}
+		t.Fatal("no serve command")
+		return nil
+	}
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		gone []string
+		has  string
+	}{
+		{"node serve", nodeServeCmd(), []string{"token"}, "node-token-file"},
+		{"hub serve", serve(hubCmd()), []string{"node-token", "token"}, "node-token-file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, g := range tt.gone {
+				if tt.cmd.Flags().Lookup(g) != nil {
+					t.Errorf("secret-bearing flag --%s still exists", g)
+				}
+			}
+			if tt.cmd.Flags().Lookup(tt.has) == nil {
+				t.Errorf("missing --%s", tt.has)
+			}
+		})
 	}
 }
