@@ -254,6 +254,39 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
+    "description": "Foreground reports the window that receives keystrokes now, with its process and integrity level. Read-only. Windows drops input injected into a window of a higher integrity level than the agent's without any error, so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the foreground window (or, for the mouse, the window under the pointer) is higher; this shows what is in the way.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_foreground"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "description": "Key presses a chord such as \"ctrl+s\", \"alt+f4\" or \"enter\". Needs a desk lease.",
     "inputSchema": {
       "additionalProperties": false,
