@@ -919,7 +919,7 @@
       "additionalProperties": false,
       "properties": {
         "ackRequired": {
-          "description": "ack_required starts the ack timer.",
+          "description": "ack_required starts the ack timer. Unset, a request asks for an ack and other kinds do not; set false, even a request asks for none.",
           "type": "boolean"
         },
         "body": {
