@@ -350,6 +350,10 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	return out, nil
 }
 
+// cleanupTimeout bounds teardown after a failed start, which must finish
+// even when the request context is already canceled.
+const cleanupTimeout = 15 * time.Second
+
 func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 	env := map[string]string{}
 	for _, k := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
@@ -357,20 +361,21 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 			env[k] = v
 		}
 	}
-	_, err := m.opts.Sessions.Create(ctx, session.CreateOptions{
-		Name: info.Session, Cwd: info.Workspace, Command: launch.Argv, Env: env,
-	})
-	if err != nil {
-		return fmt.Errorf("start sleeve session: %w", err)
-	}
 	fail := func(cause error) error {
-		if kerr := m.opts.Sessions.Kill(context.WithoutCancel(ctx), info.Session); kerr != nil && !errors.Is(kerr, session.ErrNotFound) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		if kerr := m.opts.Sessions.Kill(cctx, info.Session); kerr != nil && !errors.Is(kerr, session.ErrNotFound) {
 			log.Printf("sleeve %s: kill session: %v", info.Name, kerr)
 		}
-		if kerr := m.cfg.killScope(context.WithoutCancel(ctx), info.Name); kerr != nil {
+		if kerr := m.cfg.killScope(cctx, info.Name); kerr != nil {
 			log.Printf("sleeve %s: kill scope: %v", info.Name, kerr)
 		}
 		return cause
+	}
+	if _, err := m.opts.Sessions.Create(ctx, session.CreateOptions{
+		Name: info.Session, Cwd: info.Workspace, Command: launch.Argv, Env: env,
+	}); err != nil {
+		return fail(fmt.Errorf("start sleeve session: %w", err))
 	}
 	deadline := time.Now().Add(m.opts.StartTimeout)
 	for n := 0; ; n++ {
@@ -427,6 +432,9 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 	wasRunning := e.State == Running
 	delete(m.sleeves, name)
 	err := m.saveLocked()
+	if err != nil {
+		m.sleeves[name] = e
+	}
 	m.mu.Unlock()
 	if wasRunning {
 		m.opts.Emit("sleeve.exited", name, map[string]any{"reason": "killed"})
@@ -661,7 +669,7 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 		if fi, err := os.Stat(real); err != nil || !fi.IsDir() {
 			return "", fmt.Errorf("%w: workspace %s is not a directory", ErrInvalid, real)
 		}
-		if err := m.cfg.CheckWorkspace(real); err != nil {
+		if err := m.cfg.CheckWorkspace(name, real); err != nil {
 			return "", err
 		}
 		return real, nil

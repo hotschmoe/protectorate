@@ -91,7 +91,7 @@ func (r *rig) open(t *testing.T) {
 
 func (r *rig) workspace(t *testing.T, name string) string {
 	t.Helper()
-	ws := filepath.Join(r.cfg.Home, "ws-"+name)
+	ws := filepath.Join(r.cfg.Home, "workspaces", r.pfx+name)
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -421,5 +421,49 @@ func TestSpawnRejectsBadRequests(t *testing.T) {
 	}
 	if got := r.m.List(); len(got) != 0 {
 		t.Errorf("failed spawns left records: %v", got)
+	}
+}
+
+func TestKillRestoresRecordWhenSaveFails(t *testing.T) {
+	r := newRig(t)
+	info, _ := r.spawn(t, "ks", Limits{}, "sleep", "600")
+	blocker := filepath.Join(r.cfg.Home, "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	good := r.m.path
+	r.m.path = filepath.Join(blocker, "sleeves.yaml")
+	if err := r.m.Kill(context.Background(), info.Name); err == nil {
+		t.Fatal("Kill succeeded with an unwritable store")
+	}
+	if _, err := r.m.Get(info.Name); err != nil {
+		t.Fatalf("record lost after failed save: %v", err)
+	}
+	r.m.path = good
+	if err := r.m.Kill(context.Background(), info.Name); err != nil {
+		t.Fatalf("second Kill: %v", err)
+	}
+	if _, err := r.m.Get(info.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get after Kill = %v", err)
+	}
+}
+
+func TestFailedStartLeavesNothingRunning(t *testing.T) {
+	r := newRig(t)
+	ws := r.workspace(t, "fs")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	name := r.pfx + "fs"
+	if _, err := r.m.Spawn(ctx, SpawnRequest{Name: name, Workspace: ws, Harness: Shell, Args: []string{"sleep", "600"}}); err == nil {
+		t.Fatal("Spawn succeeded with a canceled context")
+	}
+	if _, err := r.sess.Get(context.Background(), SessionName(name)); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("session left behind: %v", err)
+	}
+	if r.cfg.scopeAlive(name) {
+		t.Errorf("scope %s left running", name)
+	}
+	if _, err := r.m.Get(name); !errors.Is(err, ErrNotFound) {
+		t.Errorf("record left behind: %v", err)
 	}
 }
