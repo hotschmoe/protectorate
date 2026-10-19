@@ -3,6 +3,7 @@ import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
 
 import '../gen/protectorate/v1/backlog.connect.client.dart';
+import '../gen/protectorate/v1/chat.connect.client.dart';
 import '../gen/protectorate/v1/events.connect.client.dart';
 import '../gen/protectorate/v1/hub.connect.client.dart';
 import '../gen/protectorate/v1/node.connect.client.dart';
@@ -41,7 +42,8 @@ class HubClient {
       quota = QuotaServiceClient(transport),
       sessions = SessionServiceClient(transport),
       sleeves = SleeveServiceClient(transport),
-      backlog = BacklogServiceClient(transport);
+      backlog = BacklogServiceClient(transport),
+      chat = ChatServiceClient(transport);
 
   final HubServiceClient hub;
   final EventServiceClient events;
@@ -50,4 +52,5 @@ class HubClient {
   final SessionServiceClient sessions;
   final SleeveServiceClient sleeves;
   final BacklogServiceClient backlog;
+  final ChatServiceClient chat;
 }
