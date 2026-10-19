@@ -64,6 +64,18 @@ for 5 minutes) it leaves itself out of build selection. An agent submits
 selector), and the hub picks the least loaded matching `shared` node, warm
 worktrees winning ties.
 
+## Busy GPUs (decided 2026-10-20)
+
+Some `shared` nodes serve models: `b70-nas-server` usually has a container
+holding its two Arc Pro B70s with a loaded LLM. A GPU counts as busy when
+another process holds most of its memory or it is under sustained load
+(an idle loaded model still holds VRAM, so memory is the main signal).
+Automatic placement (selector jobs and leases) skips a node whose GPUs are
+busy. A job or lease that names the node or the GPU explicitly is refused
+with who holds it, and the caller is told to ask: a sleeve sends a request
+to the orchestrator or the owner (mailbox, `docs/coordination.md`), and the
+decision to free the GPUs is made by a person, never by the scheduler.
+
 ## Sandboxes on nodes
 
 - **Linux `shared` nodes:** jobs run in the same bwrap + systemd user scope
@@ -114,3 +126,4 @@ worktrees winning ties.
    Object.
 5. `--provision`.
 6. Hub offload rule.
+7. Busy-GPU placement (after integrated GPU and NPU detection lands).
