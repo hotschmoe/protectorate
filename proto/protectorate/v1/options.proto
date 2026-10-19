@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+extend google.protobuf.MethodOptions {
+  // destructive marks an RPC that irreversibly destroys state. Clients such
+  // as the MCP bridge surface it as a hint.
+  bool destructive = 50001;
+}

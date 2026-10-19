@@ -45,8 +45,12 @@ const (
 
 // BacklogServiceClient is a client for the protectorate.v1.BacklogService service.
 type BacklogServiceClient interface {
+	// ListItems returns backlog items, optionally filtered by project, state
+	// and harness.
 	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
+	// AddItem appends a new TODO item to a project and returns it with its id.
 	AddItem(context.Context, *connect.Request[v1.AddItemRequest]) (*connect.Response[v1.AddItemResponse], error)
+	// UpdateItem sets an item's state, claiming or releasing it.
 	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
 }
 
@@ -65,6 +69,7 @@ func NewBacklogServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+BacklogServiceListItemsProcedure,
 			connect.WithSchema(backlogServiceMethods.ByName("ListItems")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		addItem: connect.NewClient[v1.AddItemRequest, v1.AddItemResponse](
@@ -106,8 +111,12 @@ func (c *backlogServiceClient) UpdateItem(ctx context.Context, req *connect.Requ
 
 // BacklogServiceHandler is an implementation of the protectorate.v1.BacklogService service.
 type BacklogServiceHandler interface {
+	// ListItems returns backlog items, optionally filtered by project, state
+	// and harness.
 	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
+	// AddItem appends a new TODO item to a project and returns it with its id.
 	AddItem(context.Context, *connect.Request[v1.AddItemRequest]) (*connect.Response[v1.AddItemResponse], error)
+	// UpdateItem sets an item's state, claiming or releasing it.
 	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
 }
 
@@ -122,6 +131,7 @@ func NewBacklogServiceHandler(svc BacklogServiceHandler, opts ...connect.Handler
 		BacklogServiceListItemsProcedure,
 		svc.ListItems,
 		connect.WithSchema(backlogServiceMethods.ByName("ListItems")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	backlogServiceAddItemHandler := connect.NewUnaryHandler(

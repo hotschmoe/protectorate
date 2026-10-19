@@ -39,6 +39,8 @@ const (
 
 // QuotaServiceClient is a client for the protectorate.v1.QuotaService service.
 type QuotaServiceClient interface {
+	// GetQuota returns the usage windows, resets and freshness of every
+	// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
 	GetQuota(context.Context, *connect.Request[v1.GetQuotaRequest]) (*connect.Response[v1.GetQuotaResponse], error)
 }
 
@@ -57,6 +59,7 @@ func NewQuotaServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			httpClient,
 			baseURL+QuotaServiceGetQuotaProcedure,
 			connect.WithSchema(quotaServiceMethods.ByName("GetQuota")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -74,6 +77,8 @@ func (c *quotaServiceClient) GetQuota(ctx context.Context, req *connect.Request[
 
 // QuotaServiceHandler is an implementation of the protectorate.v1.QuotaService service.
 type QuotaServiceHandler interface {
+	// GetQuota returns the usage windows, resets and freshness of every
+	// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
 	GetQuota(context.Context, *connect.Request[v1.GetQuotaRequest]) (*connect.Response[v1.GetQuotaResponse], error)
 }
 
@@ -88,6 +93,7 @@ func NewQuotaServiceHandler(svc QuotaServiceHandler, opts ...connect.HandlerOpti
 		QuotaServiceGetQuotaProcedure,
 		svc.GetQuota,
 		connect.WithSchema(quotaServiceMethods.ByName("GetQuota")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/protectorate.v1.QuotaService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

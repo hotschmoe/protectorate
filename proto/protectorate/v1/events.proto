@@ -7,7 +7,10 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
+// EventService streams hub events. It is server-streaming only, so the MCP
+// bridge does not expose it as a tool.
 service EventService {
+  // Subscribe streams every event the hub publishes until the client disconnects.
   rpc Subscribe(SubscribeRequest) returns (stream Event);
 }
 
@@ -17,7 +20,10 @@ message SubscribeRequest {}
 message Event {
   string id = 1;
   google.protobuf.Timestamp time = 2;
+  // kind is a dotted name such as "quota.updated", "session.created" or "backlog.added".
   string kind = 3;
+  // subject is the entity the event is about, e.g. a provider or item id.
   string subject = 4;
+  // payload carries kind-specific fields.
   google.protobuf.Struct payload = 5;
 }

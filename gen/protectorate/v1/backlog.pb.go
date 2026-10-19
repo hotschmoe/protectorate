@@ -128,12 +128,16 @@ func (x *Claim) GetAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// Item is one backlog entry.
 type Item struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// id is the stable item identifier assigned on creation.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// project is the heading text, e.g. "hotschmoe/protectorate" or "donate: owner/repo".
-	Project  string `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
-	Title    string `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
+	Project string `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
+	// title is the one-line description of the work.
+	Title string `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
+	// issue_url optionally links the GitHub issue.
 	IssueUrl string `protobuf:"bytes,4,opt,name=issue_url,json=issueUrl,proto3" json:"issue_url,omitempty"`
 	// priority is 1 (highest) to 9; 0 means unset.
 	Priority int32 `protobuf:"varint,5,opt,name=priority,proto3" json:"priority,omitempty"`
@@ -141,7 +145,8 @@ type Item struct {
 	Harness string    `protobuf:"bytes,6,opt,name=harness,proto3" json:"harness,omitempty"`
 	State   ItemState `protobuf:"varint,7,opt,name=state,proto3,enum=protectorate.v1.ItemState" json:"state,omitempty"`
 	Claim   *Claim    `protobuf:"bytes,8,opt,name=claim,proto3" json:"claim,omitempty"`
-	Notes   string    `protobuf:"bytes,9,opt,name=notes,proto3" json:"notes,omitempty"`
+	// notes is free-form text attached to the item.
+	Notes string `protobuf:"bytes,9,opt,name=notes,proto3" json:"notes,omitempty"`
 	// donate marks public repos we do not own; results must go to a review inbox.
 	Donate        bool `protobuf:"varint,10,opt,name=donate,proto3" json:"donate,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -355,12 +360,15 @@ func (x *ListItemsResponse) GetItems() []*Item {
 }
 
 type AddItemRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	IssueUrl      string                 `protobuf:"bytes,3,opt,name=issue_url,json=issueUrl,proto3" json:"issue_url,omitempty"`
-	Priority      int32                  `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
-	Harness       string                 `protobuf:"bytes,5,opt,name=harness,proto3" json:"harness,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// project is the heading to file the item under.
+	Project  string `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Title    string `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	IssueUrl string `protobuf:"bytes,3,opt,name=issue_url,json=issueUrl,proto3" json:"issue_url,omitempty"`
+	// priority is 1 (highest) to 9; 0 means unset.
+	Priority int32 `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
+	// harness is a preference such as "codex"; empty or "any" means none.
+	Harness       string `protobuf:"bytes,5,opt,name=harness,proto3" json:"harness,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -477,10 +485,13 @@ func (x *AddItemResponse) GetItem() *Item {
 // UpdateItemRequest moves an item to state. Claiming requires claim.by and
 // fails with FAILED_PRECONDITION if another claimant holds the item.
 type UpdateItemRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	State         ItemState              `protobuf:"varint,2,opt,name=state,proto3,enum=protectorate.v1.ItemState" json:"state,omitempty"`
-	Claim         *Claim                 `protobuf:"bytes,3,opt,name=claim,proto3" json:"claim,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id of the item to change.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// state is the state to move the item to.
+	State ItemState `protobuf:"varint,2,opt,name=state,proto3,enum=protectorate.v1.ItemState" json:"state,omitempty"`
+	// claim is required when state is CLAIMED.
+	Claim         *Claim `protobuf:"bytes,3,opt,name=claim,proto3" json:"claim,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -624,9 +635,9 @@ const file_protectorate_v1_backlog_proto_rawDesc = "" +
 	"\x16ITEM_STATE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fITEM_STATE_TODO\x10\x01\x12\x16\n" +
 	"\x12ITEM_STATE_CLAIMED\x10\x02\x12\x13\n" +
-	"\x0fITEM_STATE_DONE\x10\x032\x89\x02\n" +
-	"\x0eBacklogService\x12R\n" +
-	"\tListItems\x12!.protectorate.v1.ListItemsRequest\x1a\".protectorate.v1.ListItemsResponse\x12L\n" +
+	"\x0fITEM_STATE_DONE\x10\x032\x8e\x02\n" +
+	"\x0eBacklogService\x12W\n" +
+	"\tListItems\x12!.protectorate.v1.ListItemsRequest\x1a\".protectorate.v1.ListItemsResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\aAddItem\x12\x1f.protectorate.v1.AddItemRequest\x1a .protectorate.v1.AddItemResponse\x12U\n" +
 	"\n" +
 	"UpdateItem\x12\".protectorate.v1.UpdateItemRequest\x1a#.protectorate.v1.UpdateItemResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"

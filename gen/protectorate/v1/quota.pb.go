@@ -171,11 +171,13 @@ func (x *GetQuotaResponse) GetQuotas() []*ProviderQuota {
 }
 
 type ProviderQuota struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Provider  string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
-	Plan      string                 `protobuf:"bytes,2,opt,name=plan,proto3" json:"plan,omitempty"`
-	Source    string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
-	Freshness Freshness              `protobuf:"varint,4,opt,name=freshness,proto3,enum=protectorate.v1.Freshness" json:"freshness,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// provider is the subscription name, e.g. "claude" or "codex".
+	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Plan     string `protobuf:"bytes,2,opt,name=plan,proto3" json:"plan,omitempty"`
+	// source names where the numbers were read from.
+	Source    string    `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	Freshness Freshness `protobuf:"varint,4,opt,name=freshness,proto3,enum=protectorate.v1.Freshness" json:"freshness,omitempty"`
 	// fetched_at is when the last good read completed; unset when UNKNOWN.
 	FetchedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=fetched_at,json=fetchedAt,proto3" json:"fetched_at,omitempty"`
 	// age is the time since fetched_at at response time; unset when UNKNOWN.
@@ -307,7 +309,8 @@ func (x *ProviderQuota) GetLatency() *durationpb.Duration {
 }
 
 type QuotaWindow struct {
-	state       protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name identifies the window, e.g. "5h".
 	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	UsedPercent float64                `protobuf:"fixed64,2,opt,name=used_percent,json=usedPercent,proto3" json:"used_percent,omitempty"`
 	ResetsAt    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=resets_at,json=resetsAt,proto3" json:"resets_at,omitempty"`
@@ -389,7 +392,8 @@ func (x *QuotaWindow) GetEstimatedUnusedPercentAtReset() float64 {
 }
 
 type ResetCredit struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// kind names the type of reset credit; count of them are available.
 	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
 	Count         int32                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
@@ -489,9 +493,9 @@ const file_protectorate_v1_quota_proto_rawDesc = "" +
 	"\x15FRESHNESS_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fFRESHNESS_FRESH\x10\x01\x12\x13\n" +
 	"\x0fFRESHNESS_STALE\x10\x02\x12\x15\n" +
-	"\x11FRESHNESS_UNKNOWN\x10\x032_\n" +
-	"\fQuotaService\x12O\n" +
-	"\bGetQuota\x12 .protectorate.v1.GetQuotaRequest\x1a!.protectorate.v1.GetQuotaResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\x11FRESHNESS_UNKNOWN\x10\x032d\n" +
+	"\fQuotaService\x12T\n" +
+	"\bGetQuota\x12 .protectorate.v1.GetQuotaRequest\x1a!.protectorate.v1.GetQuotaResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_quota_proto_rawDescOnce sync.Once

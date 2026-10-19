@@ -6,15 +6,21 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
+// HubService reports on the hub process itself.
 service HubService {
-  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  // GetStatus returns the hub version, host platform and uptime.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 message GetStatusRequest {}
 
 message GetStatusResponse {
+  // version is the hub build version.
   string version = 1;
   string hostname = 2;
+  // os and arch are Go GOOS/GOARCH values of the hub host.
   string os = 3;
   string arch = 4;
   int64 uptime_seconds = 5;

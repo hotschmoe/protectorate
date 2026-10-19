@@ -49,9 +49,14 @@ const (
 
 // SessionServiceClient is a client for the protectorate.v1.SessionService service.
 type SessionServiceClient interface {
+	// ListSessions returns all live sessions.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	// CreateSession starts a detached tmux session running command, or the
+	// default shell when command is empty.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
+	// KillSession terminates a session and every process in it.
 	KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error)
+	// CapturePane returns the current text of a session's active pane.
 	CapturePane(context.Context, *connect.Request[v1.CapturePaneRequest]) (*connect.Response[v1.CapturePaneResponse], error)
 }
 
@@ -70,6 +75,7 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+SessionServiceListSessionsProcedure,
 			connect.WithSchema(sessionServiceMethods.ByName("ListSessions")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		createSession: connect.NewClient[v1.CreateSessionRequest, v1.CreateSessionResponse](
@@ -88,6 +94,7 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			httpClient,
 			baseURL+SessionServiceCapturePaneProcedure,
 			connect.WithSchema(sessionServiceMethods.ByName("CapturePane")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -123,9 +130,14 @@ func (c *sessionServiceClient) CapturePane(ctx context.Context, req *connect.Req
 
 // SessionServiceHandler is an implementation of the protectorate.v1.SessionService service.
 type SessionServiceHandler interface {
+	// ListSessions returns all live sessions.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	// CreateSession starts a detached tmux session running command, or the
+	// default shell when command is empty.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
+	// KillSession terminates a session and every process in it.
 	KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error)
+	// CapturePane returns the current text of a session's active pane.
 	CapturePane(context.Context, *connect.Request[v1.CapturePaneRequest]) (*connect.Response[v1.CapturePaneResponse], error)
 }
 
@@ -140,6 +152,7 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		SessionServiceListSessionsProcedure,
 		svc.ListSessions,
 		connect.WithSchema(sessionServiceMethods.ByName("ListSessions")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	sessionServiceCreateSessionHandler := connect.NewUnaryHandler(
@@ -158,6 +171,7 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		SessionServiceCapturePaneProcedure,
 		svc.CapturePane,
 		connect.WithSchema(sessionServiceMethods.ByName("CapturePane")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/protectorate.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

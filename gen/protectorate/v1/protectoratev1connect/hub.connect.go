@@ -39,6 +39,7 @@ const (
 
 // HubServiceClient is a client for the protectorate.v1.HubService service.
 type HubServiceClient interface {
+	// GetStatus returns the hub version, host platform and uptime.
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
 }
 
@@ -57,6 +58,7 @@ func NewHubServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+HubServiceGetStatusProcedure,
 			connect.WithSchema(hubServiceMethods.ByName("GetStatus")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -74,6 +76,7 @@ func (c *hubServiceClient) GetStatus(ctx context.Context, req *connect.Request[v
 
 // HubServiceHandler is an implementation of the protectorate.v1.HubService service.
 type HubServiceHandler interface {
+	// GetStatus returns the hub version, host platform and uptime.
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
 }
 
@@ -88,6 +91,7 @@ func NewHubServiceHandler(svc HubServiceHandler, opts ...connect.HandlerOption) 
 		HubServiceGetStatusProcedure,
 		svc.GetStatus,
 		connect.WithSchema(hubServiceMethods.ByName("GetStatus")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/protectorate.v1.HubService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

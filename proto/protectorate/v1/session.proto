@@ -3,19 +3,36 @@ syntax = "proto3";
 package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
 // SessionService manages tmux-backed harness sessions. Interactive access is
 // the WebSocket terminal at GET /ws/terminal/{name}, not an RPC.
 service SessionService {
-  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  // ListSessions returns all live sessions.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // CreateSession starts a detached tmux session running command, or the
+  // default shell when command is empty.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
-  rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
-  rpc CapturePane(CapturePaneRequest) returns (CapturePaneResponse);
+
+  // KillSession terminates a session and every process in it.
+  rpc KillSession(KillSessionRequest) returns (KillSessionResponse) {
+    option (protectorate.v1.destructive) = true;
+  }
+
+  // CapturePane returns the current text of a session's active pane.
+  rpc CapturePane(CapturePaneRequest) returns (CapturePaneResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
+// Session is one tmux-backed harness session.
 message Session {
+  // name is the unique session name, also used in the terminal URL.
   string name = 1;
   // Current working directory of the session's active pane.
   string cwd = 2;
@@ -35,9 +52,13 @@ message ListSessionsResponse {
 }
 
 message CreateSessionRequest {
+  // name identifies the session; it must not already exist.
   string name = 1;
+  // cwd is the starting directory; empty uses tmux's default.
   string cwd = 2;
+  // command is the argv to run; empty starts the default shell.
   repeated string command = 3;
+  // env holds extra environment variables for the session.
   map<string, string> env = 4;
 }
 
@@ -46,12 +67,14 @@ message CreateSessionResponse {
 }
 
 message KillSessionRequest {
+  // name of the session to kill.
   string name = 1;
 }
 
 message KillSessionResponse {}
 
 message CapturePaneRequest {
+  // name of the session to read.
   string name = 1;
   // Number of history lines above the visible screen to include.
   int32 lines = 2;

@@ -11,7 +11,11 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // EventService as events with kind "quota.updated" (subject = provider,
 // payload = the ProviderQuota in proto-JSON form).
 service QuotaService {
-  rpc GetQuota(GetQuotaRequest) returns (GetQuotaResponse);
+  // GetQuota returns the usage windows, resets and freshness of every
+  // provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
+  rpc GetQuota(GetQuotaRequest) returns (GetQuotaResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 message GetQuotaRequest {
@@ -37,8 +41,10 @@ enum Freshness {
 }
 
 message ProviderQuota {
+  // provider is the subscription name, e.g. "claude" or "codex".
   string provider = 1;
   string plan = 2;
+  // source names where the numbers were read from.
   string source = 3;
   Freshness freshness = 4;
   // fetched_at is when the last good read completed; unset when UNKNOWN.
@@ -56,6 +62,7 @@ message ProviderQuota {
 }
 
 message QuotaWindow {
+  // name identifies the window, e.g. "5h".
   string name = 1;
   double used_percent = 2;
   google.protobuf.Timestamp resets_at = 3;
@@ -70,6 +77,7 @@ message QuotaWindow {
 }
 
 message ResetCredit {
+  // kind names the type of reset credit; count of them are available.
   string kind = 1;
   int32 count = 2;
   google.protobuf.Timestamp expires_at = 3;

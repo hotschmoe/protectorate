@@ -1,0 +1,241 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "AddItem appends a new TODO item to a project and returns it with its id.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "harness is a preference such as \"codex\"; empty or \"any\" means none.",
+          "type": "string"
+        },
+        "issueUrl": {
+          "type": "string"
+        },
+        "priority": {
+          "description": "priority is 1 (highest) to 9; 0 means unset.",
+          "type": "integer"
+        },
+        "project": {
+          "description": "project is the heading to file the item under.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_add_item"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListItems returns backlog items, optionally filtered by project, state and harness.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "harness keeps items this harness may run: its own plus \"any\"/unset.",
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "state": {
+          "description": "state of UNSPECIFIED matches every state.",
+          "enum": [
+            "ITEM_STATE_UNSPECIFIED",
+            "ITEM_STATE_TODO",
+            "ITEM_STATE_CLAIMED",
+            "ITEM_STATE_DONE"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_list_items"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "UpdateItem sets an item's state, claiming or releasing it.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "additionalProperties": false,
+          "description": "claim is required when state is CLAIMED.",
+          "properties": {
+            "at": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "by": {
+              "description": "by is \"\u003csleeve\u003e\" or \"\u003csleeve\u003e/\u003charness\u003e\"; no whitespace or '@'.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "id": {
+          "description": "id of the item to change.",
+          "type": "string"
+        },
+        "state": {
+          "description": "state is the state to move the item to.",
+          "enum": [
+            "ITEM_STATE_UNSPECIFIED",
+            "ITEM_STATE_TODO",
+            "ITEM_STATE_CLAIMED",
+            "ITEM_STATE_DONE"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_update_item"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetStatus returns the hub version, host platform and uptime.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "hub_get_status"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetQuota returns the usage windows, resets and freshness of every provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "refresh": {
+          "description": "refresh forces an immediate read of each provider, rate-limited per provider; providers read too recently keep their cached data.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "quota_get_quota"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "CapturePane returns the current text of a session's active pane.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "description": "Number of history lines above the visible screen to include.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "name of the session to read.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "session_capture_pane"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "CreateSession starts a detached tmux session running command, or the default shell when command is empty.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "command is the argv to run; empty starts the default shell.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cwd": {
+          "description": "cwd is the starting directory; empty uses tmux's default.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "env holds extra environment variables for the session.",
+          "type": "object"
+        },
+        "name": {
+          "description": "name identifies the session; it must not already exist.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "session_create_session"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "KillSession terminates a session and every process in it.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "name of the session to kill.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "session_kill_session"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListSessions returns all live sessions.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "session_list_sessions"
+  }
+]

@@ -39,6 +39,7 @@ const (
 
 // EventServiceClient is a client for the protectorate.v1.EventService service.
 type EventServiceClient interface {
+	// Subscribe streams every event the hub publishes until the client disconnects.
 	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.Event], error)
 }
 
@@ -74,6 +75,7 @@ func (c *eventServiceClient) Subscribe(ctx context.Context, req *connect.Request
 
 // EventServiceHandler is an implementation of the protectorate.v1.EventService service.
 type EventServiceHandler interface {
+	// Subscribe streams every event the hub publishes until the client disconnects.
 	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.Event]) error
 }
 

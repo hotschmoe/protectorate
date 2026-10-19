@@ -7,6 +7,7 @@ TARGETS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 android/arm64
 gen:
 	buf lint
 	buf generate
+	buf build -o internal/mcpbridge/image.binpb
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/protectorate ./cmd/protectorate

@@ -22,9 +22,11 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Session is one tmux-backed harness session.
 type Session struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// name is the unique session name, also used in the terminal URL.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Current working directory of the session's active pane.
 	Cwd string `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
 	// argv the session was started with; empty for the default shell.
@@ -205,11 +207,15 @@ func (x *ListSessionsResponse) GetSessions() []*Session {
 }
 
 type CreateSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Cwd           string                 `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
-	Command       []string               `protobuf:"bytes,3,rep,name=command,proto3" json:"command,omitempty"`
-	Env           map[string]string      `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name identifies the session; it must not already exist.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// cwd is the starting directory; empty uses tmux's default.
+	Cwd string `protobuf:"bytes,2,opt,name=cwd,proto3" json:"cwd,omitempty"`
+	// command is the argv to run; empty starts the default shell.
+	Command []string `protobuf:"bytes,3,rep,name=command,proto3" json:"command,omitempty"`
+	// env holds extra environment variables for the session.
+	Env           map[string]string `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -317,8 +323,9 @@ func (x *CreateSessionResponse) GetSession() *Session {
 }
 
 type KillSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name of the session to kill.
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -398,7 +405,8 @@ func (*KillSessionResponse) Descriptor() ([]byte, []int) {
 
 type CapturePaneRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// name of the session to read.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Number of history lines above the visible screen to include.
 	Lines         int32 `protobuf:"varint,2,opt,name=lines,proto3" json:"lines,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -498,7 +506,7 @@ var File_protectorate_v1_session_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_session_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotectorate/v1/session.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaa\x02\n" +
+	"\x1dprotectorate/v1/session.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\xaa\x02\n" +
 	"\aSession\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x18\n" +
@@ -529,12 +537,12 @@ const file_protectorate_v1_session_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05lines\x18\x02 \x01(\x05R\x05lines\")\n" +
 	"\x13CapturePaneResponse\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text2\x81\x03\n" +
-	"\x0eSessionService\x12[\n" +
-	"\fListSessions\x12$.protectorate.v1.ListSessionsRequest\x1a%.protectorate.v1.ListSessionsResponse\x12^\n" +
-	"\rCreateSession\x12%.protectorate.v1.CreateSessionRequest\x1a&.protectorate.v1.CreateSessionResponse\x12X\n" +
-	"\vKillSession\x12#.protectorate.v1.KillSessionRequest\x1a$.protectorate.v1.KillSessionResponse\x12X\n" +
-	"\vCapturePane\x12#.protectorate.v1.CapturePaneRequest\x1a$.protectorate.v1.CapturePaneResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\x04text\x18\x01 \x01(\tR\x04text2\x91\x03\n" +
+	"\x0eSessionService\x12`\n" +
+	"\fListSessions\x12$.protectorate.v1.ListSessionsRequest\x1a%.protectorate.v1.ListSessionsResponse\"\x03\x90\x02\x01\x12^\n" +
+	"\rCreateSession\x12%.protectorate.v1.CreateSessionRequest\x1a&.protectorate.v1.CreateSessionResponse\x12^\n" +
+	"\vKillSession\x12#.protectorate.v1.KillSessionRequest\x1a$.protectorate.v1.KillSessionResponse\"\x04\x88\xb5\x18\x01\x12]\n" +
+	"\vCapturePane\x12#.protectorate.v1.CapturePaneRequest\x1a$.protectorate.v1.CapturePaneResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_session_proto_rawDescOnce sync.Once
@@ -588,6 +596,7 @@ func file_protectorate_v1_session_proto_init() {
 	if File_protectorate_v1_session_proto != nil {
 		return
 	}
+	file_protectorate_v1_options_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
