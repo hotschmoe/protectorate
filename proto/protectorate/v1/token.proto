@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// TokenService issues and revokes scoped API tokens. Only the owner token (the
+// one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
+service TokenService {
+  option (protectorate.v1.owner_only) = true;
+
+  // CreateToken issues a scoped token. The secret is returned once and only
+  // its SHA-256 hash is stored, so it cannot be recovered later.
+  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
+
+  // ListTokens returns every issued token, including revoked and expired
+  // ones, without secrets.
+  rpc ListTokens(ListTokensRequest) returns (ListTokensResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RevokeToken permanently disables a token. Revoking an already revoked
+  // token succeeds and keeps the original revocation time.
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse) {
+    option (protectorate.v1.destructive) = true;
+  }
+}
+
+// TokenInfo describes an issued token. It never carries the secret.
+message TokenInfo {
+  // id is the stable identifier used to revoke the token and in audit lines.
+  string id = 1;
+  // name is the label given at creation.
+  string name = 2;
+  // scopes are the grants: tool-name globs such as "session_*", or the
+  // special scopes read, events, terminal and terminal:readonly.
+  repeated string scopes = 3;
+  google.protobuf.Timestamp created_at = 4;
+  // expires_at is unset for a token that never expires.
+  google.protobuf.Timestamp expires_at = 5;
+  // last_used_at is unset until the token authenticates once. It is
+  // persisted at most about once a minute.
+  google.protobuf.Timestamp last_used_at = 6;
+  // revoked_at is unset while the token is not revoked.
+  google.protobuf.Timestamp revoked_at = 7;
+}
+
+message CreateTokenRequest {
+  // name labels the token, for example "pixel phone" or "mcp bridge".
+  string name = 1;
+  // scopes grant access; at least one is required and nothing is implied.
+  repeated string scopes = 2;
+  // ttl is the lifetime from now; zero means the token never expires.
+  google.protobuf.Duration ttl = 3;
+}
+
+message CreateTokenResponse {
+  TokenInfo token = 1;
+  // secret is the bearer token. It is shown only in this response.
+  string secret = 2;
+}
+
+message ListTokensRequest {}
+
+message ListTokensResponse {
+  repeated TokenInfo tokens = 1;
+}
+
+message RevokeTokenRequest {
+  // id of the token to revoke.
+  string id = 1;
+}
+
+message RevokeTokenResponse {
+  TokenInfo token = 1;
+}

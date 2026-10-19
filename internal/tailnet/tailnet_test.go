@@ -191,7 +191,7 @@ func whoFake(node *tailcfg.Node, err error) whoIsFunc {
 	}
 }
 
-func TestAuthorizer(t *testing.T) {
+func TestIdentify(t *testing.T) {
 	tests := []struct {
 		name    string
 		who     whoIsFunc
@@ -202,9 +202,9 @@ func TestAuthorizer(t *testing.T) {
 		{"node rejected on node", whoFake(&tailcfg.Node{Name: "n", Tags: []string{TagNode}}, nil), []string{TagHub}, false},
 		{"client rejected on node", whoFake(&tailcfg.Node{Tags: []string{TagClient}}, nil), []string{TagHub}, false},
 		{"untagged rejected", whoFake(&tailcfg.Node{Name: "laptop"}, nil), []string{TagHub}, false},
-		{"multi-tag with hub", whoFake(&tailcfg.Node{Tags: []string{TagNode, TagHub}}, nil), []string{TagHub}, true},
-		{"client allowed on api", whoFake(&tailcfg.Node{Tags: []string{TagClient}}, nil), []string{TagHub, TagClient}, true},
-		{"hub allowed on api", whoFake(&tailcfg.Node{Tags: []string{TagHub}}, nil), []string{TagHub, TagClient}, true},
+		{"multi-tag with hub", whoFake(&tailcfg.Node{Name: "h.ts.net.", Tags: []string{TagNode, TagHub}}, nil), []string{TagHub}, true},
+		{"client allowed on api", whoFake(&tailcfg.Node{Name: "phone.ts.net.", Tags: []string{TagClient}}, nil), []string{TagHub, TagClient}, true},
+		{"hub allowed on api", whoFake(&tailcfg.Node{Name: "hub.ts.net.", Tags: []string{TagHub}}, nil), []string{TagHub, TagClient}, true},
 		{"node rejected on api", whoFake(&tailcfg.Node{Tags: []string{TagNode, TierTag("server")}}, nil), []string{TagHub, TagClient}, false},
 		{"pool tag alone rejected", whoFake(&tailcfg.Node{Tags: []string{PoolTag("build")}}, nil), []string{TagHub, TagClient}, false},
 		{"whois error fails closed", whoFake(nil, errors.New("boom")), []string{TagHub}, false},
@@ -213,9 +213,12 @@ func TestAuthorizer(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/", nil)
-			err := authorizer(tt.who, tt.allowed...)(r)
+			who, err := identify(tt.who, tt.allowed...)(r)
 			if (err == nil) != tt.ok {
 				t.Fatalf("err = %v, want ok=%v", err, tt.ok)
+			}
+			if err == nil && who == "" {
+				t.Errorf("accepted caller has no identity")
 			}
 			if err != nil && !errors.Is(err, ErrForbidden) {
 				t.Errorf("error does not wrap ErrForbidden: %v", err)

@@ -16,9 +16,8 @@ type PairLinks struct {
 	Scheme string
 }
 
-// NewPairLinks builds pairing links for a hub. The credential is the hub
-// token today; a scoped, expiring device token can replace it without
-// changing the link format.
+// NewPairLinks builds pairing links for a hub. The credential is a scoped,
+// expiring device token minted by `protectorate pair`, never the owner token.
 func NewPairLinks(baseURL, name, token string) (PairLinks, error) {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

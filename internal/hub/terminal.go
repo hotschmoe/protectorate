@@ -15,6 +15,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/creack/pty"
 
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
 
@@ -42,26 +43,43 @@ type ResizeMessage struct {
 	Rows uint16 `json:"rows"`
 }
 
-// terminalAuthorized accepts the token three ways, in order: Authorization
-// bearer header, a "token.<value>" entry in Sec-WebSocket-Protocol (browsers
-// and Flutter web cannot set headers on a WebSocket but can set subprotocols,
-// and it stays out of URLs and access logs), and a ?token= query parameter
-// as a last resort for clients that can do neither.
-func (h *Hub) terminalAuthorized(r *http.Request) bool {
-	if got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && tokenMatches(h.token, got) {
-		return true
+// terminalCredentials lists the offered tokens in order: Authorization bearer
+// header, a "token.<value>" entry in Sec-WebSocket-Protocol (browsers and
+// Flutter web cannot set headers on a WebSocket but can set subprotocols, and
+// it stays out of URLs and access logs), and a ?token= query parameter as a
+// last resort for clients that can do neither.
+func terminalCredentials(r *http.Request) []string {
+	var out []string
+	if t := bearerToken(r.Header); t != "" {
+		out = append(out, t)
 	}
 	for _, line := range r.Header.Values("Sec-WebSocket-Protocol") {
 		for _, p := range strings.Split(line, ",") {
-			if got, ok := strings.CutPrefix(strings.TrimSpace(p), TokenProtocolPrefix); ok && tokenMatches(h.token, got) {
-				return true
+			if got, ok := strings.CutPrefix(strings.TrimSpace(p), TokenProtocolPrefix); ok && got != "" {
+				out = append(out, got)
 			}
 		}
 	}
-	if got := r.URL.Query().Get("token"); got != "" && tokenMatches(h.token, got) {
-		return true
+	if got := r.URL.Query().Get("token"); got != "" {
+		out = append(out, got)
 	}
-	return false
+	return out
+}
+
+// authorizeTerminal authenticates the first valid credential and checks it
+// for the terminal scope.
+func (h *Hub) authorizeTerminal(r *http.Request, readOnly bool) (*auth.Principal, error) {
+	var p *auth.Principal
+	err := auth.ErrUnauthenticated
+	for _, c := range terminalCredentials(r) {
+		if p, err = h.authz.Authenticate(c); err == nil {
+			break
+		}
+	}
+	if err == nil {
+		err = h.authz.AuthorizeTerminal(p, readOnly)
+	}
+	return p, err
 }
 
 func queryUint16(r *http.Request, key string, def uint16) uint16 {
@@ -73,13 +91,26 @@ func queryUint16(r *http.Request, key string, def uint16) uint16 {
 }
 
 func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
-	if !h.terminalAuthorized(r) {
-		http.Error(w, "missing or invalid token", http.StatusUnauthorized)
-		return
-	}
 	name := r.PathValue("name")
 	readOnly := r.URL.Query().Get("readonly") == "1"
+	procedure := "terminal.attach"
+	if readOnly {
+		procedure = "terminal.attach.readonly"
+	}
+	p, err := h.authorizeTerminal(r, readOnly)
+	if err != nil {
+		h.authz.Record(r.Context(), p, procedure, name, err, deniedCode(err))
+		if errors.Is(err, auth.ErrUnauthenticated) {
+			http.Error(w, "missing or invalid token", http.StatusUnauthorized)
+		} else {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		}
+		return
+	}
 	cmd, err := h.Sessions.AttachCmd(r.Context(), name, readOnly)
+	if err != nil {
+		h.authz.Record(r.Context(), p, procedure, name, err, "attach_failed")
+	}
 	switch {
 	case errors.Is(err, session.ErrInvalidName):
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -94,6 +125,7 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 
 	// Auth is an explicit token, not an ambient cookie, so cross-origin
 	// browser pages gain nothing from the origin check.
+	h.authz.Record(r.Context(), p, procedure, name, nil, "")
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:       []string{TerminalProtocol},
 		InsecureSkipVerify: true,

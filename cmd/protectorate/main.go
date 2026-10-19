@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -18,9 +19,11 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/quota"
 	"github.com/hotschmoe/protectorate/internal/session"
@@ -36,15 +39,38 @@ func main() {
 }
 
 type opts struct {
-	hubURL string
-	json   bool
+	hubURL    string
+	tokenFile string
+	json      bool
+}
+
+const tokenEnv = "PROTECTORATE_TOKEN"
+
+// token resolves the bearer secret: --token-file, then env PROTECTORATE_TOKEN,
+// then the owner token file of a hub on this machine.
+func (o *opts) token() (string, error) {
+	if o.tokenFile != "" {
+		b, err := os.ReadFile(o.tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("read token file: %w", err)
+		}
+		tok := strings.TrimSpace(string(b))
+		if tok == "" {
+			return "", fmt.Errorf("token file %s is empty", o.tokenFile)
+		}
+		return tok, nil
+	}
+	if v := strings.TrimSpace(os.Getenv(tokenEnv)); v != "" {
+		return v, nil
+	}
+	return hub.ReadToken()
 }
 
 func (o *opts) out(cmd *cobra.Command) out { return out{w: cmd.OutOrStdout(), json: o.json} }
 
-// httpClient sends the hub token on every request.
+// httpClient sends the resolved token on every request.
 func (o *opts) httpClient() (*http.Client, error) {
-	tok, err := hub.ReadToken()
+	tok, err := o.token()
 	if err != nil {
 		return nil, err
 	}
@@ -75,9 +101,10 @@ func newRoot() *cobra.Command {
 		hubDefault = v
 	}
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
+	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenEnv+"; default: this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 
@@ -116,7 +143,20 @@ func hubCmd() *cobra.Command {
 			for _, u := range localURLs {
 				readers = append(readers, quota.NewLocal(u))
 			}
+			home, err := hub.Home()
+			if err != nil {
+				return err
+			}
+			store, err := auth.OpenStore(filepath.Join(home, "tokens.yaml"))
+			if err != nil {
+				return err
+			}
+			audit := auth.NewAudit(filepath.Join(home, "audit"))
+			audit.OnError = func(err error) { fmt.Fprintln(cmd.ErrOrStderr(), "error:", err) }
+			defer audit.Close()
+			defer store.Flush()
 			h := hub.New(version, tok)
+			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
 			h.WebDir = webDir
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
@@ -314,12 +354,13 @@ func versionCmd(o *opts) *cobra.Command {
 func pairCmd(o *opts) *cobra.Command {
 	var pubURL, name string
 	var appQR bool
+	ttl := deviceTTL
 	c := &cobra.Command{
 		Use:   "pair",
 		Short: "Print a pairing link and QR code for adding this hub on another device",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			tok, err := hub.ReadToken()
+			cl, err := o.tokenClient()
 			if err != nil {
 				return err
 			}
@@ -329,7 +370,13 @@ func pairCmd(o *opts) *cobra.Command {
 			if name == "" {
 				name, _ = os.Hostname()
 			}
-			links, err := hub.NewPairLinks(pubURL, name, tok)
+			res, err := cl.CreateToken(cmd.Context(), connect.NewRequest(&pb.CreateTokenRequest{
+				Name: "pair: " + name, Scopes: deviceScopes, Ttl: durationpb.New(ttl),
+			}))
+			if err != nil {
+				return fmt.Errorf("mint device token (needs the owner token): %w", err)
+			}
+			links, err := hub.NewPairLinks(pubURL, name, res.Msg.Secret)
 			if err != nil {
 				return err
 			}
@@ -342,12 +389,14 @@ func pairCmd(o *opts) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(w, "\nweb:  %s\napp:  %s\n", links.Web, links.Scheme)
-			fmt.Fprintln(w, "\nThe links contain the hub token. Treat them like a password.")
+			fmt.Fprintln(w, "\nThe links contain a device token (id "+res.Msg.Token.Id+", scopes "+strings.Join(res.Msg.Token.Scopes, ", ")+", expires "+fmtStamp(res.Msg.Token.ExpiresAt, "never")+").")
+			fmt.Fprintln(w, "Treat them like a password; revoke with `protectorate token revoke "+res.Msg.Token.Id+"`.")
 			return nil
 		},
 	}
 	c.Flags().StringVar(&pubURL, "url", "", "public base URL the other device can reach (default --hub)")
 	c.Flags().StringVar(&name, "name", "", "label for the hub (default hostname)")
+	c.Flags().DurationVar(&ttl, "ttl", deviceTTL, "lifetime of the device token; 0 never expires")
 	c.Flags().BoolVar(&appQR, "app", false, "encode the protectorate:// link for the native app instead of the web link")
 	return c
 }

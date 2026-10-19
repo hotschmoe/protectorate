@@ -90,6 +90,18 @@ func TestEveryRPCHasDescription(t *testing.T) {
 	}
 }
 
+func TestOwnerOnlyServicesNotExposed(t *testing.T) {
+	defs, err := Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range defs {
+		if strings.HasPrefix(d.Name, "token_") {
+			t.Errorf("owner-only tool %s exposed", d.Name)
+		}
+	}
+}
+
 func TestImageMatchesGeneratedCode(t *testing.T) {
 	var set descriptorpb.FileDescriptorSet
 	if err := proto.Unmarshal(image, &set); err != nil {
@@ -265,14 +277,6 @@ func TestFilter(t *testing.T) {
 	}
 	if _, err := NewServer(Config{Filter: Filter{Allow: []string{"["}}}); err == nil {
 		t.Error("bad glob accepted")
-	}
-}
-
-func TestSnake(t *testing.T) {
-	for in, want := range map[string]string{"GetQuota": "get_quota", "ListSessions": "list_sessions", "GetURLPath": "get_url_path", "Hub": "hub"} {
-		if got := snake(in); got != want {
-			t.Errorf("snake(%q)=%q want %q", in, got, want)
-		}
 	}
 }
 

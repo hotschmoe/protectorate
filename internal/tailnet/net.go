@@ -125,34 +125,40 @@ func retryDial(ctx context.Context, dial dialFunc, window time.Duration, network
 
 type whoIsFunc func(ctx context.Context, remoteAddr string) (*apitype.WhoIsResponse, error)
 
-// authorizer accepts only callers whose node carries one of the allowed tags.
-func authorizer(who whoIsFunc, allowed ...string) func(*http.Request) error {
-	return func(r *http.Request) error {
+// identify accepts only callers whose node carries one of the allowed tags
+// and returns the caller's node name.
+func identify(who whoIsFunc, allowed ...string) func(*http.Request) (string, error) {
+	return func(r *http.Request) (string, error) {
 		res, err := who(r.Context(), r.RemoteAddr)
 		if err != nil {
-			return fmt.Errorf("%w: identify %s: %v", ErrForbidden, r.RemoteAddr, err)
+			return "", fmt.Errorf("%w: identify %s: %v", ErrForbidden, r.RemoteAddr, err)
 		}
 		if res == nil || res.Node == nil {
-			return fmt.Errorf("%w: %s is not a tagged node", ErrForbidden, r.RemoteAddr)
+			return "", fmt.Errorf("%w: %s is not a tagged node", ErrForbidden, r.RemoteAddr)
 		}
 		for _, t := range res.Node.Tags {
 			if slices.Contains(allowed, t) {
-				return nil
+				return strings.TrimSuffix(res.Node.Name, "."), nil
 			}
 		}
-		return fmt.Errorf("%w: %s has tags %v", ErrForbidden, res.Node.Name, res.Node.Tags)
+		return "", fmt.Errorf("%w: %s has tags %v", ErrForbidden, res.Node.Name, res.Node.Tags)
 	}
 }
 
 // AuthorizeHub is the node-side authorizer: only the hub may call.
 func (n *Net) AuthorizeHub() func(*http.Request) error {
-	return authorizer(n.lc.WhoIs, TagHub)
+	id := identify(n.lc.WhoIs, TagHub)
+	return func(r *http.Request) error {
+		_, err := id(r)
+		return err
+	}
 }
 
-// AuthorizeAPI is the hub-side authorizer for the tailnet listener: the hub
-// itself and tag:client devices. tag:node is never accepted.
-func (n *Net) AuthorizeAPI() func(*http.Request) error {
-	return authorizer(n.lc.WhoIs, TagHub, TagClient)
+// IdentifyAPI is the hub-side identity gate for the tailnet listener: the hub
+// itself and tag:client devices, never tag:node. It returns the caller's node
+// name. It only identifies the device; callers must still present a token.
+func (n *Net) IdentifyAPI() func(*http.Request) (string, error) {
+	return identify(n.lc.WhoIs, TagHub, TagClient)
 }
 
 type nodeState struct {

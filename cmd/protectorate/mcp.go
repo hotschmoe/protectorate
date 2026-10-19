@@ -25,7 +25,10 @@ func mcpCmd(o *opts) *cobra.Command {
 
 Without --allow only read-only tools are served. --allow replaces that default
 with glob patterns over tool names (use '*' for everything); --deny removes
-matches and always wins. See docs/mcp.md.`,
+matches and always wins. These filters only limit what the client is offered.
+What the bridge may actually do is set by its token: run it with a scoped token
+(--token-file, or env PROTECTORATE_TOKEN) created by 'protectorate token
+create'. See docs/mcp.md and docs/auth.md.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			hc, err := o.httpClient()
@@ -48,7 +51,7 @@ matches and always wins. See docs/mcp.md.`,
 				return err
 			}
 			if host, _, _ := net.SplitHostPort(l.Addr().String()); !net.ParseIP(host).IsLoopback() {
-				fmt.Fprintln(cmd.ErrOrStderr(), "warning: MCP HTTP endpoint has no authentication and uses the hub token; bind to loopback")
+				fmt.Fprintln(cmd.ErrOrStderr(), "warning: MCP HTTP endpoint has no authentication and acts with its token; bind to loopback")
 			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "mcp listening on http://%s\n", l.Addr())
 			hs := &http.Server{Handler: mcpbridge.HTTPHandler(srv), ReadHeaderTimeout: 10 * time.Second}

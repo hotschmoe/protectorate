@@ -215,7 +215,7 @@ func attach(ctx context.Context, o *opts, name string, readOnly bool, esc int) e
 	if !term.IsTerminal(in) || !term.IsTerminal(out) {
 		return errors.New("attach needs an interactive terminal")
 	}
-	tok, err := hub.ReadToken()
+	tok, err := o.token()
 	if err != nil {
 		return err
 	}

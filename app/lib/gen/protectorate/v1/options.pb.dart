@@ -27,9 +27,15 @@ class Options {
       _omitFieldNames ? '' : 'nodeLocal',
       50002,
       $pb.PbFieldType.OB);
+  static final ownerOnly = $pb.Extension<$core.bool>(
+      _omitMessageNames ? '' : 'google.protobuf.ServiceOptions',
+      _omitFieldNames ? '' : 'ownerOnly',
+      50003,
+      $pb.PbFieldType.OB);
   static void registerAllExtensions($pb.ExtensionRegistry registry) {
     registry.add(destructive);
     registry.add(nodeLocal);
+    registry.add(ownerOnly);
   }
 }
 

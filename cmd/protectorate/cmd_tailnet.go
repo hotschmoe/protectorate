@@ -294,5 +294,5 @@ func startTailnet(ctx context.Context, logw io.Writer) ([]hub.Extra, *http.Clien
 		return nil, nil, nil, err
 	}
 	logf("hub %s serving on tailnet port %d", cfg.HubName, tailnet.HubAPIPort)
-	return []hub.Extra{{Listener: ln, Authorize: svc.Net.AuthorizeAPI()}}, svc.Net.HTTPClient(), func() { svc.Close() }, nil
+	return []hub.Extra{{Listener: ln, Identify: svc.Net.IdentifyAPI()}}, svc.Net.HTTPClient(), func() { svc.Close() }, nil
 }

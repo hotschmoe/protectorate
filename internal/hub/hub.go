@@ -3,10 +3,8 @@ package hub
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +23,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/backlog"
 	"github.com/hotschmoe/protectorate/internal/codec"
 	"github.com/hotschmoe/protectorate/internal/session"
@@ -35,7 +34,7 @@ type Hub struct {
 	Version   string
 	Heartbeat time.Duration
 
-	token   string
+	authz   *auth.Authorizer
 	started time.Time
 	seq     atomic.Uint64
 	quota   *QuotaCache
@@ -65,7 +64,7 @@ func New(version, token string) *Hub {
 		Sessions:     session.New(session.DefaultSocket),
 		SessionPoll:  time.Second,
 		PingInterval: 20 * time.Second,
-		token:        token,
+		authz:        auth.New(token, nil, nil),
 		started:      time.Now(),
 	}
 	h.SetQuota(NewQuotaCache(nil, QuotaOptions{}))
@@ -148,32 +147,23 @@ func (b *eventBus) publish(e *pb.Event) {
 	}
 }
 
-// Handler serves every service behind the bearer-token interceptor.
+// SetAuth replaces the default authorizer, which knows only the owner token
+// and keeps no audit log. Call before Handler or Serve.
+func (h *Hub) SetAuth(a *auth.Authorizer) { h.authz = a }
+
+// Handler serves every service. Every RPC and the terminal go through the
+// authorizer; the web client files are static and public.
 func (h *Hub) Handler() http.Handler {
-	return h.handler(connect.WithInterceptors(authInterceptor{token: h.token}))
-}
-
-// authorizedHandler serves every service, admitting only requests that
-// authorize accepts. Used for listeners whose callers are identified by the
-// network (tailnet WhoIs) instead of a bearer token.
-func (h *Hub) authorizedHandler(authorize func(*http.Request) error) http.Handler {
-	next := h.handler()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := authorize(r); err != nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (h *Hub) handler(extra ...connect.HandlerOption) http.Handler {
-	opts := connect.WithHandlerOptions(append(extra, connect.WithCodec(codec.StrictJSON{}))...)
+	opts := connect.WithHandlerOptions(
+		connect.WithInterceptors(authInterceptor{a: h.authz}),
+		connect.WithCodec(codec.StrictJSON{}),
+	)
 	mux := http.NewServeMux()
 	mux.Handle(protectoratev1connect.NewHubServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewEventServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewTokenServiceHandler(h, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
 	if h.sleeves != nil {
@@ -188,11 +178,27 @@ func (h *Hub) handler(extra ...connect.HandlerOption) http.Handler {
 	return mux
 }
 
-// Extra is an additional listener served without the bearer token; Authorize
-// decides every request.
+// tailnetHandler admits only callers identify accepts (tailnet WhoIs), then
+// applies the same bearer-token scope checks as the main listener: a tagged
+// device must also present a token. The identity is recorded in the audit log.
+func (h *Hub) tailnetHandler(identify func(*http.Request) (string, error)) http.Handler {
+	next := h.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		who, err := identify(r)
+		if err != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(auth.WithTailnet(r.Context(), who)))
+	})
+}
+
+// Extra is an additional listener whose callers are first identified by the
+// network. Identify rejects unknown peers and returns the identity of the rest;
+// bearer-token scopes still apply afterwards.
 type Extra struct {
-	Listener  net.Listener
-	Authorize func(*http.Request) error
+	Listener net.Listener
+	Identify func(*http.Request) (string, error)
 }
 
 // Serve accepts HTTP/1.1 and cleartext HTTP/2 on l, plus on each extra
@@ -211,7 +217,7 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener, extra ...Extra) error {
 	}
 	servers := map[*http.Server]net.Listener{newServer(h.Handler()): l}
 	for _, e := range extra {
-		servers[newServer(h.authorizedHandler(e.Authorize))] = e.Listener
+		servers[newServer(h.tailnetHandler(e.Identify))] = e.Listener
 	}
 
 	pollDone := make(chan struct{})
@@ -327,38 +333,79 @@ func (h *Hub) heartbeat() *pb.Event {
 	}
 }
 
-type authInterceptor struct{ token string }
+type authInterceptor struct{ a *auth.Authorizer }
 
-func tokenMatches(want, got string) bool {
-	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
-}
-
-func (a authInterceptor) check(header http.Header) error {
-	got, ok := strings.CutPrefix(header.Get("Authorization"), "Bearer ")
-	if !ok || !tokenMatches(a.token, got) {
-		return connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("missing or invalid bearer token"))
+func bearerToken(header http.Header) string {
+	v := header.Get("Authorization")
+	if len(v) > 7 && strings.EqualFold(v[:7], "Bearer ") {
+		return v[7:]
 	}
-	return nil
+	return ""
 }
 
-func (a authInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+// admit authenticates and authorizes one call, auditing mutations. finish
+// must be called with the call's result.
+func (i authInterceptor) admit(ctx context.Context, procedure string, header http.Header, msg any) (context.Context, func(error), error) {
+	m, known := i.a.Method(procedure)
+	audited := !known || m.Mutating()
+	subject := auth.Subject(msg)
+	p, err := i.a.Authenticate(bearerToken(header))
+	if err == nil {
+		err = i.a.AuthorizeProcedure(p, procedure)
+	}
+	if err != nil {
+		if audited {
+			i.a.Record(ctx, p, procedure, subject, err, deniedCode(err))
+		}
+		return ctx, nil, deniedConnectError(err)
+	}
+	finish := func(callErr error) {
+		if !audited {
+			return
+		}
+		code := ""
+		if callErr != nil {
+			code = connect.CodeOf(callErr).String()
+		}
+		i.a.Record(ctx, p, procedure, subject, callErr, code)
+	}
+	return auth.WithPrincipal(ctx, p), finish, nil
+}
+
+func deniedCode(err error) string { return deniedConnectError(err).Code().String() }
+
+func deniedConnectError(err error) *connect.Error {
+	var d *auth.DeniedError
+	if errors.As(err, &d) {
+		return connect.NewError(connect.CodePermissionDenied, err)
+	}
+	return connect.NewError(connect.CodeUnauthenticated, err)
+}
+
+func (i authInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		if err := a.check(req.Header()); err != nil {
+		ctx, finish, err := i.admit(ctx, req.Spec().Procedure, req.Header(), req.Any())
+		if err != nil {
 			return nil, err
 		}
-		return next(ctx, req)
+		res, err := next(ctx, req)
+		finish(err)
+		return res, err
 	}
 }
 
-func (a authInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+func (i authInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
 	return next
 }
 
-func (a authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+func (i authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		if err := a.check(conn.RequestHeader()); err != nil {
+		ctx, finish, err := i.admit(ctx, conn.Spec().Procedure, conn.RequestHeader(), nil)
+		if err != nil {
 			return err
 		}
-		return next(ctx, conn)
+		err = next(ctx, conn)
+		finish(err)
+		return err
 	}
 }

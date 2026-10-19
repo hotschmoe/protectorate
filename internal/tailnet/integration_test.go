@@ -129,7 +129,7 @@ func TestTailnetEndToEnd(t *testing.T) {
 	hctx, hstop := context.WithCancel(ctx)
 	hubDone := make(chan error, 1)
 	go func() {
-		hubDone <- hub.New("test", "tok").Serve(hctx, local, hub.Extra{Listener: hubLn, Authorize: svc.Net.AuthorizeAPI()})
+		hubDone <- hub.New("test", "tok").Serve(hctx, local, hub.Extra{Listener: hubLn, Identify: svc.Net.IdentifyAPI()})
 	}()
 	defer func() {
 		hstop()
@@ -170,11 +170,14 @@ func TestTailnetEndToEnd(t *testing.T) {
 
 	t.Run("hub api: client allowed, node denied", func(t *testing.T) {
 		apiURL := fmt.Sprintf("http://%s:%d/protectorate.v1.HubService/GetStatus", "protectorate-hub", tailnet.HubAPIPort)
-		post := func(c *http.Client) (int, error) {
+		post := func(c *http.Client, token string) (int, error) {
 			ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader("{}"))
 			req.Header.Set("Content-Type", "application/json")
+			if token != "" {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
 			res, err := c.Do(req)
 			if err != nil {
 				return 0, err
@@ -182,12 +185,15 @@ func TestTailnetEndToEnd(t *testing.T) {
 			res.Body.Close()
 			return res.StatusCode, nil
 		}
-		if code, err := post(phone.net.HTTPClient()); err != nil || code != 200 {
+		if code, err := post(phone.net.HTTPClient(), "tok"); err != nil || code != 200 {
 			t.Fatalf("client: code=%d err=%v", code, err)
+		}
+		if code, err := post(phone.net.HTTPClient(), ""); err != nil || code != http.StatusUnauthorized {
+			t.Fatalf("client without token: code=%d err=%v", code, err)
 		}
 		short := alpha.net.HTTPClient()
 		short.Timeout = 5 * time.Second
-		if code, err := post(short); err == nil {
+		if code, err := post(short, "tok"); err == nil {
 			t.Fatalf("node reached hub api, code=%d", code)
 		}
 	})

@@ -8,7 +8,6 @@ import (
 	"path"
 	"sort"
 	"strings"
-	"unicode"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -16,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/internal/auth"
 )
 
 // image is a buf image with source info, written by `make gen`. Generated Go
@@ -41,7 +41,7 @@ func (t ToolDef) Path() string {
 }
 
 // Catalog lists every unary hub RPC in the embedded image, sorted by tool
-// name. node_local services and server-streaming RPCs are skipped.
+// name. node_local and owner_only services and server-streaming RPCs are skipped.
 func Catalog() ([]ToolDef, error) {
 	var set descriptorpb.FileDescriptorSet
 	if err := proto.Unmarshal(image, &set); err != nil {
@@ -60,7 +60,8 @@ func Catalog() ([]ToolDef, error) {
 		}
 		for i := 0; i < fd.Services().Len(); i++ {
 			svc := fd.Services().Get(i)
-			if svcOpts, _ := svc.Options().(*descriptorpb.ServiceOptions); proto.GetExtension(svcOpts, pb.E_NodeLocal).(bool) {
+			svcOpts, _ := svc.Options().(*descriptorpb.ServiceOptions)
+			if proto.GetExtension(svcOpts, pb.E_NodeLocal).(bool) || proto.GetExtension(svcOpts, pb.E_OwnerOnly).(bool) {
 				continue
 			}
 			for j := 0; j < svc.Methods().Len(); j++ {
@@ -68,7 +69,7 @@ func Catalog() ([]ToolDef, error) {
 				if m.IsStreamingClient() || m.IsStreamingServer() {
 					continue
 				}
-				name := toolName(svc, m)
+				name := auth.ToolName(svc, m)
 				if prev, dup := seen[name]; dup {
 					walkErr = fmt.Errorf("tool name %q is used by both %s and %s", name, prev, m.FullName())
 					return false
@@ -91,25 +92,6 @@ func Catalog() ([]ToolDef, error) {
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools, nil
-}
-
-func toolName(svc protoreflect.ServiceDescriptor, m protoreflect.MethodDescriptor) string {
-	return snake(strings.TrimSuffix(string(svc.Name()), "Service")) + "_" + snake(string(m.Name()))
-}
-
-func snake(s string) string {
-	r := []rune(s)
-	var b strings.Builder
-	for i, c := range r {
-		if unicode.IsUpper(c) {
-			if i > 0 && (unicode.IsLower(r[i-1]) || (unicode.IsUpper(r[i-1]) && i+1 < len(r) && unicode.IsLower(r[i+1]))) {
-				b.WriteByte('_')
-			}
-			c = unicode.ToLower(c)
-		}
-		b.WriteRune(c)
-	}
-	return b.String()
 }
 
 // comment returns the leading proto comment of d as a single paragraph line.
