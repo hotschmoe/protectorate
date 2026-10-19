@@ -1,0 +1,136 @@
+package node
+
+import (
+	"context"
+	"crypto/subtle"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
+
+	"connectrpc.com/connect"
+
+	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/codec"
+)
+
+// DefaultPort is the tailnet port of the node agent.
+const DefaultPort = 7475
+
+const (
+	defaultWatchInterval = 10 * time.Second
+	minWatchInterval     = 5 * time.Second
+)
+
+// Agent serves NodeAgentService. Authorize is called for every request before
+// any handler runs; a nil Authorize rejects everything.
+type Agent struct {
+	Collector *Collector
+	Authorize func(*http.Request) error
+}
+
+// TokenAuthorizer accepts requests carrying the given bearer token.
+func TokenAuthorizer(token string) func(*http.Request) error {
+	return func(r *http.Request) error {
+		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || token == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			return errors.New("missing or invalid bearer token")
+		}
+		return nil
+	}
+}
+
+func (a *Agent) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(protectoratev1connect.NewNodeAgentServiceHandler(a, connect.WithHandlerOptions(connect.WithCodec(codec.StrictJSON{}))))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.Authorize == nil {
+			http.Error(w, "no authorizer configured", http.StatusForbidden)
+			return
+		}
+		if err := a.Authorize(r); err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// Serve accepts HTTP/1.1 and cleartext HTTP/2 on ln and runs the collector's
+// slow-interval measurements until ctx is cancelled.
+func (a *Agent) Serve(ctx context.Context, ln net.Listener) error {
+	srv := &http.Server{
+		Handler:           a.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		Protocols:         new(http.Protocols),
+	}
+	srv.Protocols.SetHTTP1(true)
+	srv.Protocols.SetUnencryptedHTTP2(true)
+
+	slowDone := make(chan struct{})
+	slowCtx, stopSlow := context.WithCancel(ctx)
+	defer func() {
+		stopSlow()
+		<-slowDone
+	}()
+	go func() {
+		defer close(slowDone)
+		a.Collector.Run(slowCtx)
+	}()
+
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(sctx); err != nil {
+		return err
+	}
+	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func (a *Agent) GetMetrics(ctx context.Context, _ *connect.Request[pb.GetMetricsRequest]) (*connect.Response[pb.NodeMetrics], error) {
+	m, err := a.Collector.Collect(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("collect metrics: %w", err))
+	}
+	return connect.NewResponse(m), nil
+}
+
+func (a *Agent) WatchMetrics(ctx context.Context, req *connect.Request[pb.WatchMetricsRequest], stream *connect.ServerStream[pb.NodeMetrics]) error {
+	iv := time.Duration(req.Msg.IntervalSeconds) * time.Second
+	if iv == 0 {
+		iv = defaultWatchInterval
+	}
+	iv = max(iv, minWatchInterval)
+	tick := time.NewTicker(iv)
+	defer tick.Stop()
+	for {
+		m, err := a.Collector.Collect(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return connect.NewError(connect.CodeUnavailable, fmt.Errorf("collect metrics: %w", err))
+		}
+		if err := stream.Send(m); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}

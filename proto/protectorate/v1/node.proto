@@ -1,0 +1,222 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// NodeAgentService runs on every node (and in-process for the hub's own
+// node). The hub polls GetMetrics; WatchMetrics is for live views.
+service NodeAgentService {
+  rpc GetMetrics(GetMetricsRequest) returns (NodeMetrics);
+  rpc WatchMetrics(WatchMetricsRequest) returns (stream NodeMetrics);
+}
+
+// NodeService runs on the hub: the inventory plus the latest metrics of each
+// node. Polls are announced on EventService as "node.metrics" (subject = node
+// name, payload = summary) and "node.unreachable".
+service NodeService {
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc GetNode(GetNodeRequest) returns (NodeStatus);
+  rpc AddNode(AddNodeRequest) returns (NodeInfo);
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+}
+
+message GetMetricsRequest {}
+
+message WatchMetricsRequest {
+  // interval_seconds is clamped to a minimum of 5; 0 selects 10.
+  int32 interval_seconds = 1;
+}
+
+message NodeMetrics {
+  string hostname = 1;
+  string os = 2;
+  string arch = 3;
+  // platform is a human description such as "ubuntu 24.04" or "Windows 11".
+  string platform = 4;
+  string agent_version = 5;
+  int64 uptime_seconds = 6;
+  google.protobuf.Timestamp collected_at = 7;
+  CpuMetrics cpu = 8;
+  MemoryMetrics memory = 9;
+  repeated FilesystemMetrics filesystems = 10;
+  // gpus is empty when the node has none or no vendor tool is present.
+  repeated GpuMetrics gpus = 11;
+  // engine is unset when no container engine is reachable.
+  ContainerEngine engine = 12;
+  repeated DirSize watch_dirs = 13;
+  // warnings lists sections that could not be collected on this node.
+  repeated string warnings = 14;
+}
+
+message CpuMetrics {
+  int32 logical_cores = 1;
+  double usage_percent = 2;
+  // load averages are unset where the OS has none (Windows).
+  optional double load1 = 3;
+  optional double load5 = 4;
+  optional double load15 = 5;
+}
+
+message MemoryMetrics {
+  uint64 total_bytes = 1;
+  uint64 used_bytes = 2;
+  uint64 available_bytes = 3;
+  double used_percent = 4;
+  uint64 swap_total_bytes = 5;
+  uint64 swap_used_bytes = 6;
+  double swap_used_percent = 7;
+}
+
+message FilesystemMetrics {
+  string mount = 1;
+  string device = 2;
+  string fstype = 3;
+  uint64 total_bytes = 4;
+  uint64 used_bytes = 5;
+  uint64 free_bytes = 6;
+  double used_percent = 7;
+}
+
+message GpuMetrics {
+  int32 index = 1;
+  string vendor = 2;
+  string name = 3;
+  // utilization_percent is -1 when the device does not report it.
+  double utilization_percent = 4;
+  uint64 memory_used_bytes = 5;
+  uint64 memory_total_bytes = 6;
+  // temperature_celsius is -1 when the device does not report it.
+  double temperature_celsius = 7;
+}
+
+message ContainerEngine {
+  string kind = 1;
+  string version = 2;
+  // disk is unset until the first slow-interval measurement completes.
+  EngineDiskUsage disk = 3;
+  google.protobuf.Timestamp disk_measured_at = 4;
+  repeated ContainerMetrics containers = 5;
+}
+
+message EngineDiskUsage {
+  DiskBucket images = 1;
+  DiskBucket containers = 2;
+  DiskBucket volumes = 3;
+  DiskBucket build_cache = 4;
+}
+
+message DiskBucket {
+  int64 count = 1;
+  int64 size_bytes = 2;
+  int64 reclaimable_bytes = 3;
+}
+
+message ContainerMetrics {
+  string id = 1;
+  string name = 2;
+  string image = 3;
+  string state = 4;
+  double cpu_percent = 5;
+  uint64 memory_used_bytes = 6;
+  uint64 memory_limit_bytes = 7;
+  double memory_percent = 8;
+  // writable_layer_bytes and rootfs_bytes come from the slow-interval df and
+  // are 0 until measured.
+  int64 writable_layer_bytes = 9;
+  int64 rootfs_bytes = 10;
+  // stats_error is set when stats for this container could not be read.
+  string stats_error = 11;
+}
+
+message DirSize {
+  string path = 1;
+  int64 size_bytes = 2;
+  google.protobuf.Timestamp measured_at = 3;
+  google.protobuf.Duration took = 4;
+  // complete is false when the time budget ended the walk early; size_bytes
+  // is then a lower bound.
+  bool complete = 5;
+  string error = 6;
+}
+
+enum NodeFreshness {
+  NODE_FRESHNESS_UNSPECIFIED = 0;
+  // NODE_FRESHNESS_FRESH: the last poll succeeded and is recent.
+  NODE_FRESHNESS_FRESH = 1;
+  // NODE_FRESHNESS_STALE: the latest poll failed, the cached metrics are
+  // recent enough to show but are not current.
+  NODE_FRESHNESS_STALE = 2;
+  // NODE_FRESHNESS_UNREACHABLE: no good poll within the stale window (or
+  // ever). Cached metrics, if any, are old.
+  NODE_FRESHNESS_UNREACHABLE = 3;
+}
+
+enum AlertKind {
+  ALERT_KIND_UNSPECIFIED = 0;
+  ALERT_KIND_DISK_PERCENT = 1;
+  ALERT_KIND_MEM_PRESSURE = 2;
+  ALERT_KIND_UNREACHABLE = 3;
+}
+
+message NodeAlert {
+  AlertKind kind = 1;
+  // subject is the filesystem mount for disk alerts, empty otherwise.
+  string subject = 2;
+  string message = 3;
+  double value = 4;
+  double threshold = 5;
+}
+
+// NodeInfo is the inventory record of one node.
+message NodeInfo {
+  string name = 1;
+  // address is the tailnet name or an address; ":7475" is assumed when no
+  // port is given.
+  string address = 2;
+  string os = 3;
+  string arch = 4;
+  repeated string tags = 5;
+  // ssh_alias is the break-glass `ssh` host alias.
+  string ssh_alias = 6;
+  // tier is "server" or "family" and drives future command gating.
+  string tier = 7;
+  string notes = 8;
+  // local marks the hub's own node, which is not stored in the inventory.
+  bool local = 9;
+}
+
+message NodeStatus {
+  NodeInfo node = 1;
+  // metrics is the last good poll; unset when the node was never reached.
+  NodeMetrics metrics = 2;
+  NodeFreshness freshness = 3;
+  google.protobuf.Timestamp fetched_at = 4;
+  google.protobuf.Duration age = 5;
+  // error is the failure of the most recent poll, empty if it succeeded.
+  string error = 6;
+  repeated NodeAlert alerts = 7;
+}
+
+message ListNodesRequest {}
+
+message ListNodesResponse {
+  repeated NodeStatus nodes = 1;
+}
+
+message GetNodeRequest {
+  string name = 1;
+}
+
+message AddNodeRequest {
+  NodeInfo node = 1;
+}
+
+message RemoveNodeRequest {
+  string name = 1;
+}
+
+message RemoveNodeResponse {}
