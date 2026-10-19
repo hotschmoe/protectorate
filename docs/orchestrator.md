@@ -1,8 +1,8 @@
 # Orchestrator (Poe)
 
 Poe is not engine code. It is an ordinary sleeve named `poe`: a harness (Claude,
-Codex, Grok or pi, whichever has quota to spare) running in the usual bwrap and
-systemd-scope sandbox. Its workspace is `$PROTECTORATE_HOME/orchestrator/` and
+Codex, Grok or pi, whichever has quota to spare) running in chat mode (see
+[chat.md](chat.md)) in the usual bwrap and systemd-scope sandbox. Its workspace is `$PROTECTORATE_HOME/orchestrator/` and
 its only tool is the `protectorate` CLI, authenticated with a scoped token. The
 harness is untouched: it only finds normal project context files and a CLI.
 
@@ -25,8 +25,14 @@ picked, and the local LLM through pi is always the fallback.
    The sleeve gets `PROTECTORATE_TOKEN_FILE` and `PROTECTORATE_HUB`, so the CLI
    inside needs no flags.
 3. Regenerates `AGENTS.md`, `CLAUDE.md` (a symlink to it) and `hosts.md`.
-4. Starts the sleeve. If anything fails after the token was minted, the new
-   token is revoked.
+4. Starts the sleeve in chat mode. If anything fails after the token was
+   minted, the new token is revoked.
+
+Chat mode is what lets the hub reach Poe: escalations (an ack-required message
+that stayed unacked) and other mailbox notices are injected into its chat as
+ordinary user messages at its next idle (see [coordination.md](coordination.md)).
+Watch it with `protectorate chat watch poe`, and answer its approval requests
+with `chat respond`. There is no terminal mode for Poe.
 
 `AGENTS.md` holds the role, the working loop, the token's id and scopes, a table
 of every hub tool with whether this token may call it, and the CLI reference

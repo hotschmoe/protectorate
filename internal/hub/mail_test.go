@@ -362,7 +362,7 @@ func TestMailEscalation(t *testing.T) {
 			r.h.AckTimeout = 30 * time.Minute
 			r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
 			if tt.withPoe {
-				r.spawnNamed(sleeve.OrchestratorName, pb.SleeveMode_SLEEVE_MODE_TERMINAL, "")
+				r.spawnNamed(sleeve.OrchestratorName, pb.SleeveMode_SLEEVE_MODE_CHAT, "")
 			}
 			events := make(chan string, 16)
 			evCtx, stop := context.WithCancel(r.ctx)

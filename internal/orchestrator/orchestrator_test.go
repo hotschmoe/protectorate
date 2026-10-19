@@ -193,7 +193,7 @@ func (ownerAuth) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func opts(home string, tools []Tool) Options {
-	return Options{Home: home, HubURL: "http://127.0.0.1:7470", Harness: "shell", TTL: time.Hour, Tools: tools,
+	return Options{Home: home, HubURL: "http://127.0.0.1:7470", Harness: "claude", TTL: time.Hour, Tools: tools,
 		Now: func() time.Time { return time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC) }}
 }
 
@@ -221,7 +221,7 @@ func TestSpawnMintsAndRevokesOnRespawn(t *testing.T) {
 	}
 	req := h.spawned[0]
 	ws := filepath.Join(home, DirName)
-	if req.Name != SleeveName || req.Workspace != ws || req.Harness != pb.Harness_HARNESS_SHELL {
+	if req.Name != SleeveName || req.Workspace != ws || req.Harness != pb.Harness_HARNESS_CLAUDE || req.Mode != pb.SleeveMode_SLEEVE_MODE_CHAT {
 		t.Errorf("spawn request = %v", req)
 	}
 	tokenPath := filepath.Join(ws, TokenFile)
