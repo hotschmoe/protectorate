@@ -44,6 +44,7 @@ func TestDefaultScopes(t *testing.T) {
 	for _, tool := range []string{
 		"quota_suggest", "quota_get_quota", "sleeve_list_sleeves", "session_list_sessions", "session_capture_pane",
 		"sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "backlog_add_item", "backlog_update_item", "backlog_list_items",
+		"message_send", "message_reply", "message_ack", "message_inbox",
 	} {
 		if !auth.Grants(scopes, tool) {
 			t.Errorf("default scopes must grant %s: %v", tool, scopes)

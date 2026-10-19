@@ -167,9 +167,10 @@ func firstSentence(s string, limit int) string {
 
 // DefaultGrants are the tool globs Poe is given; destructive tools matched by
 // them are dropped, so a new kill-style RPC is never granted by accident.
+// message_* lets Poe answer the escalations the mailbox sends it.
 // session_* is deliberately absent: session creation starts host processes
 // outside any sandbox. Poe starts work only through sandboxed sleeves.
-var DefaultGrants = []string{"backlog_*", "lease_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve"}
+var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of
