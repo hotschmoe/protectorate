@@ -179,8 +179,9 @@ func chatCompactCmd(o *opts) *cobra.Command {
 // chatRenderer prints events as a transcript, joining the deltas of one
 // assistant message onto one line.
 type chatRenderer struct {
-	openText bool
-	openID   string
+	openText     bool
+	openID       string
+	openThinking bool
 }
 
 func (r *chatRenderer) flush(w io.Writer) {
@@ -192,14 +193,14 @@ func (r *chatRenderer) flush(w io.Writer) {
 
 func (r *chatRenderer) render(w io.Writer, ev *pb.ChatEvent) {
 	if t := ev.GetText(); t != nil {
-		if !r.openText || r.openID != t.MessageId {
+		if !r.openText || r.openID != t.MessageId || r.openThinking != t.Thinking {
 			r.flush(w)
 			label := "assistant"
 			if t.Thinking {
 				label = "thinking"
 			}
 			fmt.Fprintf(w, "%s %-9s ", ev.Time.AsTime().Local().Format("15:04:05"), label)
-			r.openText, r.openID = true, t.MessageId
+			r.openText, r.openID, r.openThinking = true, t.MessageId, t.Thinking
 		}
 		fmt.Fprint(w, t.Delta)
 		return

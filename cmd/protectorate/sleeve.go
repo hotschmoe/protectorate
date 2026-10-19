@@ -166,7 +166,12 @@ harnesses start in chat mode (drive them with 'protectorate chat'); use
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintf(w, "spawned\t%s\nattach\tprotectorate sleeve attach %s\n", res.Msg.Sleeve.Name, res.Msg.Sleeve.Name)
+				s := res.Msg.Sleeve
+				if s.Mode == pb.SleeveMode_SLEEVE_MODE_CHAT {
+					fmt.Fprintf(w, "spawned\t%s\nchat\tprotectorate chat send %s \"...\"; protectorate chat watch %s\n", s.Name, s.Name, s.Name)
+					return
+				}
+				fmt.Fprintf(w, "spawned\t%s\nattach\tprotectorate sleeve attach %s\n", s.Name, s.Name)
 			})
 		},
 	}
