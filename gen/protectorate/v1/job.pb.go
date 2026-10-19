@@ -469,6 +469,14 @@ type SubmitJobRequest struct {
 	// sent back to $PROTECTORATE_HOME/jobs/<id>/artifacts/. A glob that matches
 	// a directory takes the files below it.
 	ArtifactGlobs []string `protobuf:"bytes,6,rep,name=artifact_globs,json=artifactGlobs,proto3" json:"artifact_globs,omitempty"`
+	// request_id is a client-chosen idempotency key, 8 to 128 characters of
+	// [A-Za-z0-9._-]. The hub remembers it for 1h after the first submit with
+	// it: a repeat returns the same job instead of creating another, and waits
+	// if the first call is still in flight. Pick it with enough entropy to be
+	// unique among callers (a UUID or 16 random bytes in hex). With it, a caller
+	// that lost the response can still find or cancel the job (CancelJob
+	// request_id). Empty means no deduplication.
+	RequestId     string `protobuf:"bytes,7,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -543,6 +551,13 @@ func (x *SubmitJobRequest) GetArtifactGlobs() []string {
 		return x.ArtifactGlobs
 	}
 	return nil
+}
+
+func (x *SubmitJobRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 type GetJobRequest struct {
@@ -688,8 +703,15 @@ func (x *ListJobsResponse) GetJobs() []*Job {
 }
 
 type CancelJobRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id names the job. Set exactly one of id and request_id.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// request_id names the job by the SubmitJob key, for a caller that never
+	// saw the response. A submit still in flight is awaited and then canceled.
+	// When no submit with the key has reached the hub, the key is remembered as
+	// canceled for 1h so a late submit is refused (aborted), and the call fails
+	// with not_found.
+	RequestId     string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -727,6 +749,13 @@ func (*CancelJobRequest) Descriptor() ([]byte, []int) {
 func (x *CancelJobRequest) GetId() string {
 	if x != nil {
 		return x.Id
+	}
+	return ""
+}
+
+func (x *CancelJobRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
 	}
 	return ""
 }
@@ -2037,14 +2066,16 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\tJobSource\x12.\n" +
 	"\x03git\x18\x01 \x01(\v2\x1a.protectorate.v1.GitSourceH\x00R\x03git\x12=\n" +
 	"\bartifact\x18\x02 \x01(\v2\x1f.protectorate.v1.ArtifactSourceH\x00R\bartifactB\x06\n" +
-	"\x04kind\"\xe6\x02\n" +
+	"\x04kind\"\x85\x03\n" +
 	"\x10SubmitJobRequest\x122\n" +
 	"\x06target\x18\x01 \x01(\v2\x1a.protectorate.v1.JobTargetR\x06target\x122\n" +
 	"\x06source\x18\x02 \x01(\v2\x1a.protectorate.v1.JobSourceR\x06source\x12\x18\n" +
 	"\acommand\x18\x03 \x03(\tR\acommand\x12<\n" +
 	"\x03env\x18\x04 \x03(\v2*.protectorate.v1.SubmitJobRequest.EnvEntryR\x03env\x123\n" +
 	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12%\n" +
-	"\x0eartifact_globs\x18\x06 \x03(\tR\rartifactGlobs\x1a6\n" +
+	"\x0eartifact_globs\x18\x06 \x03(\tR\rartifactGlobs\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\a \x01(\tR\trequestId\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1f\n" +
@@ -2054,9 +2085,11 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x05state\x18\x01 \x01(\x0e2\x19.protectorate.v1.JobStateR\x05state\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"<\n" +
 	"\x10ListJobsResponse\x12(\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x14.protectorate.v1.JobR\x04jobs\"\"\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x14.protectorate.v1.JobR\x04jobs\"A\n" +
 	"\x10CancelJobRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"Z\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\"Z\n" +
 	"\x0fWatchJobRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vfrom_offset\x18\x02 \x01(\x04R\n" +

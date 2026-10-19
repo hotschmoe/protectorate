@@ -190,6 +190,7 @@ const SubmitJobRequest$json = {
       '10': 'timeout'
     },
     {'1': 'artifact_globs', '3': 6, '4': 3, '5': 9, '10': 'artifactGlobs'},
+    {'1': 'request_id', '3': 7, '4': 1, '5': 9, '10': 'requestId'},
   ],
   '3': [SubmitJobRequest_EnvEntry$json],
 };
@@ -211,8 +212,9 @@ final $typed_data.Uint8List submitJobRequestDescriptor = $convert.base64Decode(
     'cmNlUgZzb3VyY2USGAoHY29tbWFuZBgDIAMoCVIHY29tbWFuZBI8CgNlbnYYBCADKAsyKi5wcm'
     '90ZWN0b3JhdGUudjEuU3VibWl0Sm9iUmVxdWVzdC5FbnZFbnRyeVIDZW52EjMKB3RpbWVvdXQY'
     'BSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQSJQoOYXJ0aWZhY3RfZ2'
-    'xvYnMYBiADKAlSDWFydGlmYWN0R2xvYnMaNgoIRW52RW50cnkSEAoDa2V5GAEgASgJUgNrZXkS'
-    'FAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AQ==');
+    'xvYnMYBiADKAlSDWFydGlmYWN0R2xvYnMSHQoKcmVxdWVzdF9pZBgHIAEoCVIJcmVxdWVzdElk'
+    'GjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgJUgV2YWx1ZToCOA'
+    'E=');
 
 @$core.Deprecated('Use getJobRequestDescriptor instead')
 const GetJobRequest$json = {
@@ -272,12 +274,14 @@ const CancelJobRequest$json = {
   '1': 'CancelJobRequest',
   '2': [
     {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
+    {'1': 'request_id', '3': 2, '4': 1, '5': 9, '10': 'requestId'},
   ],
 };
 
 /// Descriptor for `CancelJobRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List cancelJobRequestDescriptor =
-    $convert.base64Decode('ChBDYW5jZWxKb2JSZXF1ZXN0Eg4KAmlkGAEgASgJUgJpZA==');
+final $typed_data.Uint8List cancelJobRequestDescriptor = $convert.base64Decode(
+    'ChBDYW5jZWxKb2JSZXF1ZXN0Eg4KAmlkGAEgASgJUgJpZBIdCgpyZXF1ZXN0X2lkGAIgASgJUg'
+    'lyZXF1ZXN0SWQ=');
 
 @$core.Deprecated('Use watchJobRequestDescriptor instead')
 const WatchJobRequest$json = {

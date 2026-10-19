@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -217,18 +219,28 @@ func jobStateName(s pb.JobState) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(s.String(), "JOB_STATE_"), "_", " "))
 }
 
-// runJob submits req and streams its log to stdout (stderr with --json) until
-// the job ends. An interrupt, SIGTERM or a canceled ctx cancels the job and
-// waits for the request to go out; a second interrupt quits.
-func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1connect.JobServiceClient, req *pb.SubmitJobRequest) (*pb.Job, error) {
-	res, err := jc.SubmitJob(ctx, connect.NewRequest(req))
-	if err != nil {
-		return nil, err
+// newRequestID returns a fresh idempotency key for SubmitJob.
+func newRequestID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("request id: %w", err)
 	}
-	job := res.Msg
-	stderr := cmd.ErrOrStderr()
-	fmt.Fprintf(stderr, "job %s on %s\n", job.Id, job.Node)
+	return hex.EncodeToString(b[:]), nil
+}
 
+// runJob submits req under a fresh idempotency key and streams its log to
+// stdout (stderr with --json) until the job ends. An interrupt, SIGTERM or a
+// canceled ctx cancels the job by that key, so it works even when the submit
+// is still in flight and the job id is not known; a second interrupt quits.
+func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1connect.JobServiceClient, req *pb.SubmitJobRequest) (*pb.Job, error) {
+	if req.RequestId == "" {
+		key, err := newRequestID()
+		if err != nil {
+			return nil, err
+		}
+		req.RequestId = key
+	}
+	stderr := cmd.ErrOrStderr()
 	sigc := make(chan os.Signal, 2)
 	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigc)
@@ -239,18 +251,27 @@ func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1c
 		case <-sigc:
 		case <-ctx.Done():
 		case <-finished:
-			return
+			if ctx.Err() == nil {
+				return
+			}
 		}
 		fmt.Fprintln(stderr, "interrupted: canceling job (interrupt again to quit)")
 		go func() { <-sigc; os.Exit(130) }()
 		cctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		_, _ = jc.CancelJob(cctx, connect.NewRequest(&pb.CancelJobRequest{Id: job.Id}))
+		_, _ = jc.CancelJob(cctx, connect.NewRequest(&pb.CancelJobRequest{RequestId: req.RequestId}))
 	}()
 	defer func() {
 		close(finished)
 		<-canceled
 	}()
+
+	res, err := jc.SubmitJob(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	job := res.Msg
+	fmt.Fprintf(stderr, "job %s on %s\n", job.Id, job.Node)
 
 	logw := cmd.OutOrStdout()
 	if o.json {
@@ -469,14 +490,15 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 func jobTestCrossCmd(o *opts) *cobra.Command {
 	var goos, goarch, on string
-	var ttl, timeout time.Duration
+	var timeout time.Duration
 	var allowFamily bool
 	c := &cobra.Command{
 		Use:   "test-cross --goos <os> --goarch <arch> <packages...> [-- <test flags>]",
 		Short: "Compile Go tests here and run the test binaries on a matching node",
 		Long: `Runs "go test -c" for every package with GOOS/GOARCH set, uploads each test
 binary as an artifact job and runs it on one node that matches the platform (a
-lease pins the node for the whole run). The node needs no Go toolchain. Each
+lease pins the node for the whole run; it lives 60s and is renewed while this
+command runs, so a crash frees the node within a minute). The node needs no Go toolchain. Each
 binary ships in a zip with its package directory (testdata and the other files
 tests open) and the module's go.mod/go.sum, laid out as in the module, and runs
 with the package directory as working directory, as "go test" does. Files over
@@ -491,14 +513,13 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 			if len(pkgArgs) == 0 {
 				return errors.New("name at least one package")
 			}
-			return testCross(cmd, o, goos, goarch, on, ttl, timeout, allowFamily, pkgArgs, testArgs)
+			return testCross(cmd, o, goos, goarch, on, timeout, allowFamily, pkgArgs, testArgs)
 		},
 	}
 	f := c.Flags()
 	f.StringVar(&goos, "goos", "", "target GOOS (required)")
 	f.StringVar(&goarch, "goarch", "", "target GOARCH (required)")
 	f.StringVar(&on, "on", "", "run on this node or lease instead of picking a matching node")
-	f.DurationVar(&ttl, "ttl", 30*time.Minute, "lease lifetime for the picked node")
 	f.DurationVar(&timeout, "timeout", 10*time.Minute, "per-package run timeout")
 	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")
 	_ = c.MarkFlagRequired("goos")
@@ -506,9 +527,11 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 	return c
 }
 
-func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeout time.Duration, allowFamily bool, patterns, testArgs []string) error {
+func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout time.Duration, allowFamily bool, patterns, testArgs []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	jobCtx, lose := context.WithCancelCause(ctx)
+	defer lose(nil)
 	stderr := cmd.ErrOrStderr()
 	pkgs, err := goList(ctx, patterns)
 	if err != nil {
@@ -566,14 +589,33 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 		}
 		res, err := lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{
 			Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{Os: goos, Arch: goarch}},
-			Holder: defaultHolder() + " test-cross", Ttl: durationpb.New(ttl), AllowFamily: allowFamily,
+			Holder: defaultHolder() + " test-cross", Ttl: durationpb.New(testCrossLeaseTTL), AllowFamily: allowFamily,
 		}))
 		if err != nil {
 			return fmt.Errorf("find a %s/%s node: %w", goos, goarch, err)
 		}
 		lease := res.Msg
 		fmt.Fprintf(stderr, "lease %s on %s\n", lease.Id, lease.Resource)
+		renewed := make(chan struct{})
+		renewCtx, stopRenew := context.WithCancel(ctx)
+		ticker := time.NewTicker(testCrossLeaseTTL / 3)
+		go func() {
+			defer close(renewed)
+			defer ticker.Stop()
+			err := keepLease(renewCtx, ticker.C, func(rc context.Context) error {
+				rc, cancel := context.WithTimeout(rc, testCrossLeaseTTL/3)
+				defer cancel()
+				_, err := lc.RenewLease(rc, connect.NewRequest(&pb.RenewLeaseRequest{Id: lease.Id}))
+				return err
+			})
+			if err != nil {
+				fmt.Fprintf(stderr, "lease %s lost: %v\n", lease.Id, err)
+				lose(fmt.Errorf("lease %s lost: %w", lease.Id, err))
+			}
+		}()
 		defer func() {
+			stopRenew()
+			<-renewed
 			rctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			if _, err := lc.ReleaseLease(rctx, connect.NewRequest(&pb.ReleaseLeaseRequest{Id: lease.Id})); err != nil {
@@ -590,7 +632,7 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 		if goos == "windows" {
 			exe = `.\` + b.name
 		}
-		j, err := runJob(ctx, o, cmd, jc, &pb.SubmitJobRequest{
+		j, err := runJob(jobCtx, o, cmd, jc, &pb.SubmitJobRequest{
 			Target:  target,
 			Source:  &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: b.stage, Workdir: b.workdir}}},
 			Command: append([]string{exe}, testArgs...),
@@ -598,6 +640,9 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 		})
 		if ctx.Err() != nil {
 			return &exitError{code: 130, msg: "interrupted"}
+		}
+		if cause := context.Cause(jobCtx); cause != nil {
+			return cause
 		}
 		if err != nil {
 			return err
@@ -610,6 +655,43 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 		return &exitError{code: 1, msg: "tests failed: " + strings.Join(failed, ", ")}
 	}
 	return nil
+}
+
+// testCrossLeaseTTL is how long the test-cross lease outlives its last
+// renewal, and so how long a crashed run keeps the node.
+const testCrossLeaseTTL = 60 * time.Second
+
+// maxRenewFailures is how many renewals in a row may fail before the lease is
+// given up; with a TTL/3 tick the lease is still live after the first miss.
+const maxRenewFailures = 2
+
+// keepLease calls renew on every tick until ctx ends (nil) or the lease is
+// lost: renew reports it gone or invalid, or fails maxRenewFailures times in a
+// row.
+func keepLease(ctx context.Context, ticks <-chan time.Time, renew func(context.Context) error) error {
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticks:
+		}
+		err := renew(ctx)
+		if err == nil {
+			failures = 0
+			continue
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		switch connect.CodeOf(err) {
+		case connect.CodeNotFound, connect.CodeInvalidArgument, connect.CodePermissionDenied, connect.CodeUnauthenticated:
+			return fmt.Errorf("renew: %w", err)
+		}
+		if failures++; failures >= maxRenewFailures {
+			return fmt.Errorf("renew failed %d times: %w", failures, err)
+		}
+	}
 }
 
 type goPackage struct{ path, dir, modDir string }

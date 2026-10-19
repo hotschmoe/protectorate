@@ -44,8 +44,9 @@ abstract final class JobService {
     idempotency: connect.Idempotency.noSideEffects,
   );
 
-  /// CancelJob stops a job and its whole process tree. Cancelling a finished
-  /// job is a no-op that returns its record.
+  /// CancelJob stops a job and its whole process tree, named by id or by the
+  /// SubmitJob request_id. Cancelling a finished job is a no-op that returns
+  /// its record.
   static const cancelJob = connect.Spec(
     '/$name/CancelJob',
     connect.StreamType.unary,

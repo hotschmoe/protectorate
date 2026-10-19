@@ -395,6 +395,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
     $1.Duration? timeout,
     $core.Iterable<$core.String>? artifactGlobs,
+    $core.String? requestId,
   }) {
     final result = SubmitJobRequest._();
     if (target != null) result.target = target;
@@ -403,6 +404,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     if (env != null) result.env.addEntries(env);
     if (timeout != null) result.timeout = timeout;
     if (artifactGlobs != null) result.artifactGlobs.addAll(artifactGlobs);
+    if (requestId != null) result.requestId = requestId;
     return result;
   }
 
@@ -433,6 +435,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     ..aOM<$1.Duration>(5, _omitFieldNames ? '' : 'timeout',
         subBuilder: $1.Duration.$_createMessage)
     ..pPS(6, _omitFieldNames ? '' : 'artifactGlobs')
+    ..aOS(7, _omitFieldNames ? '' : 'requestId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -504,6 +507,22 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
   /// a directory takes the files below it.
   @$pb.TagNumber(6)
   $pb.PbList<$core.String> get artifactGlobs => $_getList(5);
+
+  /// request_id is a client-chosen idempotency key, 8 to 128 characters of
+  /// [A-Za-z0-9._-]. The hub remembers it for 1h after the first submit with
+  /// it: a repeat returns the same job instead of creating another, and waits
+  /// if the first call is still in flight. Pick it with enough entropy to be
+  /// unique among callers (a UUID or 16 random bytes in hex). With it, a caller
+  /// that lost the response can still find or cancel the job (CancelJob
+  /// request_id). Empty means no deduplication.
+  @$pb.TagNumber(7)
+  $core.String get requestId => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set requestId($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasRequestId() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearRequestId() => $_clearField(7);
 }
 
 class GetJobRequest extends $pb.GeneratedMessage {
@@ -693,9 +712,11 @@ class ListJobsResponse extends $pb.GeneratedMessage {
 class CancelJobRequest extends $pb.GeneratedMessage {
   factory CancelJobRequest({
     $core.String? id,
+    $core.String? requestId,
   }) {
     final result = CancelJobRequest._();
     if (id != null) result.id = id;
+    if (requestId != null) result.requestId = requestId;
     return result;
   }
 
@@ -714,6 +735,7 @@ class CancelJobRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: CancelJobRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'id')
+    ..aOS(2, _omitFieldNames ? '' : 'requestId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -738,6 +760,7 @@ class CancelJobRequest extends $pb.GeneratedMessage {
           CancelJobRequest.$_createMessage);
   static CancelJobRequest? _defaultInstance;
 
+  /// id names the job. Set exactly one of id and request_id.
   @$pb.TagNumber(1)
   $core.String get id => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -746,6 +769,20 @@ class CancelJobRequest extends $pb.GeneratedMessage {
   $core.bool hasId() => $_has(0);
   @$pb.TagNumber(1)
   void clearId() => $_clearField(1);
+
+  /// request_id names the job by the SubmitJob key, for a caller that never
+  /// saw the response. A submit still in flight is awaited and then canceled.
+  /// When no submit with the key has reached the hub, the key is remembered as
+  /// canceled for 1h so a late submit is refused (aborted), and the call fails
+  /// with not_found.
+  @$pb.TagNumber(2)
+  $core.String get requestId => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set requestId($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasRequestId() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearRequestId() => $_clearField(2);
 }
 
 class WatchJobRequest extends $pb.GeneratedMessage {
@@ -2505,8 +2542,9 @@ class JobServiceApi {
       _client.invoke<ListJobsResponse>(
           ctx, 'JobService', 'ListJobs', request, ListJobsResponse());
 
-  /// CancelJob stops a job and its whole process tree. Cancelling a finished
-  /// job is a no-op that returns its record.
+  /// CancelJob stops a job and its whole process tree, named by id or by the
+  /// SubmitJob request_id. Cancelling a finished job is a no-op that returns
+  /// its record.
   $async.Future<Job> cancelJob(
           $pb.ClientContext? ctx, CancelJobRequest request) =>
       _client.invoke<Job>(ctx, 'JobService', 'CancelJob', request, Job());

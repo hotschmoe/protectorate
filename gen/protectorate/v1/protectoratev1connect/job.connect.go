@@ -54,8 +54,9 @@ type JobServiceClient interface {
 	GetJob(context.Context, *connect.Request[v1.GetJobRequest]) (*connect.Response[v1.Job], error)
 	// ListJobs returns job records, newest first.
 	ListJobs(context.Context, *connect.Request[v1.ListJobsRequest]) (*connect.Response[v1.ListJobsResponse], error)
-	// CancelJob stops a job and its whole process tree. Cancelling a finished
-	// job is a no-op that returns its record.
+	// CancelJob stops a job and its whole process tree, named by id or by the
+	// SubmitJob request_id. Cancelling a finished job is a no-op that returns
+	// its record.
 	CancelJob(context.Context, *connect.Request[v1.CancelJobRequest]) (*connect.Response[v1.Job], error)
 	// WatchJob replays a job's log from an offset and, when follow is set,
 	// streams new output and state changes until the job ends.
@@ -152,8 +153,9 @@ type JobServiceHandler interface {
 	GetJob(context.Context, *connect.Request[v1.GetJobRequest]) (*connect.Response[v1.Job], error)
 	// ListJobs returns job records, newest first.
 	ListJobs(context.Context, *connect.Request[v1.ListJobsRequest]) (*connect.Response[v1.ListJobsResponse], error)
-	// CancelJob stops a job and its whole process tree. Cancelling a finished
-	// job is a no-op that returns its record.
+	// CancelJob stops a job and its whole process tree, named by id or by the
+	// SubmitJob request_id. Cancelling a finished job is a no-op that returns
+	// its record.
 	CancelJob(context.Context, *connect.Request[v1.CancelJobRequest]) (*connect.Response[v1.Job], error)
 	// WatchJob replays a job's log from an offset and, when follow is set,
 	// streams new output and state changes until the job ends.

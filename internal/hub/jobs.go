@@ -162,6 +162,8 @@ type JobManager struct {
 	// selector submits see each other's load.
 	submitMu sync.Mutex
 
+	keys *submitKeys
+
 	mu   sync.Mutex
 	jobs map[string]*jobEntry
 
@@ -177,7 +179,7 @@ func OpenJobs(dir string, nodes *NodeMonitor, leases *LeaseTable, local *node.Jo
 		return nil, fmt.Errorf("create jobs dir: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &JobManager{dir: dir, nodes: nodes, leases: leases, local: local, emit: emit, jobs: map[string]*jobEntry{}, ctx: ctx, cancel: cancel}
+	m := &JobManager{dir: dir, nodes: nodes, leases: leases, local: local, emit: emit, jobs: map[string]*jobEntry{}, keys: newSubmitKeys(time.Now), ctx: ctx, cancel: cancel}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -441,6 +443,13 @@ func newJobID() (string, error) {
 // Submit validates, places and registers a job, then runs it in the
 // background.
 func (m *JobManager) Submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.Job, error) {
+	if req.RequestId != "" {
+		return m.submitKeyed(ctx, req)
+	}
+	return m.submit(ctx, req)
+}
+
+func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.Job, error) {
 	timeout, err := validateSubmit(req)
 	if err != nil {
 		return nil, err
@@ -958,7 +967,16 @@ func (h *Hub) ListJobs(_ context.Context, req *connect.Request[pb.ListJobsReques
 }
 
 func (h *Hub) CancelJob(ctx context.Context, req *connect.Request[pb.CancelJobRequest]) (*connect.Response[pb.Job], error) {
-	j, err := h.jobs.Cancel(ctx, req.Msg.Id)
+	var j *pb.Job
+	var err error
+	switch id, key := req.Msg.Id, req.Msg.RequestId; {
+	case (id == "") == (key == ""):
+		return nil, invalid("set exactly one of id and request_id")
+	case key != "":
+		j, err = h.jobs.cancelKeyed(ctx, key)
+	default:
+		j, err = h.jobs.Cancel(ctx, id)
+	}
 	if err != nil {
 		return nil, err
 	}

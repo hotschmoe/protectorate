@@ -70,8 +70,9 @@ extension type JobServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// CancelJob stops a job and its whole process tree. Cancelling a finished
-  /// job is a no-op that returns its record.
+  /// CancelJob stops a job and its whole process tree, named by id or by the
+  /// SubmitJob request_id. Cancelling a finished job is a no-op that returns
+  /// its record.
   Future<protectoratev1job.Job> cancelJob(
     protectoratev1job.CancelJobRequest input, {
     connect.Headers? headers,
