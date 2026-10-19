@@ -1,0 +1,6 @@
+name: jsonrpc_spike
+publish_to: none
+environment:
+  sdk: ^3.7.0
+dependencies:
+  http: ^1.2.0
