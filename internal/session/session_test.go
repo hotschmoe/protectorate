@@ -42,7 +42,7 @@ func TestParseList(t *testing.T) {
 		check   func(t *testing.T, s []Session)
 	}{
 		{"empty", "", 0, false, nil},
-		{"one with command", "a\t100\t2\t200\t80\t24\t/tmp\t0\t\t\t\t[\"sh\",\"-c\",\"x y\"]\n", 1, false, func(t *testing.T, s []Session) {
+		{"one with command", "a\t100\t2\t200\t80\t24\t/tmp\t0\t\t\t\tWyJzaCIsIi1jIiwieCB5Il0\n", 1, false, func(t *testing.T, s []Session) {
 			if s[0].AttachedClients != 2 || s[0].Cols != 80 || s[0].Cwd != "/tmp" || len(s[0].Command) != 3 || s[0].Command[2] != "x y" || s[0].State != Running {
 				t.Fatalf("%+v", s[0])
 			}
@@ -229,6 +229,7 @@ func TestSessionExit(t *testing.T) {
 		{"exit 3", []string{"sh", "-c", "echo last-words; exit 3"}, 3, 0, "last-words"},
 		{"exit 0", []string{"sh", "-c", "echo fine"}, 0, 0, "fine"},
 		{"killed by signal", []string{"sh", "-c", "echo dying; kill -9 $$"}, 137, 9, "dying"},
+		{"env var reference", []string{"sh", "-c", "echo $HOME; echo $GREETING $1 $$; exit 2", "a b"}, 2, 0, ""},
 		{"arg ending in semicolon", []string{"sh", "-c", "echo \"$0\"; exit 1", "end;"}, 1, 0, "end;"},
 	}
 	for i, tt := range tests {
@@ -241,7 +242,7 @@ func TestSessionExit(t *testing.T) {
 			if s.ExitCode != tt.wantCode || s.ExitSignal != tt.wantSignal || s.Exited.IsZero() {
 				t.Fatalf("%+v", s)
 			}
-			if len(s.Command) != len(tt.command) {
+			if !slices.Equal(s.Command, tt.command) {
 				t.Fatalf("command not preserved: %v", s.Command)
 			}
 			out, err := m.Capture(ctx, name, 50)

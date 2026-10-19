@@ -31,7 +31,7 @@ Guiding rules:
                      |  sessions (tmux)         |
                      |  sleeves (workspaces)    |
                      |  nodes / leases / jobs   |
-                     |  backlog                 |
+                     |  notes (backlog)         |
                      +---+------------------+---+
                          |                  |   tailnet (tsnet, embedded WireGuard)
               sleeves on the hub        +---v-------------------------------+
@@ -481,7 +481,7 @@ The coordinator is hub code, not a sleeve, and decides nothing with a model.
   escalated to the orchestrator.
 - **Leases:** an opt-in FIFO queue with a claim window and a grant notice.
 - **Notices:** new tags and default-branch advances are read with local git and
-  sent to dependent projects as facts, or filed as backlog items.
+  sent to dependent projects as facts, or filed as notes.
 
 ## Credentials (spike 3 done: `spikes/credentials/`)
 
@@ -531,7 +531,7 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
   directory.json      # projects, packages, last seen refs
   mailbox.jsonl       # messages and their delivery state
   jobs/<id>/          # job.json, job.log, artifacts/ (P3)
-  backlog.md          # low-priority work; items may link to GitHub issues (P6)
+  notes.json          # the owner's notes (docs/backlog.md)
   ca/                 # SSH CA for short-lived certs to nodes
   tailnet/            # tsnet + headscale state
   backups/            # default target of `hub backup` (docs/install.md)

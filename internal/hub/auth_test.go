@@ -83,7 +83,7 @@ func TestUnaryScopeEnforcement(t *testing.T) {
 		"none":     "not-a-token",
 		"read":     e.mint(t, "read", time.Hour, "read"),
 		"backlog":  e.mint(t, "backlog", time.Hour, "backlog_*"),
-		"add":      e.mint(t, "add", time.Hour, "backlog_add_item"),
+		"add":      e.mint(t, "add", time.Hour, "backlog_create_note"),
 		"star":     e.mint(t, "star", time.Hour, "*"),
 		"sessions": e.mint(t, "sessions", time.Hour, "session_*"),
 		"expired":  e.mint(t, "expired", time.Nanosecond, "*"),
@@ -103,8 +103,8 @@ func TestUnaryScopeEnforcement(t *testing.T) {
 		return err
 	}
 	add := func(c *http.Client) error {
-		_, err := protectoratev1connect.NewBacklogServiceClient(c, e.srv.URL).AddItem(context.Background(),
-			connect.NewRequest(&pb.AddItemRequest{Project: "me/repo", Title: "t"}))
+		_, err := protectoratev1connect.NewBacklogServiceClient(c, e.srv.URL).CreateNote(context.Background(),
+			connect.NewRequest(&pb.CreateNoteRequest{Title: "t"}))
 		return err
 	}
 	kill := func(c *http.Client) error {
@@ -164,8 +164,8 @@ func TestUnaryScopeEnforcement(t *testing.T) {
 	}
 
 	_, err := protectoratev1connect.NewBacklogServiceClient(&http.Client{Transport: bearer{tokens["read"]}}, e.srv.URL).
-		AddItem(context.Background(), connect.NewRequest(&pb.AddItemRequest{Project: "me/repo", Title: "t"}))
-	if err == nil || !strings.Contains(err.Error(), "backlog_add_item") {
+		CreateNote(context.Background(), connect.NewRequest(&pb.CreateNoteRequest{Title: "t"}))
+	if err == nil || !strings.Contains(err.Error(), "backlog_create_note") {
 		t.Fatalf("denial does not name the scope: %v", err)
 	}
 }
@@ -293,7 +293,7 @@ func TestAuditCoversMutationsNotReads(t *testing.T) {
 	readHC := &http.Client{Transport: bearer{read}}
 
 	protectoratev1connect.NewHubServiceClient(ownerHC, e.srv.URL).GetStatus(ctx, connect.NewRequest(&pb.GetStatusRequest{}))
-	protectoratev1connect.NewBacklogServiceClient(ownerHC, e.srv.URL).ListItems(ctx, connect.NewRequest(&pb.ListItemsRequest{}))
+	protectoratev1connect.NewBacklogServiceClient(ownerHC, e.srv.URL).ListNotes(ctx, connect.NewRequest(&pb.ListNotesRequest{}))
 	protectoratev1connect.NewHubServiceClient(readHC, e.srv.URL).GetStatus(ctx, connect.NewRequest(&pb.GetStatusRequest{}))
 	protectoratev1connect.NewHubServiceClient(&http.Client{Transport: bearer{"bad"}}, e.srv.URL).GetStatus(ctx, connect.NewRequest(&pb.GetStatusRequest{}))
 	st, err := protectoratev1connect.NewEventServiceClient(ownerHC, e.srv.URL).Subscribe(ctx, connect.NewRequest(&pb.SubscribeRequest{}))
@@ -306,8 +306,8 @@ func TestAuditCoversMutationsNotReads(t *testing.T) {
 		t.Fatalf("reads were audited: %+v", got)
 	}
 
-	protectoratev1connect.NewBacklogServiceClient(ownerHC, e.srv.URL).AddItem(ctx, connect.NewRequest(&pb.AddItemRequest{Project: "me/repo", Title: "do thing"}))
-	protectoratev1connect.NewBacklogServiceClient(readHC, e.srv.URL).AddItem(ctx, connect.NewRequest(&pb.AddItemRequest{Project: "me/repo", Title: "sneaky"}))
+	protectoratev1connect.NewBacklogServiceClient(ownerHC, e.srv.URL).CreateNote(ctx, connect.NewRequest(&pb.CreateNoteRequest{Title: "do thing"}))
+	protectoratev1connect.NewBacklogServiceClient(readHC, e.srv.URL).CreateNote(ctx, connect.NewRequest(&pb.CreateNoteRequest{Title: "sneaky"}))
 	protectoratev1connect.NewSessionServiceClient(&http.Client{Transport: bearer{"bad"}}, e.srv.URL).KillSession(ctx, connect.NewRequest(&pb.KillSessionRequest{Name: "victim"}))
 	protectoratev1connect.NewSessionServiceClient(ownerHC, e.srv.URL).KillSession(ctx, connect.NewRequest(&pb.KillSessionRequest{Name: "ghost"}))
 	created, _ := protectoratev1connect.NewTokenServiceClient(ownerHC, e.srv.URL).CreateToken(ctx, connect.NewRequest(&pb.CreateTokenRequest{Name: "dev", Scopes: []string{"read"}}))
@@ -320,8 +320,8 @@ func TestAuditCoversMutationsNotReads(t *testing.T) {
 		rows = append(rows, row{g.Actor, g.Procedure, g.Subject, g.Outcome, g.Code})
 	}
 	want := []row{
-		{"owner", "/protectorate.v1.BacklogService/AddItem", "", "ok", ""},
-		{"token:reader", "/protectorate.v1.BacklogService/AddItem", "", "denied", "permission_denied"},
+		{"owner", "/protectorate.v1.BacklogService/CreateNote", "", "ok", ""},
+		{"token:reader", "/protectorate.v1.BacklogService/CreateNote", "", "denied", "permission_denied"},
 		{"unauthenticated", "/protectorate.v1.SessionService/KillSession", "victim", "denied", "unauthenticated"},
 		{"owner", "/protectorate.v1.SessionService/KillSession", "ghost", "error", "not_found"},
 		{"owner", "/protectorate.v1.TokenService/CreateToken", "dev", "ok", ""},
@@ -466,7 +466,7 @@ func TestTailnetPathComposesIdentityAndToken(t *testing.T) {
 		hc := &http.Client{Transport: bearer{token}}
 		ctx := context.Background()
 		if add {
-			_, err := protectoratev1connect.NewBacklogServiceClient(hc, ts.URL).AddItem(ctx, connect.NewRequest(&pb.AddItemRequest{Project: "me/repo", Title: "t"}))
+			_, err := protectoratev1connect.NewBacklogServiceClient(hc, ts.URL).CreateNote(ctx, connect.NewRequest(&pb.CreateNoteRequest{Title: "t"}))
 			return 0, err
 		}
 		_, err := protectoratev1connect.NewHubServiceClient(hc, ts.URL).GetStatus(ctx, connect.NewRequest(&pb.GetStatusRequest{}))

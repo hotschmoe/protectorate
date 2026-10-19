@@ -3,99 +3,111 @@ syntax = "proto3";
 package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
-// BacklogService fronts the markdown file at $PROTECTORATE_HOME/backlog.md.
-// Mutations publish backlog.* events on EventService.
+// BacklogService keeps the owner's notes on the hub (docs/backlog.md). The
+// owner writes them in the app or CLI; the orchestrator reads and edits them
+// through the same API. Mutations publish note.* events on EventService.
 service BacklogService {
-  // ListItems returns backlog items, optionally filtered by project, state
-  // and harness.
-  rpc ListItems(ListItemsRequest) returns (ListItemsResponse) {
+  // ListNotes returns notes, pinned first and then most recently updated,
+  // optionally filtered by project tag and a text query.
+  rpc ListNotes(ListNotesRequest) returns (ListNotesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // AddItem appends a new TODO item to a project and returns it with its id.
-  rpc AddItem(AddItemRequest) returns (AddItemResponse);
+  // GetNote returns one note by id.
+  rpc GetNote(GetNoteRequest) returns (GetNoteResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
-  // UpdateItem sets an item's state, claiming or releasing it.
-  rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse);
+  // CreateNote adds a note and returns it with its id.
+  rpc CreateNote(CreateNoteRequest) returns (CreateNoteResponse);
+
+  // UpdateNote changes the fields that are set and leaves the others alone.
+  rpc UpdateNote(UpdateNoteRequest) returns (UpdateNoteResponse);
+
+  // DeleteNote removes a note for good.
+  rpc DeleteNote(DeleteNoteRequest) returns (DeleteNoteResponse) {
+    option (protectorate.v1.destructive) = true;
+  }
 }
 
-enum ItemState {
-  ITEM_STATE_UNSPECIFIED = 0;
-  ITEM_STATE_TODO = 1;
-  ITEM_STATE_CLAIMED = 2;
-  ITEM_STATE_DONE = 3;
-}
-
-// Claim records who took an item and when.
-message Claim {
-  // by is "<sleeve>" or "<sleeve>/<harness>"; no whitespace or '@'.
-  string by = 1;
-  google.protobuf.Timestamp at = 2;
-}
-
-// Item is one backlog entry.
-message Item {
-  // id is the stable item identifier assigned on creation.
+// Note is one note.
+message Note {
+  // id is the stable identifier assigned on creation.
   string id = 1;
-  // project is the heading text, e.g. "hotschmoe/protectorate" or "donate: owner/repo".
-  string project = 2;
-  // title is the one-line description of the work.
-  string title = 3;
-  // issue_url optionally links the GitHub issue.
-  string issue_url = 4;
-  // priority is 1 (highest) to 9; 0 means unset.
-  int32 priority = 5;
-  // harness is a preference such as "codex"; empty or "any" means no preference.
-  string harness = 6;
-  ItemState state = 7;
-  Claim claim = 8;
-  // notes is free-form text attached to the item.
-  string notes = 9;
-  // donate marks public repos we do not own; results must go to a review inbox.
-  bool donate = 10;
-}
-
-message ListItemsRequest {
-  string project = 1;
-  // state of UNSPECIFIED matches every state.
-  ItemState state = 2;
-  // harness keeps items this harness may run: its own plus "any"/unset.
-  string harness = 3;
-}
-
-message ListItemsResponse {
-  repeated Item items = 1;
-}
-
-message AddItemRequest {
-  // project is the heading to file the item under.
-  string project = 1;
+  // title is a single line; it may be empty when the note has a body.
   string title = 2;
-  string issue_url = 3;
-  // priority is 1 (highest) to 9; 0 means unset.
-  int32 priority = 4;
-  // harness is a preference such as "codex"; empty or "any" means none.
-  string harness = 5;
+  // body is markdown text.
+  string body = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  // pinned notes sort first.
+  bool pinned = 6;
+  // project is an optional tag such as "hotschmoe/protectorate".
+  string project = 7;
+  // source is who created the note: "owner", a sleeve name, "poe" or "hub".
+  string source = 8;
 }
 
-message AddItemResponse {
-  Item item = 1;
+message ListNotesRequest {
+  // project keeps notes with exactly this tag.
+  string project = 1;
+  // query keeps notes whose title or body contains it, ignoring case.
+  string query = 2;
 }
 
-// UpdateItemRequest moves an item to state. Claiming requires claim.by and
-// fails with FAILED_PRECONDITION if another claimant holds the item.
-message UpdateItemRequest {
-  // id of the item to change.
+message ListNotesResponse {
+  repeated Note notes = 1;
+}
+
+message GetNoteRequest {
   string id = 1;
-  // state is the state to move the item to.
-  ItemState state = 2;
-  // claim is required when state is CLAIMED.
-  Claim claim = 3;
 }
 
-message UpdateItemResponse {
-  Item item = 1;
+message GetNoteResponse {
+  Note note = 1;
 }
+
+// CreateNoteRequest needs a title or a body. The source is taken from the
+// caller's identity, not from the request.
+message CreateNoteRequest {
+  // title is a single line, up to 200 characters.
+  string title = 1;
+  // body is markdown text.
+  string body = 2;
+  bool pinned = 3;
+  // project is an optional tag such as "hotschmoe/protectorate".
+  string project = 4;
+}
+
+message CreateNoteResponse {
+  Note note = 1;
+}
+
+// UpdateNoteRequest sets the fields that are present; an empty project clears
+// the tag.
+message UpdateNoteRequest {
+  // id of the note to change.
+  string id = 1;
+  // title replaces the title when set.
+  optional string title = 2;
+  // body replaces the whole markdown body when set; send the full text.
+  optional string body = 3;
+  // pinned pins or unpins the note when set.
+  optional bool pinned = 4;
+  // project replaces the project tag when set; "" clears it.
+  optional string project = 5;
+}
+
+message UpdateNoteResponse {
+  Note note = 1;
+}
+
+message DeleteNoteRequest {
+  string id = 1;
+}
+
+message DeleteNoteResponse {}

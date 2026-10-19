@@ -15,7 +15,9 @@ import (
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 )
 
-func TestBacklogService(t *testing.T) {
+func ptr[T any](v T) *T { return &v }
+
+func TestNotesService(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("PROTECTORATE_HOME", home)
 	_, srv := newTestHub(t)
@@ -32,17 +34,7 @@ func TestBacklogService(t *testing.T) {
 	if !ev.Receive() {
 		t.Fatal(ev.Err())
 	}
-
-	add, err := c.AddItem(ctx, connect.NewRequest(&pb.AddItemRequest{Project: "me/repo", Title: "do it", Priority: 2, Harness: "codex"}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := add.Msg.Item.Id
-	if id == "" || add.Msg.Item.State != pb.ItemState_ITEM_STATE_TODO || add.Msg.Item.Priority != 2 {
-		t.Fatalf("added = %v", add.Msg.Item)
-	}
-
-	expect := func(t *testing.T, kind string) {
+	expect := func(t *testing.T, kind, id string) {
 		t.Helper()
 		for ev.Receive() {
 			e := ev.Msg()
@@ -50,40 +42,41 @@ func TestBacklogService(t *testing.T) {
 				continue
 			}
 			if e.Kind != kind || e.Subject != id {
-				t.Fatalf("event = %v, want %s", e, kind)
+				t.Fatalf("event = %v, want %s %s", e, kind, id)
 			}
 			return
 		}
 		t.Fatalf("no %s event: %v", kind, ev.Err())
 	}
-	expect(t, "backlog.added")
+
+	created, err := c.CreateNote(ctx, connect.NewRequest(&pb.CreateNoteRequest{Title: "buy cables", Body: "- usb-c\n- hdmi", Project: "me/repo"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := created.Msg.Note
+	if n.Id == "" || n.Source != "owner" || n.Project != "me/repo" || n.CreatedAt == nil || n.Body != "- usb-c\n- hdmi" {
+		t.Fatalf("created = %v", n)
+	}
+	expect(t, "note.created", n.Id)
 
 	tests := []struct {
 		name     string
-		id       string
-		state    pb.ItemState
-		by       string
+		req      *pb.UpdateNoteRequest
 		wantCode connect.Code
 		wantKind string
+		check    func(*pb.Note) bool
 	}{
-		{"unspecified state", id, pb.ItemState_ITEM_STATE_UNSPECIFIED, "", connect.CodeInvalidArgument, ""},
-		{"claim without by", id, pb.ItemState_ITEM_STATE_CLAIMED, "", connect.CodeInvalidArgument, ""},
-		{"unknown id", "ffff", pb.ItemState_ITEM_STATE_DONE, "", connect.CodeUnknown, ""},
-		{"claim", id, pb.ItemState_ITEM_STATE_CLAIMED, "alice/codex", 0, "backlog.claimed"},
-		{"claim again same holder", id, pb.ItemState_ITEM_STATE_CLAIMED, "alice/codex", 0, ""},
-		{"claim taken", id, pb.ItemState_ITEM_STATE_CLAIMED, "bob", connect.CodeFailedPrecondition, ""},
-		{"release", id, pb.ItemState_ITEM_STATE_TODO, "", 0, "backlog.released"},
-		{"done", id, pb.ItemState_ITEM_STATE_DONE, "alice", 0, "backlog.done"},
-		{"reopen", id, pb.ItemState_ITEM_STATE_TODO, "", 0, "backlog.reopened"},
+		{"unknown id", &pb.UpdateNoteRequest{Id: "ffff", Title: ptr("x")}, connect.CodeNotFound, "", nil},
+		{"multi-line title", &pb.UpdateNoteRequest{Id: n.Id, Title: ptr("a\nb")}, connect.CodeInvalidArgument, "", nil},
+		{"empties the note", &pb.UpdateNoteRequest{Id: n.Id, Title: ptr(""), Body: ptr("")}, connect.CodeInvalidArgument, "", nil},
+		{"pin", &pb.UpdateNoteRequest{Id: n.Id, Pinned: ptr(true)}, 0, "note.updated", func(n *pb.Note) bool { return n.Pinned && n.Title == "buy cables" }},
+		{"same again changes nothing", &pb.UpdateNoteRequest{Id: n.Id, Pinned: ptr(true)}, 0, "", func(n *pb.Note) bool { return n.Pinned }},
+		{"body keeps title", &pb.UpdateNoteRequest{Id: n.Id, Body: ptr("done")}, 0, "note.updated", func(n *pb.Note) bool { return n.Body == "done" && n.Title == "buy cables" }},
+		{"clear project", &pb.UpdateNoteRequest{Id: n.Id, Project: ptr("")}, 0, "note.updated", func(n *pb.Note) bool { return n.Project == "" }},
 	}
-	tests[2].wantCode = connect.CodeNotFound
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &pb.UpdateItemRequest{Id: tt.id, State: tt.state}
-			if tt.by != "" {
-				req.Claim = &pb.Claim{By: tt.by}
-			}
-			res, err := c.UpdateItem(ctx, connect.NewRequest(req))
+			res, err := c.UpdateNote(ctx, connect.NewRequest(tt.req))
 			if tt.wantCode != 0 {
 				if connect.CodeOf(err) != tt.wantCode {
 					t.Fatalf("err = %v, want %v", err, tt.wantCode)
@@ -93,31 +86,45 @@ func TestBacklogService(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.Msg.Item.State != tt.state {
-				t.Fatalf("state = %v", res.Msg.Item.State)
+			if !tt.check(res.Msg.Note) {
+				t.Fatalf("note = %v", res.Msg.Note)
 			}
-			if tt.wantKind == "" {
-				return
+			if tt.wantKind != "" {
+				expect(t, tt.wantKind, n.Id)
 			}
-			expect(t, tt.wantKind)
 		})
 	}
 
-	list, err := c.ListItems(ctx, connect.NewRequest(&pb.ListItemsRequest{Project: "me/repo", State: pb.ItemState_ITEM_STATE_TODO, Harness: "codex"}))
-	if err != nil || len(list.Msg.Items) != 1 || list.Msg.Items[0].Id != id {
-		t.Fatalf("list = %v err=%v", list, err)
+	second, err := c.CreateNote(ctx, connect.NewRequest(&pb.CreateNoteRequest{Body: "no title, newer"}))
+	if err != nil {
+		t.Fatal(err)
 	}
-	none, err := c.ListItems(ctx, connect.NewRequest(&pb.ListItemsRequest{Harness: "grok"}))
-	if err != nil || len(none.Msg.Items) != 0 {
-		t.Fatalf("grok should not see a codex item: %v err=%v", none, err)
+	expect(t, "note.created", second.Msg.Note.Id)
+	list, err := c.ListNotes(ctx, connect.NewRequest(&pb.ListNotesRequest{}))
+	if err != nil || len(list.Msg.Notes) != 2 || list.Msg.Notes[0].Id != n.Id {
+		t.Fatalf("pinned note must lead: %v err=%v", list, err)
+	}
+	found, err := c.ListNotes(ctx, connect.NewRequest(&pb.ListNotesRequest{Query: "NEWER"}))
+	if err != nil || len(found.Msg.Notes) != 1 || found.Msg.Notes[0].Id != second.Msg.Note.Id {
+		t.Fatalf("query = %v err=%v", found, err)
+	}
+	got, err := c.GetNote(ctx, connect.NewRequest(&pb.GetNoteRequest{Id: n.Id}))
+	if err != nil || got.Msg.Note.Body != "done" {
+		t.Fatalf("get = %v err=%v", got, err)
 	}
 
-	_, err = c.AddItem(ctx, connect.NewRequest(&pb.AddItemRequest{Project: "donate: o/r", Title: "x"}))
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("donate without url: %v", err)
+	if _, err := c.DeleteNote(ctx, connect.NewRequest(&pb.DeleteNoteRequest{Id: n.Id})); err != nil {
+		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(home, "backlog.md"))
-	if err != nil || !strings.HasPrefix(string(b), "## me/repo\n- [ ] do it  #p2 @codex id:"+id) {
+	expect(t, "note.deleted", n.Id)
+	if _, err := c.GetNote(ctx, connect.NewRequest(&pb.GetNoteRequest{Id: n.Id})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("deleted note still there: %v", err)
+	}
+	if _, err := c.CreateNote(ctx, connect.NewRequest(&pb.CreateNoteRequest{})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("empty note: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(home, "notes.json"))
+	if err != nil || strings.Contains(string(b), "buy cables") || !strings.Contains(string(b), "no title, newer") {
 		t.Fatalf("file = %q err=%v", b, err)
 	}
 }

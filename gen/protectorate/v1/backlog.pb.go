@@ -22,152 +22,42 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type ItemState int32
-
-const (
-	ItemState_ITEM_STATE_UNSPECIFIED ItemState = 0
-	ItemState_ITEM_STATE_TODO        ItemState = 1
-	ItemState_ITEM_STATE_CLAIMED     ItemState = 2
-	ItemState_ITEM_STATE_DONE        ItemState = 3
-)
-
-// Enum value maps for ItemState.
-var (
-	ItemState_name = map[int32]string{
-		0: "ITEM_STATE_UNSPECIFIED",
-		1: "ITEM_STATE_TODO",
-		2: "ITEM_STATE_CLAIMED",
-		3: "ITEM_STATE_DONE",
-	}
-	ItemState_value = map[string]int32{
-		"ITEM_STATE_UNSPECIFIED": 0,
-		"ITEM_STATE_TODO":        1,
-		"ITEM_STATE_CLAIMED":     2,
-		"ITEM_STATE_DONE":        3,
-	}
-)
-
-func (x ItemState) Enum() *ItemState {
-	p := new(ItemState)
-	*p = x
-	return p
-}
-
-func (x ItemState) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (ItemState) Descriptor() protoreflect.EnumDescriptor {
-	return file_protectorate_v1_backlog_proto_enumTypes[0].Descriptor()
-}
-
-func (ItemState) Type() protoreflect.EnumType {
-	return &file_protectorate_v1_backlog_proto_enumTypes[0]
-}
-
-func (x ItemState) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use ItemState.Descriptor instead.
-func (ItemState) EnumDescriptor() ([]byte, []int) {
-	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{0}
-}
-
-// Claim records who took an item and when.
-type Claim struct {
+// Note is one note.
+type Note struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// by is "<sleeve>" or "<sleeve>/<harness>"; no whitespace or '@'.
-	By            string                 `protobuf:"bytes,1,opt,name=by,proto3" json:"by,omitempty"`
-	At            *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Claim) Reset() {
-	*x = Claim{}
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Claim) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Claim) ProtoMessage() {}
-
-func (x *Claim) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Claim.ProtoReflect.Descriptor instead.
-func (*Claim) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *Claim) GetBy() string {
-	if x != nil {
-		return x.By
-	}
-	return ""
-}
-
-func (x *Claim) GetAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.At
-	}
-	return nil
-}
-
-// Item is one backlog entry.
-type Item struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// id is the stable item identifier assigned on creation.
+	// id is the stable identifier assigned on creation.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// project is the heading text, e.g. "hotschmoe/protectorate" or "donate: owner/repo".
-	Project string `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
-	// title is the one-line description of the work.
-	Title string `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
-	// issue_url optionally links the GitHub issue.
-	IssueUrl string `protobuf:"bytes,4,opt,name=issue_url,json=issueUrl,proto3" json:"issue_url,omitempty"`
-	// priority is 1 (highest) to 9; 0 means unset.
-	Priority int32 `protobuf:"varint,5,opt,name=priority,proto3" json:"priority,omitempty"`
-	// harness is a preference such as "codex"; empty or "any" means no preference.
-	Harness string    `protobuf:"bytes,6,opt,name=harness,proto3" json:"harness,omitempty"`
-	State   ItemState `protobuf:"varint,7,opt,name=state,proto3,enum=protectorate.v1.ItemState" json:"state,omitempty"`
-	Claim   *Claim    `protobuf:"bytes,8,opt,name=claim,proto3" json:"claim,omitempty"`
-	// notes is free-form text attached to the item.
-	Notes string `protobuf:"bytes,9,opt,name=notes,proto3" json:"notes,omitempty"`
-	// donate marks public repos we do not own; results must go to a review inbox.
-	Donate        bool `protobuf:"varint,10,opt,name=donate,proto3" json:"donate,omitempty"`
+	// title is a single line; it may be empty when the note has a body.
+	Title string `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	// body is markdown text.
+	Body      string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// pinned notes sort first.
+	Pinned bool `protobuf:"varint,6,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	// project is an optional tag such as "hotschmoe/protectorate".
+	Project string `protobuf:"bytes,7,opt,name=project,proto3" json:"project,omitempty"`
+	// source is who created the note: "owner", a sleeve name, "poe" or "hub".
+	Source        string `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Item) Reset() {
-	*x = Item{}
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[1]
+func (x *Note) Reset() {
+	*x = Note{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Item) String() string {
+func (x *Note) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Item) ProtoMessage() {}
+func (*Note) ProtoMessage() {}
 
-func (x *Item) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[1]
+func (x *Note) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -178,106 +68,142 @@ func (x *Item) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Item.ProtoReflect.Descriptor instead.
-func (*Item) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{1}
+// Deprecated: Use Note.ProtoReflect.Descriptor instead.
+func (*Note) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Item) GetId() string {
+func (x *Note) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *Item) GetProject() string {
-	if x != nil {
-		return x.Project
-	}
-	return ""
-}
-
-func (x *Item) GetTitle() string {
+func (x *Note) GetTitle() string {
 	if x != nil {
 		return x.Title
 	}
 	return ""
 }
 
-func (x *Item) GetIssueUrl() string {
+func (x *Note) GetBody() string {
 	if x != nil {
-		return x.IssueUrl
+		return x.Body
 	}
 	return ""
 }
 
-func (x *Item) GetPriority() int32 {
+func (x *Note) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
-		return x.Priority
-	}
-	return 0
-}
-
-func (x *Item) GetHarness() string {
-	if x != nil {
-		return x.Harness
-	}
-	return ""
-}
-
-func (x *Item) GetState() ItemState {
-	if x != nil {
-		return x.State
-	}
-	return ItemState_ITEM_STATE_UNSPECIFIED
-}
-
-func (x *Item) GetClaim() *Claim {
-	if x != nil {
-		return x.Claim
+		return x.CreatedAt
 	}
 	return nil
 }
 
-func (x *Item) GetNotes() string {
+func (x *Note) GetUpdatedAt() *timestamppb.Timestamp {
 	if x != nil {
-		return x.Notes
+		return x.UpdatedAt
 	}
-	return ""
+	return nil
 }
 
-func (x *Item) GetDonate() bool {
+func (x *Note) GetPinned() bool {
 	if x != nil {
-		return x.Donate
+		return x.Pinned
 	}
 	return false
 }
 
-type ListItemsRequest struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Project string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
-	// state of UNSPECIFIED matches every state.
-	State ItemState `protobuf:"varint,2,opt,name=state,proto3,enum=protectorate.v1.ItemState" json:"state,omitempty"`
-	// harness keeps items this harness may run: its own plus "any"/unset.
-	Harness       string `protobuf:"bytes,3,opt,name=harness,proto3" json:"harness,omitempty"`
+func (x *Note) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *Note) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+type ListNotesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// project keeps notes with exactly this tag.
+	Project string `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	// query keeps notes whose title or body contains it, ignoring case.
+	Query         string `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListItemsRequest) Reset() {
-	*x = ListItemsRequest{}
+func (x *ListNotesRequest) Reset() {
+	*x = ListNotesRequest{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListNotesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListNotesRequest) ProtoMessage() {}
+
+func (x *ListNotesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListNotesRequest.ProtoReflect.Descriptor instead.
+func (*ListNotesRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListNotesRequest) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *ListNotesRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+type ListNotesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Notes         []*Note                `protobuf:"bytes,1,rep,name=notes,proto3" json:"notes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListNotesResponse) Reset() {
+	*x = ListNotesResponse{}
 	mi := &file_protectorate_v1_backlog_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListItemsRequest) String() string {
+func (x *ListNotesResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListItemsRequest) ProtoMessage() {}
+func (*ListNotesResponse) ProtoMessage() {}
 
-func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
+func (x *ListNotesResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_protectorate_v1_backlog_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -289,53 +215,39 @@ func (x *ListItemsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListItemsRequest.ProtoReflect.Descriptor instead.
-func (*ListItemsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListNotesResponse.ProtoReflect.Descriptor instead.
+func (*ListNotesResponse) Descriptor() ([]byte, []int) {
 	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ListItemsRequest) GetProject() string {
+func (x *ListNotesResponse) GetNotes() []*Note {
 	if x != nil {
-		return x.Project
+		return x.Notes
 	}
-	return ""
+	return nil
 }
 
-func (x *ListItemsRequest) GetState() ItemState {
-	if x != nil {
-		return x.State
-	}
-	return ItemState_ITEM_STATE_UNSPECIFIED
-}
-
-func (x *ListItemsRequest) GetHarness() string {
-	if x != nil {
-		return x.Harness
-	}
-	return ""
-}
-
-type ListItemsResponse struct {
+type GetNoteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Items         []*Item                `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListItemsResponse) Reset() {
-	*x = ListItemsResponse{}
+func (x *GetNoteRequest) Reset() {
+	*x = GetNoteRequest{}
 	mi := &file_protectorate_v1_backlog_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListItemsResponse) String() string {
+func (x *GetNoteRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListItemsResponse) ProtoMessage() {}
+func (*GetNoteRequest) ProtoMessage() {}
 
-func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
+func (x *GetNoteRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_protectorate_v1_backlog_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -347,227 +259,211 @@ func (x *ListItemsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListItemsResponse.ProtoReflect.Descriptor instead.
-func (*ListItemsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetNoteRequest.ProtoReflect.Descriptor instead.
+func (*GetNoteRequest) Descriptor() ([]byte, []int) {
 	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ListItemsResponse) GetItems() []*Item {
-	if x != nil {
-		return x.Items
-	}
-	return nil
-}
-
-type AddItemRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// project is the heading to file the item under.
-	Project  string `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
-	Title    string `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	IssueUrl string `protobuf:"bytes,3,opt,name=issue_url,json=issueUrl,proto3" json:"issue_url,omitempty"`
-	// priority is 1 (highest) to 9; 0 means unset.
-	Priority int32 `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
-	// harness is a preference such as "codex"; empty or "any" means none.
-	Harness       string `protobuf:"bytes,5,opt,name=harness,proto3" json:"harness,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AddItemRequest) Reset() {
-	*x = AddItemRequest{}
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AddItemRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AddItemRequest) ProtoMessage() {}
-
-func (x *AddItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AddItemRequest.ProtoReflect.Descriptor instead.
-func (*AddItemRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *AddItemRequest) GetProject() string {
-	if x != nil {
-		return x.Project
-	}
-	return ""
-}
-
-func (x *AddItemRequest) GetTitle() string {
-	if x != nil {
-		return x.Title
-	}
-	return ""
-}
-
-func (x *AddItemRequest) GetIssueUrl() string {
-	if x != nil {
-		return x.IssueUrl
-	}
-	return ""
-}
-
-func (x *AddItemRequest) GetPriority() int32 {
-	if x != nil {
-		return x.Priority
-	}
-	return 0
-}
-
-func (x *AddItemRequest) GetHarness() string {
-	if x != nil {
-		return x.Harness
-	}
-	return ""
-}
-
-type AddItemResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Item          *Item                  `protobuf:"bytes,1,opt,name=item,proto3" json:"item,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AddItemResponse) Reset() {
-	*x = AddItemResponse{}
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AddItemResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AddItemResponse) ProtoMessage() {}
-
-func (x *AddItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AddItemResponse.ProtoReflect.Descriptor instead.
-func (*AddItemResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *AddItemResponse) GetItem() *Item {
-	if x != nil {
-		return x.Item
-	}
-	return nil
-}
-
-// UpdateItemRequest moves an item to state. Claiming requires claim.by and
-// fails with FAILED_PRECONDITION if another claimant holds the item.
-type UpdateItemRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// id of the item to change.
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// state is the state to move the item to.
-	State ItemState `protobuf:"varint,2,opt,name=state,proto3,enum=protectorate.v1.ItemState" json:"state,omitempty"`
-	// claim is required when state is CLAIMED.
-	Claim         *Claim `protobuf:"bytes,3,opt,name=claim,proto3" json:"claim,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UpdateItemRequest) Reset() {
-	*x = UpdateItemRequest{}
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UpdateItemRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UpdateItemRequest) ProtoMessage() {}
-
-func (x *UpdateItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_backlog_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UpdateItemRequest.ProtoReflect.Descriptor instead.
-func (*UpdateItemRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *UpdateItemRequest) GetId() string {
+func (x *GetNoteRequest) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *UpdateItemRequest) GetState() ItemState {
-	if x != nil {
-		return x.State
-	}
-	return ItemState_ITEM_STATE_UNSPECIFIED
-}
-
-func (x *UpdateItemRequest) GetClaim() *Claim {
-	if x != nil {
-		return x.Claim
-	}
-	return nil
-}
-
-type UpdateItemResponse struct {
+type GetNoteResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Item          *Item                  `protobuf:"bytes,1,opt,name=item,proto3" json:"item,omitempty"`
+	Note          *Note                  `protobuf:"bytes,1,opt,name=note,proto3" json:"note,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *UpdateItemResponse) Reset() {
-	*x = UpdateItemResponse{}
+func (x *GetNoteResponse) Reset() {
+	*x = GetNoteResponse{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetNoteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetNoteResponse) ProtoMessage() {}
+
+func (x *GetNoteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetNoteResponse.ProtoReflect.Descriptor instead.
+func (*GetNoteResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetNoteResponse) GetNote() *Note {
+	if x != nil {
+		return x.Note
+	}
+	return nil
+}
+
+// CreateNoteRequest needs a title or a body. The source is taken from the
+// caller's identity, not from the request.
+type CreateNoteRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// title is a single line, up to 200 characters.
+	Title string `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
+	// body is markdown text.
+	Body   string `protobuf:"bytes,2,opt,name=body,proto3" json:"body,omitempty"`
+	Pinned bool   `protobuf:"varint,3,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	// project is an optional tag such as "hotschmoe/protectorate".
+	Project       string `protobuf:"bytes,4,opt,name=project,proto3" json:"project,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateNoteRequest) Reset() {
+	*x = CreateNoteRequest{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateNoteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateNoteRequest) ProtoMessage() {}
+
+func (x *CreateNoteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateNoteRequest.ProtoReflect.Descriptor instead.
+func (*CreateNoteRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CreateNoteRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *CreateNoteRequest) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *CreateNoteRequest) GetPinned() bool {
+	if x != nil {
+		return x.Pinned
+	}
+	return false
+}
+
+func (x *CreateNoteRequest) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+type CreateNoteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Note          *Note                  `protobuf:"bytes,1,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateNoteResponse) Reset() {
+	*x = CreateNoteResponse{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateNoteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateNoteResponse) ProtoMessage() {}
+
+func (x *CreateNoteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateNoteResponse.ProtoReflect.Descriptor instead.
+func (*CreateNoteResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CreateNoteResponse) GetNote() *Note {
+	if x != nil {
+		return x.Note
+	}
+	return nil
+}
+
+// UpdateNoteRequest sets the fields that are present; an empty project clears
+// the tag.
+type UpdateNoteRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id of the note to change.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// title replaces the title when set.
+	Title *string `protobuf:"bytes,2,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	// body replaces the whole markdown body when set; send the full text.
+	Body *string `protobuf:"bytes,3,opt,name=body,proto3,oneof" json:"body,omitempty"`
+	// pinned pins or unpins the note when set.
+	Pinned *bool `protobuf:"varint,4,opt,name=pinned,proto3,oneof" json:"pinned,omitempty"`
+	// project replaces the project tag when set; "" clears it.
+	Project       *string `protobuf:"bytes,5,opt,name=project,proto3,oneof" json:"project,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateNoteRequest) Reset() {
+	*x = UpdateNoteRequest{}
 	mi := &file_protectorate_v1_backlog_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *UpdateItemResponse) String() string {
+func (x *UpdateNoteRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*UpdateItemResponse) ProtoMessage() {}
+func (*UpdateNoteRequest) ProtoMessage() {}
 
-func (x *UpdateItemResponse) ProtoReflect() protoreflect.Message {
+func (x *UpdateNoteRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_protectorate_v1_backlog_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -579,68 +475,227 @@ func (x *UpdateItemResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use UpdateItemResponse.ProtoReflect.Descriptor instead.
-func (*UpdateItemResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use UpdateNoteRequest.ProtoReflect.Descriptor instead.
+func (*UpdateNoteRequest) Descriptor() ([]byte, []int) {
 	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *UpdateItemResponse) GetItem() *Item {
+func (x *UpdateNoteRequest) GetId() string {
 	if x != nil {
-		return x.Item
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UpdateNoteRequest) GetTitle() string {
+	if x != nil && x.Title != nil {
+		return *x.Title
+	}
+	return ""
+}
+
+func (x *UpdateNoteRequest) GetBody() string {
+	if x != nil && x.Body != nil {
+		return *x.Body
+	}
+	return ""
+}
+
+func (x *UpdateNoteRequest) GetPinned() bool {
+	if x != nil && x.Pinned != nil {
+		return *x.Pinned
+	}
+	return false
+}
+
+func (x *UpdateNoteRequest) GetProject() string {
+	if x != nil && x.Project != nil {
+		return *x.Project
+	}
+	return ""
+}
+
+type UpdateNoteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Note          *Note                  `protobuf:"bytes,1,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateNoteResponse) Reset() {
+	*x = UpdateNoteResponse{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateNoteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateNoteResponse) ProtoMessage() {}
+
+func (x *UpdateNoteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateNoteResponse.ProtoReflect.Descriptor instead.
+func (*UpdateNoteResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *UpdateNoteResponse) GetNote() *Note {
+	if x != nil {
+		return x.Note
 	}
 	return nil
+}
+
+type DeleteNoteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteNoteRequest) Reset() {
+	*x = DeleteNoteRequest{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteNoteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteNoteRequest) ProtoMessage() {}
+
+func (x *DeleteNoteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteNoteRequest.ProtoReflect.Descriptor instead.
+func (*DeleteNoteRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DeleteNoteRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type DeleteNoteResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteNoteResponse) Reset() {
+	*x = DeleteNoteResponse{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteNoteResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteNoteResponse) ProtoMessage() {}
+
+func (x *DeleteNoteResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteNoteResponse.ProtoReflect.Descriptor instead.
+func (*DeleteNoteResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{10}
 }
 
 var File_protectorate_v1_backlog_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_backlog_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotectorate/v1/backlog.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"C\n" +
-	"\x05Claim\x12\x0e\n" +
-	"\x02by\x18\x01 \x01(\tR\x02by\x12*\n" +
-	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"\xa7\x02\n" +
-	"\x04Item\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
-	"\aproject\x18\x02 \x01(\tR\aproject\x12\x14\n" +
-	"\x05title\x18\x03 \x01(\tR\x05title\x12\x1b\n" +
-	"\tissue_url\x18\x04 \x01(\tR\bissueUrl\x12\x1a\n" +
-	"\bpriority\x18\x05 \x01(\x05R\bpriority\x12\x18\n" +
-	"\aharness\x18\x06 \x01(\tR\aharness\x120\n" +
-	"\x05state\x18\a \x01(\x0e2\x1a.protectorate.v1.ItemStateR\x05state\x12,\n" +
-	"\x05claim\x18\b \x01(\v2\x16.protectorate.v1.ClaimR\x05claim\x12\x14\n" +
-	"\x05notes\x18\t \x01(\tR\x05notes\x12\x16\n" +
-	"\x06donate\x18\n" +
-	" \x01(\bR\x06donate\"x\n" +
-	"\x10ListItemsRequest\x12\x18\n" +
-	"\aproject\x18\x01 \x01(\tR\aproject\x120\n" +
-	"\x05state\x18\x02 \x01(\x0e2\x1a.protectorate.v1.ItemStateR\x05state\x12\x18\n" +
-	"\aharness\x18\x03 \x01(\tR\aharness\"@\n" +
-	"\x11ListItemsResponse\x12+\n" +
-	"\x05items\x18\x01 \x03(\v2\x15.protectorate.v1.ItemR\x05items\"\x93\x01\n" +
-	"\x0eAddItemRequest\x12\x18\n" +
-	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1b\n" +
-	"\tissue_url\x18\x03 \x01(\tR\bissueUrl\x12\x1a\n" +
-	"\bpriority\x18\x04 \x01(\x05R\bpriority\x12\x18\n" +
-	"\aharness\x18\x05 \x01(\tR\aharness\"<\n" +
-	"\x0fAddItemResponse\x12)\n" +
-	"\x04item\x18\x01 \x01(\v2\x15.protectorate.v1.ItemR\x04item\"\x83\x01\n" +
-	"\x11UpdateItemRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x120\n" +
-	"\x05state\x18\x02 \x01(\x0e2\x1a.protectorate.v1.ItemStateR\x05state\x12,\n" +
-	"\x05claim\x18\x03 \x01(\v2\x16.protectorate.v1.ClaimR\x05claim\"?\n" +
-	"\x12UpdateItemResponse\x12)\n" +
-	"\x04item\x18\x01 \x01(\v2\x15.protectorate.v1.ItemR\x04item*i\n" +
-	"\tItemState\x12\x1a\n" +
-	"\x16ITEM_STATE_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fITEM_STATE_TODO\x10\x01\x12\x16\n" +
-	"\x12ITEM_STATE_CLAIMED\x10\x02\x12\x13\n" +
-	"\x0fITEM_STATE_DONE\x10\x032\x8e\x02\n" +
-	"\x0eBacklogService\x12W\n" +
-	"\tListItems\x12!.protectorate.v1.ListItemsRequest\x1a\".protectorate.v1.ListItemsResponse\"\x03\x90\x02\x01\x12L\n" +
-	"\aAddItem\x12\x1f.protectorate.v1.AddItemRequest\x1a .protectorate.v1.AddItemResponse\x12U\n" +
+	"\x1dprotectorate/v1/backlog.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\x80\x02\n" +
+	"\x04Note\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
+	"\x04body\x18\x03 \x01(\tR\x04body\x129\n" +
 	"\n" +
-	"UpdateItem\x12\".protectorate.v1.UpdateItemRequest\x1a#.protectorate.v1.UpdateItemResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x16\n" +
+	"\x06pinned\x18\x06 \x01(\bR\x06pinned\x12\x18\n" +
+	"\aproject\x18\a \x01(\tR\aproject\x12\x16\n" +
+	"\x06source\x18\b \x01(\tR\x06source\"B\n" +
+	"\x10ListNotesRequest\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\"@\n" +
+	"\x11ListNotesResponse\x12+\n" +
+	"\x05notes\x18\x01 \x03(\v2\x15.protectorate.v1.NoteR\x05notes\" \n" +
+	"\x0eGetNoteRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"<\n" +
+	"\x0fGetNoteResponse\x12)\n" +
+	"\x04note\x18\x01 \x01(\v2\x15.protectorate.v1.NoteR\x04note\"o\n" +
+	"\x11CreateNoteRequest\x12\x14\n" +
+	"\x05title\x18\x01 \x01(\tR\x05title\x12\x12\n" +
+	"\x04body\x18\x02 \x01(\tR\x04body\x12\x16\n" +
+	"\x06pinned\x18\x03 \x01(\bR\x06pinned\x12\x18\n" +
+	"\aproject\x18\x04 \x01(\tR\aproject\"?\n" +
+	"\x12CreateNoteResponse\x12)\n" +
+	"\x04note\x18\x01 \x01(\v2\x15.protectorate.v1.NoteR\x04note\"\xbd\x01\n" +
+	"\x11UpdateNoteRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
+	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01\x12\x17\n" +
+	"\x04body\x18\x03 \x01(\tH\x01R\x04body\x88\x01\x01\x12\x1b\n" +
+	"\x06pinned\x18\x04 \x01(\bH\x02R\x06pinned\x88\x01\x01\x12\x1d\n" +
+	"\aproject\x18\x05 \x01(\tH\x03R\aproject\x88\x01\x01B\b\n" +
+	"\x06_titleB\a\n" +
+	"\x05_bodyB\t\n" +
+	"\a_pinnedB\n" +
+	"\n" +
+	"\b_project\"?\n" +
+	"\x12UpdateNoteResponse\x12)\n" +
+	"\x04note\x18\x01 \x01(\v2\x15.protectorate.v1.NoteR\x04note\"#\n" +
+	"\x11DeleteNoteRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
+	"\x12DeleteNoteResponse2\xc7\x03\n" +
+	"\x0eBacklogService\x12W\n" +
+	"\tListNotes\x12!.protectorate.v1.ListNotesRequest\x1a\".protectorate.v1.ListNotesResponse\"\x03\x90\x02\x01\x12Q\n" +
+	"\aGetNote\x12\x1f.protectorate.v1.GetNoteRequest\x1a .protectorate.v1.GetNoteResponse\"\x03\x90\x02\x01\x12U\n" +
+	"\n" +
+	"CreateNote\x12\".protectorate.v1.CreateNoteRequest\x1a#.protectorate.v1.CreateNoteResponse\x12U\n" +
+	"\n" +
+	"UpdateNote\x12\".protectorate.v1.UpdateNoteRequest\x1a#.protectorate.v1.UpdateNoteResponse\x12[\n" +
+	"\n" +
+	"DeleteNote\x12\".protectorate.v1.DeleteNoteRequest\x1a#.protectorate.v1.DeleteNoteResponse\"\x04\x88\xb5\x18\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_backlog_proto_rawDescOnce sync.Once
@@ -654,41 +709,43 @@ func file_protectorate_v1_backlog_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_backlog_proto_rawDescData
 }
 
-var file_protectorate_v1_backlog_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protectorate_v1_backlog_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_protectorate_v1_backlog_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_protectorate_v1_backlog_proto_goTypes = []any{
-	(ItemState)(0),                // 0: protectorate.v1.ItemState
-	(*Claim)(nil),                 // 1: protectorate.v1.Claim
-	(*Item)(nil),                  // 2: protectorate.v1.Item
-	(*ListItemsRequest)(nil),      // 3: protectorate.v1.ListItemsRequest
-	(*ListItemsResponse)(nil),     // 4: protectorate.v1.ListItemsResponse
-	(*AddItemRequest)(nil),        // 5: protectorate.v1.AddItemRequest
-	(*AddItemResponse)(nil),       // 6: protectorate.v1.AddItemResponse
-	(*UpdateItemRequest)(nil),     // 7: protectorate.v1.UpdateItemRequest
-	(*UpdateItemResponse)(nil),    // 8: protectorate.v1.UpdateItemResponse
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	(*Note)(nil),                  // 0: protectorate.v1.Note
+	(*ListNotesRequest)(nil),      // 1: protectorate.v1.ListNotesRequest
+	(*ListNotesResponse)(nil),     // 2: protectorate.v1.ListNotesResponse
+	(*GetNoteRequest)(nil),        // 3: protectorate.v1.GetNoteRequest
+	(*GetNoteResponse)(nil),       // 4: protectorate.v1.GetNoteResponse
+	(*CreateNoteRequest)(nil),     // 5: protectorate.v1.CreateNoteRequest
+	(*CreateNoteResponse)(nil),    // 6: protectorate.v1.CreateNoteResponse
+	(*UpdateNoteRequest)(nil),     // 7: protectorate.v1.UpdateNoteRequest
+	(*UpdateNoteResponse)(nil),    // 8: protectorate.v1.UpdateNoteResponse
+	(*DeleteNoteRequest)(nil),     // 9: protectorate.v1.DeleteNoteRequest
+	(*DeleteNoteResponse)(nil),    // 10: protectorate.v1.DeleteNoteResponse
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
 }
 var file_protectorate_v1_backlog_proto_depIdxs = []int32{
-	9,  // 0: protectorate.v1.Claim.at:type_name -> google.protobuf.Timestamp
-	0,  // 1: protectorate.v1.Item.state:type_name -> protectorate.v1.ItemState
-	1,  // 2: protectorate.v1.Item.claim:type_name -> protectorate.v1.Claim
-	0,  // 3: protectorate.v1.ListItemsRequest.state:type_name -> protectorate.v1.ItemState
-	2,  // 4: protectorate.v1.ListItemsResponse.items:type_name -> protectorate.v1.Item
-	2,  // 5: protectorate.v1.AddItemResponse.item:type_name -> protectorate.v1.Item
-	0,  // 6: protectorate.v1.UpdateItemRequest.state:type_name -> protectorate.v1.ItemState
-	1,  // 7: protectorate.v1.UpdateItemRequest.claim:type_name -> protectorate.v1.Claim
-	2,  // 8: protectorate.v1.UpdateItemResponse.item:type_name -> protectorate.v1.Item
-	3,  // 9: protectorate.v1.BacklogService.ListItems:input_type -> protectorate.v1.ListItemsRequest
-	5,  // 10: protectorate.v1.BacklogService.AddItem:input_type -> protectorate.v1.AddItemRequest
-	7,  // 11: protectorate.v1.BacklogService.UpdateItem:input_type -> protectorate.v1.UpdateItemRequest
-	4,  // 12: protectorate.v1.BacklogService.ListItems:output_type -> protectorate.v1.ListItemsResponse
-	6,  // 13: protectorate.v1.BacklogService.AddItem:output_type -> protectorate.v1.AddItemResponse
-	8,  // 14: protectorate.v1.BacklogService.UpdateItem:output_type -> protectorate.v1.UpdateItemResponse
-	12, // [12:15] is the sub-list for method output_type
-	9,  // [9:12] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	11, // 0: protectorate.v1.Note.created_at:type_name -> google.protobuf.Timestamp
+	11, // 1: protectorate.v1.Note.updated_at:type_name -> google.protobuf.Timestamp
+	0,  // 2: protectorate.v1.ListNotesResponse.notes:type_name -> protectorate.v1.Note
+	0,  // 3: protectorate.v1.GetNoteResponse.note:type_name -> protectorate.v1.Note
+	0,  // 4: protectorate.v1.CreateNoteResponse.note:type_name -> protectorate.v1.Note
+	0,  // 5: protectorate.v1.UpdateNoteResponse.note:type_name -> protectorate.v1.Note
+	1,  // 6: protectorate.v1.BacklogService.ListNotes:input_type -> protectorate.v1.ListNotesRequest
+	3,  // 7: protectorate.v1.BacklogService.GetNote:input_type -> protectorate.v1.GetNoteRequest
+	5,  // 8: protectorate.v1.BacklogService.CreateNote:input_type -> protectorate.v1.CreateNoteRequest
+	7,  // 9: protectorate.v1.BacklogService.UpdateNote:input_type -> protectorate.v1.UpdateNoteRequest
+	9,  // 10: protectorate.v1.BacklogService.DeleteNote:input_type -> protectorate.v1.DeleteNoteRequest
+	2,  // 11: protectorate.v1.BacklogService.ListNotes:output_type -> protectorate.v1.ListNotesResponse
+	4,  // 12: protectorate.v1.BacklogService.GetNote:output_type -> protectorate.v1.GetNoteResponse
+	6,  // 13: protectorate.v1.BacklogService.CreateNote:output_type -> protectorate.v1.CreateNoteResponse
+	8,  // 14: protectorate.v1.BacklogService.UpdateNote:output_type -> protectorate.v1.UpdateNoteResponse
+	10, // 15: protectorate.v1.BacklogService.DeleteNote:output_type -> protectorate.v1.DeleteNoteResponse
+	11, // [11:16] is the sub-list for method output_type
+	6,  // [6:11] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_backlog_proto_init() }
@@ -696,19 +753,20 @@ func file_protectorate_v1_backlog_proto_init() {
 	if File_protectorate_v1_backlog_proto != nil {
 		return
 	}
+	file_protectorate_v1_options_proto_init()
+	file_protectorate_v1_backlog_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_backlog_proto_rawDesc), len(file_protectorate_v1_backlog_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   8,
+			NumEnums:      0,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_protectorate_v1_backlog_proto_goTypes,
 		DependencyIndexes: file_protectorate_v1_backlog_proto_depIdxs,
-		EnumInfos:         file_protectorate_v1_backlog_proto_enumTypes,
 		MessageInfos:      file_protectorate_v1_backlog_proto_msgTypes,
 	}.Build()
 	File_protectorate_v1_backlog_proto = out.File

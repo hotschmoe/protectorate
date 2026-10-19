@@ -21,21 +21,29 @@ import 'backlog.pbjson.dart';
 export 'backlog.pb.dart';
 
 abstract class BacklogServiceBase extends $pb.GeneratedService {
-  $async.Future<$1.ListItemsResponse> listItems(
-      $pb.ServerContext ctx, $1.ListItemsRequest request);
-  $async.Future<$1.AddItemResponse> addItem(
-      $pb.ServerContext ctx, $1.AddItemRequest request);
-  $async.Future<$1.UpdateItemResponse> updateItem(
-      $pb.ServerContext ctx, $1.UpdateItemRequest request);
+  $async.Future<$1.ListNotesResponse> listNotes(
+      $pb.ServerContext ctx, $1.ListNotesRequest request);
+  $async.Future<$1.GetNoteResponse> getNote(
+      $pb.ServerContext ctx, $1.GetNoteRequest request);
+  $async.Future<$1.CreateNoteResponse> createNote(
+      $pb.ServerContext ctx, $1.CreateNoteRequest request);
+  $async.Future<$1.UpdateNoteResponse> updateNote(
+      $pb.ServerContext ctx, $1.UpdateNoteRequest request);
+  $async.Future<$1.DeleteNoteResponse> deleteNote(
+      $pb.ServerContext ctx, $1.DeleteNoteRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
-      case 'ListItems':
-        return $1.ListItemsRequest();
-      case 'AddItem':
-        return $1.AddItemRequest();
-      case 'UpdateItem':
-        return $1.UpdateItemRequest();
+      case 'ListNotes':
+        return $1.ListNotesRequest();
+      case 'GetNote':
+        return $1.GetNoteRequest();
+      case 'CreateNote':
+        return $1.CreateNoteRequest();
+      case 'UpdateNote':
+        return $1.UpdateNoteRequest();
+      case 'DeleteNote':
+        return $1.DeleteNoteRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -44,12 +52,16 @@ abstract class BacklogServiceBase extends $pb.GeneratedService {
   $async.Future<$pb.GeneratedMessage> handleCall($pb.ServerContext ctx,
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
-      case 'ListItems':
-        return listItems(ctx, request as $1.ListItemsRequest);
-      case 'AddItem':
-        return addItem(ctx, request as $1.AddItemRequest);
-      case 'UpdateItem':
-        return updateItem(ctx, request as $1.UpdateItemRequest);
+      case 'ListNotes':
+        return listNotes(ctx, request as $1.ListNotesRequest);
+      case 'GetNote':
+        return getNote(ctx, request as $1.GetNoteRequest);
+      case 'CreateNote':
+        return createNote(ctx, request as $1.CreateNoteRequest);
+      case 'UpdateNote':
+        return updateNote(ctx, request as $1.UpdateNoteRequest);
+      case 'DeleteNote':
+        return deleteNote(ctx, request as $1.DeleteNoteRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
