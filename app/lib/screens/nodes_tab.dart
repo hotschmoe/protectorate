@@ -339,7 +339,7 @@ List<Widget> nodeMeters(
       );
     }
   }
-  final worst = worstFilesystem(m);
+  final worst = primaryFilesystem(m);
   if (worst != null) {
     rows.add(
       MeterRow(

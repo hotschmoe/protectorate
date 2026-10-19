@@ -45,12 +45,11 @@ Duration statusAge(NodeStatus s, DateTime receivedAt, DateTime now) {
   return base + (since.isNegative ? Duration.zero : since);
 }
 
-FilesystemMetrics? worstFilesystem(NodeMetrics m) {
-  FilesystemMetrics? w;
+FilesystemMetrics? primaryFilesystem(NodeMetrics m) {
   for (final f in m.filesystems) {
-    if (w == null || f.usedPercent > w.usedPercent) w = f;
+    if (f.primary) return f;
   }
-  return w;
+  return null;
 }
 
 class GpuSummary {

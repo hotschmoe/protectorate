@@ -408,6 +408,8 @@ message FilesystemMetrics {
   uint64 used_bytes = 5;
   uint64 free_bytes = 6;
   double used_percent = 7;
+  // The filesystem holding the OS or the agent home; shown as the node DISK.
+  bool primary = 8;
 }
 
 message GpuMetrics {

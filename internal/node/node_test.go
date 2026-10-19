@@ -485,3 +485,90 @@ func TestFSProberBlockedMount(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+func TestMarkPrimary(t *testing.T) {
+	gib := uint64(1 << 30)
+	tests := []struct {
+		name        string
+		goos        string
+		systemDrive string
+		home        string
+		fss         []*pb.FilesystemMetrics
+		want        string
+	}{
+		{
+			name: "windows system drive beats a fuller same-size virtual drive", goos: "windows",
+			systemDrive: "C:", home: `C:\Users\me`,
+			fss: []*pb.FilesystemMetrics{
+				{Mount: "C:", Fstype: "NTFS", TotalBytes: 500 * gib, UsedPercent: 60},
+				{Mount: "G:", Fstype: "FAT32", TotalBytes: 500 * gib, UsedPercent: 99},
+			},
+			want: "C:",
+		},
+		{
+			name: "windows without SystemDrive uses the profile volume", goos: "windows",
+			home: `d:\Users\me`,
+			fss: []*pb.FilesystemMetrics{
+				{Mount: "C:", TotalBytes: 500 * gib},
+				{Mount: "D:", TotalBytes: 500 * gib},
+			},
+			want: "D:",
+		},
+		{
+			name: "linux root when home is on it", goos: "linux", home: "/home/me",
+			fss: []*pb.FilesystemMetrics{
+				{Mount: "/", TotalBytes: 500 * gib},
+				{Mount: "/boot", TotalBytes: gib},
+			},
+			want: "/",
+		},
+		{
+			name: "linux NAS data disks never win over root", goos: "linux", home: "/home/me",
+			fss: []*pb.FilesystemMetrics{
+				{Mount: "/", Fstype: "ext4", TotalBytes: 457 * gib, UsedPercent: 30},
+				{Mount: "/mnt/disk1", TotalBytes: 8000 * gib, UsedPercent: 70},
+				{Mount: "/mnt/disk2", TotalBytes: 8000 * gib, UsedPercent: 70},
+				{Mount: "/mnt/parity1", TotalBytes: 16000 * gib, UsedPercent: 99},
+			},
+			want: "/",
+		},
+		{
+			name: "linux larger separate home wins", goos: "linux", home: "/home/me",
+			fss: []*pb.FilesystemMetrics{
+				{Mount: "/", TotalBytes: 100 * gib, UsedPercent: 95},
+				{Mount: "/home", TotalBytes: 2000 * gib, UsedPercent: 10},
+			},
+			want: "/home",
+		},
+		{
+			name: "linux smaller separate home loses to root", goos: "linux", home: "/home/me",
+			fss: []*pb.FilesystemMetrics{
+				{Mount: "/", TotalBytes: 500 * gib},
+				{Mount: "/home", TotalBytes: 50 * gib},
+			},
+			want: "/",
+		},
+		{
+			name: "none when nothing matches", goos: "linux", home: "/data/me",
+			fss:  []*pb.FilesystemMetrics{{Mount: "/mnt/x", TotalBytes: gib}},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markPrimary(tt.fss, tt.goos, tt.systemDrive, tt.home)
+			got := ""
+			for _, f := range tt.fss {
+				if f.Primary {
+					if got != "" {
+						t.Fatalf("two primaries: %s and %s", got, f.Mount)
+					}
+					got = f.Mount
+				}
+			}
+			if got != tt.want {
+				t.Fatalf("primary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

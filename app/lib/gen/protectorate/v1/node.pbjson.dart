@@ -696,6 +696,7 @@ const FilesystemMetrics$json = {
     {'1': 'used_bytes', '3': 5, '4': 1, '5': 4, '10': 'usedBytes'},
     {'1': 'free_bytes', '3': 6, '4': 1, '5': 4, '10': 'freeBytes'},
     {'1': 'used_percent', '3': 7, '4': 1, '5': 1, '10': 'usedPercent'},
+    {'1': 'primary', '3': 8, '4': 1, '5': 8, '10': 'primary'},
   ],
 };
 
@@ -704,7 +705,8 @@ final $typed_data.Uint8List filesystemMetricsDescriptor = $convert.base64Decode(
     'ChFGaWxlc3lzdGVtTWV0cmljcxIUCgVtb3VudBgBIAEoCVIFbW91bnQSFgoGZGV2aWNlGAIgAS'
     'gJUgZkZXZpY2USFgoGZnN0eXBlGAMgASgJUgZmc3R5cGUSHwoLdG90YWxfYnl0ZXMYBCABKARS'
     'CnRvdGFsQnl0ZXMSHQoKdXNlZF9ieXRlcxgFIAEoBFIJdXNlZEJ5dGVzEh0KCmZyZWVfYnl0ZX'
-    'MYBiABKARSCWZyZWVCeXRlcxIhCgx1c2VkX3BlcmNlbnQYByABKAFSC3VzZWRQZXJjZW50');
+    'MYBiABKARSCWZyZWVCeXRlcxIhCgx1c2VkX3BlcmNlbnQYByABKAFSC3VzZWRQZXJjZW50EhgK'
+    'B3ByaW1hcnkYCCABKAhSB3ByaW1hcnk=');
 
 @$core.Deprecated('Use gpuMetricsDescriptor instead')
 const GpuMetrics$json = {

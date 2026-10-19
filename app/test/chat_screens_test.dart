@@ -283,6 +283,7 @@ NodeStatus _forge(int i) => NodeStatus(
         totalBytes: _gb(930),
         usedBytes: _gb(577),
         usedPercent: 62.0,
+        primary: true,
       ),
       FilesystemMetrics(
         mount: '/data',
@@ -442,6 +443,7 @@ List<NodeStatus> _fleet(int i) => [
           totalBytes: _gb(256),
           usedBytes: _gb(239),
           usedPercent: 93.4,
+          primary: true,
         ),
       ],
       engine: ContainerEngine(kind: 'podman', version: '5.2'),
@@ -469,6 +471,7 @@ List<NodeStatus> _fleet(int i) => [
           totalBytes: _gb(1900),
           usedBytes: _gb(1010),
           usedPercent: 53.1,
+          primary: true,
         ),
       ],
       gpus: [

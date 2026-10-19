@@ -521,7 +521,7 @@ class _Board extends StatelessWidget {
     final m = s.hasMetrics() ? s.metrics : null;
     final age = ageOf(s);
     final gpu = m == null ? null : summarizeGpus(m);
-    final disk = m == null ? null : worstFilesystem(m);
+    final disk = m == null ? null : primaryFilesystem(m);
     String pct(double? v) => v == null ? '--' : '${v.round()}%';
     final cells = m == null || down
         ? <Widget>[]

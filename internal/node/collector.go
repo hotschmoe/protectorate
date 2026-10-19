@@ -465,7 +465,10 @@ func filesystemMetrics(ctx context.Context, pr *fsProber) ([]*pb.FilesystemMetri
 		}
 		all = append(all, r.fs)
 	}
-	return dedupeFilesystems(all), errs
+	fss := dedupeFilesystems(all)
+	home, _ := os.UserHomeDir()
+	markPrimary(fss, runtime.GOOS, os.Getenv("SystemDrive"), home)
+	return fss, errs
 }
 
 // dedupeFilesystems drops empty filesystems and repeated views of one device
@@ -489,6 +492,69 @@ func dedupeFilesystems(in []*pb.FilesystemMetrics) []*pb.FilesystemMetrics {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Mount < out[j].Mount })
 	return out
+}
+
+// markPrimary flags the filesystem holding the OS or the agent home. On
+// Windows that is the system drive, else the volume holding the profile (not
+// the fullest volume: virtual drives mirror C: and fill up with it). Elsewhere
+// it is the filesystem of /, unless the home directory lives on a separate,
+// larger filesystem, where the agent's workspaces are kept.
+func markPrimary(fss []*pb.FilesystemMetrics, goos, systemDrive, home string) {
+	var p *pb.FilesystemMetrics
+	if goos == "windows" {
+		p = fsHolding(fss, goos, systemDrive)
+		if p == nil {
+			p = fsHolding(fss, goos, home)
+		}
+	} else {
+		root := fsHolding(fss, goos, "/")
+		p = root
+		if h := fsHolding(fss, goos, home); h != nil && (root == nil || h.TotalBytes > root.TotalBytes) {
+			p = h
+		}
+	}
+	if p != nil {
+		p.Primary = true
+	}
+}
+
+// fsHolding returns the filesystem with the longest mount that is a prefix of
+// path, comparing case-insensitively on Windows.
+func fsHolding(fss []*pb.FilesystemMetrics, goos, path string) *pb.FilesystemMetrics {
+	if path == "" {
+		return nil
+	}
+	norm := func(s string) string {
+		if goos == "windows" {
+			return strings.ToLower(strings.ReplaceAll(strings.TrimRight(s, `\/`), "/", `\`))
+		}
+		return strings.TrimRight(s, "/")
+	}
+	sep := "/"
+	if goos == "windows" {
+		sep = `\`
+	}
+	pn := norm(path)
+	var best *pb.FilesystemMetrics
+	bestLen := -1
+	for _, f := range fss {
+		mn := norm(f.Mount)
+		if (pn == mn || strings.HasPrefix(pn, mn+sep)) && len(mn) > bestLen {
+			best, bestLen = f, len(mn)
+		}
+	}
+	return best
+}
+
+// PrimaryFilesystem returns the filesystem the agent flagged as primary, or
+// nil if it flagged none.
+func PrimaryFilesystem(m *pb.NodeMetrics) *pb.FilesystemMetrics {
+	for _, f := range m.GetFilesystems() {
+		if f.Primary {
+			return f
+		}
+	}
+	return nil
 }
 
 // WorstFilesystem returns the fullest filesystem, or nil if none was read.
