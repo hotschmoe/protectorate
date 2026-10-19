@@ -43,6 +43,9 @@ const (
 	MessageServiceReplyProcedure = "/protectorate.v1.MessageService/Reply"
 	// MessageServiceThreadProcedure is the fully-qualified name of the MessageService's Thread RPC.
 	MessageServiceThreadProcedure = "/protectorate.v1.MessageService/Thread"
+	// MessageServiceListThreadsProcedure is the fully-qualified name of the MessageService's
+	// ListThreads RPC.
+	MessageServiceListThreadsProcedure = "/protectorate.v1.MessageService/ListThreads"
 )
 
 // MessageServiceClient is a client for the protectorate.v1.MessageService service.
@@ -61,6 +64,10 @@ type MessageServiceClient interface {
 	Reply(context.Context, *connect.Request[v1.ReplyRequest]) (*connect.Response[v1.ReplyResponse], error)
 	// Thread returns every message of a thread in the order sent.
 	Thread(context.Context, *connect.Request[v1.ThreadRequest]) (*connect.Response[v1.ThreadResponse], error)
+	// ListThreads summarizes threads, most recently active first: who takes
+	// part, the last message, and what is still open. Unread counts are the
+	// caller's own.
+	ListThreads(context.Context, *connect.Request[v1.ListThreadsRequest]) (*connect.Response[v1.ListThreadsResponse], error)
 }
 
 // NewMessageServiceClient constructs a client for the protectorate.v1.MessageService service. By
@@ -105,16 +112,24 @@ func NewMessageServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		listThreads: connect.NewClient[v1.ListThreadsRequest, v1.ListThreadsResponse](
+			httpClient,
+			baseURL+MessageServiceListThreadsProcedure,
+			connect.WithSchema(messageServiceMethods.ByName("ListThreads")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // messageServiceClient implements MessageServiceClient.
 type messageServiceClient struct {
-	send   *connect.Client[v1.MessageServiceSendRequest, v1.MessageServiceSendResponse]
-	inbox  *connect.Client[v1.InboxRequest, v1.InboxResponse]
-	ack    *connect.Client[v1.AckRequest, v1.AckResponse]
-	reply  *connect.Client[v1.ReplyRequest, v1.ReplyResponse]
-	thread *connect.Client[v1.ThreadRequest, v1.ThreadResponse]
+	send        *connect.Client[v1.MessageServiceSendRequest, v1.MessageServiceSendResponse]
+	inbox       *connect.Client[v1.InboxRequest, v1.InboxResponse]
+	ack         *connect.Client[v1.AckRequest, v1.AckResponse]
+	reply       *connect.Client[v1.ReplyRequest, v1.ReplyResponse]
+	thread      *connect.Client[v1.ThreadRequest, v1.ThreadResponse]
+	listThreads *connect.Client[v1.ListThreadsRequest, v1.ListThreadsResponse]
 }
 
 // Send calls protectorate.v1.MessageService.Send.
@@ -142,6 +157,11 @@ func (c *messageServiceClient) Thread(ctx context.Context, req *connect.Request[
 	return c.thread.CallUnary(ctx, req)
 }
 
+// ListThreads calls protectorate.v1.MessageService.ListThreads.
+func (c *messageServiceClient) ListThreads(ctx context.Context, req *connect.Request[v1.ListThreadsRequest]) (*connect.Response[v1.ListThreadsResponse], error) {
+	return c.listThreads.CallUnary(ctx, req)
+}
+
 // MessageServiceHandler is an implementation of the protectorate.v1.MessageService service.
 type MessageServiceHandler interface {
 	// Send addresses a message to a sleeve name, "project:<id-or-name>",
@@ -158,6 +178,10 @@ type MessageServiceHandler interface {
 	Reply(context.Context, *connect.Request[v1.ReplyRequest]) (*connect.Response[v1.ReplyResponse], error)
 	// Thread returns every message of a thread in the order sent.
 	Thread(context.Context, *connect.Request[v1.ThreadRequest]) (*connect.Response[v1.ThreadResponse], error)
+	// ListThreads summarizes threads, most recently active first: who takes
+	// part, the last message, and what is still open. Unread counts are the
+	// caller's own.
+	ListThreads(context.Context, *connect.Request[v1.ListThreadsRequest]) (*connect.Response[v1.ListThreadsResponse], error)
 }
 
 // NewMessageServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -198,6 +222,13 @@ func NewMessageServiceHandler(svc MessageServiceHandler, opts ...connect.Handler
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	messageServiceListThreadsHandler := connect.NewUnaryHandler(
+		MessageServiceListThreadsProcedure,
+		svc.ListThreads,
+		connect.WithSchema(messageServiceMethods.ByName("ListThreads")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.MessageService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MessageServiceSendProcedure:
@@ -210,6 +241,8 @@ func NewMessageServiceHandler(svc MessageServiceHandler, opts ...connect.Handler
 			messageServiceReplyHandler.ServeHTTP(w, r)
 		case MessageServiceThreadProcedure:
 			messageServiceThreadHandler.ServeHTTP(w, r)
+		case MessageServiceListThreadsProcedure:
+			messageServiceListThreadsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -237,4 +270,8 @@ func (UnimplementedMessageServiceHandler) Reply(context.Context, *connect.Reques
 
 func (UnimplementedMessageServiceHandler) Thread(context.Context, *connect.Request[v1.ThreadRequest]) (*connect.Response[v1.ThreadResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.MessageService.Thread is not implemented"))
+}
+
+func (UnimplementedMessageServiceHandler) ListThreads(context.Context, *connect.Request[v1.ListThreadsRequest]) (*connect.Response[v1.ListThreadsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.MessageService.ListThreads is not implemented"))
 }

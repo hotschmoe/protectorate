@@ -75,22 +75,22 @@ func TestInboxAndAck(t *testing.T) {
 		}
 		return
 	}
-	peek, err := s.Inbox("web", true, true)
+	peek, err := s.Inbox("web", "", true, true)
 	if err != nil || !reflect.DeepEqual(ids(peek), []string{m1.ID, m3.ID}) {
 		t.Fatalf("unread peek = %v %v", ids(peek), err)
 	}
-	again, _ := s.Inbox("web", true, true)
+	again, _ := s.Inbox("web", "", true, true)
 	if len(again) != 2 {
 		t.Fatalf("peek must not mark read: %v", ids(again))
 	}
-	shown, _ := s.Inbox("web", true, false)
+	shown, _ := s.Inbox("web", "", true, false)
 	if len(shown) != 2 {
 		t.Fatalf("unread = %v", ids(shown))
 	}
-	if left, _ := s.Inbox("web", true, false); len(left) != 0 {
+	if left, _ := s.Inbox("web", "", true, false); len(left) != 0 {
 		t.Fatalf("reading marks read, still unread: %v", ids(left))
 	}
-	all, _ := s.Inbox("web", false, true)
+	all, _ := s.Inbox("web", "", false, true)
 	if len(all) != 3 {
 		t.Fatalf("full inbox = %v", ids(all))
 	}
@@ -250,5 +250,65 @@ func TestOpenRequests(t *testing.T) {
 	got := s.OpenRequests("lib", "api-proj")
 	if len(got) != 1 || got[0].ID != a.ID {
 		t.Fatalf("open requests = %v", got)
+	}
+}
+
+func TestThreadsSummary(t *testing.T) {
+	s, c, _ := newStore(t)
+	ask := mustSend(t, s, NewMessage{From: "api", To: "owner", Kind: Request, AckRequired: true, Body: "deploy?", Project: "", FromProject: "github.com/acme/api", Recipients: []string{"owner"}})
+	c.advance(time.Minute)
+	mustSend(t, s, NewMessage{From: "owner", To: "api", Kind: Note, Body: "later", Thread: ask.Thread, Recipients: []string{"api"}})
+	c.advance(time.Minute)
+	wait := mustSend(t, s, NewMessage{From: "web", To: "project:lib", Kind: Request, AckRequired: true, Body: "export Foo", Project: "github.com/acme/lib"})
+	if err := s.Escalate(wait.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.advance(time.Minute)
+	note := mustSend(t, s, NewMessage{From: "hub", To: "web", Kind: Notice, Body: "lease granted", Recipients: []string{"web"}})
+
+	tests := []struct {
+		name   string
+		reader string
+		thread string
+		want   ThreadInfo
+	}{
+		{"owner sees its unread request", "owner", ask.Thread, ThreadInfo{ID: ask.Thread, Participants: []string{"api", "owner"}, Messages: 2, Unread: 1, OpenAcks: 1, Projects: []string{"github.com/acme/api"}}},
+		{"waiting project request", "owner", wait.Thread, ThreadInfo{ID: wait.Thread, Participants: []string{"web", "project:github.com/acme/lib"}, Messages: 1, OpenAcks: 1, Escalated: 1, Projects: []string{"github.com/acme/lib"}}},
+		{"recipient unread", "web", note.Thread, ThreadInfo{ID: note.Thread, Participants: []string{"hub", "web"}, Messages: 1, Unread: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			all := s.Threads(tt.reader)
+			if len(all) != 3 || all[0].ID != note.Thread || all[2].ID != ask.Thread {
+				t.Fatalf("order = %+v", all)
+			}
+			var got ThreadInfo
+			for _, ti := range all {
+				if ti.ID == tt.thread {
+					got = ti
+				}
+			}
+			last := got.Last
+			got.Last = Message{}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("summary = %+v\nwant %+v", got, tt.want)
+			}
+			if want := s.Thread(tt.thread); last.ID != want[len(want)-1].ID {
+				t.Fatalf("last = %s", last.ID)
+			}
+		})
+	}
+
+	if _, _, err := s.Ack(ask.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	if ti := s.Threads("owner")[2]; ti.Unread != 0 || ti.OpenAcks != 0 {
+		t.Fatalf("after ack: %+v", ti)
+	}
+	if got, _ := s.Inbox("web", wait.Thread, false, false); len(got) != 0 {
+		t.Fatalf("thread filter leaked other threads: %v", got)
+	}
+	if got, _ := s.Inbox("web", note.Thread, false, false); len(got) != 1 || s.Threads("web")[0].Unread != 0 {
+		t.Fatalf("reading a thread did not mark it read: %v", got)
 	}
 }

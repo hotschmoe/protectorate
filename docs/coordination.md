@@ -54,7 +54,7 @@ and notified.
 
 ## Mailbox
 
-`protectorate msg send|reply|ack|inbox|thread` (`MessageService`).
+`protectorate msg send|reply|ack|inbox|thread|threads` (`MessageService`).
 
 ```
 protectorate msg send api "the schema changed" --thread t7
@@ -63,6 +63,7 @@ protectorate msg reply m42 "done in v0.3.0"
 protectorate msg ack m42
 protectorate msg inbox --unread
 protectorate msg thread t7
+protectorate msg threads --sleeve api
 ```
 
 - **Addresses:** a sleeve name, `project:<id|owner/repo|name>`,
@@ -80,7 +81,12 @@ protectorate msg thread t7
   fsynced per record and replayed on start; a torn last line is cut off.
   Bodies are limited to 32 KiB.
 - **Inbox:** per recipient; `--unread` leaves out messages already injected,
-  shown or acked; listing marks them read unless `--peek`.
+  shown or acked; `--thread` keeps one thread; listing marks them read unless
+  `--peek`.
+- **Threads:** `ListThreads` (`msg threads`, a read call) summarizes threads,
+  most recently active first: participants, message count, the last message,
+  the caller's unread count, messages whose required ack nobody gave, and
+  escalated messages still unacked. `--sleeve` and `--project` filter it.
 
 ### Delivery
 
@@ -176,5 +182,6 @@ not exist yet, and would sit on top of these RPCs.
 - No expiry of old messages or projects; the mailbox log is not compacted.
 - Delivery to a sleeve is one pass per second, serialized; a harness that
   takes a minute to open delays other deliveries that pass.
-- Paired phones get `read` (directory and threads) but not `message_*`; the
-  app has no mailbox view yet.
+- Paired phones get `read` (directory and threads) but not `message_*`: the
+  app's MESSAGES view lists and reads every thread, and sending, replying,
+  acking and marking read need the owner token.

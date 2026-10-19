@@ -68,4 +68,15 @@ abstract final class MessageService {
     protectoratev1message.ThreadResponse.new,
     idempotency: connect.Idempotency.noSideEffects,
   );
+
+  /// ListThreads summarizes threads, most recently active first: who takes
+  /// part, the last message, and what is still open. Unread counts are the
+  /// caller's own.
+  static const listThreads = connect.Spec(
+    '/$name/ListThreads',
+    connect.StreamType.unary,
+    protectoratev1message.ListThreadsRequest.new,
+    protectoratev1message.ListThreadsResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
 }

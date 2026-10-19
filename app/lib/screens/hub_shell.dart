@@ -14,6 +14,7 @@ import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
 import 'backlog_tab.dart';
+import 'messages_tab.dart';
 import 'node_detail_screen.dart';
 import 'nodes_tab.dart';
 import 'overview_tab.dart';
@@ -34,6 +35,7 @@ const _destinations = [
   _Destination('nodes', 'NODES', Icons.memory),
   _Destination('quota', 'QUOTA', Icons.speed),
   _Destination('sessions', 'SESSIONS', Icons.terminal),
+  _Destination('messages', 'MESSAGES', Icons.mail_outline),
   _Destination('backlog', 'BACKLOG', Icons.checklist),
 ];
 
@@ -136,27 +138,28 @@ class _HubShellState extends State<HubShell> {
     super.dispose();
   }
 
-  Widget _body() => switch (_index) {
-    0 => OverviewTab(
+  Widget _body() => switch (_destinations[_index].id) {
+    'overview' => OverviewTab(
       hub: widget.hub,
       client: _client,
       feed: _feed,
       history: _history,
       versions: _versions,
     ),
-    1 => NodesTab(
+    'nodes' => NodesTab(
       hub: widget.hub,
       client: _client,
       feed: _feed,
       history: _history,
       versions: _versions,
     ),
-    2 => QuotaTab(client: _client, feed: _feed),
-    3 => SessionsTab(
+    'quota' => QuotaTab(client: _client, feed: _feed),
+    'sessions' => SessionsTab(
       hub: widget.hub,
       client: _client,
       openSession: widget.openSession,
     ),
+    'messages' => MessagesTab(client: _client, feed: _feed),
     _ => BacklogTab(client: _client, feed: _feed),
   };
 

@@ -115,4 +115,24 @@ extension type MessageServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// ListThreads summarizes threads, most recently active first: who takes
+  /// part, the last message, and what is still open. Unread counts are the
+  /// caller's own.
+  Future<protectoratev1message.ListThreadsResponse> listThreads(
+    protectoratev1message.ListThreadsRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.MessageService.listThreads,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }

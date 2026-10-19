@@ -262,11 +262,13 @@ class InboxRequest extends $pb.GeneratedMessage {
     $core.bool? unreadOnly,
     $core.bool? peek,
     $core.String? as,
+    $core.String? threadId,
   }) {
     final result = InboxRequest._();
     if (unreadOnly != null) result.unreadOnly = unreadOnly;
     if (peek != null) result.peek = peek;
     if (as != null) result.as = as;
+    if (threadId != null) result.threadId = threadId;
     return result;
   }
 
@@ -287,6 +289,7 @@ class InboxRequest extends $pb.GeneratedMessage {
     ..aOB(1, _omitFieldNames ? '' : 'unreadOnly')
     ..aOB(2, _omitFieldNames ? '' : 'peek')
     ..aOS(3, _omitFieldNames ? '' : 'as')
+    ..aOS(4, _omitFieldNames ? '' : 'threadId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -340,6 +343,16 @@ class InboxRequest extends $pb.GeneratedMessage {
   $core.bool hasAs() => $_has(2);
   @$pb.TagNumber(3)
   void clearAs() => $_clearField(3);
+
+  /// thread_id keeps only the messages of this thread.
+  @$pb.TagNumber(4)
+  $core.String get threadId => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set threadId($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasThreadId() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearThreadId() => $_clearField(4);
 }
 
 class InboxResponse extends $pb.GeneratedMessage {
@@ -779,6 +792,291 @@ class ThreadResponse extends $pb.GeneratedMessage {
   $pb.PbList<MailMessage> get messages => $_getList(0);
 }
 
+class ListThreadsRequest extends $pb.GeneratedMessage {
+  factory ListThreadsRequest({
+    $core.String? sleeve,
+    $core.String? project,
+    $core.int? limit,
+  }) {
+    final result = ListThreadsRequest._();
+    if (sleeve != null) result.sleeve = sleeve;
+    if (project != null) result.project = project;
+    if (limit != null) result.limit = limit;
+    return result;
+  }
+
+  ListThreadsRequest._();
+
+  factory ListThreadsRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListThreadsRequest()..mergeFromBuffer(data, registry);
+  factory ListThreadsRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListThreadsRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListThreadsRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListThreadsRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
+    ..aOS(2, _omitFieldNames ? '' : 'project')
+    ..aI(3, _omitFieldNames ? '' : 'limit')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListThreadsRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListThreadsRequest copyWith(void Function(ListThreadsRequest) updates) =>
+      super.copyWith((message) => updates(message as ListThreadsRequest))
+          as ListThreadsRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ListThreadsRequest() / ListThreadsRequest.new instead')
+  static ListThreadsRequest create() => ListThreadsRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ListThreadsRequest._();
+  @$core.override
+  ListThreadsRequest createEmptyInstance() => ListThreadsRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ListThreadsRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListThreadsRequest>(
+          ListThreadsRequest.$_createMessage);
+  static ListThreadsRequest? _defaultInstance;
+
+  /// sleeve keeps the threads this sleeve sent to or received in.
+  @$pb.TagNumber(1)
+  $core.String get sleeve => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sleeve($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+
+  /// project keeps the threads addressed to or sent from this project (id,
+  /// "owner/repo" or bare name, as in DirectoryService.GetProject).
+  @$pb.TagNumber(2)
+  $core.String get project => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set project($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasProject() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearProject() => $_clearField(2);
+
+  /// limit is the most threads returned: 0 means 100, at most 500.
+  @$pb.TagNumber(3)
+  $core.int get limit => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set limit($core.int value) => $_setSignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasLimit() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearLimit() => $_clearField(3);
+}
+
+class ListThreadsResponse extends $pb.GeneratedMessage {
+  factory ListThreadsResponse({
+    $core.Iterable<ThreadSummary>? threads,
+  }) {
+    final result = ListThreadsResponse._();
+    if (threads != null) result.threads.addAll(threads);
+    return result;
+  }
+
+  ListThreadsResponse._();
+
+  factory ListThreadsResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListThreadsResponse()..mergeFromBuffer(data, registry);
+  factory ListThreadsResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListThreadsResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListThreadsResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListThreadsResponse.$_createMessage)
+    ..pPM<ThreadSummary>(1, _omitFieldNames ? '' : 'threads',
+        subBuilder: ThreadSummary.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListThreadsResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListThreadsResponse copyWith(void Function(ListThreadsResponse) updates) =>
+      super.copyWith((message) => updates(message as ListThreadsResponse))
+          as ListThreadsResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core
+      .Deprecated('Use ListThreadsResponse() / ListThreadsResponse.new instead')
+  static ListThreadsResponse create() => ListThreadsResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ListThreadsResponse._();
+  @$core.override
+  ListThreadsResponse createEmptyInstance() => ListThreadsResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ListThreadsResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListThreadsResponse>(
+          ListThreadsResponse.$_createMessage);
+  static ListThreadsResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<ThreadSummary> get threads => $_getList(0);
+}
+
+/// ThreadSummary is one thread at a glance.
+class ThreadSummary extends $pb.GeneratedMessage {
+  factory ThreadSummary({
+    $core.String? threadId,
+    $core.Iterable<$core.String>? participants,
+    $core.int? messageCount,
+    MailMessage? last,
+    $core.int? unread,
+    $core.int? openAcks,
+    $core.int? escalated,
+    $core.Iterable<$core.String>? projects,
+  }) {
+    final result = ThreadSummary._();
+    if (threadId != null) result.threadId = threadId;
+    if (participants != null) result.participants.addAll(participants);
+    if (messageCount != null) result.messageCount = messageCount;
+    if (last != null) result.last = last;
+    if (unread != null) result.unread = unread;
+    if (openAcks != null) result.openAcks = openAcks;
+    if (escalated != null) result.escalated = escalated;
+    if (projects != null) result.projects.addAll(projects);
+    return result;
+  }
+
+  ThreadSummary._();
+
+  factory ThreadSummary.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ThreadSummary()..mergeFromBuffer(data, registry);
+  factory ThreadSummary.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ThreadSummary()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ThreadSummary',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ThreadSummary.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'threadId')
+    ..pPS(2, _omitFieldNames ? '' : 'participants')
+    ..aI(3, _omitFieldNames ? '' : 'messageCount',
+        fieldType: $pb.PbFieldType.OU3)
+    ..aOM<MailMessage>(4, _omitFieldNames ? '' : 'last',
+        subBuilder: MailMessage.$_createMessage)
+    ..aI(5, _omitFieldNames ? '' : 'unread', fieldType: $pb.PbFieldType.OU3)
+    ..aI(6, _omitFieldNames ? '' : 'openAcks', fieldType: $pb.PbFieldType.OU3)
+    ..aI(7, _omitFieldNames ? '' : 'escalated', fieldType: $pb.PbFieldType.OU3)
+    ..pPS(8, _omitFieldNames ? '' : 'projects')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ThreadSummary clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ThreadSummary copyWith(void Function(ThreadSummary) updates) =>
+      super.copyWith((message) => updates(message as ThreadSummary))
+          as ThreadSummary;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ThreadSummary() / ThreadSummary.new instead')
+  static ThreadSummary create() => ThreadSummary._();
+  static $pb.GeneratedMessage $_createMessage() => ThreadSummary._();
+  @$core.override
+  ThreadSummary createEmptyInstance() => ThreadSummary._();
+  @$core.pragma('dart2js:noInline')
+  static ThreadSummary getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ThreadSummary>(
+          ThreadSummary.$_createMessage);
+  static ThreadSummary? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get threadId => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set threadId($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasThreadId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearThreadId() => $_clearField(1);
+
+  /// participants are the senders and recipients, in order of first
+  /// appearance. A message still waiting for a project's sleeves adds its
+  /// address ("project:<id>").
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.String> get participants => $_getList(1);
+
+  @$pb.TagNumber(3)
+  $core.int get messageCount => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set messageCount($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasMessageCount() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearMessageCount() => $_clearField(3);
+
+  /// last is the most recent message.
+  @$pb.TagNumber(4)
+  MailMessage get last => $_getN(3);
+  @$pb.TagNumber(4)
+  set last(MailMessage value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasLast() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearLast() => $_clearField(4);
+  @$pb.TagNumber(4)
+  MailMessage ensureLast() => $_ensure(3);
+
+  /// unread counts messages to the caller it has not been shown, read or
+  /// acked.
+  @$pb.TagNumber(5)
+  $core.int get unread => $_getIZ(4);
+  @$pb.TagNumber(5)
+  set unread($core.int value) => $_setUnsignedInt32(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasUnread() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearUnread() => $_clearField(5);
+
+  /// open_acks counts messages that require an ack no recipient has given.
+  @$pb.TagNumber(6)
+  $core.int get openAcks => $_getIZ(5);
+  @$pb.TagNumber(6)
+  set openAcks($core.int value) => $_setUnsignedInt32(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasOpenAcks() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearOpenAcks() => $_clearField(6);
+
+  /// escalated counts escalated messages no recipient has acked yet.
+  @$pb.TagNumber(7)
+  $core.int get escalated => $_getIZ(6);
+  @$pb.TagNumber(7)
+  set escalated($core.int value) => $_setUnsignedInt32(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasEscalated() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearEscalated() => $_clearField(7);
+
+  /// projects are the ids of the projects the thread was addressed to or sent
+  /// from.
+  @$pb.TagNumber(8)
+  $pb.PbList<$core.String> get projects => $_getList(7);
+}
+
 /// MailMessage is one message with each recipient's delivery state.
 class MailMessage extends $pb.GeneratedMessage {
   factory MailMessage({
@@ -1145,6 +1443,14 @@ class MessageServiceApi {
           $pb.ClientContext? ctx, ThreadRequest request) =>
       _client.invoke<ThreadResponse>(
           ctx, 'MessageService', 'Thread', request, ThreadResponse());
+
+  /// ListThreads summarizes threads, most recently active first: who takes
+  /// part, the last message, and what is still open. Unread counts are the
+  /// caller's own.
+  $async.Future<ListThreadsResponse> listThreads(
+          $pb.ClientContext? ctx, ListThreadsRequest request) =>
+      _client.invoke<ListThreadsResponse>(
+          ctx, 'MessageService', 'ListThreads', request, ListThreadsResponse());
 }
 
 const $core.bool _omitFieldNames =

@@ -18,6 +18,10 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/directory.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/directory.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/message.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/message.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
@@ -587,6 +591,135 @@ final _logEvents = [
   ('msg.delivered', 'refactor', 2),
 ];
 
+MailMessage _mail(
+  String id,
+  String thread,
+  String from,
+  String to,
+  String body,
+  int minutes, {
+  MessageKind kind = MessageKind.MESSAGE_KIND_NOTE,
+  bool ack = false,
+  List<MailDelivery> deliveries = const [],
+  bool escalated = false,
+  String backlog = '',
+}) => MailMessage(
+  id: id,
+  threadId: thread,
+  from: from,
+  to: to,
+  body: body,
+  kind: kind,
+  ackRequired: ack,
+  createdAt: _ago(Duration(minutes: minutes)),
+  deliveries: deliveries,
+  escalatedAt: escalated ? _ago(Duration(minutes: minutes - 62)) : null,
+  backlogItem: backlog,
+);
+
+MailDelivery _dl(String r, {int? delivered, int? read, int? acked}) =>
+    MailDelivery(
+      recipient: r,
+      deliveredAt: delivered == null
+          ? null
+          : _ago(Duration(minutes: delivered)),
+      readAt: read == null ? null : _ago(Duration(minutes: read)),
+      ackedAt: acked == null ? null : _ago(Duration(minutes: acked)),
+    );
+
+final _schemaThread = [
+  _mail(
+    'm40',
+    't14',
+    'auth-fix',
+    'owner',
+    'May I bump the session schema to v2? The refresh token moves into its own table.\n'
+        'refactor still reads v1, so its tests will fail until it migrates.',
+    26,
+    kind: MessageKind.MESSAGE_KIND_REQUEST,
+    ack: true,
+    deliveries: [_dl('owner')],
+  ),
+  _mail(
+    'm41',
+    't14',
+    'auth-fix',
+    'refactor',
+    'Heads up: session schema v2 is coming. Columns refresh_token and '
+        'refresh_expires move to session_refresh.',
+    24,
+    deliveries: [_dl('refactor', delivered: 23, acked: 19)],
+  ),
+  _mail(
+    'm42',
+    't14',
+    'refactor',
+    'auth-fix',
+    'Fine by me once v2 is tagged. I will migrate the store in the same branch.',
+    18,
+    deliveries: [_dl('auth-fix', delivered: 17)],
+  ),
+];
+
+List<ThreadSummary> _threads() => [
+  ThreadSummary(
+    threadId: 't14',
+    participants: ['auth-fix', 'owner', 'refactor'],
+    messageCount: 3,
+    last: _schemaThread.last,
+    unread: 1,
+    openAcks: 1,
+    projects: ['github.com/hotschmoe/protectorate'],
+  ),
+  ThreadSummary(
+    threadId: 't12',
+    participants: ['research', 'project:github.com/acme/web'],
+    messageCount: 1,
+    last: _mail(
+      'm37',
+      't12',
+      'research',
+      'project:acme/web',
+      'Please export the chart palette as a package; I need it for the quota report.',
+      95,
+      kind: MessageKind.MESSAGE_KIND_REQUEST,
+      ack: true,
+      escalated: true,
+      backlog: 'b7',
+    ),
+    openAcks: 1,
+    escalated: 1,
+    projects: ['github.com/acme/web'],
+  ),
+  ThreadSummary(
+    threadId: 't11',
+    participants: ['hub', 'refactor'],
+    messageCount: 1,
+    last: _mail(
+      'm35',
+      't11',
+      'hub',
+      'refactor',
+      'Upstream release: acme/lib tag v0.3.0 (3f1c2ab), previous tag v0.2.4.',
+      140,
+      kind: MessageKind.MESSAGE_KIND_NOTICE,
+    ),
+  ),
+  ThreadSummary(
+    threadId: 't9',
+    participants: ['poe', 'scratch'],
+    messageCount: 4,
+    last: _mail(
+      'm31',
+      't9',
+      'scratch',
+      'poe',
+      'Benchmarks done: qwen3:8b at 41 tok/s on the 4090, results in bench/.',
+      300,
+    ),
+  ),
+];
+
 // A hub with every service the shell reads; each node poll moves the
 // readings so the history graphs fill.
 Transport _hubTransport(StreamController<Event> events) {
@@ -641,6 +774,31 @@ Transport _hubTransport(StreamController<Event> events) {
       .unary(
         SessionService.capturePane,
         (CapturePaneRequest r, ctx) => CapturePaneResponse(text: _pane),
+      )
+      .unary(
+        MessageService.listThreads,
+        (ListThreadsRequest r, ctx) => ListThreadsResponse(threads: _threads()),
+      )
+      .unary(
+        MessageService.thread,
+        (ThreadRequest r, ctx) => ThreadResponse(messages: _schemaThread),
+      )
+      .unary(MessageService.inbox, (InboxRequest r, ctx) => InboxResponse())
+      .unary(
+        DirectoryService.listProjects,
+        (ListProjectsRequest r, ctx) => ListProjectsResponse(
+          projects: [
+            DirectoryProject(
+              id: 'github.com/hotschmoe/protectorate',
+              display: 'hotschmoe/protectorate',
+              owners: [
+                ProjectOwner(sleeve: 'auth-fix'),
+                ProjectOwner(sleeve: 'refactor'),
+              ],
+            ),
+            DirectoryProject(id: 'github.com/acme/web', display: 'acme/web'),
+          ],
+        ),
       )
       .unary(
         BacklogService.listItems,
@@ -875,7 +1033,14 @@ void main() {
       final phone = w == 412;
       final size = Size(w.toDouble(), phone ? 1200 : 860);
 
-      for (final tab in ['overview', 'nodes', 'quota', 'sessions', 'backlog']) {
+      for (final tab in [
+        'overview',
+        'nodes',
+        'quota',
+        'sessions',
+        'messages',
+        'backlog',
+      ]) {
         testWidgets('$tab $tag', (tester) async {
           tester.view.physicalSize = size;
           tester.view.devicePixelRatio = 1;
@@ -888,6 +1053,21 @@ void main() {
           await tester.pumpWidget(const SizedBox());
         });
       }
+
+      testWidgets('thread $tag', (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await _pumpShell(tester, key, b, 'messages', events);
+        await tester.tap(find.byKey(const ValueKey('thread-row-t14')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await _shoot(tester, key, 'thread-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
 
       testWidgets('add-node $tag', (tester) async {
         tester.view.physicalSize = Size(w.toDouble(), phone ? 1500 : 900);

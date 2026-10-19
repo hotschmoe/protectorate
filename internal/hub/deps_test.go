@@ -80,7 +80,7 @@ func TestDependencyNotices(t *testing.T) {
 	gitIn(t, lib, "tag", "v0.2.0")
 	c.checkReleases(r.ctx)
 
-	box, err := c.mail.Inbox("apidev", false, true)
+	box, err := c.mail.Inbox("apidev", "", false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,16 +100,16 @@ func TestDependencyNotices(t *testing.T) {
 	if last := body[strings.LastIndex(body, "\n")+1:]; !strings.HasPrefix(last, "Reply: protectorate msg send project:") || !strings.HasSuffix(last, " --thread "+box[0].Thread+` "..."`) {
 		t.Errorf("notice does not end with a reply line: %q", last)
 	}
-	if webBox, _ := c.mail.Inbox("webdev", false, true); len(webBox) != 0 {
+	if webBox, _ := c.mail.Inbox("webdev", "", false, true); len(webBox) != 0 {
 		t.Fatalf("a project that does not depend on lib was notified: %v", webBox)
 	}
-	if libBox, _ := c.mail.Inbox("libdev", false, true); len(libBox) != 1 || libBox[0].Kind != "request" {
+	if libBox, _ := c.mail.Inbox("libdev", "", false, true); len(libBox) != 1 || libBox[0].Kind != "request" {
 		t.Fatalf("libdev's mail = %v", libBox)
 	}
 
 	// a second pass has nothing new
 	c.checkReleases(r.ctx)
-	if box, _ := c.mail.Inbox("apidev", false, true); len(box) != 1 {
+	if box, _ := c.mail.Inbox("apidev", "", false, true); len(box) != 1 {
 		t.Fatalf("the same release was announced twice: %d messages", len(box))
 	}
 
@@ -119,7 +119,7 @@ func TestDependencyNotices(t *testing.T) {
 	}
 	commitIn(t, lib, "baz.go", "package lib\n", "add Baz")
 	c.checkReleases(r.ctx)
-	box, _ = c.mail.Inbox("apidev", false, true)
+	box, _ = c.mail.Inbox("apidev", "", false, true)
 	if len(box) != 2 || !strings.Contains(box[1].Body, "Upstream change: acme/lib default branch") || strings.Contains(box[1].Body, "open requests") {
 		t.Fatalf("branch notice = %+v", box)
 	}
@@ -134,7 +134,7 @@ func TestDependencyNotices(t *testing.T) {
 	if err != nil || len(items) != 1 || !strings.Contains(items[0].Title, "acme/lib released v0.3.0: review changes (uses go:github.com/acme/lib)") {
 		t.Fatalf("backlog = %v %v", items, err)
 	}
-	if box, _ := c.mail.Inbox("apidev", false, true); len(box) != 2 {
+	if box, _ := c.mail.Inbox("apidev", "", false, true); len(box) != 2 {
 		t.Fatalf("a sleeve-less dependent got a message: %d", len(box))
 	}
 	if undelivered := c.mail.Unresolved(); len(undelivered) != 0 {

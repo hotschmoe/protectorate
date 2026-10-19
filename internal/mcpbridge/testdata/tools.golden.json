@@ -922,6 +922,10 @@
           "description": "peek lists without marking read.",
           "type": "boolean"
         },
+        "threadId": {
+          "description": "thread_id keeps only the messages of this thread.",
+          "type": "string"
+        },
         "unreadOnly": {
           "description": "unread_only leaves out messages already injected, shown or acked.",
           "type": "boolean"
@@ -930,6 +934,33 @@
       "type": "object"
     },
     "name": "message_inbox"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListThreads summarizes threads, most recently active first: who takes part, the last message, and what is still open. Unread counts are the caller's own.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "limit is the most threads returned: 0 means 100, at most 500.",
+          "type": "integer"
+        },
+        "project": {
+          "description": "project keeps the threads addressed to or sent from this project (id, \"owner/repo\" or bare name, as in DirectoryService.GetProject).",
+          "type": "string"
+        },
+        "sleeve": {
+          "description": "sleeve keeps the threads this sleeve sent to or received in.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_list_threads"
   },
   {
     "annotations": {
