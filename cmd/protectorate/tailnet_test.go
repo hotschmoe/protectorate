@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,5 +40,32 @@ func TestWriteTailnetStatus(t *testing.T) {
 		if got := strings.Split(line, "\t")[4]; got != tt.path {
 			t.Errorf("%s path %q, want %q\n%s", tt.peer, got, tt.path, b.String())
 		}
+	}
+}
+
+func TestNodeJoinKeyInputs(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty.key")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no key", nil, "enrollment key is required"},
+		{"both", []string{"--key", "k", "--key-file", empty}, "exclusive"},
+		{"empty file", []string{"--key-file", empty}, "is empty"},
+		{"missing file", []string{"--key-file", empty + ".nope"}, "read key file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PROTECTORATE_HOME", t.TempDir())
+			t.Setenv(enrollKeyEnv, "")
+			_, err := runCLI("http://127.0.0.1:1", append([]string{"node", "join", "--control", "http://127.0.0.1:1"}, tt.args...)...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
