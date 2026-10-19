@@ -24,6 +24,7 @@ func testConfig() Config {
 		PathDirs:   []string{"/home/u/.local/bin", "/usr/bin", "/bin"},
 		TasksMax:   4096,
 		CgroupRoot: "/cg",
+		UnitPrefix: DefaultUnitPrefix,
 	}
 }
 

@@ -5,6 +5,7 @@ package hub
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -76,6 +77,7 @@ type chatRig struct {
 	chat protectoratev1connect.ChatServiceClient
 	ws   string
 	name string
+	cfg  sleeve.Config
 }
 
 func newChatRig(t *testing.T) *chatRig {
@@ -90,6 +92,7 @@ func newChatRig(t *testing.T) *chatRig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.UnitPrefix = fmt.Sprintf("prot-test-%06d-", rand.Intn(1000000))
 	if err := cfg.Preflight(); err != nil {
 		t.Skipf("sleeves unavailable: %v", err)
 	}
@@ -100,7 +103,7 @@ func newChatRig(t *testing.T) *chatRig {
 	h.SessionPoll = 20 * time.Millisecond
 	name := fmt.Sprintf("chat%d", time.Now().UnixNano()%1000000)
 	t.Cleanup(func() {
-		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", sleeve.UnitName(name)+".scope").Run()
+		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", cfg.UnitName(name)+".scope").Run()
 		exec.Command("tmux", "-L", sock, "kill-server").Run()
 	})
 	opts := h.SleeveOptions(cfg)
@@ -118,7 +121,7 @@ func newChatRig(t *testing.T) *chatRig {
 	t.Cleanup(func() { cancel(); <-done; h.chat.shutdown() })
 	hc := &http.Client{Transport: bearer{testToken}}
 	return &chatRig{
-		t: t, ctx: ctx, h: h, srv: srv, name: name, ws: t.TempDir(),
+		t: t, ctx: ctx, h: h, cfg: cfg, srv: srv, name: name, ws: t.TempDir(),
 		sl:   protectoratev1connect.NewSleeveServiceClient(hc, srv.URL),
 		chat: protectoratev1connect.NewChatServiceClient(hc, srv.URL),
 	}

@@ -56,10 +56,11 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
+	id := fmt.Sprintf("%06d", rand.Intn(1000000))
+	cfg.UnitPrefix = "prot-test-" + id + "-"
 	if err := cfg.Preflight(); err != nil {
 		t.Skipf("sleeve runtime unavailable: %v", err)
 	}
-	id := fmt.Sprintf("%06d", rand.Intn(1000000))
 	sock := "prot-sleeve-test-" + id
 	r := &rig{cfg: cfg, sess: session.New(sock), rec: &recorder{}, pfx: "t" + id}
 	t.Cleanup(func() {

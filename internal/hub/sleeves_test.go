@@ -5,6 +5,7 @@ package hub
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -26,6 +27,7 @@ func TestSleeveRPC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.UnitPrefix = fmt.Sprintf("prot-test-%06d-", rand.Intn(1000000))
 	if err := cfg.Preflight(); err != nil {
 		t.Skipf("sleeves unavailable: %v", err)
 	}
@@ -36,7 +38,7 @@ func TestSleeveRPC(t *testing.T) {
 	h.SessionPoll = 20 * time.Millisecond
 	name := fmt.Sprintf("hubt%d", time.Now().UnixNano()%1000000)
 	t.Cleanup(func() {
-		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", sleeve.UnitName(name)+".scope").Run()
+		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", cfg.UnitName(name)+".scope").Run()
 		exec.Command("tmux", "-L", sock, "kill-server").Run()
 	})
 	opts := h.SleeveOptions(cfg)

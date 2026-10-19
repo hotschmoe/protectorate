@@ -159,7 +159,7 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 	}
 	for _, n := range m.cfg.scopeNames() {
 		if m.sleeves[n] == nil {
-			log.Printf("sleeve scope %s has no record in %s; leaving it running", UnitName(n), m.path)
+			log.Printf("sleeve scope %s has no record in %s; leaving it running", m.cfg.UnitName(n), m.path)
 		}
 	}
 	m.mu.Lock()
@@ -283,7 +283,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, fmt.Errorf("%w: %s", ErrExists, req.Name)
 	}
 	if m.cfg.scopeAlive(req.Name) {
-		return Info{}, fmt.Errorf("%w: scope %s is still running", ErrExists, UnitName(req.Name))
+		return Info{}, fmt.Errorf("%w: scope %s is still running", ErrExists, m.cfg.UnitName(req.Name))
 	}
 
 	ws, err := m.resolveWorkspace(ctx, req.Name, req.Workspace)

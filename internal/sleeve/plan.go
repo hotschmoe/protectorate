@@ -277,7 +277,7 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		}
 	}
 	lay := c.layout(spec.Name, spec.Harness)
-	unit := UnitName(spec.Name)
+	unit := c.UnitName(spec.Name)
 
 	argv := []string{"systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + unit}
 	if m := spec.Limits.MemoryBytes; m != 0 {

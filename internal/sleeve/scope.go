@@ -15,7 +15,7 @@ import (
 )
 
 func (c Config) scopeDir(name string) string {
-	return filepath.Join(c.CgroupRoot, UnitName(name)+".scope")
+	return filepath.Join(c.CgroupRoot, c.UnitName(name)+".scope")
 }
 
 func (c Config) scopeAlive(name string) bool {
@@ -35,7 +35,7 @@ func (c Config) scopeNames() []string {
 	ents, _ := os.ReadDir(c.CgroupRoot)
 	var out []string
 	for _, e := range ents {
-		if n, ok := strings.CutPrefix(e.Name(), unitPrefix); ok {
+		if n, ok := strings.CutPrefix(e.Name(), c.UnitPrefix); ok {
 			if n, ok = strings.CutSuffix(n, ".scope"); ok {
 				out = append(out, n)
 			}
@@ -121,7 +121,7 @@ func (c Config) killScope(ctx context.Context, name string) error {
 	if !c.scopeAlive(name) {
 		return nil
 	}
-	unit := UnitName(name) + ".scope"
+	unit := c.UnitName(name) + ".scope"
 	for _, args := range [][]string{
 		{"--user", "kill", "--signal=SIGKILL", unit},
 		{"--user", "stop", unit},

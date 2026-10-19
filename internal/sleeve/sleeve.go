@@ -54,8 +54,9 @@ type Limits struct {
 const (
 	minMemoryBytes = 64 << 20
 	maxNameLen     = 40
-	unitPrefix     = "prot-sleeve-"
-	sessionPrefix  = "sleeve-"
+	// DefaultUnitPrefix starts the name of every sleeve scope.
+	DefaultUnitPrefix = "prot-sleeve-"
+	sessionPrefix     = "sleeve-"
 )
 
 var (
@@ -70,8 +71,10 @@ func ValidName(name string) error {
 	return nil
 }
 
-func UnitName(name string) string    { return unitPrefix + name }
 func SessionName(name string) string { return sessionPrefix + name }
+
+// UnitName is the systemd unit (without .scope) of a sleeve.
+func (c Config) UnitName(name string) string { return c.UnitPrefix + name }
 
 // IsSleeveSession reports whether a session name is reserved for sleeves.
 // Such sessions must only be started through the sleeve manager, which wraps
@@ -94,6 +97,9 @@ type Config struct {
 	ToolDirs []string // existing directories bound read-only at the same path
 	PathDirs []string // directories searched for harnesses and used as $PATH
 	TasksMax int
+	// UnitPrefix starts every scope name. Tests set their own so a real hub on
+	// the same user manager never sees their scopes.
+	UnitPrefix string
 	// CgroupRoot is the cgroup directory that holds the user's scopes.
 	CgroupRoot string
 	// Protected are extra resolved paths that must never be mounted or used
@@ -149,7 +155,7 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve state directory: %w", err)
 	}
-	c := Config{Home: home, UserHome: uh, TasksMax: 4096}
+	c := Config{Home: home, UserHome: uh, TasksMax: 4096, UnitPrefix: DefaultUnitPrefix}
 	for _, d := range credentialDirs {
 		if r, err := filepath.EvalSymlinks(filepath.Join(uh, d)); err == nil {
 			c.Protected = append(c.Protected, r)

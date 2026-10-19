@@ -56,7 +56,7 @@ func newMailRig(t *testing.T) *mailRig {
 func (m *mailRig) spawnNamed(name string, mode pb.SleeveMode, ws string) {
 	m.t.Helper()
 	m.t.Cleanup(func() {
-		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", sleeve.UnitName(name)+".scope").Run()
+		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", m.cfg.UnitName(name)+".scope").Run()
 	})
 	if ws == "" {
 		ws = m.t.TempDir()
