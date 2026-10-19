@@ -47,5 +47,36 @@ class Freshness extends $pb.ProtobufEnum {
   const Freshness._(super.value, super.name);
 }
 
+class TaskSize extends $pb.ProtobufEnum {
+  static const TaskSize TASK_SIZE_UNSPECIFIED =
+      TaskSize._(0, _omitEnumNames ? '' : 'TASK_SIZE_UNSPECIFIED');
+
+  /// TASK_SIZE_SMALL needs at least 5% usable capacity now.
+  static const TaskSize TASK_SIZE_SMALL =
+      TaskSize._(1, _omitEnumNames ? '' : 'TASK_SIZE_SMALL');
+
+  /// TASK_SIZE_MEDIUM needs at least 15%. It is the default.
+  static const TaskSize TASK_SIZE_MEDIUM =
+      TaskSize._(2, _omitEnumNames ? '' : 'TASK_SIZE_MEDIUM');
+
+  /// TASK_SIZE_LARGE needs at least 30%.
+  static const TaskSize TASK_SIZE_LARGE =
+      TaskSize._(3, _omitEnumNames ? '' : 'TASK_SIZE_LARGE');
+
+  static const $core.List<TaskSize> values = <TaskSize>[
+    TASK_SIZE_UNSPECIFIED,
+    TASK_SIZE_SMALL,
+    TASK_SIZE_MEDIUM,
+    TASK_SIZE_LARGE,
+  ];
+
+  static final $core.List<TaskSize?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
+  static TaskSize? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const TaskSize._(super.value, super.name);
+}
+
 const $core.bool _omitEnumNames =
     $core.bool.fromEnvironment('protobuf.omit_enum_names');

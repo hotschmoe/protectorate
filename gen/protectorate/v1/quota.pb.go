@@ -80,6 +80,61 @@ func (Freshness) EnumDescriptor() ([]byte, []int) {
 	return file_protectorate_v1_quota_proto_rawDescGZIP(), []int{0}
 }
 
+type TaskSize int32
+
+const (
+	TaskSize_TASK_SIZE_UNSPECIFIED TaskSize = 0
+	// TASK_SIZE_SMALL needs at least 5% usable capacity now.
+	TaskSize_TASK_SIZE_SMALL TaskSize = 1
+	// TASK_SIZE_MEDIUM needs at least 15%. It is the default.
+	TaskSize_TASK_SIZE_MEDIUM TaskSize = 2
+	// TASK_SIZE_LARGE needs at least 30%.
+	TaskSize_TASK_SIZE_LARGE TaskSize = 3
+)
+
+// Enum value maps for TaskSize.
+var (
+	TaskSize_name = map[int32]string{
+		0: "TASK_SIZE_UNSPECIFIED",
+		1: "TASK_SIZE_SMALL",
+		2: "TASK_SIZE_MEDIUM",
+		3: "TASK_SIZE_LARGE",
+	}
+	TaskSize_value = map[string]int32{
+		"TASK_SIZE_UNSPECIFIED": 0,
+		"TASK_SIZE_SMALL":       1,
+		"TASK_SIZE_MEDIUM":      2,
+		"TASK_SIZE_LARGE":       3,
+	}
+)
+
+func (x TaskSize) Enum() *TaskSize {
+	p := new(TaskSize)
+	*p = x
+	return p
+}
+
+func (x TaskSize) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TaskSize) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_quota_proto_enumTypes[1].Descriptor()
+}
+
+func (TaskSize) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_quota_proto_enumTypes[1]
+}
+
+func (x TaskSize) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TaskSize.Descriptor instead.
+func (TaskSize) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_quota_proto_rawDescGZIP(), []int{1}
+}
+
 type GetQuotaRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// refresh forces an immediate read of each provider, rate-limited per
@@ -452,11 +507,259 @@ func (x *ResetCredit) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type SuggestRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// task_size is a hint for how much headroom the work needs; a harness with
+	// less usable capacity than that is not recommended. Unset means medium.
+	TaskSize TaskSize `protobuf:"varint,1,opt,name=task_size,json=taskSize,proto3,enum=protectorate.v1.TaskSize" json:"task_size,omitempty"`
+	// refresh forces an immediate quota read first, as in GetQuotaRequest.
+	Refresh       bool `protobuf:"varint,2,opt,name=refresh,proto3" json:"refresh,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SuggestRequest) Reset() {
+	*x = SuggestRequest{}
+	mi := &file_protectorate_v1_quota_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SuggestRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SuggestRequest) ProtoMessage() {}
+
+func (x *SuggestRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_quota_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SuggestRequest.ProtoReflect.Descriptor instead.
+func (*SuggestRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_quota_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SuggestRequest) GetTaskSize() TaskSize {
+	if x != nil {
+		return x.TaskSize
+	}
+	return TaskSize_TASK_SIZE_UNSPECIFIED
+}
+
+func (x *SuggestRequest) GetRefresh() bool {
+	if x != nil {
+		return x.Refresh
+	}
+	return false
+}
+
+type SuggestResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// suggestions lists every candidate harness, best first: recommended ones
+	// by descending score, then the others.
+	Suggestions   []*HarnessSuggestion   `protobuf:"bytes,1,rep,name=suggestions,proto3" json:"suggestions,omitempty"`
+	GeneratedAt   *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SuggestResponse) Reset() {
+	*x = SuggestResponse{}
+	mi := &file_protectorate_v1_quota_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SuggestResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SuggestResponse) ProtoMessage() {}
+
+func (x *SuggestResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_quota_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SuggestResponse.ProtoReflect.Descriptor instead.
+func (*SuggestResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_quota_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SuggestResponse) GetSuggestions() []*HarnessSuggestion {
+	if x != nil {
+		return x.Suggestions
+	}
+	return nil
+}
+
+func (x *SuggestResponse) GetGeneratedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.GeneratedAt
+	}
+	return nil
+}
+
+type HarnessSuggestion struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// rank starts at 1 for the best candidate.
+	Rank    int32   `protobuf:"varint,1,opt,name=rank,proto3" json:"rank,omitempty"`
+	Harness Harness `protobuf:"varint,2,opt,name=harness,proto3,enum=protectorate.v1.Harness" json:"harness,omitempty"`
+	// provider is the quota subscription behind the harness, e.g. "claude";
+	// "local" for pi.
+	Provider string `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	// recommended is false when the data is not FRESH, or the usable capacity
+	// is below what the task size needs.
+	Recommended bool `protobuf:"varint,4,opt,name=recommended,proto3" json:"recommended,omitempty"`
+	// score orders the recommended candidates: the percent of capacity that is
+	// both usable now and expected to expire at the reset, weighted by how
+	// soon that reset is. 0 when not recommended.
+	Score     float64   `protobuf:"fixed64,5,opt,name=score,proto3" json:"score,omitempty"`
+	Freshness Freshness `protobuf:"varint,6,opt,name=freshness,proto3,enum=protectorate.v1.Freshness" json:"freshness,omitempty"`
+	// usable_percent is the remaining capacity of the tightest window, the
+	// most that can be spent now. Unset when there is no fresh data.
+	UsablePercent *float64 `protobuf:"fixed64,7,opt,name=usable_percent,json=usablePercent,proto3,oneof" json:"usable_percent,omitempty"`
+	// expiring_percent is the part of usable_percent expected to be unused at
+	// the reset of the scoring window. Unset when there is no fresh data.
+	ExpiringPercent *float64 `protobuf:"fixed64,8,opt,name=expiring_percent,json=expiringPercent,proto3,oneof" json:"expiring_percent,omitempty"`
+	// window names the window the score comes from, e.g. "7d".
+	Window string `protobuf:"bytes,9,opt,name=window,proto3" json:"window,omitempty"`
+	// resets_in is the time until that window resets; unset when unknown.
+	ResetsIn *durationpb.Duration `protobuf:"bytes,10,opt,name=resets_in,json=resetsIn,proto3" json:"resets_in,omitempty"`
+	// reason explains the ranking in one line.
+	Reason        string `protobuf:"bytes,11,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessSuggestion) Reset() {
+	*x = HarnessSuggestion{}
+	mi := &file_protectorate_v1_quota_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessSuggestion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessSuggestion) ProtoMessage() {}
+
+func (x *HarnessSuggestion) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_quota_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessSuggestion.ProtoReflect.Descriptor instead.
+func (*HarnessSuggestion) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_quota_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HarnessSuggestion) GetRank() int32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
+func (x *HarnessSuggestion) GetHarness() Harness {
+	if x != nil {
+		return x.Harness
+	}
+	return Harness_HARNESS_UNSPECIFIED
+}
+
+func (x *HarnessSuggestion) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *HarnessSuggestion) GetRecommended() bool {
+	if x != nil {
+		return x.Recommended
+	}
+	return false
+}
+
+func (x *HarnessSuggestion) GetScore() float64 {
+	if x != nil {
+		return x.Score
+	}
+	return 0
+}
+
+func (x *HarnessSuggestion) GetFreshness() Freshness {
+	if x != nil {
+		return x.Freshness
+	}
+	return Freshness_FRESHNESS_UNSPECIFIED
+}
+
+func (x *HarnessSuggestion) GetUsablePercent() float64 {
+	if x != nil && x.UsablePercent != nil {
+		return *x.UsablePercent
+	}
+	return 0
+}
+
+func (x *HarnessSuggestion) GetExpiringPercent() float64 {
+	if x != nil && x.ExpiringPercent != nil {
+		return *x.ExpiringPercent
+	}
+	return 0
+}
+
+func (x *HarnessSuggestion) GetWindow() string {
+	if x != nil {
+		return x.Window
+	}
+	return ""
+}
+
+func (x *HarnessSuggestion) GetResetsIn() *durationpb.Duration {
+	if x != nil {
+		return x.ResetsIn
+	}
+	return nil
+}
+
+func (x *HarnessSuggestion) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 var File_protectorate_v1_quota_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_quota_proto_rawDesc = "" +
 	"\n" +
-	"\x1bprotectorate/v1/quota.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"+\n" +
+	"\x1bprotectorate/v1/quota.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cprotectorate/v1/sleeve.proto\"+\n" +
 	"\x0fGetQuotaRequest\x12\x18\n" +
 	"\arefresh\x18\x01 \x01(\bR\arefresh\"J\n" +
 	"\x10GetQuotaResponse\x126\n" +
@@ -488,14 +791,41 @@ const file_protectorate_v1_quota_proto_rawDesc = "" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x05R\x05count\x129\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt*g\n" +
+	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"b\n" +
+	"\x0eSuggestRequest\x126\n" +
+	"\ttask_size\x18\x01 \x01(\x0e2\x19.protectorate.v1.TaskSizeR\btaskSize\x12\x18\n" +
+	"\arefresh\x18\x02 \x01(\bR\arefresh\"\x96\x01\n" +
+	"\x0fSuggestResponse\x12D\n" +
+	"\vsuggestions\x18\x01 \x03(\v2\".protectorate.v1.HarnessSuggestionR\vsuggestions\x12=\n" +
+	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\"\xd5\x03\n" +
+	"\x11HarnessSuggestion\x12\x12\n" +
+	"\x04rank\x18\x01 \x01(\x05R\x04rank\x122\n" +
+	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1a\n" +
+	"\bprovider\x18\x03 \x01(\tR\bprovider\x12 \n" +
+	"\vrecommended\x18\x04 \x01(\bR\vrecommended\x12\x14\n" +
+	"\x05score\x18\x05 \x01(\x01R\x05score\x128\n" +
+	"\tfreshness\x18\x06 \x01(\x0e2\x1a.protectorate.v1.FreshnessR\tfreshness\x12*\n" +
+	"\x0eusable_percent\x18\a \x01(\x01H\x00R\rusablePercent\x88\x01\x01\x12.\n" +
+	"\x10expiring_percent\x18\b \x01(\x01H\x01R\x0fexpiringPercent\x88\x01\x01\x12\x16\n" +
+	"\x06window\x18\t \x01(\tR\x06window\x126\n" +
+	"\tresets_in\x18\n" +
+	" \x01(\v2\x19.google.protobuf.DurationR\bresetsIn\x12\x16\n" +
+	"\x06reason\x18\v \x01(\tR\x06reasonB\x11\n" +
+	"\x0f_usable_percentB\x13\n" +
+	"\x11_expiring_percent*g\n" +
 	"\tFreshness\x12\x19\n" +
 	"\x15FRESHNESS_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fFRESHNESS_FRESH\x10\x01\x12\x13\n" +
 	"\x0fFRESHNESS_STALE\x10\x02\x12\x15\n" +
-	"\x11FRESHNESS_UNKNOWN\x10\x032d\n" +
+	"\x11FRESHNESS_UNKNOWN\x10\x03*e\n" +
+	"\bTaskSize\x12\x19\n" +
+	"\x15TASK_SIZE_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fTASK_SIZE_SMALL\x10\x01\x12\x14\n" +
+	"\x10TASK_SIZE_MEDIUM\x10\x02\x12\x13\n" +
+	"\x0fTASK_SIZE_LARGE\x10\x032\xb7\x01\n" +
 	"\fQuotaService\x12T\n" +
-	"\bGetQuota\x12 .protectorate.v1.GetQuotaRequest\x1a!.protectorate.v1.GetQuotaResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\bGetQuota\x12 .protectorate.v1.GetQuotaRequest\x1a!.protectorate.v1.GetQuotaResponse\"\x03\x90\x02\x01\x12Q\n" +
+	"\aSuggest\x12\x1f.protectorate.v1.SuggestRequest\x1a .protectorate.v1.SuggestResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_quota_proto_rawDescOnce sync.Once
@@ -509,36 +839,49 @@ func file_protectorate_v1_quota_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_quota_proto_rawDescData
 }
 
-var file_protectorate_v1_quota_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protectorate_v1_quota_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_protectorate_v1_quota_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_protectorate_v1_quota_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_protectorate_v1_quota_proto_goTypes = []any{
 	(Freshness)(0),                // 0: protectorate.v1.Freshness
-	(*GetQuotaRequest)(nil),       // 1: protectorate.v1.GetQuotaRequest
-	(*GetQuotaResponse)(nil),      // 2: protectorate.v1.GetQuotaResponse
-	(*ProviderQuota)(nil),         // 3: protectorate.v1.ProviderQuota
-	(*QuotaWindow)(nil),           // 4: protectorate.v1.QuotaWindow
-	(*ResetCredit)(nil),           // 5: protectorate.v1.ResetCredit
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 7: google.protobuf.Duration
+	(TaskSize)(0),                 // 1: protectorate.v1.TaskSize
+	(*GetQuotaRequest)(nil),       // 2: protectorate.v1.GetQuotaRequest
+	(*GetQuotaResponse)(nil),      // 3: protectorate.v1.GetQuotaResponse
+	(*ProviderQuota)(nil),         // 4: protectorate.v1.ProviderQuota
+	(*QuotaWindow)(nil),           // 5: protectorate.v1.QuotaWindow
+	(*ResetCredit)(nil),           // 6: protectorate.v1.ResetCredit
+	(*SuggestRequest)(nil),        // 7: protectorate.v1.SuggestRequest
+	(*SuggestResponse)(nil),       // 8: protectorate.v1.SuggestResponse
+	(*HarnessSuggestion)(nil),     // 9: protectorate.v1.HarnessSuggestion
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 11: google.protobuf.Duration
+	(Harness)(0),                  // 12: protectorate.v1.Harness
 }
 var file_protectorate_v1_quota_proto_depIdxs = []int32{
-	3,  // 0: protectorate.v1.GetQuotaResponse.quotas:type_name -> protectorate.v1.ProviderQuota
+	4,  // 0: protectorate.v1.GetQuotaResponse.quotas:type_name -> protectorate.v1.ProviderQuota
 	0,  // 1: protectorate.v1.ProviderQuota.freshness:type_name -> protectorate.v1.Freshness
-	6,  // 2: protectorate.v1.ProviderQuota.fetched_at:type_name -> google.protobuf.Timestamp
-	7,  // 3: protectorate.v1.ProviderQuota.age:type_name -> google.protobuf.Duration
-	6,  // 4: protectorate.v1.ProviderQuota.checked_at:type_name -> google.protobuf.Timestamp
-	4,  // 5: protectorate.v1.ProviderQuota.windows:type_name -> protectorate.v1.QuotaWindow
-	5,  // 6: protectorate.v1.ProviderQuota.resets:type_name -> protectorate.v1.ResetCredit
-	7,  // 7: protectorate.v1.ProviderQuota.latency:type_name -> google.protobuf.Duration
-	6,  // 8: protectorate.v1.QuotaWindow.resets_at:type_name -> google.protobuf.Timestamp
-	6,  // 9: protectorate.v1.ResetCredit.expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 10: protectorate.v1.QuotaService.GetQuota:input_type -> protectorate.v1.GetQuotaRequest
-	2,  // 11: protectorate.v1.QuotaService.GetQuota:output_type -> protectorate.v1.GetQuotaResponse
-	11, // [11:12] is the sub-list for method output_type
-	10, // [10:11] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 2: protectorate.v1.ProviderQuota.fetched_at:type_name -> google.protobuf.Timestamp
+	11, // 3: protectorate.v1.ProviderQuota.age:type_name -> google.protobuf.Duration
+	10, // 4: protectorate.v1.ProviderQuota.checked_at:type_name -> google.protobuf.Timestamp
+	5,  // 5: protectorate.v1.ProviderQuota.windows:type_name -> protectorate.v1.QuotaWindow
+	6,  // 6: protectorate.v1.ProviderQuota.resets:type_name -> protectorate.v1.ResetCredit
+	11, // 7: protectorate.v1.ProviderQuota.latency:type_name -> google.protobuf.Duration
+	10, // 8: protectorate.v1.QuotaWindow.resets_at:type_name -> google.protobuf.Timestamp
+	10, // 9: protectorate.v1.ResetCredit.expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 10: protectorate.v1.SuggestRequest.task_size:type_name -> protectorate.v1.TaskSize
+	9,  // 11: protectorate.v1.SuggestResponse.suggestions:type_name -> protectorate.v1.HarnessSuggestion
+	10, // 12: protectorate.v1.SuggestResponse.generated_at:type_name -> google.protobuf.Timestamp
+	12, // 13: protectorate.v1.HarnessSuggestion.harness:type_name -> protectorate.v1.Harness
+	0,  // 14: protectorate.v1.HarnessSuggestion.freshness:type_name -> protectorate.v1.Freshness
+	11, // 15: protectorate.v1.HarnessSuggestion.resets_in:type_name -> google.protobuf.Duration
+	2,  // 16: protectorate.v1.QuotaService.GetQuota:input_type -> protectorate.v1.GetQuotaRequest
+	7,  // 17: protectorate.v1.QuotaService.Suggest:input_type -> protectorate.v1.SuggestRequest
+	3,  // 18: protectorate.v1.QuotaService.GetQuota:output_type -> protectorate.v1.GetQuotaResponse
+	8,  // 19: protectorate.v1.QuotaService.Suggest:output_type -> protectorate.v1.SuggestResponse
+	18, // [18:20] is the sub-list for method output_type
+	16, // [16:18] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_quota_proto_init() }
@@ -546,14 +889,16 @@ func file_protectorate_v1_quota_proto_init() {
 	if File_protectorate_v1_quota_proto != nil {
 		return
 	}
+	file_protectorate_v1_sleeve_proto_init()
 	file_protectorate_v1_quota_proto_msgTypes[3].OneofWrappers = []any{}
+	file_protectorate_v1_quota_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_quota_proto_rawDesc), len(file_protectorate_v1_quota_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   5,
+			NumEnums:      2,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

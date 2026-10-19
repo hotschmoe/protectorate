@@ -4,6 +4,7 @@ package protectorate.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/sleeve.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
@@ -14,6 +15,18 @@ service QuotaService {
   // GetQuota returns the usage windows, resets and freshness of every
   // provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
   rpc GetQuota(GetQuotaRequest) returns (GetQuotaResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Suggest ranks the harnesses a sleeve can run (claude, codex, grok and
+  // pi) by usable spare capacity before reset, best first. Only FRESH quota
+  // data counts as capacity: STALE and UNKNOWN providers are listed as not
+  // recommended. A harness scores the capacity that is usable now (the
+  // tightest window) and expected to expire unused at a reset, weighted
+  // toward the sooner reset. pi on the local LLM has no quota and is always
+  // recommended as the fallback, ranked below any subscription with real
+  // capacity to burn. Antigravity has no sleeve harness and is not listed.
+  rpc Suggest(SuggestRequest) returns (SuggestResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }
@@ -81,4 +94,58 @@ message ResetCredit {
   string kind = 1;
   int32 count = 2;
   google.protobuf.Timestamp expires_at = 3;
+}
+
+enum TaskSize {
+  TASK_SIZE_UNSPECIFIED = 0;
+  // TASK_SIZE_SMALL needs at least 5% usable capacity now.
+  TASK_SIZE_SMALL = 1;
+  // TASK_SIZE_MEDIUM needs at least 15%. It is the default.
+  TASK_SIZE_MEDIUM = 2;
+  // TASK_SIZE_LARGE needs at least 30%.
+  TASK_SIZE_LARGE = 3;
+}
+
+message SuggestRequest {
+  // task_size is a hint for how much headroom the work needs; a harness with
+  // less usable capacity than that is not recommended. Unset means medium.
+  TaskSize task_size = 1;
+  // refresh forces an immediate quota read first, as in GetQuotaRequest.
+  bool refresh = 2;
+}
+
+message SuggestResponse {
+  // suggestions lists every candidate harness, best first: recommended ones
+  // by descending score, then the others.
+  repeated HarnessSuggestion suggestions = 1;
+  google.protobuf.Timestamp generated_at = 2;
+}
+
+message HarnessSuggestion {
+  // rank starts at 1 for the best candidate.
+  int32 rank = 1;
+  Harness harness = 2;
+  // provider is the quota subscription behind the harness, e.g. "claude";
+  // "local" for pi.
+  string provider = 3;
+  // recommended is false when the data is not FRESH, or the usable capacity
+  // is below what the task size needs.
+  bool recommended = 4;
+  // score orders the recommended candidates: the percent of capacity that is
+  // both usable now and expected to expire at the reset, weighted by how
+  // soon that reset is. 0 when not recommended.
+  double score = 5;
+  Freshness freshness = 6;
+  // usable_percent is the remaining capacity of the tightest window, the
+  // most that can be spent now. Unset when there is no fresh data.
+  optional double usable_percent = 7;
+  // expiring_percent is the part of usable_percent expected to be unused at
+  // the reset of the scoring window. Unset when there is no fresh data.
+  optional double expiring_percent = 8;
+  // window names the window the score comes from, e.g. "7d".
+  string window = 9;
+  // resets_in is the time until that window resets; unset when unknown.
+  google.protobuf.Duration resets_in = 10;
+  // reason explains the ranking in one line.
+  string reason = 11;
 }

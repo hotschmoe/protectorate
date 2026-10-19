@@ -15,19 +15,23 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'quota.pb.dart' as $2;
+import 'quota.pb.dart' as $3;
 import 'quota.pbjson.dart';
 
 export 'quota.pb.dart';
 
 abstract class QuotaServiceBase extends $pb.GeneratedService {
-  $async.Future<$2.GetQuotaResponse> getQuota(
-      $pb.ServerContext ctx, $2.GetQuotaRequest request);
+  $async.Future<$3.GetQuotaResponse> getQuota(
+      $pb.ServerContext ctx, $3.GetQuotaRequest request);
+  $async.Future<$3.SuggestResponse> suggest(
+      $pb.ServerContext ctx, $3.SuggestRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'GetQuota':
-        return $2.GetQuotaRequest();
+        return $3.GetQuotaRequest();
+      case 'Suggest':
+        return $3.SuggestRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -37,7 +41,9 @@ abstract class QuotaServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'GetQuota':
-        return getQuota(ctx, request as $2.GetQuotaRequest);
+        return getQuota(ctx, request as $3.GetQuotaRequest);
+      case 'Suggest':
+        return suggest(ctx, request as $3.SuggestRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

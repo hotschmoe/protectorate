@@ -36,6 +36,22 @@ final $typed_data.Uint8List freshnessDescriptor = $convert.base64Decode(
     'CglGcmVzaG5lc3MSGQoVRlJFU0hORVNTX1VOU1BFQ0lGSUVEEAASEwoPRlJFU0hORVNTX0ZSRV'
     'NIEAESEwoPRlJFU0hORVNTX1NUQUxFEAISFQoRRlJFU0hORVNTX1VOS05PV04QAw==');
 
+@$core.Deprecated('Use taskSizeDescriptor instead')
+const TaskSize$json = {
+  '1': 'TaskSize',
+  '2': [
+    {'1': 'TASK_SIZE_UNSPECIFIED', '2': 0},
+    {'1': 'TASK_SIZE_SMALL', '2': 1},
+    {'1': 'TASK_SIZE_MEDIUM', '2': 2},
+    {'1': 'TASK_SIZE_LARGE', '2': 3},
+  ],
+};
+
+/// Descriptor for `TaskSize`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List taskSizeDescriptor = $convert.base64Decode(
+    'CghUYXNrU2l6ZRIZChVUQVNLX1NJWkVfVU5TUEVDSUZJRUQQABITCg9UQVNLX1NJWkVfU01BTE'
+    'wQARIUChBUQVNLX1NJWkVfTUVESVVNEAISEwoPVEFTS19TSVpFX0xBUkdFEAM=');
+
 @$core.Deprecated('Use getQuotaRequestDescriptor instead')
 const GetQuotaRequest$json = {
   '1': 'GetQuotaRequest',
@@ -211,6 +227,127 @@ final $typed_data.Uint8List resetCreditDescriptor = $convert.base64Decode(
     'I5CgpleHBpcmVzX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJZXhwaXJl'
     'c0F0');
 
+@$core.Deprecated('Use suggestRequestDescriptor instead')
+const SuggestRequest$json = {
+  '1': 'SuggestRequest',
+  '2': [
+    {
+      '1': 'task_size',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.TaskSize',
+      '10': 'taskSize'
+    },
+    {'1': 'refresh', '3': 2, '4': 1, '5': 8, '10': 'refresh'},
+  ],
+};
+
+/// Descriptor for `SuggestRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List suggestRequestDescriptor = $convert.base64Decode(
+    'Cg5TdWdnZXN0UmVxdWVzdBI2Cgl0YXNrX3NpemUYASABKA4yGS5wcm90ZWN0b3JhdGUudjEuVG'
+    'Fza1NpemVSCHRhc2tTaXplEhgKB3JlZnJlc2gYAiABKAhSB3JlZnJlc2g=');
+
+@$core.Deprecated('Use suggestResponseDescriptor instead')
+const SuggestResponse$json = {
+  '1': 'SuggestResponse',
+  '2': [
+    {
+      '1': 'suggestions',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.HarnessSuggestion',
+      '10': 'suggestions'
+    },
+    {
+      '1': 'generated_at',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'generatedAt'
+    },
+  ],
+};
+
+/// Descriptor for `SuggestResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List suggestResponseDescriptor = $convert.base64Decode(
+    'Cg9TdWdnZXN0UmVzcG9uc2USRAoLc3VnZ2VzdGlvbnMYASADKAsyIi5wcm90ZWN0b3JhdGUudj'
+    'EuSGFybmVzc1N1Z2dlc3Rpb25SC3N1Z2dlc3Rpb25zEj0KDGdlbmVyYXRlZF9hdBgCIAEoCzIa'
+    'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSC2dlbmVyYXRlZEF0');
+
+@$core.Deprecated('Use harnessSuggestionDescriptor instead')
+const HarnessSuggestion$json = {
+  '1': 'HarnessSuggestion',
+  '2': [
+    {'1': 'rank', '3': 1, '4': 1, '5': 5, '10': 'rank'},
+    {
+      '1': 'harness',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.Harness',
+      '10': 'harness'
+    },
+    {'1': 'provider', '3': 3, '4': 1, '5': 9, '10': 'provider'},
+    {'1': 'recommended', '3': 4, '4': 1, '5': 8, '10': 'recommended'},
+    {'1': 'score', '3': 5, '4': 1, '5': 1, '10': 'score'},
+    {
+      '1': 'freshness',
+      '3': 6,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.Freshness',
+      '10': 'freshness'
+    },
+    {
+      '1': 'usable_percent',
+      '3': 7,
+      '4': 1,
+      '5': 1,
+      '9': 0,
+      '10': 'usablePercent',
+      '17': true
+    },
+    {
+      '1': 'expiring_percent',
+      '3': 8,
+      '4': 1,
+      '5': 1,
+      '9': 1,
+      '10': 'expiringPercent',
+      '17': true
+    },
+    {'1': 'window', '3': 9, '4': 1, '5': 9, '10': 'window'},
+    {
+      '1': 'resets_in',
+      '3': 10,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'resetsIn'
+    },
+    {'1': 'reason', '3': 11, '4': 1, '5': 9, '10': 'reason'},
+  ],
+  '8': [
+    {'1': '_usable_percent'},
+    {'1': '_expiring_percent'},
+  ],
+};
+
+/// Descriptor for `HarnessSuggestion`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List harnessSuggestionDescriptor = $convert.base64Decode(
+    'ChFIYXJuZXNzU3VnZ2VzdGlvbhISCgRyYW5rGAEgASgFUgRyYW5rEjIKB2hhcm5lc3MYAiABKA'
+    '4yGC5wcm90ZWN0b3JhdGUudjEuSGFybmVzc1IHaGFybmVzcxIaCghwcm92aWRlchgDIAEoCVII'
+    'cHJvdmlkZXISIAoLcmVjb21tZW5kZWQYBCABKAhSC3JlY29tbWVuZGVkEhQKBXNjb3JlGAUgAS'
+    'gBUgVzY29yZRI4CglmcmVzaG5lc3MYBiABKA4yGi5wcm90ZWN0b3JhdGUudjEuRnJlc2huZXNz'
+    'UglmcmVzaG5lc3MSKgoOdXNhYmxlX3BlcmNlbnQYByABKAFIAFINdXNhYmxlUGVyY2VudIgBAR'
+    'IuChBleHBpcmluZ19wZXJjZW50GAggASgBSAFSD2V4cGlyaW5nUGVyY2VudIgBARIWCgZ3aW5k'
+    'b3cYCSABKAlSBndpbmRvdxI2CglyZXNldHNfaW4YCiABKAsyGS5nb29nbGUucHJvdG9idWYuRH'
+    'VyYXRpb25SCHJlc2V0c0luEhYKBnJlYXNvbhgLIAEoCVIGcmVhc29uQhEKD191c2FibGVfcGVy'
+    'Y2VudEITChFfZXhwaXJpbmdfcGVyY2VudA==');
+
 const $core.Map<$core.String, $core.dynamic> QuotaServiceBase$json = {
   '1': 'QuotaService',
   '2': [
@@ -218,6 +355,12 @@ const $core.Map<$core.String, $core.dynamic> QuotaServiceBase$json = {
       '1': 'GetQuota',
       '2': '.protectorate.v1.GetQuotaRequest',
       '3': '.protectorate.v1.GetQuotaResponse',
+      '4': {'34': 1},
+    },
+    {
+      '1': 'Suggest',
+      '2': '.protectorate.v1.SuggestRequest',
+      '3': '.protectorate.v1.SuggestResponse',
       '4': {'34': 1},
     },
   ],
@@ -233,9 +376,14 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.google.protobuf.Duration': $1.Duration$json,
   '.protectorate.v1.QuotaWindow': QuotaWindow$json,
   '.protectorate.v1.ResetCredit': ResetCredit$json,
+  '.protectorate.v1.SuggestRequest': SuggestRequest$json,
+  '.protectorate.v1.SuggestResponse': SuggestResponse$json,
+  '.protectorate.v1.HarnessSuggestion': HarnessSuggestion$json,
 };
 
 /// Descriptor for `QuotaService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List quotaServiceDescriptor = $convert.base64Decode(
     'CgxRdW90YVNlcnZpY2USVAoIR2V0UXVvdGESIC5wcm90ZWN0b3JhdGUudjEuR2V0UXVvdGFSZX'
-    'F1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkdldFF1b3RhUmVzcG9uc2UiA5ACAQ==');
+    'F1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkdldFF1b3RhUmVzcG9uc2UiA5ACARJRCgdTdWdnZXN0'
+    'Eh8ucHJvdGVjdG9yYXRlLnYxLlN1Z2dlc3RSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLlN1Z2'
+    'dlc3RSZXNwb25zZSIDkAIB');

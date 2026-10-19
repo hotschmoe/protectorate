@@ -111,3 +111,36 @@ func TestWriteQuota(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteSuggest(t *testing.T) {
+	usable, exp := 62.0, 48.0
+	resp := &pb.SuggestResponse{Suggestions: []*pb.HarnessSuggestion{
+		{Rank: 1, Harness: pb.Harness_HARNESS_CODEX, Recommended: true, Score: 31.4, UsablePercent: &usable, ExpiringPercent: &exp,
+			ResetsIn: durationpb.New(26 * time.Hour), Reason: "7d window resets in 1d02h"},
+		{Rank: 2, Harness: pb.Harness_HARNESS_PI, Recommended: true, Score: 1, Reason: "local LLM"},
+		{Rank: 3, Harness: pb.Harness_HARNESS_GROK, Reason: "no quota data yet"},
+	}}
+	var buf bytes.Buffer
+	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+	writeSuggest(tw, resp)
+	tw.Flush()
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("want header and 3 rows:\n%s", buf.String())
+	}
+	for i, want := range [][]string{
+		{"RANK", "HARNESS", "REASON"},
+		{"1", "codex", "yes", "31.4", "62%", "48%", "1d02h", "7d window"},
+		{"2", "pi", "yes", "1.0", "local LLM"},
+		{"3", "grok", "no", "0.0", "no quota data yet"},
+	} {
+		for _, w := range want {
+			if !strings.Contains(lines[i], w) {
+				t.Errorf("line %d missing %q: %q", i, w, lines[i])
+			}
+		}
+	}
+	if strings.Contains(lines[3], "%") {
+		t.Errorf("a provider without data must show no percentages: %q", lines[3])
+	}
+}

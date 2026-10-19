@@ -35,6 +35,8 @@ const (
 const (
 	// QuotaServiceGetQuotaProcedure is the fully-qualified name of the QuotaService's GetQuota RPC.
 	QuotaServiceGetQuotaProcedure = "/protectorate.v1.QuotaService/GetQuota"
+	// QuotaServiceSuggestProcedure is the fully-qualified name of the QuotaService's Suggest RPC.
+	QuotaServiceSuggestProcedure = "/protectorate.v1.QuotaService/Suggest"
 )
 
 // QuotaServiceClient is a client for the protectorate.v1.QuotaService service.
@@ -42,6 +44,15 @@ type QuotaServiceClient interface {
 	// GetQuota returns the usage windows, resets and freshness of every
 	// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
 	GetQuota(context.Context, *connect.Request[v1.GetQuotaRequest]) (*connect.Response[v1.GetQuotaResponse], error)
+	// Suggest ranks the harnesses a sleeve can run (claude, codex, grok and
+	// pi) by usable spare capacity before reset, best first. Only FRESH quota
+	// data counts as capacity: STALE and UNKNOWN providers are listed as not
+	// recommended. A harness scores the capacity that is usable now (the
+	// tightest window) and expected to expire unused at a reset, weighted
+	// toward the sooner reset. pi on the local LLM has no quota and is always
+	// recommended as the fallback, ranked below any subscription with real
+	// capacity to burn. Antigravity has no sleeve harness and is not listed.
+	Suggest(context.Context, *connect.Request[v1.SuggestRequest]) (*connect.Response[v1.SuggestResponse], error)
 }
 
 // NewQuotaServiceClient constructs a client for the protectorate.v1.QuotaService service. By
@@ -62,12 +73,20 @@ func NewQuotaServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		suggest: connect.NewClient[v1.SuggestRequest, v1.SuggestResponse](
+			httpClient,
+			baseURL+QuotaServiceSuggestProcedure,
+			connect.WithSchema(quotaServiceMethods.ByName("Suggest")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // quotaServiceClient implements QuotaServiceClient.
 type quotaServiceClient struct {
 	getQuota *connect.Client[v1.GetQuotaRequest, v1.GetQuotaResponse]
+	suggest  *connect.Client[v1.SuggestRequest, v1.SuggestResponse]
 }
 
 // GetQuota calls protectorate.v1.QuotaService.GetQuota.
@@ -75,11 +94,25 @@ func (c *quotaServiceClient) GetQuota(ctx context.Context, req *connect.Request[
 	return c.getQuota.CallUnary(ctx, req)
 }
 
+// Suggest calls protectorate.v1.QuotaService.Suggest.
+func (c *quotaServiceClient) Suggest(ctx context.Context, req *connect.Request[v1.SuggestRequest]) (*connect.Response[v1.SuggestResponse], error) {
+	return c.suggest.CallUnary(ctx, req)
+}
+
 // QuotaServiceHandler is an implementation of the protectorate.v1.QuotaService service.
 type QuotaServiceHandler interface {
 	// GetQuota returns the usage windows, resets and freshness of every
 	// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
 	GetQuota(context.Context, *connect.Request[v1.GetQuotaRequest]) (*connect.Response[v1.GetQuotaResponse], error)
+	// Suggest ranks the harnesses a sleeve can run (claude, codex, grok and
+	// pi) by usable spare capacity before reset, best first. Only FRESH quota
+	// data counts as capacity: STALE and UNKNOWN providers are listed as not
+	// recommended. A harness scores the capacity that is usable now (the
+	// tightest window) and expected to expire unused at a reset, weighted
+	// toward the sooner reset. pi on the local LLM has no quota and is always
+	// recommended as the fallback, ranked below any subscription with real
+	// capacity to burn. Antigravity has no sleeve harness and is not listed.
+	Suggest(context.Context, *connect.Request[v1.SuggestRequest]) (*connect.Response[v1.SuggestResponse], error)
 }
 
 // NewQuotaServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -96,10 +129,19 @@ func NewQuotaServiceHandler(svc QuotaServiceHandler, opts ...connect.HandlerOpti
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	quotaServiceSuggestHandler := connect.NewUnaryHandler(
+		QuotaServiceSuggestProcedure,
+		svc.Suggest,
+		connect.WithSchema(quotaServiceMethods.ByName("Suggest")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.QuotaService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QuotaServiceGetQuotaProcedure:
 			quotaServiceGetQuotaHandler.ServeHTTP(w, r)
+		case QuotaServiceSuggestProcedure:
+			quotaServiceSuggestHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -111,4 +153,8 @@ type UnimplementedQuotaServiceHandler struct{}
 
 func (UnimplementedQuotaServiceHandler) GetQuota(context.Context, *connect.Request[v1.GetQuotaRequest]) (*connect.Response[v1.GetQuotaResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.QuotaService.GetQuota is not implemented"))
+}
+
+func (UnimplementedQuotaServiceHandler) Suggest(context.Context, *connect.Request[v1.SuggestRequest]) (*connect.Response[v1.SuggestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.QuotaService.Suggest is not implemented"))
 }

@@ -213,6 +213,7 @@ func quotaCmd(o *opts) *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&refresh, "refresh", false, "force an immediate read (rate-limited per provider)")
+	c.AddCommand(quotaSuggestCmd(o))
 	return c
 }
 
@@ -400,5 +401,42 @@ func pairCmd(o *opts) *cobra.Command {
 	c.Flags().StringVar(&name, "name", "", "label for the hub (default hostname)")
 	c.Flags().DurationVar(&ttl, "ttl", deviceTTL, "lifetime of the device token; 0 never expires")
 	c.Flags().BoolVar(&appQR, "app", false, "encode the protectorate:// link for the native app instead of the web link")
+	return c
+}
+
+func quotaSuggestCmd(o *opts) *cobra.Command {
+	var forSize string
+	var refresh bool
+	c := &cobra.Command{
+		Use:   "suggest [--for small|medium|large]",
+		Short: "Rank harnesses by usable spare capacity before reset",
+		Long: `Rank claude, codex, grok and pi (local LLM) by capacity that is usable now
+and would otherwise expire unused at a reset. Only fresh quota data counts:
+stale or unknown providers are listed as not picked. The local LLM is always
+available as the fallback. --for says how much headroom the task needs
+(small 5%, medium 15%, large 30% usable).`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			size := pb.TaskSize_TASK_SIZE_UNSPECIFIED
+			if forSize != "" {
+				var ok bool
+				if size, ok = taskSizes[forSize]; !ok {
+					return fmt.Errorf("unknown task size %q, want small, medium or large", forSize)
+				}
+			}
+			hc, err := o.httpClient()
+			if err != nil {
+				return err
+			}
+			res, err := protectoratev1connect.NewQuotaServiceClient(hc, o.hubURL).
+				Suggest(cmd.Context(), connect.NewRequest(&pb.SuggestRequest{TaskSize: size, Refresh: refresh}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) { writeSuggest(w, res.Msg) })
+		},
+	}
+	c.Flags().StringVar(&forSize, "for", "", "task size hint: small, medium (default) or large")
+	c.Flags().BoolVar(&refresh, "refresh", false, "force an immediate quota read first (rate-limited per provider)")
 	return c
 }

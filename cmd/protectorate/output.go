@@ -119,6 +119,34 @@ func writeQuota(w io.Writer, r *pb.GetQuotaResponse, now time.Time) {
 	}
 }
 
+var taskSizes = map[string]pb.TaskSize{
+	"small": pb.TaskSize_TASK_SIZE_SMALL, "medium": pb.TaskSize_TASK_SIZE_MEDIUM, "large": pb.TaskSize_TASK_SIZE_LARGE,
+}
+
+func pctOrDash(v *float64) string {
+	if v == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.0f%%", *v)
+}
+
+// writeSuggest renders the ranking, best first. Rows that are not
+// recommended carry their reason like the others.
+func writeSuggest(w io.Writer, r *pb.SuggestResponse) {
+	fmt.Fprintln(w, "RANK\tHARNESS\tPICK\tSCORE\tUSABLE\tEXPIRING\tRESETS IN\tREASON")
+	for _, s := range r.Suggestions {
+		pick, resets := "no", "-"
+		if s.Recommended {
+			pick = "yes"
+		}
+		if s.ResetsIn != nil {
+			resets = fmtDur(s.ResetsIn.AsDuration())
+		}
+		fmt.Fprintf(w, "%d\t%s\t%s\t%.1f\t%s\t%s\t%s\t%s\n", s.Rank, harnessName(s.Harness), pick, s.Score,
+			pctOrDash(s.UsablePercent), pctOrDash(s.ExpiringPercent), resets, s.Reason)
+	}
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "-"

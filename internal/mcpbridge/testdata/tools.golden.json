@@ -256,6 +256,35 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
+    "description": "Suggest ranks the harnesses a sleeve can run (claude, codex, grok and pi) by usable spare capacity before reset, best first. Only FRESH quota data counts as capacity: STALE and UNKNOWN providers are listed as not recommended. A harness scores the capacity that is usable now (the tightest window) and expected to expire unused at a reset, weighted toward the sooner reset. pi on the local LLM has no quota and is always recommended as the fallback, ranked below any subscription with real capacity to burn. Antigravity has no sleeve harness and is not listed.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "refresh": {
+          "description": "refresh forces an immediate quota read first, as in GetQuotaRequest.",
+          "type": "boolean"
+        },
+        "taskSize": {
+          "description": "task_size is a hint for how much headroom the work needs; a harness with less usable capacity than that is not recommended. Unset means medium.",
+          "enum": [
+            "TASK_SIZE_UNSPECIFIED",
+            "TASK_SIZE_SMALL",
+            "TASK_SIZE_MEDIUM",
+            "TASK_SIZE_LARGE"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "quota_suggest"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "description": "CapturePane returns the current text of a session's active pane. It also works on exited sessions, which is how a crash is diagnosed. Include at least one history line to see the whole final screen of an exited session.",
     "inputSchema": {
       "additionalProperties": false,

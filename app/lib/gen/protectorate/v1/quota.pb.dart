@@ -21,6 +21,7 @@ import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
 import 'quota.pbenum.dart';
+import 'sleeve.pbenum.dart' as $2;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
@@ -536,6 +537,348 @@ class ResetCredit extends $pb.GeneratedMessage {
   $0.Timestamp ensureExpiresAt() => $_ensure(2);
 }
 
+class SuggestRequest extends $pb.GeneratedMessage {
+  factory SuggestRequest({
+    TaskSize? taskSize,
+    $core.bool? refresh,
+  }) {
+    final result = SuggestRequest._();
+    if (taskSize != null) result.taskSize = taskSize;
+    if (refresh != null) result.refresh = refresh;
+    return result;
+  }
+
+  SuggestRequest._();
+
+  factory SuggestRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SuggestRequest()..mergeFromBuffer(data, registry);
+  factory SuggestRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SuggestRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SuggestRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SuggestRequest.$_createMessage)
+    ..aE<TaskSize>(1, _omitFieldNames ? '' : 'taskSize',
+        enumValues: TaskSize.values)
+    ..aOB(2, _omitFieldNames ? '' : 'refresh')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SuggestRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SuggestRequest copyWith(void Function(SuggestRequest) updates) =>
+      super.copyWith((message) => updates(message as SuggestRequest))
+          as SuggestRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SuggestRequest() / SuggestRequest.new instead')
+  static SuggestRequest create() => SuggestRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SuggestRequest._();
+  @$core.override
+  SuggestRequest createEmptyInstance() => SuggestRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SuggestRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SuggestRequest>(
+          SuggestRequest.$_createMessage);
+  static SuggestRequest? _defaultInstance;
+
+  /// task_size is a hint for how much headroom the work needs; a harness with
+  /// less usable capacity than that is not recommended. Unset means medium.
+  @$pb.TagNumber(1)
+  TaskSize get taskSize => $_getN(0);
+  @$pb.TagNumber(1)
+  set taskSize(TaskSize value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasTaskSize() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearTaskSize() => $_clearField(1);
+
+  /// refresh forces an immediate quota read first, as in GetQuotaRequest.
+  @$pb.TagNumber(2)
+  $core.bool get refresh => $_getBF(1);
+  @$pb.TagNumber(2)
+  set refresh($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasRefresh() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearRefresh() => $_clearField(2);
+}
+
+class SuggestResponse extends $pb.GeneratedMessage {
+  factory SuggestResponse({
+    $core.Iterable<HarnessSuggestion>? suggestions,
+    $0.Timestamp? generatedAt,
+  }) {
+    final result = SuggestResponse._();
+    if (suggestions != null) result.suggestions.addAll(suggestions);
+    if (generatedAt != null) result.generatedAt = generatedAt;
+    return result;
+  }
+
+  SuggestResponse._();
+
+  factory SuggestResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SuggestResponse()..mergeFromBuffer(data, registry);
+  factory SuggestResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SuggestResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SuggestResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SuggestResponse.$_createMessage)
+    ..pPM<HarnessSuggestion>(1, _omitFieldNames ? '' : 'suggestions',
+        subBuilder: HarnessSuggestion.$_createMessage)
+    ..aOM<$0.Timestamp>(2, _omitFieldNames ? '' : 'generatedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SuggestResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SuggestResponse copyWith(void Function(SuggestResponse) updates) =>
+      super.copyWith((message) => updates(message as SuggestResponse))
+          as SuggestResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SuggestResponse() / SuggestResponse.new instead')
+  static SuggestResponse create() => SuggestResponse._();
+  static $pb.GeneratedMessage $_createMessage() => SuggestResponse._();
+  @$core.override
+  SuggestResponse createEmptyInstance() => SuggestResponse._();
+  @$core.pragma('dart2js:noInline')
+  static SuggestResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SuggestResponse>(
+          SuggestResponse.$_createMessage);
+  static SuggestResponse? _defaultInstance;
+
+  /// suggestions lists every candidate harness, best first: recommended ones
+  /// by descending score, then the others.
+  @$pb.TagNumber(1)
+  $pb.PbList<HarnessSuggestion> get suggestions => $_getList(0);
+
+  @$pb.TagNumber(2)
+  $0.Timestamp get generatedAt => $_getN(1);
+  @$pb.TagNumber(2)
+  set generatedAt($0.Timestamp value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasGeneratedAt() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearGeneratedAt() => $_clearField(2);
+  @$pb.TagNumber(2)
+  $0.Timestamp ensureGeneratedAt() => $_ensure(1);
+}
+
+class HarnessSuggestion extends $pb.GeneratedMessage {
+  factory HarnessSuggestion({
+    $core.int? rank,
+    $2.Harness? harness,
+    $core.String? provider,
+    $core.bool? recommended,
+    $core.double? score,
+    Freshness? freshness,
+    $core.double? usablePercent,
+    $core.double? expiringPercent,
+    $core.String? window,
+    $1.Duration? resetsIn,
+    $core.String? reason,
+  }) {
+    final result = HarnessSuggestion._();
+    if (rank != null) result.rank = rank;
+    if (harness != null) result.harness = harness;
+    if (provider != null) result.provider = provider;
+    if (recommended != null) result.recommended = recommended;
+    if (score != null) result.score = score;
+    if (freshness != null) result.freshness = freshness;
+    if (usablePercent != null) result.usablePercent = usablePercent;
+    if (expiringPercent != null) result.expiringPercent = expiringPercent;
+    if (window != null) result.window = window;
+    if (resetsIn != null) result.resetsIn = resetsIn;
+    if (reason != null) result.reason = reason;
+    return result;
+  }
+
+  HarnessSuggestion._();
+
+  factory HarnessSuggestion.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      HarnessSuggestion()..mergeFromBuffer(data, registry);
+  factory HarnessSuggestion.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      HarnessSuggestion()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'HarnessSuggestion',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: HarnessSuggestion.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'rank')
+    ..aE<$2.Harness>(2, _omitFieldNames ? '' : 'harness',
+        enumValues: $2.Harness.values)
+    ..aOS(3, _omitFieldNames ? '' : 'provider')
+    ..aOB(4, _omitFieldNames ? '' : 'recommended')
+    ..aD(5, _omitFieldNames ? '' : 'score')
+    ..aE<Freshness>(6, _omitFieldNames ? '' : 'freshness',
+        enumValues: Freshness.values)
+    ..aD(7, _omitFieldNames ? '' : 'usablePercent')
+    ..aD(8, _omitFieldNames ? '' : 'expiringPercent')
+    ..aOS(9, _omitFieldNames ? '' : 'window')
+    ..aOM<$1.Duration>(10, _omitFieldNames ? '' : 'resetsIn',
+        subBuilder: $1.Duration.$_createMessage)
+    ..aOS(11, _omitFieldNames ? '' : 'reason')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  HarnessSuggestion clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  HarnessSuggestion copyWith(void Function(HarnessSuggestion) updates) =>
+      super.copyWith((message) => updates(message as HarnessSuggestion))
+          as HarnessSuggestion;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use HarnessSuggestion() / HarnessSuggestion.new instead')
+  static HarnessSuggestion create() => HarnessSuggestion._();
+  static $pb.GeneratedMessage $_createMessage() => HarnessSuggestion._();
+  @$core.override
+  HarnessSuggestion createEmptyInstance() => HarnessSuggestion._();
+  @$core.pragma('dart2js:noInline')
+  static HarnessSuggestion getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<HarnessSuggestion>(
+          HarnessSuggestion.$_createMessage);
+  static HarnessSuggestion? _defaultInstance;
+
+  /// rank starts at 1 for the best candidate.
+  @$pb.TagNumber(1)
+  $core.int get rank => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set rank($core.int value) => $_setSignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasRank() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearRank() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $2.Harness get harness => $_getN(1);
+  @$pb.TagNumber(2)
+  set harness($2.Harness value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasHarness() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearHarness() => $_clearField(2);
+
+  /// provider is the quota subscription behind the harness, e.g. "claude";
+  /// "local" for pi.
+  @$pb.TagNumber(3)
+  $core.String get provider => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set provider($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasProvider() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearProvider() => $_clearField(3);
+
+  /// recommended is false when the data is not FRESH, or the usable capacity
+  /// is below what the task size needs.
+  @$pb.TagNumber(4)
+  $core.bool get recommended => $_getBF(3);
+  @$pb.TagNumber(4)
+  set recommended($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasRecommended() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearRecommended() => $_clearField(4);
+
+  /// score orders the recommended candidates: the percent of capacity that is
+  /// both usable now and expected to expire at the reset, weighted by how
+  /// soon that reset is. 0 when not recommended.
+  @$pb.TagNumber(5)
+  $core.double get score => $_getN(4);
+  @$pb.TagNumber(5)
+  set score($core.double value) => $_setDouble(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasScore() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearScore() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  Freshness get freshness => $_getN(5);
+  @$pb.TagNumber(6)
+  set freshness(Freshness value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasFreshness() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearFreshness() => $_clearField(6);
+
+  /// usable_percent is the remaining capacity of the tightest window, the
+  /// most that can be spent now. Unset when there is no fresh data.
+  @$pb.TagNumber(7)
+  $core.double get usablePercent => $_getN(6);
+  @$pb.TagNumber(7)
+  set usablePercent($core.double value) => $_setDouble(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasUsablePercent() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearUsablePercent() => $_clearField(7);
+
+  /// expiring_percent is the part of usable_percent expected to be unused at
+  /// the reset of the scoring window. Unset when there is no fresh data.
+  @$pb.TagNumber(8)
+  $core.double get expiringPercent => $_getN(7);
+  @$pb.TagNumber(8)
+  set expiringPercent($core.double value) => $_setDouble(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasExpiringPercent() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearExpiringPercent() => $_clearField(8);
+
+  /// window names the window the score comes from, e.g. "7d".
+  @$pb.TagNumber(9)
+  $core.String get window => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set window($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasWindow() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearWindow() => $_clearField(9);
+
+  /// resets_in is the time until that window resets; unset when unknown.
+  @$pb.TagNumber(10)
+  $1.Duration get resetsIn => $_getN(9);
+  @$pb.TagNumber(10)
+  set resetsIn($1.Duration value) => $_setField(10, value);
+  @$pb.TagNumber(10)
+  $core.bool hasResetsIn() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearResetsIn() => $_clearField(10);
+  @$pb.TagNumber(10)
+  $1.Duration ensureResetsIn() => $_ensure(9);
+
+  /// reason explains the ranking in one line.
+  @$pb.TagNumber(11)
+  $core.String get reason => $_getSZ(10);
+  @$pb.TagNumber(11)
+  set reason($core.String value) => $_setString(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasReason() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearReason() => $_clearField(11);
+}
+
 /// QuotaService reports subscription usage. Updates are also announced on
 /// EventService as events with kind "quota.updated" (subject = provider,
 /// payload = the ProviderQuota in proto-JSON form).
@@ -550,6 +893,19 @@ class QuotaServiceApi {
           $pb.ClientContext? ctx, GetQuotaRequest request) =>
       _client.invoke<GetQuotaResponse>(
           ctx, 'QuotaService', 'GetQuota', request, GetQuotaResponse());
+
+  /// Suggest ranks the harnesses a sleeve can run (claude, codex, grok and
+  /// pi) by usable spare capacity before reset, best first. Only FRESH quota
+  /// data counts as capacity: STALE and UNKNOWN providers are listed as not
+  /// recommended. A harness scores the capacity that is usable now (the
+  /// tightest window) and expected to expire unused at a reset, weighted
+  /// toward the sooner reset. pi on the local LLM has no quota and is always
+  /// recommended as the fallback, ranked below any subscription with real
+  /// capacity to burn. Antigravity has no sleeve harness and is not listed.
+  $async.Future<SuggestResponse> suggest(
+          $pb.ClientContext? ctx, SuggestRequest request) =>
+      _client.invoke<SuggestResponse>(
+          ctx, 'QuotaService', 'Suggest', request, SuggestResponse());
 }
 
 const $core.bool _omitFieldNames =
