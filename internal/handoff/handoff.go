@@ -253,7 +253,10 @@ func (f Facts) conversation(budget int) string {
 	for _, p := range chosen {
 		b.WriteString(entry(p, turns[p.idx].Text))
 	}
-	if omitted > 0 {
+	switch {
+	case omitted == 1:
+		b.WriteString("\n(1 other message omitted; the full record is the transcript above.)\n")
+	case omitted > 1:
 		fmt.Fprintf(&b, "\n(%d other messages omitted; the full record is the transcript above.)\n", omitted)
 	}
 	return b.String()

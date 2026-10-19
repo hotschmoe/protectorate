@@ -417,13 +417,14 @@ func printHandoff(w io.Writer, h *pb.Handoff) {
 		return
 	}
 	fmt.Fprintf(w, "resleeved from\t%s (session %s) to %s at %s\n", h.FromHarness, h.FromSessionId, h.ToHarness, h.At.AsTime().Local().Format(time.RFC3339))
+	by := strings.Join(strings.Fields(h.SummarizerHarness+" "+h.SummarizerProvider+" "+h.SummarizerModel), " ")
 	switch {
 	case h.SummarizerHarness == "":
 		fmt.Fprintf(w, "summary\tnone: %s\n", h.SummaryError)
 	case h.SummarizerLocal:
-		fmt.Fprintf(w, "summary\tby local model %s %s %s (check it against the facts)\n", h.SummarizerHarness, h.SummarizerProvider, h.SummarizerModel)
+		fmt.Fprintf(w, "summary\tby local model %s (check it against the facts)\n", by)
 	default:
-		fmt.Fprintf(w, "summary\tby %s %s\n", h.SummarizerHarness, h.SummarizerModel)
+		fmt.Fprintf(w, "summary\tby %s\n", by)
 	}
 	fmt.Fprintf(w, "handoff\t%s\n", h.Path)
 	if h.ArchivePath != "" {

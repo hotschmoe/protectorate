@@ -460,7 +460,7 @@ func TestUsageAndToolResults(t *testing.T) {
 		baseURL  string
 	}{
 		{Claude, 1002, 1000000, 900, 100, "a.txt", false, "claude-fake", "anthropic", ""},
-		{Codex, 5, 258400, 2, 0, "", true, "", "openai", ""},
+		{Codex, 5, 258400, 2, 0, "", true, "gpt-fake", "openai", ""},
 		{Grok, 128, 0, 28, 0, "a.txt", false, "", "xai", ""},
 		{Pi, 19, 200000, 10, 2, "denied", true, "pi-fake", "vllm", "http://127.0.0.1:8000/v1"},
 	}
