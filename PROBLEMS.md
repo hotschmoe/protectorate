@@ -365,6 +365,23 @@ and get results or build artifacts back.
 - It can be built as a sequence: SSH inventory (P2), then a resident node agent
   with metrics, then reservations, then job dispatch.
 
+`[decided]` The dashboard also shows **disk space**. Agents often pile up
+hundreds of GB of build caches and images, so a bird's-eye view of CPU, GPU,
+memory and disk for every node is how we spot that something is wrong.
+**Per-sleeve/container resource usage** is shown too, as the archived design
+did (`archive/internal/envoy/host_stats.go` and parallel Docker stats).
+
+`[note]` What disk should break down into:
+- per filesystem: used/free, with alert thresholds,
+- per sleeve: workspace dir size, the container's writable layer, and
+  build-cache dirs (`target/`, `node_modules/`, `~/.cache`, Go/Cargo caches),
+- the container engine: images, build cache and volumes (`docker system df -v`),
+- top offenders, ranked, with a one-click (or one-CLI) cleanup *proposal* that
+  only runs after confirmation.
+
+Directory sizes are expensive to compute, so measure them on a slow interval
+in the background (or by watching filesystem events), not per request.
+
 ---
 
 ## Emerging shape
