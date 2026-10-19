@@ -99,6 +99,55 @@ Before production we need:
 - a key-expiry policy for tagged nodes,
 - a real-device Android test (Android 11+ restricts netlink).
 
+### Headscale lifecycle (`internal/tailnet`)
+
+Headscale runs as a **supervised child process of `hub serve`** from a pinned
+binary (v0.29.5) in `$PROTECTORATE_HOME/bin`, not a container. Reasons: the hub
+is already a host binary with no Docker dependency; the release is one static
+binary, so `hub tailnet install` can fetch it and verify its sha256 against
+both the published `checksums.txt` and a checksum compiled into our binary;
+the admin API key and unix socket stay on the host filesystem; and Docker
+would add a daemon dependency and an extra failure domain to the one process
+every node depends on. The supervisor restarts it with 1s..30s backoff,
+SIGTERMs it on hub stop (SIGKILL after 10s) and appends its output to
+`tailnet/headscale.log` (not rotated; use logrotate with copytruncate). If the
+hub is SIGKILLed the child is not reaped: run the hub under systemd
+(`KillMode=control-group`).
+
+```
+protectorate hub tailnet install
+protectorate hub tailnet init --server-url https://hs.example.com [--pool build] [--key-expiry-days 180]
+protectorate hub serve                       # starts headscale + joins as tag:hub
+protectorate node invite <name> [--tier server|family] [--pool build] [--expires 1h]
+protectorate node join --control URL --key KEY [--name N]   # on the node, then `node serve`
+protectorate node revoke|renew <name>
+protectorate client invite --name phone      # stock Tailscale app, tag:client
+```
+
+- Config lives in `tailnet/config.json`; headscale's `headscale.yaml` (JSON,
+  which is valid YAML) and `policy.json` are regenerated from it on every start.
+  Embedded DERP + STUN are on, Tailscale's public DERP map is off
+  (`--public-derp` adds it). Use `http://LAN-IP:7480` for LAN-only; for
+  anything off-LAN give headscale `--tls-cert/--tls-key` or terminate TLS in
+  a reverse proxy, and open UDP 3478 for STUN.
+- ACL (everything else is denied): `tag:hub -> tag:node:7475,22`,
+  `tag:client -> tag:hub:7470`, and `tag:pool-X -> tag:pool-X:*` for each
+  configured pool. Pools are the knob that lets chosen nodes reach each
+  other (`init --pool`, `node invite --pool`). `tag:tier-server|family`
+  records the trust tier on the node for hub policy.
+- Enrollment keys are single-use, tagged and short-lived, created through
+  headscale's REST API with an API key (0600, auto-recreated on expiry).
+- Key expiry: headscale leaves tagged nodes unexpiring, so the hub applies
+  `key_expiry_days` (default 180) to every `tag:node`/`tag:client` node once a
+  minute; `node renew` extends one, an expired node needs `node revoke` and a
+  fresh invite. The hub's own node never expires.
+- The hub API is also served on the tailnet (port 7470) for `tag:hub` and
+  `tag:client` callers, authorized by WhoIs instead of the bearer token
+  (terminal WebSockets still require the token). `tag:node` is denied by ACL
+  and by the authorizer. Node agents accept only `tag:hub`.
+- Right after a join the netmap may not yet hold every peer, so the hub's
+  tailnet `http.Client` retries "no such host" lookups for up to 15s.
+
 SSH stays as the bootstrap and break-glass path (`spikes/ssh-agentless/`).
 
 - Every hub and node binary embeds `tailscale.com/tsnet`, a userspace

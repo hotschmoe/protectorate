@@ -147,10 +147,25 @@ func (b *eventBus) publish(e *pb.Event) {
 
 // Handler serves every service behind the bearer-token interceptor.
 func (h *Hub) Handler() http.Handler {
-	opts := connect.WithHandlerOptions(
-		connect.WithInterceptors(authInterceptor{token: h.token}),
-		connect.WithCodec(codec.StrictJSON{}),
-	)
+	return h.handler(connect.WithInterceptors(authInterceptor{token: h.token}))
+}
+
+// authorizedHandler serves every service, admitting only requests that
+// authorize accepts. Used for listeners whose callers are identified by the
+// network (tailnet WhoIs) instead of a bearer token.
+func (h *Hub) authorizedHandler(authorize func(*http.Request) error) http.Handler {
+	next := h.handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := authorize(r); err != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (h *Hub) handler(extra ...connect.HandlerOption) http.Handler {
+	opts := connect.WithHandlerOptions(append(extra, connect.WithCodec(codec.StrictJSON{}))...)
 	mux := http.NewServeMux()
 	mux.Handle(protectoratev1connect.NewHubServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewEventServiceHandler(h, opts))
@@ -167,16 +182,31 @@ func (h *Hub) Handler() http.Handler {
 	return mux
 }
 
-// Serve accepts HTTP/1.1 and cleartext HTTP/2 on l until ctx is cancelled.
-func (h *Hub) Serve(ctx context.Context, l net.Listener) error {
-	srv := &http.Server{
-		Handler:           h.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
-		Protocols:         new(http.Protocols),
+// Extra is an additional listener served without the bearer token; Authorize
+// decides every request.
+type Extra struct {
+	Listener  net.Listener
+	Authorize func(*http.Request) error
+}
+
+// Serve accepts HTTP/1.1 and cleartext HTTP/2 on l, plus on each extra
+// listener, until ctx is cancelled.
+func (h *Hub) Serve(ctx context.Context, l net.Listener, extra ...Extra) error {
+	newServer := func(handler http.Handler) *http.Server {
+		srv := &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			BaseContext:       func(net.Listener) context.Context { return ctx },
+			Protocols:         new(http.Protocols),
+		}
+		srv.Protocols.SetHTTP1(true)
+		srv.Protocols.SetUnencryptedHTTP2(true)
+		return srv
 	}
-	srv.Protocols.SetHTTP1(true)
-	srv.Protocols.SetUnencryptedHTTP2(true)
+	servers := map[*http.Server]net.Listener{newServer(h.Handler()): l}
+	for _, e := range extra {
+		servers[newServer(h.authorizedHandler(e.Authorize))] = e.Listener
+	}
 
 	pollDone := make(chan struct{})
 	pollCtx, stopPoll := context.WithCancel(ctx)
@@ -206,22 +236,33 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener) error {
 		}()
 	}
 
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(l) }()
+	errc := make(chan error, len(servers))
+	for srv, ln := range servers {
+		go func() { errc <- srv.Serve(ln) }()
+	}
+	var first error
+	pending := len(servers)
 	select {
-	case err := <-errc:
-		return err
+	case first = <-errc:
+		pending--
 	case <-ctx.Done():
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
-		return err
+	for srv := range servers {
+		if err := srv.Shutdown(sctx); err != nil && first == nil {
+			first = err
+		}
 	}
-	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
-		return err
+	for ; pending > 0; pending-- {
+		if err := <-errc; !errors.Is(err, http.ErrServerClosed) && first == nil {
+			first = err
+		}
 	}
-	return nil
+	if errors.Is(first, http.ErrServerClosed) {
+		return nil
+	}
+	return first
 }
 
 func (h *Hub) GetStatus(context.Context, *connect.Request[pb.GetStatusRequest]) (*connect.Response[pb.GetStatusResponse], error) {

@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -76,7 +77,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), nodeCmd(o), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 
@@ -108,7 +109,7 @@ func hubCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			fmt.Fprintf(cmd.ErrOrStderr(), "hub %s listening on %s\n", version, l.Addr())
 			readers := []quota.Reader{quota.NewClaude(), quota.NewCodex(), quota.NewGrok(), quota.NewAntigravity()}
@@ -119,13 +120,18 @@ func hubCmd() *cobra.Command {
 			h.Sessions = session.New(tmuxSocket)
 			h.WebDir = webDir
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
+			extra, nodeClient, closeTailnet, err := startTailnet(ctx, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			defer closeTailnet()
 			if nodeToken == "" {
 				nodeToken = os.Getenv(nodeTokenEnv)
 			}
-			if err := attachNodes(h, nodeInterval, nodeToken, watch); err != nil {
+			if err := attachNodes(h, nodeInterval, nodeToken, watch, nodeClient); err != nil {
 				return err
 			}
-			return h.Serve(ctx, l)
+			return h.Serve(ctx, l, extra...)
 		},
 	}
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
@@ -137,7 +143,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
 	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")
-	c.AddCommand(serve)
+	c.AddCommand(serve, hubTailnetCmd())
 	return c
 }
 

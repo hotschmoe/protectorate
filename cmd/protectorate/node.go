@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -19,6 +22,7 @@ import (
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/node"
+	"github.com/hotschmoe/protectorate/internal/tailnet"
 )
 
 const nodeTokenEnv = "PROTECTORATE_NODE_TOKEN"
@@ -36,7 +40,7 @@ func localNodeName() string {
 }
 
 // attachNodes wires NodeService into h with this machine as the hub's node.
-func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []string) error {
+func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []string, client *http.Client) error {
 	home, err := hub.Home()
 	if err != nil {
 		return err
@@ -50,13 +54,14 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 		return fmt.Errorf("write hosts.md: %w", err)
 	}
 	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch})
-	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token}))
+	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client}))
 	return nil
 }
 
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
 	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o))
+	c.AddCommand(nodeEnrollCmds()...)
 	return c
 }
 
@@ -165,29 +170,47 @@ func nodeServeCmd() *cobra.Command {
 		Short: "Run the node agent",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if token == "" {
-				token = os.Getenv(nodeTokenEnv)
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			a := &node.Agent{
+				Collector: node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow}),
 			}
-			if token == "" {
-				return fmt.Errorf("a token is required: pass --token or set %s", nodeTokenEnv)
-			}
-			l, err := net.Listen("tcp", listen)
+			var l net.Listener
+			home, err := hub.Home()
 			if err != nil {
 				return err
 			}
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
-			defer stop()
-			fmt.Fprintf(cmd.ErrOrStderr(), "node agent %s listening on %s\n", version, l.Addr())
-			a := &node.Agent{
-				Collector: node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow}),
-				Authorize: node.TokenAuthorizer(token),
+			tsDir := filepath.Join(home, "tsnet")
+			if tailnet.Joined(tsDir) {
+				n, err := tailnet.OpenNode(ctx, tsDir)
+				if err != nil {
+					return err
+				}
+				defer n.Close()
+				if l, err = n.Listen(node.DefaultPort); err != nil {
+					return err
+				}
+				a.Authorize = n.AuthorizeHub()
+				fmt.Fprintf(cmd.ErrOrStderr(), "node agent %s serving on the tailnet, port %d (hub only)\n", version, node.DefaultPort)
+			} else {
+				if token == "" {
+					token = os.Getenv(nodeTokenEnv)
+				}
+				if token == "" {
+					return fmt.Errorf("not enrolled in a tailnet and no token: run `protectorate node join`, or pass --token or set %s", nodeTokenEnv)
+				}
+				if l, err = net.Listen("tcp", listen); err != nil {
+					return err
+				}
+				a.Authorize = node.TokenAuthorizer(token)
+				fmt.Fprintf(cmd.ErrOrStderr(), "node agent %s listening on %s\n", version, l.Addr())
 			}
 			return a.Serve(ctx, l)
 		},
 	}
 	f := c.Flags()
-	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on")
-	f.StringVar(&token, "token", "", "bearer token the hub must present (env "+nodeTokenEnv+")")
+	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
+	f.StringVar(&token, "token", "", "bearer token the hub must present when not enrolled in a tailnet (env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")
 	f.DurationVar(&slow, "watch-interval", 15*time.Minute, "how often to measure watched directories and engine disk usage")
 	return c
