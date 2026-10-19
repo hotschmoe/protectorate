@@ -24,6 +24,7 @@ type nodeOps interface {
 	Put(context.Context, *pb.PutFileRequest) (*pb.PutFileResponse, error)
 	Get(context.Context, *pb.GetFileRequest, func(*pb.GetFileResponse) error) error
 	Desk(context.Context, *pb.DeskActionRequest) (*pb.DeskActionResponse, error)
+	Apply(context.Context, *pb.ApplyUpdateRequest) (*pb.ApplyUpdateResponse, error)
 }
 
 type localOps struct {
@@ -50,6 +51,10 @@ func (l localOps) Desk(ctx context.Context, req *pb.DeskActionRequest) (*pb.Desk
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the hub node does not serve desktop commands"))
 	}
 	return l.desk.Do(ctx, req)
+}
+
+func (l localOps) Apply(context.Context, *pb.ApplyUpdateRequest) (*pb.ApplyUpdateResponse, error) {
+	return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the hub's own node is the hub process: replace its binary and restart the hub"))
 }
 
 type remoteOps struct {
@@ -84,6 +89,16 @@ func (r remoteOps) Desk(ctx context.Context, req *pb.DeskActionRequest) (*pb.Des
 	ctx, cancel := context.WithTimeout(ctx, deskTimeout)
 	defer cancel()
 	res, err := r.c.DeskAction(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg, nil
+}
+
+func (r remoteOps) Apply(ctx context.Context, req *pb.ApplyUpdateRequest) (*pb.ApplyUpdateResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	defer cancel()
+	res, err := r.c.ApplyUpdate(ctx, connect.NewRequest(req))
 	if err != nil {
 		return nil, err
 	}
@@ -142,4 +157,16 @@ func (h *Hub) GetFile(ctx context.Context, req *connect.Request[pb.GetFileReques
 		return err
 	}
 	return ops.Get(ctx, req.Msg, stream.Send)
+}
+
+func (h *Hub) ApplyUpdate(ctx context.Context, req *connect.Request[pb.ApplyUpdateRequest]) (*connect.Response[pb.ApplyUpdateResponse], error) {
+	ops, err := h.opsFor(req.Msg.Name, req.Msg.AllowFamily)
+	if err != nil {
+		return nil, err
+	}
+	res, err := ops.Apply(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
 }

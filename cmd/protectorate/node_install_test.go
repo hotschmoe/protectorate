@@ -321,3 +321,49 @@ func TestDoctorParsers(t *testing.T) {
 		t.Error("windows startup levels wrong")
 	}
 }
+
+func TestUpdateHelpers(t *testing.T) {
+	pick := []struct {
+		name                   string
+		goos, arch, sOS, sArch string
+		want                   string
+	}{
+		{"own platform uses this executable", "linux", "amd64", "linux", "amd64", "/opt/protectorate"},
+		{"other linux arch", "linux", "arm64", "linux", "amd64", filepath.Join("bin", "protectorate-linux-arm64")},
+		{"windows gets .exe", "windows", "amd64", "linux", "amd64", filepath.Join("bin", "protectorate-windows-amd64.exe")},
+		{"android", "android", "arm64", "linux", "amd64", filepath.Join("bin", "protectorate-android-arm64")},
+	}
+	for _, tt := range pick {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickBinary("bin", tt.goos, tt.arch, tt.sOS, tt.sArch, "/opt/protectorate"); got != tt.want {
+				t.Errorf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+	need := []struct {
+		node, hub string
+		force     bool
+		want      bool
+	}{
+		{"v1", "v2", false, true},
+		{"v2", "v2", false, false},
+		{"v2", "v2", true, true},
+		{"", "v2", false, true},
+	}
+	for _, tt := range need {
+		if got, _ := needsUpdate(tt.node, tt.hub, tt.force); got != tt.want {
+			t.Errorf("needsUpdate(%q,%q,%v) = %v", tt.node, tt.hub, tt.force, got)
+		}
+	}
+	cells := []struct{ node, hub, want string }{
+		{"v2", "v2", "v2"},
+		{"v1", "v2", "v1 (!)"},
+		{"", "v2", "-"},
+		{"v1", "", "v1"},
+	}
+	for _, tt := range cells {
+		if got := versionCell(tt.node, tt.hub); got != tt.want {
+			t.Errorf("versionCell(%q,%q) = %q, want %q", tt.node, tt.hub, got, tt.want)
+		}
+	}
+}

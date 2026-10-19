@@ -61,6 +61,9 @@ const (
 	// NodeAgentServiceDeskActionProcedure is the fully-qualified name of the NodeAgentService's
 	// DeskAction RPC.
 	NodeAgentServiceDeskActionProcedure = "/protectorate.v1.NodeAgentService/DeskAction"
+	// NodeAgentServiceApplyUpdateProcedure is the fully-qualified name of the NodeAgentService's
+	// ApplyUpdate RPC.
+	NodeAgentServiceApplyUpdateProcedure = "/protectorate.v1.NodeAgentService/ApplyUpdate"
 	// NodeServiceListNodesProcedure is the fully-qualified name of the NodeService's ListNodes RPC.
 	NodeServiceListNodesProcedure = "/protectorate.v1.NodeService/ListNodes"
 	// NodeServiceGetNodeProcedure is the fully-qualified name of the NodeService's GetNode RPC.
@@ -73,6 +76,8 @@ const (
 	NodeServicePutFileProcedure = "/protectorate.v1.NodeService/PutFile"
 	// NodeServiceGetFileProcedure is the fully-qualified name of the NodeService's GetFile RPC.
 	NodeServiceGetFileProcedure = "/protectorate.v1.NodeService/GetFile"
+	// NodeServiceApplyUpdateProcedure is the fully-qualified name of the NodeService's ApplyUpdate RPC.
+	NodeServiceApplyUpdateProcedure = "/protectorate.v1.NodeService/ApplyUpdate"
 )
 
 // NodeAgentServiceClient is a client for the protectorate.v1.NodeAgentService service.
@@ -103,6 +108,9 @@ type NodeAgentServiceClient interface {
 	// DeskAction runs one desktop command in the node agent's interactive
 	// session. See DeskService.
 	DeskAction(context.Context, *connect.Request[v1.DeskActionRequest]) (*connect.Response[v1.DeskActionResponse], error)
+	// ApplyUpdate swaps the agent's binary for a file already transferred into
+	// its file root and restarts the agent. See NodeService.ApplyUpdate.
+	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
 }
 
 // NewNodeAgentServiceClient constructs a client for the protectorate.v1.NodeAgentService service.
@@ -172,6 +180,12 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(nodeAgentServiceMethods.ByName("DeskAction")),
 			connect.WithClientOptions(opts...),
 		),
+		applyUpdate: connect.NewClient[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse](
+			httpClient,
+			baseURL+NodeAgentServiceApplyUpdateProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("ApplyUpdate")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -186,6 +200,7 @@ type nodeAgentServiceClient struct {
 	putFile       *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
 	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
 	deskAction    *connect.Client[v1.DeskActionRequest, v1.DeskActionResponse]
+	applyUpdate   *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
 }
 
 // GetMetrics calls protectorate.v1.NodeAgentService.GetMetrics.
@@ -233,6 +248,11 @@ func (c *nodeAgentServiceClient) DeskAction(ctx context.Context, req *connect.Re
 	return c.deskAction.CallUnary(ctx, req)
 }
 
+// ApplyUpdate calls protectorate.v1.NodeAgentService.ApplyUpdate.
+func (c *nodeAgentServiceClient) ApplyUpdate(ctx context.Context, req *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
+	return c.applyUpdate.CallUnary(ctx, req)
+}
+
 // NodeAgentServiceHandler is an implementation of the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceHandler interface {
 	// GetMetrics collects this node's current metrics.
@@ -261,6 +281,9 @@ type NodeAgentServiceHandler interface {
 	// DeskAction runs one desktop command in the node agent's interactive
 	// session. See DeskService.
 	DeskAction(context.Context, *connect.Request[v1.DeskActionRequest]) (*connect.Response[v1.DeskActionResponse], error)
+	// ApplyUpdate swaps the agent's binary for a file already transferred into
+	// its file root and restarts the agent. See NodeService.ApplyUpdate.
+	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
 }
 
 // NewNodeAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -326,6 +349,12 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		connect.WithSchema(nodeAgentServiceMethods.ByName("DeskAction")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeAgentServiceApplyUpdateHandler := connect.NewUnaryHandler(
+		NodeAgentServiceApplyUpdateProcedure,
+		svc.ApplyUpdate,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("ApplyUpdate")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeAgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeAgentServiceGetMetricsProcedure:
@@ -346,6 +375,8 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 			nodeAgentServiceGetFileHandler.ServeHTTP(w, r)
 		case NodeAgentServiceDeskActionProcedure:
 			nodeAgentServiceDeskActionHandler.ServeHTTP(w, r)
+		case NodeAgentServiceApplyUpdateProcedure:
+			nodeAgentServiceApplyUpdateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -391,6 +422,10 @@ func (UnimplementedNodeAgentServiceHandler) DeskAction(context.Context, *connect
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.DeskAction is not implemented"))
 }
 
+func (UnimplementedNodeAgentServiceHandler) ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.ApplyUpdate is not implemented"))
+}
+
 // NodeServiceClient is a client for the protectorate.v1.NodeService service.
 type NodeServiceClient interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -416,6 +451,15 @@ type NodeServiceClient interface {
 	// GetFile streams a file or directory from a node: a header, chunks and a
 	// trailer with the size and SHA-256 the receiver must verify.
 	GetFile(context.Context, *connect.Request[v1.GetFileRequest]) (*connect.ServerStreamForClient[v1.GetFileResponse], error)
+	// ApplyUpdate installs a new agent binary that PutFile placed in the node's
+	// file root. The node verifies size and SHA-256, runs the file's
+	// `version --json`, swaps it in keeping exactly one previous binary
+	// (<exe>.old) and restarts itself through its startup registration, or by
+	// re-executing. It answers before restarting. The new binary is on trial:
+	// unless the hub reaches it, the node rolls back to the previous binary.
+	// Only the owner token may call it. The hub's own node cannot be updated
+	// this way.
+	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
 }
 
 // NewNodeServiceClient constructs a client for the protectorate.v1.NodeService service. By default,
@@ -467,17 +511,24 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("GetFile")),
 			connect.WithClientOptions(opts...),
 		),
+		applyUpdate: connect.NewClient[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse](
+			httpClient,
+			baseURL+NodeServiceApplyUpdateProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("ApplyUpdate")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // nodeServiceClient implements NodeServiceClient.
 type nodeServiceClient struct {
-	listNodes  *connect.Client[v1.ListNodesRequest, v1.ListNodesResponse]
-	getNode    *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
-	addNode    *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
-	removeNode *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
-	putFile    *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
-	getFile    *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
+	listNodes   *connect.Client[v1.ListNodesRequest, v1.ListNodesResponse]
+	getNode     *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
+	addNode     *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
+	removeNode  *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
+	putFile     *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
+	getFile     *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
+	applyUpdate *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
 }
 
 // ListNodes calls protectorate.v1.NodeService.ListNodes.
@@ -510,6 +561,11 @@ func (c *nodeServiceClient) GetFile(ctx context.Context, req *connect.Request[v1
 	return c.getFile.CallServerStream(ctx, req)
 }
 
+// ApplyUpdate calls protectorate.v1.NodeService.ApplyUpdate.
+func (c *nodeServiceClient) ApplyUpdate(ctx context.Context, req *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
+	return c.applyUpdate.CallUnary(ctx, req)
+}
+
 // NodeServiceHandler is an implementation of the protectorate.v1.NodeService service.
 type NodeServiceHandler interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -535,6 +591,15 @@ type NodeServiceHandler interface {
 	// GetFile streams a file or directory from a node: a header, chunks and a
 	// trailer with the size and SHA-256 the receiver must verify.
 	GetFile(context.Context, *connect.Request[v1.GetFileRequest], *connect.ServerStream[v1.GetFileResponse]) error
+	// ApplyUpdate installs a new agent binary that PutFile placed in the node's
+	// file root. The node verifies size and SHA-256, runs the file's
+	// `version --json`, swaps it in keeping exactly one previous binary
+	// (<exe>.old) and restarts itself through its startup registration, or by
+	// re-executing. It answers before restarting. The new binary is on trial:
+	// unless the hub reaches it, the node rolls back to the previous binary.
+	// Only the owner token may call it. The hub's own node cannot be updated
+	// this way.
+	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
 }
 
 // NewNodeServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -582,6 +647,12 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("GetFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeServiceApplyUpdateHandler := connect.NewUnaryHandler(
+		NodeServiceApplyUpdateProcedure,
+		svc.ApplyUpdate,
+		connect.WithSchema(nodeServiceMethods.ByName("ApplyUpdate")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeServiceListNodesProcedure:
@@ -596,6 +667,8 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServicePutFileHandler.ServeHTTP(w, r)
 		case NodeServiceGetFileProcedure:
 			nodeServiceGetFileHandler.ServeHTTP(w, r)
+		case NodeServiceApplyUpdateProcedure:
+			nodeServiceApplyUpdateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -627,4 +700,8 @@ func (UnimplementedNodeServiceHandler) PutFile(context.Context, *connect.Request
 
 func (UnimplementedNodeServiceHandler) GetFile(context.Context, *connect.Request[v1.GetFileRequest], *connect.ServerStream[v1.GetFileResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.GetFile is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.ApplyUpdate is not implemented"))
 }

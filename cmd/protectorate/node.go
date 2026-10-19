@@ -89,7 +89,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
-	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o))
+	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o))
 	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
 }
@@ -200,7 +200,7 @@ func nodeServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Run the node agent",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
 			if hideConsole {
 				hideOwnConsole()
 			}
@@ -209,8 +209,25 @@ func nodeServeCmd() *cobra.Command {
 					return fmt.Errorf("set home: %w", err)
 				}
 			}
+			restartReq := make(chan node.RestartKind, 1)
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("locate this executable: %w", err)
+			}
+			if r, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+				exe = r
+			}
+			defer func() {
+				select {
+				case k := <-restartReq:
+					err = errors.Join(err, finishRestart(k, exe, os.Args[1:]))
+				default:
+				}
+			}()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			ctx, cancelRun := context.WithCancel(ctx)
+			defer cancelRun()
 			var l net.Listener
 			home, err := hub.Home()
 			if err != nil {
@@ -233,6 +250,20 @@ func nodeServeCmd() *cobra.Command {
 				return err
 			}
 			a.Desk = &node.Desk{D: desk.New()}
+			a.Updater = &node.Updater{Files: a.Files, Exe: exe, Version: version, Supervision: node.DetectSupervision(runningAsService()),
+				Restart: func(k node.RestartKind) {
+					select {
+					case restartReq <- k:
+					default:
+					}
+					cancelRun()
+				}}
+			if rolledBack, err := a.Updater.Start(); err != nil {
+				return err
+			} else if rolledBack {
+				fmt.Fprintln(cmd.ErrOrStderr(), "node agent: the updated binary never confirmed; rolled back to the previous one and restarting")
+				return nil
+			}
 			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow})
 			tsDir := filepath.Join(home, "tsnet")
 			if tailnet.Joined(tsDir) {

@@ -36,6 +36,8 @@ type Agent struct {
 	Files *Files
 	// Desk drives the desktop; nil refuses it.
 	Desk *Desk
+	// Updater swaps the agent's binary; nil refuses updates.
+	Updater *Updater
 }
 
 // TokenAuthorizer accepts requests carrying the given bearer token.
@@ -107,6 +109,9 @@ func (a *Agent) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 func (a *Agent) GetMetrics(ctx context.Context, _ *connect.Request[pb.GetMetricsRequest]) (*connect.Response[pb.NodeMetrics], error) {
+	if a.Updater != nil {
+		a.Updater.Touch()
+	}
 	m, err := a.Collector.Collect(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("collect metrics: %w", err))
@@ -207,6 +212,17 @@ func (a *Agent) DeskAction(ctx context.Context, req *connect.Request[pb.DeskActi
 		return nil, errNoDesk
 	}
 	res, err := a.Desk.Do(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (a *Agent) ApplyUpdate(ctx context.Context, req *connect.Request[pb.ApplyUpdateRequest]) (*connect.Response[pb.ApplyUpdateResponse], error) {
+	if a.Updater == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("this node does not accept updates"))
+	}
+	res, err := a.Updater.Apply(ctx, req.Msg)
 	if err != nil {
 		return nil, err
 	}

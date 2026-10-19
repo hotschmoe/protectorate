@@ -121,6 +121,22 @@ protectorate job test-cross --goos android --goarch arm64 ./...         # all pa
 
 Not verified on a real phone: Android 11+ restricts netlink for apps (tsnet's interface and route discovery may degrade), `/proc/stat` and `/proc/loadavg` may be unreadable (the node reports a CPU warning and drops the load average rather than failing), and battery optimisation or Doze can kill the process or freeze the network even with the wake lock. A node killed that way is shown unreachable until `node serve` runs again. Once it runs again the hub sees it fresh within a poll or two (the node pings the hub on start); no hub restart is needed. Disable battery optimisation for Termux and keep the Termux notification.
 
+## Update nodes
+
+```
+make cross                                   # on the hub box: bin/protectorate-<os>-<arch>[.exe]
+protectorate node ls                         # VERSION column; (!) marks a node that differs from the hub
+protectorate node update <node>              # or: node update --all [--binary-dir bin] [--force]
+```
+
+Nothing updates by itself. `node update` sends one binary per node over the file transfer (zstd where it shrinks, size and SHA-256 checked): this executable for nodes of its own OS and architecture, the matching `make cross` file from `--binary-dir` (default `bin/`) for the rest. Run it where the build is, normally the hub box. The node then:
+
+1. checks size and SHA-256 again, copies the file next to its own binary and runs `<new> version --json` (it must report the node's OS and architecture);
+2. swaps it in and keeps exactly one previous binary: `protectorate.exe.old` / `protectorate.old` next to it, overwritten by the next update. Linux and Termux copy the old one aside and rename the new one over it atomically; Windows cannot overwrite a running exe, so it renames the running exe to `.old` and puts the new one in place;
+3. answers, shuts down and restarts: `systemctl --user restart` for the unit `node install` wrote, `schtasks /Run` for the Windows logon task (after it exits; the task's restart-on-failure is the fallback), `sv restart` for the Termux service, exit status 75 under a supervisor that restarts on failure (a systemd system unit or Windows service), and otherwise by starting itself again from the same path with the same arguments.
+
+The CLI waits (`--timeout`, default 3 minutes) until `node ls` shows the new version. The new binary is on trial, recorded in `protectorate.exe.update` next to the binary (a marker file that is rewritten, never deleted): the first hub poll that reaches it confirms the update. If the new binary is started twice without the hub reaching it, or four minutes pass without contact, it puts the `.old` binary back (on Windows the failed one stays as `.failed`) and restarts. A node that has no supervisor and whose new binary dies before running any code stays down; that is why `version --json` is run first. The hub's own node is updated by replacing the hub binary and restarting the hub. Updating is owner-only (the `NodeService.ApplyUpdate` RPC is not offered to scoped tokens or the MCP bridge).
+
 ## Phone client
 
 ```

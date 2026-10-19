@@ -41,6 +41,8 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.GetFileRequest request);
   $async.Future<$4.DeskActionResponse> deskAction(
       $pb.ServerContext ctx, $4.DeskActionRequest request);
+  $async.Future<$6.ApplyUpdateResponse> applyUpdate(
+      $pb.ServerContext ctx, $6.ApplyUpdateRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -62,6 +64,8 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return $6.GetFileRequest();
       case 'DeskAction':
         return $4.DeskActionRequest();
+      case 'ApplyUpdate':
+        return $6.ApplyUpdateRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -88,6 +92,8 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return getFile(ctx, request as $6.GetFileRequest);
       case 'DeskAction':
         return deskAction(ctx, request as $4.DeskActionRequest);
+      case 'ApplyUpdate':
+        return applyUpdate(ctx, request as $6.ApplyUpdateRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -111,6 +117,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.PutFileRequest request);
   $async.Future<$6.GetFileResponse> getFile(
       $pb.ServerContext ctx, $6.GetFileRequest request);
+  $async.Future<$6.ApplyUpdateResponse> applyUpdate(
+      $pb.ServerContext ctx, $6.ApplyUpdateRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -126,6 +134,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return $6.PutFileRequest();
       case 'GetFile':
         return $6.GetFileRequest();
+      case 'ApplyUpdate':
+        return $6.ApplyUpdateRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -146,6 +156,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return putFile(ctx, request as $6.PutFileRequest);
       case 'GetFile':
         return getFile(ctx, request as $6.GetFileRequest);
+      case 'ApplyUpdate':
+        return applyUpdate(ctx, request as $6.ApplyUpdateRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

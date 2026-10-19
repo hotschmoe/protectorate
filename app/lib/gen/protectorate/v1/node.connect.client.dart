@@ -182,6 +182,25 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// ApplyUpdate swaps the agent's binary for a file already transferred into
+  /// its file root and restarts the agent. See NodeService.ApplyUpdate.
+  Future<protectoratev1node.ApplyUpdateResponse> applyUpdate(
+    protectoratev1node.ApplyUpdateRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeAgentService.applyUpdate,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -299,6 +318,31 @@ extension type NodeServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).server(
       specs.NodeService.getFile,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// ApplyUpdate installs a new agent binary that PutFile placed in the node's
+  /// file root. The node verifies size and SHA-256, runs the file's
+  /// `version --json`, swaps it in keeping exactly one previous binary
+  /// (<exe>.old) and restarts itself through its startup registration, or by
+  /// re-executing. It answers before restarting. The new binary is on trial:
+  /// unless the hub reaches it, the node rolls back to the previous binary.
+  /// Only the owner token may call it. The hub's own node cannot be updated
+  /// this way.
+  Future<protectoratev1node.ApplyUpdateResponse> applyUpdate(
+    protectoratev1node.ApplyUpdateRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeService.applyUpdate,
       input,
       signal: signal,
       headers: headers,

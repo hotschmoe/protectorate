@@ -536,3 +536,25 @@ func zstdDecode(b []byte) ([]byte, error) {
 	defer d.Close()
 	return d.DecodeAll(b, nil)
 }
+
+func TestApplyUpdateRelay(t *testing.T) {
+	e := newJobEnv(t, 1)
+	nc := protectoratev1connect.NewNodeServiceClient(&http.Client{Transport: bearer{testToken}}, e.srv.URL)
+	tests := []struct {
+		name string
+		node string
+		want connect.Code
+	}{
+		{"hub's own node", "hubhost", connect.CodeFailedPrecondition},
+		{"agent without an updater", "peer", connect.CodeUnimplemented},
+		{"unknown node", "ghost", connect.CodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := nc.ApplyUpdate(context.Background(), connect.NewRequest(&pb.ApplyUpdateRequest{Name: tt.node, Path: "p", Size: 1, Sha256: "00"}))
+			if connect.CodeOf(err) != tt.want {
+				t.Fatalf("err = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}

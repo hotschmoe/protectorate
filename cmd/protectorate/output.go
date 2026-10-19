@@ -230,15 +230,19 @@ func gpuSummary(gpus []*pb.GpuMetrics) string {
 }
 
 func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
-	fmt.Fprintln(w, "NAME\tOS/ARCH\tCPU\tGPU\tMEM\tDISK\tCONT\tFRESHNESS\tALERTS")
+	fmt.Fprintln(w, "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tFRESHNESS\tALERTS")
+	hubVer := hubVersionOf(r.Nodes)
+	skew := false
 	for _, s := range r.Nodes {
 		n, m := s.Node, s.Metrics
 		plat := "?"
 		if n.Os != "" {
 			plat = n.Os + "/" + n.Arch
 		}
-		cpuS, memS, diskS, contS, gpuS := "-", "-", "-", "-", "-"
+		cpuS, memS, diskS, contS, gpuS, verS := "-", "-", "-", "-", "-", "-"
 		if m != nil {
+			verS = versionCell(m.AgentVersion, hubVer)
+			skew = skew || strings.HasSuffix(verS, "(!)")
 			if m.Cpu != nil {
 				cpuS = fmt.Sprintf("%.0f%%", m.Cpu.UsagePercent)
 			}
@@ -257,10 +261,13 @@ func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
 		if n.Local {
 			name += "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			name, plat, cpuS, gpuS, memS, diskS, contS, nodeFreshnessLabel(s), alertLabel(s.Alerts))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			name, plat, verS, cpuS, gpuS, memS, diskS, contS, nodeFreshnessLabel(s), alertLabel(s.Alerts))
 	}
 	fmt.Fprintln(w, "\n* the hub's own node")
+	if skew {
+		fmt.Fprintf(w, "(!) differs from the hub's %s: protectorate node update <node> | --all\n", hubVer)
+	}
 	for _, s := range r.Nodes {
 		for _, a := range s.Alerts {
 			if a.Kind == pb.AlertKind_ALERT_KIND_NAME_MISMATCH {

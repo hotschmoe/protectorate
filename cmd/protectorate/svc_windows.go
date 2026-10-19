@@ -80,3 +80,8 @@ func (w *winService) Execute(_ []string, req <-chan svc.ChangeRequest, status ch
 		}
 	}
 }
+
+func runningAsService() bool {
+	ok, err := svc.IsWindowsService()
+	return err == nil && ok
+}

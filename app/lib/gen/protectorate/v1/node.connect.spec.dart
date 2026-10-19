@@ -96,6 +96,15 @@ abstract final class NodeAgentService {
     protectoratev1desk.DeskActionRequest.new,
     protectoratev1desk.DeskActionResponse.new,
   );
+
+  /// ApplyUpdate swaps the agent's binary for a file already transferred into
+  /// its file root and restarts the agent. See NodeService.ApplyUpdate.
+  static const applyUpdate = connect.Spec(
+    '/$name/ApplyUpdate',
+    connect.StreamType.unary,
+    protectoratev1node.ApplyUpdateRequest.new,
+    protectoratev1node.ApplyUpdateResponse.new,
+  );
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -164,5 +173,20 @@ abstract final class NodeService {
     connect.StreamType.server,
     protectoratev1node.GetFileRequest.new,
     protectoratev1node.GetFileResponse.new,
+  );
+
+  /// ApplyUpdate installs a new agent binary that PutFile placed in the node's
+  /// file root. The node verifies size and SHA-256, runs the file's
+  /// `version --json`, swaps it in keeping exactly one previous binary
+  /// (<exe>.old) and restarts itself through its startup registration, or by
+  /// re-executing. It answers before restarting. The new binary is on trial:
+  /// unless the hub reaches it, the node rolls back to the previous binary.
+  /// Only the owner token may call it. The hub's own node cannot be updated
+  /// this way.
+  static const applyUpdate = connect.Spec(
+    '/$name/ApplyUpdate',
+    connect.StreamType.unary,
+    protectoratev1node.ApplyUpdateRequest.new,
+    protectoratev1node.ApplyUpdateResponse.new,
   );
 }
