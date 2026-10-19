@@ -117,18 +117,27 @@ protectorate api call <Method> '<json>'   # generic escape hatch
   token mechanism. "AI as orchestrator" and "AI talking to the orchestrator"
   are the same path.
 
-## Credentials (spike)
+## Credentials (spike 3 done: `spikes/credentials/`)
 
-- Log in once on the hub. Each provider has one canonical credential on the
-  hub, which every sleeve uses live, never as a copy. Copies go stale when a
-  refresh rotates the token.
-- Bind-mount **directories, never single files**. CLIs save with
-  write-temp-then-rename, and renaming over a single-file bind mount fails
-  with `EBUSY`.
-- Share **only the auth**, not the whole config directory. Shared session
-  history collides, because every sleeve's workspace is `/workspace`.
-- Per CLI (Claude, Codex, Grok, Antigravity, pi): find which file holds the
-  credential and how it's written, then pick a symlink or a mounted subfolder.
+- Log in once on the hub. Each provider has one canonical credential dir on
+  the hub, shared live by every sleeve, never copied. The docker test showed a
+  copy keeps the old token after a refresh rotates it.
+- Never bind-mount a single file. A rename-over fails with `EBUSY` (shown in
+  the docker test). Mount the shared credential **directory** into each sleeve.
+- Share only the auth. Config, sessions and history stay per sleeve.
+
+| CLI | Per-sleeve config | Shared credential | Notes |
+|-----|-------------------|-------------------|-------|
+| Claude | `CLAUDE_CONFIG_DIR` | `CLAUDE_SECURESTORAGE_CONFIG_DIR` = shared dir | Native split. Temp+rename save; `mkdir .oauth_refresh.lock` sits in the shared dir, so refresh is serialized across sleeves. Don't symlink (it reads with `O_NOFOLLOW`). |
+| Codex | `CODEX_HOME` | `auth.json` symlinked into the shared dir | In-place `O_TRUNC` write, so the symlink survives. No cross-process lock: a simultaneous refresh can hit `refresh_token_reused`, and Codex recovers on the next 401. |
+| Grok | `GROK_HOME` | `auth.json` **and** `auth.json.lock` symlinked into the shared dir | Writes temp+rename next to the symlink's target; `flock` on the lock file is only shared if the lock is symlinked too. |
+| pi | `PI_CODING_AGENT_SESSION_DIR` | `PI_CODING_AGENT_DIR` = shared dir | Uses a `proper-lockfile` lock dir created beside `auth.json`, so the whole agent dir must be shared. Sessions are split out via the env var. |
+| Antigravity | ? | ? | Not installed. Measure later. |
+
+The hub's sleeve runtime builds this layout. Each CLI still reads and writes
+its own files its own way, so the harness stays untouched. Remote nodes can't
+bind-mount: the candidates there are Grok's `GROK_AUTH_PROVIDER_COMMAND` and
+Claude's `CLAUDE_CODE_OAUTH_TOKEN`, both still to be evaluated.
 
 ## Quota (P1)
 
