@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 const (
@@ -226,11 +227,11 @@ func (i *Inventory) commit(next []nodeRecord) error {
 	if err := os.MkdirAll(i.dir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", i.dir, err)
 	}
-	if err := writeFileAtomic(i.path(), raw, 0o600); err != nil {
+	if err := fsutil.WriteFile(i.path(), raw, 0o600); err != nil {
 		return fmt.Errorf("write inventory: %w", err)
 	}
 	i.nodes = next
-	if err := writeFileAtomic(filepath.Join(i.dir, "hosts.md"), renderHosts(i.local, next), 0o644); err != nil {
+	if err := fsutil.WriteFile(filepath.Join(i.dir, "hosts.md"), renderHosts(i.local, next), 0o644); err != nil {
 		log.Printf("write hosts.md: %v", err)
 	}
 	return nil
@@ -243,39 +244,7 @@ func (i *Inventory) WriteHosts() error {
 	if err := os.MkdirAll(i.dir, 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(i.dir, "hosts.md"), renderHosts(i.local, i.nodes), 0o644)
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			f.Close()
-			os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	if err := f.Chmod(perm); err != nil && !errors.Is(err, os.ErrPermission) {
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	ok = true
-	return nil
+	return fsutil.WriteFile(filepath.Join(i.dir, "hosts.md"), renderHosts(i.local, i.nodes), 0o644)
 }
 
 func renderHosts(local *pb.NodeInfo, nodes []nodeRecord) []byte {

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 // SecretPrefix starts every issued token so leaked secrets are recognizable.
@@ -213,31 +215,7 @@ func (s *Store) writeLocked() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".tokens-*.tmp")
-	if err != nil {
-		return fmt.Errorf("write tokens: %w", err)
-	}
-	name := tmp.Name()
-	fail := func(err error) error {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("write tokens: %w", err)
-	}
-	if err := tmp.Chmod(0o600); err != nil && !errors.Is(err, os.ErrInvalid) {
-		return fail(err)
-	}
-	if _, err := tmp.Write(b); err != nil {
-		return fail(err)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fail(err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("write tokens: %w", err)
-	}
-	if err := os.Rename(name, s.path); err != nil {
-		os.Remove(name)
+	if err := fsutil.WriteFile(s.path, b, 0o600); err != nil {
 		return fmt.Errorf("write tokens: %w", err)
 	}
 	return nil

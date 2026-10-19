@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 const (
@@ -130,22 +132,12 @@ func (c Config) Save(home string) error {
 	return writeFile(configPath(home), append(b, '\n'), 0o600)
 }
 
-// writeFile replaces path atomically so a crash never leaves a torn file.
 func writeFile(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(data)
-	cerr := f.Close()
-	if err := errors.Join(werr, cerr, os.Chmod(f.Name(), perm)); err != nil {
+	if err := fsutil.WriteFile(path, data, perm); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	return nil
 }

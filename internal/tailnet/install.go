@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 // HeadscaleVersion is the pinned control server. It must be upgraded together
@@ -104,7 +106,7 @@ func install(ctx context.Context, home, version, base, goos, goarch string, hc *
 	if err := os.Chmod(tmp.Name(), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.Rename(tmp.Name(), dest); err != nil {
+	if err := fsutil.Rename(tmp.Name(), dest); err != nil {
 		return "", fmt.Errorf("install %s: %w", dest, err)
 	}
 	return dest, nil

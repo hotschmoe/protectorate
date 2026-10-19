@@ -29,6 +29,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
 
@@ -223,7 +224,7 @@ func writeJob(dir string, j *pb.Job) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(dir, "job.json"), raw, 0o600)
+	return fsutil.WriteFile(filepath.Join(dir, "job.json"), raw, 0o600)
 }
 
 // update applies fn to the record, persists it and wakes watchers. State

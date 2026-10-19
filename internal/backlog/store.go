@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 const maxAttempts = 16
@@ -83,23 +85,9 @@ func (s *Store) Update(id string, st State, by string) (Item, State, error) {
 	return out, prev, err
 }
 
-// retryShared reruns fn while Windows reports a sharing conflict, which shows
-// up as a permission error: a file another handle has open cannot be replaced
-// or deleted, and a file being deleted cannot be opened.
-func retryShared(fn func() error) error {
-	err := fn()
-	if runtime.GOOS != "windows" {
-		return err
-	}
-	for deadline := time.Now().Add(5 * time.Second); errors.Is(err, fs.ErrPermission) && time.Now().Before(deadline); err = fn() {
-		time.Sleep(2 * time.Millisecond)
-	}
-	return err
-}
-
 func readFile(path string) ([]byte, error) {
 	var b []byte
-	err := retryShared(func() (err error) {
+	err := fsutil.Retry(func() (err error) {
 		b, err = os.ReadFile(path)
 		return err
 	})
@@ -169,7 +157,7 @@ func lock(path string) (func(), error) {
 		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			_ = f.Close()
-			return func() { _ = retryShared(func() error { return os.Remove(name) }) }, nil
+			return func() { _ = fsutil.Retry(func() error { return os.Remove(name) }) }, nil
 		}
 		held := errors.Is(err, os.ErrExist) || (runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission))
 		if !held {
@@ -230,7 +218,7 @@ func commit(path string, orig, data []byte, hook func()) (bool, error) {
 		_ = os.Remove(name)
 		return false, nil
 	}
-	if err := retryShared(func() error { return os.Rename(name, path) }); err != nil {
+	if err := fsutil.Retry(func() error { return os.Rename(name, path) }); err != nil {
 		_ = os.Remove(name)
 		return false, fmt.Errorf("replace backlog: %w", err)
 	}

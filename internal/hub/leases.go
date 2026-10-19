@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 const (
@@ -137,7 +138,7 @@ func (t *LeaseTable) persistLocked() error {
 	if err := os.MkdirAll(filepath.Dir(t.path), 0o700); err != nil {
 		return err
 	}
-	return writeFileAtomic(t.path, raw, 0o600)
+	return fsutil.WriteFile(t.path, raw, 0o600)
 }
 
 // expireLocked drops leases past their expiry and reports whether any went.

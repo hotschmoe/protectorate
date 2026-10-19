@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 const (
@@ -118,7 +119,7 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 	}
 
 	tokenPath := filepath.Join(ws, TokenFile)
-	if err := writeAtomic(tokenPath, []byte(created.Msg.Secret+"\n"), 0o600); err != nil {
+	if err := fsutil.WriteFile(tokenPath, []byte(created.Msg.Secret+"\n"), 0o600); err != nil {
 		return fail(fmt.Errorf("write token file: %w", err))
 	}
 	expires := "never"
@@ -195,10 +196,10 @@ func readHosts(home string) []byte {
 // Grok and pi read AGENTS.md. A CLAUDE.md that is something else is renamed
 // aside, never deleted.
 func WriteContext(dir string, agents, hosts []byte) error {
-	if err := writeAtomic(filepath.Join(dir, "AGENTS.md"), agents, 0o644); err != nil {
+	if err := fsutil.WriteFile(filepath.Join(dir, "AGENTS.md"), agents, 0o644); err != nil {
 		return fmt.Errorf("write AGENTS.md: %w", err)
 	}
-	if err := writeAtomic(filepath.Join(dir, "hosts.md"), hosts, 0o644); err != nil {
+	if err := fsutil.WriteFile(filepath.Join(dir, "hosts.md"), hosts, 0o644); err != nil {
 		return fmt.Errorf("write hosts.md: %w", err)
 	}
 	link := filepath.Join(dir, "CLAUDE.md")
@@ -222,28 +223,4 @@ func WriteContext(dir string, agents, hosts []byte) error {
 		return fmt.Errorf("link CLAUDE.md: %w", err)
 	}
 	return nil
-}
-
-func writeAtomic(path string, data []byte, perm os.FileMode) (err error) {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer func() {
-		if err != nil {
-			f.Close()
-			os.Remove(tmp)
-		}
-	}()
-	if err = f.Chmod(perm); err != nil {
-		return err
-	}
-	if _, err = f.Write(data); err != nil {
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

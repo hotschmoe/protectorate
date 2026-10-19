@@ -17,6 +17,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
 
@@ -177,34 +178,7 @@ func (m *Manager) saveLocked() error {
 	if err := os.MkdirAll(m.cfg.Home, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", m.cfg.Home, err)
 	}
-	return writeFileAtomic(m.path, raw, 0o600)
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) (err error) {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer func() {
-		if err != nil {
-			f.Close()
-			os.Remove(tmp)
-		}
-	}()
-	if err = f.Chmod(perm); err != nil {
-		return err
-	}
-	if _, err = f.Write(data); err != nil {
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteFile(m.path, raw, 0o600)
 }
 
 func (m *Manager) List() []Info {
