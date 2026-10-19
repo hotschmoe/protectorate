@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"tailscale.com/envknob"
 	"testing"
 	"time"
 
@@ -34,6 +35,18 @@ func freeAddr(t *testing.T, network string) string {
 		defer l.Close()
 		return l.Addr().String()
 	}
+}
+
+func testConfig(t *testing.T) tailnet.Config {
+	t.Helper()
+	listen := freeAddr(t, "tcp")
+	cfg := tailnet.DefaultConfig("http://" + listen)
+	cfg.Listen = listen
+	cfg.GRPCListen = freeAddr(t, "tcp")
+	cfg.MetricsListen = freeAddr(t, "tcp")
+	cfg.DERPListen = freeAddr(t, "tcp")
+	cfg.STUNListen = freeAddr(t, "udp")
+	return cfg
 }
 
 type member struct {
@@ -101,12 +114,7 @@ func TestTailnetEndToEnd(t *testing.T) {
 	if _, err := tailnet.Install(ctx, home, tailnet.HeadscaleVersion, nil); err != nil {
 		t.Fatal(err)
 	}
-	listen := freeAddr(t, "tcp")
-	cfg := tailnet.DefaultConfig("http://" + listen)
-	cfg.Listen = listen
-	cfg.GRPCListen = freeAddr(t, "tcp")
-	cfg.MetricsListen = freeAddr(t, "tcp")
-	cfg.STUNListen = freeAddr(t, "udp")
+	cfg := testConfig(t)
 	cfg.Pools = []string{"build"}
 	if err := cfg.Save(home); err != nil {
 		t.Fatal(err)
@@ -261,12 +269,7 @@ func TestNodeRestartRecovery(t *testing.T) {
 	if _, err := tailnet.Install(ctx, home, tailnet.HeadscaleVersion, nil); err != nil {
 		t.Fatal(err)
 	}
-	listen := freeAddr(t, "tcp")
-	cfg := tailnet.DefaultConfig("http://" + listen)
-	cfg.Listen = listen
-	cfg.GRPCListen = freeAddr(t, "tcp")
-	cfg.MetricsListen = freeAddr(t, "tcp")
-	cfg.STUNListen = freeAddr(t, "udp")
+	cfg := testConfig(t)
 	if err := cfg.Save(home); err != nil {
 		t.Fatal(err)
 	}
@@ -337,5 +340,82 @@ func TestNodeRestartRecovery(t *testing.T) {
 		if d := interval - time.Since(t0); d > 0 {
 			time.Sleep(d)
 		}
+	}
+}
+
+// TestDERPRelay joins two members to a hub whose control URL is plain http and
+// checks that traffic flows both over a direct UDP path and, with direct paths
+// disabled in magicsock, over the hub's TLS DERP relay using the pinned
+// self-signed certificate.
+func TestDERPRelay(t *testing.T) {
+	if os.Getenv("PROT_TAILNET_IT") != "1" {
+		t.Skip("set PROT_TAILNET_IT=1 to run (downloads headscale, starts real processes)")
+	}
+	tests := []struct {
+		name      string
+		forceDERP bool
+	}{
+		{"direct udp", false},
+		{"relay only", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.forceDERP {
+				envknob.SetenvForTest(t, "TS_DEBUG_ALWAYS_USE_DERP", "1")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+			defer cancel()
+			home := t.TempDir()
+			if _, err := tailnet.Install(ctx, home, tailnet.HeadscaleVersion, nil); err != nil {
+				t.Fatal(err)
+			}
+			cfg := testConfig(t)
+			if err := cfg.Save(home); err != nil {
+				t.Fatal(err)
+			}
+			svc, err := tailnet.Start(ctx, home, cfg, t.Logf)
+			if err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			defer svc.Close()
+			enroll(ctx, t, svc.Admin, cfg.ServerURL, "alpha", []string{tailnet.TagNode, tailnet.TierTag("server")}, true)
+
+			hc := svc.Net.HTTPClient()
+			deadline := time.Now().Add(90 * time.Second)
+			var path string
+			for {
+				code, body, err := get(ctx, hc, fmt.Sprintf("http://alpha:%d/", tailnet.NodePort), 20*time.Second)
+				if err != nil || code != 200 || body != "hello from alpha" {
+					if time.Now().After(deadline) {
+						t.Fatalf("hub -> alpha: code=%d body=%q err=%v", code, body, err)
+					}
+					time.Sleep(time.Second)
+					continue
+				}
+				st, err := svc.Net.LocalClientForTest().Status(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, p := range st.Peer {
+					if p.HostName == "alpha" {
+						path = fmt.Sprintf("relay=%q curaddr=%q", p.Relay, p.CurAddr)
+						if tt.forceDERP && (p.CurAddr != "" || p.Relay == "") {
+							t.Fatalf("relay-only run not on DERP: %s", path)
+						}
+						if !tt.forceDERP && p.CurAddr == "" && time.Now().Before(deadline) {
+							path = ""
+						}
+					}
+				}
+				if path != "" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("alpha never switched to a direct path")
+				}
+				time.Sleep(time.Second)
+			}
+			t.Logf("hub -> alpha path: %s", path)
+		})
 	}
 }
