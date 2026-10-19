@@ -284,6 +284,12 @@ node) executes.
   as working directory on a node with no toolchain. Unlike a git source this
   carries uncommitted edits and needs no git on the node. Artifacts that
   come back keep their permission bits.
+  `test-cross` holds one lease for the whole run. Ctrl-C or SIGTERM cancels the
+  running job, skips the remaining packages (exit 130) and releases the lease,
+  as does every error path; the release has its own 15s timeout. Only SIGKILL or
+  a second Ctrl-C leaves the lease to expire after `--ttl`. The hub creates no
+  leases of its own for jobs (a selector or node target pins nothing), so
+  there is no job-scoped lease to release server-side.
 - **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)
   and `--job-dir`. Timeout and cancel signal the process group (SIGTERM, then
   SIGKILL after 3s); on Windows the command runs in a job object that kills the

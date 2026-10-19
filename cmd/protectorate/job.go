@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -217,7 +218,8 @@ func jobStateName(s pb.JobState) string {
 }
 
 // runJob submits req and streams its log to stdout (stderr with --json) until
-// the job ends. Interrupt cancels the job; a second interrupt quits.
+// the job ends. An interrupt, SIGTERM or a canceled ctx cancels the job and
+// waits for the request to go out; a second interrupt quits.
 func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1connect.JobServiceClient, req *pb.SubmitJobRequest) (*pb.Job, error) {
 	res, err := jc.SubmitJob(ctx, connect.NewRequest(req))
 	if err != nil {
@@ -228,12 +230,15 @@ func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1c
 	fmt.Fprintf(stderr, "job %s on %s\n", job.Id, job.Node)
 
 	sigc := make(chan os.Signal, 2)
-	signal.Notify(sigc, os.Interrupt)
+	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigc)
+	finished, canceled := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(canceled)
 		select {
 		case <-sigc:
 		case <-ctx.Done():
+		case <-finished:
 			return
 		}
 		fmt.Fprintln(stderr, "interrupted: canceling job (interrupt again to quit)")
@@ -241,6 +246,10 @@ func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1c
 		cctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_, _ = jc.CancelJob(cctx, connect.NewRequest(&pb.CancelJobRequest{Id: job.Id}))
+	}()
+	defer func() {
+		close(finished)
+		<-canceled
 	}()
 
 	logw := cmd.OutOrStdout()
@@ -498,7 +507,8 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 }
 
 func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeout time.Duration, allowFamily bool, patterns, testArgs []string) error {
-	ctx := cmd.Context()
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	stderr := cmd.ErrOrStderr()
 	pkgs, err := goList(ctx, patterns)
 	if err != nil {
@@ -564,7 +574,11 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 		lease := res.Msg
 		fmt.Fprintf(stderr, "lease %s on %s\n", lease.Id, lease.Resource)
 		defer func() {
-			_, _ = lc.ReleaseLease(context.Background(), connect.NewRequest(&pb.ReleaseLeaseRequest{Id: lease.Id}))
+			rctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if _, err := lc.ReleaseLease(rctx, connect.NewRequest(&pb.ReleaseLeaseRequest{Id: lease.Id})); err != nil {
+				fmt.Fprintf(stderr, "release lease %s: %v (it expires after its ttl)\n", lease.Id, err)
+			}
 		}()
 		target = &pb.JobTarget{Target: &pb.JobTarget_LeaseId{LeaseId: lease.Id}}
 	}
@@ -582,6 +596,9 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 			Command: append([]string{exe}, testArgs...),
 			Timeout: durationpb.New(timeout),
 		})
+		if ctx.Err() != nil {
+			return &exitError{code: 130, msg: "interrupted"}
+		}
 		if err != nil {
 			return err
 		}
