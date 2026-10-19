@@ -279,12 +279,15 @@ func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
 	}
 }
 
-// agentClient talks to one node agent, presenting the node token if any.
+// agentClient talks to one node agent, presenting the node token if any. It
+// never follows redirects, so the token stays with the address the owner added.
 func (m *NodeMonitor) agentClient(n *pb.NodeInfo, opts ...connect.ClientOption) protectoratev1connect.NodeAgentServiceClient {
 	if m.opts.Token != "" {
 		opts = append(opts, connect.WithInterceptors(bearerInterceptor{token: m.opts.Token}))
 	}
-	return protectoratev1connect.NewNodeAgentServiceClient(m.opts.Client, AgentURL(n.Address), opts...)
+	client := *m.opts.Client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return protectoratev1connect.NewNodeAgentServiceClient(&client, AgentURL(n.Address), opts...)
 }
 
 type bearerInterceptor struct{ token string }

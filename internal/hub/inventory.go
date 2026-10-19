@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -33,7 +36,7 @@ var (
 
 	nodeNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 	sshAliasRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$`)
-	addrRe     = regexp.MustCompile(`^[A-Za-z0-9._:\[\]/-]+$`)
+	hostRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	tagRe      = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 )
 
@@ -116,8 +119,8 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 	switch {
 	case !nodeNameRe.MatchString(n.Name):
 		return nil, fmt.Errorf("%w: name %q must be lowercase letters, digits, '.', '_' or '-'", ErrInvalidNode, n.Name)
-	case n.Addr == "" || !addrRe.MatchString(n.Addr):
-		return nil, fmt.Errorf("%w: %s: address %q is empty or has invalid characters", ErrInvalidNode, n.Name, n.Addr)
+	case !validNodeAddr(n.Addr):
+		return nil, fmt.Errorf("%w: %s: address %q must be host, host:port or http(s)://host[:port] with no path or credentials", ErrInvalidNode, n.Name, n.Addr)
 	case n.SSH != "" && !sshAliasRe.MatchString(n.SSH):
 		return nil, fmt.Errorf("%w: %s: ssh alias %q has invalid characters", ErrInvalidNode, n.Name, n.SSH)
 	case n.Tier != TierServer && n.Tier != TierFamily:
@@ -138,6 +141,33 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 	sort.Strings(tags)
 	n.Tags = tags
 	return &n, nil
+}
+
+// validNodeAddr accepts only a bare host or IP with an optional port and an
+// optional http or https scheme. The node token is sent to this address, so
+// paths, credentials, queries and other schemes are refused.
+func validNodeAddr(addr string) bool {
+	rest := addr
+	for _, scheme := range []string{"http://", "https://"} {
+		if r, ok := strings.CutPrefix(addr, scheme); ok {
+			rest = r
+			break
+		}
+	}
+	u, err := url.Parse("http://" + rest)
+	if err != nil || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Host != rest || u.ForceQuery {
+		return false
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return false
+		}
+	}
+	host := u.Hostname()
+	if _, err := netip.ParseAddr(host); err == nil {
+		return true
+	}
+	return hostRe.MatchString(host) && !strings.Contains(host, "..")
 }
 
 func (r nodeRecord) info() *pb.NodeInfo {

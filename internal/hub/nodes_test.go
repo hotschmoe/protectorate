@@ -43,6 +43,8 @@ func TestInventory(t *testing.T) {
 		{"bad name", &pb.NodeInfo{Name: "has space", Address: "x"}, ErrInvalidNode},
 		{"empty addr", &pb.NodeInfo{Name: "a1"}, ErrInvalidNode},
 		{"addr injection", &pb.NodeInfo{Name: "a2", Address: "x; rm -rf /"}, ErrInvalidNode},
+		{"addr with path", &pb.NodeInfo{Name: "a6", Address: "evil.example/x"}, ErrInvalidNode},
+		{"addr with credentials", &pb.NodeInfo{Name: "a7", Address: "http://u@evil.example"}, ErrInvalidNode},
 		{"bad ssh alias", &pb.NodeInfo{Name: "a3", Address: "x", SshAlias: "-oProxyCommand=evil"}, ErrInvalidNode},
 		{"bad tier", &pb.NodeInfo{Name: "a4", Address: "x", Tier: "root"}, ErrInvalidNode},
 		{"bad tag", &pb.NodeInfo{Name: "a5", Address: "x", Tags: []string{"a b"}}, ErrInvalidNode},
@@ -601,5 +603,65 @@ func TestPollRecoversFromDeadPooledConnection(t *testing.T) {
 	}
 	if d := time.Since(start); d > fetchTimeout {
 		t.Fatalf("recovery took %s, over the %s fetch budget", d, fetchTimeout)
+	}
+}
+
+func TestValidNodeAddr(t *testing.T) {
+	tests := []struct {
+		addr string
+		ok   bool
+	}{
+		{"gpu-box", true},
+		{"gpu-box.tail1234.ts.net", true},
+		{"10.0.0.5:7475", true},
+		{"[fd7a:115c::1]:7475", true},
+		{"fd7a:115c::1", false},
+		{"http://127.0.0.1:8080", true},
+		{"https://box.example.com", true},
+		{"", false},
+		{"ftp://box", false},
+		{"http://", false},
+		{"evil.com/steal", false},
+		{"http://evil.com/", false},
+		{"http://good@evil.com", false},
+		{"evil.com@good", false},
+		{"box?x=1", false},
+		{"box#x", false},
+		{"box:0", false},
+		{"box:99999", false},
+		{"box:abc", false},
+		{"bo x", false},
+		{"x; rm -rf /", false},
+		{"-box", false},
+		{"a..b", false},
+		{"//evil.com", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.addr, func(t *testing.T) {
+			if got := validNodeAddr(tt.addr); got != tt.ok {
+				t.Fatalf("validNodeAddr(%q) = %v, want %v", tt.addr, got, tt.ok)
+			}
+		})
+	}
+}
+
+func TestNodeTokenNotSentOnRedirect(t *testing.T) {
+	var leaked atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Add(1)
+	}))
+	defer other.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+
+	m := NewNodeMonitor(nil, LocalNodeInfo("hub", "linux", "amd64"), nil, NodeOptions{Token: "secret", FetchTimeout: time.Second})
+	_, err := m.fetchHTTP(context.Background(), &pb.NodeInfo{Name: "n", Address: redirector.URL})
+	if err == nil {
+		t.Fatal("redirected poll succeeded")
+	}
+	if leaked.Load() != 0 {
+		t.Fatalf("redirect was followed %d times", leaked.Load())
 	}
 }

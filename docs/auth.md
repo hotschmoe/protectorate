@@ -64,6 +64,11 @@ scoped token gets 403 with a hint to attach with `readonly=1`, which still
 works. `job_submit_job` is likewise shell access (on nodes, not the hub) and
 stays a deliberate grant.
 
+The hub sends its node token only to an address the owner added: inventory
+addresses must be a bare host or IP with an optional port (and optional
+`http(s)://`), with no path, credentials or query, and node polls and job calls
+never follow redirects.
+
 ## Entry points
 
 | Entry point | Check |
