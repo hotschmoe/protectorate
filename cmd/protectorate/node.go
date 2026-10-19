@@ -78,6 +78,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 	if err != nil {
 		return err
 	}
+	local.Home = home
 	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch, Jobs: local})
 	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client, Peers: peers}))
 	files, err := node.NewFiles(filepath.Join(home, "node-files"), false)
@@ -303,6 +304,7 @@ func nodeServeCmd() *cobra.Command {
 				if a.Jobs, err = node.NewJobs(jobDir, jobSlots); err != nil {
 					return err
 				}
+				a.Jobs.Home = home
 				watch = append(watch, a.Jobs.Dir())
 			}
 			if fileRoot == "" {

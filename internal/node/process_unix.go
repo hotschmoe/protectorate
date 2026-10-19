@@ -12,8 +12,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 )
 
 // procTree is a started command and everything it spawned: a process group.
@@ -43,13 +41,6 @@ func StartDetached(exe string, args []string) error {
 		return err
 	}
 	return cmd.Process.Release()
-}
-
-// probeIsolation reports how this node runs jobs.
-func probeIsolation() *pb.JobIsolation {
-	iso := &pb.JobIsolation{Sandbox: "none", Note: "jobs run as the agent's user, unsandboxed"}
-	iso.Admin, iso.Note = probeAdmin(iso.Note)
-	return iso
 }
 
 var (

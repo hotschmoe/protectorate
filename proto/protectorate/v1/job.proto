@@ -158,6 +158,17 @@ message SubmitJobRequest {
   // selector), a node that reports it can elevate, and the owner token or a
   // node_admin grant for the node. Admin jobs are never sandboxed.
   bool admin = 8;
+  // limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox
+  // is "bwrap" or a Windows job object); unset means no cap.
+  JobLimits limits = 9;
+}
+
+// JobLimits are cgroup (Linux) or job object (Windows) caps.
+message JobLimits {
+  // cpu_percent is CPU time as a share of one core: 200 is two cores.
+  uint32 cpu_percent = 1;
+  // memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.
+  uint64 memory_bytes = 2;
 }
 
 message GetJobRequest {
@@ -260,6 +271,7 @@ message Job {
   string isolation = 24;
   // task is the task of the admin grant the job was submitted with.
   string task = 25;
+  JobLimits limits = 26;
 }
 
 message PrepareJobRequest {
@@ -311,6 +323,7 @@ message RunJobRequest {
   // workdir is relative to the job directory; only valid with an archive.
   string workdir = 11;
   JobMode mode = 12;
+  JobLimits limits = 13;
 }
 
 message JobStarted {

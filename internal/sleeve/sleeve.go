@@ -81,7 +81,8 @@ func (c Config) UnitName(name string) string { return c.UnitPrefix + name }
 // them in the sandbox; plain session RPCs must refuse them.
 func IsSleeveSession(name string) bool { return strings.HasPrefix(name, sessionPrefix) }
 
-func (l Limits) validate() error {
+// Validate checks the limits a scope can enforce.
+func (l Limits) Validate() error {
 	if l.MemoryBytes != 0 && l.MemoryBytes < minMemoryBytes {
 		return fmt.Errorf("%w: memory limit must be at least 64 MiB", ErrInvalid)
 	}

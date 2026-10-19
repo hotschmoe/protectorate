@@ -53,6 +53,9 @@ type Jobs struct {
 	// Probe, when set before the first job or metrics poll, replaces probing
 	// the host for isolation and elevation (tests).
 	Probe func() *pb.JobIsolation
+	// Home is the agent's PROTECTORATE_HOME. A sandbox never exposes it;
+	// empty means jobs are not sandboxed.
+	Home string
 
 	dir   string
 	slots chan struct{}
@@ -64,6 +67,8 @@ type Jobs struct {
 
 	isoOnce sync.Once
 	iso     *pb.JobIsolation
+	// box runs sandboxed jobs; nil when the node cannot sandbox.
+	box *sandbox
 }
 
 // Isolation reports how this node isolates and elevates jobs, probed once.
@@ -72,7 +77,7 @@ func (j *Jobs) Isolation() *pb.JobIsolation {
 		if j.Probe != nil {
 			j.iso = j.Probe()
 		} else {
-			j.iso = probeIsolation()
+			j.iso = j.probeIsolation()
 		}
 	})
 	return proto.Clone(j.iso).(*pb.JobIsolation)
@@ -365,7 +370,7 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 	if err != nil {
 		return setupFailed(err)
 	}
-	argv, label, err := j.commandFor(req)
+	argv, envArgs, label, err := j.commandFor(req, workdir, jobDir)
 	if err != nil {
 		return setupFailed(err)
 	}
@@ -377,7 +382,7 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 	if timeout <= 0 {
 		timeout = defaultJobTimeout
 	}
-	fin := j.execute(runCtx, r, req, argv, workdir, jobDir, timeout, send)
+	fin := j.execute(runCtx, r, req, argv, envArgs, workdir, jobDir, timeout, send)
 	if fin.End == pb.JobEnd_JOB_END_EXITED || fin.End == pb.JobEnd_JOB_END_TIMED_OUT {
 		if err := sendArtifacts(runCtx, workdir, req.ArtifactGlobs, send); err != nil && fin.Error == "" {
 			fin.Error = "send artifacts: " + err.Error()
@@ -482,33 +487,74 @@ func envKeys(req *pb.RunJobRequest) []string {
 	return append(append([]string(nil), jobEnvKeys...), keys...)
 }
 
-// commandFor returns the argv that runs req's command in its mode and the
-// isolation label reported to the hub.
-func (j *Jobs) commandFor(req *pb.RunJobRequest) ([]string, string, error) {
+// jobEnv is the job's own variables in envKeys order.
+func jobEnv(req *pb.RunJobRequest, jobDir string) [][2]string {
+	env := [][2]string{{"PROTECTORATE_JOB_ID", req.JobId}, {"PROTECTORATE_JOB_DIR", jobDir}}
+	for _, k := range envKeys(req)[len(jobEnvKeys):] {
+		env = append(env, [2]string{k, req.Env[k]})
+	}
+	return env
+}
+
+// commandFor returns the argv that runs req's command in its mode, the
+// arguments a sandbox reads from fd 3 (nil outside one) and the isolation
+// label reported to the hub.
+func (j *Jobs) commandFor(req *pb.RunJobRequest, workdir, jobDir string) (argv []string, envArgs []byte, label string, err error) {
 	iso := j.Isolation()
 	switch req.Mode {
 	case pb.JobMode_JOB_MODE_ADMIN:
 		if iso.Admin == "" {
-			return nil, "", fmt.Errorf("this node cannot run admin jobs: %s", iso.Note)
+			return nil, nil, "", fmt.Errorf("this node cannot run admin jobs: %s", iso.Note)
 		}
 		argv, err := adminArgv(iso.Admin, req.Command, envKeys(req))
-		return argv, iso.Admin, err
+		return argv, nil, iso.Admin, err
 	case pb.JobMode_JOB_MODE_PLAIN:
-		return req.Command, "plain", nil
+		return req.Command, nil, "plain", nil
 	}
-	label := iso.Sandbox
+	if j.box != nil {
+		argv, envArgs, err := j.box.plan(req, workdir, jobDir, jobEnv(req, jobDir))
+		return argv, envArgs, iso.Sandbox + limitsLabel(req.Limits), err
+	}
+	label = iso.Sandbox
 	if iso.Note != "" {
 		label += ": " + iso.Note
 	}
-	return req.Command, label, nil
+	return req.Command, nil, label, nil
 }
 
-func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
+func limitsLabel(l *pb.JobLimits) string {
+	var parts []string
+	if l.GetCpuPercent() > 0 {
+		parts = append(parts, fmt.Sprintf("cpu %d%%", l.CpuPercent))
+	}
+	if l.GetMemoryBytes() > 0 {
+		parts = append(parts, fmt.Sprintf("memory %d MiB", l.MemoryBytes>>20))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ", " + strings.Join(parts, ", ")
+}
+
+func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = workdir
-	cmd.Env = append(os.Environ(), "PROTECTORATE_JOB_ID="+req.JobId, "PROTECTORATE_JOB_DIR="+jobDir)
-	for _, k := range envKeys(req)[len(jobEnvKeys):] {
-		cmd.Env = append(cmd.Env, k+"="+req.Env[k])
+	cmd.Env = os.Environ()
+	if envArgs == nil {
+		for _, kv := range jobEnv(req, jobDir) {
+			cmd.Env = append(cmd.Env, kv[0]+"="+kv[1])
+		}
+	} else {
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			return &pb.JobFinished{End: pb.JobEnd_JOB_END_ERROR, ExitCode: -1, Error: fmt.Sprintf("sandbox env pipe: %v", err)}
+		}
+		defer pr.Close()
+		cmd.ExtraFiles = []*os.File{pr}
+		go func() {
+			_, _ = pw.Write(envArgs)
+			pw.Close()
+		}()
 	}
 	w := &logWriter{send: send, onFail: r.cancel}
 	cmd.Stdout, cmd.Stderr = w, w

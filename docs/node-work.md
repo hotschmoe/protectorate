@@ -139,9 +139,36 @@ decision to free the GPUs is made by a person, never by the scheduler.
 
 ## Sandboxes on nodes
 
-- **Linux `shared` nodes:** jobs run in the same bwrap + systemd user scope
-  as sleeves (PID namespace, cgroup limits, only the job directory and tool
-  dirs mounted). Reuse `internal/sleeve`'s plan.
+- **Linux `shared` nodes (built):** sandboxed jobs run in the sleeve sandbox:
+  `internal/sleeve`'s `Box` and `BoxArgv` build both (the sleeve plan is now a
+  box too) and `CheckBind` holds the shared secret-path rules. Each job is
+  `systemd-run --user --scope --unit=prot-job-<id>` (with `-p MemoryMax`,
+  `MemorySwapMax=0`, `CPUQuota` from `job run --cpu 200 --mem 4G`, i.e.
+  `SubmitJobRequest.limits`, and TasksMax 4096) around bwrap with PID, IPC
+  and UTS namespaces on a fresh root: the system directories and the narrow
+  tool dirs read-only (credential files masked), the job directory and the
+  warm worktree the only writable binds, and the node's job home
+  (`<job-dir>/home`, kept across jobs for caches) in place of the user's
+  real home, so `~/.ssh`, `~/.config`, `$PROTECTORATE_HOME` (node token,
+  tailnet keys) and the rest of the home are not there. The environment is
+  cleared (the agent's own variables never reach a job); HOME, PATH, USER,
+  LANG, TERM=dumb, `GOMODCACHE=~/.cache/go-mod` (because `~/go` is a
+  read-only tool dir) and the job's variables are set, values passed on
+  fd 3 (`bwrap --args 3`) so they never appear in the process list. The
+  network is the host's. A cancel or timeout kills the process group; bwrap's
+  `--die-with-parent` and the PID namespace take every descendant with it,
+  detached ones included.
+- The agent decides once, at its first job or metrics poll: it needs Linux,
+  bwrap, systemd-run, systemctl, the user manager's cgroup, a job directory
+  outside the secret paths, and a trial `true` in a box that succeeds.
+  Otherwise jobs run unsandboxed and the node says why in its metrics
+  (`JobIsolation`: `sandbox none` and the reason; `node show` prints a
+  `jobs` line, the app a JOBS panel, amber when unisolated). Termux nodes
+  report `no bwrap sandbox on android`. Each job's record says how it ran
+  (`isolation`: `bwrap, cpu 200%, memory 4096 MiB`, or `none: ...`).
+- Admin jobs run unsandboxed by definition (they are root) and plain jobs on
+  `care` nodes as the agent's user; the audit detail says `admin (elevated,
+  unsandboxed)` or `plain (agent user, unsandboxed)`.
 - **Windows `shared` nodes** (often someone's real desktop, with mail,
   browser sessions and BIMcloud under their user): jobs run as a dedicated
   low-privilege local account, `protectorate-runner`, that has no access to

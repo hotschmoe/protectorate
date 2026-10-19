@@ -198,6 +198,25 @@ func contains(l []string, s string) bool {
 // CheckWorkspace rejects directories that would shadow the sandbox or expose
 // real credentials or hub state.
 func (c Config) CheckWorkspace(name, ws string) error {
+	if err := c.CheckBind(ws); err != nil {
+		return err
+	}
+	if within(ws, c.Home) {
+		own := filepath.Join(c.workspacesDir(), name)
+		if name == OrchestratorName {
+			own = filepath.Join(c.Home, OrchestratorDir)
+		}
+		if !within(ws, own) {
+			return fmt.Errorf("%w: workspace %s is protectorate state that sleeve %s does not own", ErrInvalid, ws, name)
+		}
+	}
+	return nil
+}
+
+// CheckBind rejects a directory to bind read-write into a sandbox when it
+// would shadow the sandbox or expose real credentials or the whole state
+// directory: the secret-path rules every sandbox shares.
+func (c Config) CheckBind(ws string) error {
 	if !filepath.IsAbs(ws) || filepath.Clean(ws) != ws {
 		return fmt.Errorf("%w: workspace %q must be a clean absolute path", ErrInvalid, ws)
 	}
@@ -224,15 +243,6 @@ func (c Config) CheckWorkspace(name, ws string) error {
 	if within(c.Home, ws) {
 		return bad("contains the protectorate state directory")
 	}
-	if within(ws, c.Home) {
-		own := filepath.Join(c.workspacesDir(), name)
-		if name == OrchestratorName {
-			own = filepath.Join(c.Home, OrchestratorDir)
-		}
-		if !within(ws, own) {
-			return bad("is protectorate state that sleeve " + name + " does not own")
-		}
-	}
 	return nil
 }
 
@@ -256,13 +266,93 @@ func checkEnv(env map[string]string) error {
 	return nil
 }
 
+// Box is one bwrap sandbox in a systemd user scope: a PID, IPC and UTS
+// namespace on a fresh root with the system directories and the tool dirs
+// read-only, known secret files masked, and only the binds named here
+// writable. Sleeves and node jobs are both boxes.
+type Box struct {
+	Unit     string
+	Hostname string
+	Limits   Limits
+	// Home is the host directory bound read-write at the user's home.
+	Home string
+	// RO, ROFiles and Symlinks add read-only directories, files and
+	// symlinks at their host paths, after the tool dirs.
+	RO       []string
+	ROFiles  []string
+	Symlinks []Link
+	// RW are bound read-write at their host paths; Chdir is the working
+	// directory inside.
+	RW    []string
+	Chdir string
+	// Env is set after --clearenv. EnvFD makes bwrap read further
+	// NUL-separated arguments (SetenvArgs) from fd 3, which keeps values out
+	// of the process list.
+	Env     [][2]string
+	EnvFD   bool
+	Command []string
+}
+
+// BoxArgv is the systemd-run and bwrap argv of b. It has no side effects;
+// the caller validates the binds (CheckBind) and the limits.
+func (c Config) BoxArgv(b Box) []string {
+	argv := []string{"systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + b.Unit}
+	if m := b.Limits.MemoryBytes; m != 0 {
+		argv = append(argv, "-p", "MemoryMax="+strconv.FormatUint(m, 10), "-p", "MemorySwapMax=0")
+	}
+	if p := b.Limits.CPUPercent; p != 0 {
+		argv = append(argv, "-p", "CPUQuota="+strconv.FormatUint(uint64(p), 10)+"%")
+	}
+	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue", "--")
+
+	argv = append(argv, "bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
+		"--hostname", b.Hostname, "--tmpfs", "/")
+	argv = append(argv, c.System...)
+	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp")
+	argv = append(argv, "--bind", b.Home, c.UserHome)
+	ro := append(append([]string(nil), c.ToolDirs...), b.RO...)
+	for _, d := range ro {
+		argv = append(argv, "--ro-bind", d, d)
+	}
+	for _, f := range b.ROFiles {
+		argv = append(argv, "--ro-bind", f, f)
+	}
+	for _, k := range b.Symlinks {
+		argv = append(argv, "--symlink", k.Target, k.Path)
+	}
+	for _, f := range c.masks(ro) {
+		argv = append(argv, "--ro-bind", "/dev/null", f)
+	}
+	for _, d := range b.RW {
+		argv = append(argv, "--bind", d, d)
+	}
+	argv = append(argv, "--chdir", b.Chdir, "--clearenv")
+	for _, kv := range b.Env {
+		argv = append(argv, "--setenv", kv[0], kv[1])
+	}
+	if b.EnvFD {
+		argv = append(argv, "--args", "3")
+	}
+	return append(append(argv, "--"), b.Command...)
+}
+
+// SetenvArgs encodes env as bwrap --setenv arguments in the NUL-separated
+// form of `bwrap --args`.
+func SetenvArgs(env [][2]string) []byte {
+	var out []byte
+	for _, kv := range env {
+		out = append(out, "--setenv\x00"+kv[0]+"\x00"+kv[1]+"\x00"...)
+	}
+	return out
+}
+
 // Plan builds the systemd-run and bwrap command for spec. It has no side
 // effects; Layout.Apply prepares the host directories it refers to.
 func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	if err := ValidName(spec.Name); err != nil {
 		return Launch{}, err
 	}
-	if err := spec.Limits.validate(); err != nil {
+	if err := spec.Limits.Validate(); err != nil {
 		return Launch{}, err
 	}
 	if err := checkEnv(spec.Env); err != nil {
@@ -278,39 +368,6 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	}
 	lay := c.layout(spec.Name, spec.Harness)
 	unit := c.UnitName(spec.Name)
-
-	argv := []string{"systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + unit}
-	if m := spec.Limits.MemoryBytes; m != 0 {
-		argv = append(argv, "-p", "MemoryMax="+strconv.FormatUint(m, 10), "-p", "MemorySwapMax=0")
-	}
-	if p := spec.Limits.CPUPercent; p != 0 {
-		argv = append(argv, "-p", "CPUQuota="+strconv.FormatUint(uint64(p), 10)+"%")
-	}
-	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue", "--")
-
-	argv = append(argv, "bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
-		"--hostname", spec.Name, "--tmpfs", "/")
-	argv = append(argv, c.System...)
-	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp")
-	argv = append(argv, "--bind", c.sleeveHome(spec.Name), c.UserHome)
-	for _, d := range append(append([]string(nil), c.ToolDirs...), bin.RO...) {
-		argv = append(argv, "--ro-bind", d, d)
-	}
-	for _, f := range bin.Files {
-		argv = append(argv, "--ro-bind", f, f)
-	}
-	for _, k := range bin.Symlinks {
-		argv = append(argv, "--symlink", k.Target, k.Path)
-	}
-	ro := append(append([]string(nil), c.ToolDirs...), bin.RO...)
-	for _, f := range c.masks(ro) {
-		argv = append(argv, "--ro-bind", "/dev/null", f)
-	}
-	for _, d := range lay.Binds {
-		argv = append(argv, "--bind", d, d)
-	}
-	argv = append(argv, "--bind", spec.Workspace, spec.Workspace, "--chdir", spec.Workspace, "--clearenv")
-
 	env := [][2]string{
 		{"HOME", c.UserHome},
 		{"PATH", strings.Join(c.PathDirs, ":")},
@@ -322,27 +379,28 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		{"LANG", "C.UTF-8"},
 	}
 	env = append(env, lay.Env...)
-	for _, kv := range env {
-		argv = append(argv, "--setenv", kv[0], kv[1])
-	}
-	var envArgs []byte
 	keys := make([]string, 0, len(spec.Env))
 	for k := range spec.Env {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var callerEnv [][2]string
 	for _, k := range keys {
-		envArgs = append(envArgs, "--setenv\x00"+k+"\x00"+spec.Env[k]+"\x00"...)
+		callerEnv = append(callerEnv, [2]string{k, spec.Env[k]})
 	}
-	if len(envArgs) > 0 {
-		argv = append(argv, "--args", "3")
-	}
-	argv = append(argv, "--", bin.Path)
+	envArgs := SetenvArgs(callerEnv)
+	command := []string{bin.Path}
 	if spec.Harness == Shell && len(spec.Args) > 0 {
-		argv = append(argv[:len(argv)-1], spec.Args...)
+		command = spec.Args
 	} else {
-		argv = append(argv, spec.Args...)
+		command = append(command, spec.Args...)
 	}
+	argv := c.BoxArgv(Box{
+		Unit: unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
+		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
+		RW: append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,
+		Env: env, EnvFD: len(envArgs) > 0, Command: command,
+	})
 	launch := Launch{Argv: argv, Unit: unit, Layout: lay}
 	if len(envArgs) > 0 {
 		launch.EnvFile, launch.EnvArgs = c.envFile(spec.Name), envArgs

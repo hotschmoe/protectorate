@@ -664,6 +664,21 @@
           },
           "type": "object"
         },
+        "limits": {
+          "additionalProperties": false,
+          "description": "limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox is \"bwrap\" or a Windows job object); unset means no cap.",
+          "properties": {
+            "cpuPercent": {
+              "description": "cpu_percent is CPU time as a share of one core: 200 is two cores.",
+              "type": "integer"
+            },
+            "memoryBytes": {
+              "description": "memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
         "requestId": {
           "description": "request_id is a client-chosen idempotency key, 8 to 128 characters of [A-Za-z0-9._-]. The hub remembers it for 1h after the first submit with it: a repeat returns the same job instead of creating another, and waits if the first call is still in flight. Pick it with enough entropy to be unique among callers (a UUID or 16 random bytes in hex). With it, a caller that lost the response can still find or cancel the job (CancelJob request_id). Empty means no deduplication.",
           "type": "string"

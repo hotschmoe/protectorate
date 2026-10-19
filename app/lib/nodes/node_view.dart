@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/job.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../theme/tokens.dart';
@@ -311,6 +312,18 @@ List<Sleeve> sleevesBySize(NodeMetrics m) {
 const tierCare = 'care';
 
 bool isCareNode(NodeStatus s) => s.node.tier == tierCare;
+
+// How a node isolates jobs ("bwrap", "runner", "job-object", "none") and
+// elevates admin jobs, one line each.
+List<String> jobIsolationLines(JobIsolation j) => [
+  'sandbox ${j.sandbox.isEmpty ? 'none' : j.sandbox}',
+  j.admin.isEmpty ? 'no admin jobs' : 'admin via ${j.admin}',
+  if (j.note.isNotEmpty) j.note,
+];
+
+// A node whose ordinary jobs run without isolation.
+bool jobsUnisolated(JobIsolation j) =>
+    j.sandbox == 'none' || j.sandbox == 'job-object';
 
 class AlertBadge {
   const AlertBadge(this.label, this.critical);

@@ -382,6 +382,19 @@ class NodeDetail extends StatelessWidget {
           cpuHistory: cpuHistory,
           memHistory: memHistory,
         ),
+        if (m.hasJobs())
+          Panel(
+            key: const ValueKey('jobs-isolation'),
+            legend: 'JOBS',
+            tone: jobsUnisolated(m.jobs) ? Tone.warn : null,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final l in jobIsolationLines(m.jobs))
+                  Text(l, style: t.data()),
+              ],
+            ),
+          ),
         if (m.warnings.isNotEmpty)
           Panel(
             legend: 'COLLECTION WARNINGS',

@@ -31,11 +31,11 @@ func TestCommandFor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			j := &Jobs{Probe: func() *pb.JobIsolation { return tt.iso }}
-			argv, label, err := j.commandFor(&pb.RunJobRequest{Command: cmd, Env: tt.env, Mode: tt.mode})
+			argv, envArgs, label, err := j.commandFor(&pb.RunJobRequest{Command: cmd, Env: tt.env, Mode: tt.mode}, "/w", "/w")
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v", err)
 			}
-			if !tt.wantErr && (!reflect.DeepEqual(argv, tt.wantArgv) || label != tt.wantLabel) {
+			if !tt.wantErr && (!reflect.DeepEqual(argv, tt.wantArgv) || label != tt.wantLabel || envArgs != nil) {
 				t.Fatalf("argv %q label %q", argv, label)
 			}
 		})

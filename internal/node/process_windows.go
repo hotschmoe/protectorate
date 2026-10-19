@@ -3,6 +3,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"syscall"
@@ -82,9 +83,16 @@ func StartDetached(exe string, args []string) error {
 	return cmd.Process.Release()
 }
 
+// sandbox is how sandboxed jobs run; none exists on Windows yet.
+type sandbox struct{}
+
+func (*sandbox) plan(*pb.RunJobRequest, string, string, [][2]string) ([]string, []byte, error) {
+	return nil, nil, errors.New("no sandbox on windows")
+}
+
 // probeIsolation reports how this node runs jobs: in a job object under the
 // agent's own account, elevated when the agent is.
-func probeIsolation() *pb.JobIsolation {
+func (j *Jobs) probeIsolation() *pb.JobIsolation {
 	iso := &pb.JobIsolation{Sandbox: "job-object", Note: "unisolated: jobs run as the agent's account in a job object"}
 	if windows.GetCurrentProcessToken().IsElevated() {
 		iso.Admin = "elevated"

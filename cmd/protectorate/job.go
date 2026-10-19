@@ -141,6 +141,8 @@ func jobRunCmd(o *opts) *cobra.Command {
 	var globs, envPairs []string
 	var timeout time.Duration
 	var admin bool
+	var cpu uint32
+	var mem string
 	c := &cobra.Command{
 		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
@@ -169,6 +171,13 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 				return err
 			}
 			req := &pb.SubmitJobRequest{Target: target, Command: args, ArtifactGlobs: globs, Timeout: durationpb.New(timeout), Admin: admin}
+			memBytes, err := parseOptSize(mem)
+			if err != nil {
+				return err
+			}
+			if cpu > 0 || memBytes > 0 {
+				req.Limits = &pb.JobLimits{CpuPercent: cpu, MemoryBytes: memBytes}
+			}
 			if req.Env, err = parseEnv(envPairs); err != nil {
 				return err
 			}
@@ -207,6 +216,8 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 	f.StringArrayVar(&globs, "artifact-glob", nil, "fetch files matching this glob back to the hub (repeatable)")
 	f.StringArrayVarP(&envPairs, "env", "e", nil, "environment variable KEY=VALUE (repeatable)")
 	f.DurationVar(&timeout, "timeout", time.Hour, "kill the command after this long (at most 24h)")
+	f.Uint32Var(&cpu, "cpu", 0, "cap a sandboxed job's CPU, in percent of one core (200 = two cores)")
+	f.StringVar(&mem, "mem", "", "cap a sandboxed job's memory, e.g. 4G (at least 64M)")
 	f.BoolVar(&admin, "admin", false, "run elevated (sudo -n on Linux, the agent's elevated token on Windows), unsandboxed; needs a named node and an admin grant for it")
 	return c
 }

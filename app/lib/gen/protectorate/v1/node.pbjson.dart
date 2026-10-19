@@ -1540,6 +1540,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.UploadJobDataResponse': $3.UploadJobDataResponse$json,
   '.protectorate.v1.RunJobRequest': $3.RunJobRequest$json,
   '.protectorate.v1.RunJobRequest.EnvEntry': $3.RunJobRequest_EnvEntry$json,
+  '.protectorate.v1.JobLimits': $3.JobLimits$json,
   '.protectorate.v1.JobEvent': $3.JobEvent$json,
   '.protectorate.v1.JobStarted': $3.JobStarted$json,
   '.protectorate.v1.JobOutput': $3.JobOutput$json,

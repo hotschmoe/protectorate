@@ -224,6 +224,14 @@ const SubmitJobRequest$json = {
     {'1': 'artifact_globs', '3': 6, '4': 3, '5': 9, '10': 'artifactGlobs'},
     {'1': 'request_id', '3': 7, '4': 1, '5': 9, '10': 'requestId'},
     {'1': 'admin', '3': 8, '4': 1, '5': 8, '10': 'admin'},
+    {
+      '1': 'limits',
+      '3': 9,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.JobLimits',
+      '10': 'limits'
+    },
   ],
   '3': [SubmitJobRequest_EnvEntry$json],
 };
@@ -246,8 +254,23 @@ final $typed_data.Uint8List submitJobRequestDescriptor = $convert.base64Decode(
     '90ZWN0b3JhdGUudjEuU3VibWl0Sm9iUmVxdWVzdC5FbnZFbnRyeVIDZW52EjMKB3RpbWVvdXQY'
     'BSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQSJQoOYXJ0aWZhY3RfZ2'
     'xvYnMYBiADKAlSDWFydGlmYWN0R2xvYnMSHQoKcmVxdWVzdF9pZBgHIAEoCVIJcmVxdWVzdElk'
-    'EhQKBWFkbWluGAggASgIUgVhZG1pbho2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIUCg'
-    'V2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
+    'EhQKBWFkbWluGAggASgIUgVhZG1pbhIyCgZsaW1pdHMYCSABKAsyGi5wcm90ZWN0b3JhdGUudj'
+    'EuSm9iTGltaXRzUgZsaW1pdHMaNgoIRW52RW50cnkSEAoDa2V5GAEgASgJUgNrZXkSFAoFdmFs'
+    'dWUYAiABKAlSBXZhbHVlOgI4AQ==');
+
+@$core.Deprecated('Use jobLimitsDescriptor instead')
+const JobLimits$json = {
+  '1': 'JobLimits',
+  '2': [
+    {'1': 'cpu_percent', '3': 1, '4': 1, '5': 13, '10': 'cpuPercent'},
+    {'1': 'memory_bytes', '3': 2, '4': 1, '5': 4, '10': 'memoryBytes'},
+  ],
+};
+
+/// Descriptor for `JobLimits`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List jobLimitsDescriptor = $convert.base64Decode(
+    'CglKb2JMaW1pdHMSHwoLY3B1X3BlcmNlbnQYASABKA1SCmNwdVBlcmNlbnQSIQoMbWVtb3J5X2'
+    'J5dGVzGAIgASgEUgttZW1vcnlCeXRlcw==');
 
 @$core.Deprecated('Use getJobRequestDescriptor instead')
 const GetJobRequest$json = {
@@ -507,6 +530,14 @@ const Job$json = {
     },
     {'1': 'isolation', '3': 24, '4': 1, '5': 9, '10': 'isolation'},
     {'1': 'task', '3': 25, '4': 1, '5': 9, '10': 'task'},
+    {
+      '1': 'limits',
+      '3': 26,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.JobLimits',
+      '10': 'limits'
+    },
   ],
   '8': [
     {'1': '_gpu_index'},
@@ -533,7 +564,8 @@ final $typed_data.Uint8List jobDescriptor = $convert.base64Decode(
     '9yYXRlLnYxLkpvYkFydGlmYWN0UglhcnRpZmFjdHMSJQoOYXJ0aWZhY3RfYnl0ZXMYFSABKARS'
     'DWFydGlmYWN0Qnl0ZXMSGwoJbG9nX2J5dGVzGBYgASgEUghsb2dCeXRlcxIsCgRtb2RlGBcgAS'
     'gOMhgucHJvdGVjdG9yYXRlLnYxLkpvYk1vZGVSBG1vZGUSHAoJaXNvbGF0aW9uGBggASgJUglp'
-    'c29sYXRpb24SEgoEdGFzaxgZIAEoCVIEdGFza0IMCgpfZ3B1X2luZGV4');
+    'c29sYXRpb24SEgoEdGFzaxgZIAEoCVIEdGFzaxIyCgZsaW1pdHMYGiABKAsyGi5wcm90ZWN0b3'
+    'JhdGUudjEuSm9iTGltaXRzUgZsaW1pdHNCDAoKX2dwdV9pbmRleA==');
 
 @$core.Deprecated('Use prepareJobRequestDescriptor instead')
 const PrepareJobRequest$json = {
@@ -632,6 +664,14 @@ const RunJobRequest$json = {
       '6': '.protectorate.v1.JobMode',
       '10': 'mode'
     },
+    {
+      '1': 'limits',
+      '3': 13,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.JobLimits',
+      '10': 'limits'
+    },
   ],
   '3': [RunJobRequest_EnvEntry$json],
 };
@@ -656,8 +696,9 @@ final $typed_data.Uint8List runJobRequestDescriptor = $convert.base64Decode(
     'UucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQSJQoOYXJ0aWZhY3RfZ2xvYnMYCSADKAlSDWFy'
     'dGlmYWN0R2xvYnMSKQoQYXJ0aWZhY3RfYXJjaGl2ZRgKIAEoCFIPYXJ0aWZhY3RBcmNoaXZlEh'
     'gKB3dvcmtkaXIYCyABKAlSB3dvcmtkaXISLAoEbW9kZRgMIAEoDjIYLnByb3RlY3RvcmF0ZS52'
-    'MS5Kb2JNb2RlUgRtb2RlGjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGA'
-    'IgASgJUgV2YWx1ZToCOAE=');
+    'MS5Kb2JNb2RlUgRtb2RlEjIKBmxpbWl0cxgNIAEoCzIaLnByb3RlY3RvcmF0ZS52MS5Kb2JMaW'
+    '1pdHNSBmxpbWl0cxo2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIUCgV2YWx1ZRgCIAEo'
+    'CVIFdmFsdWU6AjgB');
 
 @$core.Deprecated('Use jobStartedDescriptor instead')
 const JobStarted$json = {
@@ -860,6 +901,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ArtifactSource': ArtifactSource$json,
   '.protectorate.v1.SubmitJobRequest.EnvEntry': SubmitJobRequest_EnvEntry$json,
   '.google.protobuf.Duration': $1.Duration$json,
+  '.protectorate.v1.JobLimits': JobLimits$json,
   '.protectorate.v1.Job': Job$json,
   '.google.protobuf.Timestamp': $2.Timestamp$json,
   '.protectorate.v1.JobArtifact': JobArtifact$json,

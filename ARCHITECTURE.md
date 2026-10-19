@@ -382,6 +382,11 @@ node) executes.
   per-package `--timeout` bounds how long a run can hold the node. The hub creates no
   leases of its own for jobs (a selector or node target pins nothing), so
   there is no job-scoped lease to release server-side.
+- **Sandbox:** on Linux nodes with bwrap and a systemd user manager a job on
+  a `shared` node runs in the sleeve sandbox (bwrap in a `prot-job-<id>`
+  user scope, cgroup caps from `job run --cpu/--mem`, only the job directory
+  and worktree writable, the node's job home instead of the real one);
+  elsewhere unsandboxed, said in the node's metrics. See docs/node-work.md.
 - **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)
   and `--job-dir`. Timeout and cancel signal the process group (SIGTERM, then
   SIGKILL after 3s); on Windows the command runs in a job object that kills the

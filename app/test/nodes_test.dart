@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/job.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
 import 'package:protectorate/hubs/event_feed.dart';
@@ -338,6 +339,36 @@ void main() {
       t.getTopLeft(find.byKey(ValueKey(rows[0]))).dy,
       lessThan(t.getTopLeft(find.byKey(ValueKey(rows[1]))).dy),
     );
+  });
+
+  testWidgets('detail says how the node isolates jobs', (t) async {
+    t.view.physicalSize = const Size(500, 3000);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final m = _metrics()
+      ..jobs = JobIsolation(
+        sandbox: 'none',
+        note: 'jobs run as the agent\'s user, unsandboxed: bwrap not found',
+      );
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: NodeDetail(
+            status: _status(
+              'phone',
+              NodeFreshness.NODE_FRESHNESS_FRESH,
+              metrics: m,
+            ),
+            age: Duration.zero,
+            now: DateTime(2026),
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(const ValueKey('jobs-isolation')), findsOneWidget);
+    expect(find.text('sandbox none'), findsOneWidget);
+    expect(find.text('no admin jobs'), findsOneWidget);
+    expect(find.textContaining('bwrap not found'), findsOneWidget);
   });
 
   test('sleeve workspaces count as offenders', () {

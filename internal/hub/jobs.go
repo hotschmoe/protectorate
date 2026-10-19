@@ -42,6 +42,7 @@ const (
 	cancelBackstop    = 10 * time.Second
 	cancelWait        = 8 * time.Second
 	logReadChunk      = 64 << 10
+	minJobMemory      = 64 << 20
 )
 
 var jobIDRe = regexp.MustCompile(`^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$`)
@@ -337,6 +338,9 @@ func validateSubmit(req *pb.SubmitJobRequest) (time.Duration, error) {
 			return 0, invalid("invalid artifact glob %q", g)
 		}
 	}
+	if m := req.GetLimits().GetMemoryBytes(); m != 0 && m < minJobMemory {
+		return 0, invalid("a memory limit must be at least 64 MiB")
+	}
 	return timeout, nil
 }
 
@@ -564,7 +568,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	job := &pb.Job{
 		Id: id, State: pb.JobState_JOB_STATE_PREPARING, Target: req.Target, Node: n.Name, Source: src,
 		Command: req.Command, EnvKeys: envKeys, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
-		SubmittedAt: timestamppb.Now(), Mode: mode, Task: p.GetTask(),
+		SubmittedAt: timestamppb.Now(), Mode: mode, Task: p.GetTask(), Limits: req.Limits,
 	}
 	if gpu != nil {
 		g := int32(*gpu)
@@ -596,7 +600,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	run := &pb.RunJobRequest{
 		JobId: id, Command: req.Command, Env: env, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
 		RepoKey: plan.key, Commit: plan.commit, ArtifactName: plan.name,
-		ArtifactArchive: plan.dir != "", Workdir: plan.workdir, Mode: mode,
+		ArtifactArchive: plan.dir != "", Workdir: plan.workdir, Mode: mode, Limits: req.Limits,
 	}
 	snap := proto.Clone(job).(*pb.Job)
 	m.wg.Add(1)

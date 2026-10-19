@@ -328,6 +328,20 @@ func writeNodeStatus(w io.Writer, s *pb.NodeStatus) {
 	writeMetrics(w, s.Metrics)
 }
 
+// jobIsolationLabel says how a node isolates and elevates jobs.
+func jobIsolationLabel(j *pb.JobIsolation) string {
+	s := "sandbox " + j.Sandbox
+	if j.Admin != "" {
+		s += ", admin via " + j.Admin
+	} else {
+		s += ", no admin jobs"
+	}
+	if j.Note != "" {
+		s += " (" + j.Note + ")"
+	}
+	return s
+}
+
 func writeMetrics(w io.Writer, m *pb.NodeMetrics) {
 	fmt.Fprintf(w, "hostname\t%s\n", m.Hostname)
 	fmt.Fprintf(w, "platform\t%s\n", strings.TrimSpace(m.Os+"/"+m.Arch+" "+m.Platform))
@@ -339,6 +353,9 @@ func writeMetrics(w io.Writer, m *pb.NodeMetrics) {
 			line += fmt.Sprintf(", load %.2f %.2f %.2f", *c.Load1, *c.Load5, *c.Load15)
 		}
 		fmt.Fprintf(w, "cpu\t%s\n", line)
+	}
+	if j := m.Jobs; j != nil {
+		fmt.Fprintf(w, "jobs\t%s\n", jobIsolationLabel(j))
 	}
 	if mm := m.Memory; mm != nil {
 		fmt.Fprintf(w, "memory\t%.1f%% (%s of %s used, %s available)\n", mm.UsedPercent, fmtBytes(mm.UsedBytes), fmtBytes(mm.TotalBytes), fmtBytes(mm.AvailableBytes))

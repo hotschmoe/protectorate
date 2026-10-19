@@ -477,6 +477,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? artifactGlobs,
     $core.String? requestId,
     $core.bool? admin,
+    JobLimits? limits,
   }) {
     final result = SubmitJobRequest._();
     if (target != null) result.target = target;
@@ -487,6 +488,7 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     if (artifactGlobs != null) result.artifactGlobs.addAll(artifactGlobs);
     if (requestId != null) result.requestId = requestId;
     if (admin != null) result.admin = admin;
+    if (limits != null) result.limits = limits;
     return result;
   }
 
@@ -519,6 +521,8 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
     ..pPS(6, _omitFieldNames ? '' : 'artifactGlobs')
     ..aOS(7, _omitFieldNames ? '' : 'requestId')
     ..aOB(8, _omitFieldNames ? '' : 'admin')
+    ..aOM<JobLimits>(9, _omitFieldNames ? '' : 'limits',
+        subBuilder: JobLimits.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -619,6 +623,92 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
   $core.bool hasAdmin() => $_has(7);
   @$pb.TagNumber(8)
   void clearAdmin() => $_clearField(8);
+
+  /// limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox
+  /// is "bwrap" or a Windows job object); unset means no cap.
+  @$pb.TagNumber(9)
+  JobLimits get limits => $_getN(8);
+  @$pb.TagNumber(9)
+  set limits(JobLimits value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasLimits() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearLimits() => $_clearField(9);
+  @$pb.TagNumber(9)
+  JobLimits ensureLimits() => $_ensure(8);
+}
+
+/// JobLimits are cgroup (Linux) or job object (Windows) caps.
+class JobLimits extends $pb.GeneratedMessage {
+  factory JobLimits({
+    $core.int? cpuPercent,
+    $fixnum.Int64? memoryBytes,
+  }) {
+    final result = JobLimits._();
+    if (cpuPercent != null) result.cpuPercent = cpuPercent;
+    if (memoryBytes != null) result.memoryBytes = memoryBytes;
+    return result;
+  }
+
+  JobLimits._();
+
+  factory JobLimits.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JobLimits()..mergeFromBuffer(data, registry);
+  factory JobLimits.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JobLimits()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'JobLimits',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: JobLimits.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'cpuPercent', fieldType: $pb.PbFieldType.OU3)
+    ..a<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'memoryBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JobLimits clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JobLimits copyWith(void Function(JobLimits) updates) =>
+      super.copyWith((message) => updates(message as JobLimits)) as JobLimits;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use JobLimits() / JobLimits.new instead')
+  static JobLimits create() => JobLimits._();
+  static $pb.GeneratedMessage $_createMessage() => JobLimits._();
+  @$core.override
+  JobLimits createEmptyInstance() => JobLimits._();
+  @$core.pragma('dart2js:noInline')
+  static JobLimits getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<JobLimits>(JobLimits.$_createMessage);
+  static JobLimits? _defaultInstance;
+
+  /// cpu_percent is CPU time as a share of one core: 200 is two cores.
+  @$pb.TagNumber(1)
+  $core.int get cpuPercent => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set cpuPercent($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCpuPercent() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCpuPercent() => $_clearField(1);
+
+  /// memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get memoryBytes => $_getI64(1);
+  @$pb.TagNumber(2)
+  set memoryBytes($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasMemoryBytes() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearMemoryBytes() => $_clearField(2);
 }
 
 class GetJobRequest extends $pb.GeneratedMessage {
@@ -1247,6 +1337,7 @@ class Job extends $pb.GeneratedMessage {
     JobMode? mode,
     $core.String? isolation,
     $core.String? task,
+    JobLimits? limits,
   }) {
     final result = Job._();
     if (id != null) result.id = id;
@@ -1274,6 +1365,7 @@ class Job extends $pb.GeneratedMessage {
     if (mode != null) result.mode = mode;
     if (isolation != null) result.isolation = isolation;
     if (task != null) result.task = task;
+    if (limits != null) result.limits = limits;
     return result;
   }
 
@@ -1332,6 +1424,8 @@ class Job extends $pb.GeneratedMessage {
     ..aE<JobMode>(23, _omitFieldNames ? '' : 'mode', enumValues: JobMode.values)
     ..aOS(24, _omitFieldNames ? '' : 'isolation')
     ..aOS(25, _omitFieldNames ? '' : 'task')
+    ..aOM<JobLimits>(26, _omitFieldNames ? '' : 'limits',
+        subBuilder: JobLimits.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1585,6 +1679,17 @@ class Job extends $pb.GeneratedMessage {
   $core.bool hasTask() => $_has(24);
   @$pb.TagNumber(25)
   void clearTask() => $_clearField(25);
+
+  @$pb.TagNumber(26)
+  JobLimits get limits => $_getN(25);
+  @$pb.TagNumber(26)
+  set limits(JobLimits value) => $_setField(26, value);
+  @$pb.TagNumber(26)
+  $core.bool hasLimits() => $_has(25);
+  @$pb.TagNumber(26)
+  void clearLimits() => $_clearField(26);
+  @$pb.TagNumber(26)
+  JobLimits ensureLimits() => $_ensure(25);
 }
 
 class PrepareJobRequest extends $pb.GeneratedMessage {
@@ -1924,6 +2029,7 @@ class RunJobRequest extends $pb.GeneratedMessage {
     $core.bool? artifactArchive,
     $core.String? workdir,
     JobMode? mode,
+    JobLimits? limits,
   }) {
     final result = RunJobRequest._();
     if (jobId != null) result.jobId = jobId;
@@ -1938,6 +2044,7 @@ class RunJobRequest extends $pb.GeneratedMessage {
     if (artifactArchive != null) result.artifactArchive = artifactArchive;
     if (workdir != null) result.workdir = workdir;
     if (mode != null) result.mode = mode;
+    if (limits != null) result.limits = limits;
     return result;
   }
 
@@ -1972,6 +2079,8 @@ class RunJobRequest extends $pb.GeneratedMessage {
     ..aOB(10, _omitFieldNames ? '' : 'artifactArchive')
     ..aOS(11, _omitFieldNames ? '' : 'workdir')
     ..aE<JobMode>(12, _omitFieldNames ? '' : 'mode', enumValues: JobMode.values)
+    ..aOM<JobLimits>(13, _omitFieldNames ? '' : 'limits',
+        subBuilder: JobLimits.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2094,6 +2203,17 @@ class RunJobRequest extends $pb.GeneratedMessage {
   $core.bool hasMode() => $_has(11);
   @$pb.TagNumber(12)
   void clearMode() => $_clearField(12);
+
+  @$pb.TagNumber(13)
+  JobLimits get limits => $_getN(12);
+  @$pb.TagNumber(13)
+  set limits(JobLimits value) => $_setField(13, value);
+  @$pb.TagNumber(13)
+  $core.bool hasLimits() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearLimits() => $_clearField(13);
+  @$pb.TagNumber(13)
+  JobLimits ensureLimits() => $_ensure(12);
 }
 
 class JobStarted extends $pb.GeneratedMessage {
