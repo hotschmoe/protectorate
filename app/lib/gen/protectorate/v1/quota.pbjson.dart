@@ -217,7 +217,8 @@ const $core.Map<$core.String, $core.dynamic> QuotaServiceBase$json = {
     {
       '1': 'GetQuota',
       '2': '.protectorate.v1.GetQuotaRequest',
-      '3': '.protectorate.v1.GetQuotaResponse'
+      '3': '.protectorate.v1.GetQuotaResponse',
+      '4': {'34': 1},
     },
   ],
 };
@@ -236,5 +237,5 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 
 /// Descriptor for `QuotaService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List quotaServiceDescriptor = $convert.base64Decode(
-    'CgxRdW90YVNlcnZpY2USTwoIR2V0UXVvdGESIC5wcm90ZWN0b3JhdGUudjEuR2V0UXVvdGFSZX'
-    'F1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkdldFF1b3RhUmVzcG9uc2U=');
+    'CgxRdW90YVNlcnZpY2USVAoIR2V0UXVvdGESIC5wcm90ZWN0b3JhdGUudjEuR2V0UXVvdGFSZX'
+    'F1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkdldFF1b3RhUmVzcG9uc2UiA5ACAQ==');

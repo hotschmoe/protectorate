@@ -19,6 +19,7 @@ import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
+/// Session is one tmux-backed harness session.
 class Session extends $pb.GeneratedMessage {
   factory Session({
     $core.String? name,
@@ -88,6 +89,7 @@ class Session extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<Session>(Session.$_createMessage);
   static Session? _defaultInstance;
 
+  /// name is the unique session name, also used in the terminal URL.
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -320,6 +322,7 @@ class CreateSessionRequest extends $pb.GeneratedMessage {
           CreateSessionRequest.$_createMessage);
   static CreateSessionRequest? _defaultInstance;
 
+  /// name identifies the session; it must not already exist.
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -329,6 +332,7 @@ class CreateSessionRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
+  /// cwd is the starting directory; empty uses tmux's default.
   @$pb.TagNumber(2)
   $core.String get cwd => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -338,9 +342,11 @@ class CreateSessionRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearCwd() => $_clearField(2);
 
+  /// command is the argv to run; empty starts the default shell.
   @$pb.TagNumber(3)
   $pb.PbList<$core.String> get command => $_getList(2);
 
+  /// env holds extra environment variables for the session.
   @$pb.TagNumber(4)
   $pb.PbMap<$core.String, $core.String> get env => $_getMap(3);
 }
@@ -456,6 +462,7 @@ class KillSessionRequest extends $pb.GeneratedMessage {
           KillSessionRequest.$_createMessage);
   static KillSessionRequest? _defaultInstance;
 
+  /// name of the session to kill.
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -560,6 +567,7 @@ class CapturePaneRequest extends $pb.GeneratedMessage {
           CapturePaneRequest.$_createMessage);
   static CapturePaneRequest? _defaultInstance;
 
+  /// name of the session to read.
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -647,18 +655,26 @@ class SessionServiceApi {
 
   SessionServiceApi(this._client);
 
+  /// ListSessions returns all live sessions.
   $async.Future<ListSessionsResponse> listSessions(
           $pb.ClientContext? ctx, ListSessionsRequest request) =>
       _client.invoke<ListSessionsResponse>(ctx, 'SessionService',
           'ListSessions', request, ListSessionsResponse());
+
+  /// CreateSession starts a detached tmux session running command, or the
+  /// default shell when command is empty.
   $async.Future<CreateSessionResponse> createSession(
           $pb.ClientContext? ctx, CreateSessionRequest request) =>
       _client.invoke<CreateSessionResponse>(ctx, 'SessionService',
           'CreateSession', request, CreateSessionResponse());
+
+  /// KillSession terminates a session and every process in it.
   $async.Future<KillSessionResponse> killSession(
           $pb.ClientContext? ctx, KillSessionRequest request) =>
       _client.invoke<KillSessionResponse>(
           ctx, 'SessionService', 'KillSession', request, KillSessionResponse());
+
+  /// CapturePane returns the current text of a session's active pane.
   $async.Future<CapturePaneResponse> capturePane(
           $pb.ClientContext? ctx, CapturePaneRequest request) =>
       _client.invoke<CapturePaneResponse>(

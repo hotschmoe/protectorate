@@ -60,7 +60,8 @@ const $core.Map<$core.String, $core.dynamic> HubServiceBase$json = {
     {
       '1': 'GetStatus',
       '2': '.protectorate.v1.GetStatusRequest',
-      '3': '.protectorate.v1.GetStatusResponse'
+      '3': '.protectorate.v1.GetStatusResponse',
+      '4': {'34': 1},
     },
   ],
 };
@@ -75,5 +76,5 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 
 /// Descriptor for `HubService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List hubServiceDescriptor = $convert.base64Decode(
-    'CgpIdWJTZXJ2aWNlElIKCUdldFN0YXR1cxIhLnByb3RlY3RvcmF0ZS52MS5HZXRTdGF0dXNSZX'
-    'F1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkdldFN0YXR1c1Jlc3BvbnNl');
+    'CgpIdWJTZXJ2aWNlElcKCUdldFN0YXR1cxIhLnByb3RlY3RvcmF0ZS52MS5HZXRTdGF0dXNSZX'
+    'F1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkdldFN0YXR1c1Jlc3BvbnNlIgOQAgE=');

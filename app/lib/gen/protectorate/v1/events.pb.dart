@@ -143,6 +143,7 @@ class Event extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $0.Timestamp ensureTime() => $_ensure(1);
 
+  /// kind is a dotted name such as "quota.updated", "session.created" or "backlog.added".
   @$pb.TagNumber(3)
   $core.String get kind => $_getSZ(2);
   @$pb.TagNumber(3)
@@ -152,6 +153,7 @@ class Event extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   void clearKind() => $_clearField(3);
 
+  /// subject is the entity the event is about, e.g. a provider or item id.
   @$pb.TagNumber(4)
   $core.String get subject => $_getSZ(3);
   @$pb.TagNumber(4)
@@ -161,6 +163,7 @@ class Event extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   void clearSubject() => $_clearField(4);
 
+  /// payload carries kind-specific fields.
   @$pb.TagNumber(5)
   $1.Struct get payload => $_getN(4);
   @$pb.TagNumber(5)
@@ -173,11 +176,14 @@ class Event extends $pb.GeneratedMessage {
   $1.Struct ensurePayload() => $_ensure(4);
 }
 
+/// EventService streams hub events. It is server-streaming only, so the MCP
+/// bridge does not expose it as a tool.
 class EventServiceApi {
   final $pb.RpcClient _client;
 
   EventServiceApi(this._client);
 
+  /// Subscribe streams every event the hub publishes until the client disconnects.
   $async.Future<Event> subscribe(
           $pb.ClientContext? ctx, SubscribeRequest request) =>
       _client.invoke<Event>(ctx, 'EventService', 'Subscribe', request, Event());

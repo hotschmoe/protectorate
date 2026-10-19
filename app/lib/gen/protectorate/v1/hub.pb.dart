@@ -126,6 +126,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
           GetStatusResponse.$_createMessage);
   static GetStatusResponse? _defaultInstance;
 
+  /// version is the hub build version.
   @$pb.TagNumber(1)
   $core.String get version => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -144,6 +145,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearHostname() => $_clearField(2);
 
+  /// os and arch are Go GOOS/GOARCH values of the hub host.
   @$pb.TagNumber(3)
   $core.String get os => $_getSZ(2);
   @$pb.TagNumber(3)
@@ -183,11 +185,13 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   $0.Timestamp ensureStartedAt() => $_ensure(5);
 }
 
+/// HubService reports on the hub process itself.
 class HubServiceApi {
   final $pb.RpcClient _client;
 
   HubServiceApi(this._client);
 
+  /// GetStatus returns the hub version, host platform and uptime.
   $async.Future<GetStatusResponse> getStatus(
           $pb.ClientContext? ctx, GetStatusRequest request) =>
       _client.invoke<GetStatusResponse>(

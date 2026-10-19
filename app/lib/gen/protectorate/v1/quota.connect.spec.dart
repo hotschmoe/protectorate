@@ -13,10 +13,13 @@ abstract final class QuotaService {
   /// Fully-qualified name of the QuotaService service.
   static const name = 'protectorate.v1.QuotaService';
 
+  /// GetQuota returns the usage windows, resets and freshness of every
+  /// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
   static const getQuota = connect.Spec(
     '/$name/GetQuota',
     connect.StreamType.unary,
     protectoratev1quota.GetQuotaRequest.new,
     protectoratev1quota.GetQuotaResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
   );
 }

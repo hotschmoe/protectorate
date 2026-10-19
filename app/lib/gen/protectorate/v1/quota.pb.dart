@@ -227,6 +227,7 @@ class ProviderQuota extends $pb.GeneratedMessage {
           ProviderQuota.$_createMessage);
   static ProviderQuota? _defaultInstance;
 
+  /// provider is the subscription name, e.g. "claude" or "codex".
   @$pb.TagNumber(1)
   $core.String get provider => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -245,6 +246,7 @@ class ProviderQuota extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearPlan() => $_clearField(2);
 
+  /// source names where the numbers were read from.
   @$pb.TagNumber(3)
   $core.String get source => $_getSZ(2);
   @$pb.TagNumber(3)
@@ -392,6 +394,7 @@ class QuotaWindow extends $pb.GeneratedMessage {
           QuotaWindow.$_createMessage);
   static QuotaWindow? _defaultInstance;
 
+  /// name identifies the window, e.g. "5h".
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -502,6 +505,7 @@ class ResetCredit extends $pb.GeneratedMessage {
           ResetCredit.$_createMessage);
   static ResetCredit? _defaultInstance;
 
+  /// kind names the type of reset credit; count of them are available.
   @$pb.TagNumber(1)
   $core.String get kind => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -540,6 +544,8 @@ class QuotaServiceApi {
 
   QuotaServiceApi(this._client);
 
+  /// GetQuota returns the usage windows, resets and freshness of every
+  /// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
   $async.Future<GetQuotaResponse> getQuota(
           $pb.ClientContext? ctx, GetQuotaRequest request) =>
       _client.invoke<GetQuotaResponse>(

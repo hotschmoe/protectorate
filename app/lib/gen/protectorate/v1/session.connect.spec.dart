@@ -12,13 +12,17 @@ abstract final class SessionService {
   /// Fully-qualified name of the SessionService service.
   static const name = 'protectorate.v1.SessionService';
 
+  /// ListSessions returns all live sessions.
   static const listSessions = connect.Spec(
     '/$name/ListSessions',
     connect.StreamType.unary,
     protectoratev1session.ListSessionsRequest.new,
     protectoratev1session.ListSessionsResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
   );
 
+  /// CreateSession starts a detached tmux session running command, or the
+  /// default shell when command is empty.
   static const createSession = connect.Spec(
     '/$name/CreateSession',
     connect.StreamType.unary,
@@ -26,6 +30,7 @@ abstract final class SessionService {
     protectoratev1session.CreateSessionResponse.new,
   );
 
+  /// KillSession terminates a session and every process in it.
   static const killSession = connect.Spec(
     '/$name/KillSession',
     connect.StreamType.unary,
@@ -33,10 +38,12 @@ abstract final class SessionService {
     protectoratev1session.KillSessionResponse.new,
   );
 
+  /// CapturePane returns the current text of a session's active pane.
   static const capturePane = connect.Spec(
     '/$name/CapturePane',
     connect.StreamType.unary,
     protectoratev1session.CapturePaneRequest.new,
     protectoratev1session.CapturePaneResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
   );
 }

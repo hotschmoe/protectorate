@@ -194,7 +194,8 @@ const $core.Map<$core.String, $core.dynamic> SessionServiceBase$json = {
     {
       '1': 'ListSessions',
       '2': '.protectorate.v1.ListSessionsRequest',
-      '3': '.protectorate.v1.ListSessionsResponse'
+      '3': '.protectorate.v1.ListSessionsResponse',
+      '4': {'34': 1},
     },
     {
       '1': 'CreateSession',
@@ -204,12 +205,14 @@ const $core.Map<$core.String, $core.dynamic> SessionServiceBase$json = {
     {
       '1': 'KillSession',
       '2': '.protectorate.v1.KillSessionRequest',
-      '3': '.protectorate.v1.KillSessionResponse'
+      '3': '.protectorate.v1.KillSessionResponse',
+      '4': {}
     },
     {
       '1': 'CapturePane',
       '2': '.protectorate.v1.CapturePaneRequest',
-      '3': '.protectorate.v1.CapturePaneResponse'
+      '3': '.protectorate.v1.CapturePaneResponse',
+      '4': {'34': 1},
     },
   ],
 };
@@ -233,10 +236,11 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 
 /// Descriptor for `SessionService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List sessionServiceDescriptor = $convert.base64Decode(
-    'Cg5TZXNzaW9uU2VydmljZRJbCgxMaXN0U2Vzc2lvbnMSJC5wcm90ZWN0b3JhdGUudjEuTGlzdF'
-    'Nlc3Npb25zUmVxdWVzdBolLnByb3RlY3RvcmF0ZS52MS5MaXN0U2Vzc2lvbnNSZXNwb25zZRJe'
-    'Cg1DcmVhdGVTZXNzaW9uEiUucHJvdGVjdG9yYXRlLnYxLkNyZWF0ZVNlc3Npb25SZXF1ZXN0Gi'
-    'YucHJvdGVjdG9yYXRlLnYxLkNyZWF0ZVNlc3Npb25SZXNwb25zZRJYCgtLaWxsU2Vzc2lvbhIj'
-    'LnByb3RlY3RvcmF0ZS52MS5LaWxsU2Vzc2lvblJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuS2'
-    'lsbFNlc3Npb25SZXNwb25zZRJYCgtDYXB0dXJlUGFuZRIjLnByb3RlY3RvcmF0ZS52MS5DYXB0'
-    'dXJlUGFuZVJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuQ2FwdHVyZVBhbmVSZXNwb25zZQ==');
+    'Cg5TZXNzaW9uU2VydmljZRJgCgxMaXN0U2Vzc2lvbnMSJC5wcm90ZWN0b3JhdGUudjEuTGlzdF'
+    'Nlc3Npb25zUmVxdWVzdBolLnByb3RlY3RvcmF0ZS52MS5MaXN0U2Vzc2lvbnNSZXNwb25zZSID'
+    'kAIBEl4KDUNyZWF0ZVNlc3Npb24SJS5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlcX'
+    'Vlc3QaJi5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlc3BvbnNlEl4KC0tpbGxTZXNz'
+    'aW9uEiMucHJvdGVjdG9yYXRlLnYxLktpbGxTZXNzaW9uUmVxdWVzdBokLnByb3RlY3RvcmF0ZS'
+    '52MS5LaWxsU2Vzc2lvblJlc3BvbnNlIgSItRgBEl0KC0NhcHR1cmVQYW5lEiMucHJvdGVjdG9y'
+    'YXRlLnYxLkNhcHR1cmVQYW5lUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5DYXB0dXJlUGFuZV'
+    'Jlc3BvbnNlIgOQAgE=');
