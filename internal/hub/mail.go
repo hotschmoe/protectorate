@@ -53,7 +53,7 @@ type sendResult struct {
 	Msg     mailbox.Message
 	Dup     bool
 	Waiting bool
-	Backlog string
+	Note    string
 }
 
 // chatMode classifies a recipient: "chat" for a sleeve that takes injected
@@ -148,14 +148,14 @@ func (c *coordinator) send(sender string, a sendArgs) (sendResult, error) {
 	if err != nil {
 		return sendResult{}, connect.NewError(connect.CodeInternal, err)
 	}
-	res := sendResult{Msg: m, Dup: !created, Waiting: len(m.Recipients) == 0, Backlog: m.BacklogItem}
+	res := sendResult{Msg: m, Dup: !created, Waiting: len(m.Recipients) == 0, Note: m.NoteID}
 	if !created {
 		return res, nil
 	}
 	c.event("msg.sent", m, map[string]any{"recipients": strings.Join(m.Recipients, ",")})
 	c.armInboxOnly(m)
 	if m.Kind == mailbox.Request && len(m.Recipients) == 0 && project != "" {
-		res.Backlog = c.fileRequest(m, project)
+		res.Note = c.fileRequest(m, project)
 	}
 	c.nudge()
 	return res, nil
@@ -184,8 +184,8 @@ func (c *coordinator) armInboxOnly(m mailbox.Message) {
 	}
 }
 
-// fileRequest turns a request to a project with no live sleeve into a backlog
-// item for that project, and returns its id.
+// fileRequest turns a request to a project with no live sleeve into a note
+// tagged with that project, and returns its id.
 func (c *coordinator) fileRequest(m mailbox.Message, project string) string {
 	if c.h.backlog == nil {
 		return ""
@@ -194,19 +194,22 @@ func (c *coordinator) fileRequest(m mailbox.Message, project string) string {
 	if err != nil {
 		return ""
 	}
-	it, err := c.h.backlog.Add(backlog.NewItem{
+	body := fmt.Sprintf("%s\n\nFrom %s, thread %s, message %s.\nReply: protectorate msg reply %s \"...\"",
+		strings.TrimRight(m.Body, "\n"), m.From, m.Thread, m.ID, m.ID)
+	n, err := c.h.fileNote(backlog.NewNote{
+		Title:   fmt.Sprintf("%s asks: %s", m.From, firstLine(m.Body, 80)),
+		Body:    body,
 		Project: v.Display,
-		Title:   fmt.Sprintf("%s asks: %s (thread %s, %s)", m.From, firstLine(m.Body, 80), m.Thread, m.ID),
+		Source:  m.From,
 	})
 	if err != nil {
-		log.Printf("mailbox: file backlog item for %s: %v", m.ID, err)
+		log.Printf("mailbox: file note for %s: %v", m.ID, err)
 		return ""
 	}
-	c.h.publishBacklog("backlog.added", it)
-	if err := c.mail.SetBacklogItem(m.ID, it.ID); err != nil {
-		log.Printf("mailbox: record backlog item for %s: %v", m.ID, err)
+	if err := c.mail.SetNoteID(m.ID, n.ID); err != nil {
+		log.Printf("mailbox: record note for %s: %v", m.ID, err)
 	}
-	return it.ID
+	return n.ID
 }
 
 func firstLine(s string, n int) string {
@@ -433,8 +436,8 @@ func renderMessage(m mailbox.Message, project string, reminder bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s]\n%s\n", head, strings.TrimRight(m.Body, "\n"))
 	b.WriteByte('\n')
-	if m.BacklogItem != "" {
-		fmt.Fprintf(&b, "This request is already filed as backlog item %s for the project. Work it from the backlog; do not add another item for it.\n", m.BacklogItem)
+	if m.NoteID != "" {
+		fmt.Fprintf(&b, "This request is already filed as note %s for the project. Work it from the note (protectorate backlog show %s); do not add another note for it.\n", m.NoteID, m.NoteID)
 	}
 	if m.From != hubName {
 		fmt.Fprintf(&b, "Reply: protectorate msg reply %s \"...\"\n", m.ID)
@@ -502,7 +505,7 @@ func mailToProto(m mailbox.Message) *pb.MailMessage {
 	out := &pb.MailMessage{
 		Id: m.ID, ThreadId: m.Thread, From: m.From, To: m.To, Kind: kindToProto(m.Kind), AckRequired: m.AckRequired,
 		Body: m.Body, ReplyTo: m.ReplyTo, CreatedAt: timestamppb.New(m.Created), EscalatedAt: ts(m.Escalated),
-		BacklogItem: m.BacklogItem,
+		NoteId: m.NoteID,
 	}
 	for _, r := range m.Recipients {
 		d := m.Deliveries[r]
@@ -530,7 +533,7 @@ func (s messageService) Send(ctx context.Context, req *connect.Request[pb.Messag
 		return nil, err
 	}
 	return connect.NewResponse(&pb.MessageServiceSendResponse{
-		Message: mailToProto(res.Msg), Duplicate: res.Dup, Waiting: res.Waiting, BacklogItem: res.Backlog,
+		Message: mailToProto(res.Msg), Duplicate: res.Dup, Waiting: res.Waiting, NoteId: res.Note,
 	}), nil
 }
 

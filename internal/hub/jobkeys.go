@@ -2,7 +2,9 @@ package hub
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"sync"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/internal/keylog"
 )
 
 const (
@@ -29,9 +32,11 @@ type keyEntry struct {
 	expires  time.Time
 }
 
-// submitKeys dedupes SubmitJob by request id for a bounded window.
+// submitKeys dedupes SubmitJob by request id for a bounded window. With a log
+// it survives a hub restart.
 type submitKeys struct {
 	now func() time.Time
+	log *keylog.Log
 
 	mu      sync.Mutex
 	entries map[string]*keyEntry
@@ -55,10 +60,38 @@ func (k *submitKeys) sweepLocked() {
 	}
 }
 
+// restore adopts the entries a previous hub persisted and records the rest in
+// log.
+func (k *submitKeys) restore(log *keylog.Log, entries []keylog.Entry) {
+	k.log = log
+	for _, p := range entries {
+		e := &keyEntry{done: make(chan struct{}), id: p.Value, expires: p.Expires}
+		if p.Err != "" {
+			e.err, e.canceled = connect.NewError(connect.Code(p.Code), errors.New(p.Err)), true
+		}
+		close(e.done)
+		k.entries[p.Key] = e
+	}
+}
+
+func (k *submitKeys) persist(key string, e *keyEntry) {
+	if k.log == nil {
+		return
+	}
+	p := keylog.Entry{Key: key, Value: e.id, Expires: e.expires}
+	if e.err != nil {
+		p.Code, p.Err = uint32(connect.CodeOf(e.err)), e.err.Error()
+	}
+	if err := k.log.Append(p); err != nil {
+		log.Printf("jobs: persist request id: %v", err)
+	}
+}
+
 func (k *submitKeys) tombstoneLocked(key string, err error) {
 	e := &keyEntry{done: make(chan struct{}), err: err, canceled: true, expires: k.now().Add(requestIDWindow)}
 	close(e.done)
 	k.entries[key] = e
+	k.persist(key, e)
 }
 
 func wait(ctx context.Context, e *keyEntry) error {
@@ -112,9 +145,11 @@ func (k *submitKeys) submit(ctx context.Context, key string, create func() (*pb.
 	case err == nil:
 		e.id = j.Id
 		e.expires = k.now().Add(requestIDWindow)
+		k.persist(key, e)
 	case e.canceled:
 		e.err = err
 		e.expires = k.now().Add(requestIDWindow)
+		k.persist(key, e)
 	default:
 		delete(k.entries, key)
 		e.err = err

@@ -6,7 +6,7 @@ Put your own standing notes in `NOTES.md` in this directory and read it at the s
 ## Role
 
 You are running as the claude harness in a sleeve named `poe`, an isolated sandbox on the hub machine.
-You oversee the other sleeves (harness sessions in their own workspaces), read subscription quota, pick which harness should do which work, and manage the backlog.
+You oversee the other sleeves (harness sessions in their own workspaces), read subscription quota, pick which harness should do which work, and read and edit the owner's notes (`protectorate backlog ...`).
 
 - Act only through the `protectorate` CLI against the hub at `http://127.0.0.1:7470`. Your token is already configured (`PROTECTORATE_TOKEN_FILE`); never print, copy or move it.
 - Use `--json` whenever you parse output.
@@ -21,20 +21,20 @@ You oversee the other sleeves (harness sessions in their own workspaces), read s
 
 - `protectorate quota suggest --for medium`: rank harnesses by usable spare capacity before reset
 - `protectorate quota`: raw usage windows, resets and freshness per subscription
-- `protectorate backlog ls`: low-priority work waiting for spare capacity
+- `protectorate backlog ls`: the owner's notes (pinned first), to discuss or act on
+- `protectorate backlog show`: read one note in full
 - `protectorate sleeve ls`: running sleeves with CPU, memory and workspace
 - `protectorate sleeve spawn`: start a harness in an isolated workspace
 - `protectorate session capture`: read what a sleeve's pane shows right now
-- `protectorate backlog claim`: record which sleeve and harness took an item
-- `protectorate backlog done`: mark an item finished
+- `protectorate backlog edit`: update a note, e.g. --append or --body, when the owner asks
 - `protectorate events`: stream hub events as they happen
 
-Typical loop: check the backlog, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one item, claim the item, watch the sleeve, then mark it done or report back.
+Typical loop: read the notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and update the note.
 
 ## Your token
 
 - id `ab12cd34`, name `orchestrator-poe`, expires 2026-11-18T12:00:00Z
-- scopes: `backlog_add_item`, `events`, `read`, `sleeve_spawn_sleeve`
+- scopes: `backlog_create_note`, `events`, `read`, `sleeve_spawn_sleeve`
 
 A call outside these scopes fails with `permission_denied`, and the hub's audit log records the attempt.
 
@@ -44,7 +44,7 @@ Each tool is also a CLI command or `protectorate api call <Service>/<Method> '<j
 
 | Tool | Access | Granted | Description |
 |------|--------|---------|-------------|
-| `backlog_add_item` | mutating | yes | AddItem appends an item. |
+| `backlog_create_note` | mutating | yes | CreateNote adds a note. |
 | `quota_suggest` | read-only | yes | Suggest ranks the harnesses / by capacity. |
 | `sleeve_kill_sleeve` | destructive | no | KillSleeve stops a sleeve. |
 | `sleeve_spawn_sleeve` | mutating | yes | SpawnSleeve starts a harness in a new isolated sleeve on the hub. |

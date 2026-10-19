@@ -124,20 +124,23 @@ func TestDependencyNotices(t *testing.T) {
 		t.Fatalf("branch notice = %+v", box)
 	}
 
-	// a dependent nobody works on gets a backlog item, once, and no message
+	// a dependent nobody works on gets a note, once, and no message
 	update(false)
 	commitIn(t, lib, "qux.go", "package lib\n", "add Qux")
 	gitIn(t, lib, "tag", "v0.3.0")
 	c.checkReleases(r.ctx)
 	c.checkReleases(r.ctx)
-	items, err := r.h.backlog.List(backlog.Filter{Project: "acme/api"})
-	if err != nil || len(items) != 1 || !strings.Contains(items[0].Title, "acme/lib released v0.3.0: review changes (uses go:github.com/acme/lib)") {
-		t.Fatalf("backlog = %v %v", items, err)
+	notes, err := r.h.backlog.List(backlog.Filter{Project: "acme/api"})
+	if err != nil || len(notes) != 1 || !strings.Contains(notes[0].Title, "acme/lib released v0.3.0: review changes (uses go:github.com/acme/lib)") {
+		t.Fatalf("notes = %v %v", notes, err)
+	}
+	if notes[0].Source != "hub" || !strings.Contains(notes[0].Body, "Upstream release: acme/lib tag v0.3.0") {
+		t.Fatalf("note source/body = %q / %q", notes[0].Source, notes[0].Body)
 	}
 	if box, _ := c.mail.Inbox("apidev", "", false, true); len(box) != 2 {
 		t.Fatalf("a sleeve-less dependent got a message: %d", len(box))
 	}
 	if undelivered := c.mail.Unresolved(); len(undelivered) != 0 {
-		t.Fatalf("a backlog-only notice must not wait for a sleeve: %v", undelivered)
+		t.Fatalf("a note-only notice must not wait for a sleeve: %v", undelivered)
 	}
 }

@@ -414,7 +414,7 @@ class MailBlock extends StatelessWidget {
           if (m.kind != MessageKind.MESSAGE_KIND_NOTE &&
                   m.kind != MessageKind.MESSAGE_KIND_UNSPECIFIED ||
               m.hasEscalatedAt() ||
-              m.backlogItem.isNotEmpty)
+              m.noteId.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Wrap(
@@ -435,11 +435,8 @@ class MailBlock extends StatelessWidget {
                       label: 'ESCALATED',
                       tone: _acked(m) ? Tone.dim : Tone.alarm,
                     ),
-                  if (m.backlogItem.isNotEmpty)
-                    Annunciator(
-                      label: 'BACKLOG ${m.backlogItem}',
-                      tone: Tone.info,
-                    ),
+                  if (m.noteId.isNotEmpty)
+                    Annunciator(label: 'NOTE ${m.noteId}', tone: Tone.info),
                 ],
               ),
             ),

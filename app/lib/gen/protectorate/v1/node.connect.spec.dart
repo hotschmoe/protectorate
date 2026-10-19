@@ -54,13 +54,33 @@ abstract final class NodeAgentService {
   );
 
   /// RunJob checks the source out, runs the command and streams its output;
-  /// matching artifacts follow the exit. The job dies with the stream: if the
-  /// caller disconnects, the process tree is killed.
+  /// matching artifacts follow the exit. The job does not depend on the
+  /// stream: if the caller disconnects it keeps running (bounded by its
+  /// timeout) and AttachJob picks the stream up again.
   static const runJob = connect.Spec(
     '/$name/RunJob',
     connect.StreamType.server,
     protectoratev1job.RunJobRequest.new,
     protectoratev1job.JobEvent.new,
+  );
+
+  /// AttachJob streams a job again from an output offset: started, the output
+  /// from from_offset, then artifacts and the result once it ended. A finished
+  /// job is kept for an hour. NOT_FOUND when the node never had the job.
+  static const attachJob = connect.Spec(
+    '/$name/AttachJob',
+    connect.StreamType.server,
+    protectoratev1job.AttachJobRequest.new,
+    protectoratev1job.JobEvent.new,
+  );
+
+  /// ListJobs lists the jobs the node is running or still holds the result of.
+  static const listJobs = connect.Spec(
+    '/$name/ListJobs',
+    connect.StreamType.unary,
+    protectoratev1job.NodeAgentServiceListJobsRequest.new,
+    protectoratev1job.NodeAgentServiceListJobsResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
   );
 
   /// CancelJob kills a running job's process tree.

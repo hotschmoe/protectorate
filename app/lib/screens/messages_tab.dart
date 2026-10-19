@@ -659,7 +659,7 @@ class _ComposeDialogState extends State<ComposeDialog> {
             ),
             Text(
               _kind == MessageKind.MESSAGE_KIND_REQUEST
-                  ? 'A request asks for an ack. To a project with no live sleeve it also becomes a backlog item.'
+                  ? 'A request asks for an ack. To a project with no live sleeve it also becomes a backlog note.'
                   : 'A note is information; nobody is asked to act.',
               style: t.small(),
             ),

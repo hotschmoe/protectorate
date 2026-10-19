@@ -111,11 +111,11 @@ protectorate msg threads --sleeve api
   `msg inbox`.
 - A **project address** resolves to the sleeves working on the project now
   (excluding the sender). With none live the message waits, and a `request`
-  also becomes a backlog item for the project (`<sender> asks: ...`), and the
-  message is stored pending with a reference to that item. When a sleeve for
-  the project appears the message is delivered once, and says the request is
-  already backlog item `<id>` to work from the backlog; the item is the only
-  actionable copy.
+  also becomes a note tagged with the project (`<sender> asks: ...`, source
+  the sender), and the message is stored pending with a reference to that
+  note. When a sleeve for the project appears the message is delivered once,
+  and says the request is already note `<id>` (`protectorate backlog show
+  <id>`); the note is the only actionable copy.
 - **Ack timers:** an `ack_required` message that stays unacked for the timeout
   (`hub serve --msg-ack-timeout`, default 30m, counted from delivery, or from
   addressing for terminal recipients) is delivered again once. Unacked for
@@ -166,7 +166,7 @@ Close one with: protectorate msg ack <id>
 
 Facts only, bounded (20 commits, 40 files, at most 3 tags per look). The open
 requests are the dependent's unacked `request` messages to that project. A
-dependent with no live sleeve gets a backlog item instead (once). Git runs
+dependent with no live sleeve gets a note tagged with the project instead (once; source `hub`, body the same facts). Git runs
 with hooks, fsmonitor, pager and external diff disabled, since workspaces are
 written by sandboxed agents.
 

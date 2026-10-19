@@ -16,7 +16,7 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // at its next IDLE, never during a running turn; the text says how to reply
 // and ack. A sleeve in terminal mode gets no injection and reads its Inbox.
 // A project address resolves to the sleeves currently working on that project;
-// with none live the message waits, and a request also becomes a backlog item.
+// with none live the message waits, and a request also becomes a backlog note.
 // An ack_required message not acked within the timeout (default 30 minutes)
 // is delivered once more, then escalated to the orchestrator.
 //
@@ -58,7 +58,7 @@ enum MessageKind {
   // NOTE is information; no one is asked to act.
   MESSAGE_KIND_NOTE = 1;
   // REQUEST asks the recipient to do something. To a project with no live
-  // sleeve it also becomes a backlog item.
+  // sleeve it also becomes a backlog note.
   MESSAGE_KIND_REQUEST = 2;
   // NOTICE states facts, typically sent by the hub, such as a dependency
   // release or a granted lease.
@@ -86,8 +86,8 @@ message MessageServiceSendResponse {
   // waiting is true while no recipient is resolved, such as a project with no
   // live sleeve.
   bool waiting = 3;
-  // backlog_item is the id of the backlog item a request was filed as.
-  string backlog_item = 4;
+  // note_id is the id of the backlog note a request was filed as.
+  string note_id = 4;
 }
 
 message InboxRequest {
@@ -185,7 +185,7 @@ message MailMessage {
   google.protobuf.Timestamp created_at = 9;
   repeated MailDelivery deliveries = 10;
   google.protobuf.Timestamp escalated_at = 11;
-  string backlog_item = 12;
+  string note_id = 12;
 }
 
 // MailDelivery is one recipient's state for a message.

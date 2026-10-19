@@ -760,6 +760,83 @@ final $typed_data.Uint8List nodeAgentServiceCancelJobResponseDescriptor =
         'CiFOb2RlQWdlbnRTZXJ2aWNlQ2FuY2VsSm9iUmVzcG9uc2USFAoFZm91bmQYASABKAhSBWZvdW'
         '5k');
 
+@$core.Deprecated('Use nodeAgentServiceListJobsRequestDescriptor instead')
+const NodeAgentServiceListJobsRequest$json = {
+  '1': 'NodeAgentServiceListJobsRequest',
+};
+
+/// Descriptor for `NodeAgentServiceListJobsRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nodeAgentServiceListJobsRequestDescriptor =
+    $convert.base64Decode('Ch9Ob2RlQWdlbnRTZXJ2aWNlTGlzdEpvYnNSZXF1ZXN0');
+
+@$core.Deprecated('Use nodeAgentServiceListJobsResponseDescriptor instead')
+const NodeAgentServiceListJobsResponse$json = {
+  '1': 'NodeAgentServiceListJobsResponse',
+  '2': [
+    {
+      '1': 'jobs',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.NodeJob',
+      '10': 'jobs'
+    },
+  ],
+};
+
+/// Descriptor for `NodeAgentServiceListJobsResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nodeAgentServiceListJobsResponseDescriptor =
+    $convert.base64Decode(
+        'CiBOb2RlQWdlbnRTZXJ2aWNlTGlzdEpvYnNSZXNwb25zZRIsCgRqb2JzGAEgAygLMhgucHJvdG'
+        'VjdG9yYXRlLnYxLk5vZGVKb2JSBGpvYnM=');
+
+@$core.Deprecated('Use nodeJobDescriptor instead')
+const NodeJob$json = {
+  '1': 'NodeJob',
+  '2': [
+    {'1': 'job_id', '3': 1, '4': 1, '5': 9, '10': 'jobId'},
+    {'1': 'started', '3': 2, '4': 1, '5': 8, '10': 'started'},
+    {
+      '1': 'finished',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.JobFinished',
+      '10': 'finished'
+    },
+    {'1': 'log_bytes', '3': 4, '4': 1, '5': 4, '10': 'logBytes'},
+    {
+      '1': 'finished_at',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'finishedAt'
+    },
+  ],
+};
+
+/// Descriptor for `NodeJob`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nodeJobDescriptor = $convert.base64Decode(
+    'CgdOb2RlSm9iEhUKBmpvYl9pZBgBIAEoCVIFam9iSWQSGAoHc3RhcnRlZBgCIAEoCFIHc3Rhcn'
+    'RlZBI4CghmaW5pc2hlZBgDIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Kb2JGaW5pc2hlZFIIZmlu'
+    'aXNoZWQSGwoJbG9nX2J5dGVzGAQgASgEUghsb2dCeXRlcxI7CgtmaW5pc2hlZF9hdBgFIAEoCz'
+    'IaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSCmZpbmlzaGVkQXQ=');
+
+@$core.Deprecated('Use attachJobRequestDescriptor instead')
+const AttachJobRequest$json = {
+  '1': 'AttachJobRequest',
+  '2': [
+    {'1': 'job_id', '3': 1, '4': 1, '5': 9, '10': 'jobId'},
+    {'1': 'from_offset', '3': 2, '4': 1, '5': 4, '10': 'fromOffset'},
+  ],
+};
+
+/// Descriptor for `AttachJobRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List attachJobRequestDescriptor = $convert.base64Decode(
+    'ChBBdHRhY2hKb2JSZXF1ZXN0EhUKBmpvYl9pZBgBIAEoCVIFam9iSWQSHwoLZnJvbV9vZmZzZX'
+    'QYAiABKARSCmZyb21PZmZzZXQ=');
+
 const $core.Map<$core.String, $core.dynamic> JobServiceBase$json = {
   '1': 'JobService',
   '2': [

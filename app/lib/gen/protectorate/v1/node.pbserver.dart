@@ -33,6 +33,10 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $4.UploadJobDataRequest request);
   $async.Future<$4.JobEvent> runJob(
       $pb.ServerContext ctx, $4.RunJobRequest request);
+  $async.Future<$4.JobEvent> attachJob(
+      $pb.ServerContext ctx, $4.AttachJobRequest request);
+  $async.Future<$4.NodeAgentServiceListJobsResponse> listJobs(
+      $pb.ServerContext ctx, $4.NodeAgentServiceListJobsRequest request);
   $async.Future<$4.NodeAgentServiceCancelJobResponse> cancelJob(
       $pb.ServerContext ctx, $4.NodeAgentServiceCancelJobRequest request);
   $async.Future<$6.PutFileResponse> putFile(
@@ -60,6 +64,10 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return $4.UploadJobDataRequest();
       case 'RunJob':
         return $4.RunJobRequest();
+      case 'AttachJob':
+        return $4.AttachJobRequest();
+      case 'ListJobs':
+        return $4.NodeAgentServiceListJobsRequest();
       case 'CancelJob':
         return $4.NodeAgentServiceCancelJobRequest();
       case 'PutFile':
@@ -92,6 +100,10 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return uploadJobData(ctx, request as $4.UploadJobDataRequest);
       case 'RunJob':
         return runJob(ctx, request as $4.RunJobRequest);
+      case 'AttachJob':
+        return attachJob(ctx, request as $4.AttachJobRequest);
+      case 'ListJobs':
+        return listJobs(ctx, request as $4.NodeAgentServiceListJobsRequest);
       case 'CancelJob':
         return cancelJob(ctx, request as $4.NodeAgentServiceCancelJobRequest);
       case 'PutFile':

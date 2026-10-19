@@ -5,533 +5,325 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-const sample = `# My backlog
-
-Some free text the user wrote.
-
-## hotschmoe/protectorate
-- [ ] Add GPU metrics to node agent  #p2 @any  id:b7f3
-  Optional indented notes.
-  second note line
-- [ ] Fix flaky test  https://github.com/hotschmoe/protectorate/issues/12  @codex  id:9c1a
-- [x] Done item  id:0001
-- [~] Taken item @grok id:0002 claim:alice/grok@2026-10-19T10:00:00Z
-* not an item, just a bullet
--[ ] also not an item
-
-## donate: owner/public-repo
-- [ ] https://github.com/owner/public-repo/issues/345  id:0003
-- [ ] no id yet @pi
-trailing text
-`
-
-func TestParseItems(t *testing.T) {
-	items := Parse(sample).Items()
-	want := []Item{
-		{ID: "b7f3", Project: "hotschmoe/protectorate", Title: "Add GPU metrics to node agent", Priority: 2, Harness: "any", Notes: "Optional indented notes.\nsecond note line"},
-		{ID: "9c1a", Project: "hotschmoe/protectorate", Title: "Fix flaky test", IssueURL: "https://github.com/hotschmoe/protectorate/issues/12", Harness: "codex"},
-		{ID: "0001", Project: "hotschmoe/protectorate", Title: "Done item", State: StateDone},
-		{ID: "0002", Project: "hotschmoe/protectorate", Title: "Taken item", Harness: "grok", State: StateClaimed,
-			Claim: &Claim{By: "alice/grok", At: time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)}},
-		{ID: "0003", Project: "donate: owner/public-repo", IssueURL: "https://github.com/owner/public-repo/issues/345", Donate: true},
-		{Project: "donate: owner/public-repo", Title: "no id yet", Harness: "pi", Donate: true},
-	}
-	if len(items) != len(want) {
-		t.Fatalf("got %d items, want %d: %+v", len(items), len(want), items)
-	}
-	for i, w := range want {
-		g := items[i]
-		g.Line = 0
-		if fmt.Sprintf("%+v", g.Claim) != fmt.Sprintf("%+v", w.Claim) {
-			t.Errorf("item %d claim = %+v, want %+v", i, g.Claim, w.Claim)
-		}
-		g.Claim, w.Claim = nil, nil
-		if g != w {
-			t.Errorf("item %d = %+v, want %+v", i, g, w)
-		}
-	}
+func testStore(t *testing.T) (*Store, *time.Time) {
+	t.Helper()
+	s := NewStore(t.TempDir())
+	clock := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { clock = clock.Add(time.Minute); return clock }
+	return s, &clock
 }
 
-func TestTitleEdgeCases(t *testing.T) {
-	tests := []struct {
-		line  string
-		title string
-		kinds string
-	}{
-		{"- [ ] plain title", "plain title", ""},
-		{"- [ ] mention @bob in the middle id:1", "mention @bob in the middle", "id"},
-		{"- [ ] A #p1 #p2 id:x", "A #p1", "id prio"},
-		{"- [ ] A https://a https://b id:x", "A https://a", "id url"},
-		{"- [ ]   spaced   words   @codex", "spaced   words", "harness"},
-		{"- [ ] id:only", "", "id"},
-		{"- [X] upper id:u", "", "id"},
-	}
-	for _, tt := range tests {
-		p, ok := parseItemLine(tt.line)
-		if !ok {
-			t.Fatalf("%q did not parse", tt.line)
-		}
-		if tt.line == "- [X] upper id:u" {
-			tt.title = "upper"
-		}
-		if p.title != tt.title {
-			t.Errorf("%q: title %q, want %q", tt.line, p.title, tt.title)
-		}
-		for _, k := range strings.Fields(tt.kinds) {
-			if _, ok := p.spans[k]; !ok {
-				t.Errorf("%q: missing %s", tt.line, k)
-			}
-		}
-	}
-}
+func ptr[T any](v T) *T { return &v }
 
-func TestRoundTripSample(t *testing.T) {
-	for _, in := range []string{"", "\n", "\n\n", sample, strings.TrimSuffix(sample, "\n"), strings.ReplaceAll(sample, "\n", "\r\n"), "- [ ] x\r\n\tnote\r\n"} {
-		if got := Parse(in).String(); got != in {
-			t.Errorf("round trip changed %q into %q", in, got)
-		}
-	}
-}
-
-func TestSetStateKeepsOtherLines(t *testing.T) {
-	now := time.Date(2026, 10, 20, 8, 30, 0, 0, time.UTC)
+func TestCreateValidation(t *testing.T) {
 	tests := []struct {
 		name    string
-		id      string
-		st      State
-		by      string
-		want    string
-		wantErr error
+		in      NewNote
+		wantErr bool
+		check   func(Note) string
 	}{
-		{"claim", "b7f3", StateClaimed, "bob/codex", "- [~] Add GPU metrics to node agent  #p2 @any  id:b7f3 claim:bob/codex@2026-10-20T08:30:00Z", nil},
-		{"claim needs by", "b7f3", StateClaimed, "", "", ErrInvalid},
-		{"claim bad by", "b7f3", StateClaimed, "a b", "", ErrInvalid},
-		{"claim taken", "0002", StateClaimed, "bob", "", ErrUnavailable},
-		{"claim same holder idempotent", "0002", StateClaimed, "alice/grok", "- [~] Taken item @grok id:0002 claim:alice/grok@2026-10-19T10:00:00Z", nil},
-		{"claim done", "0001", StateClaimed, "bob", "", ErrUnavailable},
-		{"release", "0002", StateTodo, "", "- [ ] Taken item @grok id:0002", nil},
-		{"reopen", "0001", StateTodo, "", "- [ ] Done item  id:0001", nil},
-		{"done keeps claim", "0002", StateDone, "", "- [x] Taken item @grok id:0002 claim:alice/grok@2026-10-19T10:00:00Z", nil},
-		{"done by holder", "0002", StateDone, "alice/grok", "- [x] Taken item @grok id:0002 claim:alice/grok@2026-10-19T10:00:00Z", nil},
-		{"done by thief", "0002", StateDone, "bob", "", ErrUnavailable},
-		{"done records doer", "9c1a", StateDone, "carol", "- [x] Fix flaky test  https://github.com/hotschmoe/protectorate/issues/12  @codex  id:9c1a claim:carol@2026-10-20T08:30:00Z", nil},
-		{"missing", "ffff", StateDone, "", "", ErrNotFound},
+		{"title only", NewNote{Title: "  call dentist  "}, false, func(n Note) string {
+			if n.Title != "call dentist" {
+				return "title not trimmed"
+			}
+			return ""
+		}},
+		{"body only", NewNote{Body: "just text"}, false, nil},
+		{"crlf body", NewNote{Title: "t", Body: "a\r\nb"}, false, func(n Note) string {
+			if n.Body != "a\nb" {
+				return "crlf kept"
+			}
+			return ""
+		}},
+		{"empty", NewNote{}, true, nil},
+		{"blank body", NewNote{Body: " \n "}, true, nil},
+		{"multi-line title", NewNote{Title: "a\nb"}, true, nil},
+		{"long title", NewNote{Title: strings.Repeat("x", maxTitle+1)}, true, nil},
+		{"multi-line project", NewNote{Title: "t", Project: "a\nb"}, true, nil},
+		{"huge body", NewNote{Title: "t", Body: strings.Repeat("x", maxBody+1)}, true, nil},
+		{"nul in body", NewNote{Title: "t", Body: "a\x00b"}, true, nil},
+		{"bad utf8", NewNote{Title: "t", Body: "\xff\xfe"}, true, nil},
+		{"tagged", NewNote{Title: "t", Project: "me/repo", Source: "alice", Pinned: true}, false, func(n Note) string {
+			if n.Project != "me/repo" || n.Source != "alice" || !n.Pinned {
+				return "fields lost"
+			}
+			return ""
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := Parse(sample)
-			before := append([]string(nil), d.lines...)
-			it, _, err := d.SetState(tt.id, tt.st, tt.by, now)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("err = %v, want %v", err, tt.wantErr)
-			}
-			if err != nil {
-				if d.String() != sample {
-					t.Fatal("failed update modified the document")
+			s, _ := testStore(t)
+			n, err := s.Create(tt.in)
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalid) {
+					t.Fatalf("err = %v, want ErrInvalid", err)
+				}
+				if all, _ := s.List(Filter{}); len(all) != 0 {
+					t.Fatalf("a rejected note was stored: %v", all)
 				}
 				return
 			}
-			if it.State != tt.st {
-				t.Errorf("state = %v", it.State)
+			if err != nil {
+				t.Fatal(err)
 			}
-			for i := range before {
-				switch {
-				case i == it.Line && d.lines[i] != tt.want:
-					t.Errorf("line = %q\nwant   %q", d.lines[i], tt.want)
-				case i != it.Line && d.lines[i] != before[i]:
-					t.Errorf("line %d changed: %q", i, d.lines[i])
+			if n.ID == "" || n.Created.IsZero() || !n.Created.Equal(n.Updated) {
+				t.Fatalf("note = %+v", n)
+			}
+			if tt.check != nil {
+				if msg := tt.check(n); msg != "" {
+					t.Fatal(msg)
 				}
 			}
 		})
 	}
 }
 
-func TestAdd(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	tests := []struct {
-		name    string
-		in      string
-		n       NewItem
-		wantHas string
-		wantErr error
+		name        string
+		patch       Patch
+		wantErr     error
+		wantChanged bool
+		check       func(Note) bool
 	}{
-		{"existing project after notes", sample, NewItem{Project: "hotschmoe/protectorate", Title: "New one", Priority: 1, Harness: "claude"}, "claim:alice/grok@2026-10-19T10:00:00Z\n- [ ] New one  #p1 @claude id:", nil},
-		{"new project", sample, NewItem{Project: "other/repo", Title: "T"}, "text\n\n## other/repo\n- [ ] T  id:", nil},
-		{"empty file", "", NewItem{Project: "p", Title: "T"}, "## p\n- [ ] T  id:", nil},
-		{"no trailing newline", "## p\n- [ ] a id:1", NewItem{Project: "p", Title: "b"}, "- [ ] a id:1\n- [ ] b  id:", nil},
-		{"donate with url only", "", NewItem{Project: "donate: o/r", IssueURL: "https://github.com/o/r/issues/1"}, "- [ ] https://github.com/o/r/issues/1 id:", nil},
-		{"donate needs url", "", NewItem{Project: "donate: o/r", Title: "x"}, "", ErrInvalid},
-		{"no title or url", "", NewItem{Project: "p"}, "", ErrInvalid},
-		{"bad prio", "", NewItem{Project: "p", Title: "x", Priority: 10}, "", ErrInvalid},
-		{"bad harness", "", NewItem{Project: "p", Title: "x", Harness: "a b"}, "", ErrInvalid},
-		{"multiline", "", NewItem{Project: "p", Title: "x\ny"}, "", ErrInvalid},
-		{"title ends in meta", "", NewItem{Project: "p", Title: "ping @bob"}, "", ErrInvalid},
-		{"bad url", "", NewItem{Project: "p", Title: "x", IssueURL: "ftp://x"}, "", ErrInvalid},
+		{"title", Patch{Title: ptr("new")}, nil, true, func(n Note) bool { return n.Title == "new" && n.Body == "body" && n.Project == "p" }},
+		{"same title", Patch{Title: ptr("old")}, nil, false, nil},
+		{"body", Patch{Body: ptr("other")}, nil, true, func(n Note) bool { return n.Body == "other" && n.Title == "old" }},
+		{"clear project", Patch{Project: ptr("")}, nil, true, func(n Note) bool { return n.Project == "" }},
+		{"pin", Patch{Pinned: ptr(true)}, nil, true, func(n Note) bool { return n.Pinned }},
+		{"empty patch", Patch{}, nil, false, nil},
+		{"bad title", Patch{Title: ptr("a\nb")}, ErrInvalid, false, nil},
+		{"would empty the note", Patch{Title: ptr(""), Body: ptr("")}, ErrInvalid, false, nil},
+		{"clear title keeps body", Patch{Title: ptr("")}, nil, true, func(n Note) bool { return n.Title == "" && n.Body == "body" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := Parse(tt.in)
-			it, err := d.Add(tt.n)
+			s, _ := testStore(t)
+			orig, err := s.Create(NewNote{Title: "old", Body: "body", Project: "p"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, changed, err := s.Update(orig.ID, tt.patch)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
 			if err != nil {
-				if d.String() != tt.in {
-					t.Fatal("failed add modified the document")
-				}
 				return
 			}
-			if !strings.Contains(d.String(), tt.wantHas) {
-				t.Errorf("document lacks %q:\n%s", tt.wantHas, d)
+			if changed != tt.wantChanged {
+				t.Fatalf("changed = %v", changed)
 			}
-			if it.ID == "" || it.Project != tt.n.Project || it.Title != tt.n.Title && !strings.HasPrefix(tt.n.Title, "https://") && tt.n.Title != "" {
-				t.Errorf("item = %+v", it)
+			if changed && !got.Updated.After(orig.Updated) {
+				t.Errorf("updated time did not advance: %v", got.Updated)
 			}
-			if it.IssueURL != tt.n.IssueURL || it.Priority != tt.n.Priority || it.Harness != tt.n.Harness {
-				t.Errorf("fields not preserved: %+v", it)
+			if !changed && !got.Updated.Equal(orig.Updated) {
+				t.Errorf("a no-op moved the updated time")
 			}
-			var rest []string
-			for _, l := range strings.Split(d.String(), "\n") {
-				if !strings.Contains(l, "id:"+it.ID) {
-					rest = append(rest, l)
-				}
+			if tt.check != nil && !tt.check(got) {
+				t.Fatalf("note = %+v", got)
 			}
-			if got := strings.Join(rest, "\n"); !strings.HasPrefix(got, strings.TrimRight(tt.in, "\n")) {
-				t.Errorf("existing text was altered:\n%s", d)
+			if stored, _ := s.Get(orig.ID); stored != got {
+				t.Fatalf("stored %+v != returned %+v", stored, got)
 			}
 		})
 	}
+	s, _ := testStore(t)
+	if _, _, err := s.Update("ffff", Patch{Title: ptr("x")}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown id: %v", err)
+	}
 }
 
-func TestEnsureIDs(t *testing.T) {
-	d := Parse(sample)
-	changed, err := d.EnsureIDs()
-	if err != nil || !changed {
-		t.Fatalf("changed=%v err=%v", changed, err)
-	}
-	items := d.Items()
-	seen := map[string]bool{}
-	for _, it := range items {
-		if it.ID == "" || seen[it.ID] {
-			t.Fatalf("bad ids: %+v", items)
+func TestListOrderAndFilter(t *testing.T) {
+	s, _ := testStore(t)
+	mk := func(n NewNote) Note {
+		t.Helper()
+		out, err := s.Create(n)
+		if err != nil {
+			t.Fatal(err)
 		}
-		seen[it.ID] = true
+		return out
 	}
-	if !strings.Contains(d.String(), "- [ ] no id yet @pi id:") {
-		t.Errorf("id not appended in place:\n%s", d)
+	a := mk(NewNote{Title: "alpha", Project: "x/y"})
+	b := mk(NewNote{Title: "beta", Body: "Needle inside"})
+	c := mk(NewNote{Title: "gamma", Pinned: true})
+	if _, _, err := s.Update(a.ID, Patch{Body: ptr("touched")}); err != nil {
+		t.Fatal(err)
 	}
-	if again, _ := d.EnsureIDs(); again {
-		t.Error("second EnsureIDs changed the document")
-	}
-}
-
-func TestQuery(t *testing.T) {
-	todo, done := StateTodo, StateDone
 	tests := []struct {
 		name string
 		f    Filter
-		want int
+		want []string
 	}{
-		{"all", Filter{}, 6},
-		{"project", Filter{Project: "donate: owner/public-repo"}, 2},
-		{"state todo", Filter{State: &todo}, 4},
-		{"state done", Filter{State: &done}, 1},
-		{"harness codex gets codex, any, unset", Filter{Harness: "codex"}, 4},
-		{"harness pi", Filter{Harness: "pi"}, 4},
+		{"pinned first then updated", Filter{}, []string{c.ID, a.ID, b.ID}},
+		{"project", Filter{Project: "x/y"}, []string{a.ID}},
+		{"query in body, any case", Filter{Query: "needle"}, []string{b.ID}},
+		{"query in title", Filter{Query: "GAM"}, []string{c.ID}},
+		{"no match", Filter{Query: "zzz"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := len(Parse(sample).Query(tt.f)); got != tt.want {
-				t.Errorf("got %d, want %d", got, tt.want)
+			got, err := s.List(tt.f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ids []string
+			for _, n := range got {
+				ids = append(ids, n.ID)
+			}
+			if fmt.Sprint(ids) != fmt.Sprint(tt.want) {
+				t.Fatalf("ids = %v, want %v", ids, tt.want)
 			}
 		})
 	}
 }
 
-func newTestStore(t *testing.T, content string) *Store {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "sub", "backlog.md")
-	if content != "" {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return NewStore(p)
-}
-
-func TestStoreCreatesFile(t *testing.T) {
-	s := newTestStore(t, "")
-	if items, err := s.List(Filter{}); err != nil || len(items) != 0 {
-		t.Fatalf("items=%v err=%v", items, err)
-	}
-	if _, err := s.Add(NewItem{Project: "p", Title: "first"}); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(s.Path())
-	if err != nil || !strings.HasPrefix(string(b), "## p\n- [ ] first  id:") {
-		t.Fatalf("file = %q err=%v", b, err)
-	}
-}
-
-func TestStoreListAssignsIDs(t *testing.T) {
-	s := newTestStore(t, "## p\n- [ ] a\n- [ ] b\n")
-	items, err := s.List(Filter{})
-	if err != nil || len(items) != 2 || items[0].ID == "" || items[1].ID == "" {
-		t.Fatalf("items=%+v err=%v", items, err)
-	}
-	b, _ := os.ReadFile(s.Path())
-	if !strings.Contains(string(b), "- [ ] a id:"+items[0].ID+"\n") {
-		t.Errorf("file = %q", b)
-	}
-}
-
-func TestStorePreservesFileMode(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows has no unix permission bits")
-	}
-	s := newTestStore(t, "## p\n- [ ] a id:1\n")
-	if _, _, err := s.Update("1", StateDone, ""); err != nil {
-		t.Fatal(err)
-	}
-	fi, err := os.Stat(s.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode().Perm() != 0o644 {
-		t.Errorf("mode = %v", fi.Mode().Perm())
-	}
-	ents, _ := os.ReadDir(filepath.Dir(s.Path()))
-	for _, e := range ents {
-		if n := e.Name(); n != filepath.Base(s.Path()) && n != "."+filepath.Base(s.Path())+".lock" {
-			t.Errorf("leftover file: %s", n)
-		}
-	}
-}
-
-func TestStoreReappliesAfterExternalEdit(t *testing.T) {
-	s := newTestStore(t, "## p\n- [ ] a id:aa\n")
-	calls := 0
-	s.beforeCommit = func() {
-		calls++
-		if calls == 1 {
-			err := os.WriteFile(s.Path(), []byte("# human wrote this\n## p\n- [ ] a id:aa\n- [ ] human item id:hh\n"), 0o644)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-	}
-	if _, _, err := s.Update("aa", StateClaimed, "bob"); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 2 {
-		t.Errorf("commit attempts = %d, want 2", calls)
-	}
-	b, _ := os.ReadFile(s.Path())
-	got := string(b)
-	if !strings.HasPrefix(got, "# human wrote this\n## p\n- [~] a id:aa claim:bob@") || !strings.Contains(got, "- [ ] human item id:hh\n") {
-		t.Errorf("external edit lost or change not applied:\n%s", got)
-	}
-}
-
-func TestStoreGivesUpOnEndlessChurn(t *testing.T) {
-	s := newTestStore(t, "## p\n- [ ] a id:aa\n")
-	n := 0
-	s.beforeCommit = func() {
-		n++
-		_ = os.WriteFile(s.Path(), []byte(fmt.Sprintf("## p\n- [ ] a id:aa\n%d\n", n)), 0o644)
-	}
-	if _, _, err := s.Update("aa", StateDone, ""); err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestStoreFollowsSymlink(t *testing.T) {
+func TestDeleteAndPersistence(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real.md")
-	link := filepath.Join(dir, "backlog.md")
-	if err := os.WriteFile(real, []byte("## p\n- [ ] a id:1\n"), 0o644); err != nil {
+	s := NewStore(dir)
+	keep, _ := s.Create(NewNote{Title: "keep"})
+	drop, _ := s.Create(NewNote{Title: "drop"})
+	if _, err := s.Delete(drop.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(real, link); err != nil {
-		t.Skip("symlinks unavailable:", err)
+	if _, err := s.Delete(drop.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete: %v", err)
 	}
-	if _, _, err := NewStore(link).Update("1", StateDone, ""); err != nil {
+	got, err := NewStore(dir).List(Filter{})
+	if err != nil || len(got) != 1 || got[0].ID != keep.ID {
+		t.Fatalf("reopened = %v err=%v", got, err)
+	}
+	if _, err := s.Delete(keep.ID); err != nil {
 		t.Fatal(err)
 	}
-	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
-		t.Error("symlink was replaced")
-	}
-	if b, _ := os.ReadFile(real); !strings.Contains(string(b), "[x]") {
-		t.Errorf("target not updated: %q", b)
+	if got, err := NewStore(dir).List(Filter{}); err != nil || len(got) != 0 {
+		t.Fatalf("emptied store = %v err=%v", got, err)
 	}
 }
 
-func TestConcurrentClaimsHaveOneWinner(t *testing.T) {
-	s := newTestStore(t, "## p\n- [ ] a id:aa\n")
-	const n = 20
+func TestConcurrentStores(t *testing.T) {
+	dir := t.TempDir()
 	var wg sync.WaitGroup
-	errs := make([]error, n)
-	for i := range n {
+	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, errs[i] = NewStore(s.Path()).Update("aa", StateClaimed, fmt.Sprintf("s%d", i))
-		}()
-	}
-	wg.Wait()
-	wins := 0
-	for _, err := range errs {
-		switch {
-		case err == nil:
-			wins++
-		case !errors.Is(err, ErrUnavailable):
-			t.Errorf("unexpected error: %v", err)
-		}
-	}
-	if wins != 1 {
-		t.Fatalf("%d claimants won, want 1", wins)
-	}
-}
-
-func TestConcurrentAddsKeepAll(t *testing.T) {
-	s := newTestStore(t, "## p\n")
-	var wg sync.WaitGroup
-	for i := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := NewStore(s.Path()).Add(NewItem{Project: "p", Title: fmt.Sprintf("item %d", i)}); err != nil {
-				t.Error(err)
-			}
-		}()
-	}
-	wg.Wait()
-	items, err := s.List(Filter{})
-	if err != nil || len(items) != 20 {
-		t.Fatalf("got %d items, err=%v", len(items), err)
-	}
-}
-
-func TestManyWritersLoseNothing(t *testing.T) {
-	s := newTestStore(t, "## p\n")
-	const writers, each = 8, 10
-	var wg sync.WaitGroup
-	for w := range writers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			st := NewStore(s.Path())
-			for i := range each {
-				if _, err := st.Add(NewItem{Project: "p", Title: fmt.Sprintf("w%d item %d", w, i)}); err != nil {
+			s := NewStore(dir)
+			for j := 0; j < 5; j++ {
+				if _, err := s.Create(NewNote{Title: fmt.Sprintf("n%d-%d", i, j)}); err != nil {
 					t.Error(err)
-					return
 				}
 			}
 		}()
 	}
 	wg.Wait()
-	items, err := s.List(Filter{})
-	if err != nil || len(items) != writers*each {
-		t.Fatalf("got %d items, want %d, err=%v", len(items), writers*each, err)
+	got, err := NewStore(dir).List(Filter{})
+	if err != nil || len(got) != 40 {
+		t.Fatalf("notes = %d err=%v", len(got), err)
+	}
+	ids := map[string]bool{}
+	for _, n := range got {
+		ids[n.ID] = true
+	}
+	if len(ids) != 40 {
+		t.Fatalf("duplicate ids: %d unique", len(ids))
 	}
 }
 
-func TestLockIgnoresAgeAndExcludes(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "BACKLOG.md")
-	unlock, err := lock(target)
+const legacy = `Intro text is ignored.
+
+## hotschmoe/protectorate
+- [ ] Add GPU metrics to node agent  #p2 @codex  id:b7f3
+  Optional indented notes.
+  Second line.
+- [~] Fix flaky test  https://github.com/hotschmoe/protectorate/issues/12  @codex  id:9c1a claim:alice/codex@2026-10-19T10:00:00Z
+- [x] Done item  id:0c2d
+- [ ] Item without an id
+## donate: owner/public-repo
+- [ ] https://github.com/owner/public-repo/issues/345  id:41ee
+`
+
+func TestMigratesLegacyBacklog(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "backlog.md"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(dir)
+	got, err := s.List(Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-time.Hour)
-	name := filepath.Join(filepath.Dir(target), ".BACKLOG.md.lock")
-	if err := os.Chtimes(name, old, old); err != nil {
+	byID := map[string]Note{}
+	for _, n := range got {
+		byID[n.ID] = n
+	}
+	if len(got) != 5 {
+		t.Fatalf("notes = %d: %+v", len(got), got)
+	}
+	tests := []struct {
+		id, title, project string
+		body               []string
+	}{
+		{"b7f3", "Add GPU metrics to node agent", "hotschmoe/protectorate", []string{"Optional indented notes.\nSecond line.", "Priority: p2", "Harness: codex"}},
+		{"9c1a", "Fix flaky test", "hotschmoe/protectorate", []string{"Issue: https://github.com/hotschmoe/protectorate/issues/12", "Status: claimed by alice/codex at 2026-10-19T10:00:00Z"}},
+		{"0c2d", "Done item", "hotschmoe/protectorate", []string{"Status: done"}},
+		{"41ee", "https://github.com/owner/public-repo/issues/345", "donate: owner/public-repo", []string{"Issue: https://github.com/owner/public-repo/issues/345"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			n, ok := byID[tt.id]
+			if !ok {
+				t.Fatalf("id %s not preserved", tt.id)
+			}
+			if n.Title != tt.title || n.Project != tt.project || n.Source != "owner" {
+				t.Fatalf("note = %+v", n)
+			}
+			for _, w := range tt.body {
+				if !strings.Contains(n.Body, w) {
+					t.Errorf("body %q lacks %q", n.Body, w)
+				}
+			}
+		})
+	}
+	var noID *Note
+	for i := range got {
+		if got[i].Title == "Item without an id" {
+			noID = &got[i]
+		}
+	}
+	if noID == nil || noID.ID == "" {
+		t.Fatalf("item without an id: %+v", noID)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "backlog.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("legacy file still in place: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "backlog.md.migrated")); err != nil || string(b) != legacy {
+		t.Errorf("legacy copy = %q err=%v", b, err)
+	}
+
+	// a stray backlog.md after migration is not read again
+	if err := os.WriteFile(filepath.Join(dir, "backlog.md"), []byte("- [ ] ghost  id:eeee\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := make(chan func(), 1)
-	go func() {
-		u, err := lock(target)
-		if err != nil {
-			t.Error(err)
-		}
-		got <- u
-	}()
-	select {
-	case <-got:
-		t.Fatal("second writer acquired a held lock")
-	case <-time.After(150 * time.Millisecond):
-	}
-	unlock()
-	select {
-	case u := <-got:
-		u()
-	case <-time.After(5 * time.Second):
-		t.Fatal("second writer never acquired the released lock")
+	again, err := NewStore(dir).List(Filter{})
+	if err != nil || len(again) != 5 {
+		t.Fatalf("second load = %d err=%v", len(again), err)
 	}
 }
 
-func FuzzRoundTrip(f *testing.F) {
-	f.Add(sample)
-	f.Add("")
-	f.Add("\n\n")
-	f.Add("## \n- [ ]\n- [ ] \r\n  note\r\n\t\n")
-	f.Add("- [x] a #p1 @b id:c claim:d@e https://f\n")
-	f.Fuzz(func(t *testing.T, in string) {
-		d := Parse(in)
-		if got := d.String(); got != in {
-			t.Fatalf("round trip changed %q into %q", in, got)
-		}
-		d.Items()
-	})
-}
-
-// FuzzEditPreservesRest checks that state changes, id assignment and adds
-// touch only the intended lines of arbitrary documents.
-func FuzzEditPreservesRest(f *testing.F) {
-	f.Add(sample, uint8(0), uint8(1))
-	f.Add("- [ ] a id:1\n- [ ] b id:1\n", uint8(1), uint8(2))
-	f.Add("## p\r\n- [ ] a\r\n", uint8(0), uint8(0))
-	f.Fuzz(func(t *testing.T, in string, pick, state uint8) {
-		d := Parse(in)
-		items := d.Items()
-		if _, err := d.EnsureIDs(); err != nil {
-			t.Fatal(err)
-		}
-		items = d.Items()
-		if len(items) == 0 {
-			return
-		}
-		it := items[int(pick)%len(items)]
-		before := append([]string(nil), d.lines...)
-		got, _, err := d.SetState(it.ID, State(state%3), "w", time.Unix(0, 0))
-		if err != nil {
-			if d.String() != strings.Join(before, "\n")+tail(d) {
-				t.Fatal("failed SetState modified the document")
-			}
-			return
-		}
-		for i := range before {
-			if i != got.Line && d.lines[i] != before[i] {
-				t.Fatalf("line %d changed", i)
-			}
-		}
-		if again, _ := Parse(d.String()).find(it.ID); again.State != got.State || again.Title != got.Title {
-			t.Fatalf("reparse differs: %+v vs %+v", again, got)
-		}
-	})
-}
-
-func tail(d *Doc) string {
-	if d.nl && len(d.lines) > 0 {
-		return "\n"
+func TestEmptyHubHasNoNotesFile(t *testing.T) {
+	dir := t.TempDir()
+	got, err := NewStore(dir).List(Filter{})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("list = %v err=%v", got, err)
 	}
-	return ""
+	if _, err := os.Stat(filepath.Join(dir, "notes.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a read created notes.json: %v", err)
+	}
 }

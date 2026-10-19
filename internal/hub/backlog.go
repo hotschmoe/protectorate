@@ -10,79 +10,81 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/backlog"
 )
 
-// SetBacklog installs the backlog store. Call before Handler or Serve.
+// SetBacklog installs the notes store. Call before Handler or Serve.
 func (h *Hub) SetBacklog(s *backlog.Store) { h.backlog = s }
 
-func (h *Hub) ListItems(_ context.Context, req *connect.Request[pb.ListItemsRequest]) (*connect.Response[pb.ListItemsResponse], error) {
-	f := backlog.Filter{Project: req.Msg.Project, Harness: req.Msg.Harness}
-	if st, ok := fromProtoState(req.Msg.State); ok {
-		f.State = &st
-	}
-	items, err := h.backlog.List(f)
+func (h *Hub) ListNotes(_ context.Context, req *connect.Request[pb.ListNotesRequest]) (*connect.Response[pb.ListNotesResponse], error) {
+	notes, err := h.backlog.List(backlog.Filter{Project: req.Msg.Project, Query: req.Msg.Query})
 	if err != nil {
 		return nil, backlogError(err)
 	}
-	res := &pb.ListItemsResponse{Items: make([]*pb.Item, len(items))}
-	for i, it := range items {
-		res.Items[i] = toProtoItem(it)
+	res := &pb.ListNotesResponse{Notes: make([]*pb.Note, len(notes))}
+	for i, n := range notes {
+		res.Notes[i] = toProtoNote(n)
 	}
 	return connect.NewResponse(res), nil
 }
 
-func (h *Hub) AddItem(_ context.Context, req *connect.Request[pb.AddItemRequest]) (*connect.Response[pb.AddItemResponse], error) {
+func (h *Hub) GetNote(_ context.Context, req *connect.Request[pb.GetNoteRequest]) (*connect.Response[pb.GetNoteResponse], error) {
+	n, err := h.backlog.Get(req.Msg.Id)
+	if err != nil {
+		return nil, backlogError(err)
+	}
+	return connect.NewResponse(&pb.GetNoteResponse{Note: toProtoNote(n)}), nil
+}
+
+func (h *Hub) CreateNote(ctx context.Context, req *connect.Request[pb.CreateNoteRequest]) (*connect.Response[pb.CreateNoteResponse], error) {
 	m := req.Msg
-	it, err := h.backlog.Add(backlog.NewItem{
-		Project: m.Project, Title: m.Title, IssueURL: m.IssueUrl,
-		Priority: int(m.Priority), Harness: m.Harness,
+	n, err := h.backlog.Create(backlog.NewNote{
+		Title: m.Title, Body: m.Body, Pinned: m.Pinned, Project: m.Project,
+		Source: senderOf(auth.PrincipalFrom(ctx)),
 	})
 	if err != nil {
 		return nil, backlogError(err)
 	}
-	h.publishBacklog("backlog.added", it)
-	return connect.NewResponse(&pb.AddItemResponse{Item: toProtoItem(it)}), nil
+	h.publishNote("note.created", n)
+	return connect.NewResponse(&pb.CreateNoteResponse{Note: toProtoNote(n)}), nil
 }
 
-func (h *Hub) UpdateItem(_ context.Context, req *connect.Request[pb.UpdateItemRequest]) (*connect.Response[pb.UpdateItemResponse], error) {
-	st, ok := fromProtoState(req.Msg.State)
-	if !ok {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("state is required"))
-	}
-	it, prev, err := h.backlog.Update(req.Msg.Id, st, req.Msg.GetClaim().GetBy())
+func (h *Hub) UpdateNote(_ context.Context, req *connect.Request[pb.UpdateNoteRequest]) (*connect.Response[pb.UpdateNoteResponse], error) {
+	m := req.Msg
+	n, changed, err := h.backlog.Update(m.Id, backlog.Patch{Title: m.Title, Body: m.Body, Pinned: m.Pinned, Project: m.Project})
 	if err != nil {
 		return nil, backlogError(err)
 	}
-	if kind := backlogEventKind(prev, it.State); kind != "" {
-		h.publishBacklog(kind, it)
+	if changed {
+		h.publishNote("note.updated", n)
 	}
-	return connect.NewResponse(&pb.UpdateItemResponse{Item: toProtoItem(it)}), nil
+	return connect.NewResponse(&pb.UpdateNoteResponse{Note: toProtoNote(n)}), nil
 }
 
-func backlogEventKind(prev, now backlog.State) string {
-	switch {
-	case prev == now:
-		return ""
-	case now == backlog.StateDone:
-		return "backlog.done"
-	case now == backlog.StateClaimed:
-		return "backlog.claimed"
-	case prev == backlog.StateClaimed:
-		return "backlog.released"
+func (h *Hub) DeleteNote(_ context.Context, req *connect.Request[pb.DeleteNoteRequest]) (*connect.Response[pb.DeleteNoteResponse], error) {
+	n, err := h.backlog.Delete(req.Msg.Id)
+	if err != nil {
+		return nil, backlogError(err)
 	}
-	return "backlog.reopened"
+	h.publishNote("note.deleted", n)
+	return connect.NewResponse(&pb.DeleteNoteResponse{}), nil
 }
 
-func (h *Hub) publishBacklog(kind string, it backlog.Item) {
-	m := map[string]any{
-		"id": it.ID, "project": it.Project, "title": it.Title,
-		"state": it.State.String(), "donate": it.Donate,
+// fileNote creates a note on the hub's own initiative and announces it.
+func (h *Hub) fileNote(n backlog.NewNote) (backlog.Note, error) {
+	note, err := h.backlog.Create(n)
+	if err != nil {
+		return backlog.Note{}, err
 	}
-	if it.Claim != nil {
-		m["by"] = it.Claim.By
-	}
-	payload, err := structpb.NewStruct(m)
+	h.publishNote("note.created", note)
+	return note, nil
+}
+
+func (h *Hub) publishNote(kind string, n backlog.Note) {
+	payload, err := structpb.NewStruct(map[string]any{
+		"id": n.ID, "title": n.Title, "project": n.Project, "source": n.Source, "pinned": n.Pinned,
+	})
 	if err != nil {
 		return
 	}
@@ -90,7 +92,7 @@ func (h *Hub) publishBacklog(kind string, it backlog.Item) {
 		Id:      strconv.FormatUint(h.seq.Add(1), 10),
 		Time:    timestamppb.Now(),
 		Kind:    kind,
-		Subject: it.ID,
+		Subject: n.ID,
 		Payload: payload,
 	})
 }
@@ -100,44 +102,15 @@ func backlogError(err error) error {
 	switch {
 	case errors.Is(err, backlog.ErrNotFound):
 		code = connect.CodeNotFound
-	case errors.Is(err, backlog.ErrInvalid), errors.Is(err, backlog.ErrAmbiguous):
+	case errors.Is(err, backlog.ErrInvalid):
 		code = connect.CodeInvalidArgument
-	case errors.Is(err, backlog.ErrUnavailable):
-		code = connect.CodeFailedPrecondition
 	}
 	return connect.NewError(code, err)
 }
 
-func fromProtoState(s pb.ItemState) (backlog.State, bool) {
-	switch s {
-	case pb.ItemState_ITEM_STATE_TODO:
-		return backlog.StateTodo, true
-	case pb.ItemState_ITEM_STATE_CLAIMED:
-		return backlog.StateClaimed, true
-	case pb.ItemState_ITEM_STATE_DONE:
-		return backlog.StateDone, true
+func toProtoNote(n backlog.Note) *pb.Note {
+	return &pb.Note{
+		Id: n.ID, Title: n.Title, Body: n.Body, Pinned: n.Pinned, Project: n.Project, Source: n.Source,
+		CreatedAt: timestamppb.New(n.Created), UpdatedAt: timestamppb.New(n.Updated),
 	}
-	return 0, false
-}
-
-func toProtoItem(it backlog.Item) *pb.Item {
-	out := &pb.Item{
-		Id: it.ID, Project: it.Project, Title: it.Title, IssueUrl: it.IssueURL,
-		Priority: int32(it.Priority), Harness: it.Harness, Notes: it.Notes, Donate: it.Donate,
-	}
-	switch it.State {
-	case backlog.StateClaimed:
-		out.State = pb.ItemState_ITEM_STATE_CLAIMED
-	case backlog.StateDone:
-		out.State = pb.ItemState_ITEM_STATE_DONE
-	default:
-		out.State = pb.ItemState_ITEM_STATE_TODO
-	}
-	if it.Claim != nil {
-		out.Claim = &pb.Claim{By: it.Claim.By}
-		if !it.Claim.At.IsZero() {
-			out.Claim.At = timestamppb.New(it.Claim.At)
-		}
-	}
-	return out
 }

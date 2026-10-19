@@ -16,7 +16,7 @@ import "message.connect.spec.dart" as specs;
 /// at its next IDLE, never during a running turn; the text says how to reply
 /// and ack. A sleeve in terminal mode gets no injection and reads its Inbox.
 /// A project address resolves to the sleeves currently working on that project;
-/// with none live the message waits, and a request also becomes a backlog item.
+/// with none live the message waits, and a request also becomes a backlog note.
 /// An ack_required message not acked within the timeout (default 30 minutes)
 /// is delivered once more, then escalated to the orchestrator.
 /// Changes are announced on EventService as "msg.sent", "msg.delivered",

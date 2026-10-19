@@ -36,9 +36,9 @@ for _ in $(seq 50); do
 done
 
 "$bin" session new demo --cwd "$work" -- bash -c 'echo demo; echo hello from the demo session; exec bash' >/dev/null
-"$bin" backlog add "hotschmoe/protectorate" "Wire the pairing flow" --prio 1 >/dev/null
-"$bin" backlog add "hotschmoe/protectorate" "Screenshot every screen" --prio 3 --harness codex >/dev/null
-"$bin" backlog add "donate: octo/widgets" "Fix flaky parser test" --issue https://github.com/octo/widgets/issues/7 >/dev/null
+"$bin" backlog add "Wire the pairing flow" --project hotschmoe/protectorate --body "Scan the QR, confirm, land on the overview." --pin >/dev/null
+"$bin" backlog add "Screenshot every screen" --project hotschmoe/protectorate --body "Phone and desktop, dark and light." >/dev/null
+"$bin" backlog add "Fix flaky parser test" --project octo/widgets --body "https://github.com/octo/widgets/issues/7" >/dev/null
 "$bin" node add ghost --addr 127.0.0.1:1 >/dev/null
 node_name=$("$bin" node ls 2>/dev/null | awk 'NR>1 && $1 != "ghost" {gsub(/\*/, "", $1); print $1; exit}')
 sleep 8

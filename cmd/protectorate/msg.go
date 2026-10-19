@@ -58,7 +58,7 @@ func msgSendCmd(o *opts) *cobra.Command {
 		Short: "Send a message (use - as the body to read stdin)",
 		Long: `<to> is a sleeve name, project:<id-or-name>, orchestrator or owner. A request
 asks for something and asks for an ack by default; a project with no live
-sleeve keeps the message and files a backlog item. An ack-required message
+sleeve keeps the message and files a backlog note. An ack-required message
 not acked within the hub's timeout is re-delivered once, then escalated.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,8 +93,8 @@ not acked within the hub's timeout is re-delivered once, then escalated.`,
 				if res.Msg.Waiting {
 					fmt.Fprintln(w, "waiting\tno live recipient yet; it is delivered when one appears")
 				}
-				if res.Msg.BacklogItem != "" {
-					fmt.Fprintf(w, "backlog\t%s\n", res.Msg.BacklogItem)
+				if res.Msg.NoteId != "" {
+					fmt.Fprintf(w, "note\t%s\n", res.Msg.NoteId)
 				}
 			})
 		},

@@ -695,7 +695,7 @@ final _logEvents = [
   ('session.started', 'work', 52),
   ('sleeve.spawned', 'research', 40),
   ('chat.approval', 'auth-fix', 31),
-  ('backlog.claimed', 'a1', 29),
+  ('note.created', 'a1', 29),
   ('quota.refreshed', 'claude', 18),
   ('node.unreachable', 'pi-lab', 11),
   ('lease.acquired', 'desk:win-desk', 6),
@@ -713,7 +713,7 @@ MailMessage _mail(
   bool ack = false,
   List<MailDelivery> deliveries = const [],
   bool escalated = false,
-  String backlog = '',
+  String note = '',
 }) => MailMessage(
   id: id,
   threadId: thread,
@@ -725,7 +725,7 @@ MailMessage _mail(
   createdAt: _ago(Duration(minutes: minutes)),
   deliveries: deliveries,
   escalatedAt: escalated ? _ago(Duration(minutes: minutes - 62)) : null,
-  backlogItem: backlog,
+  noteId: note,
 );
 
 MailDelivery _dl(String r, {int? delivered, int? read, int? acked}) =>
@@ -796,7 +796,7 @@ List<ThreadSummary> _threads() => [
       kind: MessageKind.MESSAGE_KIND_REQUEST,
       ack: true,
       escalated: true,
-      backlog: 'b7',
+      note: 'n7',
     ),
     openAcks: 1,
     escalated: 1,
@@ -1045,43 +1045,50 @@ Transport _hubTransport(StreamController<Event> events) {
         ),
       )
       .unary(
-        BacklogService.listItems,
-        (ListItemsRequest r, ctx) => ListItemsResponse(
-          items: [
-            Item(
-              id: 'a1',
-              project: 'hotschmoe/protectorate',
-              title: 'Reject empty passwords in the login form',
-              priority: 1,
-              harness: 'claude',
-              state: ItemState.ITEM_STATE_CLAIMED,
-              claim: Claim(by: 'auth-fix/claude'),
-            ),
-            Item(
-              id: 'a2',
-              project: 'hotschmoe/protectorate',
-              title: 'Per-sleeve GPU accounting on Arc Pro',
-              priority: 2,
-              state: ItemState.ITEM_STATE_TODO,
-            ),
-            Item(
-              id: 'a3',
-              project: 'hotschmoe/protectorate',
-              title: 'Quota refresh backoff',
-              state: ItemState.ITEM_STATE_DONE,
-            ),
-            Item(
-              id: 'b1',
-              project: 'acme/web',
-              title: 'Migrate the build to bazel 8',
-              priority: 3,
-              harness: 'codex',
-              state: ItemState.ITEM_STATE_TODO,
-            ),
-          ],
-        ),
+        BacklogService.listNotes,
+        (ListNotesRequest r, ctx) => ListNotesResponse(notes: _notes()),
       )
       .build();
+}
+
+List<Note> _notes() {
+  Timestamp ago(Duration d) =>
+      Timestamp.fromDateTime(DateTime.now().toUtc().subtract(d));
+  return [
+    Note(
+      id: 'a1',
+      title: 'Gap 2: hub as a real service',
+      body:
+          'Run the hub as a systemd service with its own home.\nTLS via Traefik, owner token never over plain http.',
+      project: 'hotschmoe/protectorate',
+      source: 'owner',
+      pinned: true,
+      updatedAt: ago(const Duration(hours: 2)),
+    ),
+    Note(
+      id: 'a2',
+      title: 'acme/lib asks: export Foo',
+      body:
+          'apidev asks: please export Foo from the lib package.\n\nFrom apidev, thread t7.',
+      project: 'acme/lib',
+      source: 'apidev',
+      updatedAt: ago(const Duration(minutes: 14)),
+    ),
+    Note(
+      id: 'a3',
+      title: 'acme/lib released v0.3.0: review changes',
+      body: 'Upstream release: acme/lib tag v0.3.0\nCommits (2): add Qux',
+      project: 'acme/api',
+      source: 'hub',
+      updatedAt: ago(const Duration(days: 1, hours: 3)),
+    ),
+    Note(
+      id: 'a4',
+      body: 'Ideas for the demo: record the pairing flow on the phone.',
+      source: 'owner',
+      updatedAt: ago(const Duration(days: 4)),
+    ),
+  ];
 }
 
 const _pane =
@@ -1297,6 +1304,21 @@ void main() {
           await tester.pumpWidget(const SizedBox());
         });
       }
+
+      testWidgets('notes-editor $tag', (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await _pumpShell(tester, key, b, 'backlog', events);
+        await tester.tap(find.byKey(const ValueKey('note-a2')));
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 800));
+        await _shoot(tester, key, 'notes-editor-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
 
       testWidgets('thread $tag', (tester) async {
         tester.view.physicalSize = size;

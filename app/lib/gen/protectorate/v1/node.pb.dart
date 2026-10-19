@@ -4722,12 +4722,31 @@ class NodeAgentServiceApi {
           'UploadJobData', request, $4.UploadJobDataResponse());
 
   /// RunJob checks the source out, runs the command and streams its output;
-  /// matching artifacts follow the exit. The job dies with the stream: if the
-  /// caller disconnects, the process tree is killed.
+  /// matching artifacts follow the exit. The job does not depend on the
+  /// stream: if the caller disconnects it keeps running (bounded by its
+  /// timeout) and AttachJob picks the stream up again.
   $async.Future<$4.JobEvent> runJob(
           $pb.ClientContext? ctx, $4.RunJobRequest request) =>
       _client.invoke<$4.JobEvent>(
           ctx, 'NodeAgentService', 'RunJob', request, $4.JobEvent());
+
+  /// AttachJob streams a job again from an output offset: started, the output
+  /// from from_offset, then artifacts and the result once it ended. A finished
+  /// job is kept for an hour. NOT_FOUND when the node never had the job.
+  $async.Future<$4.JobEvent> attachJob(
+          $pb.ClientContext? ctx, $4.AttachJobRequest request) =>
+      _client.invoke<$4.JobEvent>(
+          ctx, 'NodeAgentService', 'AttachJob', request, $4.JobEvent());
+
+  /// ListJobs lists the jobs the node is running or still holds the result of.
+  $async.Future<$4.NodeAgentServiceListJobsResponse> listJobs(
+          $pb.ClientContext? ctx, $4.NodeAgentServiceListJobsRequest request) =>
+      _client.invoke<$4.NodeAgentServiceListJobsResponse>(
+          ctx,
+          'NodeAgentService',
+          'ListJobs',
+          request,
+          $4.NodeAgentServiceListJobsResponse());
 
   /// CancelJob kills a running job's process tree.
   $async.Future<$4.NodeAgentServiceCancelJobResponse> cancelJob(

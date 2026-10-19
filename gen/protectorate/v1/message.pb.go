@@ -30,7 +30,7 @@ const (
 	// NOTE is information; no one is asked to act.
 	MessageKind_MESSAGE_KIND_NOTE MessageKind = 1
 	// REQUEST asks the recipient to do something. To a project with no live
-	// sleeve it also becomes a backlog item.
+	// sleeve it also becomes a backlog note.
 	MessageKind_MESSAGE_KIND_REQUEST MessageKind = 2
 	// NOTICE states facts, typically sent by the hub, such as a dependency
 	// release or a granted lease.
@@ -177,8 +177,8 @@ type MessageServiceSendResponse struct {
 	// waiting is true while no recipient is resolved, such as a project with no
 	// live sleeve.
 	Waiting bool `protobuf:"varint,3,opt,name=waiting,proto3" json:"waiting,omitempty"`
-	// backlog_item is the id of the backlog item a request was filed as.
-	BacklogItem   string `protobuf:"bytes,4,opt,name=backlog_item,json=backlogItem,proto3" json:"backlog_item,omitempty"`
+	// note_id is the id of the backlog note a request was filed as.
+	NoteId        string `protobuf:"bytes,4,opt,name=note_id,json=noteId,proto3" json:"note_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -234,9 +234,9 @@ func (x *MessageServiceSendResponse) GetWaiting() bool {
 	return false
 }
 
-func (x *MessageServiceSendResponse) GetBacklogItem() string {
+func (x *MessageServiceSendResponse) GetNoteId() string {
 	if x != nil {
-		return x.BacklogItem
+		return x.NoteId
 	}
 	return ""
 }
@@ -882,7 +882,7 @@ type MailMessage struct {
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	Deliveries    []*MailDelivery        `protobuf:"bytes,10,rep,name=deliveries,proto3" json:"deliveries,omitempty"`
 	EscalatedAt   *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=escalated_at,json=escalatedAt,proto3" json:"escalated_at,omitempty"`
-	BacklogItem   string                 `protobuf:"bytes,12,opt,name=backlog_item,json=backlogItem,proto3" json:"backlog_item,omitempty"`
+	NoteId        string                 `protobuf:"bytes,12,opt,name=note_id,json=noteId,proto3" json:"note_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -994,9 +994,9 @@ func (x *MailMessage) GetEscalatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *MailMessage) GetBacklogItem() string {
+func (x *MailMessage) GetNoteId() string {
 	if x != nil {
-		return x.BacklogItem
+		return x.NoteId
 	}
 	return ""
 }
@@ -1092,12 +1092,12 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\fack_required\x18\x05 \x01(\bH\x00R\vackRequired\x88\x01\x01\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x06 \x01(\tR\trequestIdB\x0f\n" +
-	"\r_ack_required\"\xaf\x01\n" +
+	"\r_ack_required\"\xa5\x01\n" +
 	"\x1aMessageServiceSendResponse\x126\n" +
 	"\amessage\x18\x01 \x01(\v2\x1c.protectorate.v1.MailMessageR\amessage\x12\x1c\n" +
 	"\tduplicate\x18\x02 \x01(\bR\tduplicate\x12\x18\n" +
-	"\awaiting\x18\x03 \x01(\bR\awaiting\x12!\n" +
-	"\fbacklog_item\x18\x04 \x01(\tR\vbacklogItem\"p\n" +
+	"\awaiting\x18\x03 \x01(\bR\awaiting\x12\x17\n" +
+	"\anote_id\x18\x04 \x01(\tR\x06noteId\"p\n" +
 	"\fInboxRequest\x12\x1f\n" +
 	"\vunread_only\x18\x01 \x01(\bR\n" +
 	"unreadOnly\x12\x12\n" +
@@ -1137,7 +1137,7 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\x06unread\x18\x05 \x01(\rR\x06unread\x12\x1b\n" +
 	"\topen_acks\x18\x06 \x01(\rR\bopenAcks\x12\x1c\n" +
 	"\tescalated\x18\a \x01(\rR\tescalated\x12\x1a\n" +
-	"\bprojects\x18\b \x03(\tR\bprojects\"\xbe\x03\n" +
+	"\bprojects\x18\b \x03(\tR\bprojects\"\xb4\x03\n" +
 	"\vMailMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tthread_id\x18\x02 \x01(\tR\bthreadId\x12\x12\n" +
@@ -1153,8 +1153,8 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"deliveries\x18\n" +
 	" \x03(\v2\x1d.protectorate.v1.MailDeliveryR\n" +
 	"deliveries\x12=\n" +
-	"\fescalated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\vescalatedAt\x12!\n" +
-	"\fbacklog_item\x18\f \x01(\tR\vbacklogItem\"\xf5\x01\n" +
+	"\fescalated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\vescalatedAt\x12\x17\n" +
+	"\anote_id\x18\f \x01(\tR\x06noteId\"\xf5\x01\n" +
 	"\fMailDelivery\x12\x1c\n" +
 	"\trecipient\x18\x01 \x01(\tR\trecipient\x12=\n" +
 	"\fdelivered_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vdeliveredAt\x123\n" +

@@ -183,7 +183,7 @@ func TestSchemaShapes(t *testing.T) {
 		byName[tl.Name] = tl
 	}
 	for _, n := range []string{"hub_get_status", "quota_get_quota", "session_list_sessions", "job_submit_job",
-		"session_kill_session", "session_capture_pane", "backlog_list_items", "backlog_add_item", "backlog_update_item"} {
+		"session_kill_session", "session_capture_pane", "backlog_list_notes", "backlog_get_note", "backlog_create_note", "backlog_update_note", "backlog_delete_note"} {
 		if byName[n] == nil {
 			t.Errorf("missing tool %s", n)
 		}
@@ -204,8 +204,8 @@ func TestSchemaShapes(t *testing.T) {
 		}
 		return cur
 	}
-	if got := get(schema("backlog_list_items"), "properties", "state", "enum"); !reflect.DeepEqual(got, []any{"ITEM_STATE_UNSPECIFIED", "ITEM_STATE_TODO", "ITEM_STATE_CLAIMED", "ITEM_STATE_DONE"}) {
-		t.Errorf("state enum: %v", got)
+	if got := get(schema("sleeve_spawn_sleeve"), "properties", "mode", "enum"); !reflect.DeepEqual(got, []any{"SLEEVE_MODE_UNSPECIFIED", "SLEEVE_MODE_CHAT", "SLEEVE_MODE_TERMINAL"}) {
+		t.Errorf("mode enum: %v", got)
 	}
 	if got := get(schema("job_submit_job"), "properties", "command", "type"); got != "array" {
 		t.Errorf("command type: %v", got)
@@ -213,17 +213,20 @@ func TestSchemaShapes(t *testing.T) {
 	if got := get(schema("job_submit_job"), "properties", "env", "additionalProperties", "type"); got != "string" {
 		t.Errorf("env value type: %v", got)
 	}
-	if got := get(schema("backlog_update_item"), "properties", "claim", "properties", "at", "format"); got != "date-time" {
-		t.Errorf("timestamp format: %v", got)
+	if got := get(schema("backlog_update_note"), "properties", "pinned", "type"); got != "boolean" {
+		t.Errorf("optional bool type: %v", got)
 	}
-	if got := get(schema("backlog_add_item"), "additionalProperties"); got != false {
+	if got := get(schema("backlog_create_note"), "additionalProperties"); got != false {
 		t.Errorf("additionalProperties: %v", got)
 	}
 	if byName["session_kill_session"].Annotations.ReadOnlyHint || !*byName["session_kill_session"].Annotations.DestructiveHint {
 		t.Error("kill_session must be a destructive mutation")
 	}
-	if a := byName["backlog_add_item"].Annotations; a.ReadOnlyHint || *a.DestructiveHint {
-		t.Error("add_item must be a non-destructive mutation")
+	if a := byName["backlog_create_note"].Annotations; a.ReadOnlyHint || *a.DestructiveHint {
+		t.Error("create_note must be a non-destructive mutation")
+	}
+	if a := byName["backlog_delete_note"].Annotations; a.ReadOnlyHint || !*a.DestructiveHint {
+		t.Error("delete_note must be a destructive mutation")
 	}
 	if !byName["quota_get_quota"].Annotations.ReadOnlyHint {
 		t.Error("get_quota must be read-only")
@@ -238,21 +241,21 @@ func TestCallTools(t *testing.T) {
 		t.Fatalf("hub_get_status: %q %v", text, isErr)
 	}
 
-	text, isErr = call(t, cs, "backlog_add_item", map[string]any{"project": "me/repo", "title": "Fix it", "priority": 2})
+	text, isErr = call(t, cs, "backlog_create_note", map[string]any{"project": "me/repo", "title": "Fix it", "body": "details"})
 	if isErr || !strings.Contains(text, `"title":"Fix it"`) {
 		t.Fatalf("add: %q %v", text, isErr)
 	}
-	text, isErr = call(t, cs, "backlog_list_items", map[string]any{"state": "ITEM_STATE_TODO"})
+	text, isErr = call(t, cs, "backlog_list_notes", map[string]any{"query": "DETAILS"})
 	if isErr || !strings.Contains(text, `"Fix it"`) {
 		t.Fatalf("list: %q %v", text, isErr)
 	}
 
-	text, isErr = call(t, cs, "backlog_add_item", map[string]any{"project": "me/repo", "titel": "typo"})
+	text, isErr = call(t, cs, "backlog_create_note", map[string]any{"project": "me/repo", "titel": "typo"})
 	if !isErr || !strings.HasPrefix(text, "invalid_argument:") || !strings.Contains(text, "titel") {
 		t.Errorf("unknown field: %q %v", text, isErr)
 	}
 
-	text, isErr = call(t, cs, "backlog_update_item", map[string]any{"id": "nope", "state": "ITEM_STATE_DONE"})
+	text, isErr = call(t, cs, "backlog_update_note", map[string]any{"id": "nope", "pinned": true})
 	if !isErr || !strings.HasPrefix(text, "not_found:") {
 		t.Errorf("missing item: %q %v", text, isErr)
 	}
@@ -266,16 +269,16 @@ func TestFilter(t *testing.T) {
 		}
 		return out
 	}
-	readOnly := []string{"backlog_list_items", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "node_get_node", "node_list_nodes", "quota_get_quota", "quota_suggest", "session_capture_pane", "session_list_sessions", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}
+	readOnly := []string{"backlog_get_note", "backlog_list_notes", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "node_get_node", "node_list_nodes", "quota_get_quota", "quota_suggest", "session_capture_pane", "session_list_sessions", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}
 	cases := []struct {
 		name string
 		f    Filter
 		want []string
 	}{
 		{"default is read-only", Filter{}, readOnly},
-		{"allow glob replaces default", Filter{Allow: []string{"backlog_*"}}, []string{"backlog_add_item", "backlog_list_items", "backlog_update_item"}},
-		{"deny wins", Filter{Allow: []string{"backlog_*"}, Deny: []string{"*_update_item", "backlog_add_*"}}, []string{"backlog_list_items"}},
-		{"deny on default", Filter{Deny: []string{"session_*", "node_*"}}, []string{"backlog_list_items", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "quota_get_quota", "quota_suggest", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}},
+		{"allow glob replaces default", Filter{Allow: []string{"backlog_*"}}, []string{"backlog_create_note", "backlog_delete_note", "backlog_get_note", "backlog_list_notes", "backlog_update_note"}},
+		{"deny wins", Filter{Allow: []string{"backlog_*"}, Deny: []string{"*_update_note", "backlog_create_*", "backlog_delete_*"}}, []string{"backlog_get_note", "backlog_list_notes"}},
+		{"deny on default", Filter{Deny: []string{"session_*", "node_*"}}, []string{"backlog_get_note", "backlog_list_notes", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "quota_get_quota", "quota_suggest", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}},
 	}
 	for _, c := range cases {
 		if got := names(c.f); !reflect.DeepEqual(got, c.want) {
