@@ -25,6 +25,29 @@ import 'desk.pbjson.dart' as $0;
 import 'job.pbjson.dart' as $4;
 import 'sleeve.pbjson.dart' as $2;
 
+@$core.Deprecated('Use updatePhaseDescriptor instead')
+const UpdatePhase$json = {
+  '1': 'UpdatePhase',
+  '2': [
+    {'1': 'UPDATE_PHASE_UNSPECIFIED', '2': 0},
+    {'1': 'UPDATE_PHASE_SKIPPED', '2': 1},
+    {'1': 'UPDATE_PHASE_SENDING', '2': 2},
+    {'1': 'UPDATE_PHASE_VERIFYING', '2': 3},
+    {'1': 'UPDATE_PHASE_SWAPPING', '2': 4},
+    {'1': 'UPDATE_PHASE_RESTARTING', '2': 5},
+    {'1': 'UPDATE_PHASE_CONFIRMED', '2': 6},
+    {'1': 'UPDATE_PHASE_ROLLED_BACK', '2': 7},
+  ],
+};
+
+/// Descriptor for `UpdatePhase`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List updatePhaseDescriptor = $convert.base64Decode(
+    'CgtVcGRhdGVQaGFzZRIcChhVUERBVEVfUEhBU0VfVU5TUEVDSUZJRUQQABIYChRVUERBVEVfUE'
+    'hBU0VfU0tJUFBFRBABEhgKFFVQREFURV9QSEFTRV9TRU5ESU5HEAISGgoWVVBEQVRFX1BIQVNF'
+    'X1ZFUklGWUlORxADEhkKFVVQREFURV9QSEFTRV9TV0FQUElORxAEEhsKF1VQREFURV9QSEFTRV'
+    '9SRVNUQVJUSU5HEAUSGgoWVVBEQVRFX1BIQVNFX0NPTkZJUk1FRBAGEhwKGFVQREFURV9QSEFT'
+    'RV9ST0xMRURfQkFDSxAH');
+
 @$core.Deprecated('Use fileKindDescriptor instead')
 const FileKind$json = {
   '1': 'FileKind',
@@ -163,6 +186,50 @@ final $typed_data.Uint8List deskPolicyStatusDescriptor = $convert.base64Decode(
     'ChBEZXNrUG9saWN5U3RhdHVzEjMKBnBvbGljeRgBIAEoCzIbLnByb3RlY3RvcmF0ZS52MS5EZX'
     'NrUG9saWN5UgZwb2xpY3kSMAoFc3RhdGUYAiABKAsyGi5wcm90ZWN0b3JhdGUudjEuRGVza1N0'
     'YXRlUgVzdGF0ZRIWCgZob2xkZXIYAyABKAlSBmhvbGRlcg==');
+
+@$core.Deprecated('Use updateNodeRequestDescriptor instead')
+const UpdateNodeRequest$json = {
+  '1': 'UpdateNodeRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'force', '3': 3, '4': 1, '5': 8, '10': 'force'},
+  ],
+};
+
+/// Descriptor for `UpdateNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List updateNodeRequestDescriptor = $convert.base64Decode(
+    'ChFVcGRhdGVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbWlseR'
+    'gCIAEoCFILYWxsb3dGYW1pbHkSFAoFZm9yY2UYAyABKAhSBWZvcmNl');
+
+@$core.Deprecated('Use updateNodeProgressDescriptor instead')
+const UpdateNodeProgress$json = {
+  '1': 'UpdateNodeProgress',
+  '2': [
+    {
+      '1': 'phase',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.UpdatePhase',
+      '10': 'phase'
+    },
+    {'1': 'sent_bytes', '3': 2, '4': 1, '5': 4, '10': 'sentBytes'},
+    {'1': 'total_bytes', '3': 3, '4': 1, '5': 4, '10': 'totalBytes'},
+    {'1': 'version', '3': 4, '4': 1, '5': 9, '10': 'version'},
+    {'1': 'previous_version', '3': 5, '4': 1, '5': 9, '10': 'previousVersion'},
+    {'1': 'restart', '3': 6, '4': 1, '5': 9, '10': 'restart'},
+    {'1': 'message', '3': 7, '4': 1, '5': 9, '10': 'message'},
+  ],
+};
+
+/// Descriptor for `UpdateNodeProgress`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List updateNodeProgressDescriptor = $convert.base64Decode(
+    'ChJVcGRhdGVOb2RlUHJvZ3Jlc3MSMgoFcGhhc2UYASABKA4yHC5wcm90ZWN0b3JhdGUudjEuVX'
+    'BkYXRlUGhhc2VSBXBoYXNlEh0KCnNlbnRfYnl0ZXMYAiABKARSCXNlbnRCeXRlcxIfCgt0b3Rh'
+    'bF9ieXRlcxgDIAEoBFIKdG90YWxCeXRlcxIYCgd2ZXJzaW9uGAQgASgJUgd2ZXJzaW9uEikKEH'
+    'ByZXZpb3VzX3ZlcnNpb24YBSABKAlSD3ByZXZpb3VzVmVyc2lvbhIYCgdyZXN0YXJ0GAYgASgJ'
+    'UgdyZXN0YXJ0EhgKB21lc3NhZ2UYByABKAlSB21lc3NhZ2U=');
 
 @$core.Deprecated('Use applyUpdateRequestDescriptor instead')
 const ApplyUpdateRequest$json = {
@@ -1199,6 +1266,13 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '4': {}
     },
     {
+      '1': 'UpdateNode',
+      '2': '.protectorate.v1.UpdateNodeRequest',
+      '3': '.protectorate.v1.UpdateNodeProgress',
+      '4': {},
+      '6': true
+    },
+    {
       '1': 'SetDeskPolicy',
       '2': '.protectorate.v1.SetDeskPolicyRequest',
       '3': '.protectorate.v1.DeskPolicyStatus',
@@ -1251,6 +1325,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.FileHeader': FileHeader$json,
   '.protectorate.v1.ApplyUpdateRequest': ApplyUpdateRequest$json,
   '.protectorate.v1.ApplyUpdateResponse': ApplyUpdateResponse$json,
+  '.protectorate.v1.UpdateNodeRequest': UpdateNodeRequest$json,
+  '.protectorate.v1.UpdateNodeProgress': UpdateNodeProgress$json,
   '.protectorate.v1.SetDeskPolicyRequest': SetDeskPolicyRequest$json,
   '.protectorate.v1.DeskPolicyStatus': DeskPolicyStatus$json,
   '.protectorate.v1.GetDeskPolicyRequest': GetDeskPolicyRequest$json,
@@ -1268,8 +1344,9 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'ogLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVzcG9uc2USTgoHR2V0RmlsZRIfLnByb3RlY3Rv'
     'cmF0ZS52MS5HZXRGaWxlUmVxdWVzdBogLnByb3RlY3RvcmF0ZS52MS5HZXRGaWxlUmVzcG9uc2'
     'UwARJeCgtBcHBseVVwZGF0ZRIjLnByb3RlY3RvcmF0ZS52MS5BcHBseVVwZGF0ZVJlcXVlc3Qa'
-    'JC5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXNwb25zZSIEoLUYARJfCg1TZXREZXNrUG'
-    '9saWN5EiUucHJvdGVjdG9yYXRlLnYxLlNldERlc2tQb2xpY3lSZXF1ZXN0GiEucHJvdGVjdG9y'
-    'YXRlLnYxLkRlc2tQb2xpY3lTdGF0dXMiBKC1GAESWQoNR2V0RGVza1BvbGljeRIlLnByb3RlY3'
-    'RvcmF0ZS52MS5HZXREZXNrUG9saWN5UmVxdWVzdBohLnByb3RlY3RvcmF0ZS52MS5EZXNrUG9s'
-    'aWN5U3RhdHVz');
+    'JC5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXNwb25zZSIEoLUYARJdCgpVcGRhdGVOb2'
+    'RlEiIucHJvdGVjdG9yYXRlLnYxLlVwZGF0ZU5vZGVSZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYx'
+    'LlVwZGF0ZU5vZGVQcm9ncmVzcyIEoLUYATABEl8KDVNldERlc2tQb2xpY3kSJS5wcm90ZWN0b3'
+    'JhdGUudjEuU2V0RGVza1BvbGljeVJlcXVlc3QaIS5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGlj'
+    'eVN0YXR1cyIEoLUYARJZCg1HZXREZXNrUG9saWN5EiUucHJvdGVjdG9yYXRlLnYxLkdldERlc2'
+    'tQb2xpY3lSZXF1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkRlc2tQb2xpY3lTdGF0dXM=');

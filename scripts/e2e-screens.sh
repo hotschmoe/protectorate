@@ -20,10 +20,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(cd "$root/app" && flutter build web --dart-define=E2E_AUTOCONFIRM=true >"$work/flutter.log" 2>&1) \
+(make -C "$root" app-build-web APP_FLAGS=--dart-define=E2E_AUTOCONFIRM=true >"$work/flutter.log" 2>&1) \
   || { tail -30 "$work/flutter.log"; exit 1; }
-(cd "$root" && go build -o "$work/protectorate" ./cmd/protectorate)
-bin=$work/protectorate
+make -C "$root" build >/dev/null
+bin=$root/bin/protectorate
 
 mkdir -p "$work/cache"
 head -c 3000000 /dev/zero >"$work/cache/blob"

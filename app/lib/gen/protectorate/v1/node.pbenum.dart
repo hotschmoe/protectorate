@@ -14,6 +14,59 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
+class UpdatePhase extends $pb.ProtobufEnum {
+  static const UpdatePhase UPDATE_PHASE_UNSPECIFIED =
+      UpdatePhase._(0, _omitEnumNames ? '' : 'UPDATE_PHASE_UNSPECIFIED');
+
+  /// UPDATE_PHASE_SKIPPED: the node already runs the hub's version.
+  static const UpdatePhase UPDATE_PHASE_SKIPPED =
+      UpdatePhase._(1, _omitEnumNames ? '' : 'UPDATE_PHASE_SKIPPED');
+
+  /// UPDATE_PHASE_SENDING: the binary is on its way; sent_bytes of total_bytes.
+  static const UpdatePhase UPDATE_PHASE_SENDING =
+      UpdatePhase._(2, _omitEnumNames ? '' : 'UPDATE_PHASE_SENDING');
+
+  /// UPDATE_PHASE_VERIFYING: the node checks size, SHA-256 and that it runs.
+  static const UpdatePhase UPDATE_PHASE_VERIFYING =
+      UpdatePhase._(3, _omitEnumNames ? '' : 'UPDATE_PHASE_VERIFYING');
+
+  /// UPDATE_PHASE_SWAPPING: the node swapped the binary in (version and
+  /// previous_version are set) and is about to restart.
+  static const UpdatePhase UPDATE_PHASE_SWAPPING =
+      UpdatePhase._(4, _omitEnumNames ? '' : 'UPDATE_PHASE_SWAPPING');
+
+  /// UPDATE_PHASE_RESTARTING: waiting for the node to come back.
+  static const UpdatePhase UPDATE_PHASE_RESTARTING =
+      UpdatePhase._(5, _omitEnumNames ? '' : 'UPDATE_PHASE_RESTARTING');
+
+  /// UPDATE_PHASE_CONFIRMED: the node reports the new version. Final.
+  static const UpdatePhase UPDATE_PHASE_CONFIRMED =
+      UpdatePhase._(6, _omitEnumNames ? '' : 'UPDATE_PHASE_CONFIRMED');
+
+  /// UPDATE_PHASE_ROLLED_BACK: the node came back on its previous binary.
+  /// Final.
+  static const UpdatePhase UPDATE_PHASE_ROLLED_BACK =
+      UpdatePhase._(7, _omitEnumNames ? '' : 'UPDATE_PHASE_ROLLED_BACK');
+
+  static const $core.List<UpdatePhase> values = <UpdatePhase>[
+    UPDATE_PHASE_UNSPECIFIED,
+    UPDATE_PHASE_SKIPPED,
+    UPDATE_PHASE_SENDING,
+    UPDATE_PHASE_VERIFYING,
+    UPDATE_PHASE_SWAPPING,
+    UPDATE_PHASE_RESTARTING,
+    UPDATE_PHASE_CONFIRMED,
+    UPDATE_PHASE_ROLLED_BACK,
+  ];
+
+  static final $core.List<UpdatePhase?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 7);
+  static UpdatePhase? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const UpdatePhase._(super.value, super.name);
+}
+
 class FileKind extends $pb.ProtobufEnum {
   static const FileKind FILE_KIND_UNSPECIFIED =
       FileKind._(0, _omitEnumNames ? '' : 'FILE_KIND_UNSPECIFIED');

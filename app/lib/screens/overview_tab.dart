@@ -10,6 +10,7 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
+import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
@@ -26,8 +27,10 @@ class OverviewTab extends StatefulWidget {
     required this.feed,
     this.history,
     this.now,
+    this.versions = const Versions(),
   });
 
+  final Versions versions;
   final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
@@ -131,6 +134,7 @@ class _OverviewTabState extends State<OverviewTab> {
           name: s.node.name,
           now: widget.now,
           history: _history,
+          versions: widget.versions,
         ),
       ),
     );
@@ -153,6 +157,7 @@ class _OverviewTabState extends State<OverviewTab> {
             _nodes.where((n) => n.node.local).firstOrNull?.node.name ?? '',
           ),
           wide: wide,
+          versions: widget.versions,
         );
         final board = Panel(
           legend: 'MACHINE ROOM',
@@ -169,6 +174,7 @@ class _OverviewTabState extends State<OverviewTab> {
             beats: _nodeBeats,
             wide: wide,
             onOpen: _open,
+            hubVersion: widget.versions.hub,
           ),
         );
         final quota = Panel(
@@ -222,8 +228,10 @@ class _StatusPanel extends StatelessWidget {
     required this.beat,
     required this.hubCpu,
     required this.wide,
+    required this.versions,
   });
 
+  final Versions versions;
   final List<NodeStatus> nodes;
   final List<ProviderQuota> quotas;
   final EventFeed feed;
@@ -247,6 +255,11 @@ class _StatusPanel extends StatelessWidget {
         .length;
     final badges = [for (final n in nodes) ...alertBadges(n)];
     final critical = badges.where((b) => b.critical).length;
+    final skew = versionSkew(
+      hubVersion: versions.hub,
+      appVersion: versions.app,
+      nodes: nodes,
+    );
     final fresh = quotas
         .where((q) => q.freshness == Freshness.FRESHNESS_FRESH)
         .length;
@@ -287,7 +300,7 @@ class _StatusPanel extends StatelessWidget {
           'OF ${quotas.length}',
           unknown > 0 ? Tone.warn : Tone.lit,
         ),
-        _HubTile(status: hub, onRetry: onRetry),
+        _HubTile(status: hub, onRetry: onRetry, appVersion: versions.app),
       ],
     );
     return Panel(
@@ -354,6 +367,15 @@ class _StatusPanel extends StatelessWidget {
                 label: 'QUOTA UNKNOWN',
                 tone: Tone.alarm,
                 lit: unknown > 0,
+              ),
+              Tooltip(
+                message: skewMessage(skew, versions),
+                child: Annunciator(
+                  key: const ValueKey('skew-annunciator'),
+                  label: 'VERSION SKEW',
+                  tone: Tone.warn,
+                  lit: skew.any,
+                ),
               ),
               ListenableBuilder(
                 listenable: feed,
@@ -438,8 +460,10 @@ class _Board extends StatelessWidget {
     required this.beats,
     required this.wide,
     required this.onOpen,
+    required this.hubVersion,
   });
 
+  final String hubVersion;
   final List<NodeStatus> nodes;
   final bool loaded;
   final Object? error;
@@ -632,6 +656,7 @@ class _Board extends StatelessWidget {
         ],
       );
     }
+    final skewed = nodeSkewed(s, hubVersion);
     return InkWell(
       key: ValueKey('board-${s.node.name}'),
       borderRadius: BorderRadius.circular(Tokens.innerRadius),
@@ -639,7 +664,23 @@ class _Board extends StatelessWidget {
       child: BarRow(
         index: i,
         padding: EdgeInsets.symmetric(horizontal: 10, vertical: wide ? 10 : 12),
-        child: body,
+        child: skewed
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  body,
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SkewBadge(
+                      key: ValueKey('skew-${s.node.name}'),
+                      nodeVersion: nodeVersion(s),
+                      hubVersion: hubVersion,
+                    ),
+                  ),
+                ],
+              )
+            : body,
       ),
     );
   }
@@ -773,10 +814,15 @@ class _QuotaSummary extends StatelessWidget {
 }
 
 class _HubTile extends StatelessWidget {
-  const _HubTile({required this.status, required this.onRetry});
+  const _HubTile({
+    required this.status,
+    required this.onRetry,
+    required this.appVersion,
+  });
 
   final Future<GetStatusResponse> status;
   final VoidCallback onRetry;
+  final String appVersion;
 
   @override
   Widget build(BuildContext context) {
@@ -818,6 +864,8 @@ class _HubTile extends StatelessWidget {
             const SizedBox(height: 4),
             Text('${s.hostname} (${s.os}/${s.arch})', style: t.small(t.p.lit)),
             Text('version ${s.version}', style: t.small()),
+            if (appVersion.isNotEmpty)
+              Text('app $appVersion', style: t.small()),
           ],
         );
       },

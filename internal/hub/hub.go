@@ -40,6 +40,15 @@ type Hub struct {
 	// AckTimeout is how long an ack_required message may stay unacked before
 	// it is re-delivered, and again before it is escalated; 0 means 30m.
 	AckTimeout time.Duration
+	// BinaryDir holds the protectorate-<os>-<arch> builds UpdateNode sends to
+	// nodes of other platforms; empty means the directory of the hub's own
+	// executable. SelfExe overrides the path of that executable.
+	BinaryDir string
+	SelfExe   string
+	// UpdateTimeout is how long UpdateNode waits for a node to report the
+	// new version; 0 means 3m.
+	UpdateTimeout time.Duration
+	updatePoll    time.Duration
 
 	authz   *auth.Authorizer
 	started time.Time

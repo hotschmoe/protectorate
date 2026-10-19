@@ -355,6 +355,231 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
   void clearHolder() => $_clearField(3);
 }
 
+class UpdateNodeRequest extends $pb.GeneratedMessage {
+  factory UpdateNodeRequest({
+    $core.String? name,
+    $core.bool? allowFamily,
+    $core.bool? force,
+  }) {
+    final result = UpdateNodeRequest._();
+    if (name != null) result.name = name;
+    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (force != null) result.force = force;
+    return result;
+  }
+
+  UpdateNodeRequest._();
+
+  factory UpdateNodeRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateNodeRequest()..mergeFromBuffer(data, registry);
+  factory UpdateNodeRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateNodeRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UpdateNodeRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: UpdateNodeRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(3, _omitFieldNames ? '' : 'force')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateNodeRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateNodeRequest copyWith(void Function(UpdateNodeRequest) updates) =>
+      super.copyWith((message) => updates(message as UpdateNodeRequest))
+          as UpdateNodeRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpdateNodeRequest() / UpdateNodeRequest.new instead')
+  static UpdateNodeRequest create() => UpdateNodeRequest._();
+  static $pb.GeneratedMessage $_createMessage() => UpdateNodeRequest._();
+  @$core.override
+  UpdateNodeRequest createEmptyInstance() => UpdateNodeRequest._();
+  @$core.pragma('dart2js:noInline')
+  static UpdateNodeRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UpdateNodeRequest>(
+          UpdateNodeRequest.$_createMessage);
+  static UpdateNodeRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get allowFamily => $_getBF(1);
+  @$pb.TagNumber(2)
+  set allowFamily($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAllowFamily() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAllowFamily() => $_clearField(2);
+
+  /// force sends the binary even when the node reports the hub's version.
+  @$pb.TagNumber(3)
+  $core.bool get force => $_getBF(2);
+  @$pb.TagNumber(3)
+  set force($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasForce() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearForce() => $_clearField(3);
+}
+
+class UpdateNodeProgress extends $pb.GeneratedMessage {
+  factory UpdateNodeProgress({
+    UpdatePhase? phase,
+    $fixnum.Int64? sentBytes,
+    $fixnum.Int64? totalBytes,
+    $core.String? version,
+    $core.String? previousVersion,
+    $core.String? restart,
+    $core.String? message,
+  }) {
+    final result = UpdateNodeProgress._();
+    if (phase != null) result.phase = phase;
+    if (sentBytes != null) result.sentBytes = sentBytes;
+    if (totalBytes != null) result.totalBytes = totalBytes;
+    if (version != null) result.version = version;
+    if (previousVersion != null) result.previousVersion = previousVersion;
+    if (restart != null) result.restart = restart;
+    if (message != null) result.message = message;
+    return result;
+  }
+
+  UpdateNodeProgress._();
+
+  factory UpdateNodeProgress.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateNodeProgress()..mergeFromBuffer(data, registry);
+  factory UpdateNodeProgress.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateNodeProgress()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UpdateNodeProgress',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: UpdateNodeProgress.$_createMessage)
+    ..aE<UpdatePhase>(1, _omitFieldNames ? '' : 'phase',
+        enumValues: UpdatePhase.values)
+    ..a<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'sentBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        3, _omitFieldNames ? '' : 'totalBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(4, _omitFieldNames ? '' : 'version')
+    ..aOS(5, _omitFieldNames ? '' : 'previousVersion')
+    ..aOS(6, _omitFieldNames ? '' : 'restart')
+    ..aOS(7, _omitFieldNames ? '' : 'message')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateNodeProgress clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateNodeProgress copyWith(void Function(UpdateNodeProgress) updates) =>
+      super.copyWith((message) => updates(message as UpdateNodeProgress))
+          as UpdateNodeProgress;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UpdateNodeProgress() / UpdateNodeProgress.new instead')
+  static UpdateNodeProgress create() => UpdateNodeProgress._();
+  static $pb.GeneratedMessage $_createMessage() => UpdateNodeProgress._();
+  @$core.override
+  UpdateNodeProgress createEmptyInstance() => UpdateNodeProgress._();
+  @$core.pragma('dart2js:noInline')
+  static UpdateNodeProgress getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<UpdateNodeProgress>(
+          UpdateNodeProgress.$_createMessage);
+  static UpdateNodeProgress? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  UpdatePhase get phase => $_getN(0);
+  @$pb.TagNumber(1)
+  set phase(UpdatePhase value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPhase() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPhase() => $_clearField(1);
+
+  /// sent_bytes and total_bytes are uncompressed bytes of the binary; set from
+  /// SENDING on.
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get sentBytes => $_getI64(1);
+  @$pb.TagNumber(2)
+  set sentBytes($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSentBytes() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSentBytes() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get totalBytes => $_getI64(2);
+  @$pb.TagNumber(3)
+  set totalBytes($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTotalBytes() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTotalBytes() => $_clearField(3);
+
+  /// version is what the new binary reports, previous_version what the node
+  /// ran before; set from SWAPPING on (SKIPPED carries the node's version in
+  /// both).
+  @$pb.TagNumber(4)
+  $core.String get version => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set version($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasVersion() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearVersion() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get previousVersion => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set previousVersion($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasPreviousVersion() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearPreviousVersion() => $_clearField(5);
+
+  /// restart is how the node restarts, as in ApplyUpdateResponse.
+  @$pb.TagNumber(6)
+  $core.String get restart => $_getSZ(5);
+  @$pb.TagNumber(6)
+  set restart($core.String value) => $_setString(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasRestart() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearRestart() => $_clearField(6);
+
+  /// message is a human line about the step.
+  @$pb.TagNumber(7)
+  $core.String get message => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set message($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasMessage() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearMessage() => $_clearField(7);
+}
+
 class ApplyUpdateRequest extends $pb.GeneratedMessage {
   factory ApplyUpdateRequest({
     $core.String? name,
@@ -3704,6 +3929,20 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, ApplyUpdateRequest request) =>
       _client.invoke<ApplyUpdateResponse>(
           ctx, 'NodeService', 'ApplyUpdate', request, ApplyUpdateResponse());
+
+  /// UpdateNode brings a node to the hub's version: the hub sends the node
+  /// the binary for its OS and architecture (its own executable for the hub's
+  /// platform, otherwise protectorate-<os>-<arch> from its binary dir), has
+  /// the node verify and swap it in as ApplyUpdate does, then watches until
+  /// the node reports the new version or puts the old binary back. It streams
+  /// the progress and ends when the update is confirmed, rolled back or
+  /// skipped (the node is already at the hub's version and force is unset);
+  /// any failure ends the stream with an error. Only the owner token may call
+  /// it. The hub's own node cannot be updated this way.
+  $async.Future<UpdateNodeProgress> updateNode(
+          $pb.ClientContext? ctx, UpdateNodeRequest request) =>
+      _client.invoke<UpdateNodeProgress>(
+          ctx, 'NodeService', 'UpdateNode', request, UpdateNodeProgress());
 
   /// SetDeskPolicy sets or clears (policy unset) when agents may drive a
   /// node's desktop. Only the owner token may call it. The hub keeps the

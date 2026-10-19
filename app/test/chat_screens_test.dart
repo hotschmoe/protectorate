@@ -40,6 +40,7 @@ import 'package:protectorate/hubs/event_feed.dart';
 import 'package:protectorate/hubs/hub_client.dart';
 import 'package:protectorate/hubs/hub_profile.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
+import 'package:protectorate/nodes/version_skew.dart';
 import 'package:protectorate/screens/chat_screen.dart';
 import 'package:protectorate/screens/sleeves_screen.dart';
 import 'package:protectorate/theme/tokens.dart';
@@ -452,6 +453,7 @@ List<NodeStatus> _fleet(int i) => [
       os: 'windows',
       arch: 'amd64',
       platform: 'windows 11 pro',
+      agentVersion: 'v0.9.0',
       uptimeSeconds: Int64(2 * 86400),
       cpu: CpuMetrics(logicalCores: 24, usagePercent: 6.2),
       memory: MemoryMetrics(
@@ -603,7 +605,12 @@ Transport _hubTransport(StreamController<Event> events) {
         NodeService.listNodes,
         (ListNodesRequest r, ctx) => ListNodesResponse(nodes: _fleet(polls++)),
       )
-      .unary(NodeService.getNode, (GetNodeRequest r, ctx) => _forge(polls++))
+      .unary(
+        NodeService.getNode,
+        (GetNodeRequest r, ctx) => r.name == 'forge'
+            ? _forge(polls++)
+            : _fleet(0).firstWhere((n) => n.node.name == r.name),
+      )
       .unary(
         QuotaService.getQuota,
         (GetQuotaRequest r, ctx) => GetQuotaResponse(quotas: _quotas()),
@@ -702,6 +709,7 @@ Future<void> _pumpShell(
           hub: _hub,
           clientFactory: (_) => HubClient.withTransport(transport),
           initialTab: tab,
+          appVersion: 'v0.9.2',
         ),
       ),
     ),
@@ -876,39 +884,42 @@ void main() {
         });
       }
 
-      testWidgets('node $tag', (tester) async {
-        tester.view.physicalSize = Size(w.toDouble(), phone ? 2400 : 1400);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.reset);
-        final events = StreamController<Event>.broadcast();
-        addTearDown(events.close);
-        final feed = EventFeed(() => events.stream)..start();
-        addTearDown(feed.dispose);
-        final key = GlobalKey();
-        await tester.pumpWidget(
-          RepaintBoundary(
-            key: key,
-            child: MaterialApp(
-              debugShowCheckedModeBanner: false,
-              theme: appTheme(b),
-              home: NodeDetailScreen(
-                hub: _hub,
-                client: HubClient.withTransport(_hubTransport(events)),
-                feed: feed,
-                name: 'forge',
+      for (final node in ['forge', 'win-desk']) {
+        testWidgets('node $node $tag', (tester) async {
+          tester.view.physicalSize = Size(w.toDouble(), phone ? 2400 : 1400);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          final events = StreamController<Event>.broadcast();
+          addTearDown(events.close);
+          final feed = EventFeed(() => events.stream)..start();
+          addTearDown(feed.dispose);
+          final key = GlobalKey();
+          await tester.pumpWidget(
+            RepaintBoundary(
+              key: key,
+              child: MaterialApp(
+                debugShowCheckedModeBanner: false,
+                theme: appTheme(b),
+                home: NodeDetailScreen(
+                  hub: _hub,
+                  client: HubClient.withTransport(_hubTransport(events)),
+                  feed: feed,
+                  name: node,
+                  versions: const Versions(hub: 'v0.9.2', app: 'v0.9.2'),
+                ),
               ),
             ),
-          ),
-        );
-        await tester.pump();
-        for (var i = 0; i < 40; i++) {
-          events.add(Event(kind: 'node.metrics', subject: 'forge'));
-          await tester.pump(const Duration(milliseconds: 50));
-        }
-        await tester.pump(const Duration(milliseconds: 600));
-        await _shoot(tester, key, 'node-$tag');
-        await tester.pumpWidget(const SizedBox());
-      });
+          );
+          await tester.pump();
+          for (var i = 0; i < 40; i++) {
+            events.add(Event(kind: 'node.metrics', subject: node));
+            await tester.pump(const Duration(milliseconds: 50));
+          }
+          await tester.pump(const Duration(milliseconds: 600));
+          await _shoot(tester, key, 'node-$node-$tag');
+          await tester.pumpWidget(const SizedBox());
+        });
+      }
 
       testWidgets('hubs $tag', (tester) async {
         tester.view.physicalSize = Size(w.toDouble(), phone ? 900 : 700);

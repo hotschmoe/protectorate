@@ -125,6 +125,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.GetFileRequest request);
   $async.Future<$6.ApplyUpdateResponse> applyUpdate(
       $pb.ServerContext ctx, $6.ApplyUpdateRequest request);
+  $async.Future<$6.UpdateNodeProgress> updateNode(
+      $pb.ServerContext ctx, $6.UpdateNodeRequest request);
   $async.Future<$6.DeskPolicyStatus> setDeskPolicy(
       $pb.ServerContext ctx, $6.SetDeskPolicyRequest request);
   $async.Future<$6.DeskPolicyStatus> getDeskPolicy(
@@ -146,6 +148,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return $6.GetFileRequest();
       case 'ApplyUpdate':
         return $6.ApplyUpdateRequest();
+      case 'UpdateNode':
+        return $6.UpdateNodeRequest();
       case 'SetDeskPolicy':
         return $6.SetDeskPolicyRequest();
       case 'GetDeskPolicy':
@@ -172,6 +176,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return getFile(ctx, request as $6.GetFileRequest);
       case 'ApplyUpdate':
         return applyUpdate(ctx, request as $6.ApplyUpdateRequest);
+      case 'UpdateNode':
+        return updateNode(ctx, request as $6.UpdateNodeRequest);
       case 'SetDeskPolicy':
         return setDeskPolicy(ctx, request as $6.SetDeskPolicyRequest);
       case 'GetDeskPolicy':
