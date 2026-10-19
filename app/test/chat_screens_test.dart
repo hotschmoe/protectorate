@@ -1,15 +1,37 @@
-// Renders chat and sleeve screens to PNG. Skipped unless SCREENSHOT_DIR is set.
+// Renders every main screen to PNG with realistic fake data, phone and
+// desktop, both themes. Skipped unless SCREENSHOT_DIR is set.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:connectrpc/connect.dart';
 import 'package:connectrpc/test.dart';
 import 'package:fixnum/fixnum.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
+    as pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/quota.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/quota.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/session.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/session.pb.dart';
+import 'package:protectorate/screens/history_screen.dart';
+import 'package:protectorate/screens/hub_shell.dart';
+import 'package:protectorate/screens/hubs_screen.dart';
+import 'package:protectorate/screens/node_detail_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:protectorate/gen/protectorate/v1/chat.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/chat.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/sleeve.connect.spec.dart';
@@ -149,6 +171,10 @@ Future<void> _loadFonts() async {
     ..addFont(read('assets/fonts/JetBrainsMonoNL-Bold.ttf'))
     ..addFont(read('assets/fonts/JetBrainsMonoNL-Italic.ttf'));
   await mono.load();
+  final seg = FontLoader(segmentFamily)
+    ..addFont(read('assets/fonts/DSEG7Classic-Regular.ttf'))
+    ..addFont(read('assets/fonts/DSEG7Classic-Bold.ttf'));
+  await seg.load();
 }
 
 Future<void> _shoot(WidgetTester tester, GlobalKey key, String name) async {
@@ -196,6 +222,502 @@ Sleeve _sleeve(
           contextWindow: Int64(win),
         ),
 );
+
+Timestamp _ago(Duration d) =>
+    Timestamp.fromDateTime(DateTime.now().toUtc().subtract(d));
+Timestamp _in(Duration d) =>
+    Timestamp.fromDateTime(DateTime.now().toUtc().add(d));
+Int64 _gb(num g) => Int64((g * (1 << 30)).round());
+pb.Duration _dur(Duration d) => pb.Duration(seconds: Int64(d.inSeconds));
+
+double _wave(int i, double base, double amp) =>
+    (base + amp * math.sin(i / 2.7) + ((i * 37) % 11) - 5).clamp(1.0, 99.0);
+
+NodeStatus _forge(int i) => NodeStatus(
+  node: NodeInfo(
+    name: 'forge',
+    address: '100.64.0.1:7475',
+    tier: 'workstation',
+    tags: ['gpu', 'docker'],
+    local: true,
+  ),
+  freshness: NodeFreshness.NODE_FRESHNESS_FRESH,
+  alerts: [
+    NodeAlert(
+      kind: AlertKind.ALERT_KIND_DISK_PERCENT,
+      subject: '/data',
+      value: 82,
+    ),
+  ],
+  metrics: NodeMetrics(
+    hostname: 'forge',
+    os: 'linux',
+    arch: 'amd64',
+    platform: 'ubuntu 24.04',
+    agentVersion: 'v0.9.2',
+    uptimeSeconds: Int64(9 * 86400 + 4 * 3600),
+    collectedAt: _ago(Duration(seconds: (200 - i) * 30)),
+    cpu: CpuMetrics(
+      logicalCores: 16,
+      usagePercent: _wave(i, 38, 22),
+      load1: 3.21,
+      load5: 2.84,
+      load15: 2.10,
+    ),
+    memory: MemoryMetrics(
+      totalBytes: _gb(64),
+      usedBytes: _gb(37.4),
+      usedPercent: 58.4,
+      swapTotalBytes: _gb(8),
+      swapUsedBytes: _gb(0.4),
+      swapUsedPercent: 5,
+    ),
+    filesystems: [
+      FilesystemMetrics(
+        mount: '/',
+        device: '/dev/nvme0n1p2',
+        fstype: 'ext4',
+        totalBytes: _gb(930),
+        usedBytes: _gb(577),
+        usedPercent: 62.0,
+      ),
+      FilesystemMetrics(
+        mount: '/data',
+        device: '/dev/md0',
+        fstype: 'xfs',
+        totalBytes: _gb(7450),
+        usedBytes: _gb(6110),
+        usedPercent: 82.0,
+      ),
+      FilesystemMetrics(
+        mount: '/boot/efi',
+        device: '/dev/nvme0n1p1',
+        fstype: 'vfat',
+        totalBytes: _gb(1),
+        usedBytes: _gb(0.31),
+        usedPercent: 31.0,
+      ),
+    ],
+    gpus: [
+      GpuMetrics(
+        index: 0,
+        vendor: 'nvidia',
+        name: 'RTX 4090',
+        utilizationPercent: _wave(i + 5, 66, 25),
+        memoryUsedBytes: _gb(18.2),
+        memoryTotalBytes: _gb(24),
+        temperatureCelsius: 66,
+      ),
+    ],
+    engine: ContainerEngine(
+      kind: 'docker',
+      version: '27.3.1',
+      diskMeasuredAt: _ago(const Duration(minutes: 4)),
+      disk: EngineDiskUsage(
+        images: DiskBucket(
+          count: Int64(41),
+          sizeBytes: _gb(96),
+          reclaimableBytes: _gb(52),
+        ),
+        buildCache: DiskBucket(
+          count: Int64(318),
+          sizeBytes: _gb(141),
+          reclaimableBytes: _gb(141),
+        ),
+        volumes: DiskBucket(
+          count: Int64(12),
+          sizeBytes: _gb(38),
+          reclaimableBytes: _gb(4),
+        ),
+        containers: DiskBucket(count: Int64(5), sizeBytes: _gb(9)),
+      ),
+      containers: [
+        ContainerMetrics(
+          name: 'postgres',
+          state: 'running',
+          cpuPercent: 3.4,
+          memoryUsedBytes: _gb(1.2),
+          writableLayerBytes: _gb(0.4),
+          createdAt: _ago(const Duration(days: 12)),
+        ),
+        ContainerMetrics(
+          name: 'buildkitd',
+          state: 'running',
+          cpuPercent: 41.0,
+          memoryUsedBytes: _gb(3.1),
+          writableLayerBytes: _gb(6.8),
+          createdAt: _ago(const Duration(days: 3)),
+        ),
+        ContainerMetrics(
+          name: 'redis',
+          state: 'running',
+          cpuPercent: 0.6,
+          memoryUsedBytes: _gb(0.2),
+          writableLayerBytes: _gb(0.01),
+          createdAt: _ago(const Duration(days: 12)),
+        ),
+        ContainerMetrics(
+          name: 'grafana',
+          state: 'exited',
+          writableLayerBytes: _gb(1.4),
+          createdAt: _ago(const Duration(days: 40)),
+        ),
+      ],
+    ),
+    watchDirs: [
+      DirSize(
+        path: '/home/me/.cache/bazel',
+        sizeBytes: _gb(84),
+        complete: true,
+        measuredAt: _ago(const Duration(minutes: 9)),
+      ),
+      DirSize(
+        path: '/home/me/.cargo',
+        sizeBytes: _gb(22),
+        measuredAt: _ago(const Duration(minutes: 9)),
+      ),
+    ],
+    sleeves: [
+      Sleeve(
+        name: 'auth-fix',
+        harness: Harness.HARNESS_CLAUDE,
+        state: SleeveState.SLEEVE_STATE_RUNNING,
+        limits: SleeveLimits(cpuPercent: 200, memoryBytes: _gb(4)),
+        usage: SleeveUsage(
+          cpuPercent: 62,
+          memoryCurrentBytes: _gb(1.66),
+          memoryPeakBytes: _gb(2.1),
+          pids: 38,
+          workspaceDiskBytes: _gb(3.4),
+        ),
+      ),
+      Sleeve(
+        name: 'refactor',
+        harness: Harness.HARNESS_CODEX,
+        state: SleeveState.SLEEVE_STATE_RUNNING,
+        limits: SleeveLimits(cpuPercent: 200, memoryBytes: _gb(4)),
+        usage: SleeveUsage(
+          cpuPercent: 181,
+          memoryCurrentBytes: _gb(3.7),
+          memoryPeakBytes: _gb(3.9),
+          pids: 112,
+          oomKills: Int64(1),
+          workspaceDiskBytes: _gb(11.2),
+        ),
+      ),
+    ],
+  ),
+);
+
+List<NodeStatus> _fleet(int i) => [
+  _forge(i),
+  NodeStatus(
+    node: NodeInfo(name: 'arc', address: '100.64.0.7:7475', tier: 'arm'),
+    freshness: NodeFreshness.NODE_FRESHNESS_FRESH,
+    alerts: [
+      NodeAlert(
+        kind: AlertKind.ALERT_KIND_DISK_PERCENT,
+        subject: '/',
+        value: 93,
+      ),
+    ],
+    metrics: NodeMetrics(
+      os: 'linux',
+      arch: 'arm64',
+      platform: 'debian 13',
+      uptimeSeconds: Int64(41 * 86400),
+      collectedAt: _ago(Duration(seconds: (200 - i) * 30)),
+      cpu: CpuMetrics(logicalCores: 8, usagePercent: _wave(i + 9, 14, 8)),
+      memory: MemoryMetrics(
+        totalBytes: _gb(16),
+        usedBytes: _gb(6.6),
+        usedPercent: 41.2,
+      ),
+      filesystems: [
+        FilesystemMetrics(
+          mount: '/',
+          totalBytes: _gb(256),
+          usedBytes: _gb(239),
+          usedPercent: 93.4,
+        ),
+      ],
+      engine: ContainerEngine(kind: 'podman', version: '5.2'),
+    ),
+  ),
+  NodeStatus(
+    node: NodeInfo(name: 'win-desk', address: '100.64.0.4:7475'),
+    freshness: NodeFreshness.NODE_FRESHNESS_STALE,
+    age: _dur(const Duration(minutes: 2)),
+    metrics: NodeMetrics(
+      os: 'windows',
+      arch: 'amd64',
+      platform: 'windows 11 pro',
+      uptimeSeconds: Int64(2 * 86400),
+      cpu: CpuMetrics(logicalCores: 24, usagePercent: 6.2),
+      memory: MemoryMetrics(
+        totalBytes: _gb(32),
+        usedBytes: _gb(21.1),
+        usedPercent: 66.0,
+      ),
+      filesystems: [
+        FilesystemMetrics(
+          mount: 'C:',
+          totalBytes: _gb(1900),
+          usedBytes: _gb(1010),
+          usedPercent: 53.1,
+        ),
+      ],
+      gpus: [
+        GpuMetrics(
+          name: 'Arc A770',
+          vendor: 'intel',
+          utilizationPercent: 3,
+          memoryUsedBytes: _gb(2),
+          memoryTotalBytes: _gb(16),
+          temperatureCelsius: -1,
+        ),
+      ],
+    ),
+  ),
+  NodeStatus(
+    node: NodeInfo(
+      name: 'pi-lab',
+      address: '100.64.0.9:7475',
+      os: 'linux',
+      arch: 'arm64',
+    ),
+    freshness: NodeFreshness.NODE_FRESHNESS_UNREACHABLE,
+    age: _dur(const Duration(hours: 3)),
+    error: 'dial tcp 100.64.0.9:7475: connect: no route to host',
+    alerts: [NodeAlert(kind: AlertKind.ALERT_KIND_UNREACHABLE)],
+    metrics: NodeMetrics(
+      os: 'linux',
+      arch: 'arm64',
+      cpu: CpuMetrics(logicalCores: 4, usagePercent: 9),
+      memory: MemoryMetrics(totalBytes: _gb(8), usedPercent: 30),
+    ),
+  ),
+];
+
+List<ProviderQuota> _quotas() => [
+  ProviderQuota(
+    provider: 'claude',
+    plan: 'max',
+    freshness: Freshness.FRESHNESS_FRESH,
+    windows: [
+      QuotaWindow(
+        name: '5h',
+        usedPercent: 64,
+        resetsAt: _in(const Duration(hours: 2, minutes: 14)),
+        estimatedUnusedPercentAtReset: 9,
+      ),
+      QuotaWindow(
+        name: '7d',
+        usedPercent: 38,
+        resetsAt: _in(const Duration(days: 3, hours: 4)),
+        estimatedUnusedPercentAtReset: 22,
+      ),
+    ],
+    resets: [
+      ResetCredit(
+        kind: 'weekly reset',
+        count: 1,
+        expiresAt: _in(const Duration(days: 9)),
+      ),
+    ],
+  ),
+  ProviderQuota(
+    provider: 'codex',
+    plan: 'pro',
+    freshness: Freshness.FRESHNESS_FRESH,
+    windows: [
+      QuotaWindow(
+        name: '5h',
+        usedPercent: 91,
+        resetsAt: _in(const Duration(minutes: 41)),
+      ),
+      QuotaWindow(
+        name: 'week',
+        usedPercent: 47,
+        resetsAt: _in(const Duration(days: 4, hours: 19)),
+      ),
+    ],
+  ),
+  ProviderQuota(
+    provider: 'grok',
+    plan: 'supergrok',
+    freshness: Freshness.FRESHNESS_STALE,
+    age: _dur(const Duration(minutes: 25)),
+    windows: [
+      QuotaWindow(
+        name: '2h',
+        usedPercent: 30,
+        resetsAt: _in(const Duration(minutes: 77)),
+      ),
+    ],
+  ),
+  ProviderQuota(
+    provider: 'antigravity',
+    freshness: Freshness.FRESHNESS_UNKNOWN,
+    error: 'token expired; run protectorate login antigravity',
+  ),
+];
+
+final _logEvents = [
+  ('session.started', 'work', 52),
+  ('sleeve.spawned', 'research', 40),
+  ('chat.approval', 'auth-fix', 31),
+  ('backlog.claimed', 'a1', 29),
+  ('quota.refreshed', 'claude', 18),
+  ('node.unreachable', 'pi-lab', 11),
+  ('lease.acquired', 'desk:win-desk', 6),
+  ('msg.delivered', 'refactor', 2),
+];
+
+// A hub with every service the shell reads; each node poll moves the
+// readings so the history graphs fill.
+Transport _hubTransport(StreamController<Event> events) {
+  var polls = 0;
+  return FakeTransportBuilder()
+      .server(
+        EventService.subscribe,
+        (SubscribeRequest r, ctx) => events.stream,
+      )
+      .unary(
+        HubService.getStatus,
+        (GetStatusRequest r, ctx) => GetStatusResponse(
+          hostname: 'forge',
+          os: 'linux',
+          arch: 'amd64',
+          version: 'v0.9.2',
+          uptimeSeconds: Int64(9 * 86400 + 4 * 3600),
+        ),
+      )
+      .unary(
+        NodeService.listNodes,
+        (ListNodesRequest r, ctx) => ListNodesResponse(nodes: _fleet(polls++)),
+      )
+      .unary(NodeService.getNode, (GetNodeRequest r, ctx) => _forge(polls++))
+      .unary(
+        QuotaService.getQuota,
+        (GetQuotaRequest r, ctx) => GetQuotaResponse(quotas: _quotas()),
+      )
+      .unary(
+        SessionService.listSessions,
+        (ListSessionsRequest r, ctx) => ListSessionsResponse(
+          sessions: [
+            Session(
+              name: 'work',
+              cwd: '/home/me/src/protectorate',
+              attachedClients: 1,
+            ),
+            Session(name: 'logs', cwd: '/var/log'),
+            Session(
+              name: 'build-arm',
+              cwd: '/home/me/src/protectorate',
+              attachedClients: 2,
+            ),
+          ],
+        ),
+      )
+      .unary(
+        SessionService.capturePane,
+        (CapturePaneRequest r, ctx) => CapturePaneResponse(text: _pane),
+      )
+      .unary(
+        BacklogService.listItems,
+        (ListItemsRequest r, ctx) => ListItemsResponse(
+          items: [
+            Item(
+              id: 'a1',
+              project: 'hotschmoe/protectorate',
+              title: 'Reject empty passwords in the login form',
+              priority: 1,
+              harness: 'claude',
+              state: ItemState.ITEM_STATE_CLAIMED,
+              claim: Claim(by: 'auth-fix/claude'),
+            ),
+            Item(
+              id: 'a2',
+              project: 'hotschmoe/protectorate',
+              title: 'Per-sleeve GPU accounting on Arc Pro',
+              priority: 2,
+              state: ItemState.ITEM_STATE_TODO,
+            ),
+            Item(
+              id: 'a3',
+              project: 'hotschmoe/protectorate',
+              title: 'Quota refresh backoff',
+              state: ItemState.ITEM_STATE_DONE,
+            ),
+            Item(
+              id: 'b1',
+              project: 'acme/web',
+              title: 'Migrate the build to bazel 8',
+              priority: 3,
+              harness: 'codex',
+              state: ItemState.ITEM_STATE_TODO,
+            ),
+          ],
+        ),
+      )
+      .build();
+}
+
+const _pane =
+    '\x1b[38;5;214mme@forge\x1b[0m:\x1b[34m~/src/protectorate\x1b[0m\$ git status -sb\r\n'
+    '## pivot-city...origin/pivot-city\r\n'
+    ' \x1b[31mM\x1b[0m app/lib/theme/tokens.dart\r\n'
+    '\x1b[32m??\x1b[0m app/lib/vfd/\r\n'
+    '\x1b[38;5;214mme@forge\x1b[0m:\x1b[34m~/src/protectorate\x1b[0m\$ make test\r\n'
+    'go vet ./...\r\n'
+    'go test -race ./...\r\n'
+    'ok  \tgithub.com/hotschmoe/protectorate/internal/hub\t4.112s\r\n'
+    'ok  \tgithub.com/hotschmoe/protectorate/internal/node\t2.380s\r\n'
+    '\x1b[31mFAIL\x1b[0m\tgithub.com/hotschmoe/protectorate/internal/auth\t0.041s\r\n'
+    '\x1b[33mwarning:\x1b[0m 1 package failed\r\n'
+    '\x1b[38;5;214mme@forge\x1b[0m:\x1b[34m~/src/protectorate\x1b[0m\$ ';
+
+Future<void> _pumpShell(
+  WidgetTester tester,
+  GlobalKey key,
+  Brightness b,
+  String tab,
+  StreamController<Event> events,
+) async {
+  final transport = _hubTransport(events);
+  await tester.pumpWidget(
+    RepaintBoundary(
+      key: key,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: appTheme(b),
+        home: HubShell(
+          hub: _hub,
+          clientFactory: (_) => HubClient.withTransport(transport),
+          initialTab: tab,
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
+  for (final (kind, subject, minutes) in _logEvents) {
+    events.add(
+      Event(
+        kind: kind,
+        subject: subject,
+        time: _ago(Duration(minutes: minutes)),
+      ),
+    );
+  }
+  for (var i = 0; i < 40; i++) {
+    events.add(
+      Event(kind: 'node.metrics', subject: 'forge', time: _ago(Duration.zero)),
+    );
+    await tester.pump(const Duration(milliseconds: 350));
+  }
+  await tester.pump(const Duration(milliseconds: 600));
+}
 
 void main() {
   if (_dir == null) {
@@ -248,6 +770,7 @@ void main() {
         addTearDown(tester.view.reset);
         final key = GlobalKey();
         final transport = FakeTransportBuilder()
+            .server(ChatService.watch, (WatchRequest r, ctx) => _transcript())
             .unary(
               SleeveService.listSleeves,
               (ListSleevesRequest r, ctx) => ListSleevesResponse(
@@ -328,6 +851,120 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
         await _shoot(tester, key, 'sleeves-$tag');
         await tester.pumpWidget(const SizedBox());
+      });
+
+      final phone = w == 412;
+      final size = Size(w.toDouble(), phone ? 1200 : 860);
+
+      for (final tab in ['overview', 'nodes', 'quota', 'sessions', 'backlog']) {
+        testWidgets('$tab $tag', (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          final events = StreamController<Event>.broadcast();
+          addTearDown(events.close);
+          final key = GlobalKey();
+          await _pumpShell(tester, key, b, tab, events);
+          await _shoot(tester, key, '$tab-$tag');
+          await tester.pumpWidget(const SizedBox());
+        });
+      }
+
+      testWidgets('node $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 2400 : 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final feed = EventFeed(() => events.stream)..start();
+        addTearDown(feed.dispose);
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: NodeDetailScreen(
+                hub: _hub,
+                client: HubClient.withTransport(_hubTransport(events)),
+                feed: feed,
+                name: 'forge',
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        for (var i = 0; i < 40; i++) {
+          events.add(Event(kind: 'node.metrics', subject: 'forge'));
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.pump(const Duration(milliseconds: 600));
+        await _shoot(tester, key, 'node-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('hubs $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 900 : 700);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        SharedPreferences.setMockInitialValues({
+          'hubs': jsonEncode([
+            const HubProfile(
+              id: '1',
+              name: 'home',
+              baseUrl: 'https://forge.tail0b1c.ts.net:7470',
+              token: 't',
+            ).toJson(),
+            const HubProfile(
+              id: '2',
+              name: 'office',
+              baseUrl: 'http://10.20.0.2:7470',
+            ).toJson(),
+          ]),
+        });
+        final store = HubStore(await SharedPreferences.getInstance());
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: HubsScreen(
+                store: store,
+                clientFactory: (_) => throw UnimplementedError(),
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+        await _shoot(tester, key, 'hubs-$tag');
+      });
+
+      testWidgets('terminal $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 800 : 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: HistoryScreen(
+                client: HubClient.withTransport(_hubTransport(events)),
+                session: 'work',
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await _shoot(tester, key, 'terminal-$tag');
       });
     }
   }
