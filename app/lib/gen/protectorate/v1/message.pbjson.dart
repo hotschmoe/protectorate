@@ -88,7 +88,7 @@ const MessageServiceSendResponse$json = {
     },
     {'1': 'duplicate', '3': 2, '4': 1, '5': 8, '10': 'duplicate'},
     {'1': 'waiting', '3': 3, '4': 1, '5': 8, '10': 'waiting'},
-    {'1': 'backlog_item', '3': 4, '4': 1, '5': 9, '10': 'backlogItem'},
+    {'1': 'note_id', '3': 4, '4': 1, '5': 9, '10': 'noteId'},
   ],
 };
 
@@ -96,8 +96,7 @@ const MessageServiceSendResponse$json = {
 final $typed_data.Uint8List messageServiceSendResponseDescriptor = $convert.base64Decode(
     'ChpNZXNzYWdlU2VydmljZVNlbmRSZXNwb25zZRI2CgdtZXNzYWdlGAEgASgLMhwucHJvdGVjdG'
     '9yYXRlLnYxLk1haWxNZXNzYWdlUgdtZXNzYWdlEhwKCWR1cGxpY2F0ZRgCIAEoCFIJZHVwbGlj'
-    'YXRlEhgKB3dhaXRpbmcYAyABKAhSB3dhaXRpbmcSIQoMYmFja2xvZ19pdGVtGAQgASgJUgtiYW'
-    'NrbG9nSXRlbQ==');
+    'YXRlEhgKB3dhaXRpbmcYAyABKAhSB3dhaXRpbmcSFwoHbm90ZV9pZBgEIAEoCVIGbm90ZUlk');
 
 @$core.Deprecated('Use inboxRequestDescriptor instead')
 const InboxRequest$json = {
@@ -277,7 +276,7 @@ const MailMessage$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'escalatedAt'
     },
-    {'1': 'backlog_item', '3': 12, '4': 1, '5': 9, '10': 'backlogItem'},
+    {'1': 'note_id', '3': 12, '4': 1, '5': 9, '10': 'noteId'},
   ],
 };
 
@@ -290,8 +289,7 @@ final $typed_data.Uint8List mailMessageDescriptor = $convert.base64Decode(
     'bHlUbxI5CgpjcmVhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJY3'
     'JlYXRlZEF0Ej0KCmRlbGl2ZXJpZXMYCiADKAsyHS5wcm90ZWN0b3JhdGUudjEuTWFpbERlbGl2'
     'ZXJ5UgpkZWxpdmVyaWVzEj0KDGVzY2FsYXRlZF9hdBgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi'
-    '5UaW1lc3RhbXBSC2VzY2FsYXRlZEF0EiEKDGJhY2tsb2dfaXRlbRgMIAEoCVILYmFja2xvZ0l0'
-    'ZW0=');
+    '5UaW1lc3RhbXBSC2VzY2FsYXRlZEF0EhcKB25vdGVfaWQYDCABKAlSBm5vdGVJZA==');
 
 @$core.Deprecated('Use mailDeliveryDescriptor instead')
 const MailDelivery$json = {

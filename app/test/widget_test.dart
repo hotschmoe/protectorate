@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connectrpc/test.dart';
 import 'package:flutter/material.dart';
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart';
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
@@ -33,15 +34,16 @@ const _hub = HubProfile(
 HubClient _fakeClient(HubProfile p, {void Function(String?)? onAuth}) {
   final transport = FakeTransportBuilder()
       .unary(
-        BacklogService.listItems,
-        (ListItemsRequest r, ctx) => ListItemsResponse(
-          items: [
-            Item(
+        BacklogService.listNotes,
+        (ListNotesRequest r, ctx) => ListNotesResponse(
+          notes: [
+            Note(
               id: 'a1',
               project: 'acme/app',
               title: 'fix login',
-              priority: 2,
-              state: ItemState.ITEM_STATE_TODO,
+              body: 'The form accepts empty passwords.',
+              source: 'auth-fix',
+              updatedAt: Timestamp.fromDateTime(DateTime.now().toUtc()),
             ),
           ],
         ),
@@ -179,8 +181,9 @@ void main() {
       expect(find.byKey(const ValueKey('nav-bar')), findsNothing);
       await tester.tap(find.text('BACKLOG'));
       await tester.pumpAndSettle();
-      expect(find.text('acme/app'), findsOneWidget);
+      expect(find.byKey(const ValueKey('tag-acme/app')), findsOneWidget);
       expect(find.text('fix login'), findsOneWidget);
+      expect(find.text('from sleeve auth-fix'), findsOneWidget);
     });
   });
 

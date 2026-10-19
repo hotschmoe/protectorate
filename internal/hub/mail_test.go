@@ -37,7 +37,7 @@ func newMailRig(t *testing.T) *mailRig {
 	t.Helper()
 	r := newChatRig(t)
 	t.Setenv("PROTECTORATE_HOME", t.TempDir())
-	r.h.SetBacklog(backlog.NewStore(filepath.Join(t.TempDir(), "backlog.md")))
+	r.h.SetBacklog(backlog.NewStore(t.TempDir()))
 	r.h.SelfURL = "http://127.0.0.1:1"
 	m := &mailRig{chatRig: r, home: t.TempDir(), clock: &clock{t: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)}}
 	if err := r.h.EnableCoordination(m.home); err != nil {
@@ -160,10 +160,10 @@ func TestRenderMessage(t *testing.T) {
 			want: "[notice m9 from hub, thread t4, ack required]\nx\n\nAck: protectorate msg ack m9",
 		},
 		{
-			name: "request already filed as a backlog item",
-			m:    mailbox.Message{ID: "m5", Thread: "t2", From: "api", Kind: mailbox.Request, AckRequired: true, Body: "export Foo", BacklogItem: "b7"},
+			name: "request already filed as a note",
+			m:    mailbox.Message{ID: "m5", Thread: "t2", From: "api", Kind: mailbox.Request, AckRequired: true, Body: "export Foo", NoteID: "b7"},
 			want: "[request m5 from sleeve api, thread t2, ack required]\nexport Foo\n\n" +
-				"This request is already filed as backlog item b7 for the project. Work it from the backlog; do not add another item for it.\n" +
+				"This request is already filed as note b7 for the project. Work it from the note (protectorate backlog show b7); do not add another note for it.\n" +
 				"Reply: protectorate msg reply m5 \"...\"\nAck: protectorate msg ack m5",
 		},
 		{
@@ -459,7 +459,7 @@ func TestMailProjectAddressing(t *testing.T) {
 	apidev := r.as("apidev")
 
 	got := r.post(apidev, "project:acme/lib", "please export Foo", func(q *pb.MessageServiceSendRequest) { q.Kind = pb.MessageKind_MESSAGE_KIND_REQUEST })
-	if got.Waiting || got.BacklogItem != "" || len(got.Message.Deliveries) != 1 || got.Message.Deliveries[0].Recipient != "libdev" {
+	if got.Waiting || got.NoteId != "" || len(got.Message.Deliveries) != 1 || got.Message.Deliveries[0].Recipient != "libdev" {
 		t.Fatalf("project address did not resolve to its sleeve: %v", got)
 	}
 	r.pass()
@@ -469,22 +469,25 @@ func TestMailProjectAddressing(t *testing.T) {
 		t.Fatalf("libdev got %v", us)
 	}
 
-	// no live owner: the request waits and is filed as a backlog item
+	// no live owner: the request waits and is filed as a backlog note
 	if _, err := r.sl.KillSleeve(r.ctx, connect.NewRequest(&pb.KillSleeveRequest{Name: "libdev"})); err != nil {
 		t.Fatal(err)
 	}
 	r.h.coord.refresh(r.ctx)
 	waiting := r.post(apidev, "project:lib", "and also Bar", func(q *pb.MessageServiceSendRequest) { q.Kind = pb.MessageKind_MESSAGE_KIND_REQUEST })
-	if !waiting.Waiting || waiting.BacklogItem == "" {
+	if !waiting.Waiting || waiting.NoteId == "" {
 		t.Fatalf("waiting request = %v", waiting)
 	}
 	items, err := r.h.backlog.List(backlog.Filter{Project: "acme/lib"})
-	if err != nil || len(items) != 1 || !strings.Contains(items[0].Title, "apidev asks: and also Bar") || items[0].ID != waiting.BacklogItem {
-		t.Fatalf("backlog = %v %v", items, err)
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Title, "apidev asks: and also Bar") || items[0].ID != waiting.NoteId {
+		t.Fatalf("notes = %v %v", items, err)
+	}
+	if items[0].Source != "apidev" || items[0].Project != "acme/lib" || !strings.Contains(items[0].Body, "and also Bar") || !strings.Contains(items[0].Body, "msg reply "+waiting.Message.Id) {
+		t.Fatalf("request note = %+v", items[0])
 	}
 	note := r.post(apidev, "project:lib", "fyi")
-	if !note.Waiting || note.BacklogItem != "" {
-		t.Fatalf("a note must wait without a backlog item: %v", note)
+	if !note.Waiting || note.NoteId != "" {
+		t.Fatalf("a note must wait without a note: %v", note)
 	}
 
 	// a sleeve for the project appears: the waiting messages go to it
@@ -496,8 +499,8 @@ func TestMailProjectAddressing(t *testing.T) {
 	if len(us) != 1 || !strings.Contains(us[0].text, "and also Bar") || !strings.Contains(us[0].text, "fyi") || us[0].from != "mailbox" {
 		t.Fatalf("libdev2 got %v", us)
 	}
-	if n := strings.Count(us[0].text, "backlog item "+waiting.BacklogItem); n != 1 {
-		t.Fatalf("delivery names backlog item %s %d times: %s", waiting.BacklogItem, n, us[0].text)
+	if n := strings.Count(us[0].text, "as note "+waiting.NoteId); n != 1 {
+		t.Fatalf("delivery names note %s %d times: %s", waiting.NoteId, n, us[0].text)
 	}
 	if items, err := r.h.backlog.List(backlog.Filter{Project: "acme/lib"}); err != nil || len(items) != 1 {
 		t.Fatalf("more than one actionable copy of the request: %v %v", items, err)

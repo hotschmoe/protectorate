@@ -12,7 +12,7 @@ Nothing is hand-listed. At startup the bridge reads an embedded buf image
 RPC into a tool:
 
 - name: `<service>_<method>` in snake_case without the `Service` suffix, e.g.
-  `quota_get_quota`, `backlog_add_item`
+  `quota_get_quota`, `backlog_create_note`
 - description: the RPC's proto comment; field comments become property
   descriptions
 - input schema: derived from the request message (enums as string enums,
@@ -100,9 +100,11 @@ address, including an empty host, is refused.
 ## Example tool list (`--allow '*'`)
 
 ```
-backlog_add_item        mutating
-backlog_list_items      read-only
-backlog_update_item     mutating
+backlog_create_note     mutating
+backlog_delete_note     mutating, destructive
+backlog_get_note        read-only
+backlog_list_notes      read-only
+backlog_update_note     mutating
 hub_get_status          read-only
 quota_get_quota         read-only
 quota_suggest           read-only
