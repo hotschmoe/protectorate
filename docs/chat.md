@@ -98,22 +98,23 @@ Native auto-compaction is left at each harness's defaults; when one happens the
 log gets a Compaction event with `native=true`. Context and cache numbers come
 from per-call usage and are zero until the first call.
 
-## Verified live (2026-10-20, scratch hub, no model login)
+## Verified live (2026-10-20, ms-r1, real logins via `protectorate login`)
 
-The scratch hub had no provider login (credentials are never copied), so no
-model turn ran. With the real binaries in real sandboxes: a Claude chat sleeve
-opened `claude -p` stream-json with the autonomous flags, accepted a Send and
-streamed Claude's own "Not logged in" reply into the log; cgroup memory and
-pids were sampled; `chat compact` returned failed_precondition (nothing to
-compact). A pi sleeve did the same ("No API key") and reported "Nothing to
-compact". A Codex sleeve opened `codex app-server` over stdio and started a
-thread. A Grok sleeve was refused at open with "Authentication required", and
-the failed spawn left no sleeve behind. The end-to-end flow (Send, request id
-dedupe, approval, interrupt, compaction, restart and resume, kill) is covered
-by `internal/hub/chat_test.go` with a scripted stand-in for `claude` running in
-the real bwrap/systemd sandbox.
+One chat sleeve per harness on a scratch git workspace, prompt "Read the file
+hello.txt in the current directory and reply with only its first word":
 
-Not verified: real model turns on any harness, Claude `compact_boundary` on a
-real conversation, Codex compaction, Grok chat, Grok `_x.ai/session_notification`
-and `tool_call_update` shapes (taken from research notes), Claude cache expiry
-against a real subscription.
+| | Tool call seen | Answer | Context / window | Cache read on 2nd call | Manual compact |
+|---|---|---|---|---|---|
+| Claude | `Bash` head | banana | 23677 / 1000000 | 23554 | 23681 -> 1978 |
+| Codex | `commandExecution` | banana | 14372 / 475000 | 12288 | 14372 -> 8377 |
+| Grok | `read_file` | banana | 16594 / unknown | 16384 | unimplemented |
+| pi (hotschmoe-local / hotschmoe-dd) | `read` | banana | 1724 / 200000 | 1679 | "nothing to compact" (too small) |
+
+pi's thinking and answer arrive as separate events under one message id. Hub
+restart: drivers die with the hub (`--die-with-parent`, no orphans), and the
+next Send resumed Claude's native session after its compaction (it recalled
+the earlier answer; context 24468, consistent with the compacted history).
+
+Not verified: Grok compaction over ACP, Claude cache expiry against the
+subscription TTL, approvals from a real harness (sleeves run autonomous),
+reconnect mid-message from the app against a real stream.
