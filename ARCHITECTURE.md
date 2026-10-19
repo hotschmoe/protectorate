@@ -382,13 +382,15 @@ node) executes.
 
 ## Harness sessions: attached and dispatched (spike: `spikes/drivers/`)
 
-Pending the user's confirmation that a harness's official headless mode
-counts as "its own harness":
+Decided 2026-10-20: a harness's official headless mode counts as its own
+harness, and it is the default way the user works. Library:
+`internal/driver`.
 
-- **Attached:** the normal TUI under tmux, in a sleeve. This is what the user
-  types into from the phone.
-- **Dispatched** (backlog work, delegation): the harness's own headless
-  protocol, supervised by the hub.
+- **Dispatched (default):** the harness's own headless protocol, supervised by
+  the hub and shown in the app as a chat view (planned: `ChatService`).
+- **Attached (advanced/fallback):** the normal TUI under tmux, in a sleeve,
+  through the xterm view. "Take over" closes the driver and resumes the same
+  native session id in the TUI, and back.
 
 | Harness | Protocol | Settled signal | Approval |
 |---------|----------|----------------|----------|
