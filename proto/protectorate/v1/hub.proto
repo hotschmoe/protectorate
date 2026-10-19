@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+service HubService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string version = 1;
+  string hostname = 2;
+  string os = 3;
+  string arch = 4;
+  int64 uptime_seconds = 5;
+  google.protobuf.Timestamp started_at = 6;
+}

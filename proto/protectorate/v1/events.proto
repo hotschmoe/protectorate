@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+service EventService {
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+}
+
+message SubscribeRequest {}
+
+// Event is the generic envelope for everything the hub announces.
+message Event {
+  string id = 1;
+  google.protobuf.Timestamp time = 2;
+  string kind = 3;
+  string subject = 4;
+  google.protobuf.Struct payload = 5;
+}
