@@ -123,7 +123,7 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 	if _, _, err := s.Ack(a.ID, "libdev2"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetBacklogItem(a.ID, "b7f3"); err != nil {
+	if err := s.SetNoteID(a.ID, "b7f3"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -145,7 +145,7 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 	}
 	d := got.Deliveries
 	if !reflect.DeepEqual(got.Recipients, []string{"libdev", "libdev2"}) || d["libdev"].Delivered == nil || d["libdev"].Acked != nil ||
-		d["libdev2"].Acked == nil || d["libdev2"].Since.IsZero() || got.BacklogItem != "b7f3" || got.Open() {
+		d["libdev2"].Acked == nil || d["libdev2"].Since.IsZero() || got.NoteID != "b7f3" || got.Open() {
 		t.Fatalf("replayed message = %+v", got)
 	}
 	if again, created, _ := re.Send(NewMessage{From: "api", RequestID: "req-1", To: "project:lib", Kind: Request}); created || again.ID != a.ID {

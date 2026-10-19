@@ -1,13 +1,25 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../gen/protectorate/v1/backlog.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
+import '../nodes/node_view.dart';
+import '../notes/note_draft.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
+
+const _sideBySide = 720.0;
+const _listWidth = 340.0;
+
+String sourceLabel(String source) {
+  if (source.isEmpty || source == 'owner') return '';
+  if (source == 'hub' || source.startsWith('token:')) return 'from $source';
+  return 'from sleeve $source';
+}
 
 class BacklogTab extends StatefulWidget {
   const BacklogTab({super.key, required this.client, required this.feed});
@@ -20,16 +32,19 @@ class BacklogTab extends StatefulWidget {
 }
 
 class _BacklogTabState extends State<BacklogTab> {
-  List<Item> _items = const [];
+  List<Note> _notes = const [];
   Object? _error;
   bool _loading = true;
+  String? _filter;
+  NoteDraft? _open;
+  final _background = <NoteDraft>{};
   StreamSubscription<dynamic>? _sub;
 
   @override
   void initState() {
     super.initState();
     _sub = widget.feed.incoming.listen((e) {
-      if (e.kind.startsWith('backlog.')) _refresh();
+      if (e.kind.startsWith('note.')) _refresh();
     });
     _refresh();
   }
@@ -37,18 +52,48 @@ class _BacklogTabState extends State<BacklogTab> {
   @override
   void dispose() {
     _sub?.cancel();
+    for (final d in {?_open, ..._background}) {
+      if (d.hasUnsaved) unawaited(d.flush());
+      d.dispose();
+    }
     super.dispose();
+  }
+
+  NoteDraft _draft([Note? n]) =>
+      NoteDraft(widget.client, note: n, onSaved: _saved);
+
+  void _saved(Note n) {
+    if (!mounted) return;
+    setState(() {
+      _notes = [
+        for (final e in _notes)
+          if (e.id != n.id) e,
+        n,
+      ];
+    });
   }
 
   Future<void> _refresh() async {
     try {
-      final r = await widget.client.backlog.listItems(ListItemsRequest());
-      if (mounted) {
-        setState(() {
-          _items = r.items;
-          _error = null;
-        });
-      }
+      final r = await widget.client.backlog.listNotes(ListNotesRequest());
+      if (!mounted) return;
+      setState(() {
+        _notes = r.notes;
+        _error = null;
+        final byId = {for (final n in r.notes) n.id: n};
+        for (final d in {?_open, ..._background}) {
+          final n = byId[d.id];
+          if (n != null) d.adopt(n);
+        }
+        final open = _open;
+        if (open != null &&
+            open.id != null &&
+            !open.hasUnsaved &&
+            !byId.containsKey(open.id)) {
+          _open = null;
+          open.dispose();
+        }
+      });
     } on Object catch (e) {
       if (mounted) setState(() => _error = e);
     } finally {
@@ -56,252 +101,611 @@ class _BacklogTabState extends State<BacklogTab> {
     }
   }
 
-  Future<void> _done(Item it) async {
-    try {
-      await widget.client.backlog.updateItem(
-        UpdateItemRequest(id: it.id, state: ItemState.ITEM_STATE_DONE),
-      );
-      await _refresh();
-    } on Object catch (e) {
-      if (mounted) setState(() => _error = e);
-    }
+  List<Note> get _sorted {
+    final shown = [
+      for (final n in _notes)
+        if (_filter == null || n.project == _filter) n,
+    ];
+    shown.sort((a, b) {
+      if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+      return b.updatedAt.toDateTime().compareTo(a.updatedAt.toDateTime());
+    });
+    return shown;
   }
 
-  Future<void> _add() async {
-    final projects = {for (final i in _items) i.project}.toList()..sort();
-    final req = await showDialog<AddItemRequest>(
+  List<String> get _tags => {
+    for (final n in _notes)
+      if (n.project.isNotEmpty) n.project,
+  }.toList()..sort();
+
+  void _close() {
+    final d = _open;
+    if (d == null) return;
+    setState(() => _open = null);
+    _retire(d);
+  }
+
+  void _select(Note n) {
+    if (_open?.id == n.id) return;
+    final held = _background.where((d) => d.id == n.id).firstOrNull;
+    final previous = _open;
+    setState(() {
+      if (held != null) _background.remove(held);
+      _open = held ?? _draft(n);
+    });
+    if (previous != null) _retire(previous);
+  }
+
+  // A draft with edits the hub has not taken yet keeps saving in the
+  // background after its editor is gone.
+  void _retire(NoteDraft d) {
+    if (!d.hasUnsaved || d.state == SaveState.rejected || d.blank) {
+      d.dispose();
+      return;
+    }
+    _background.add(d);
+    void settle() {
+      if (d.hasUnsaved) return;
+      d.removeListener(settle);
+      _background.remove(d);
+      scheduleMicrotask(d.dispose);
+    }
+
+    d.addListener(settle);
+    unawaited(d.flush());
+  }
+
+  void _new() {
+    final previous = _open;
+    setState(() => _open = _draft());
+    if (previous != null) _retire(previous);
+  }
+
+  Future<void> _delete(NoteDraft d) async {
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => _AddItemDialog(projects: projects),
+      builder: (_) => AlertDialog(
+        title: const Text('Delete this note?'),
+        content: Text(
+          d.title.isEmpty ? 'It has no title.' : d.title,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('note-delete-cancel'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            key: const ValueKey('note-delete-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('DELETE'),
+          ),
+        ],
+      ),
     );
-    if (req == null) return;
+    if (ok != true || !mounted) return;
+    final id = d.id;
     try {
-      await widget.client.backlog.addItem(req);
-      await _refresh();
+      if (id != null) {
+        await widget.client.backlog.deleteNote(DeleteNoteRequest(id: id));
+      }
     } on Object catch (e) {
       if (mounted) setState(() => _error = e);
+      return;
     }
+    if (!mounted) return;
+    setState(() {
+      _notes = [
+        for (final n in _notes)
+          if (n.id != id) n,
+      ];
+      _open = null;
+    });
+    d.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
-    final groups = <String, List<Item>>{};
-    for (final it in _items) {
-      groups.putIfAbsent(it.project, () => []).add(it);
-    }
-    final projects = groups.keys.toList()..sort();
-    return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: null,
-        key: const ValueKey('add-item'),
-        onPressed: _add,
-        icon: const Icon(Icons.add),
-        label: const Text('ADD ITEM'),
-      ),
-      body: Column(
-        children: [
-          if (_loading) const BusyBar(),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: NoteStrip('$_error', tone: Tone.alarm),
-            ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refresh,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(
-                  Tokens.gap,
-                  Tokens.gap,
-                  Tokens.gap,
-                  96,
-                ),
+    return LayoutBuilder(
+      builder: (context, box) {
+        final wide = box.maxWidth >= _sideBySide;
+        final editing = _open != null;
+        final Widget content = wide
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (!_loading && _error == null && _items.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Center(
-                        child: Text(
-                          'Backlog is empty. Add an item to begin.',
-                          style: t.small(),
-                        ),
-                      ),
-                    ),
-                  for (final p in projects)
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxWidth: Tokens.contentMaxWidth,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: Tokens.gap),
-                          child: Panel(
-                            padding: const EdgeInsets.all(4),
-                            trailing: Text(
-                              '${groups[p]!.where((i) => i.state != ItemState.ITEM_STATE_DONE).length} OPEN',
-                              style: t.legend(),
-                            ),
-                            legend: '${groups[p]!.length} ITEMS',
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    10,
-                                    8,
-                                    10,
-                                    6,
-                                  ),
-                                  child: Text(
-                                    p.isEmpty ? '(no project)' : p,
-                                    style: t.title(),
-                                  ),
-                                ),
-                                for (var i = 0; i < groups[p]!.length; i++)
-                                  _row(t, i, groups[p]![i]),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                  SizedBox(width: _listWidth, child: _list(t, wide)),
+                  Expanded(child: _editorPane(t, wide)),
+                ],
+              )
+            : editing
+            ? _editorPane(t, wide)
+            : _list(t, wide);
+        return PopScope(
+          canPop: wide || !editing,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _close();
+          },
+          child: Scaffold(
+            floatingActionButton: wide || editing
+                ? null
+                : FloatingActionButton.extended(
+                    heroTag: null,
+                    key: const ValueKey('add-note'),
+                    onPressed: _new,
+                    icon: const Icon(Icons.add),
+                    label: const Text('NEW NOTE'),
+                  ),
+            body: Column(
+              children: [
+                if (_loading) const BusyBar(),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    child: NoteStrip('$_error', tone: Tone.alarm),
+                  ),
+                Expanded(child: content),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _list(Tokens t, bool wide) {
+    final notes = _sorted;
+    final tags = _tags;
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(
+          Tokens.gap,
+          Tokens.gap,
+          wide ? 0 : Tokens.gap,
+          96,
+        ),
+        children: [
+          if (wide)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Tokens.gap),
+              child: FilledButton.icon(
+                key: const ValueKey('add-note'),
+                onPressed: _new,
+                icon: const Icon(Icons.add),
+                label: const Text('NEW NOTE'),
+              ),
+            ),
+          if (tags.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Tokens.gap),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  TagChip(
+                    key: const ValueKey('tag-all'),
+                    label: 'ALL',
+                    selected: _filter == null,
+                    onTap: () => setState(() => _filter = null),
+                  ),
+                  for (final tag in tags)
+                    TagChip(
+                      key: ValueKey('tag-$tag'),
+                      label: tag,
+                      selected: _filter == tag,
+                      onTap: () => setState(() => _filter = tag),
                     ),
                 ],
               ),
             ),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: Tokens.contentMaxWidth,
+              ),
+              child: Panel(
+                padding: const EdgeInsets.all(4),
+                legend: 'NOTES',
+                trailing: Text('${notes.length}', style: t.legend()),
+                child: notes.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(
+                          child: Text(
+                            _loading
+                                ? ''
+                                : _filter != null
+                                ? 'No notes tagged $_filter.'
+                                : 'No notes yet. Start one.',
+                            style: t.small(),
+                          ),
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (var i = 0; i < notes.length; i++)
+                            _row(t, i, notes[i], wide),
+                        ],
+                      ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _row(Tokens t, int i, Item it) {
-    final done = it.state == ItemState.ITEM_STATE_DONE;
-    final title = it.title.isEmpty ? it.issueUrl : it.title;
-    final bits = [
-      if (it.priority > 0) 'p${it.priority}',
-      if (it.harness.isNotEmpty && it.harness != 'any') it.harness,
-      if (it.hasClaim()) 'claimed by ${it.claim.by}',
-    ];
-    final (label, tone) = switch (it.state) {
-      ItemState.ITEM_STATE_TODO => ('TODO', Tone.lit),
-      ItemState.ITEM_STATE_CLAIMED => ('CLAIMED', Tone.info),
-      ItemState.ITEM_STATE_DONE => ('DONE', Tone.ok),
-      _ => ('?', Tone.dim),
-    };
-    return BarRow(
-      key: ValueKey('item-${it.id}'),
-      index: i,
-      padding: const EdgeInsets.fromLTRB(10, 4, 0, 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 82,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Annunciator(label: label, tone: tone, lit: !done),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: done
-                      ? t
-                            .data(t.p.dim)
-                            .copyWith(decoration: TextDecoration.lineThrough)
-                      : t.data(t.p.emph),
+  Widget _row(Tokens t, int i, Note n, bool wide) {
+    final selected = _open?.id == n.id;
+    final heading = n.title.isNotEmpty ? n.title : _firstLine(n.body);
+    final snippet = n.title.isEmpty ? '' : _firstLine(n.body);
+    final from = sourceLabel(n.source);
+    return InkWell(
+      key: ValueKey('note-${n.id}'),
+      borderRadius: BorderRadius.circular(Tokens.innerRadius),
+      onTap: () => _select(n),
+      child: BarRow(
+        index: i,
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Container(
+          decoration: selected && wide
+              ? BoxDecoration(
+                  border: Border(
+                    left: BorderSide(color: t.tone(Tone.info), width: 2),
+                  ),
+                )
+              : null,
+          padding: EdgeInsets.only(left: selected && wide ? 8 : 0),
+          constraints: const BoxConstraints(minHeight: 40),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (n.pinned)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8, top: 1),
+                  child: Icon(
+                    Icons.push_pin,
+                    size: 14,
+                    color: t.tone(Tone.warn),
+                    semanticLabel: 'Pinned',
+                  ),
                 ),
-                if (bits.isNotEmpty) Text(bits.join('  '), style: t.small()),
-              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      heading,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.data(t.p.emph),
+                    ),
+                    if (snippet.isNotEmpty)
+                      Text(
+                        snippet,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.small(),
+                      ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (n.project.isNotEmpty) TagChip(label: n.project),
+                        if (from.isNotEmpty)
+                          Text(from, style: t.small(t.tone(Tone.info))),
+                        Text(
+                          formatAge(
+                            DateTime.now().difference(n.updatedAt.toDateTime()),
+                          ),
+                          style: t.small(),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _editorPane(Tokens t, bool wide) {
+    final d = _open;
+    if (d == null) {
+      return Padding(
+        padding: const EdgeInsets.all(Tokens.gap),
+        child: Panel(
+          legend: 'NOTE',
+          child: SizedBox(
+            height: 160,
+            child: Center(
+              child: Text('Pick a note or start a new one.', style: t.small()),
             ),
           ),
-          if (!done)
-            IconButton(
-              tooltip: 'Mark done',
-              icon: const Icon(Icons.check_circle_outline),
-              onPressed: () => _done(it),
-            )
-          else
-            const SizedBox(width: Tokens.touch),
-        ],
-      ),
+        ),
+      );
+    }
+    return NoteEditor(
+      key: ObjectKey(d),
+      draft: d,
+      tags: _tags,
+      wide: wide,
+      onBack: _close,
+      onDelete: () => _delete(d),
     );
   }
 }
 
-class _AddItemDialog extends StatefulWidget {
-  const _AddItemDialog({required this.projects});
-
-  final List<String> projects;
-
-  @override
-  State<_AddItemDialog> createState() => _AddItemDialogState();
+String _firstLine(String s) {
+  for (final l in s.split('\n')) {
+    final v = l.trim();
+    if (v.isNotEmpty) return v;
+  }
+  return '';
 }
 
-class _AddItemDialogState extends State<_AddItemDialog> {
-  late final _project = TextEditingController(
-    text: widget.projects.isEmpty ? '' : widget.projects.first,
-  );
-  final _title = TextEditingController();
-  final _prio = TextEditingController();
+class TagChip extends StatelessWidget {
+  const TagChip({
+    super.key,
+    required this.label,
+    this.selected = false,
+    this.onTap,
+  });
 
-  @override
-  void dispose() {
-    _project.dispose();
-    _title.dispose();
-    _prio.dispose();
-    super.dispose();
-  }
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Add backlog item'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const ValueKey('item-project'),
-            controller: _project,
-            decoration: const InputDecoration(labelText: 'Project'),
-          ),
-          TextField(
-            key: const ValueKey('item-title'),
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Title'),
-          ),
-          TextField(
-            controller: _prio,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Priority (1-9)'),
-          ),
-        ],
+    final t = Tokens.of(context);
+    final c = selected ? t.tone(Tone.info) : t.p.legend;
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: selected ? t.tint(c) : null,
+        border: Border.all(color: c.withValues(alpha: selected ? 0.8 : 0.5)),
+        borderRadius: BorderRadius.circular(Tokens.innerRadius + 2),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('CANCEL'),
-        ),
-        FilledButton(
-          key: const ValueKey('item-add'),
-          onPressed: () {
-            final project = _project.text.trim();
-            final title = _title.text.trim();
-            if (project.isEmpty || title.isEmpty) return;
-            Navigator.of(context).pop(
-              AddItemRequest(
-                project: project,
-                title: title,
-                priority: int.tryParse(_prio.text.trim()) ?? 0,
-              ),
-            );
-          },
-          child: const Text('ADD'),
-        ),
-      ],
+      child: Text(label, style: t.small(c)),
     );
+    if (onTap == null) return chip;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Tokens.innerRadius + 2),
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 32),
+          child: Align(widthFactor: 1, child: chip),
+        ),
+      ),
+    );
+  }
+}
+
+class NoteEditor extends StatefulWidget {
+  const NoteEditor({
+    super.key,
+    required this.draft,
+    required this.tags,
+    required this.wide,
+    required this.onBack,
+    required this.onDelete,
+  });
+
+  final NoteDraft draft;
+  final List<String> tags;
+  final bool wide;
+  final VoidCallback onBack;
+  final VoidCallback onDelete;
+
+  @override
+  State<NoteEditor> createState() => _NoteEditorState();
+}
+
+class _NoteEditorState extends State<NoteEditor> {
+  late final _title = TextEditingController(text: widget.draft.title);
+  late final _body = TextEditingController(text: widget.draft.body);
+  late final _project = TextEditingController(text: widget.draft.project);
+
+  NoteDraft get _d => widget.draft;
+
+  @override
+  void initState() {
+    super.initState();
+    _d.addListener(_sync);
+  }
+
+  @override
+  void dispose() {
+    _d.removeListener(_sync);
+    _title.dispose();
+    _body.dispose();
+    _project.dispose();
+    super.dispose();
+  }
+
+  // Text the hub changed under an editor with no local edits.
+  void _sync() {
+    if (!mounted) return;
+    if (_title.text != _d.title) _title.text = _d.title;
+    if (_body.text != _d.body) _body.text = _d.body;
+    if (_project.text != _d.project) _project.text = _d.project;
+    setState(() {});
+  }
+
+  (String, Tone, bool) _status() => switch (_d.state) {
+    SaveState.saved => ('SAVED', Tone.ok, true),
+    SaveState.edited => ('EDITED', Tone.info, true),
+    SaveState.saving => ('SAVING', Tone.info, true),
+    SaveState.offline => ('OFFLINE, RETRYING', Tone.warn, true),
+    SaveState.rejected => ('NOT SAVED', Tone.alarm, true),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    final (label, tone, lit) = _status();
+    final from = sourceLabel(_d.source);
+    final suggestions = [
+      for (final tag in widget.tags)
+        if (tag != _d.project) tag,
+    ];
+    return LayoutBuilder(
+      builder: (context, box) {
+        final lines = ((box.maxHeight - 340) / 22).floor().clamp(5, 40);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(Tokens.gap),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: Tokens.contentMaxWidth,
+              ),
+              child: Panel(
+                legend: _d.id == null ? 'NEW NOTE' : 'NOTE ${_d.id}',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Annunciator(
+                      key: const ValueKey('note-status'),
+                      label: label,
+                      tone: tone,
+                      lit: lit,
+                      blink: _d.state == SaveState.offline,
+                    ),
+                    IconButton(
+                      key: const ValueKey('note-pin'),
+                      tooltip: _d.pinned ? 'Unpin' : 'Pin to the top',
+                      isSelected: _d.pinned,
+                      icon: const Icon(Icons.push_pin_outlined),
+                      selectedIcon: const Icon(Icons.push_pin),
+                      onPressed: () => _d.edit(pinned: !_d.pinned),
+                    ),
+                    IconButton(
+                      key: const ValueKey('note-delete'),
+                      tooltip: 'Delete note',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: widget.onDelete,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        if (!widget.wide)
+                          IconButton(
+                            key: const ValueKey('note-back'),
+                            tooltip: 'Back to notes',
+                            icon: const Icon(Icons.arrow_back),
+                            onPressed: widget.onBack,
+                          ),
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('note-title'),
+                            controller: _title,
+                            maxLength: 200,
+                            maxLengthEnforcement: MaxLengthEnforcement.enforced,
+                            inputFormatters: [_SingleLine()],
+                            style: t.title(t.p.emph),
+                            decoration: const InputDecoration(
+                              hintText: 'Title',
+                              counterText: '',
+                            ),
+                            textInputAction: TextInputAction.next,
+                            onChanged: (v) => _d.edit(title: v),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: Tokens.gapS),
+                    TextField(
+                      key: const ValueKey('note-body'),
+                      controller: _body,
+                      minLines: lines,
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
+                      style: t.body(t.p.emph),
+                      decoration: const InputDecoration(
+                        hintText: 'Write in markdown',
+                      ),
+                      onChanged: (v) => _d.edit(body: v),
+                    ),
+                    const SizedBox(height: Tokens.gapS),
+                    TextField(
+                      key: const ValueKey('note-project'),
+                      controller: _project,
+                      style: t.data(),
+                      decoration: const InputDecoration(
+                        labelText: 'Project tag',
+                        hintText: 'owner/repo',
+                      ),
+                      inputFormatters: [_SingleLine()],
+                      onChanged: (v) => _d.edit(project: v.trim()),
+                    ),
+                    if (suggestions.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: Tokens.gapS),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final tag in suggestions)
+                              TagChip(
+                                key: ValueKey('suggest-$tag'),
+                                label: tag,
+                                onTap: () {
+                                  _project.text = tag;
+                                  _d.edit(project: tag);
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: Tokens.gapS),
+                    Text(
+                      [
+                        if (from.isNotEmpty) from,
+                        if (_d.updated != null)
+                          'updated ${formatAge(DateTime.now().difference(_d.updated!))}',
+                        if (_d.state == SaveState.rejected && _d.error != null)
+                          _d.error!,
+                      ].join('  '),
+                      style: t.small(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SingleLine extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (!newValue.text.contains('\n')) return newValue;
+    final text = newValue.text.replaceAll('\n', ' ');
+    return newValue.copyWith(text: text);
   }
 }

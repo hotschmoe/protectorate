@@ -27,7 +27,7 @@ clients (desktop, Android, web) talk to the same API.
 | Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
 | Files and desktop (P11, `docs/desk.md`) | `node put/get`, `desk <node> screenshot/windows/click/move/type/key/run` | zstd-adaptive, sha256-verified, atomic file copies confined to a node file root; Windows screen and input from the logged-in session behind a `desk:<node>` lease |
 | Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("poe") with a scoped token, driving the hub through the CLI |
-| Backlog (P6) | `backlog ls/add/claim/done/edit` | one markdown file on the hub; items link to GitHub issues |
+| Notes (backlog) | `backlog add/ls/show/edit/rm/pin` | the owner's notes, kept on the hub, editable in the app and by the orchestrator |
 | Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |
 | Clients | `pair`, `mcp`, `hub serve --web` | QR pairing with a scoped device token; MCP tools generated from the API |
 | Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |

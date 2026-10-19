@@ -83,7 +83,7 @@ func TestSleeveIdentity(t *testing.T) {
 	}
 	for tool, want := range map[string]bool{
 		"sleeve_kill_sleeve": false, "token_create_token": false, "chat_send": false,
-		"sleeve_list_sleeves": true, "backlog_add_item": true, "lease_acquire_lease": true, "lease_list_leases": true,
+		"sleeve_list_sleeves": true, "backlog_create_note": true, "lease_acquire_lease": true, "lease_list_leases": true,
 	} {
 		if got := auth.Grants(p.Scopes, tool); got != want {
 			t.Errorf("Grants(%s) = %v, want %v", tool, got, want)

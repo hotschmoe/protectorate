@@ -27,7 +27,7 @@ func TestCommandDocsAndWorkflow(t *testing.T) {
 			t.Errorf("workflow command %q is not in the CLI", s.Command)
 		}
 	}
-	for _, want := range []string{"quota", "quota suggest", "sleeve spawn", "sleeve ls", "session capture", "backlog claim", "api call", "events"} {
+	for _, want := range []string{"quota", "quota suggest", "sleeve spawn", "sleeve ls", "session capture", "backlog edit", "api call", "events"} {
 		if _, ok := byPath[want]; !ok {
 			t.Errorf("missing %q", want)
 		}

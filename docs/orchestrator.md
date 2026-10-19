@@ -46,11 +46,13 @@ last on `PATH`, so `protectorate` runs inside the sandbox. Sleeves share the
 host network, so `127.0.0.1` reaches the hub. The binary must be installed
 under the name `protectorate`.
 
+The orchestrator can read and edit the owner's notes with `protectorate backlog ...`, so you can talk to it about them (docs/backlog.md).
+
 ## Scoping
 
 Default scopes are `read`, `events` and the explicit names of the mutating,
 non-destructive tools matching `backlog_*`, `lease_*` and `sleeve_spawn_sleeve`.
-In practice: read everything, stream events, add and update backlog items, and
+In practice: read everything, stream events, create and update notes, and
 spawn sleeves. Not granted by default:
 
 - token management, raw session creation, respawn and node add (owner-only
@@ -73,7 +75,7 @@ would allow. That is a convention for the model; the token is the enforcement.
 
 ```
 protectorate orchestrator spawn --add-scopes sleeve_kill_sleeve     # allow kill
-protectorate orchestrator spawn --scopes read,events,backlog_add_item   # replace the defaults
+protectorate orchestrator spawn --scopes read,events,backlog_create_note   # replace the defaults
 ```
 
 Scopes use the tool names from `protectorate mcp` (see [auth.md](auth.md)).

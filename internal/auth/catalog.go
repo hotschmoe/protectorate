@@ -8,7 +8,7 @@
 //	terminal           the WebSocket terminal, read-write or read-only
 //	terminal:readonly  the WebSocket terminal with readonly=1 only
 //	<glob>             path.Match glob over tool names such as session_* or
-//	                   backlog_add_item; the tool name is the snake_case
+//	                   backlog_create_note; the tool name is the snake_case
 //	                   service name without "Service", an underscore, and the
 //	                   snake_case method name
 //

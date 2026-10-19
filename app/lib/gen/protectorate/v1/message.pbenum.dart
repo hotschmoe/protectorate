@@ -24,7 +24,7 @@ class MessageKind extends $pb.ProtobufEnum {
       MessageKind._(1, _omitEnumNames ? '' : 'MESSAGE_KIND_NOTE');
 
   /// REQUEST asks the recipient to do something. To a project with no live
-  /// sleeve it also becomes a backlog item.
+  /// sleeve it also becomes a backlog note.
   static const MessageKind MESSAGE_KIND_REQUEST =
       MessageKind._(2, _omitEnumNames ? '' : 'MESSAGE_KIND_REQUEST');
 

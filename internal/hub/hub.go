@@ -115,7 +115,7 @@ func New(version, token string) *Hub {
 	}
 	h.SetQuota(NewQuotaCache(nil, QuotaOptions{}))
 	if home, err := Home(); err == nil {
-		h.SetBacklog(backlog.NewStore(filepath.Join(home, "backlog.md")))
+		h.SetBacklog(backlog.NewStore(home))
 	}
 	return h
 }
