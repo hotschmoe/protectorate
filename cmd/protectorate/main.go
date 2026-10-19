@@ -77,7 +77,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 
@@ -305,4 +305,45 @@ func versionCmd(o *opts) *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "protectorate %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
 		},
 	}
+}
+
+func pairCmd(o *opts) *cobra.Command {
+	var pubURL, name string
+	var appQR bool
+	c := &cobra.Command{
+		Use:   "pair",
+		Short: "Print a pairing link and QR code for adding this hub on another device",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			tok, err := hub.ReadToken()
+			if err != nil {
+				return err
+			}
+			if pubURL == "" {
+				pubURL = o.hubURL
+			}
+			if name == "" {
+				name, _ = os.Hostname()
+			}
+			links, err := hub.NewPairLinks(pubURL, name, tok)
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			qrText := links.Web
+			if appQR {
+				qrText = links.Scheme
+			}
+			if err := hub.WriteQR(w, qrText); err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "\nweb:  %s\napp:  %s\n", links.Web, links.Scheme)
+			fmt.Fprintln(w, "\nThe links contain the hub token. Treat them like a password.")
+			return nil
+		},
+	}
+	c.Flags().StringVar(&pubURL, "url", "", "public base URL the other device can reach (default --hub)")
+	c.Flags().StringVar(&name, "name", "", "label for the hub (default hostname)")
+	c.Flags().BoolVar(&appQR, "app", false, "encode the protectorate:// link for the native app instead of the web link")
+	return c
 }

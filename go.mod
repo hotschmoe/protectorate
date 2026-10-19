@@ -12,6 +12,7 @@ require (
 	golang.org/x/term v0.47.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
+	rsc.io/qr v0.2.0
 	tailscale.com v1.104.1
 )
 
