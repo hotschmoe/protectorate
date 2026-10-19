@@ -34,6 +34,16 @@ clients (desktop, Android, web) talk to the same API.
 | Nodes | `node install/uninstall/doctor/update` | one-command node setup per OS, dry-run first; uninstall deletes nothing; update pushes a build, swaps it with one rollback binary |
 | Add and remove nodes (`docs/install.md`) | app ADD NODE / REMOVE NODE, `node invite`, `node rm [--jobs wait\|cancel] [--uninstall]` | the hub serves `/install.sh`, `/install.ps1` and sha256-checked builds under `/dl/`; a single-use key from the environment, never a URL; live INVITED, JOINED, FIRST METRICS, READY; removal drains, revokes the tailnet enrollment and deletes nothing on the machine |
 
+## Install
+
+Hub, on Linux (x86_64 or aarch64), per user, no sudo; re-run to upgrade:
+
+```
+curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.2.0/install-hub.sh | bash
+```
+
+It verifies the release against `SHA256SUMS`, lists missing prerequisites (bwrap, tmux, git, systemd user manager) instead of installing them, and enables a `protectorate-hub` user unit. Nodes join from the web app (NODES, ADD NODE). Details in [docs/install.md](docs/install.md); branch and release rules in [DEV.md](DEV.md).
+
 ## Build
 
 ```
@@ -48,7 +58,7 @@ make app-check  # flutter analyze + test
 ## Run
 
 ```
-protectorate hub serve [--web app/build/web]   # owner token at ~/.protectorate/token
+protectorate hub serve [--web app/build/web]   # --web defaults to ~/.local/share/protectorate/web when installed; owner token at ~/.protectorate/token
 protectorate login claude                       # once per harness, on the hub; --status lists them
 protectorate quota
 protectorate session new demo -- claude

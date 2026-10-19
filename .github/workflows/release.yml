@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: bufbuild/buf-setup-action@v1
+      - name: Generator plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
+          dart pub global activate protoc_plugin
+          dart pub global activate connectrpc
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+      - name: Version
+        run: |
+          version=$(make -s version)
+          test "$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME builds as $version (dirty tree or a second tag on this commit?)"; exit 1; }
+          echo "version $version, app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: gofmt
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Vet and race tests
+        run: make test
+      - run: make check-gen
+      - run: make check-version
+      - name: Go binaries for every target
+        run: make cross
+      - run: make app-check
+      - run: make app-build-web
+      - name: Android APK (optional)
+        continue-on-error: true
+        run: make apk
+      - name: Assemble release assets
+        run: |
+          version=$(make -s version)
+          mkdir dist
+          cp bin/protectorate-* dist/
+          tar -czf "dist/protectorate-web-$version.tar.gz" -C app/build/web .
+          apk=app/build/app/outputs/flutter-apk/app-release.apk
+          if [ -f "$apk" ]; then cp "$apk" "dist/protectorate-$version.apk"; fi
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
