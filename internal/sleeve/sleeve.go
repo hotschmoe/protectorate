@@ -184,7 +184,7 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 			return Config{}, fmt.Errorf("resolve tool dir %q: %w", d, err)
 		}
 		if c.touchesCredentials(d) || c.touchesCredentials(r) {
-			return Config{}, fmt.Errorf("tool dir %q would expose harness credentials", d)
+			return Config{}, fmt.Errorf("tool dir %q would expose credentials or hub state (it contains the user home or the state directory, or overlaps a credential dir)", d)
 		}
 	}
 	c.PathDirs = c.defaultPath(os.Getenv("PATH"))
@@ -202,7 +202,7 @@ func (c *Config) AddBinaryDir(exe string) error {
 	dirs := symlinkDirs(exe)
 	for _, d := range dirs {
 		if !c.mounted(d) && c.touchesCredentials(d) {
-			return fmt.Errorf("%w: %s would expose harness credentials", ErrInvalid, d)
+			return fmt.Errorf("%w: mounting %s would expose credentials or hub state (it contains the user home or the state directory, or overlaps a credential dir); put the binary somewhere like ~/.local/bin", ErrInvalid, d)
 		}
 	}
 	for _, d := range dirs {
