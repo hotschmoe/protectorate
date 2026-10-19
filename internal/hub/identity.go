@@ -21,7 +21,7 @@ const (
 
 // sleeveScopes are what every sleeve's own token grants: the read-only API,
 // the mailbox, the directory, leases and the backlog. Nothing else.
-var sleeveScopes = []string{auth.ScopeRead, "backlog_*", "directory_*", "lease_*"}
+var sleeveScopes = []string{auth.ScopeRead, "backlog_*", "directory_*", "lease_*", "message_*"}
 
 func sleeveTokenName(name string) string { return sleeveTokenPrefix + name }
 

@@ -37,6 +37,9 @@ type Hub struct {
 	// SelfURL is how sleeves on this machine reach the hub; it is exported to
 	// them as PROTECTORATE_HUB.
 	SelfURL string
+	// AckTimeout is how long an ack_required message may stay unacked before
+	// it is re-delivered, and again before it is escalated; 0 means 30m.
+	AckTimeout time.Duration
 
 	authz   *auth.Authorizer
 	started time.Time
@@ -203,6 +206,7 @@ func (h *Hub) Handler() http.Handler {
 	}
 	if h.coord != nil {
 		mux.Handle(protectoratev1connect.NewDirectoryServiceHandler(directoryService{h.coord}, opts))
+		mux.Handle(protectoratev1connect.NewMessageServiceHandler(messageService{h.coord}, opts))
 	}
 	if h.nodes != nil {
 		mux.Handle(protectoratev1connect.NewNodeServiceHandler(h, opts))
@@ -287,7 +291,7 @@ func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) erro
 	if h.coord != nil {
 		coordDone := make(chan struct{})
 		go func() { defer close(coordDone); h.coord.Run(ctx) }()
-		defer func() { <-coordDone }()
+		defer func() { <-coordDone; h.coord.close() }()
 	}
 
 	if h.nodes != nil {

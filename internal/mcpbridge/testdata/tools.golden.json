@@ -560,6 +560,144 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Ack confirms a message. It stops the ack timer.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "as": {
+          "description": "as acks on behalf of a recipient; only the owner may.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_ack"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Inbox lists the messages addressed to the caller, oldest first, and marks them read unless peek is set. The owner may read another mailbox with as.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "as": {
+          "description": "as reads another mailbox; only the owner may.",
+          "type": "string"
+        },
+        "peek": {
+          "description": "peek lists without marking read.",
+          "type": "boolean"
+        },
+        "unreadOnly": {
+          "description": "unread_only leaves out messages already injected, shown or acked.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_inbox"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Reply answers a message in the same thread, addressed to its sender, and acks the original.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_reply"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Send addresses a message to a sleeve name, \"project:\u003cid-or-name\u003e\", \"orchestrator\" or \"owner\". Retrying with the same request_id returns the original message instead of sending twice.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ackRequired": {
+          "description": "ack_required starts the ack timer.",
+          "type": "boolean"
+        },
+        "body": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "MESSAGE_KIND_UNSPECIFIED",
+            "MESSAGE_KIND_NOTE",
+            "MESSAGE_KIND_REQUEST",
+            "MESSAGE_KIND_NOTICE"
+          ],
+          "type": "string"
+        },
+        "requestId": {
+          "description": "request_id (8-128 chars) makes a retry return the original message.",
+          "type": "string"
+        },
+        "threadId": {
+          "description": "thread_id continues an existing thread; empty starts a new one.",
+          "type": "string"
+        },
+        "to": {
+          "description": "to is a sleeve name, \"project:\u003cid-or-name\u003e\", \"orchestrator\" or \"owner\".",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_send"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Thread returns every message of a thread in the order sent.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_thread"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true

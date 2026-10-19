@@ -5,13 +5,19 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/hotschmoe/protectorate/internal/directory"
+	"github.com/hotschmoe/protectorate/internal/mailbox"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
-const coordInterval = time.Minute
+const (
+	coordInterval     = time.Minute
+	deliverInterval   = time.Second
+	defaultAckTimeout = 30 * time.Minute
+)
 
 // coordinator is the hub's deterministic coordination layer: the directory of
 // projects and, built on it, the mailbox. It is hub code, not a sleeve; no
@@ -19,12 +25,18 @@ const coordInterval = time.Minute
 type coordinator struct {
 	h        *Hub
 	dir      *directory.Directory
+	mail     *mailbox.Store
 	interval time.Duration
+	every    time.Duration
+	now      func() time.Time
 	kick     chan struct{}
+	wake     chan struct{}
+
+	passMu sync.Mutex
 }
 
-// EnableCoordination turns on DirectoryService, keeping its state under home.
-// Call after SetSleeves and before Handler or Serve.
+// EnableCoordination turns on DirectoryService and MessageService, keeping
+// their state under home. Call after SetSleeves and before Handler or Serve.
 func (h *Hub) EnableCoordination(home string) error {
 	if h.sleeves == nil {
 		return fmt.Errorf("coordination needs sleeves")
@@ -33,8 +45,22 @@ func (h *Hub) EnableCoordination(home string) error {
 	if err != nil {
 		return err
 	}
-	h.coord = &coordinator{h: h, dir: dir, interval: coordInterval, kick: make(chan struct{}, 1)}
+	c := &coordinator{
+		h: h, dir: dir, interval: coordInterval, every: deliverInterval, now: time.Now,
+		kick: make(chan struct{}, 1), wake: make(chan struct{}, 1),
+	}
+	if c.mail, err = mailbox.Open(filepath.Join(home, "mailbox.jsonl"), func() time.Time { return c.now() }); err != nil {
+		return err
+	}
+	h.coord = c
 	return nil
+}
+
+func (c *coordinator) ackTimeout() time.Duration {
+	if t := c.h.AckTimeout; t > 0 {
+		return t
+	}
+	return defaultAckTimeout
 }
 
 func (h *Hub) pokeCoord() {
@@ -43,7 +69,7 @@ func (h *Hub) pokeCoord() {
 	}
 }
 
-// poke asks the run loop for a pass soon; passes already requested coalesce.
+// poke asks the run loop to rescan workspaces soon; requests coalesce.
 func (c *coordinator) poke() {
 	select {
 	case c.kick <- struct{}{}:
@@ -51,20 +77,40 @@ func (c *coordinator) poke() {
 	}
 }
 
-// Run refreshes the directory on spawn and kill and on a slow interval until
-// ctx is done.
+// nudge asks the run loop for a delivery pass soon.
+func (c *coordinator) nudge() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Run refreshes the directory on spawn and kill and on a slow interval, and
+// delivers mail every second, until ctx is done.
 func (c *coordinator) Run(ctx context.Context) {
 	c.refresh(ctx)
-	tick := time.NewTicker(c.interval)
-	defer tick.Stop()
+	dirTick := time.NewTicker(c.interval)
+	defer dirTick.Stop()
+	passTick := time.NewTicker(c.every)
+	defer passTick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-dirTick.C:
+			c.refresh(ctx)
 		case <-c.kick:
+			c.refresh(ctx)
+		case <-passTick.C:
+		case <-c.wake:
 		}
-		c.refresh(ctx)
+		c.pass(ctx)
+	}
+}
+
+func (c *coordinator) close() {
+	if err := c.mail.Close(); err != nil {
+		log.Printf("coordination: close mailbox: %v", err)
 	}
 }
 

@@ -266,7 +266,7 @@ func TestFilter(t *testing.T) {
 		}
 		return out
 	}
-	readOnly := []string{"backlog_list_items", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "node_get_node", "node_list_nodes", "quota_get_quota", "quota_suggest", "session_capture_pane", "session_list_sessions", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}
+	readOnly := []string{"backlog_list_items", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_thread", "node_get_node", "node_list_nodes", "quota_get_quota", "quota_suggest", "session_capture_pane", "session_list_sessions", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}
 	cases := []struct {
 		name string
 		f    Filter
@@ -275,7 +275,7 @@ func TestFilter(t *testing.T) {
 		{"default is read-only", Filter{}, readOnly},
 		{"allow glob replaces default", Filter{Allow: []string{"backlog_*"}}, []string{"backlog_add_item", "backlog_list_items", "backlog_update_item"}},
 		{"deny wins", Filter{Allow: []string{"backlog_*"}, Deny: []string{"*_update_item", "backlog_add_*"}}, []string{"backlog_list_items"}},
-		{"deny on default", Filter{Deny: []string{"session_*", "node_*"}}, []string{"backlog_list_items", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "quota_get_quota", "quota_suggest", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}},
+		{"deny on default", Filter{Deny: []string{"session_*", "node_*"}}, []string{"backlog_list_items", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_thread", "quota_get_quota", "quota_suggest", "sleeve_get_sleeve", "sleeve_list_sleeves", "tailnet_get_status"}},
 	}
 	for _, c := range cases {
 		if got := names(c.f); !reflect.DeepEqual(got, c.want) {

@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// MessageService is the hub's mailbox between sleeves, the orchestrator and
+// the owner. The sender of a message is the authenticated caller (a sleeve's
+// own token names the sleeve), never a claimed name. Messages are kept on the
+// hub and survive restarts.
+//
+// Delivery is deterministic hub code. A message to a sleeve in chat mode is
+// sent into its chat as an ordinary user message ("from" = "sleeve:<name>")
+// at its next IDLE, never during a running turn; the text says how to reply
+// and ack. A sleeve in terminal mode gets no injection and reads its Inbox.
+// A project address resolves to the sleeves currently working on that project;
+// with none live the message waits, and a request also becomes a backlog item.
+// An ack_required message not acked within the timeout (default 30 minutes)
+// is delivered once more, then escalated to the orchestrator.
+//
+// Changes are announced on EventService as "msg.sent", "msg.delivered",
+// "msg.acked", "msg.reminded" and "msg.escalated" (subject = message id).
+service MessageService {
+  // Send addresses a message to a sleeve name, "project:<id-or-name>",
+  // "orchestrator" or "owner". Retrying with the same request_id returns the
+  // original message instead of sending twice.
+  rpc Send(MessageServiceSendRequest) returns (MessageServiceSendResponse);
+
+  // Inbox lists the messages addressed to the caller, oldest first, and marks
+  // them read unless peek is set. The owner may read another mailbox with as.
+  rpc Inbox(InboxRequest) returns (InboxResponse);
+
+  // Ack confirms a message. It stops the ack timer.
+  rpc Ack(AckRequest) returns (AckResponse);
+
+  // Reply answers a message in the same thread, addressed to its sender, and
+  // acks the original.
+  rpc Reply(ReplyRequest) returns (ReplyResponse);
+
+  // Thread returns every message of a thread in the order sent.
+  rpc Thread(ThreadRequest) returns (ThreadResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+enum MessageKind {
+  // UNSPECIFIED sends a note.
+  MESSAGE_KIND_UNSPECIFIED = 0;
+  // NOTE is information; no one is asked to act.
+  MESSAGE_KIND_NOTE = 1;
+  // REQUEST asks the recipient to do something. To a project with no live
+  // sleeve it also becomes a backlog item.
+  MESSAGE_KIND_REQUEST = 2;
+  // NOTICE states facts, typically sent by the hub, such as a dependency
+  // release or a granted lease.
+  MESSAGE_KIND_NOTICE = 3;
+}
+
+message MessageServiceSendRequest {
+  // to is a sleeve name, "project:<id-or-name>", "orchestrator" or "owner".
+  string to = 1;
+  string body = 2;
+  // thread_id continues an existing thread; empty starts a new one.
+  string thread_id = 3;
+  MessageKind kind = 4;
+  // ack_required starts the ack timer.
+  bool ack_required = 5;
+  // request_id (8-128 chars) makes a retry return the original message.
+  string request_id = 6;
+}
+
+message MessageServiceSendResponse {
+  MailMessage message = 1;
+  // duplicate is true when request_id matched an earlier send.
+  bool duplicate = 2;
+  // waiting is true while no recipient is resolved, such as a project with no
+  // live sleeve.
+  bool waiting = 3;
+  // backlog_item is the id of the backlog item a request was filed as.
+  string backlog_item = 4;
+}
+
+message InboxRequest {
+  // unread_only leaves out messages already injected, shown or acked.
+  bool unread_only = 1;
+  // peek lists without marking read.
+  bool peek = 2;
+  // as reads another mailbox; only the owner may.
+  string as = 3;
+}
+
+message InboxResponse {
+  repeated MailMessage messages = 1;
+}
+
+message AckRequest {
+  string id = 1;
+  // as acks on behalf of a recipient; only the owner may.
+  string as = 2;
+}
+
+message AckResponse {
+  MailMessage message = 1;
+}
+
+message ReplyRequest {
+  string id = 1;
+  string body = 2;
+  string request_id = 3;
+}
+
+message ReplyResponse {
+  MailMessage message = 1;
+}
+
+message ThreadRequest {
+  string thread_id = 1;
+}
+
+message ThreadResponse {
+  repeated MailMessage messages = 1;
+}
+
+// MailMessage is one message with each recipient's delivery state.
+message MailMessage {
+  // id is "m<n>"; thread_id is "t<n>".
+  string id = 1;
+  string thread_id = 2;
+  // from is the sender: a sleeve name, "owner" or "hub".
+  string from = 3;
+  // to is the address as sent.
+  string to = 4;
+  MessageKind kind = 5;
+  bool ack_required = 6;
+  string body = 7;
+  string reply_to = 8;
+  google.protobuf.Timestamp created_at = 9;
+  repeated MailDelivery deliveries = 10;
+  google.protobuf.Timestamp escalated_at = 11;
+  string backlog_item = 12;
+}
+
+// MailDelivery is one recipient's state for a message.
+message MailDelivery {
+  string recipient = 1;
+  // delivered_at is when the message was injected into the recipient's chat.
+  google.protobuf.Timestamp delivered_at = 2;
+  google.protobuf.Timestamp read_at = 3;
+  google.protobuf.Timestamp acked_at = 4;
+  uint32 reminders = 5;
+}
