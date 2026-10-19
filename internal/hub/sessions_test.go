@@ -30,7 +30,6 @@ func newSessionHub(t *testing.T) (*Hub, string, string) {
 	sock := fmt.Sprintf("protectorate-test-%d", time.Now().UnixNano())
 	h.Sessions = session.New(sock)
 	h.SessionPoll = 20 * time.Millisecond
-	h.PingInterval = 50 * time.Millisecond
 	t.Cleanup(func() { exec.Command("tmux", "-L", sock, "kill-server").Run() })
 
 	ctx, cancel := context.WithCancel(context.Background())
