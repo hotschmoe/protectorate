@@ -1905,11 +1905,11 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"PrepareJob\x12\".protectorate.v1.PrepareJobRequest\x1a#.protectorate.v1.PrepareJobResponse\x12^\n" +
 	"\rUploadJobData\x12%.protectorate.v1.UploadJobDataRequest\x1a&.protectorate.v1.UploadJobDataResponse\x12E\n" +
 	"\x06RunJob\x12\x1e.protectorate.v1.RunJobRequest\x1a\x19.protectorate.v1.JobEvent0\x01\x12r\n" +
-	"\tCancelJob\x121.protectorate.v1.NodeAgentServiceCancelJobRequest\x1a2.protectorate.v1.NodeAgentServiceCancelJobResponse\x1a\x04\x90\xb5\x18\x012\xd2\x02\n" +
+	"\tCancelJob\x121.protectorate.v1.NodeAgentServiceCancelJobRequest\x1a2.protectorate.v1.NodeAgentServiceCancelJobResponse\x1a\x04\x90\xb5\x18\x012\xd8\x02\n" +
 	"\vNodeService\x12W\n" +
 	"\tListNodes\x12!.protectorate.v1.ListNodesRequest\x1a\".protectorate.v1.ListNodesResponse\"\x03\x90\x02\x01\x12L\n" +
-	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\"\x03\x90\x02\x01\x12E\n" +
-	"\aAddNode\x12\x1f.protectorate.v1.AddNodeRequest\x1a\x19.protectorate.v1.NodeInfo\x12U\n" +
+	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\"\x03\x90\x02\x01\x12K\n" +
+	"\aAddNode\x12\x1f.protectorate.v1.AddNodeRequest\x1a\x19.protectorate.v1.NodeInfo\"\x04\xa0\xb5\x18\x01\x12U\n" +
 	"\n" +
 	"RemoveNode\x12\".protectorate.v1.RemoveNodeRequest\x1a#.protectorate.v1.RemoveNodeResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 

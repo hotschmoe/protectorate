@@ -784,7 +784,8 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
     {
       '1': 'AddNode',
       '2': '.protectorate.v1.AddNodeRequest',
-      '3': '.protectorate.v1.NodeInfo'
+      '3': '.protectorate.v1.NodeInfo',
+      '4': {}
     },
     {
       '1': 'RemoveNode',
@@ -828,7 +829,7 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'CgtOb2RlU2VydmljZRJXCglMaXN0Tm9kZXMSIS5wcm90ZWN0b3JhdGUudjEuTGlzdE5vZGVzUm'
     'VxdWVzdBoiLnByb3RlY3RvcmF0ZS52MS5MaXN0Tm9kZXNSZXNwb25zZSIDkAIBEkwKB0dldE5v'
     'ZGUSHy5wcm90ZWN0b3JhdGUudjEuR2V0Tm9kZVJlcXVlc3QaGy5wcm90ZWN0b3JhdGUudjEuTm'
-    '9kZVN0YXR1cyIDkAIBEkUKB0FkZE5vZGUSHy5wcm90ZWN0b3JhdGUudjEuQWRkTm9kZVJlcXVl'
-    'c3QaGS5wcm90ZWN0b3JhdGUudjEuTm9kZUluZm8SVQoKUmVtb3ZlTm9kZRIiLnByb3RlY3Rvcm'
-    'F0ZS52MS5SZW1vdmVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5SZW1vdmVOb2RlUmVz'
-    'cG9uc2U=');
+    '9kZVN0YXR1cyIDkAIBEksKB0FkZE5vZGUSHy5wcm90ZWN0b3JhdGUudjEuQWRkTm9kZVJlcXVl'
+    'c3QaGS5wcm90ZWN0b3JhdGUudjEuTm9kZUluZm8iBKC1GAESVQoKUmVtb3ZlTm9kZRIiLnByb3'
+    'RlY3RvcmF0ZS52MS5SZW1vdmVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5SZW1vdmVO'
+    'b2RlUmVzcG9uc2U=');

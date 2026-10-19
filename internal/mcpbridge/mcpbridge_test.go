@@ -100,6 +100,13 @@ func TestOwnerOnlyServicesNotExposed(t *testing.T) {
 			t.Errorf("owner-only tool %s exposed", d.Name)
 		}
 	}
+	for _, name := range []string{"session_create_session", "session_respawn_session", "node_add_node"} {
+		for _, d := range defs {
+			if d.Name == name {
+				t.Errorf("owner-only rpc %s exposed", name)
+			}
+		}
+	}
 }
 
 func TestImageMatchesGeneratedCode(t *testing.T) {
@@ -175,7 +182,7 @@ func TestSchemaShapes(t *testing.T) {
 	for _, tl := range listTools(t, cs) {
 		byName[tl.Name] = tl
 	}
-	for _, n := range []string{"hub_get_status", "quota_get_quota", "session_list_sessions", "session_create_session",
+	for _, n := range []string{"hub_get_status", "quota_get_quota", "session_list_sessions", "job_submit_job",
 		"session_kill_session", "session_capture_pane", "backlog_list_items", "backlog_add_item", "backlog_update_item"} {
 		if byName[n] == nil {
 			t.Errorf("missing tool %s", n)
@@ -200,10 +207,10 @@ func TestSchemaShapes(t *testing.T) {
 	if got := get(schema("backlog_list_items"), "properties", "state", "enum"); !reflect.DeepEqual(got, []any{"ITEM_STATE_UNSPECIFIED", "ITEM_STATE_TODO", "ITEM_STATE_CLAIMED", "ITEM_STATE_DONE"}) {
 		t.Errorf("state enum: %v", got)
 	}
-	if got := get(schema("session_create_session"), "properties", "command", "type"); got != "array" {
+	if got := get(schema("job_submit_job"), "properties", "command", "type"); got != "array" {
 		t.Errorf("command type: %v", got)
 	}
-	if got := get(schema("session_create_session"), "properties", "env", "additionalProperties", "type"); got != "string" {
+	if got := get(schema("job_submit_job"), "properties", "env", "additionalProperties", "type"); got != "string" {
 		t.Errorf("env value type: %v", got)
 	}
 	if got := get(schema("backlog_update_item"), "properties", "claim", "properties", "at", "format"); got != "date-time" {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/session"
+	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
 // Terminal wire protocol. Every WebSocket message is binary: one type byte
@@ -75,7 +76,7 @@ func terminalCredentials(r *http.Request) []string {
 
 // authorizeTerminal authenticates the first valid credential and checks it
 // for the terminal scope.
-func (h *Hub) authorizeTerminal(r *http.Request, readOnly bool) (*auth.Principal, error) {
+func (h *Hub) authorizeTerminal(r *http.Request, name string, readOnly bool) (*auth.Principal, error) {
 	var p *auth.Principal
 	err := auth.ErrUnauthenticated
 	for _, c := range terminalCredentials(r) {
@@ -84,7 +85,7 @@ func (h *Hub) authorizeTerminal(r *http.Request, readOnly bool) (*auth.Principal
 		}
 	}
 	if err == nil {
-		err = h.authz.AuthorizeTerminal(p, readOnly)
+		err = h.authz.AuthorizeTerminal(p, readOnly, !sleeve.IsSleeveSession(name))
 	}
 	return p, err
 }
@@ -104,7 +105,7 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if readOnly {
 		procedure = "terminal.attach.readonly"
 	}
-	p, err := h.authorizeTerminal(r, readOnly)
+	p, err := h.authorizeTerminal(r, name, readOnly)
 	if err != nil {
 		h.authz.Record(r.Context(), p, procedure, name, err, deniedCode(err))
 		if errors.Is(err, auth.ErrUnauthenticated) {

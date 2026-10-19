@@ -30,7 +30,8 @@ abstract final class SessionService {
 
   /// CreateSession starts a detached tmux session running command, or the
   /// default shell when command is empty. Names starting with "sleeve-" are
-  /// reserved for sleeves and fail with FAILED_PRECONDITION.
+  /// reserved for sleeves and fail with FAILED_PRECONDITION. The command runs
+  /// unsandboxed as the hub's OS user, so only the owner token may call it.
   static const createSession = connect.Spec(
     '/$name/CreateSession',
     connect.StreamType.unary,
@@ -50,7 +51,8 @@ abstract final class SessionService {
   /// RespawnSession restarts an exited session with its original command and
   /// working directory. The previous output stays in scrollback. It fails with
   /// FAILED_PRECONDITION while the session is still running, and for sessions
-  /// named "sleeve-*", which only SleeveService.SpawnSleeve may restart.
+  /// named "sleeve-*", which only SleeveService.SpawnSleeve may restart. It
+  /// reruns an unsandboxed command, so only the owner token may call it.
   static const respawnSession = connect.Spec(
     '/$name/RespawnSession',
     connect.StreamType.unary,

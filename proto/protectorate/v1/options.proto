@@ -10,6 +10,10 @@ extend google.protobuf.MethodOptions {
   // destructive marks an RPC that irreversibly destroys state. Clients such
   // as the MCP bridge surface it as a hint.
   bool destructive = 50001;
+
+  // owner_only_rpc marks an RPC only the owner token may call, whatever scopes
+  // another token carries. The MCP bridge leaves it out.
+  bool owner_only_rpc = 50004;
 }
 
 extend google.protobuf.ServiceOptions {

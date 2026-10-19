@@ -47,8 +47,9 @@ non-destructive tools matching `backlog_*`, `lease_*` and `sleeve_spawn_sleeve`.
 In practice: read everything, stream events, add and update backlog items, and
 spawn sleeves. Not granted by default:
 
-- token management (owner-only whatever the scopes), `sleeve_kill_sleeve`,
-  `session_kill_session`, node add/remove;
+- token management, raw session creation, respawn and node add (owner-only
+  whatever the scopes), `sleeve_kill_sleeve`, `session_kill_session` and
+  node remove;
 - the terminal;
 - `session_*` creation. `session_create_session` and `session_respawn_session`
   start processes directly on the host, outside any sandbox, so a token that

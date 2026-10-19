@@ -423,74 +423,6 @@
   },
   {
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "AddNode adds or updates a node in the hub inventory.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "node": {
-          "additionalProperties": false,
-          "properties": {
-            "address": {
-              "description": "address is the tailnet name or an address; \":7475\" is assumed when no port is given.",
-              "type": "string"
-            },
-            "arch": {
-              "type": "string"
-            },
-            "inviteKeyId": {
-              "description": "invite_key_id is the tailnet pre-auth key id issued for the invite, used to notice a node that joined under a different name.",
-              "type": "integer"
-            },
-            "invited": {
-              "description": "invited marks a node whose enrollment key was issued but which has not answered a poll yet; the hub clears it on the first successful poll.",
-              "type": "boolean"
-            },
-            "local": {
-              "description": "local marks the hub's own node, which is not stored in the inventory.",
-              "type": "boolean"
-            },
-            "name": {
-              "type": "string"
-            },
-            "notes": {
-              "type": "string"
-            },
-            "os": {
-              "type": "string"
-            },
-            "sshAlias": {
-              "description": "ssh_alias is the break-glass `ssh` host alias.",
-              "type": "string"
-            },
-            "tags": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "tier": {
-              "description": "tier is \"server\" or \"family\" and drives future command gating.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "update": {
-          "description": "update replaces an existing record instead of failing with ALREADY_EXISTS; fields left empty keep their stored value.",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
-    "name": "node_add_node"
-  },
-  {
-    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -613,44 +545,6 @@
   },
   {
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "CreateSession starts a detached tmux session running command, or the default shell when command is empty. Names starting with \"sleeve-\" are reserved for sleeves and fail with FAILED_PRECONDITION.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "command": {
-          "description": "command is the argv to run; empty starts the default shell.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "cwd": {
-          "description": "cwd is the starting directory; empty uses tmux's default.",
-          "type": "string"
-        },
-        "env": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "env holds extra environment variables for the session.",
-          "type": "object"
-        },
-        "name": {
-          "description": "name identifies the session; it must not already exist.",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "session_create_session"
-  },
-  {
-    "annotations": {
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false,
@@ -682,26 +576,6 @@
       "type": "object"
     },
     "name": "session_list_sessions"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "RespawnSession restarts an exited session with its original command and working directory. The previous output stays in scrollback. It fails with FAILED_PRECONDITION while the session is still running, and for sessions named \"sleeve-*\", which only SleeveService.SpawnSleeve may restart.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "description": "name of the exited session to restart.",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "session_respawn_session"
   },
   {
     "annotations": {

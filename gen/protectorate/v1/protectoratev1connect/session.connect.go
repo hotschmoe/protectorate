@@ -56,7 +56,8 @@ type SessionServiceClient interface {
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// CreateSession starts a detached tmux session running command, or the
 	// default shell when command is empty. Names starting with "sleeve-" are
-	// reserved for sleeves and fail with FAILED_PRECONDITION.
+	// reserved for sleeves and fail with FAILED_PRECONDITION. The command runs
+	// unsandboxed as the hub's OS user, so only the owner token may call it.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
 	// KillSession terminates a session and every process in it. It also removes
 	// an exited session, discarding its final screen.
@@ -64,7 +65,8 @@ type SessionServiceClient interface {
 	// RespawnSession restarts an exited session with its original command and
 	// working directory. The previous output stays in scrollback. It fails with
 	// FAILED_PRECONDITION while the session is still running, and for sessions
-	// named "sleeve-*", which only SleeveService.SpawnSleeve may restart.
+	// named "sleeve-*", which only SleeveService.SpawnSleeve may restart. It
+	// reruns an unsandboxed command, so only the owner token may call it.
 	RespawnSession(context.Context, *connect.Request[v1.RespawnSessionRequest]) (*connect.Response[v1.RespawnSessionResponse], error)
 	// CapturePane returns the current text of a session's active pane. It also
 	// works on exited sessions, which is how a crash is diagnosed. Include at
@@ -158,7 +160,8 @@ type SessionServiceHandler interface {
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// CreateSession starts a detached tmux session running command, or the
 	// default shell when command is empty. Names starting with "sleeve-" are
-	// reserved for sleeves and fail with FAILED_PRECONDITION.
+	// reserved for sleeves and fail with FAILED_PRECONDITION. The command runs
+	// unsandboxed as the hub's OS user, so only the owner token may call it.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
 	// KillSession terminates a session and every process in it. It also removes
 	// an exited session, discarding its final screen.
@@ -166,7 +169,8 @@ type SessionServiceHandler interface {
 	// RespawnSession restarts an exited session with its original command and
 	// working directory. The previous output stays in scrollback. It fails with
 	// FAILED_PRECONDITION while the session is still running, and for sessions
-	// named "sleeve-*", which only SleeveService.SpawnSleeve may restart.
+	// named "sleeve-*", which only SleeveService.SpawnSleeve may restart. It
+	// reruns an unsandboxed command, so only the owner token may call it.
 	RespawnSession(context.Context, *connect.Request[v1.RespawnSessionRequest]) (*connect.Response[v1.RespawnSessionResponse], error)
 	// CapturePane returns the current text of a session's active pane. It also
 	// works on exited sessions, which is how a crash is diagnosed. Include at

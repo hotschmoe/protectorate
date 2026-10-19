@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
@@ -78,14 +79,15 @@ func code(err error) connect.Code {
 func TestUnaryScopeEnforcement(t *testing.T) {
 	e := newAuthEnv(t)
 	tokens := map[string]string{
-		"owner":   testToken,
-		"none":    "not-a-token",
-		"read":    e.mint(t, "read", time.Hour, "read"),
-		"backlog": e.mint(t, "backlog", time.Hour, "backlog_*"),
-		"add":     e.mint(t, "add", time.Hour, "backlog_add_item"),
-		"star":    e.mint(t, "star", time.Hour, "*"),
-		"expired": e.mint(t, "expired", time.Nanosecond, "*"),
-		"revoked": e.mint(t, "revoked", time.Hour, "*"),
+		"owner":    testToken,
+		"none":     "not-a-token",
+		"read":     e.mint(t, "read", time.Hour, "read"),
+		"backlog":  e.mint(t, "backlog", time.Hour, "backlog_*"),
+		"add":      e.mint(t, "add", time.Hour, "backlog_add_item"),
+		"star":     e.mint(t, "star", time.Hour, "*"),
+		"sessions": e.mint(t, "sessions", time.Hour, "session_*"),
+		"expired":  e.mint(t, "expired", time.Nanosecond, "*"),
+		"revoked":  e.mint(t, "revoked", time.Hour, "*"),
 	}
 	for _, tk := range e.store.List() {
 		if tk.Name == "revoked" {
@@ -108,6 +110,16 @@ func TestUnaryScopeEnforcement(t *testing.T) {
 	kill := func(c *http.Client) error {
 		_, err := protectoratev1connect.NewSessionServiceClient(c, e.srv.URL).KillSession(context.Background(),
 			connect.NewRequest(&pb.KillSessionRequest{Name: "ghost"}))
+		return err
+	}
+	create := func(c *http.Client) error {
+		_, err := protectoratev1connect.NewSessionServiceClient(c, e.srv.URL).CreateSession(context.Background(),
+			connect.NewRequest(&pb.CreateSessionRequest{Name: "x", Command: []string{"true"}}))
+		return err
+	}
+	respawn := func(c *http.Client) error {
+		_, err := protectoratev1connect.NewSessionServiceClient(c, e.srv.URL).RespawnSession(context.Background(),
+			connect.NewRequest(&pb.RespawnSessionRequest{Name: "ghost"}))
 		return err
 	}
 	tokenLs := func(c *http.Client) error {
@@ -134,6 +146,11 @@ func TestUnaryScopeEnforcement(t *testing.T) {
 		{"backlog cannot kill", "backlog", kill, connect.CodePermissionDenied},
 		{"exact tool mutates", "add", add, 0},
 		{"star kills", "star", kill, connect.CodeNotFound},
+		{"star cannot create session", "star", create, connect.CodePermissionDenied},
+		{"star cannot respawn", "star", respawn, connect.CodePermissionDenied},
+		{"session glob cannot create session", "sessions", create, connect.CodePermissionDenied},
+		{"session glob still kills", "sessions", kill, connect.CodeNotFound},
+		{"owner respawn (not found is past auth)", "owner", respawn, connect.CodeNotFound},
 		{"star cannot list tokens", "star", tokenLs, connect.CodePermissionDenied},
 		{"read cannot list tokens", "read", tokenLs, connect.CodePermissionDenied},
 	}
@@ -352,6 +369,9 @@ func TestTerminalScopeEnforcement(t *testing.T) {
 	if _, err := e.h.Sessions.Create(context.Background(), session.CreateOptions{Name: "box", Command: []string{"cat"}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.h.Sessions.Create(context.Background(), session.CreateOptions{Name: "sleeve-box", Command: []string{"cat"}}); err != nil {
+		t.Fatal(err)
+	}
 	term := e.mint(t, "term", time.Hour, "terminal")
 	ro := e.mint(t, "ro", time.Hour, "terminal:readonly")
 	star := e.mint(t, "star", time.Hour, "*", "read", "events")
@@ -361,30 +381,35 @@ func TestTerminalScopeEnforcement(t *testing.T) {
 		return &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + tok}}}
 	}
 	tests := []struct {
-		name  string
-		query string
-		opts  *websocket.DialOptions
-		want  int
+		name    string
+		session string
+		query   string
+		opts    *websocket.DialOptions
+		want    int
 	}{
-		{"owner", "", hdr(testToken), 101},
-		{"terminal rw", "", hdr(term), 101},
-		{"terminal ro flag", "?readonly=1", hdr(term), 101},
-		{"terminal via subprotocol", "", &websocket.DialOptions{Subprotocols: []string{TerminalProtocol, "token." + term}}, 101},
-		{"terminal via query", "?token=" + term, &websocket.DialOptions{}, 101},
-		{"readonly scope with flag", "?readonly=1", hdr(ro), 101},
-		{"readonly scope without flag", "", hdr(ro), 403},
-		{"star has no terminal", "", hdr(star), 403},
-		{"star has no readonly terminal", "?readonly=1", hdr(star), 403},
-		{"expired", "", hdr(expired), 401},
-		{"bad header good query falls through", "?token=" + term, hdr("nope"), 101},
-		{"no token", "", &websocket.DialOptions{}, 401},
-		{"scoped token in wrong place", "", &websocket.DialOptions{Subprotocols: []string{TerminalProtocol, "token."}}, 401},
+		{"owner", "", "", hdr(testToken), 101},
+		{"owner rw sleeve", "sleeve-box", "", hdr(testToken), 101},
+		{"terminal rw host session denied", "", "", hdr(term), 403},
+		{"terminal rw sleeve", "sleeve-box", "", hdr(term), 101},
+		{"terminal ro sleeve", "sleeve-box", "?readonly=1", hdr(term), 101},
+		{"terminal ro flag", "", "?readonly=1", hdr(term), 101},
+		{"terminal via subprotocol", "sleeve-box", "", &websocket.DialOptions{Subprotocols: []string{TerminalProtocol, "token." + term}}, 101},
+		{"terminal via query", "sleeve-box", "?token=" + term, &websocket.DialOptions{}, 101},
+		{"readonly scope with flag", "", "?readonly=1", hdr(ro), 101},
+		{"readonly scope without flag", "", "", hdr(ro), 403},
+		{"star has no terminal", "", "", hdr(star), 403},
+		{"star has no readonly terminal", "", "?readonly=1", hdr(star), 403},
+		{"expired", "", "", hdr(expired), 401},
+		{"bad header good query falls through", "sleeve-box", "?token=" + term, hdr("nope"), 101},
+		{"no token", "", "", &websocket.DialOptions{}, 401},
+		{"scoped token in wrong place", "", "", &websocket.DialOptions{Subprotocols: []string{TerminalProtocol, "token."}}, 401},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			conn, res, err := websocket.Dial(ctx, wsURL(e.srv.URL, "box", tt.query), tt.opts)
+			name := cmp.Or(tt.session, "box")
+			conn, res, err := websocket.Dial(ctx, wsURL(e.srv.URL, name, tt.query), tt.opts)
 			if tt.want == 101 {
 				if err != nil {
 					t.Fatal(err)
@@ -404,7 +429,7 @@ func TestTerminalScopeEnforcement(t *testing.T) {
 
 	var attaches, denied int
 	for _, en := range e.entries(t) {
-		if !strings.HasPrefix(en.Procedure, "terminal.attach") || en.Subject != "box" {
+		if !strings.HasPrefix(en.Procedure, "terminal.attach") || (en.Subject != "box" && en.Subject != "sleeve-box") {
 			t.Errorf("unexpected entry %+v", en)
 		}
 		switch en.Outcome {
@@ -414,7 +439,7 @@ func TestTerminalScopeEnforcement(t *testing.T) {
 			denied++
 		}
 	}
-	if attaches != 7 || denied != 6 {
+	if attaches != 9 || denied != 7 {
 		t.Fatalf("attaches=%d denied=%d entries=%+v", attaches, denied, e.entries(t))
 	}
 	b, _ := os.ReadFile(mustGlob(t, filepath.Join(e.audit, "*"))[0])

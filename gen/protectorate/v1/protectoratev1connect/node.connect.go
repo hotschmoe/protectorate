@@ -298,7 +298,8 @@ type NodeServiceClient interface {
 	// GetNode returns one node with full metrics: filesystems, GPUs,
 	// containers, engine disk usage and watched directories.
 	GetNode(context.Context, *connect.Request[v1.GetNodeRequest]) (*connect.Response[v1.NodeStatus], error)
-	// AddNode adds or updates a node in the hub inventory.
+	// AddNode adds or updates a node in the hub inventory. The hub polls the
+	// address with its node token, so only the owner token may call it.
 	AddNode(context.Context, *connect.Request[v1.AddNodeRequest]) (*connect.Response[v1.NodeInfo], error)
 	// RemoveNode removes a node from the hub inventory. It does not touch the
 	// machine itself.
@@ -381,7 +382,8 @@ type NodeServiceHandler interface {
 	// GetNode returns one node with full metrics: filesystems, GPUs,
 	// containers, engine disk usage and watched directories.
 	GetNode(context.Context, *connect.Request[v1.GetNodeRequest]) (*connect.Response[v1.NodeStatus], error)
-	// AddNode adds or updates a node in the hub inventory.
+	// AddNode adds or updates a node in the hub inventory. The hub polls the
+	// address with its node token, so only the owner token may call it.
 	AddNode(context.Context, *connect.Request[v1.AddNodeRequest]) (*connect.Response[v1.NodeInfo], error)
 	// RemoveNode removes a node from the hub inventory. It does not touch the
 	// machine itself.

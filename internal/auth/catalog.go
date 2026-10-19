@@ -80,7 +80,7 @@ func buildCatalog() (map[string]Method, error) {
 					Service:   string(svc.Name()),
 					ReadOnly:  opts.GetIdempotencyLevel() == descriptorpb.MethodOptions_NO_SIDE_EFFECTS,
 					Streaming: m.IsStreamingClient() || m.IsStreamingServer(),
-					OwnerOnly: owner,
+					OwnerOnly: owner || proto.GetExtension(opts, pb.E_OwnerOnlyRpc).(bool),
 				}
 				for _, prev := range out {
 					if prev.Tool == def.Tool {

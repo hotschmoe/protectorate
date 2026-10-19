@@ -99,7 +99,6 @@ hub_get_status          read-only
 quota_get_quota         read-only
 quota_suggest           read-only
 session_capture_pane    read-only
-session_create_session  mutating
 session_kill_session    mutating, destructive
 session_list_sessions   read-only
 ```

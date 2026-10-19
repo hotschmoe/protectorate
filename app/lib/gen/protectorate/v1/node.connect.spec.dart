@@ -98,7 +98,8 @@ abstract final class NodeService {
     idempotency: connect.Idempotency.noSideEffects,
   );
 
-  /// AddNode adds or updates a node in the hub inventory.
+  /// AddNode adds or updates a node in the hub inventory. The hub polls the
+  /// address with its node token, so only the owner token may call it.
   static const addNode = connect.Spec(
     '/$name/AddNode',
     connect.StreamType.unary,

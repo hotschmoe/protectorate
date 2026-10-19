@@ -727,12 +727,12 @@ const file_protectorate_v1_session_proto_rawDesc = "" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATE_RUNNING\x10\x01\x12\x18\n" +
-	"\x14SESSION_STATE_EXITED\x10\x022\xf4\x03\n" +
+	"\x14SESSION_STATE_EXITED\x10\x022\x80\x04\n" +
 	"\x0eSessionService\x12`\n" +
-	"\fListSessions\x12$.protectorate.v1.ListSessionsRequest\x1a%.protectorate.v1.ListSessionsResponse\"\x03\x90\x02\x01\x12^\n" +
-	"\rCreateSession\x12%.protectorate.v1.CreateSessionRequest\x1a&.protectorate.v1.CreateSessionResponse\x12^\n" +
-	"\vKillSession\x12#.protectorate.v1.KillSessionRequest\x1a$.protectorate.v1.KillSessionResponse\"\x04\x88\xb5\x18\x01\x12a\n" +
-	"\x0eRespawnSession\x12&.protectorate.v1.RespawnSessionRequest\x1a'.protectorate.v1.RespawnSessionResponse\x12]\n" +
+	"\fListSessions\x12$.protectorate.v1.ListSessionsRequest\x1a%.protectorate.v1.ListSessionsResponse\"\x03\x90\x02\x01\x12d\n" +
+	"\rCreateSession\x12%.protectorate.v1.CreateSessionRequest\x1a&.protectorate.v1.CreateSessionResponse\"\x04\xa0\xb5\x18\x01\x12^\n" +
+	"\vKillSession\x12#.protectorate.v1.KillSessionRequest\x1a$.protectorate.v1.KillSessionResponse\"\x04\x88\xb5\x18\x01\x12g\n" +
+	"\x0eRespawnSession\x12&.protectorate.v1.RespawnSessionRequest\x1a'.protectorate.v1.RespawnSessionResponse\"\x04\xa0\xb5\x18\x01\x12]\n" +
 	"\vCapturePane\x12#.protectorate.v1.CapturePaneRequest\x1a$.protectorate.v1.CapturePaneResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (

@@ -62,8 +62,11 @@ service NodeService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // AddNode adds or updates a node in the hub inventory.
-  rpc AddNode(AddNodeRequest) returns (NodeInfo);
+  // AddNode adds or updates a node in the hub inventory. The hub polls the
+  // address with its node token, so only the owner token may call it.
+  rpc AddNode(AddNodeRequest) returns (NodeInfo) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
 
   // RemoveNode removes a node from the hub inventory. It does not touch the
   // machine itself.

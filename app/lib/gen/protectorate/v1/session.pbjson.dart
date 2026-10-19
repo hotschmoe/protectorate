@@ -270,7 +270,8 @@ const $core.Map<$core.String, $core.dynamic> SessionServiceBase$json = {
     {
       '1': 'CreateSession',
       '2': '.protectorate.v1.CreateSessionRequest',
-      '3': '.protectorate.v1.CreateSessionResponse'
+      '3': '.protectorate.v1.CreateSessionResponse',
+      '4': {}
     },
     {
       '1': 'KillSession',
@@ -281,7 +282,8 @@ const $core.Map<$core.String, $core.dynamic> SessionServiceBase$json = {
     {
       '1': 'RespawnSession',
       '2': '.protectorate.v1.RespawnSessionRequest',
-      '3': '.protectorate.v1.RespawnSessionResponse'
+      '3': '.protectorate.v1.RespawnSessionResponse',
+      '4': {}
     },
     {
       '1': 'CapturePane',
@@ -315,11 +317,11 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 final $typed_data.Uint8List sessionServiceDescriptor = $convert.base64Decode(
     'Cg5TZXNzaW9uU2VydmljZRJgCgxMaXN0U2Vzc2lvbnMSJC5wcm90ZWN0b3JhdGUudjEuTGlzdF'
     'Nlc3Npb25zUmVxdWVzdBolLnByb3RlY3RvcmF0ZS52MS5MaXN0U2Vzc2lvbnNSZXNwb25zZSID'
-    'kAIBEl4KDUNyZWF0ZVNlc3Npb24SJS5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlcX'
-    'Vlc3QaJi5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlc3BvbnNlEl4KC0tpbGxTZXNz'
-    'aW9uEiMucHJvdGVjdG9yYXRlLnYxLktpbGxTZXNzaW9uUmVxdWVzdBokLnByb3RlY3RvcmF0ZS'
-    '52MS5LaWxsU2Vzc2lvblJlc3BvbnNlIgSItRgBEmEKDlJlc3Bhd25TZXNzaW9uEiYucHJvdGVj'
-    'dG9yYXRlLnYxLlJlc3Bhd25TZXNzaW9uUmVxdWVzdBonLnByb3RlY3RvcmF0ZS52MS5SZXNwYX'
-    'duU2Vzc2lvblJlc3BvbnNlEl0KC0NhcHR1cmVQYW5lEiMucHJvdGVjdG9yYXRlLnYxLkNhcHR1'
-    'cmVQYW5lUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5DYXB0dXJlUGFuZVJlc3BvbnNlIgOQAg'
-    'E=');
+    'kAIBEmQKDUNyZWF0ZVNlc3Npb24SJS5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlcX'
+    'Vlc3QaJi5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlc3BvbnNlIgSgtRgBEl4KC0tp'
+    'bGxTZXNzaW9uEiMucHJvdGVjdG9yYXRlLnYxLktpbGxTZXNzaW9uUmVxdWVzdBokLnByb3RlY3'
+    'RvcmF0ZS52MS5LaWxsU2Vzc2lvblJlc3BvbnNlIgSItRgBEmcKDlJlc3Bhd25TZXNzaW9uEiYu'
+    'cHJvdGVjdG9yYXRlLnYxLlJlc3Bhd25TZXNzaW9uUmVxdWVzdBonLnByb3RlY3RvcmF0ZS52MS'
+    '5SZXNwYXduU2Vzc2lvblJlc3BvbnNlIgSgtRgBEl0KC0NhcHR1cmVQYW5lEiMucHJvdGVjdG9y'
+    'YXRlLnYxLkNhcHR1cmVQYW5lUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5DYXB0dXJlUGFuZV'
+    'Jlc3BvbnNlIgOQAgE=');

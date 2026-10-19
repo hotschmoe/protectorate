@@ -41,7 +41,7 @@ func (t ToolDef) Path() string {
 }
 
 // Catalog lists every unary hub RPC in the embedded image, sorted by tool
-// name. node_local and owner_only services and server-streaming RPCs are skipped.
+// name. node_local and owner_only services and methods and server-streaming RPCs are skipped.
 func Catalog() ([]ToolDef, error) {
 	var set descriptorpb.FileDescriptorSet
 	if err := proto.Unmarshal(image, &set); err != nil {
@@ -66,7 +66,8 @@ func Catalog() ([]ToolDef, error) {
 			}
 			for j := 0; j < svc.Methods().Len(); j++ {
 				m := svc.Methods().Get(j)
-				if m.IsStreamingClient() || m.IsStreamingServer() {
+				opts, _ := m.Options().(*descriptorpb.MethodOptions)
+				if m.IsStreamingClient() || m.IsStreamingServer() || proto.GetExtension(opts, pb.E_OwnerOnlyRpc).(bool) {
 					continue
 				}
 				name := auth.ToolName(svc, m)
@@ -75,7 +76,6 @@ func Catalog() ([]ToolDef, error) {
 					return false
 				}
 				seen[name] = string(m.FullName())
-				opts, _ := m.Options().(*descriptorpb.MethodOptions)
 				tools = append(tools, ToolDef{
 					Name:        name,
 					Description: comment(m),

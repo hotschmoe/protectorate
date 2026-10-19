@@ -47,8 +47,22 @@ agent's user on any node the caller can target, and source paths are read from
 the hub's disk. Node agents accept the job RPCs only from the hub (tailnet
 WhoIs `tag:hub`, or the node token); the hub never serves `NodeAgentService`.
 
-Services marked `(protectorate.v1.owner_only)` (TokenService) accept only the
-owner token whatever the scopes.
+Services marked `(protectorate.v1.owner_only)` (TokenService) and RPCs marked
+`(protectorate.v1.owner_only_rpc)` accept only the owner token whatever the
+scopes. The RPC form covers anything that runs code as the hub's OS user or
+aims the hub's credentials: `CreateSession` and `RespawnSession` (the command
+is unsandboxed and could read `$PROTECTORATE_HOME/token`) and `AddNode` (the
+hub polls the address with the node token). Owner-only RPCs match no scope
+glob, so granting them is rejected at token creation; `*` and `session_*` do
+not include them.
+
+The terminal is the same hole by another door. Typing into a session that runs
+as the hub user is code execution as that user, so a `terminal` token may
+attach read-write only to `sleeve-*` sessions, which run in the sleeve
+sandbox. Read-write attach to any other session needs the owner token; a
+scoped token gets 403 with a hint to attach with `readonly=1`, which still
+works. `job_submit_job` is likewise shell access (on nodes, not the hub) and
+stays a deliberate grant.
 
 ## Entry points
 

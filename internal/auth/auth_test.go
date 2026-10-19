@@ -35,6 +35,10 @@ func TestCatalog(t *testing.T) {
 		"/protectorate.v1.EventService/Subscribe":     {streaming: true},
 		"/protectorate.v1.TokenService/CreateToken":   {owner: true},
 		"/protectorate.v1.TokenService/ListTokens":    {read: true, owner: true},
+		pCreate:  {owner: true},
+		pRespawn: {owner: true},
+		pAddNode: {owner: true},
+		pRmNode:  {},
 	}
 	for proc, w := range want {
 		m, ok := ms[proc]
@@ -67,6 +71,8 @@ func TestValidateScopes(t *testing.T) {
 		{"star", []string{"*"}, []string{"*"}, false},
 		{"typo matches nothing", []string{"sesion_*"}, nil, true},
 		{"owner-only only", []string{"token_*"}, nil, true},
+		{"owner-only rpc by name", []string{"session_create_session"}, nil, true},
+		{"owner-only rpc add node", []string{"node_add_node"}, nil, true},
 		{"bad glob", []string{"["}, nil, true},
 		{"empty scope", []string{""}, nil, true},
 		{"procedure form rejected", []string{"/protectorate.v1.HubService/GetStatus"}, nil, true},
@@ -89,6 +95,9 @@ const (
 	pList    = "/protectorate.v1.SessionService/ListSessions"
 	pCreate  = "/protectorate.v1.SessionService/CreateSession"
 	pKill    = "/protectorate.v1.SessionService/KillSession"
+	pRespawn = "/protectorate.v1.SessionService/RespawnSession"
+	pAddNode = "/protectorate.v1.NodeService/AddNode"
+	pRmNode  = "/protectorate.v1.NodeService/RemoveNode"
 	pAdd     = "/protectorate.v1.BacklogService/AddItem"
 	pListIt  = "/protectorate.v1.BacklogService/ListItems"
 	pSub     = "/protectorate.v1.EventService/Subscribe"
@@ -113,7 +122,7 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"no scopes denies read", nil, false, pStatus, false, "read or hub_get_status"},
 		{"read covers every read rpc", []string{"read"}, false, pList, true, ""},
 		{"read covers other service read", []string{"read"}, false, pListIt, true, ""},
-		{"read excludes mutation", []string{"read"}, false, pCreate, false, "session_create_session"},
+		{"read excludes mutation", []string{"read"}, false, pCreate, false, "owner token (session_create_session is owner-only)"},
 		{"read excludes streaming", []string{"read"}, false, pSub, false, "events or event_subscribe"},
 		{"events covers stream", []string{"events"}, false, pSub, true, ""},
 		{"events not reads", []string{"events"}, false, pStatus, false, "read or hub_get_status"},
@@ -122,6 +131,12 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"exact tool", []string{"backlog_add_item"}, false, pAdd, true, ""},
 		{"exact tool not sibling", []string{"backlog_add_item"}, false, pListIt, false, "read or backlog_list_items"},
 		{"star everything but owner-only", []string{"*"}, false, pKill, true, ""},
+		{"star not create session", []string{"*"}, false, pCreate, false, "session_create_session is owner-only"},
+		{"exact tool not create session", []string{"session_create_session"}, false, pCreate, false, "session_create_session is owner-only"},
+		{"glob not respawn", []string{"session_*"}, false, pRespawn, false, "session_respawn_session is owner-only"},
+		{"star not add node", []string{"*", "node_add_node"}, false, pAddNode, false, "node_add_node is owner-only"},
+		{"owner create session", nil, true, pCreate, true, ""},
+		{"glob still kills", []string{"node_*"}, false, pRmNode, true, ""},
 		{"star not token service", []string{"*"}, false, pTokNew, false, "owner token (token_create_token is owner-only)"},
 		{"star not token list", []string{"*", "read"}, false, pTokList, false, "owner token (token_list_tokens is owner-only)"},
 		{"terminal scope grants no rpc", []string{"terminal", "terminal:readonly"}, false, pStatus, false, "read or hub_get_status"},
@@ -151,19 +166,23 @@ func TestAuthorizeTerminal(t *testing.T) {
 		name     string
 		p        *Principal
 		readOnly bool
+		host     bool
 		ok       bool
 	}{
-		{"owner rw", &Principal{Owner: true}, false, true},
-		{"terminal rw", &Principal{Scopes: []string{"terminal"}}, false, true},
-		{"terminal ro", &Principal{Scopes: []string{"terminal"}}, true, true},
-		{"readonly scope ro", &Principal{Scopes: []string{"terminal:readonly"}}, true, true},
-		{"readonly scope rw denied", &Principal{Scopes: []string{"terminal:readonly"}}, false, false},
-		{"star is not terminal", &Principal{Scopes: []string{"*", "read", "events"}}, true, false},
-		{"none", &Principal{}, true, false},
+		{"owner rw", &Principal{Owner: true}, false, false, true},
+		{"owner rw host session", &Principal{Owner: true}, false, true, true},
+		{"terminal rw sleeve", &Principal{Scopes: []string{"terminal"}}, false, false, true},
+		{"terminal rw host session denied", &Principal{Scopes: []string{"terminal"}}, false, true, false},
+		{"terminal ro host session", &Principal{Scopes: []string{"terminal"}}, true, true, true},
+		{"terminal ro", &Principal{Scopes: []string{"terminal"}}, true, false, true},
+		{"readonly scope ro", &Principal{Scopes: []string{"terminal:readonly"}}, true, true, true},
+		{"readonly scope rw denied", &Principal{Scopes: []string{"terminal:readonly"}}, false, false, false},
+		{"star is not terminal", &Principal{Scopes: []string{"*", "read", "events"}}, true, false, false},
+		{"none", &Principal{}, true, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := a.AuthorizeTerminal(tt.p, tt.readOnly)
+			err := a.AuthorizeTerminal(tt.p, tt.readOnly, tt.host)
 			if (err == nil) != tt.ok {
 				t.Fatalf("err = %v", err)
 			}

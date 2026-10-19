@@ -169,7 +169,8 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// AddNode adds or updates a node in the hub inventory.
+  /// AddNode adds or updates a node in the hub inventory. The hub polls the
+  /// address with its node token, so only the owner token may call it.
   Future<protectoratev1node.NodeInfo> addNode(
     protectoratev1node.AddNodeRequest input, {
     connect.Headers? headers,

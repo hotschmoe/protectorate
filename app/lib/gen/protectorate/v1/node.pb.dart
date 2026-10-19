@@ -2319,7 +2319,8 @@ class NodeServiceApi {
       _client.invoke<NodeStatus>(
           ctx, 'NodeService', 'GetNode', request, NodeStatus());
 
-  /// AddNode adds or updates a node in the hub inventory.
+  /// AddNode adds or updates a node in the hub inventory. The hub polls the
+  /// address with its node token, so only the owner token may call it.
   $async.Future<NodeInfo> addNode(
           $pb.ClientContext? ctx, AddNodeRequest request) =>
       _client.invoke<NodeInfo>(
