@@ -7,6 +7,7 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/add_node.dart';
+import '../nodes/desk_view.dart';
 import '../nodes/node_update.dart';
 import '../nodes/remove_node.dart';
 import '../nodes/node_view.dart';
@@ -15,6 +16,7 @@ import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
+import 'desk_screen.dart';
 import 'nodes_tab.dart';
 import 'sleeves_screen.dart';
 
@@ -153,6 +155,16 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
                       onChanged: _refresh,
                     )
                   : null,
+              onOpenDesk: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => DeskScreen(
+                    client: widget.client,
+                    feed: widget.feed,
+                    name: widget.name,
+                    now: widget.now,
+                  ),
+                ),
+              ),
               onManageSleeves: s.node.local
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -282,6 +294,7 @@ class NodeDetail extends StatelessWidget {
     this.onRemove,
     this.onReissue,
     this.onUpdate,
+    this.onOpenDesk,
     this.versions = const Versions(),
     this.cpuHistory = const [],
     this.memHistory = const [],
@@ -291,6 +304,7 @@ class NodeDetail extends StatelessWidget {
   final VoidCallback? onRemove;
   final VoidCallback? onReissue;
   final VoidCallback? onUpdate;
+  final VoidCallback? onOpenDesk;
   final Versions versions;
   final NodeStatus status;
   final Duration age;
@@ -353,6 +367,8 @@ class NodeDetail extends StatelessWidget {
         ),
       if (onRemove != null || onReissue != null)
         _ManagePanel(status: status, onRemove: onRemove, onReissue: onReissue),
+      if (isWindowsNode(status) && !status.node.invited)
+        DeskPanel(status: status, now: now, onOpen: down ? null : onOpenDesk),
       if (down)
         NoteStrip(
           m == null

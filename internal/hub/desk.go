@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/desk"
 )
 
 // deskResource is the lease resource that guards a node's desktop.
@@ -184,7 +185,14 @@ func (h *Hub) Screenshot(ctx context.Context, req *connect.Request[pb.Screenshot
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(res.GetScreenshot()), nil
+	shot := res.GetScreenshot()
+	// An agent older than max_width sends the full screen; scale it here.
+	if req.Msg.MaxWidth > 0 && shot != nil {
+		if shot.Png, err = desk.DownscalePNG(shot.Png, int(req.Msg.MaxWidth)); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("scale screenshot of %s: %w", req.Msg.Target.GetName(), err))
+		}
+	}
+	return connect.NewResponse(shot), nil
 }
 
 func (h *Hub) ListWindows(ctx context.Context, req *connect.Request[pb.ListWindowsRequest]) (*connect.Response[pb.ListWindowsResponse], error) {

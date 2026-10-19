@@ -18,6 +18,8 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/desk.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/desk.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/directory.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/directory.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/message.connect.spec.dart';
@@ -48,6 +50,7 @@ import 'package:protectorate/nodes/add_node.dart';
 import 'package:protectorate/nodes/remove_node.dart';
 import 'package:protectorate/nodes/version_skew.dart';
 import 'package:protectorate/screens/chat_screen.dart';
+import 'package:protectorate/screens/desk_screen.dart';
 import 'package:protectorate/screens/sleeves_screen.dart';
 import 'package:protectorate/theme/tokens.dart';
 
@@ -164,6 +167,92 @@ Stream<ChatEvent> _transcript() async* {
     ),
   );
   await Completer<void>().future;
+}
+
+List<int> _desktopPng = const [];
+
+// A plausible Windows desktop at the size a phone would ask for.
+Future<List<int>> _paintDesktop() async {
+  const w = 1280.0, h = 720.0;
+  final rec = ui.PictureRecorder();
+  final c = Canvas(rec);
+  final p = Paint();
+  p.shader = ui.Gradient.linear(Offset.zero, const Offset(w, h), [
+    const Color(0xFF0B3D6E),
+    const Color(0xFF1C6EA4),
+  ]);
+  c.drawRect(const Rect.fromLTWH(0, 0, w, h), p);
+  p.shader = null;
+  void window(Rect r, String title, Color bar, {bool lines = true}) {
+    c.drawRect(
+      r.shift(const Offset(0, 4)),
+      Paint()..color = const Color(0x55000000),
+    );
+    c.drawRect(r, Paint()..color = const Color(0xFFF3F3F3));
+    c.drawRect(Rect.fromLTWH(r.left, r.top, r.width, 28), Paint()..color = bar);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: const TextStyle(
+          fontFamily: monoFamily,
+          fontSize: 13,
+          color: Color(0xFF202020),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(c, Offset(r.left + 10, r.top + 7));
+    if (!lines) return;
+    for (var i = 0; i < 9; i++) {
+      c.drawRect(
+        Rect.fromLTWH(
+          r.left + 16,
+          r.top + 48 + i * 22,
+          r.width * (0.4 + (i * 37 % 50) / 100),
+          9,
+        ),
+        Paint()..color = const Color(0xFFCFD6DE),
+      );
+    }
+  }
+
+  window(
+    const Rect.fromLTWH(70, 60, 820, 520),
+    'ArchiCAD 27 - office-tower.pln',
+    const Color(0xFFE6E6E6),
+    lines: false,
+  );
+  final plan = Paint()
+    ..color = const Color(0xFF2B5D8A)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2;
+  c.drawRect(const Rect.fromLTWH(150, 140, 420, 320), plan);
+  c.drawRect(const Rect.fromLTWH(150, 140, 180, 140), plan);
+  c.drawRect(const Rect.fromLTWH(330, 280, 240, 180), plan);
+  c.drawLine(const Offset(150, 360), const Offset(330, 360), plan);
+  c.drawRect(
+    const Rect.fromLTWH(610, 140, 250, 400),
+    Paint()..color = const Color(0xFFE9ECEF),
+  );
+  window(
+    const Rect.fromLTWH(760, 220, 460, 330),
+    'ENERCALC - Beam B-12',
+    const Color(0xFFDCE7F3),
+  );
+  c.drawRect(
+    const Rect.fromLTWH(0, h - 44, w, 44),
+    Paint()..color = const Color(0xFF1F1F1F),
+  );
+  for (var i = 0; i < 6; i++) {
+    c.drawRect(
+      Rect.fromLTWH(w / 2 - 150 + i * 52, h - 36, 28, 28),
+      Paint()
+        ..color = i == 2 ? const Color(0xFF6CB4EE) : const Color(0xFF9AA4AE),
+    );
+  }
+  final img = await rec.endRecording().toImage(w.toInt(), h.toInt());
+  final data = await img.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
 }
 
 Future<void> _loadFonts() async {
@@ -457,6 +546,23 @@ List<NodeStatus> _fleet(int i) => [
     node: NodeInfo(name: 'win-desk', address: '100.64.0.4:7475'),
     freshness: NodeFreshness.NODE_FRESHNESS_STALE,
     age: _dur(const Duration(minutes: 2)),
+    desk: DeskState(
+      available: true,
+      reason: DeskReason.DESK_REASON_AVAILABLE,
+      detail: 'inside the window 19:00-07:00, no physical input for 1h12m',
+      lastInput: _ago(const Duration(hours: 1, minutes: 12)),
+      policy: DeskPolicy(
+        window: '19:00-07:00',
+        idle: _dur(const Duration(minutes: 15)),
+        lockAfter: true,
+      ),
+    ),
+    deskHolder: 'auto:token:sleeve:cad',
+    deskInputs: [
+      DeskUse(caller: 'token:sleeve:cad', count: 214),
+      DeskUse(caller: 'token:sleeve:research', count: 18),
+      DeskUse(caller: 'owner', count: 3),
+    ],
     metrics: NodeMetrics(
       os: 'windows',
       arch: 'amd64',
@@ -785,6 +891,51 @@ Transport _hubTransport(StreamController<Event> events) {
       )
       .unary(MessageService.inbox, (InboxRequest r, ctx) => InboxResponse())
       .unary(
+        DeskService.screenshot,
+        (ScreenshotRequest r, ctx) =>
+            ScreenshotResponse(png: _desktopPng, width: 2560, height: 1440),
+      )
+      .unary(
+        DeskService.listWindows,
+        (ListWindowsRequest r, ctx) => ListWindowsResponse(
+          windows: [
+            DeskWindow(
+              title: 'ArchiCAD 27 - office-tower.pln',
+              x: 140,
+              y: 120,
+              width: 1640,
+              height: 1040,
+              pid: 6120,
+            ),
+            DeskWindow(
+              title: 'ENERCALC - Beam B-12',
+              x: 1520,
+              y: 440,
+              width: 920,
+              height: 660,
+              pid: 4410,
+            ),
+            DeskWindow(title: 'Outlook', pid: 3312, minimized: true),
+            DeskWindow(
+              title: 'Program Manager',
+              width: 2560,
+              height: 1440,
+              pid: 980,
+            ),
+          ],
+        ),
+      )
+      .unary(
+        DeskService.foreground,
+        (ForegroundRequest r, ctx) => ForegroundResponse(
+          title: 'ENERCALC - Beam B-12',
+          pid: 4410,
+          process: 'enercalc.exe',
+          integrity: 'medium',
+          agentIntegrity: 'medium',
+        ),
+      )
+      .unary(
         DirectoryService.listProjects,
         (ListProjectsRequest r, ctx) => ListProjectsResponse(
           projects: [
@@ -1066,6 +1217,45 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
         await _shoot(tester, key, 'thread-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('desk $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 2300 : 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        if (_desktopPng.isEmpty) {
+          _desktopPng = (await tester.runAsync(_paintDesktop))!;
+        }
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final feed = EventFeed(() => events.stream)..start();
+        addTearDown(feed.dispose);
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: DeskScreen(
+                client: HubClient.withTransport(_hubTransport(events)),
+                feed: feed,
+                name: 'win-desk',
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        await tester.runAsync(
+          () => precacheImage(
+            MemoryImage(Uint8List.fromList(_desktopPng)),
+            tester.element(find.byType(Scaffold)),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'desk-$tag');
         await tester.pumpWidget(const SizedBox());
       });
 

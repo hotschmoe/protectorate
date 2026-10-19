@@ -30,6 +30,7 @@ func (o *opts) deskClient() (protectoratev1connect.DeskServiceClient, error) {
 type deskFlags struct {
 	lease, button, output string
 	double, allowFamily   bool
+	maxWidth              int32
 }
 
 func deskCmd(o *opts) *cobra.Command {
@@ -78,6 +79,7 @@ arguments or negative numbers: desk win1 --lease L run -- notepad.exe a.txt`,
 	fl := c.Flags()
 	fl.StringVar(&f.lease, "lease", "", "lease id on desk:<node> (default: the hub leases the desktop for 2 minutes per command; or env "+deskLeaseEnv+")")
 	fl.StringVarP(&f.output, "output", "o", "", "screenshot file (default screenshot.png)")
+	fl.Int32Var(&f.maxWidth, "max-width", 0, "scale the screenshot down to at most this many pixels wide (coordinates stay screen pixels)")
 	fl.StringVar(&f.button, "button", "left", "mouse button for click: left, right or middle")
 	fl.BoolVar(&f.double, "double", false, "double-click")
 	fl.BoolVar(&f.allowFamily, "allow-family", false, "allow nodes of tier family")
@@ -113,7 +115,7 @@ func parseDeskArgs(verb string, args []string, f deskFlags) (*pb.DeskActionReque
 		case "foreground":
 			return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Foreground{Foreground: &pb.ForegroundRequest{}}}, nil
 		}
-		return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Screenshot{Screenshot: &pb.ScreenshotRequest{}}}, nil
+		return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Screenshot{Screenshot: &pb.ScreenshotRequest{MaxWidth: f.maxWidth}}}, nil
 	case "click":
 		x, y, err := deskInts(verb, args)
 		if err != nil {

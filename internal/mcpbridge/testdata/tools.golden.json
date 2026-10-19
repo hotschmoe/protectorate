@@ -441,6 +441,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "maxWidth": {
+          "description": "max_width scales the image down, keeping its aspect ratio, to at most this many pixels wide, for viewing over a slow link; 0 keeps full size. Input coordinates stay screen pixels: scale by width / the PNG's width.",
+          "type": "integer"
+        },
         "target": {
           "additionalProperties": false,
           "properties": {

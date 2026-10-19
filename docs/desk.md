@@ -75,7 +75,7 @@ Without `-f` an existing destination is an error.
 ## Desktop commands
 
 ```
-protectorate desk <node> screenshot [-o file.png]
+protectorate desk <node> screenshot [-o file.png] [--max-width N]
 protectorate desk <node> windows
 protectorate desk <node> foreground
 protectorate desk <node> --lease ID click X Y [--button left|right|middle] [--double]
@@ -86,7 +86,11 @@ protectorate desk <node> --lease ID run <program> [-- args]
 ```
 
 Coordinates are pixels of the screenshot (origin at the top-left of the
-virtual screen, all monitors). `windows` lists visible top-level windows with
+virtual screen, all monitors). `--max-width` (`ScreenshotRequest.max_width`)
+scales the image down for viewing over a slow link, each pixel the average of
+the screen pixels it covers; the node scales it before sending, and the hub
+scales what an older agent sent at full size. The reported width and height
+stay the screen's, the coordinate space of input. `windows` lists visible top-level windows with
 title, position, size and process id. A key chord is zero or more of ctrl, alt,
 shift, win followed by one key: a letter, digit, F1 to F24, or a name such as
 enter, tab, esc, space, backspace, delete, home, end, pageup, pagedown, left,
