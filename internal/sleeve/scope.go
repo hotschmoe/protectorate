@@ -110,6 +110,11 @@ func (c Config) readUsage(name string) (rawUsage, error) {
 	return u, nil
 }
 
+func (c Config) readOOMKills(name string) (uint64, bool) {
+	n, err := readKeyed(filepath.Join(c.scopeDir(name), "memory.events"), "oom_kill")
+	return n, err == nil
+}
+
 // killScope sends SIGKILL to every process in the scope and waits for the
 // cgroup to disappear.
 func (c Config) killScope(ctx context.Context, name string) error {

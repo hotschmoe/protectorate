@@ -77,6 +77,12 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	if i.State == sleeve.Exited {
 		s.State = pb.SleeveState_SLEEVE_STATE_EXITED
 		s.ExitedAt = timestamppb.New(i.Exited)
+		s.ExitSignal = int32(i.ExitSignal)
+		s.OomKilled = i.OOMKilled
+		if i.ExitCode != nil {
+			c := int32(*i.ExitCode)
+			s.ExitCode = &c
+		}
 	}
 	return s
 }

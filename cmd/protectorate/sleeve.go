@@ -16,6 +16,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/hub"
+	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
@@ -165,6 +166,36 @@ func sleeveStateLabel(s pb.SleeveState) string {
 	return "exited"
 }
 
+// exitLabel describes how an exited sleeve ended, e.g. "exit 3",
+// "killed by signal 11" or "exit 137 (OOM killed)".
+func exitLabel(s *pb.Sleeve) string {
+	var l string
+	switch {
+	case s.ExitCode == nil:
+		return "unknown"
+	case s.ExitSignal > 0:
+		l = fmt.Sprintf("killed by signal %d (exit %d)", s.ExitSignal, *s.ExitCode)
+	default:
+		l = fmt.Sprintf("exit %d", *s.ExitCode)
+	}
+	if s.OomKilled {
+		l += " (OOM killed)"
+	}
+	return l
+}
+
+func sleeveRowState(s *pb.Sleeve) string {
+	if s.State == pb.SleeveState_SLEEVE_STATE_RUNNING || s.ExitCode == nil {
+		return sleeveStateLabel(s.State)
+	}
+	if s.OomKilled {
+		return fmt.Sprintf("exited(%d,oom)", *s.ExitCode)
+	}
+	return fmt.Sprintf("exited(%d)", *s.ExitCode)
+}
+
+const showTailLines = 20
+
 func limitLabel(l *pb.SleeveLimits) string {
 	cpu, mem := "-", "-"
 	if l.GetCpuPercent() > 0 {
@@ -194,7 +225,7 @@ func sleeveLsCmd(o *opts) *cobra.Command {
 				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE")
 				for _, s := range res.Msg.Sleeves {
 					u := s.Usage
-					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State),
+					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
 						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace)
 				}
 			})
@@ -217,16 +248,32 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 				return err
 			}
 			s, u := res.Msg.Sleeve, res.Msg.Sleeve.Usage
+			var tail string
+			if s.State == pb.SleeveState_SLEEVE_STATE_EXITED {
+				sc, err := sessionClient(o)
+				if err != nil {
+					return err
+				}
+				if cp, err := sc.CapturePane(cmd.Context(), connect.NewRequest(&pb.CapturePaneRequest{Name: s.Session, Lines: 100})); err == nil {
+					tail = session.Tail(cp.Msg.Text, showTailLines)
+				}
+			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
 				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {
 					fmt.Fprintf(w, "exited\t%s\n", s.ExitedAt.AsTime().Local().Format(time.RFC3339))
+					fmt.Fprintf(w, "exit\t%s\n", exitLabel(s))
 				}
 				fmt.Fprintf(w, "args\t%s\nlimits\t%s\n", strings.Join(s.Args, " "), limitLabel(s.Limits))
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))
+				if tail != "" {
+					fmt.Fprintf(w, "\nlast %d lines of output:\n%s\n", showTailLines, tail)
+				} else if s.State == pb.SleeveState_SLEEVE_STATE_EXITED {
+					fmt.Fprintln(w, "\n(no output kept: the session is gone)")
+				}
 			})
 		},
 	}

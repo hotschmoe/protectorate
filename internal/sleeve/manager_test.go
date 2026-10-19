@@ -228,6 +228,9 @@ func TestSleeveLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "b exited", func() bool { i, _ := r.m.Get(bName); return i.State == Exited })
+	if i, _ := r.m.Get(bName); i.ExitCode != nil {
+		t.Errorf("exit code %d invented for a session killed from outside", *i.ExitCode)
+	}
 	if r.cfg.scopeAlive(bName) {
 		t.Error("b's scope survived its session")
 	}
@@ -281,6 +284,89 @@ func TestMemoryLimitEnforced(t *testing.T) {
 	}
 	if err := r.m.Kill(context.Background(), info.Name); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSleeveExitKeepsSession(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	info, ws := r.spawn(t, "crash", Limits{}, "sh", "-c", "echo crash-output; sleep 1; exit 3")
+	waitFor(t, "exit", func() bool { i, _ := r.m.Get(info.Name); return i.State == Exited })
+
+	i, _ := r.m.Get(info.Name)
+	if i.ExitCode == nil || *i.ExitCode != 3 || i.ExitSignal != 0 || i.OOMKilled || i.Exited.IsZero() {
+		t.Fatalf("info = %+v", i)
+	}
+	if !r.rec.has("sleeve.exited " + info.Name) {
+		t.Errorf("no exited event: %v", r.rec.events)
+	}
+	if r.cfg.scopeAlive(info.Name) {
+		t.Error("scope alive after exit")
+	}
+	s, err := r.sess.Get(ctx, info.Session)
+	if err != nil || s.State != session.Exited || s.ExitCode != 3 {
+		t.Fatalf("session = %+v, %v", s, err)
+	}
+	text, err := r.sess.Capture(ctx, info.Session, 50)
+	if err != nil || !strings.Contains(text, "crash-output") {
+		t.Fatalf("capture = %q, %v", text, err)
+	}
+
+	r.open(t)
+	if got, _ := r.m.Get(info.Name); got.State != Exited || got.ExitCode == nil || *got.ExitCode != 3 {
+		t.Fatalf("exit info lost across restart: %+v", got)
+	}
+
+	again, err := r.m.Spawn(ctx, SpawnRequest{Name: info.Name, Workspace: ws, Harness: Shell, Args: []string{"sleep", "600"}})
+	if err != nil {
+		t.Fatalf("respawn over dead session: %v", err)
+	}
+	if again.State != Running || again.ExitCode != nil || again.Workspace != info.Workspace {
+		t.Fatalf("respawned = %+v", again)
+	}
+	if s, err := r.sess.Get(ctx, info.Session); err != nil || s.State != session.Running {
+		t.Fatalf("session after respawn = %+v, %v", s, err)
+	}
+
+	if err := r.m.Kill(ctx, info.Name); err != nil {
+		t.Fatal(err)
+	}
+	dead, _ := r.spawn(t, "crash2", Limits{}, "sh", "-c", "sleep 1; exit 1")
+	waitFor(t, "second exit", func() bool { i, _ := r.m.Get(dead.Name); return i.State == Exited })
+	if err := r.m.Kill(ctx, dead.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.sess.Get(ctx, dead.Session); !errors.Is(err, session.ErrNotFound) {
+		t.Errorf("kill of an exited sleeve left its dead session: %v", err)
+	}
+}
+
+func TestSleeveExitReasons(t *testing.T) {
+	r := newRig(t)
+	tests := []struct {
+		name       string
+		limits     Limits
+		script     string
+		wantCode   int
+		wantSignal int
+		wantOOM    bool
+	}{
+		{"oom killed", Limits{MemoryBytes: 128 << 20}, "tail /dev/zero; rc=$?; sleep 1; exit $rc", 137, 0, true},
+		{"sigkill without oom", Limits{MemoryBytes: 128 << 20}, "sleep 1; kill -9 $$", 137, 0, false},
+		{"plain failure", Limits{}, "sleep 1; exit 2", 2, 0, false},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info, _ := r.spawn(t, fmt.Sprintf("r%d", i), tt.limits, "sh", "-c", tt.script)
+			waitFor(t, "exit", func() bool { i, _ := r.m.Get(info.Name); return i.State == Exited })
+			got, _ := r.m.Get(info.Name)
+			if got.ExitCode == nil || *got.ExitCode != tt.wantCode || got.ExitSignal != tt.wantSignal || got.OOMKilled != tt.wantOOM {
+				t.Fatalf("info = %+v (exit code %v)", got, got.ExitCode)
+			}
+			if err := r.m.Kill(context.Background(), info.Name); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

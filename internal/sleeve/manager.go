@@ -51,7 +51,15 @@ type Info struct {
 	Memory    uint64    `yaml:"memory_bytes,omitempty"`
 	Args      []string  `yaml:"args,omitempty"`
 	Exited    time.Time `yaml:"exited,omitempty"`
-	Usage     Usage     `yaml:"-"`
+	// ExitCode is nil when the exit status is unknown (the session was
+	// killed outside the hub). It is 128+ExitSignal when a signal ended the
+	// harness.
+	ExitCode   *int `yaml:"exit_code,omitempty"`
+	ExitSignal int  `yaml:"exit_signal,omitempty"`
+	// OOMKilled is set when the harness exited with status 137 after the
+	// kernel OOM killer fired in its cgroup.
+	OOMKilled bool  `yaml:"oom_killed,omitempty"`
+	Usage     Usage `yaml:"-"`
 }
 
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
@@ -70,6 +78,7 @@ type Options struct {
 	Sessions      *session.Manager
 	Emit          func(kind, subject string, payload map[string]any)
 	UsageInterval time.Duration // default 3s
+	OOMInterval   time.Duration // how often limited sleeves' OOM counters are read; default 50ms
 	DiskInterval  time.Duration // default 5m
 	StartTimeout  time.Duration // default 15s
 }
@@ -103,6 +112,9 @@ type fileFormat struct {
 func Open(ctx context.Context, opts Options) (*Manager, error) {
 	if opts.UsageInterval <= 0 {
 		opts.UsageInterval = 3 * time.Second
+	}
+	if opts.OOMInterval <= 0 {
+		opts.OOMInterval = 50 * time.Millisecond
 	}
 	if opts.DiskInterval <= 0 {
 		opts.DiskInterval = 5 * time.Minute
@@ -283,6 +295,12 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, fmt.Errorf("prepare sleeve layout: %w", err)
 	}
 
+	if prev != nil {
+		if err := m.opts.Sessions.Kill(ctx, prev.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
+			return Info{}, fmt.Errorf("remove exited session: %w", err)
+		}
+	}
+
 	info := Info{
 		Name: req.Name, Harness: req.Harness, Workspace: ws, Session: SessionName(req.Name),
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
@@ -363,9 +381,15 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 			return fail(fmt.Errorf("%w: scope %s did not appear within %s", ErrUnavailable, launch.Unit, m.opts.StartTimeout))
 		}
 		if n%25 == 24 {
-			if _, err := m.opts.Sessions.Get(ctx, info.Session); errors.Is(err, session.ErrNotFound) {
+			s, err := m.opts.Sessions.Get(ctx, info.Session)
+			switch {
+			case errors.Is(err, session.ErrNotFound):
 				return fail(fmt.Errorf("%w: sleeve exited during startup (run the printed command by hand to see why): %s",
 					ErrUnavailable, strings.Join(launch.Argv, " ")))
+			case err == nil && s.State == session.Exited:
+				tail, _ := m.opts.Sessions.Capture(ctx, info.Session, 40)
+				return fail(fmt.Errorf("%w: sleeve exited during startup with %s: %s\n%s",
+					ErrUnavailable, exitLabel(s), strings.Join(launch.Argv, " "), session.Tail(tail, 20)))
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -385,10 +409,10 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 	if e == nil {
 		return ErrNotFound
 	}
+	if err := m.opts.Sessions.Kill(ctx, e.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
+		return fmt.Errorf("kill session: %w", err)
+	}
 	if e.State == Running {
-		if err := m.opts.Sessions.Kill(ctx, e.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
-			return fmt.Errorf("kill session: %w", err)
-		}
 		if err := m.cfg.killScope(ctx, name); err != nil {
 			return err
 		}
@@ -408,39 +432,59 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 }
 
 // Reconcile marks running sleeves whose tmux session or scope has gone as
-// exited and cleans up whichever half is left.
+// exited. A session whose command ended is kept for diagnosis and its exit
+// status recorded; a session whose scope vanished is killed.
 func (m *Manager) Reconcile(ctx context.Context) error {
-	live, err := m.opts.Sessions.List(ctx)
+	list, err := m.opts.Sessions.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
-	have := make(map[string]bool, len(live))
-	for _, s := range live {
-		have[s.Name] = true
+	live := make(map[string]session.Session, len(list))
+	for _, s := range list {
+		live[s.Name] = s
+	}
+	type gone struct {
+		e *entry
+		s *session.Session
 	}
 	m.mu.Lock()
-	var gone []*entry
+	var out []gone
 	for name, e := range m.sleeves {
-		if e.State == Running && !m.pending[name] && (!have[e.Session] || !m.cfg.scopeAlive(name)) {
-			gone = append(gone, e)
+		if e.State != Running || m.pending[name] {
+			continue
+		}
+		s, ok := live[e.Session]
+		switch {
+		case !ok:
+			out = append(out, gone{e: e})
+		case s.State == session.Exited || !m.cfg.scopeAlive(name):
+			out = append(out, gone{e: e, s: &s})
 		}
 	}
 	m.mu.Unlock()
-	for _, e := range gone {
-		if err := m.markExited(ctx, e, have[e.Session]); err != nil {
-			log.Printf("sleeve %s: %v", e.Name, err)
+	for _, g := range out {
+		if err := m.markExited(ctx, g.e, g.s); err != nil {
+			log.Printf("sleeve %s: %v", g.e.Name, err)
 		}
 	}
 	return nil
 }
 
-func (m *Manager) markExited(ctx context.Context, e *entry, sessionLive bool) error {
+func exitLabel(s session.Session) string {
+	if s.ExitSignal > 0 {
+		return fmt.Sprintf("signal %d (status %d)", s.ExitSignal, s.ExitCode)
+	}
+	return fmt.Sprintf("status %d", s.ExitCode)
+}
+
+// markExited records e as exited. s is its tmux session if one still exists.
+func (m *Manager) markExited(ctx context.Context, e *entry, s *session.Session) error {
 	if err := m.reserve(e.Name); err != nil {
 		return nil
 	}
 	defer m.release(e.Name)
 	ctx = context.WithoutCancel(ctx)
-	if sessionLive {
+	if s != nil && s.State == session.Running {
 		if err := m.opts.Sessions.Kill(ctx, e.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
 			log.Printf("sleeve %s: kill session: %v", e.Name, err)
 		}
@@ -454,10 +498,23 @@ func (m *Manager) markExited(ctx context.Context, e *entry, sessionLive bool) er
 		return nil
 	}
 	e.State, e.Exited = Exited, time.Now().UTC().Truncate(time.Second)
+	if s != nil && s.State == session.Exited {
+		code := s.ExitCode
+		e.ExitCode, e.ExitSignal = &code, s.ExitSignal
+		if !s.Exited.IsZero() {
+			e.Exited = s.Exited.UTC()
+		}
+		e.OOMKilled = e.oomSeen > 0 && (code == 137 || s.ExitSignal == 9)
+	}
 	e.Usage.CPUPercent, e.Usage.Pids = 0, 0
 	err := m.saveLocked()
+	payload := map[string]any{"reason": "exited", "oom_killed": e.OOMKilled}
+	if e.ExitCode != nil {
+		payload["exit_code"] = float64(*e.ExitCode)
+		payload["exit_signal"] = float64(e.ExitSignal)
+	}
 	m.mu.Unlock()
-	m.opts.Emit("sleeve.exited", e.Name, map[string]any{"reason": "exited"})
+	m.opts.Emit("sleeve.exited", e.Name, payload)
 	return err
 }
 
@@ -468,16 +525,37 @@ func (m *Manager) Run(ctx context.Context) {
 	m.mu.Unlock()
 	tick := time.NewTicker(m.opts.UsageInterval)
 	defer tick.Stop()
+	oomTick := time.NewTicker(m.opts.OOMInterval)
+	defer oomTick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-oomTick.C:
+			m.pollOOM()
+			continue
 		case <-tick.C:
 		}
 		if err := m.Reconcile(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("sleeves: %v", err)
 		}
 		m.sample()
+	}
+}
+
+// pollOOM reads the OOM counter of memory-limited sleeves often, because a
+// harness killed by the OOM killer takes its scope, and the counter, with it
+// within milliseconds.
+func (m *Manager) pollOOM() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.sleeves {
+		if e.State != Running || e.Memory == 0 {
+			continue
+		}
+		if n, ok := m.cfg.readOOMKills(e.Name); ok {
+			m.recordOOMLocked(e, n)
+		}
 	}
 }
 
@@ -520,14 +598,18 @@ func (m *Manager) sampleLocked(e *entry, now time.Time) {
 	if raw.peakKnown && raw.memPeak > u.MemPeak {
 		u.MemPeak = raw.memPeak
 	}
-	if raw.oomKills > e.oomSeen {
+	m.recordOOMLocked(e, raw.oomKills)
+}
+
+func (m *Manager) recordOOMLocked(e *entry, kills uint64) {
+	if kills > e.oomSeen {
 		m.opts.Emit("sleeve.oom", e.Name, map[string]any{
-			"oom_kills": float64(raw.oomKills), "new_kills": float64(raw.oomKills - e.oomSeen),
-			"memory_max_bytes": float64(e.Memory), "memory_peak_bytes": float64(u.MemPeak),
+			"oom_kills": float64(kills), "new_kills": float64(kills - e.oomSeen),
+			"memory_max_bytes": float64(e.Memory), "memory_peak_bytes": float64(e.Usage.MemPeak),
 		})
-		e.oomSeen = raw.oomKills
+		e.oomSeen = kills
 	}
-	u.OOMKills = e.oomSeen
+	e.Usage.OOMKills = e.oomSeen
 }
 
 func (m *Manager) measureDisk(ctx context.Context, list []*entry) {
