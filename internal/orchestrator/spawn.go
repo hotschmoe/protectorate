@@ -14,13 +14,14 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
+	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
 const (
-	SleeveName = "poe"
+	SleeveName = sleeve.OrchestratorName
 	TokenName  = "orchestrator-poe"
 	TokenFile  = ".protectorate-token"
-	DirName    = "orchestrator"
+	DirName    = sleeve.OrchestratorDir
 
 	missingHosts = "# Hosts\n\nThe hub has not written an inventory yet. Run `protectorate node ls`.\n"
 )

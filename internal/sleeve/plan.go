@@ -85,9 +85,13 @@ func (c Config) Locate(h Harness) (Binary, error) {
 		}
 		b := Binary{Path: p}
 		for _, dir := range symlinkDirs(p) {
-			if !c.mounted(dir) && !contains(b.RO, dir) {
-				b.RO = append(b.RO, dir)
+			if c.mounted(dir) || contains(b.RO, dir) {
+				continue
 			}
+			if c.touchesCredentials(dir) {
+				return Binary{}, fmt.Errorf("%w: %s resolves through %s, which would expose harness credentials", ErrUnavailable, p, dir)
+			}
+			b.RO = append(b.RO, dir)
 		}
 		return b, nil
 	}
@@ -139,7 +143,7 @@ func contains(l []string, s string) bool {
 
 // CheckWorkspace rejects directories that would shadow the sandbox or expose
 // real credentials or hub state.
-func (c Config) CheckWorkspace(ws string) error {
+func (c Config) CheckWorkspace(name, ws string) error {
 	if !filepath.IsAbs(ws) || filepath.Clean(ws) != ws {
 		return fmt.Errorf("%w: workspace %q must be a clean absolute path", ErrInvalid, ws)
 	}
@@ -155,17 +159,21 @@ func (c Config) CheckWorkspace(ws string) error {
 	if within(c.UserHome, ws) {
 		return bad("contains the user home directory")
 	}
-	if within(c.Home, ws) {
-		return bad("contains the protectorate state directory")
-	}
-	for _, d := range credentialDirs {
-		if within(ws, filepath.Join(c.UserHome, d)) {
+	for _, d := range c.protectedDirs() {
+		if within(ws, d) {
 			return bad("is inside a directory holding harness credentials")
 		}
 	}
-	for _, d := range []string{"auth", "sleeves"} {
-		if within(ws, filepath.Join(c.Home, d)) {
-			return bad("is inside protectorate state")
+	if within(c.Home, ws) {
+		return bad("contains the protectorate state directory")
+	}
+	if within(ws, c.Home) {
+		own := filepath.Join(c.workspacesDir(), name)
+		if name == OrchestratorName {
+			own = filepath.Join(c.Home, OrchestratorDir)
+		}
+		if !within(ws, own) {
+			return bad("is protectorate state that sleeve " + name + " does not own")
 		}
 	}
 	return nil
@@ -203,7 +211,7 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	if err := checkEnv(spec.Env); err != nil {
 		return Launch{}, err
 	}
-	if err := c.CheckWorkspace(spec.Workspace); err != nil {
+	if err := c.CheckWorkspace(spec.Name, spec.Workspace); err != nil {
 		return Launch{}, err
 	}
 	for _, a := range spec.Args {
@@ -230,6 +238,10 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	argv = append(argv, "--bind", c.sleeveHome(spec.Name), c.UserHome)
 	for _, d := range append(append([]string(nil), c.ToolDirs...), bin.RO...) {
 		argv = append(argv, "--ro-bind", d, d)
+	}
+	ro := append(append([]string(nil), c.ToolDirs...), bin.RO...)
+	for _, f := range c.masks(ro) {
+		argv = append(argv, "--ro-bind", "/dev/null", f)
 	}
 	for _, d := range lay.Binds {
 		argv = append(argv, "--bind", d, d)

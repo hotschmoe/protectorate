@@ -96,9 +96,30 @@ type Config struct {
 	TasksMax int
 	// CgroupRoot is the cgroup directory that holds the user's scopes.
 	CgroupRoot string
+	// Protected are extra resolved paths that must never be mounted or used
+	// as a workspace, such as the targets of symlinked credential dirs.
+	Protected []string
 }
 
-var defaultToolDirs = []string{".local", ".nvm", "go", ".cargo", ".rustup"}
+// Names of the orchestrator sleeve and the state subdirectory that is its
+// workspace and holds its token file.
+const (
+	OrchestratorName = "poe"
+	OrchestratorDir  = "orchestrator"
+)
+
+// defaultToolDirs are mounted read-only when they exist, relative to $HOME.
+// They are narrow on purpose: ~/.cargo and ~/.local/share hold registry
+// tokens and application data. Harnesses installed under ~/.local/share are
+// reached through the symlink chain of their binary in ~/.local/bin.
+var defaultToolDirs = []string{
+	".local/bin", ".local/lib", ".local/opt", ".local/go", ".local/share/pi-omp-setup",
+	".nvm", "go", ".cargo/bin", ".rustup",
+}
+
+// maskedFiles are known secret files under $HOME. Any that exists inside a
+// mounted directory is overlaid with /dev/null.
+var maskedFiles = []string{".cargo/credentials", ".cargo/credentials.toml"}
 
 // credentialDirs under $HOME hold real logins and are never mounted or used
 // as a workspace.
@@ -111,7 +132,19 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("locate user home: %w", err)
 	}
+	if uh, err = filepath.EvalSymlinks(uh); err != nil {
+		return Config{}, fmt.Errorf("resolve user home: %w", err)
+	}
+	home, err = filepath.EvalSymlinks(home)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve state directory: %w", err)
+	}
 	c := Config{Home: home, UserHome: uh, TasksMax: 4096}
+	for _, d := range credentialDirs {
+		if r, err := filepath.EvalSymlinks(filepath.Join(uh, d)); err == nil {
+			c.Protected = append(c.Protected, r)
+		}
+	}
 	if u, err := user.Current(); err == nil {
 		c.User = u.Username
 	}
@@ -138,7 +171,11 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 		}
 	}
 	for _, d := range c.ToolDirs {
-		if c.touchesCredentials(d) {
+		r, err := filepath.EvalSymlinks(d)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve tool dir %q: %w", d, err)
+		}
+		if c.touchesCredentials(d) || c.touchesCredentials(r) {
 			return Config{}, fmt.Errorf("tool dir %q would expose harness credentials", d)
 		}
 	}
@@ -171,16 +208,43 @@ func (c *Config) AddBinaryDir(exe string) error {
 	return nil
 }
 
+// protectedDirs lists the credential directories, lexical and resolved.
+func (c Config) protectedDirs() []string {
+	out := append([]string(nil), c.Protected...)
+	for _, d := range credentialDirs {
+		out = append(out, filepath.Join(c.UserHome, d))
+	}
+	return out
+}
+
 func (c Config) touchesCredentials(p string) bool {
-	if within(c.UserHome, p) {
+	if within(c.UserHome, p) || within(c.Home, p) {
 		return true
 	}
-	for _, d := range credentialDirs {
-		if within(p, filepath.Join(c.UserHome, d)) {
+	for _, d := range c.protectedDirs() {
+		if within(p, d) || within(d, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// masks returns the secret files that exist inside any of dirs.
+func (c Config) masks(dirs []string) []string {
+	var out []string
+	for _, f := range maskedFiles {
+		p := filepath.Join(c.UserHome, f)
+		for _, d := range dirs {
+			if !within(p, d) {
+				continue
+			}
+			if _, err := os.Lstat(p); err == nil {
+				out = append(out, p)
+			}
+			break
+		}
+	}
+	return out
 }
 
 func (c Config) defaultPath(hostPath string) []string {

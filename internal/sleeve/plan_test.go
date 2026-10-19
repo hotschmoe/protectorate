@@ -229,15 +229,183 @@ func TestAddBinaryDir(t *testing.T) {
 	})
 }
 
-func TestOrchestratorWorkspace(t *testing.T) {
+func TestCheckWorkspaceStateOwnership(t *testing.T) {
 	linuxHost(t)
 	c := testConfig()
+	tests := []struct {
+		sleeve, ws string
+		ok         bool
+	}{
+		{"poe", "/state/orchestrator", true},
+		{"poe", "/state/orchestrator/sub", true},
+		{"alice", "/state/orchestrator", false},
+		{"alice", "/state/orchestrator/sub", false},
+		{"alice", "/state/workspaces", false},
+		{"poe", "/state/workspaces", false},
+		{"alice", "/state/workspaces/alice", true},
+		{"alice", "/state/workspaces/alice/repo", true},
+		{"alice", "/state/workspaces/bob", false},
+		{"alice", "/state/workspaces/alicia", false},
+		{"alice", "/state/sleeves/alice", false},
+		{"poe", "/state/sleeves/poe", false},
+		{"alice", "/state/auth/claude", false},
+		{"alice", "/state/token", false},
+		{"alice", "/state", false},
+		{"alice", "/", false},
+		{"alice", "/home/u", false},
+		{"alice", "/home/u/.codex/sessions", false},
+		{"alice", "/work/x", true},
+	}
+	for _, tt := range tests {
+		if err := c.CheckWorkspace(tt.sleeve, tt.ws); (err == nil) != tt.ok {
+			t.Errorf("CheckWorkspace(%s, %s) = %v, want ok=%v", tt.sleeve, tt.ws, err, tt.ok)
+		}
+	}
+}
+
+func TestCheckWorkspaceProtectedTargets(t *testing.T) {
+	linuxHost(t)
+	c := testConfig()
+	c.Protected = []string{"/mnt/secrets/codex"}
 	for ws, ok := range map[string]bool{
-		"/state/orchestrator": true, "/state/sleeves/poe": false, "/state/auth/claude": false, "/state": false,
+		"/mnt/secrets/codex": false, "/mnt/secrets/codex/x": false, "/mnt/secrets": true,
 	} {
-		if err := c.CheckWorkspace(ws); (err == nil) != ok {
+		if err := c.CheckWorkspace("alice", ws); (err == nil) != ok {
 			t.Errorf("CheckWorkspace(%s) = %v, want ok=%v", ws, err, ok)
 		}
+	}
+}
+
+func TestDefaultConfigCanonicalizesPaths(t *testing.T) {
+	linuxHost(t)
+	base := t.TempDir()
+	real := filepath.Join(base, "mnt", "state")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "state-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	c, err := DefaultConfig(link, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(real)
+	if c.Home != want {
+		t.Fatalf("Home = %s, want %s", c.Home, want)
+	}
+	if err := c.CheckWorkspace("alice", want); err == nil {
+		t.Error("the resolved state directory is a valid workspace")
+	}
+}
+
+func TestDefaultToolDirsAreNarrow(t *testing.T) {
+	linuxHost(t)
+	uh := t.TempDir()
+	for _, d := range []string{".local/bin", ".local/share/app", ".cargo/bin", ".cargo/registry", ".nvm"} {
+		if err := os.MkdirAll(filepath.Join(uh, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", uh)
+	c, err := DefaultConfig(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := filepath.EvalSymlinks(uh)
+	got := strings.Join(c.ToolDirs, " ")
+	for _, bad := range []string{filepath.Join(r, ".local") + " ", filepath.Join(r, ".cargo") + " ", "share", "registry"} {
+		if strings.Contains(got+" ", bad) {
+			t.Errorf("ToolDirs %q contains %q", got, bad)
+		}
+	}
+	for _, d := range []string{".local/bin", ".cargo/bin", ".nvm"} {
+		if !contains(c.ToolDirs, filepath.Join(r, d)) {
+			t.Errorf("ToolDirs %q lacks %s", got, d)
+		}
+	}
+}
+
+func TestPlanMasksCredentialFiles(t *testing.T) {
+	linuxHost(t)
+	uh := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(uh, ".cargo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cred := filepath.Join(uh, ".cargo", "credentials.toml")
+	if err := os.WriteFile(cred, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		tools []string
+		want  bool
+	}{
+		{"whole cargo dir mounted", []string{filepath.Join(uh, ".cargo")}, true},
+		{"cargo bin only", []string{filepath.Join(uh, ".cargo", "bin")}, false},
+		{"no tools", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := testConfig()
+			c.UserHome, c.ToolDirs = uh, tt.tools
+			l, err := c.Plan(Spec{Name: "a", Harness: Shell, Workspace: "/work/x"}, Binary{Path: "/usr/bin/bash"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(strings.Join(l.Argv, " "), "--ro-bind /dev/null "+cred); got != tt.want {
+				t.Errorf("masked = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLocateRefusesCredentialDirs(t *testing.T) {
+	linuxHost(t)
+	uh := t.TempDir()
+	mk := func(rel string) string {
+		p := filepath.Join(uh, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	codex := mk(".codex/tool")
+	share := mk(".local/share/claude/versions/1")
+	for _, f := range []string{codex, share} {
+		if err := os.WriteFile(f, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name, target string
+		wantErr      bool
+		wantRO       string
+	}{
+		{"into credential dir", codex, true, ""},
+		{"into share versions", share, false, filepath.Dir(share)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bin := mk(".local/bin/" + strings.ReplaceAll(tt.name, " ", "-"))
+			if err := os.Symlink(tt.target, bin); err != nil {
+				t.Fatal(err)
+			}
+			c := testConfig()
+			c.UserHome, c.ToolDirs = uh, []string{filepath.Join(uh, ".local", "bin")}
+			c.PathDirs = []string{filepath.Join(uh, ".local", "bin")}
+			b, err := c.Locate(Harness(filepath.Base(bin)))
+			if tt.wantErr {
+				if !errors.Is(err, ErrUnavailable) {
+					t.Fatalf("err = %v", err)
+				}
+				return
+			}
+			if err != nil || len(b.RO) != 1 || b.RO[0] != tt.wantRO {
+				t.Fatalf("RO = %v, err = %v", b.RO, err)
+			}
+		})
 	}
 }
 
