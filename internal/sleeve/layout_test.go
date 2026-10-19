@@ -173,3 +173,14 @@ func TestLayoutEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexConfigSeed(t *testing.T) {
+	linuxHost(t)
+	c := layoutConfig(t)
+	if err := c.layout("s", Codex).Apply(); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustRead(t, filepath.Join(c.sleeveHome("s"), ".codex/config.toml")); got != codexSeed {
+		t.Errorf("codex seed = %q", got)
+	}
+}

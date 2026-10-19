@@ -1568,94 +1568,6 @@ func (x *CompactResponse) GetCompaction() *Compaction {
 	return nil
 }
 
-type SetModeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sleeve        string                 `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
-	Mode          SleeveMode             `protobuf:"varint,2,opt,name=mode,proto3,enum=protectorate.v1.SleeveMode" json:"mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetModeRequest) Reset() {
-	*x = SetModeRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetModeRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetModeRequest) ProtoMessage() {}
-
-func (x *SetModeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetModeRequest.ProtoReflect.Descriptor instead.
-func (*SetModeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *SetModeRequest) GetSleeve() string {
-	if x != nil {
-		return x.Sleeve
-	}
-	return ""
-}
-
-func (x *SetModeRequest) GetMode() SleeveMode {
-	if x != nil {
-		return x.Mode
-	}
-	return SleeveMode_SLEEVE_MODE_UNSPECIFIED
-}
-
-type SetModeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetModeResponse) Reset() {
-	*x = SetModeResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetModeResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetModeResponse) ProtoMessage() {}
-
-func (x *SetModeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetModeResponse.ProtoReflect.Descriptor instead.
-func (*SetModeResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{23}
-}
-
 var File_protectorate_v1_chat_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_chat_proto_rawDesc = "" +
@@ -1763,11 +1675,7 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x0fCompactResponse\x12;\n" +
 	"\n" +
 	"compaction\x18\x01 \x01(\v2\x1b.protectorate.v1.CompactionR\n" +
-	"compaction\"Y\n" +
-	"\x0eSetModeRequest\x12\x16\n" +
-	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x12/\n" +
-	"\x04mode\x18\x02 \x01(\x0e2\x1b.protectorate.v1.SleeveModeR\x04mode\"\x11\n" +
-	"\x0fSetModeResponse*Y\n" +
+	"compaction*Y\n" +
 	"\n" +
 	"SleeveMode\x12\x1b\n" +
 	"\x17SLEEVE_MODE_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -1780,14 +1688,13 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x15CHAT_STATE_COMPACTING\x10\x03\x12\x13\n" +
 	"\x0fCHAT_STATE_IDLE\x10\x04\x12\x15\n" +
 	"\x11CHAT_STATE_FAILED\x10\x05\x12\x15\n" +
-	"\x11CHAT_STATE_EXITED\x10\x062\xdb\x03\n" +
+	"\x11CHAT_STATE_EXITED\x10\x062\x8d\x03\n" +
 	"\vChatService\x12I\n" +
 	"\x05Watch\x12\x1d.protectorate.v1.WatchRequest\x1a\x1a.protectorate.v1.ChatEvent\"\x03\x90\x02\x010\x01\x12C\n" +
 	"\x04Send\x12\x1c.protectorate.v1.SendRequest\x1a\x1d.protectorate.v1.SendResponse\x12R\n" +
 	"\tInterrupt\x12!.protectorate.v1.InterruptRequest\x1a\".protectorate.v1.InterruptResponse\x12L\n" +
 	"\aRespond\x12\x1f.protectorate.v1.RespondRequest\x1a .protectorate.v1.RespondResponse\x12L\n" +
-	"\aCompact\x12\x1f.protectorate.v1.CompactRequest\x1a .protectorate.v1.CompactResponse\x12L\n" +
-	"\aSetMode\x12\x1f.protectorate.v1.SetModeRequest\x1a .protectorate.v1.SetModeResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\aCompact\x12\x1f.protectorate.v1.CompactRequest\x1a .protectorate.v1.CompactResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_chat_proto_rawDescOnce sync.Once
@@ -1802,7 +1709,7 @@ func file_protectorate_v1_chat_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_protectorate_v1_chat_proto_goTypes = []any{
 	(SleeveMode)(0),               // 0: protectorate.v1.SleeveMode
 	(ChatState)(0),                // 1: protectorate.v1.ChatState
@@ -1828,15 +1735,13 @@ var file_protectorate_v1_chat_proto_goTypes = []any{
 	(*RespondResponse)(nil),       // 21: protectorate.v1.RespondResponse
 	(*CompactRequest)(nil),        // 22: protectorate.v1.CompactRequest
 	(*CompactResponse)(nil),       // 23: protectorate.v1.CompactResponse
-	(*SetModeRequest)(nil),        // 24: protectorate.v1.SetModeRequest
-	(*SetModeResponse)(nil),       // 25: protectorate.v1.SetModeResponse
-	(*timestamppb.Timestamp)(nil), // 26: google.protobuf.Timestamp
+	(*timestamppb.Timestamp)(nil), // 24: google.protobuf.Timestamp
 }
 var file_protectorate_v1_chat_proto_depIdxs = []int32{
 	1,  // 0: protectorate.v1.ChatStatus.state:type_name -> protectorate.v1.ChatState
-	26, // 1: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
-	26, // 2: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
-	26, // 3: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
+	24, // 1: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
+	24, // 2: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
+	24, // 3: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
 	4,  // 4: protectorate.v1.ChatEvent.user:type_name -> protectorate.v1.UserMessage
 	5,  // 5: protectorate.v1.ChatEvent.text:type_name -> protectorate.v1.AssistantText
 	6,  // 6: protectorate.v1.ChatEvent.tool_call:type_name -> protectorate.v1.ToolCall
@@ -1848,27 +1753,24 @@ var file_protectorate_v1_chat_proto_depIdxs = []int32{
 	12, // 12: protectorate.v1.ChatEvent.compaction:type_name -> protectorate.v1.Compaction
 	13, // 13: protectorate.v1.ChatEvent.error:type_name -> protectorate.v1.ChatError
 	14, // 14: protectorate.v1.ChatEvent.state:type_name -> protectorate.v1.StateChange
-	26, // 15: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
+	24, // 15: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
 	1,  // 16: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
 	12, // 17: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
-	0,  // 18: protectorate.v1.SetModeRequest.mode:type_name -> protectorate.v1.SleeveMode
-	15, // 19: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
-	16, // 20: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
-	18, // 21: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
-	20, // 22: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
-	22, // 23: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
-	24, // 24: protectorate.v1.ChatService.SetMode:input_type -> protectorate.v1.SetModeRequest
-	3,  // 25: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
-	17, // 26: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
-	19, // 27: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
-	21, // 28: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
-	23, // 29: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
-	25, // 30: protectorate.v1.ChatService.SetMode:output_type -> protectorate.v1.SetModeResponse
-	25, // [25:31] is the sub-list for method output_type
-	19, // [19:25] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	15, // 18: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
+	16, // 19: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
+	18, // 20: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
+	20, // 21: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
+	22, // 22: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
+	3,  // 23: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
+	17, // 24: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
+	19, // 25: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
+	21, // 26: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
+	23, // 27: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
+	23, // [23:28] is the sub-list for method output_type
+	18, // [18:23] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_chat_proto_init() }
@@ -1895,7 +1797,7 @@ func file_protectorate_v1_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_chat_proto_rawDesc), len(file_protectorate_v1_chat_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   24,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -59,6 +59,7 @@ type Hub struct {
 
 	backlog *backlog.Store
 	sleeves *sleeve.Manager
+	chat    *chatManager
 
 	// WebDir, when set, serves a built web client (app/build/web) from the
 	// hub's own origin so browsers need no CORS. The client still authenticates.
@@ -194,6 +195,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
 	if h.sleeves != nil {
 		mux.Handle(protectoratev1connect.NewSleeveServiceHandler(h, opts))
+		mux.Handle(protectoratev1connect.NewChatServiceHandler(chatService{h}, opts))
 	}
 	if h.nodes != nil {
 		mux.Handle(protectoratev1connect.NewNodeServiceHandler(h, opts))
@@ -266,6 +268,9 @@ func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) erro
 	go func() { defer close(watchDone); h.WatchSessions(ctx) }()
 	defer func() { <-watchDone }()
 
+	if h.chat != nil {
+		defer h.chat.shutdown()
+	}
 	if h.sleeves != nil {
 		sleevesDone := make(chan struct{})
 		go func() { defer close(sleevesDone); h.sleeves.Run(ctx) }()

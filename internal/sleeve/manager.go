@@ -48,10 +48,15 @@ type Info struct {
 	Session   string    `yaml:"session"`
 	Created   time.Time `yaml:"created"`
 	State     State     `yaml:"state"`
-	CPU       uint32    `yaml:"cpu_percent,omitempty"`
-	Memory    uint64    `yaml:"memory_bytes,omitempty"`
-	Args      []string  `yaml:"args,omitempty"`
-	Exited    time.Time `yaml:"exited,omitempty"`
+	// Mode is how the harness runs. A record without one is a terminal
+	// sleeve from before modes existed.
+	Mode Mode `yaml:"mode,omitempty"`
+	// Chat is set for sleeves in chat mode.
+	Chat   *Chat     `yaml:"chat,omitempty"`
+	CPU    uint32    `yaml:"cpu_percent,omitempty"`
+	Memory uint64    `yaml:"memory_bytes,omitempty"`
+	Args   []string  `yaml:"args,omitempty"`
+	Exited time.Time `yaml:"exited,omitempty"`
 	// ExitCode is nil when the exit status is unknown (the session was
 	// killed outside the hub). It is 128+ExitSignal when a signal ended the
 	// harness.
@@ -72,6 +77,8 @@ type SpawnRequest struct {
 	Args      []string
 	Limits    Limits
 	Env       map[string]string
+	// Mode defaults to chat for agent harnesses and terminal for shell.
+	Mode Mode
 }
 
 type Options struct {
@@ -260,6 +267,10 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err := req.Limits.validate(); err != nil {
 		return Info{}, err
 	}
+	mode, err := resolveMode(req.Harness, req.Mode, req.Args)
+	if err != nil {
+		return Info{}, err
+	}
 	if err := m.reserve(ctx, req.Name); err != nil {
 		return Info{}, err
 	}
@@ -283,7 +294,11 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	spec := Spec{Name: req.Name, Harness: req.Harness, Args: req.Args, Workspace: ws, Env: req.Env, Limits: req.Limits}
+	args := req.Args
+	if mode == ModeTerminal {
+		args = terminalArgs(req.Harness, req.Args)
+	}
+	spec := Spec{Name: req.Name, Harness: req.Harness, Args: args, Workspace: ws, Env: req.Env, Limits: req.Limits}
 	launch, err := m.cfg.Plan(spec, bin)
 	if err != nil {
 		return Info{}, err
@@ -295,16 +310,22 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, err
 	}
 
-	if prev != nil {
+	if prev != nil && prev.Session != "" {
 		if err := m.opts.Sessions.Kill(ctx, prev.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
 			return Info{}, fmt.Errorf("remove exited session: %w", err)
 		}
 	}
 
 	info := Info{
-		Name: req.Name, Harness: req.Harness, Workspace: ws, Session: SessionName(req.Name),
+		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
 		CPU: req.Limits.CPUPercent, Memory: req.Limits.MemoryBytes, Args: req.Args,
+	}
+	if mode == ModeTerminal {
+		info.Session = SessionName(req.Name)
+	}
+	if mode == ModeChat {
+		info.Chat = &Chat{}
 	}
 	e := &entry{Info: info}
 	m.mu.Lock()
@@ -322,6 +343,16 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, fmt.Errorf("persist sleeve: %w", err)
 	}
 
+	if mode == ModeChat {
+		m.mu.Lock()
+		out := e.Info
+		m.mu.Unlock()
+		m.opts.Emit("sleeve.spawned", req.Name, map[string]any{
+			"harness": string(req.Harness), "workspace": ws, "mode": string(mode),
+			"spawn_ms": float64(time.Since(start).Milliseconds()),
+		})
+		return out, nil
+	}
 	if err := m.start(ctx, launch, info); err != nil {
 		m.mu.Lock()
 		if prev != nil {
@@ -344,7 +375,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	out := e.Info
 	m.mu.Unlock()
 	m.opts.Emit("sleeve.spawned", req.Name, map[string]any{
-		"harness": string(req.Harness), "workspace": ws, "session": info.Session,
+		"harness": string(req.Harness), "workspace": ws, "session": info.Session, "mode": string(mode),
 		"spawn_ms": float64(time.Since(start).Milliseconds()),
 	})
 	return out, nil
@@ -417,8 +448,10 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 	if e == nil {
 		return ErrNotFound
 	}
-	if err := m.opts.Sessions.Kill(ctx, e.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
-		return fmt.Errorf("kill session: %w", err)
+	if e.Session != "" {
+		if err := m.opts.Sessions.Kill(ctx, e.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
+			return fmt.Errorf("kill session: %w", err)
+		}
 	}
 	if e.State == Running {
 		if err := m.cfg.killScope(ctx, name); err != nil {
@@ -464,7 +497,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	m.mu.Lock()
 	var out []gone
 	for name, e := range m.sleeves {
-		if _, busy := m.pending[name]; e.State != Running || busy {
+		if _, busy := m.pending[name]; e.State != Running || e.Mode == ModeChat || busy {
 			continue
 		}
 		s, ok := live[e.Session]

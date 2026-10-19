@@ -43,8 +43,6 @@ const (
 	ChatServiceRespondProcedure = "/protectorate.v1.ChatService/Respond"
 	// ChatServiceCompactProcedure is the fully-qualified name of the ChatService's Compact RPC.
 	ChatServiceCompactProcedure = "/protectorate.v1.ChatService/Compact"
-	// ChatServiceSetModeProcedure is the fully-qualified name of the ChatService's SetMode RPC.
-	ChatServiceSetModeProcedure = "/protectorate.v1.ChatService/SetMode"
 )
 
 // ChatServiceClient is a client for the protectorate.v1.ChatService service.
@@ -65,10 +63,6 @@ type ChatServiceClient interface {
 	// with failed_precondition while a turn is running or an approval is
 	// pending, and returns after the harness has confirmed the compaction.
 	Compact(context.Context, *connect.Request[v1.CompactRequest]) (*connect.Response[v1.CompactResponse], error)
-	// SetMode switches a sleeve between chat and terminal ("take over"). The
-	// current driver is closed first, then the other mode resumes the same
-	// native session id.
-	SetMode(context.Context, *connect.Request[v1.SetModeRequest]) (*connect.Response[v1.SetModeResponse], error)
 }
 
 // NewChatServiceClient constructs a client for the protectorate.v1.ChatService service. By default,
@@ -113,12 +107,6 @@ func NewChatServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(chatServiceMethods.ByName("Compact")),
 			connect.WithClientOptions(opts...),
 		),
-		setMode: connect.NewClient[v1.SetModeRequest, v1.SetModeResponse](
-			httpClient,
-			baseURL+ChatServiceSetModeProcedure,
-			connect.WithSchema(chatServiceMethods.ByName("SetMode")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
@@ -129,7 +117,6 @@ type chatServiceClient struct {
 	interrupt *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
 	respond   *connect.Client[v1.RespondRequest, v1.RespondResponse]
 	compact   *connect.Client[v1.CompactRequest, v1.CompactResponse]
-	setMode   *connect.Client[v1.SetModeRequest, v1.SetModeResponse]
 }
 
 // Watch calls protectorate.v1.ChatService.Watch.
@@ -157,11 +144,6 @@ func (c *chatServiceClient) Compact(ctx context.Context, req *connect.Request[v1
 	return c.compact.CallUnary(ctx, req)
 }
 
-// SetMode calls protectorate.v1.ChatService.SetMode.
-func (c *chatServiceClient) SetMode(ctx context.Context, req *connect.Request[v1.SetModeRequest]) (*connect.Response[v1.SetModeResponse], error) {
-	return c.setMode.CallUnary(ctx, req)
-}
-
 // ChatServiceHandler is an implementation of the protectorate.v1.ChatService service.
 type ChatServiceHandler interface {
 	// Watch replays the sleeve's events after after_seq, then streams new ones
@@ -180,10 +162,6 @@ type ChatServiceHandler interface {
 	// with failed_precondition while a turn is running or an approval is
 	// pending, and returns after the harness has confirmed the compaction.
 	Compact(context.Context, *connect.Request[v1.CompactRequest]) (*connect.Response[v1.CompactResponse], error)
-	// SetMode switches a sleeve between chat and terminal ("take over"). The
-	// current driver is closed first, then the other mode resumes the same
-	// native session id.
-	SetMode(context.Context, *connect.Request[v1.SetModeRequest]) (*connect.Response[v1.SetModeResponse], error)
 }
 
 // NewChatServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -224,12 +202,6 @@ func NewChatServiceHandler(svc ChatServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(chatServiceMethods.ByName("Compact")),
 		connect.WithHandlerOptions(opts...),
 	)
-	chatServiceSetModeHandler := connect.NewUnaryHandler(
-		ChatServiceSetModeProcedure,
-		svc.SetMode,
-		connect.WithSchema(chatServiceMethods.ByName("SetMode")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/protectorate.v1.ChatService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ChatServiceWatchProcedure:
@@ -242,8 +214,6 @@ func NewChatServiceHandler(svc ChatServiceHandler, opts ...connect.HandlerOption
 			chatServiceRespondHandler.ServeHTTP(w, r)
 		case ChatServiceCompactProcedure:
 			chatServiceCompactHandler.ServeHTTP(w, r)
-		case ChatServiceSetModeProcedure:
-			chatServiceSetModeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -271,8 +241,4 @@ func (UnimplementedChatServiceHandler) Respond(context.Context, *connect.Request
 
 func (UnimplementedChatServiceHandler) Compact(context.Context, *connect.Request[v1.CompactRequest]) (*connect.Response[v1.CompactResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.Compact is not implemented"))
-}
-
-func (UnimplementedChatServiceHandler) SetMode(context.Context, *connect.Request[v1.SetModeRequest]) (*connect.Response[v1.SetModeResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.SetMode is not implemented"))
 }

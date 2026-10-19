@@ -137,7 +137,7 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 	}
 
 	spawned, err := hub.SpawnSleeve(ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
-		Name: SleeveName, Workspace: ws, Harness: harness,
+		Name: SleeveName, Workspace: ws, Harness: harness, Mode: pb.SleeveMode_SLEEVE_MODE_TERMINAL,
 		Env: map[string]string{"PROTECTORATE_HUB": o.HubURL, "PROTECTORATE_TOKEN_FILE": tokenPath},
 	}))
 	if err != nil {

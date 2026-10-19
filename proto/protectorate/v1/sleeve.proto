@@ -13,7 +13,7 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // memory limits. In chat mode (the default for agent harnesses) the harness
 // runs its official headless protocol and is driven through ChatService. In
 // terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
-// WebSocket terminal work on it. Sleeves are Linux-only.
+// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 // Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
 // and "sleeve.oom" (subject = sleeve name).
 service SleeveService {
@@ -112,8 +112,7 @@ message Sleeve {
   // few milliseconds of the kill may still be reported as a plain exit 137.
   bool oom_killed = 13;
   SleeveMode mode = 14;
-  // chat is set for agent harnesses in either mode, so the session id and
-  // context usage survive a switch to the terminal.
+  // chat is set for sleeves in chat mode.
   ChatStatus chat = 15;
 }
 

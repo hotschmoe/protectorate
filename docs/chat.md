@@ -1,0 +1,100 @@
+# Chat
+
+A sleeve in chat mode (the default for claude, codex, grok and pi) runs its
+harness through the harness's own headless protocol, inside the sleeve sandbox
+and systemd scope, so limits and cgroup usage work as for any sleeve. The hub
+normalizes what the harness emits into events in a per-sleeve log, and any
+number of clients watch it. The harness's own session store stays the full
+record; the log is the view. Design: ARCHITECTURE.md, "Harness sessions".
+
+```
+protectorate sleeve spawn alice --workspace ~/src/proj --harness claude   # chat mode
+protectorate chat watch alice                  # replay, then follow
+protectorate chat send alice "run the tests"
+protectorate chat interrupt alice
+protectorate chat respond alice <approval-id> --allow
+protectorate chat compact alice
+```
+
+`--mode terminal` spawns the TUI under tmux instead (always for `shell`). A
+sleeve keeps its mode for life; a terminal sleeve has no chat.
+
+## API
+
+`ChatService` (`proto/protectorate/v1/chat.proto`). `Watch` needs the `read`
+scope; every call is covered by `chat_*`.
+
+- **Watch(sleeve, after_seq)** replays stored events with `seq > after_seq`,
+  then streams live ones, with no gap or duplicate at the boundary.
+- **Send(sleeve, text, request_id)** starts a turn. A retry with the same
+  `request_id` (8-128 chars) returns the original `seq`. During a turn it
+  steers on harnesses that can (Codex, pi) and fails with `failed_precondition`
+  on the rest (Claude, Grok): interrupt first.
+- **Interrupt** cancels the running turn; a no-op when idle.
+- **Respond(approval_id, allow, note)** answers an `ApprovalRequest`.
+- **Compact** runs the harness's native compaction and returns after the
+  harness confirmed it. `failed_precondition` unless the chat is IDLE, or when
+  there is too little to compact; `unimplemented` for Grok, where `/compact`
+  over ACP is not verified.
+
+`Sleeve.chat` (`ChatStatus`) is kept current: state, harness session id, model,
+`context_tokens` (the prompt size of the last model call), `context_window`,
+`cache_expires_at` (Claude only), `last_seq`. Every state change is published
+on EventService as `chat.state` (subject = sleeve name).
+
+## The log
+
+`<state dir>/sleeves/<name>/chat.jsonl`, one proto-JSON `ChatEvent` per line,
+`seq` from 1. A new sleeve with a reused name moves the old log aside as
+`chat.jsonl.<unix time>`. A partial last line left by a crash is cut off on
+open.
+
+Assistant text is coalesced: the first delta of a message reserves its `seq`;
+live watchers receive the deltas, all carrying that `seq`, and the stored event
+is the whole message under the same `seq`. A watcher that attaches mid-message
+first gets the text so far, then the following deltas. To resume after a
+disconnect, pass the last `seq` seen; if the last event was a text delta, pass
+its `seq` minus one and replace the message with that `message_id`. A watcher
+that falls 4096 events behind is cut with `resource_exhausted` and resumes the
+same way.
+
+State, highest priority first: AWAITING_APPROVAL, WORKING, COMPACTING, IDLE;
+FAILED and EXITED when the driver is gone. The driver starts at spawn, stays
+open until the sleeve is killed or the hub stops, and restarts on the next Send
+after a crash or a hub restart, resuming the native session. A session id is
+only resumed once a turn was sent, since harnesses store a session only then.
+
+## Per harness
+
+| | Claude | Codex | Grok | pi |
+|---|---|---|---|---|
+| Autonomy in a sleeve | `bypassPermissions` | sleeve `config.toml`: never / danger-full-access | `/always-approve on` | no gate |
+| Steer mid-turn | no | yes | no | yes |
+| Approvals | yes | yes (none under the sleeve config) | yes | no |
+| Context window | from `result.modelUsage` | `modelContextWindow` | unknown | model's `contextWindow` |
+| Cache expiry | 5m or 1h from the usage buckets | no | no | no |
+| Manual compact | yes | yes | no | yes |
+
+Native auto-compaction is left at each harness's defaults; when one happens the
+log gets a Compaction event with `native=true`. Context and cache numbers come
+from per-call usage and are zero until the first call.
+
+## Verified live (2026-10-20, scratch hub, no model login)
+
+The scratch hub had no provider login (credentials are never copied), so no
+model turn ran. With the real binaries in real sandboxes: a Claude chat sleeve
+opened `claude -p` stream-json with the autonomous flags, accepted a Send and
+streamed Claude's own "Not logged in" reply into the log; cgroup memory and
+pids were sampled; `chat compact` returned failed_precondition (nothing to
+compact). A pi sleeve did the same ("No API key") and reported "Nothing to
+compact". A Codex sleeve opened `codex app-server` over stdio and started a
+thread. A Grok sleeve was refused at open with "Authentication required", and
+the failed spawn left no sleeve behind. The end-to-end flow (Send, request id
+dedupe, approval, interrupt, compaction, restart and resume, kill) is covered
+by `internal/hub/chat_test.go` with a scripted stand-in for `claude` running in
+the real bwrap/systemd sandbox.
+
+Not verified: real model turns on any harness, Claude `compact_boundary` on a
+real conversation, Codex compaction, Grok chat, Grok `_x.ai/session_notification`
+and `tool_call_update` shapes (taken from research notes), Claude cache expiry
+against a real subscription.

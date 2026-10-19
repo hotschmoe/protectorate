@@ -28,6 +28,10 @@ type Seed struct {
 
 const claudeSeed = "{\"hasCompletedOnboarding\":true}\n"
 
+// The sandbox is the boundary, so Codex runs without its own approval gate
+// and sandbox; the user's config.toml, with its trust and model, is not copied.
+const codexSeed = "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n"
+
 // layout paths on the host live under the sleeve's home; the same paths
 // relative to $HOME are what the harness sees.
 func (c Config) layout(name string, h Harness) Layout {
@@ -51,6 +55,7 @@ func (c Config) layout(name string, h Harness) Layout {
 	case Codex:
 		shared()
 		l.Dirs = append(l.Dirs, host(".codex"))
+		l.Seeds = append(l.Seeds, Seed{host(".codex/config.toml"), codexSeed})
 		l.Links = append(l.Links, Link{host(".codex/auth.json"), filepath.Join(auth, "auth.json")})
 		l.Env = append(l.Env, [2]string{"CODEX_HOME", inside(".codex")})
 	case Grok:

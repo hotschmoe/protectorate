@@ -546,36 +546,6 @@ final $typed_data.Uint8List compactResponseDescriptor = $convert.base64Decode(
     'Cg9Db21wYWN0UmVzcG9uc2USOwoKY29tcGFjdGlvbhgBIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
     '5Db21wYWN0aW9uUgpjb21wYWN0aW9u');
 
-@$core.Deprecated('Use setModeRequestDescriptor instead')
-const SetModeRequest$json = {
-  '1': 'SetModeRequest',
-  '2': [
-    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
-    {
-      '1': 'mode',
-      '3': 2,
-      '4': 1,
-      '5': 14,
-      '6': '.protectorate.v1.SleeveMode',
-      '10': 'mode'
-    },
-  ],
-};
-
-/// Descriptor for `SetModeRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List setModeRequestDescriptor = $convert.base64Decode(
-    'Cg5TZXRNb2RlUmVxdWVzdBIWCgZzbGVldmUYASABKAlSBnNsZWV2ZRIvCgRtb2RlGAIgASgOMh'
-    'sucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZU1vZGVSBG1vZGU=');
-
-@$core.Deprecated('Use setModeResponseDescriptor instead')
-const SetModeResponse$json = {
-  '1': 'SetModeResponse',
-};
-
-/// Descriptor for `SetModeResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List setModeResponseDescriptor =
-    $convert.base64Decode('Cg9TZXRNb2RlUmVzcG9uc2U=');
-
 const $core.Map<$core.String, $core.dynamic> ChatServiceBase$json = {
   '1': 'ChatService',
   '2': [
@@ -606,11 +576,6 @@ const $core.Map<$core.String, $core.dynamic> ChatServiceBase$json = {
       '2': '.protectorate.v1.CompactRequest',
       '3': '.protectorate.v1.CompactResponse'
     },
-    {
-      '1': 'SetMode',
-      '2': '.protectorate.v1.SetModeRequest',
-      '3': '.protectorate.v1.SetModeResponse'
-    },
   ],
 };
 
@@ -639,8 +604,6 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.RespondResponse': RespondResponse$json,
   '.protectorate.v1.CompactRequest': CompactRequest$json,
   '.protectorate.v1.CompactResponse': CompactResponse$json,
-  '.protectorate.v1.SetModeRequest': SetModeRequest$json,
-  '.protectorate.v1.SetModeResponse': SetModeResponse$json,
 };
 
 /// Descriptor for `ChatService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -652,5 +615,4 @@ final $typed_data.Uint8List chatServiceDescriptor = $convert.base64Decode(
     'MS5JbnRlcnJ1cHRSZXNwb25zZRJMCgdSZXNwb25kEh8ucHJvdGVjdG9yYXRlLnYxLlJlc3Bvbm'
     'RSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLlJlc3BvbmRSZXNwb25zZRJMCgdDb21wYWN0Eh8u'
     'cHJvdGVjdG9yYXRlLnYxLkNvbXBhY3RSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLkNvbXBhY3'
-    'RSZXNwb25zZRJMCgdTZXRNb2RlEh8ucHJvdGVjdG9yYXRlLnYxLlNldE1vZGVSZXF1ZXN0GiAu'
-    'cHJvdGVjdG9yYXRlLnYxLlNldE1vZGVSZXNwb25zZQ==');
+    'RSZXNwb25zZQ==');

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -31,7 +32,18 @@ func (h *Hub) SleeveOptions(cfg sleeve.Config) sleeve.Options {
 }
 
 // SetSleeves enables SleeveService. Call before Handler or Serve.
-func (h *Hub) SetSleeves(m *sleeve.Manager) { h.sleeves = m }
+func (h *Hub) SetSleeves(m *sleeve.Manager) {
+	h.sleeves = m
+	h.chat = newChatManager(h)
+}
+
+// sleeveProto is sleeveToProto with the live chat status laid over the
+// persisted one.
+func (h *Hub) sleeveProto(i sleeve.Info) *pb.Sleeve {
+	s := sleeveToProto(i)
+	h.chat.overlay(s)
+	return s
+}
 
 var harnessToProto = map[sleeve.Harness]pb.Harness{
 	sleeve.Claude: pb.Harness_HARNESS_CLAUDE,
@@ -50,6 +62,44 @@ func harnessFromProto(h pb.Harness) sleeve.Harness {
 	return ""
 }
 
+func modeFromProto(m pb.SleeveMode) sleeve.Mode {
+	switch m {
+	case pb.SleeveMode_SLEEVE_MODE_CHAT:
+		return sleeve.ModeChat
+	case pb.SleeveMode_SLEEVE_MODE_TERMINAL:
+		return sleeve.ModeTerminal
+	}
+	return ""
+}
+
+func modeToProto(m sleeve.Mode) pb.SleeveMode {
+	if m == sleeve.ModeChat {
+		return pb.SleeveMode_SLEEVE_MODE_CHAT
+	}
+	return pb.SleeveMode_SLEEVE_MODE_TERMINAL
+}
+
+func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
+	if c == nil {
+		return nil
+	}
+	s := &pb.ChatStatus{
+		State:            pb.ChatState(pb.ChatState_value[c.State]),
+		HarnessSessionId: c.SessionID,
+		Model:            c.Model,
+		ContextTokens:    c.Context,
+		ContextWindow:    c.Window,
+		LastSeq:          c.LastSeq,
+	}
+	if !c.CacheExpires.IsZero() {
+		s.CacheExpiresAt = timestamppb.New(c.CacheExpires)
+	}
+	if !c.LastActivity.IsZero() {
+		s.LastActivityAt = timestamppb.New(c.LastActivity)
+	}
+	return s
+}
+
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
 		Name:      i.Name,
@@ -58,6 +108,8 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Session:   i.Session,
 		CreatedAt: timestamppb.New(i.Created),
 		Args:      i.Args,
+		Mode:      modeToProto(i.Mode),
+		Chat:      chatToProto(i.Chat),
 		Limits:    &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
 		State:     pb.SleeveState_SLEEVE_STATE_RUNNING,
 		Usage: &pb.SleeveUsage{
@@ -96,7 +148,7 @@ func (h *Hub) sleeveRows() []*pb.Sleeve {
 	var out []*pb.Sleeve
 	for _, i := range h.sleeves.List() {
 		if i.State == sleeve.Running {
-			out = append(out, sleeveToProto(i))
+			out = append(out, h.sleeveProto(i))
 		}
 	}
 	return out
@@ -127,7 +179,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 	}
 	r := sleeve.SpawnRequest{
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
-		Args: m.Args, Env: m.Env,
+		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode),
 	}
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
@@ -136,14 +188,24 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 	if err != nil {
 		return nil, sleeveErr(err)
 	}
+	if info.Mode == sleeve.ModeChat {
+		if err := h.chat.start(ctx, info.Name); err != nil {
+			h.chat.remove(info.Name)
+			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
+				log.Printf("sleeve %s: kill after failed chat start: %v", info.Name, kerr)
+			}
+			return nil, err
+		}
+		info, _ = h.sleeves.Get(info.Name)
+	}
 	h.scanSessions(ctx)
-	return connect.NewResponse(&pb.SpawnSleeveResponse{Sleeve: sleeveToProto(info)}), nil
+	return connect.NewResponse(&pb.SpawnSleeveResponse{Sleeve: h.sleeveProto(info)}), nil
 }
 
 func (h *Hub) ListSleeves(context.Context, *connect.Request[pb.ListSleevesRequest]) (*connect.Response[pb.ListSleevesResponse], error) {
 	res := &pb.ListSleevesResponse{}
 	for _, i := range h.sleeves.List() {
-		res.Sleeves = append(res.Sleeves, sleeveToProto(i))
+		res.Sleeves = append(res.Sleeves, h.sleeveProto(i))
 	}
 	return connect.NewResponse(res), nil
 }
@@ -153,10 +215,11 @@ func (h *Hub) GetSleeve(_ context.Context, req *connect.Request[pb.GetSleeveRequ
 	if err != nil {
 		return nil, sleeveErr(err)
 	}
-	return connect.NewResponse(&pb.GetSleeveResponse{Sleeve: sleeveToProto(i)}), nil
+	return connect.NewResponse(&pb.GetSleeveResponse{Sleeve: h.sleeveProto(i)}), nil
 }
 
 func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeveRequest]) (*connect.Response[pb.KillSleeveResponse], error) {
+	h.chat.remove(req.Msg.Name)
 	if err := h.sleeves.Kill(ctx, req.Msg.Name); err != nil {
 		return nil, sleeveErr(err)
 	}

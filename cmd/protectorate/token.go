@@ -19,7 +19,7 @@ import (
 
 // deviceScopes and deviceTTL are what `pair` grants a paired phone or browser;
 // --host-shell adds terminal:host.
-var deviceScopes = []string{"read", "terminal", "events", "session_*", "sleeve_*", "backlog_*"}
+var deviceScopes = []string{"read", "terminal", "events", "session_*", "sleeve_*", "chat_*", "backlog_*"}
 
 const deviceTTL = 90 * 24 * time.Hour
 

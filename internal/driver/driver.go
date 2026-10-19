@@ -26,6 +26,9 @@ var (
 	ErrClosed          = errors.New("driver: session closed")
 	ErrUnsupported     = errors.New("driver: not supported by this harness")
 	ErrUnknownApproval = errors.New("driver: unknown or already answered approval")
+	// ErrNothingToCompact means the harness found too little history to
+	// compact; no compaction happened.
+	ErrNothingToCompact = errors.New("driver: nothing to compact")
 )
 
 // Caps tells callers what a harness supports instead of faking it.
@@ -57,19 +60,33 @@ func CapsFor(h Harness) (Caps, error) {
 type Kind string
 
 const (
-	KindText     Kind = "text"
-	KindToolCall Kind = "tool_call"
-	KindApproval Kind = "approval"
-	KindUsage    Kind = "usage"
-	KindSettled  Kind = "settled"
-	KindError    Kind = "error"
-	KindExited   Kind = "exited"
+	KindText       Kind = "text"
+	KindToolCall   Kind = "tool_call"
+	KindToolResult Kind = "tool_result"
+	KindApproval   Kind = "approval"
+	KindUsage      Kind = "usage"
+	KindCompaction Kind = "compaction"
+	KindSettled    Kind = "settled"
+	KindError      Kind = "error"
+	KindExited     Kind = "exited"
 )
 
 type ToolCall struct {
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input,omitempty"`
+}
+
+// MaxToolOutput bounds ToolResult.Output in bytes.
+const MaxToolOutput = 16 << 10
+
+// ToolResult is the outcome of a ToolCall. Output is cut at MaxToolOutput
+// and Truncated says so.
+type ToolResult struct {
+	CallID    string `json:"call_id"`
+	Output    string `json:"output,omitempty"`
+	IsError   bool   `json:"is_error,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type Approval struct {
@@ -79,30 +96,56 @@ type Approval struct {
 	Raw     json.RawMessage `json:"raw,omitempty"`
 }
 
+// Usage describes the last model call, never a sum over a turn. Zero means
+// the harness did not say.
+//
+//	ContextTokens:  prompt size of the call (fresh input + cache read + cache write)
+//	InputTokens:    the uncached part of that prompt
+//	CacheExpires:   when the prompt cache goes cold, if derivable
 type Usage struct {
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	CachedTokens int64   `json:"cached_tokens"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
+	ContextTokens    int64     `json:"context_tokens"`
+	ContextWindow    int64     `json:"context_window,omitempty"`
+	InputTokens      int64     `json:"input_tokens"`
+	OutputTokens     int64     `json:"output_tokens"`
+	CacheReadTokens  int64     `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"`
+	CacheExpires     time.Time `json:"cache_expires,omitempty"`
+	Model            string    `json:"model,omitempty"`
+}
+
+// Compaction records a context compaction the harness confirmed. Native is
+// true when the harness started it on its own.
+type Compaction struct {
+	TokensBefore int64 `json:"tokens_before"`
+	TokensAfter  int64 `json:"tokens_after"`
+	Native       bool  `json:"native,omitempty"`
 }
 
 // Event is one item of a session's stream. Every Send ends in exactly one
 // KindSettled, or in KindError followed by KindExited if the harness died.
 // KindExited is always last; the channel closes after it.
 //
-//	KindText:     Text is a delta (Claude delivers whole message blocks)
-//	KindToolCall: Tool
-//	KindApproval: Approval; the turn is blocked until Respond
-//	KindUsage:    Usage (per turn or cumulative, harness-native)
-//	KindSettled:  StopReason
-//	KindError:    Text
-//	KindExited:   ExitCode, Text holds the bounded stderr tail
+//	KindText:       Text is a delta (Claude delivers whole message blocks);
+//	                MessageID groups the deltas of one message when the
+//	                harness names it; Thinking marks reasoning text
+//	KindToolCall:   Tool
+//	KindToolResult: ToolResult
+//	KindApproval:   Approval; the turn is blocked until Respond
+//	KindUsage:      Usage
+//	KindCompaction: Compaction
+//	KindSettled:    StopReason
+//	KindError:      Text
+//	KindExited:     ExitCode, Text holds the bounded stderr tail
 type Event struct {
 	Kind       Kind            `json:"kind"`
 	Text       string          `json:"text,omitempty"`
+	MessageID  string          `json:"message_id,omitempty"`
+	Thinking   bool            `json:"thinking,omitempty"`
 	Tool       *ToolCall       `json:"tool,omitempty"`
+	ToolResult *ToolResult     `json:"tool_result,omitempty"`
 	Approval   *Approval       `json:"approval,omitempty"`
 	Usage      *Usage          `json:"usage,omitempty"`
+	Compaction *Compaction     `json:"compaction,omitempty"`
 	StopReason string          `json:"stop_reason,omitempty"`
 	ExitCode   int             `json:"exit_code,omitempty"`
 	Raw        json.RawMessage `json:"raw,omitempty"`
@@ -119,6 +162,12 @@ type Session interface {
 	// carry a deny reason and ignored by the rest.
 	Respond(ctx context.Context, approvalID string, allow bool, note string) error
 	Interrupt(ctx context.Context) error
+	// Compact runs the harness's own compaction between turns and returns
+	// once the harness's own record confirms it. It fails with ErrBusy
+	// during a turn, ErrNothingToCompact when there is too little history
+	// and ErrUnsupported on harnesses where it is not verified. The result
+	// is also delivered as a KindCompaction event.
+	Compact(ctx context.Context) (Compaction, error)
 	// Close stops the harness and returns after it has exited, so the
 	// session id is free for a TUI to resume.
 	Close() error
@@ -129,13 +178,19 @@ type Options struct {
 	Bin string
 	// Env entries are appended to the process environment.
 	Env []string
-	// CodexSocket overrides the Codex daemon control socket path.
-	CodexSocket string
 	// StopTimeout bounds graceful shutdown before the process group is
 	// signalled. Default 5s.
 	StopTimeout time.Duration
 	// StderrLimit bounds captured stderr bytes. Default 8 KiB.
 	StderrLimit int
+	// Command, when set, turns the harness executable and arguments the
+	// driver would run into the argv to start instead, so the sleeve layer can
+	// put the harness in its sandbox. stdio stays connected to the harness.
+	Command func(bin string, args []string) ([]string, error)
+	// Sandboxed says the caller isolates the harness, so the driver runs it
+	// in its own autonomous permission mode, using only the harness's
+	// official flags and commands.
+	Sandboxed bool
 
 	release func()
 }

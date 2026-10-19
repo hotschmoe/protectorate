@@ -68,12 +68,11 @@ func TestEventDetails(t *testing.T) {
 			var usage bool
 			var tool bool
 			for _, e := range evs {
-				usage = usage || e.Kind == KindUsage && e.Usage != nil && e.Usage.InputTokens > 0
+				usage = usage || e.Kind == KindUsage && e.Usage != nil && e.Usage.ContextTokens > 0
 				tool = tool || e.Kind == KindToolCall && e.Tool != nil && e.Tool.Name != ""
 			}
-			wantTool := fx.h == Codex || fx.h == Pi
-			if tool != wantTool {
-				t.Fatalf("tool call seen=%v want %v (%v)", tool, wantTool, kinds(evs))
+			if !tool {
+				t.Fatalf("no tool call: %v", kinds(evs))
 			}
 			if !usage {
 				t.Fatalf("no usage event: %v", kinds(evs))
@@ -215,7 +214,7 @@ func TestExitMidTurn(t *testing.T) {
 					t.Fatalf("settled after death: %v", ks)
 				}
 			}
-			if fx.h != Codex && evs[len(evs)-1].ExitCode != 3 {
+			if evs[len(evs)-1].ExitCode != 3 {
 				t.Fatalf("exit code %d", evs[len(evs)-1].ExitCode)
 			}
 			if _, ok := <-s.Events(); ok {
@@ -229,16 +228,9 @@ func TestExitMidTurn(t *testing.T) {
 }
 
 func TestCodexResumeLocked(t *testing.T) {
-	_, err := Open(ctx5(t), Codex, t.TempDir(), "locked", Options{CodexSocket: fakeCodex(t)})
+	_, err := Open(ctx5(t), Codex, t.TempDir(), "locked", Options{Bin: os.Args[0], Env: fakeEnv("codex"), StopTimeout: time.Second})
 	if err == nil || !strings.Contains(err.Error(), "active writer") {
 		t.Fatalf("got %v", err)
-	}
-}
-
-func TestCodexNoDaemon(t *testing.T) {
-	_, err := Open(ctx5(t), Codex, t.TempDir(), "", Options{CodexSocket: t.TempDir() + "/none.sock"})
-	if err == nil {
-		t.Fatal("expected connect error")
 	}
 }
 
@@ -421,5 +413,244 @@ func TestOwnersOpenDriver(t *testing.T) {
 
 	if _, err := o.OpenDriver(ctx5(t), Claude, t.TempDir(), "", "bad", Options{Bin: "/nonexistent"}); err == nil {
 		t.Fatal("expected open failure")
+	}
+}
+
+func TestCommandWrapsHarness(t *testing.T) {
+	var gotBin string
+	var gotArgs []string
+	s, err := Open(ctx5(t), Claude, t.TempDir(), "sess-9", Options{
+		Env: fakeEnv("claude"), StopTimeout: time.Second,
+		Command: func(bin string, args []string) ([]string, error) {
+			gotBin, gotArgs = bin, args
+			return append([]string{os.Args[0]}, args...), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if gotBin != "claude" || !strings.Contains(strings.Join(gotArgs, " "), "--resume sess-9") {
+		t.Fatalf("command saw bin=%q args=%v", gotBin, gotArgs)
+	}
+	if err := s.Send(ctx5(t), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if txt := joinText(until(t, s, KindSettled)); !strings.Contains(txt, "id=sess-9") {
+		t.Fatalf("wrapped harness did not run: %q", txt)
+	}
+	if _, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{
+		Command: func(string, []string) ([]string, error) { return nil, errors.New("no sandbox") },
+	}); err == nil || !strings.Contains(err.Error(), "no sandbox") {
+		t.Fatalf("command error not surfaced: %v", err)
+	}
+}
+
+func TestUsageAndToolResults(t *testing.T) {
+	tests := []struct {
+		h       Harness
+		context int64
+		window  int64
+		read    int64
+		write   int64
+		output  string
+		isErr   bool
+		model   string
+	}{
+		{Claude, 1002, 1000000, 900, 100, "a.txt", false, "claude-fake"},
+		{Codex, 5, 258400, 2, 0, "", true, ""},
+		{Grok, 128, 0, 28, 0, "a.txt", false, ""},
+		{Pi, 19, 200000, 10, 2, "denied", true, "pi-fake"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.h), func(t *testing.T) {
+			var fx fixture
+			for _, f := range fixtures() {
+				if f.h == tc.h {
+					fx = f
+				}
+			}
+			s := fx.open(t, "")
+			if err := s.Send(ctx5(t), "hello"); err != nil {
+				t.Fatal(err)
+			}
+			evs := until(t, s, KindSettled)
+			var last *Usage
+			var usages int
+			var res *ToolResult
+			for _, e := range evs {
+				switch e.Kind {
+				case KindUsage:
+					usages++
+					last = e.Usage
+				case KindToolResult:
+					res = e.ToolResult
+				}
+			}
+			if last == nil || last.ContextTokens != tc.context || last.ContextWindow != tc.window ||
+				last.CacheReadTokens != tc.read || last.CacheWriteTokens != tc.write || last.Model != tc.model {
+				t.Fatalf("usage = %+v, want context %d window %d read %d write %d model %q", last, tc.context, tc.window, tc.read, tc.write, tc.model)
+			}
+			if tc.h == Claude {
+				if usages != 2 {
+					t.Fatalf("usage events = %d, want one per message id plus the window update", usages)
+				}
+				if d := time.Until(last.CacheExpires); d < 59*time.Minute || d > time.Hour {
+					t.Fatalf("cache expiry in %v, want about 1h", d)
+				}
+			}
+			if res == nil || res.IsError != tc.isErr {
+				t.Fatalf("tool result = %+v", res)
+			}
+			if tc.h == Codex {
+				if !res.Truncated || len(res.Output) != MaxToolOutput {
+					t.Fatalf("output not bounded: truncated=%v len=%d", res.Truncated, len(res.Output))
+				}
+			} else if res.Output != tc.output {
+				t.Fatalf("output %q want %q", res.Output, tc.output)
+			}
+		})
+	}
+}
+
+func TestThinkingAndMessageIDs(t *testing.T) {
+	fx := fixtures()[0]
+	s := fx.open(t, "")
+	if err := s.Send(ctx5(t), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	var think, plain bool
+	for _, e := range until(t, s, KindSettled) {
+		if e.Kind == KindText {
+			if e.MessageID == "" {
+				t.Fatalf("text without message id: %+v", e)
+			}
+			think = think || e.Thinking
+			plain = plain || !e.Thinking
+		}
+	}
+	if !think || !plain {
+		t.Fatalf("thinking=%v plain=%v", think, plain)
+	}
+}
+
+func TestCompact(t *testing.T) {
+	for _, fx := range fixtures() {
+		t.Run(string(fx.h), func(t *testing.T) {
+			s := fx.open(t, "")
+			if fx.h == Grok {
+				if _, err := s.Compact(ctx5(t)); !errors.Is(err, ErrUnsupported) {
+					t.Fatalf("grok compact: %v", err)
+				}
+				return
+			}
+			c, err := s.Compact(ctx5(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[Harness]Compaction{
+				Claude: {TokensBefore: 12546, TokensAfter: 1278},
+				Codex:  {TokensBefore: 0, TokensAfter: 700},
+				Pi:     {TokensBefore: 150, TokensAfter: 30},
+			}[fx.h]
+			if c != want {
+				t.Fatalf("compaction %+v, want %+v", c, want)
+			}
+			var evs []Event
+			for len(evs) == 0 || evs[len(evs)-1].Kind != KindCompaction {
+				evs = append(evs, next(t, s))
+			}
+			if got := evs[len(evs)-1].Compaction; got.Native || got.TokensAfter != want.TokensAfter {
+				t.Fatalf("event %+v", got)
+			}
+			for _, e := range evs {
+				if e.Kind == KindSettled {
+					t.Fatalf("manual compaction settled a turn: %v", kinds(evs))
+				}
+			}
+			if _, err := s.Compact(ctx5(t)); !errors.Is(err, ErrNothingToCompact) {
+				t.Fatalf("second compact: %v", err)
+			}
+			// the session still works and a compaction does not leave it busy
+			if err := s.Send(ctx5(t), "hello"); err != nil {
+				t.Fatalf("send after compact: %v", err)
+			}
+			until(t, s, KindSettled)
+		})
+	}
+}
+
+func TestCompactBusy(t *testing.T) {
+	s := fixtures()[3].open(t, "")
+	if err := s.Send(ctx5(t), "slow"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Compact(ctx5(t)); !errors.Is(err, ErrBusy) {
+		t.Fatalf("compact during a turn: %v", err)
+	}
+	s.Interrupt(ctx5(t))
+	until(t, s, KindSettled)
+}
+
+func TestNativeAutoCompaction(t *testing.T) {
+	s := fixtures()[0].open(t, "")
+	if err := s.Send(ctx5(t), "autocompact please"); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range until(t, s, KindSettled) {
+		if e.Kind == KindCompaction {
+			if !e.Compaction.Native || e.Compaction.TokensBefore != 900 {
+				t.Fatalf("compaction %+v", e.Compaction)
+			}
+			return
+		}
+	}
+	t.Fatal("no compaction event")
+}
+
+func TestSandboxedFlags(t *testing.T) {
+	open := func(sandboxed bool) string {
+		s, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{Bin: os.Args[0], Env: fakeEnv("claude"), Sandboxed: sandboxed, StopTimeout: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		if err := s.Send(ctx5(t), "sandboxed?"); err != nil {
+			t.Fatal(err)
+		}
+		return joinText(until(t, s, KindSettled))
+	}
+	if got := open(true); !strings.Contains(got, "bypassPermissions") || strings.Contains(got, "autocompact") {
+		t.Fatalf("sandboxed args: %s", got)
+	}
+	if got := open(false); strings.Contains(got, "bypassPermissions") {
+		t.Fatalf("unsandboxed args: %s", got)
+	}
+}
+
+func TestCodexSandboxedLeavesPolicyToConfig(t *testing.T) {
+	for _, sandboxed := range []bool{false, true} {
+		s, err := Open(ctx5(t), Codex, t.TempDir(), "", Options{
+			Bin: os.Args[0], Env: fakeEnv("codex", "DRIVER_FAKE_POLICY=1"), Sandboxed: sandboxed, StopTimeout: time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := s.SessionID() == "cx-policy-set", !sandboxed; got != want {
+			t.Errorf("sandboxed=%v: policy params sent=%v, want %v", sandboxed, got, want)
+		}
+		s.Close()
+	}
+}
+
+func TestSyntheticMessageReportsNoUsage(t *testing.T) {
+	s := fixtures()[0].open(t, "")
+	if err := s.Send(ctx5(t), "synthetic"); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range until(t, s, KindSettled) {
+		if e.Kind == KindUsage && e.Usage.ContextTokens == 0 {
+			t.Fatalf("zero-context usage event: %+v", e.Usage)
+		}
 	}
 }

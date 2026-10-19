@@ -11,9 +11,8 @@ import "chat.pb.dart" as protectoratev1chat;
 /// into ChatEvents. The hub keeps each sleeve's events in an append-only log,
 /// so any number of clients can watch and a reconnecting client resumes from
 /// the last seq it saw. The harness's own session store stays the full record;
-/// the log is the view. Only one driver owns a native session at a time, so a
-/// sleeve is either in chat mode or in terminal mode (SetMode switches, keeping
-/// the native session id).
+/// the log is the view. A sleeve is in chat mode for life, or in terminal mode
+/// and then has no chat.
 abstract final class ChatService {
   /// Fully-qualified name of the ChatService service.
   static const name = 'protectorate.v1.ChatService';
@@ -63,15 +62,5 @@ abstract final class ChatService {
     connect.StreamType.unary,
     protectoratev1chat.CompactRequest.new,
     protectoratev1chat.CompactResponse.new,
-  );
-
-  /// SetMode switches a sleeve between chat and terminal ("take over"). The
-  /// current driver is closed first, then the other mode resumes the same
-  /// native session id.
-  static const setMode = connect.Spec(
-    '/$name/SetMode',
-    connect.StreamType.unary,
-    protectoratev1chat.SetModeRequest.new,
-    protectoratev1chat.SetModeResponse.new,
   );
 }

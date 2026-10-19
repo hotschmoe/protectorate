@@ -53,6 +53,16 @@ func startProc(bin string, args []string, cwd string, opts Options) (*proc, erro
 	if limit <= 0 {
 		limit = 8 << 10
 	}
+	if opts.Command != nil {
+		argv, err := opts.Command(bin, args)
+		if err != nil {
+			return nil, fmt.Errorf("build %s command: %w", bin, err)
+		}
+		if len(argv) == 0 {
+			return nil, fmt.Errorf("build %s command: empty argv", bin)
+		}
+		bin, args = argv[0], argv[1:]
+	}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), opts.Env...)

@@ -497,3 +497,62 @@ func TestPlanKeepsEnvOutOfArgv(t *testing.T) {
 		t.Fatalf("no-env launch = %v, %v", l, err)
 	}
 }
+
+func TestEnvFileRoundTrip(t *testing.T) {
+	linuxHost(t)
+	c := testConfig()
+	c.Home = t.TempDir()
+	want := map[string]string{"A": "1", "B": "two words", "EMPTY": ""}
+	l, err := c.Plan(Spec{Name: "env1", Harness: Claude, Workspace: "/work/x", Env: want}, Binary{Path: "/home/u/.local/bin/claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.writeEnvFile("env1", l); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.readEnvFile("env1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("env = %v, want %v", got, want)
+	}
+	if got, err := c.readEnvFile("nosuch"); err != nil || got != nil {
+		t.Errorf("missing file: %v, %v", got, err)
+	}
+}
+
+func TestLaunchKeepsEnvAndArgs(t *testing.T) {
+	linuxHost(t)
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := testConfig()
+	c.Home = t.TempDir()
+	c.ToolDirs, c.PathDirs = []string{dir}, []string{dir}
+	ws := filepath.Join(c.Home, "workspaces", "chat1")
+	info := Info{Name: "chat1", Harness: Claude, Workspace: ws}
+	l, err := c.Plan(Spec{Name: "chat1", Harness: Claude, Workspace: ws, Env: map[string]string{"K": "v"}}, Binary{Path: bin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.writeEnvFile("chat1", l); err != nil {
+		t.Fatal(err)
+	}
+	c.UserHome = filepath.Join(t.TempDir(), "u")
+	launch, err := c.launch(info, []string{"-p", "--resume", "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(launch.Argv, " ")
+	for _, want := range []string{"systemd-run", "prot-sleeve-chat1", "bwrap", "--args 3", bin + " -p --resume abc"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv lacks %q: %s", want, joined)
+		}
+	}
+	if _, err := os.Stat(c.envFile("chat1")); err != nil {
+		t.Errorf("env file dropped by relaunch: %v", err)
+	}
+}

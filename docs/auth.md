@@ -38,7 +38,8 @@ without `Service`, an underscore and the snake_case method, for example
 `session_kill_session`, `backlog_*`, `*`. `protectorate mcp` lists the same
 names. Globs must match at least one tool when the token is created, so typos
 are rejected rather than silently granting nothing. Procedure paths are not
-scopes. `*` covers every hub RPC except owner-only ones, but not the terminal.
+scopes. `chat_*` covers every ChatService call, including `chat_watch`; `read`
+alone is enough to watch a chat but not to send, answer an approval or compact. `*` covers every hub RPC except owner-only ones, but not the terminal.
 
 Leases and jobs follow the same rules: `lease_*` and `job_*` are globs like any
 other, `read` admits `GetJob`, `ListJobs`, `WatchJob` and `ListLeases`, and
@@ -122,7 +123,7 @@ protectorate audit tail -n 50
 Every command takes the token from `--token-file`, then env
 `PROTECTORATE_TOKEN`, then the local owner token file, so a scoped token also
 works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
-mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `backlog_*`,
+mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `chat_*`, `backlog_*`,
 90 days) instead of embedding the owner token.
 
 ## Shared node token
