@@ -188,7 +188,7 @@ func Describe(ctx context.Context, dir, from, to string) (Facts, error) {
 	if n, err := Git(ctx, dir, "rev-list", "--count", rng); err == nil {
 		f.TotalCommits, _ = strconv.Atoi(strings.TrimSpace(n))
 	}
-	names, err := Git(ctx, dir, "diff", "--name-status", from, to)
+	names, err := Git(ctx, dir, "diff", "--no-textconv", "--no-ext-diff", "--name-status", from, to)
 	if err != nil {
 		return f, nil
 	}
@@ -201,7 +201,7 @@ func Describe(ctx context.Context, dir, from, to string) (Facts, error) {
 			f.Files = append(f.Files, strings.Join(strings.Fields(line), " "))
 		}
 	}
-	if st, err := Git(ctx, dir, "diff", "--shortstat", from, to); err == nil {
+	if st, err := Git(ctx, dir, "diff", "--no-textconv", "--no-ext-diff", "--shortstat", from, to); err == nil {
 		f.ShortStat = strings.TrimSpace(st)
 	}
 	return f, nil

@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -148,5 +149,61 @@ func TestReadRefsAndDescribe(t *testing.T) {
 	f, err = Describe(ctx, many, base, head)
 	if err != nil || f.TotalFiles != maxFiles+10 || len(f.Files) != maxFiles || !strings.Contains(f.String(), "first 40 shown") {
 		t.Fatalf("bounded facts = %d/%d %v", len(f.Files), f.TotalFiles, err)
+	}
+}
+
+// A sandboxed agent writes the repository config; Describe must not run the
+// programs it names.
+func TestDescribeRunsNoRepositoryPrograms(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	marker := filepath.Join(t.TempDir(), "ran")
+	prog := filepath.Join(t.TempDir(), "prog")
+	write(t, filepath.Dir(prog), "prog", "#!/bin/sh\ntouch "+marker+"\necho '[GNUPG:] SIG_CREATED ' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\nAAAA\\n-----END PGP SIGNATURE-----\\n'\ncat\n")
+	if err := os.Chmod(prog, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		config [][2]string
+		attrs  string
+	}{
+		{"signature helper", [][2]string{{"log.showSignature", "true"}, {"gpg.program", prog}}, ""},
+		{"textconv", [][2]string{{"diff.evil.textconv", prog}}, "* diff=evil\n"},
+		{"external diff driver", [][2]string{{"diff.evil.command", prog}}, "* diff=evil\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			dir := t.TempDir()
+			git(t, dir, "init", "-q")
+			if tc.attrs != "" {
+				write(t, dir, ".gitattributes", tc.attrs)
+			}
+			first := commit(t, dir, "a.txt", "one\n", "first")
+			write(t, dir, "a.txt", "two\n")
+			git(t, dir, "add", ".")
+			git(t, dir, "-c", "gpg.program="+prog, "commit", "-q", "-S", "-m", "signed")
+			second := git(t, dir, "rev-parse", "HEAD")
+			for _, kv := range tc.config {
+				git(t, dir, "config", kv[0], kv[1])
+			}
+			if _, err := os.Stat(marker); err == nil {
+				if err := os.Remove(marker); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f, err := Describe(ctx, dir, first, second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(f.Commits) != 1 || f.TotalFiles != 1 {
+				t.Fatalf("facts = %+v", f)
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatalf("Describe ran the repository's %s", tc.name)
+			}
+		})
 	}
 }

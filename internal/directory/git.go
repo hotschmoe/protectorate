@@ -16,6 +16,9 @@ const gitTimeout = 10 * time.Second
 // Git runs a read-only git command in dir. Repository-controlled hooks and
 // helpers are switched off, since the repository is written by a sandboxed
 // agent: nothing in a workspace's config may make the hub run a program.
+// Only commands that never read the worktree belong here (refs, log, tree to
+// tree diffs without textconv): filters run on worktree files, and their
+// command comes from the repository config.
 func Git(ctx context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
@@ -23,6 +26,7 @@ func Git(ctx context.Context, dir string, args ...string) (string, error) {
 		"-C", dir, "--no-pager",
 		"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat",
 		"-c", "diff.external=", "-c", "core.sshCommand=false", "-c", "safe.directory=" + dir,
+		"-c", "log.showSignature=false",
 	}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = append(cmd.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_EXTERNAL_DIFF=")
