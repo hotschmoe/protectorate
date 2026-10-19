@@ -19,6 +19,12 @@ protectorate chat compact alice
 `--mode terminal` spawns the TUI under tmux instead (always for `shell`). A
 sleeve keeps its mode for life; a terminal sleeve has no chat.
 
+A chat harness runs autonomous: the sandbox is the boundary. `sleeve spawn
+--supervised` runs it in its asking mode instead (Claude `--permission-mode
+default`, Codex `approvalPolicy` `untrusted` with its `workspace-write`
+sandbox, Grok `/always-approve off`; pi has no gate), so approvals arrive as
+`ApprovalRequest` events and `chat respond` answers them.
+
 ## API
 
 `ChatService` (`proto/protectorate/v1/chat.proto`). `Watch` needs the `read`

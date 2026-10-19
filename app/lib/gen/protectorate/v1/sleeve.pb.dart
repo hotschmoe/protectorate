@@ -292,6 +292,7 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.bool? oomKilled,
     $1.SleeveMode? mode,
     $1.ChatStatus? chat,
+    $core.bool? supervised,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -309,6 +310,7 @@ class Sleeve extends $pb.GeneratedMessage {
     if (oomKilled != null) result.oomKilled = oomKilled;
     if (mode != null) result.mode = mode;
     if (chat != null) result.chat = chat;
+    if (supervised != null) result.supervised = supervised;
     return result;
   }
 
@@ -349,6 +351,7 @@ class Sleeve extends $pb.GeneratedMessage {
         enumValues: $1.SleeveMode.values)
     ..aOM<$1.ChatStatus>(15, _omitFieldNames ? '' : 'chat',
         subBuilder: $1.ChatStatus.$_createMessage)
+    ..aOB(16, _omitFieldNames ? '' : 'supervised')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -519,6 +522,19 @@ class Sleeve extends $pb.GeneratedMessage {
   void clearChat() => $_clearField(15);
   @$pb.TagNumber(15)
   $1.ChatStatus ensureChat() => $_ensure(14);
+
+  /// supervised chat sleeves run the harness in its asking permission mode:
+  /// approvals arrive as ApprovalRequest events, answered with
+  /// ChatService.Respond. Unsupervised sleeves run autonomous (the sandbox is
+  /// the boundary).
+  @$pb.TagNumber(16)
+  $core.bool get supervised => $_getBF(15);
+  @$pb.TagNumber(16)
+  set supervised($core.bool value) => $_setBool(15, value);
+  @$pb.TagNumber(16)
+  $core.bool hasSupervised() => $_has(15);
+  @$pb.TagNumber(16)
+  void clearSupervised() => $_clearField(16);
 }
 
 class SpawnSleeveRequest extends $pb.GeneratedMessage {
@@ -530,6 +546,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     SleeveLimits? limits,
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
     $1.SleeveMode? mode,
+    $core.bool? supervised,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -539,6 +556,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (limits != null) result.limits = limits;
     if (env != null) result.env.addEntries(env);
     if (mode != null) result.mode = mode;
+    if (supervised != null) result.supervised = supervised;
     return result;
   }
 
@@ -570,6 +588,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
         packageName: const $pb.PackageName('protectorate.v1'))
     ..aE<$1.SleeveMode>(7, _omitFieldNames ? '' : 'mode',
         enumValues: $1.SleeveMode.values)
+    ..aOB(8, _omitFieldNames ? '' : 'supervised')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -650,6 +669,19 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   $core.bool hasMode() => $_has(6);
   @$pb.TagNumber(7)
   void clearMode() => $_clearField(7);
+
+  /// supervised runs a chat sleeve's harness in its asking permission mode
+  /// instead of autonomous: Claude --permission-mode default, Codex
+  /// approvalPolicy untrusted with its workspace-write sandbox, Grok
+  /// /always-approve off. pi has no gate and ignores it.
+  @$pb.TagNumber(8)
+  $core.bool get supervised => $_getBF(7);
+  @$pb.TagNumber(8)
+  set supervised($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasSupervised() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearSupervised() => $_clearField(8);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {

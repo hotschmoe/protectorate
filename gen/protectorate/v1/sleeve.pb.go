@@ -328,7 +328,12 @@ type Sleeve struct {
 	OomKilled bool       `protobuf:"varint,13,opt,name=oom_killed,json=oomKilled,proto3" json:"oom_killed,omitempty"`
 	Mode      SleeveMode `protobuf:"varint,14,opt,name=mode,proto3,enum=protectorate.v1.SleeveMode" json:"mode,omitempty"`
 	// chat is set for sleeves in chat mode.
-	Chat          *ChatStatus `protobuf:"bytes,15,opt,name=chat,proto3" json:"chat,omitempty"`
+	Chat *ChatStatus `protobuf:"bytes,15,opt,name=chat,proto3" json:"chat,omitempty"`
+	// supervised chat sleeves run the harness in its asking permission mode:
+	// approvals arrive as ApprovalRequest events, answered with
+	// ChatService.Respond. Unsupervised sleeves run autonomous (the sandbox is
+	// the boundary).
+	Supervised    bool `protobuf:"varint,16,opt,name=supervised,proto3" json:"supervised,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -468,6 +473,13 @@ func (x *Sleeve) GetChat() *ChatStatus {
 	return nil
 }
 
+func (x *Sleeve) GetSupervised() bool {
+	if x != nil {
+		return x.Supervised
+	}
+	return false
+}
+
 type SpawnSleeveRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.
@@ -479,8 +491,13 @@ type SpawnSleeveRequest struct {
 	Args   []string      `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`
 	Limits *SleeveLimits `protobuf:"bytes,5,opt,name=limits,proto3" json:"limits,omitempty"`
 	// env holds extra environment variables for the harness.
-	Env           map[string]string `protobuf:"bytes,6,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Mode          SleeveMode        `protobuf:"varint,7,opt,name=mode,proto3,enum=protectorate.v1.SleeveMode" json:"mode,omitempty"`
+	Env  map[string]string `protobuf:"bytes,6,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Mode SleeveMode        `protobuf:"varint,7,opt,name=mode,proto3,enum=protectorate.v1.SleeveMode" json:"mode,omitempty"`
+	// supervised runs a chat sleeve's harness in its asking permission mode
+	// instead of autonomous: Claude --permission-mode default, Codex
+	// approvalPolicy untrusted with its workspace-write sandbox, Grok
+	// /always-approve off. pi has no gate and ignores it.
+	Supervised    bool `protobuf:"varint,8,opt,name=supervised,proto3" json:"supervised,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -562,6 +579,13 @@ func (x *SpawnSleeveRequest) GetMode() SleeveMode {
 		return x.Mode
 	}
 	return SleeveMode_SLEEVE_MODE_UNSPECIFIED
+}
+
+func (x *SpawnSleeveRequest) GetSupervised() bool {
+	if x != nil {
+		return x.Supervised
+	}
+	return false
 }
 
 type SpawnSleeveResponse struct {
@@ -877,7 +901,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\x81\x05\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xa1\x05\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -897,9 +921,12 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\n" +
 	"oom_killed\x18\r \x01(\bR\toomKilled\x12/\n" +
 	"\x04mode\x18\x0e \x01(\x0e2\x1b.protectorate.v1.SleeveModeR\x04mode\x12/\n" +
-	"\x04chat\x18\x0f \x01(\v2\x1b.protectorate.v1.ChatStatusR\x04chatB\f\n" +
+	"\x04chat\x18\x0f \x01(\v2\x1b.protectorate.v1.ChatStatusR\x04chat\x12\x1e\n" +
 	"\n" +
-	"_exit_code\"\xee\x02\n" +
+	"supervised\x18\x10 \x01(\bR\n" +
+	"supervisedB\f\n" +
+	"\n" +
+	"_exit_code\"\x8e\x03\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
@@ -907,7 +934,10 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x04args\x18\x04 \x03(\tR\x04args\x125\n" +
 	"\x06limits\x18\x05 \x01(\v2\x1d.protectorate.v1.SleeveLimitsR\x06limits\x12>\n" +
 	"\x03env\x18\x06 \x03(\v2,.protectorate.v1.SpawnSleeveRequest.EnvEntryR\x03env\x12/\n" +
-	"\x04mode\x18\a \x01(\x0e2\x1b.protectorate.v1.SleeveModeR\x04mode\x1a6\n" +
+	"\x04mode\x18\a \x01(\x0e2\x1b.protectorate.v1.SleeveModeR\x04mode\x12\x1e\n" +
+	"\n" +
+	"supervised\x18\b \x01(\bR\n" +
+	"supervised\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +

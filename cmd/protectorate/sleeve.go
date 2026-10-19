@@ -104,15 +104,18 @@ func sleeveSpawnCmd(o *opts) *cobra.Command {
 	var workspace, harness, mem, mode string
 	var cpu uint32
 	var env []string
+	var supervised bool
 	c := &cobra.Command{
-		Use:   "spawn <name> --workspace <dir|git url> --harness <h> [--cpu 200] [--mem 8G] [-- args...]",
+		Use:   "spawn <name> --workspace <dir|git url> --harness <h> [--cpu 200] [--mem 8G] [--supervised] [-- args...]",
 		Short: "Start a harness in an isolated sleeve",
 		Long: `Start a harness (claude, codex, grok, pi or shell) in a sandbox with its own
 process namespace and CPU/memory limits. The workspace is a directory on the
 hub or a git URL to clone. --cpu is a percentage of one core (200 = two cores).
 For the shell harness, arguments after -- are the command to run. Agent
 harnesses start in chat mode (drive them with 'protectorate chat'); use
---mode terminal for the TUI under tmux.`,
+--mode terminal for the TUI under tmux. A chat harness runs autonomous (the
+sandbox is the boundary) unless --supervised: then it asks before acting and
+'protectorate chat respond' answers.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, extra := args[0], args[1:]
@@ -161,6 +164,7 @@ harnesses start in chat mode (drive them with 'protectorate chat'); use
 			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
 				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode,
+				Supervised: supervised,
 			}))
 			if err != nil {
 				return err
@@ -181,6 +185,7 @@ harnesses start in chat mode (drive them with 'protectorate chat'); use
 	c.Flags().StringVar(&mem, "mem", "", "memory limit such as 512M or 8G (empty = unlimited)")
 	c.Flags().StringArrayVar(&env, "env", nil, "environment variable K=V (repeatable)")
 	c.Flags().StringVar(&mode, "mode", "", "chat or terminal (default: chat for agent harnesses, terminal for shell)")
+	c.Flags().BoolVar(&supervised, "supervised", false, "chat mode: the harness asks before acting (answer with chat respond)")
 	return c
 }
 
@@ -291,6 +296,9 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 					fmt.Fprintf(w, "exit\t%s\n", exitLabel(s))
 				}
 				fmt.Fprintf(w, "args\t%s\nlimits\t%s\n", strings.Join(s.Args, " "), limitLabel(s.Limits))
+				if s.Supervised {
+					fmt.Fprintln(w, "supervised\tyes (the harness asks; answer with chat respond)")
+				}
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))

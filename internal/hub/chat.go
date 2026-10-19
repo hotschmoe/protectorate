@@ -318,7 +318,7 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 	octx, cancel := context.WithTimeout(ctx, driverOpenTimeout)
 	defer cancel()
 	sess, err := s.m.open(octx, driver.Harness(info.Harness), info.Workspace, resume, "chat:"+s.name,
-		driver.Options{Command: cmd, Sandboxed: true})
+		driver.Options{Command: cmd, Autonomous: !info.Supervised})
 	if err != nil {
 		s.mu.Lock()
 		s.appendLocked(func(e *pb.ChatEvent) {

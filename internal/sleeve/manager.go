@@ -52,7 +52,12 @@ type Info struct {
 	// sleeve from before modes existed.
 	Mode Mode `yaml:"mode,omitempty"`
 	// Chat is set for sleeves in chat mode.
-	Chat   *Chat     `yaml:"chat,omitempty"`
+	Chat *Chat `yaml:"chat,omitempty"`
+	// Supervised chat sleeves run the harness in its asking permission mode.
+	Supervised bool `yaml:"supervised,omitempty"`
+	// Helper names the hub-internal job of a short-lived sleeve (such as a
+	// handoff summary); the directory and the mailbox leave such sleeves out.
+	Helper string    `yaml:"helper,omitempty"`
 	CPU    uint32    `yaml:"cpu_percent,omitempty"`
 	Memory uint64    `yaml:"memory_bytes,omitempty"`
 	Args   []string  `yaml:"args,omitempty"`
@@ -79,6 +84,9 @@ type SpawnRequest struct {
 	Env       map[string]string
 	// Mode defaults to chat for agent harnesses and terminal for shell.
 	Mode Mode
+	// Supervised applies to chat mode only.
+	Supervised bool
+	Helper     string
 }
 
 type Options struct {
@@ -279,6 +287,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
+	if req.Supervised && mode != ModeChat {
+		return Info{}, fmt.Errorf("%w: supervised applies to chat mode; a terminal sleeve's TUI asks in the terminal", ErrInvalid)
+	}
 	if err := m.reserve(ctx, req.Name); err != nil {
 		return Info{}, err
 	}
@@ -328,6 +339,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
 		CPU: req.Limits.CPUPercent, Memory: req.Limits.MemoryBytes, Args: req.Args,
+		Supervised: req.Supervised, Helper: req.Helper,
 	}
 	if mode == ModeTerminal {
 		info.Session = SessionName(req.Name)

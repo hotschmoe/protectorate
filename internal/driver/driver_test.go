@@ -611,9 +611,9 @@ func TestNativeAutoCompaction(t *testing.T) {
 	t.Fatal("no compaction event")
 }
 
-func TestSandboxedFlags(t *testing.T) {
-	open := func(sandboxed bool) string {
-		s, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{Bin: os.Args[0], Env: fakeEnv("claude"), Sandboxed: sandboxed, StopTimeout: time.Second})
+func TestAutonomousFlags(t *testing.T) {
+	open := func(autonomous bool) string {
+		s, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{Bin: os.Args[0], Env: fakeEnv("claude"), Autonomous: autonomous, StopTimeout: time.Second})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -624,23 +624,23 @@ func TestSandboxedFlags(t *testing.T) {
 		return joinText(until(t, s, KindSettled))
 	}
 	if got := open(true); !strings.Contains(got, "bypassPermissions") || strings.Contains(got, "autocompact") {
-		t.Fatalf("sandboxed args: %s", got)
+		t.Fatalf("autonomous args: %s", got)
 	}
 	if got := open(false); strings.Contains(got, "bypassPermissions") {
-		t.Fatalf("unsandboxed args: %s", got)
+		t.Fatalf("supervised args: %s", got)
 	}
 }
 
-func TestCodexSandboxedLeavesPolicyToConfig(t *testing.T) {
-	for _, sandboxed := range []bool{false, true} {
+func TestCodexAutonomousLeavesPolicyToConfig(t *testing.T) {
+	for _, autonomous := range []bool{false, true} {
 		s, err := Open(ctx5(t), Codex, t.TempDir(), "", Options{
-			Bin: os.Args[0], Env: fakeEnv("codex", "DRIVER_FAKE_POLICY=1"), Sandboxed: sandboxed, StopTimeout: time.Second,
+			Bin: os.Args[0], Env: fakeEnv("codex", "DRIVER_FAKE_POLICY=1"), Autonomous: autonomous, StopTimeout: time.Second,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := s.SessionID() == "cx-policy-set", !sandboxed; got != want {
-			t.Errorf("sandboxed=%v: policy params sent=%v, want %v", sandboxed, got, want)
+		if got, want := s.SessionID() == "cx-policy-set", !autonomous; got != want {
+			t.Errorf("autonomous=%v: policy params sent=%v, want %v", autonomous, got, want)
 		}
 		s.Close()
 	}

@@ -43,7 +43,7 @@ func openClaude(_ context.Context, cwd, sessionID string, opts Options) (Session
 		"-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose",
 		"--permission-prompt-tool", "stdio", "--permission-mode", "default",
 	}
-	if opts.Sandboxed {
+	if opts.Autonomous {
 		args[len(args)-1] = "bypassPermissions"
 	}
 	if sessionID != "" {

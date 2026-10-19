@@ -1379,6 +1379,10 @@
           "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",
           "type": "string"
         },
+        "supervised": {
+          "description": "supervised runs a chat sleeve's harness in its asking permission mode instead of autonomous: Claude --permission-mode default, Codex approvalPolicy untrusted with its workspace-write sandbox, Grok /always-approve off. pi has no gate and ignores it.",
+          "type": "boolean"
+        },
         "workspace": {
           "description": "workspace is an absolute directory path on the hub, or a git URL to clone.",
           "type": "string"

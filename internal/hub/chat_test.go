@@ -402,6 +402,44 @@ func TestChatShellAndMissing(t *testing.T) {
 	}
 }
 
+func TestChatSupervisedPermissionMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		supervised bool
+		mode       pb.SleeveMode
+		wantArg    string
+		wantCode   connect.Code
+	}{
+		{"autonomous by default", false, pb.SleeveMode_SLEEVE_MODE_CHAT, "--permission-mode bypassPermissions", 0},
+		{"supervised asks", true, pb.SleeveMode_SLEEVE_MODE_CHAT, "--permission-mode default", 0},
+		{"supervised terminal refused", true, pb.SleeveMode_SLEEVE_MODE_TERMINAL, "", connect.CodeInvalidArgument},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newChatRig(t)
+			res, err := r.sl.SpawnSleeve(r.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
+				Name: r.name, Workspace: r.ws, Harness: pb.Harness_HARNESS_CLAUDE, Mode: tc.mode, Supervised: tc.supervised,
+			}))
+			if tc.wantCode != 0 {
+				if code(err) != tc.wantCode {
+					t.Fatalf("spawn: %v, want %v", err, tc.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Msg.Sleeve.Supervised != tc.supervised {
+				t.Fatalf("supervised = %v", res.Msg.Sleeve.Supervised)
+			}
+			waitFor(t, "harness args with "+tc.wantArg, func() bool {
+				args, _ := os.ReadFile(filepath.Join(r.ws, "args.log"))
+				return strings.Contains(string(args), tc.wantArg)
+			})
+		})
+	}
+}
+
 func TestChatTerminalSleeveHasNoChat(t *testing.T) {
 	r := newChatRig(t)
 	if s := r.spawn(pb.SleeveMode_SLEEVE_MODE_TERMINAL); s.Mode != pb.SleeveMode_SLEEVE_MODE_TERMINAL || s.Session == "" || s.Chat != nil {

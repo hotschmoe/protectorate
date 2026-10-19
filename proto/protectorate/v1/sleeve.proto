@@ -114,6 +114,11 @@ message Sleeve {
   SleeveMode mode = 14;
   // chat is set for sleeves in chat mode.
   ChatStatus chat = 15;
+  // supervised chat sleeves run the harness in its asking permission mode:
+  // approvals arrive as ApprovalRequest events, answered with
+  // ChatService.Respond. Unsupervised sleeves run autonomous (the sandbox is
+  // the boundary).
+  bool supervised = 16;
 }
 
 message SpawnSleeveRequest {
@@ -128,6 +133,11 @@ message SpawnSleeveRequest {
   // env holds extra environment variables for the harness.
   map<string, string> env = 6;
   SleeveMode mode = 7;
+  // supervised runs a chat sleeve's harness in its asking permission mode
+  // instead of autonomous: Claude --permission-mode default, Codex
+  // approvalPolicy untrusted with its workspace-write sandbox, Grok
+  // /always-approve off. pi has no gate and ignores it.
+  bool supervised = 8;
 }
 
 message SpawnSleeveResponse {

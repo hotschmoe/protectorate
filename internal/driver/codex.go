@@ -61,7 +61,7 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 		return fail(err)
 	}
 	params := map[string]any{"cwd": cwd}
-	if !opts.Sandboxed {
+	if !opts.Autonomous {
 		params["approvalPolicy"], params["sandbox"] = "untrusted", "workspace-write"
 	}
 	method := "thread/start"

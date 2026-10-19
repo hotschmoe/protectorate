@@ -103,16 +103,17 @@ func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
 
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
-		Name:      i.Name,
-		Harness:   harnessToProto[i.Harness],
-		Workspace: i.Workspace,
-		Session:   i.Session,
-		CreatedAt: timestamppb.New(i.Created),
-		Args:      i.Args,
-		Mode:      modeToProto(i.Mode),
-		Chat:      chatToProto(i.Chat),
-		Limits:    &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
-		State:     pb.SleeveState_SLEEVE_STATE_RUNNING,
+		Name:       i.Name,
+		Harness:    harnessToProto[i.Harness],
+		Workspace:  i.Workspace,
+		Session:    i.Session,
+		CreatedAt:  timestamppb.New(i.Created),
+		Args:       i.Args,
+		Mode:       modeToProto(i.Mode),
+		Chat:       chatToProto(i.Chat),
+		Supervised: i.Supervised,
+		Limits:     &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
+		State:      pb.SleeveState_SLEEVE_STATE_RUNNING,
 		Usage: &pb.SleeveUsage{
 			CpuPercent:         i.Usage.CPUPercent,
 			CpuSeconds:         i.Usage.CPUSeconds,
@@ -180,7 +181,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 	}
 	r := sleeve.SpawnRequest{
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
-		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode),
+		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
 	}
 	// the orchestrator carries its own token, minted by `orchestrator spawn`
 	var identity auth.Token

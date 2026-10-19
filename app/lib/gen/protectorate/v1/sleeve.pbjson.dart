@@ -204,6 +204,7 @@ const Sleeve$json = {
       '6': '.protectorate.v1.ChatStatus',
       '10': 'chat'
     },
+    {'1': 'supervised', '3': 16, '4': 1, '5': 8, '10': 'supervised'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -223,7 +224,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'GAsgASgFSABSCGV4aXRDb2RliAEBEh8KC2V4aXRfc2lnbmFsGAwgASgFUgpleGl0U2lnbmFsEh'
     '0KCm9vbV9raWxsZWQYDSABKAhSCW9vbUtpbGxlZBIvCgRtb2RlGA4gASgOMhsucHJvdGVjdG9y'
     'YXRlLnYxLlNsZWV2ZU1vZGVSBG1vZGUSLwoEY2hhdBgPIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
-    '5DaGF0U3RhdHVzUgRjaGF0QgwKCl9leGl0X2NvZGU=');
+    '5DaGF0U3RhdHVzUgRjaGF0Eh4KCnN1cGVydmlzZWQYECABKAhSCnN1cGVydmlzZWRCDAoKX2V4'
+    'aXRfY29kZQ==');
 
 @$core.Deprecated('Use spawnSleeveRequestDescriptor instead')
 const SpawnSleeveRequest$json = {
@@ -264,6 +266,7 @@ const SpawnSleeveRequest$json = {
       '6': '.protectorate.v1.SleeveMode',
       '10': 'mode'
     },
+    {'1': 'supervised', '3': 8, '4': 1, '5': 8, '10': 'supervised'},
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -285,8 +288,9 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'c3NSB2hhcm5lc3MSEgoEYXJncxgEIAMoCVIEYXJncxI1CgZsaW1pdHMYBSABKAsyHS5wcm90ZW'
     'N0b3JhdGUudjEuU2xlZXZlTGltaXRzUgZsaW1pdHMSPgoDZW52GAYgAygLMiwucHJvdGVjdG9y'
     'YXRlLnYxLlNwYXduU2xlZXZlUmVxdWVzdC5FbnZFbnRyeVIDZW52Ei8KBG1vZGUYByABKA4yGy'
-    '5wcm90ZWN0b3JhdGUudjEuU2xlZXZlTW9kZVIEbW9kZRo2CghFbnZFbnRyeRIQCgNrZXkYASAB'
-    'KAlSA2tleRIUCgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
+    '5wcm90ZWN0b3JhdGUudjEuU2xlZXZlTW9kZVIEbW9kZRIeCgpzdXBlcnZpc2VkGAggASgIUgpz'
+    'dXBlcnZpc2VkGjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgJUg'
+    'V2YWx1ZToCOAE=');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {
