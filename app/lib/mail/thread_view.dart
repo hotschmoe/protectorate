@@ -85,6 +85,20 @@ String mailFailure(Object e) {
   return (seen, seen == 'QUEUED' ? Tone.dim : Tone.lit);
 }
 
+// The messages a reply most likely answers: the newest one still waiting on
+// the owner, then the newest anyone may reply to.
+List<MailMessage> replyCandidates(List<MailMessage> msgs) {
+  final out = <MailMessage>[];
+  final open = msgs.lastWhere(
+    (m) => canReply(m) && ownerCanAck(m),
+    orElse: MailMessage.new,
+  );
+  if (open.id.isNotEmpty) out.add(open);
+  final last = msgs.lastWhere(canReply, orElse: MailMessage.new);
+  if (last.id.isNotEmpty && last.id != open.id) out.add(last);
+  return out;
+}
+
 // Who may be written to from a thread: everyone but the owner and the hub.
 List<String> threadTargets(Iterable<MailMessage> msgs) {
   final out = <String>[];
@@ -189,8 +203,8 @@ class _ThreadViewState extends State<ThreadView> {
   }
 
   String? _defaultTarget(List<MailMessage> msgs) {
-    final last = msgs.lastWhere(canReply, orElse: MailMessage.new);
-    if (last.id.isNotEmpty) return 'reply:${last.id}';
+    final replies = replyCandidates(msgs);
+    if (replies.isNotEmpty) return 'reply:${replies.first.id}';
     final targets = threadTargets(msgs);
     return targets.isEmpty ? null : 'to:${targets.first}';
   }
@@ -252,19 +266,15 @@ class _ThreadViewState extends State<ThreadView> {
       );
     }
     final targets = threadTargets(_msgs);
-    final replyable = _msgs.where(canReply).toList();
+    final target = _target;
+    final picked = target != null && target.startsWith('reply:')
+        ? _msgs.where((m) => m.id == target.substring(6)).firstOrNull
+        : null;
     final options = <(String, String)>[
-      if (replyable.isNotEmpty)
-        ('reply:${replyable.last.id}', 'REPLY ${replyable.last.from}'),
+      for (final m in {...replyCandidates(_msgs), ?picked})
+        ('reply:${m.id}', 'REPLY ${m.id} ${m.from}'),
       for (final a in targets) ('to:$a', 'TO $a'),
     ];
-    final target = _target;
-    if (target != null &&
-        target.startsWith('reply:') &&
-        !options.any((o) => o.$1 == target)) {
-      final m = _msgs.where((m) => m.id == target.substring(6)).firstOrNull;
-      if (m != null) options.insert(0, (target, 'REPLY ${m.id} ${m.from}'));
-    }
     final open = _msgs.where((m) => m.ackRequired && !_acked(m)).length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

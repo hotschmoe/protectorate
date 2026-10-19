@@ -208,6 +208,8 @@ void main() {
         expect(shortProject(input), want);
       }
       expect(partyLabel('project:github.com/acme/lib'), 'project:acme/lib');
+      expect(replyCandidates([_ask(), _fyi()]).map((m) => m.id), ['m1', 'm2']);
+      expect(replyCandidates([_fyi()]).map((m) => m.id), ['m2']);
       expect(canReply(_ask()), isTrue);
       expect(canReply(orch), isFalse);
       expect(ownerCanAck(_ask()), isTrue);
@@ -257,7 +259,7 @@ void main() {
     await t.enterText(find.byKey(const ValueKey('mail-compose')), 'go ahead');
     await t.tap(find.byKey(const ValueKey('mail-send')));
     await t.pumpAndSettle();
-    expect(hub.replies.single.id, 'm2');
+    expect(hub.replies.single.id, 'm1');
     expect(hub.replies.single.body, 'go ahead');
     expect(hub.replies.single.requestId, startsWith('app-'));
 
@@ -269,12 +271,12 @@ void main() {
     expect(hub.sent.single.to, 'web');
     expect(hub.sent.single.threadId, 't1');
 
-    await t.tap(find.byKey(const ValueKey('reply-m1')));
+    await t.tap(find.byKey(const ValueKey('reply-m2')));
     await t.pump();
     await t.enterText(find.byKey(const ValueKey('mail-compose')), 'later');
     await t.tap(find.byKey(const ValueKey('mail-send')));
     await t.pumpAndSettle();
-    expect(hub.replies.last.id, 'm1');
+    expect(hub.replies.last.id, 'm2');
   });
 
   testWidgets('a token without message scopes is told what it needs', (
