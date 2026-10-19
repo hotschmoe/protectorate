@@ -182,3 +182,37 @@ func TestLoginStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestInstalledDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	web := filepath.Join(home, ".local", "share", "protectorate", "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, flag, marker, want string
+		index                    bool
+	}{
+		{"no marker file", "", "index.html", "", false},
+		{"flag wins", "/x", "index.html", "/x", true},
+		{"marker present", "", "index.html", web, true},
+		{"missing dir", "", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.index {
+				if err := os.WriteFile(filepath.Join(web, "index.html"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			name := "web"
+			if tc.name == "missing dir" {
+				name = "bin"
+			}
+			if got := installedDir(tc.flag, name, tc.marker); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
