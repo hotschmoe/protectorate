@@ -37,7 +37,7 @@ Do not pass the `grpc` option to `protoc-gen-dart`.
 - web: `<base>/#/pair?name=..&token=..` (served by `hub serve --web`; the token stays in the URL fragment and is never sent to a server)
 - app: `protectorate://pair?url=<base>&name=..&token=..`
 
-Either link opens a confirm dialog with the hub name and URL; confirming saves the profile and opens it. Optional `tab=overview|quota|sessions|backlog` and `session=<name>` parameters pick the landing screen. The `confirm=auto` parameter skips the dialog only in builds made with `--dart-define=E2E_AUTOCONFIRM=true` (used by `scripts/e2e-screens.sh`).
+Either link opens a confirm dialog with the hub name and URL; confirming saves the profile and opens it. Optional `tab=overview|nodes|quota|sessions|backlog`, `session=<name>` and `node=<name>` parameters pick the landing screen. The `confirm=auto` parameter skips the dialog only in builds made with `--dart-define=E2E_AUTOCONFIRM=true` (used by `scripts/e2e-screens.sh`).
 
 The credential in the link is a scoped device token, not the owner token. `pair` mints it through `TokenService` (so it needs the owner token) with scopes `read`, `events`, `terminal`, `session_*` and `backlog_*`, a 90 day lifetime (`--ttl` changes it) and the label `pair: <name>`. It cannot manage tokens or touch nodes. A lost phone is handled with `protectorate token revoke <id>`; `pair` prints the id. The app should treat `permission_denied` as "this device lacks that scope", and `unauthenticated` as "expired or revoked, pair again".
 

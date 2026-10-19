@@ -5,6 +5,7 @@ import 'package:connectrpc/protocol/connect.dart' as protocol;
 import '../gen/protectorate/v1/backlog.connect.client.dart';
 import '../gen/protectorate/v1/events.connect.client.dart';
 import '../gen/protectorate/v1/hub.connect.client.dart';
+import '../gen/protectorate/v1/node.connect.client.dart';
 import '../gen/protectorate/v1/quota.connect.client.dart';
 import '../gen/protectorate/v1/session.connect.client.dart';
 import 'hub_profile.dart';
@@ -35,12 +36,14 @@ class HubClient {
   HubClient.withTransport(Transport transport)
     : hub = HubServiceClient(transport),
       events = EventServiceClient(transport),
+      node = NodeServiceClient(transport),
       quota = QuotaServiceClient(transport),
       sessions = SessionServiceClient(transport),
       backlog = BacklogServiceClient(transport);
 
   final HubServiceClient hub;
   final EventServiceClient events;
+  final NodeServiceClient node;
   final QuotaServiceClient quota;
   final SessionServiceClient sessions;
   final BacklogServiceClient backlog;

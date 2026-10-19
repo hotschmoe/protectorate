@@ -10,6 +10,7 @@ class PairingRequest {
     required this.token,
     this.tab,
     this.session,
+    this.node,
     this.autoConfirm = false,
   });
 
@@ -18,6 +19,7 @@ class PairingRequest {
   final String token;
   final String? tab;
   final String? session;
+  final String? node;
   final bool autoConfirm;
 }
 
@@ -39,6 +41,7 @@ PairingRequest? _fromQuery(Map<String, String> q, String baseUrl) {
     token: q['token'] ?? '',
     tab: q['tab'],
     session: q['session'],
+    node: q['node'],
     autoConfirm: q['confirm'] == 'auto',
   );
 }

@@ -117,6 +117,7 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
             clientFactory: _factory,
             initialTab: req.tab,
             openSession: req.session,
+            openNode: req.node,
           ),
         ),
       ),
@@ -128,14 +129,16 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
     return MaterialApp(
       navigatorKey: _navKey,
       title: 'Protectorate',
+      themeMode: ThemeMode.system,
       theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.light,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.indigo,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
       ),
       home: HubsScreen(store: widget.store, clientFactory: _factory),

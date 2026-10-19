@@ -4,8 +4,10 @@ import '../gen/protectorate/v1/events.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
-import 'overview_tab.dart';
 import 'backlog_tab.dart';
+import 'node_detail_screen.dart';
+import 'nodes_tab.dart';
+import 'overview_tab.dart';
 import 'quota_tab.dart';
 import 'sessions_tab.dart';
 
@@ -20,6 +22,7 @@ class _Destination {
 
 const _destinations = [
   _Destination('overview', 'Overview', Icons.dashboard),
+  _Destination('nodes', 'Nodes', Icons.memory),
   _Destination('quota', 'Quota', Icons.speed),
   _Destination('sessions', 'Sessions', Icons.terminal),
   _Destination('backlog', 'Backlog', Icons.checklist),
@@ -37,12 +40,14 @@ class HubShell extends StatefulWidget {
     required this.clientFactory,
     this.initialTab,
     this.openSession,
+    this.openNode,
   });
 
   final HubProfile hub;
   final HubClient Function(HubProfile) clientFactory;
   final String? initialTab;
   final String? openSession;
+  final String? openNode;
 
   @override
   State<HubShell> createState() => _HubShellState();
@@ -56,6 +61,23 @@ class _HubShellState extends State<HubShell> {
   late int _index = tabIndex(widget.initialTab);
 
   @override
+  void initState() {
+    super.initState();
+    final node = widget.openNode;
+    if (node != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                NodeDetailScreen(client: _client, feed: _feed, name: node),
+          ),
+        );
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _feed.dispose();
     super.dispose();
@@ -63,8 +85,9 @@ class _HubShellState extends State<HubShell> {
 
   Widget _body() => switch (_index) {
     0 => OverviewTab(client: _client, feed: _feed),
-    1 => QuotaTab(client: _client, feed: _feed),
-    2 => SessionsTab(
+    1 => NodesTab(client: _client, feed: _feed),
+    2 => QuotaTab(client: _client, feed: _feed),
+    3 => SessionsTab(
       hub: widget.hub,
       client: _client,
       openSession: widget.openSession,
