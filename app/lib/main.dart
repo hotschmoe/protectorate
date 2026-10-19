@@ -12,6 +12,7 @@ import 'hubs/pairing.dart';
 import 'screens/hub_shell.dart';
 import 'screens/hubs_screen.dart';
 import 'screens/pair_dialog.dart';
+import 'theme/tokens.dart';
 
 const _e2eAutoConfirm = bool.fromEnvironment('E2E_AUTOCONFIRM');
 
@@ -132,17 +133,8 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
       navigatorKey: _navKey,
       title: 'Protectorate',
       themeMode: ThemeMode.system,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: appTheme(Brightness.light),
+      darkTheme: appTheme(Brightness.dark),
       home: HubsScreen(store: widget.store, clientFactory: _factory),
     );
   }

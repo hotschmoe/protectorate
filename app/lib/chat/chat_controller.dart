@@ -133,9 +133,6 @@ class ChatController extends ChangeNotifier {
 
   Future<void> compact() => client.compact(CompactRequest(sleeve: sleeve));
 
-  Future<void> setMode(SleeveMode mode) =>
-      client.setMode(SetModeRequest(sleeve: sleeve, mode: mode));
-
   @override
   void dispose() {
     _disposed = true;

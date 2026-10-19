@@ -11,7 +11,6 @@ import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../sleeves/sleeve_info.dart';
 import '../theme/tokens.dart';
-import 'terminal_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -29,12 +28,11 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-enum _Menu { compact, takeOver }
+enum _Menu { compact }
 
 class _ChatScreenState extends State<ChatScreen> {
   late final ChatController _chat;
   final _input = TextEditingController();
-  bool _terminalMode = false;
 
   @override
   void initState() {
@@ -44,8 +42,6 @@ class _ChatScreenState extends State<ChatScreen> {
       sleeve: widget.sleeve.name,
     );
     if (widget.sleeve.hasChat()) _chat.transcript.seed(widget.sleeve.chat);
-    _terminalMode =
-        effectiveMode(widget.sleeve) == SleeveMode.SLEEVE_MODE_TERMINAL;
     _chat.start();
   }
 
@@ -81,30 +77,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _takeOver() async {
-    await _run(() async {
-      await _chat.setMode(SleeveMode.SLEEVE_MODE_TERMINAL);
-      if (!mounted) return;
-      setState(() => _terminalMode = true);
-      final back = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
-          builder: (_) => TerminalScreen(
-            hub: widget.hub,
-            client: widget.client,
-            session: widget.sleeve.session,
-            sleeve: widget.sleeve.name,
-          ),
-        ),
-      );
-      if (back == true && mounted) setState(() => _terminalMode = false);
-    });
-  }
-
-  Future<void> _resume() => _run(() async {
-    await _chat.setMode(SleeveMode.SLEEVE_MODE_CHAT);
-    if (mounted) setState(() => _terminalMode = false);
-  });
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -121,19 +93,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 key: const ValueKey('chat-menu'),
                 onSelected: (m) => switch (m) {
                   _Menu.compact => _run(_chat.compact),
-                  _Menu.takeOver => _takeOver(),
                 },
                 itemBuilder: (_) => [
                   PopupMenuItem(
                     key: const ValueKey('menu-compact'),
                     value: _Menu.compact,
-                    enabled: _chat.canCompact && !_terminalMode,
+                    enabled: _chat.canCompact,
                     child: const Text('Compact'),
-                  ),
-                  const PopupMenuItem(
-                    key: ValueKey('menu-take-over'),
-                    value: _Menu.takeOver,
-                    child: Text('Take over (terminal)'),
                   ),
                 ],
               ),
@@ -153,17 +119,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   const LinearProgressIndicator(
                     key: ValueKey('reconnecting'),
                     minHeight: 2,
-                  ),
-                if (_terminalMode)
-                  MaterialBanner(
-                    content: const Text('This sleeve is in terminal mode.'),
-                    actions: [
-                      TextButton(
-                        key: const ValueKey('resume-chat'),
-                        onPressed: _resume,
-                        child: const Text('Resume chat'),
-                      ),
-                    ],
                   ),
                 Expanded(
                   child: Center(
@@ -192,7 +147,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 _Composer(
                   controller: _input,
                   working: _chat.working,
-                  enabled: !_terminalMode,
                   onSend: _send,
                   onStop: () => _run(_chat.interrupt),
                 ),
@@ -250,14 +204,12 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.working,
-    required this.enabled,
     required this.onSend,
     required this.onStop,
   });
 
   final TextEditingController controller;
   final bool working;
-  final bool enabled;
   final VoidCallback onSend;
   final VoidCallback onStop;
 
@@ -284,7 +236,6 @@ class _Composer extends StatelessWidget {
                   child: TextField(
                     key: const ValueKey('composer'),
                     controller: controller,
-                    enabled: enabled,
                     minLines: 1,
                     maxLines: 6,
                     textCapitalization: TextCapitalization.sentences,
@@ -316,7 +267,7 @@ class _Composer extends StatelessWidget {
               IconButton.filled(
                 key: const ValueKey('send'),
                 tooltip: 'Send',
-                onPressed: enabled ? onSend : null,
+                onPressed: onSend,
                 icon: const Icon(Icons.arrow_upward_rounded),
               ),
             ],

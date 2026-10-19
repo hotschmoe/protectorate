@@ -20,6 +20,7 @@ import 'package:protectorate/hubs/hub_profile.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
 import 'package:protectorate/screens/chat_screen.dart';
 import 'package:protectorate/screens/sleeves_screen.dart';
+import 'package:protectorate/theme/tokens.dart';
 
 const _hub = HubProfile(id: '1', name: 'home', baseUrl: 'http://hub:7470');
 final _dir = Platform.environment['SCREENSHOT_DIR'];
@@ -139,16 +140,14 @@ Stream<ChatEvent> _transcript() async* {
 Future<void> _loadFonts() async {
   Future<ByteData> read(String p) async =>
       ByteData.sublistView(await File(p).readAsBytes());
-  final roboto = FontLoader('Roboto')
-    ..addFont(read('$_fonts/Roboto-Regular.ttf'))
-    ..addFont(read('$_fonts/Roboto-Medium.ttf'))
-    ..addFont(read('$_fonts/Roboto-Bold.ttf'));
-  await roboto.load();
   final icons = FontLoader('MaterialIcons')
     ..addFont(read('$_fonts/MaterialIcons-Regular.otf'));
   await icons.load();
-  final mono = FontLoader('DejaVu Sans Mono')
-    ..addFont(read('assets/fonts/DejaVuSansMono.ttf'));
+  final mono = FontLoader(monoFamily)
+    ..addFont(read('assets/fonts/JetBrainsMonoNL-Regular.ttf'))
+    ..addFont(read('assets/fonts/JetBrainsMonoNL-Medium.ttf'))
+    ..addFont(read('assets/fonts/JetBrainsMonoNL-Bold.ttf'))
+    ..addFont(read('assets/fonts/JetBrainsMonoNL-Italic.ttf'));
   await mono.load();
 }
 
@@ -161,12 +160,6 @@ Future<void> _shoot(WidgetTester tester, GlobalKey key, String name) async {
     await File('$_dir/$name.png').writeAsBytes(data!.buffer.asUint8List());
   });
 }
-
-ThemeData _theme(Brightness b) => ThemeData(
-  fontFamily: 'Roboto',
-  colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: b),
-  useMaterial3: true,
-);
 
 Sleeve _sleeve(
   String name,
@@ -224,7 +217,7 @@ void main() {
             key: key,
             child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              theme: _theme(b),
+              theme: appTheme(b),
               home: ChatScreen(
                 hub: _hub,
                 client: HubClient.withTransport(transport),
@@ -305,7 +298,7 @@ void main() {
             key: key,
             child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              theme: _theme(b),
+              theme: appTheme(b),
               home: SleevesScreen(
                 hub: _hub,
                 client: HubClient.withTransport(transport),

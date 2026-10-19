@@ -3,7 +3,16 @@ import 'package:flutter/material.dart';
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 
-const monoFamily = 'DejaVu Sans Mono';
+const monoFamily = 'JetBrains Mono';
+
+ThemeData appTheme(Brightness brightness) => ThemeData(
+  colorScheme: ColorScheme.fromSeed(
+    seedColor: Colors.indigo,
+    brightness: brightness,
+  ),
+  fontFamily: monoFamily,
+  useMaterial3: true,
+);
 
 class Accent {
   const Accent(this.fg, this.bg);
