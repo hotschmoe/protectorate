@@ -1,0 +1,40 @@
+# b70-nas-server: two Intel Arc Pro B70 (Battlemage G31, 8086:e223, subsystem
+# 8086:1701) on xe, Ubuntu 26.04, kernel 7.1.0. Each tile has a render/compute
+# GT (gt0-rc) and a media GT (gt1-mc). No VRAM size in sysfs; perf events and
+# other users' fdinfo need privileges the agent does not have.
+bus/pci/devices/0000:00:00.0 -> ../../../devices/pci0000:00/0000:00:00.0
+bus/pci/devices/0000:0b:00.0 -> ../../../devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0
+bus/pci/devices/0000:44:00.0 -> ../../../devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0
+bus/pci/drivers/xe/
+devices/pci0000:00/0000:00:00.0/class = 0x060000
+devices/pci0000:00/0000:00:00.0/vendor = 0x1022
+devices/pci0000:00/0000:00:00.0/device = 0x14d8
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/class = 0x030000
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/vendor = 0x8086
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/device = 0xe223
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/driver -> ../../../../../../bus/pci/drivers/xe
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/tile0/gt0/gtidle/name = gt0-rc
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/tile0/gt0/gtidle/idle_residency_ms = 1211341
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/tile0/gt0/freq0/cur_freq = 783
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/tile0/gt1/gtidle/name = gt1-mc
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/tile0/gt1/gtidle/idle_residency_ms = 1953927
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/hwmon/hwmon6/name = xe
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/hwmon/hwmon6/temp2_label = pkg
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/hwmon/hwmon6/temp2_input = 55000
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/hwmon/hwmon6/temp3_label = vram
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/hwmon/hwmon6/temp3_input = 58000
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/drm/card0/
+devices/pci0000:00/0000:00:03.1/0000:09:00.0/0000:0a:01.0/0000:0b:00.0/drm/renderD128/
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/class = 0x030000
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/vendor = 0x8086
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/device = 0xe223
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/driver -> ../../../../../../bus/pci/drivers/xe
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/tile0/gt0/gtidle/name = gt0-rc
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/tile0/gt0/gtidle/idle_residency_ms = 1180002
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/tile0/gt1/gtidle/name = gt1-mc
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/tile0/gt1/gtidle/idle_residency_ms = 1950100
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/hwmon/hwmon7/name = xe
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/hwmon/hwmon7/temp2_label = pkg
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/hwmon/hwmon7/temp2_input = 51000
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/drm/card1/
+devices/pci0000:40/0000:40:03.1/0000:42:00.0/0000:43:01.0/0000:44:00.0/drm/renderD129/

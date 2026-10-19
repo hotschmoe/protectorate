@@ -314,31 +314,6 @@ List<Widget> nodeMeters(
     }
     return rows;
   }
-  final gpu = summarizeGpus(m);
-  if (gpu != null) {
-    rows.add(
-      MeterRow(
-        key: const ValueKey('gpu'),
-        label: gpu.count > 1 ? 'GPU${gpu.count}' : 'GPU',
-        percent: gpu.utilPercent,
-        value: gpu.utilPercent == null
-            ? 'n/a'
-            : formatPercent(gpu.utilPercent!),
-        dim: dim,
-      ),
-    );
-    if (gpu.vramPercent != null) {
-      rows.add(
-        MeterRow(
-          key: const ValueKey('vram'),
-          label: 'VRAM',
-          percent: gpu.vramPercent,
-          value: '${formatBytes(gpu.vramUsed)} / ${formatBytes(gpu.vramTotal)}',
-          dim: dim,
-        ),
-      );
-    }
-  }
   final worst = worstFilesystem(m);
   if (worst != null) {
     rows.add(
@@ -350,6 +325,12 @@ List<Widget> nodeMeters(
         dim: dim,
       ),
     );
+  }
+  for (final g in m.gpus) {
+    rows.add(GpuLines(key: ValueKey('gpu-${g.index}'), gpu: g, dim: dim));
+  }
+  for (final (i, n) in m.npus.indexed) {
+    rows.add(NpuLines(key: ValueKey('npu-$i'), npu: n, index: i, dim: dim));
   }
   return rows;
 }

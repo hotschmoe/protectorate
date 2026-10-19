@@ -59,35 +59,171 @@ class GpuSummary {
     required this.utilPercent,
     required this.vramUsed,
     required this.vramTotal,
+    required this.vramKnown,
   });
 
   final int count;
+  // The first GPU's utilization: the node lists its main GPU first.
   final double? utilPercent;
   final int vramUsed;
   final int vramTotal;
+  final bool vramKnown;
 
-  double? get vramPercent => vramTotal > 0 ? vramUsed * 100 / vramTotal : null;
+  double? get vramPercent =>
+      vramKnown && vramTotal > 0 ? vramUsed * 100 / vramTotal : null;
 }
 
 GpuSummary? summarizeGpus(NodeMetrics m) {
   if (m.gpus.isEmpty) return null;
-  double? util;
+  final first = m.gpus.first.utilizationPercent;
   var used = 0;
   var total = 0;
+  var known = true;
   for (final g in m.gpus) {
-    if (g.utilizationPercent >= 0 &&
-        (util == null || g.utilizationPercent > util)) {
-      util = g.utilizationPercent;
-    }
-    used += g.memoryUsedBytes.toInt();
+    if (g.integrated || g.memoryTotalBytes == 0) continue;
     total += g.memoryTotalBytes.toInt();
+    used += g.memoryUsedBytes.toInt();
+    known = known && g.hasMemoryUsedBytes();
   }
   return GpuSummary(
     count: m.gpus.length,
-    utilPercent: util,
+    utilPercent: first >= 0 ? first : null,
     vramUsed: used,
     vramTotal: total,
+    vramKnown: known,
   );
+}
+
+double? knownPercent(double v) => v >= 0 ? v : null;
+
+// One GPU: name, integrated or discrete and driver, then a utilization meter
+// when the device reports one and a VRAM meter for dedicated memory.
+class GpuLines extends StatelessWidget {
+  const GpuLines({
+    super.key,
+    required this.gpu,
+    this.dim = false,
+    this.detail = false,
+  });
+
+  final GpuMetrics gpu;
+  final bool dim;
+  final bool detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    final g = gpu;
+    final util = knownPercent(g.utilizationPercent);
+    final total = g.memoryTotalBytes.toInt();
+    final used = g.memoryUsedBytes.toInt();
+    final valueChars = detail ? 17 : 12;
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: detail ? 4 : 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: detail ? '#${g.index} ${g.name}' : g.name,
+                  style: detail ? t.data(t.p.emph) : t.small(t.p.emph),
+                ),
+                TextSpan(
+                  text: g.integrated ? '  INTEGRATED' : '  DISCRETE',
+                  style: t.legend(),
+                ),
+                if (g.driver.isNotEmpty)
+                  TextSpan(text: '  ${g.driver}', style: t.small()),
+                if (detail && g.temperatureCelsius >= 0)
+                  TextSpan(
+                    text: '  ${g.temperatureCelsius.round()} C',
+                    style: t.small(),
+                  ),
+              ],
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (util != null)
+            MeterRow(
+              key: ValueKey('gpu-util-${g.index}'),
+              label: 'GPU',
+              percent: util,
+              value: formatPercent(util),
+              dim: dim,
+              valueChars: valueChars,
+            ),
+          if (!g.integrated && total > 0)
+            MeterRow(
+              key: ValueKey('gpu-vram-${g.index}'),
+              label: 'VRAM',
+              percent: g.hasMemoryUsedBytes() ? used * 100 / total : null,
+              value:
+                  '${g.hasMemoryUsedBytes() ? formatBytes(used) : '?'} / ${formatBytes(total)}',
+              dim: dim,
+              valueChars: valueChars,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// One NPU: name, driver and clock, then a utilization meter when known.
+class NpuLines extends StatelessWidget {
+  const NpuLines({
+    super.key,
+    required this.npu,
+    required this.index,
+    this.dim = false,
+    this.detail = false,
+  });
+
+  final AcceleratorMetrics npu;
+  final int index;
+  final bool dim;
+  final bool detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    final n = npu;
+    final util = knownPercent(n.utilizationPercent);
+    final mhz = n.frequencyHz.toInt() ~/ 1000000;
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: detail ? 4 : 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: n.name,
+                  style: detail ? t.data(t.p.emph) : t.small(t.p.emph),
+                ),
+                TextSpan(text: '  ${n.kind.toUpperCase()}', style: t.legend()),
+                if (n.driver.isNotEmpty)
+                  TextSpan(text: '  ${n.driver}', style: t.small()),
+                if (mhz > 0) TextSpan(text: '  $mhz MHz', style: t.small()),
+              ],
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (util != null)
+            MeterRow(
+              key: ValueKey('npu-util-$index'),
+              label: 'NPU',
+              percent: util,
+              value: formatPercent(util),
+              dim: dim,
+              valueChars: detail ? 17 : 12,
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 enum OffenderKind { container, engine, watchedDir, sleeve }

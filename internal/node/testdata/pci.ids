@@ -1,0 +1,11 @@
+# Subset of pci.ids (vendor, then tab-indented device, then subsystems).
+1002  Advanced Micro Devices, Inc. [AMD/ATI]
+	744c  Navi 31 [Radeon RX 7900 XT/7900 XTX]
+1425  Chelsio Communications Inc
+	56a0  T540-50A0 Unified Wire Storage Controller
+8086  Intel Corporation
+	56a0  DG2 [Arc A770]
+	7d1d  Meteor Lake NPU
+	a780  Raptor Lake-S GT1 [UHD Graphics 770]
+	e223  Battlemage G31 [Intel Graphics]
+		8086 1701  subsystem lines are skipped

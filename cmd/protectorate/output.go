@@ -207,26 +207,45 @@ func alertLabel(alerts []*pb.NodeAlert) string {
 	return orDash(strings.Join(parts, ","))
 }
 
+// gpuSummary is the first GPU's utilization (the board's GPU figure) and
+// the dedicated VRAM of all GPUs.
 func gpuSummary(gpus []*pb.GpuMetrics) string {
 	if len(gpus) == 0 {
 		return "-"
 	}
+	s := fmt.Sprintf("%dx %s", len(gpus), utilLabel(gpus[0].UtilizationPercent))
+	if v := vramLabel(gpus); v != "" {
+		s += " " + v
+	}
+	return s
+}
+
+func utilLabel(p float64) string {
+	if p < 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.0f%%", p)
+}
+
+// vramLabel sums dedicated VRAM; use is "?" when any card does not report it.
+func vramLabel(gpus []*pb.GpuMetrics) string {
 	var used, total uint64
-	var utilSum float64
-	var utilN int
+	known := true
 	for _, g := range gpus {
-		used += g.MemoryUsedBytes
-		total += g.MemoryTotalBytes
-		if g.UtilizationPercent >= 0 {
-			utilSum += g.UtilizationPercent
-			utilN++
+		if g.Integrated || g.MemoryTotalBytes == 0 {
+			continue
 		}
+		total += g.MemoryTotalBytes
+		known = known && g.MemoryUsedBytes != nil
+		used += g.GetMemoryUsedBytes()
 	}
-	util := "?"
-	if utilN > 0 {
-		util = fmt.Sprintf("%.0f%%", utilSum/float64(utilN))
+	switch {
+	case total == 0:
+		return ""
+	case !known:
+		return "?/" + fmtBytes(total)
 	}
-	return fmt.Sprintf("%dx %s %s/%s", len(gpus), util, fmtBytes(used), fmtBytes(total))
+	return fmtBytes(used) + "/" + fmtBytes(total)
 }
 
 func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
@@ -334,16 +353,28 @@ func writeMetrics(w io.Writer, m *pb.NodeMetrics) {
 	}
 
 	if len(m.Gpus) > 0 {
-		fmt.Fprintln(w, "\nGPU\tNAME\tUTIL\tVRAM\tTEMP")
+		fmt.Fprintln(w, "\nGPU\tNAME\tTYPE\tDRIVER\tUTIL\tVRAM\tTEMP")
 		for _, g := range m.Gpus {
-			util, temp := "?", "?"
-			if g.UtilizationPercent >= 0 {
-				util = fmt.Sprintf("%.0f%%", g.UtilizationPercent)
+			kind, vram, temp := "discrete", "shared", "-"
+			if g.Integrated {
+				kind = "integrated"
+			} else if vram = vramLabel([]*pb.GpuMetrics{g}); vram == "" {
+				vram = "-"
 			}
 			if g.TemperatureCelsius >= 0 {
 				temp = fmt.Sprintf("%.0fC", g.TemperatureCelsius)
 			}
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s/%s\t%s\n", g.Index, g.Name, util, fmtBytes(g.MemoryUsedBytes), fmtBytes(g.MemoryTotalBytes), temp)
+			fmt.Fprintf(w, "%d\t%s %s\t%s\t%s\t%s\t%s\t%s\n", g.Index, g.Vendor, g.Name, kind, orDash(g.Driver), utilLabel(g.UtilizationPercent), vram, temp)
+		}
+	}
+	if len(m.Npus) > 0 {
+		fmt.Fprintln(w, "\nNPU\tNAME\tDRIVER\tUTIL\tCLOCK")
+		for i, n := range m.Npus {
+			clock := "-"
+			if n.FrequencyHz > 0 {
+				clock = fmt.Sprintf("%.0f MHz", float64(n.FrequencyHz)/1e6)
+			}
+			fmt.Fprintf(w, "%d\t%s %s\t%s\t%s\t%s\n", i, n.Vendor, n.Name, orDash(n.Driver), utilLabel(n.UtilizationPercent), clock)
 		}
 	}
 

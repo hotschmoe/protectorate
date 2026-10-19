@@ -717,6 +717,10 @@
                 "arch": {
                   "type": "string"
                 },
+                "gpu": {
+                  "description": "gpu requires a GPU whose vendor or name contains this text, ignoring case (e.g. \"adreno\", \"intel\"); with gpu_vram_bytes the reserved GPU must match it too.",
+                  "type": "string"
+                },
                 "gpuVramBytes": {
                   "description": "gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease then reserves that GPU instead of the whole node.",
                   "type": "integer"
@@ -724,6 +728,10 @@
                 "minFreeMemoryBytes": {
                   "description": "min_free_memory_bytes is the least available memory the node must report.",
                   "type": "integer"
+                },
+                "npu": {
+                  "description": "npu requires an NPU whose vendor or name contains this text, ignoring case (e.g. \"hexagon\").",
+                  "type": "string"
                 },
                 "os": {
                   "description": "os and arch are Go GOOS/GOARCH values such as \"windows\" and \"arm64\".",
@@ -778,6 +786,10 @@
             "arch": {
               "type": "string"
             },
+            "gpu": {
+              "description": "gpu requires a GPU whose vendor or name contains this text, ignoring case (e.g. \"adreno\", \"intel\"); with gpu_vram_bytes the reserved GPU must match it too.",
+              "type": "string"
+            },
             "gpuVramBytes": {
               "description": "gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease then reserves that GPU instead of the whole node.",
               "type": "integer"
@@ -785,6 +797,10 @@
             "minFreeMemoryBytes": {
               "description": "min_free_memory_bytes is the least available memory the node must report.",
               "type": "integer"
+            },
+            "npu": {
+              "description": "npu requires an NPU whose vendor or name contains this text, ignoring case (e.g. \"hexagon\").",
+              "type": "string"
             },
             "os": {
               "description": "os and arch are Go GOOS/GOARCH values such as \"windows\" and \"arm64\".",

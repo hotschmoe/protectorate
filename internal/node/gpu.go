@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 )
 
@@ -72,7 +74,7 @@ func parseNvidiaSMI(raw []byte) []*pb.GpuMetrics {
 			Vendor:             "nvidia",
 			Name:               f[1],
 			UtilizationPercent: numOr(f[2], -1),
-			MemoryUsedBytes:    uint64(numOr(f[3], 0) * mib),
+			MemoryUsedBytes:    optBytes(f[3], mib),
 			MemoryTotalBytes:   uint64(numOr(f[4], 0) * mib),
 			TemperatureCelsius: numOr(f[5], -1),
 		})
@@ -87,6 +89,15 @@ func numOr(s string, def float64) float64 {
 		return def
 	}
 	return v
+}
+
+// optBytes scales a reported amount to bytes; nil when it is not a number.
+func optBytes(s string, scale float64) *uint64 {
+	v := numOr(s, -1)
+	if v < 0 {
+		return nil
+	}
+	return proto.Uint64(uint64(v * scale))
 }
 
 // parseROCmSMI reads `rocm-smi --json` output: {"card0": {"<label>": "<value>"}}.
@@ -117,7 +128,7 @@ func parseROCmSMI(raw []byte) []*pb.GpuMetrics {
 		}
 		g.UtilizationPercent = numOr(firstField(c, "GPU use (%)"), -1)
 		g.MemoryTotalBytes = uint64(numOr(firstField(c, "VRAM Total Memory (B)"), 0))
-		g.MemoryUsedBytes = uint64(numOr(firstField(c, "VRAM Total Used Memory (B)"), 0))
+		g.MemoryUsedBytes = optBytes(firstField(c, "VRAM Total Used Memory (B)"), 1)
 		g.TemperatureCelsius = numOr(firstFieldPrefix(c, "Temperature (Sensor edge)"), -1)
 		out = append(out, g)
 	}

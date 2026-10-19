@@ -15,6 +15,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -29,11 +30,11 @@ func TestParseNvidiaSMI(t *testing.T) {
 		{"empty", "", nil},
 		{"garbage", "NVIDIA-SMI has failed\n", nil},
 		{"two gpus", "0, NVIDIA GeForce RTX 4090, 35, 1024, 24564, 51\n1, NVIDIA GeForce RTX 3060, 0, 0, 12288, 40\n", []*pb.GpuMetrics{
-			{Index: 0, Name: "NVIDIA GeForce RTX 4090", UtilizationPercent: 35, MemoryUsedBytes: 1024 * mib, MemoryTotalBytes: 24564 * mib, TemperatureCelsius: 51},
-			{Index: 1, Name: "NVIDIA GeForce RTX 3060", UtilizationPercent: 0, MemoryUsedBytes: 0, MemoryTotalBytes: 12288 * mib, TemperatureCelsius: 40},
+			{Index: 0, Name: "NVIDIA GeForce RTX 4090", UtilizationPercent: 35, MemoryUsedBytes: proto.Uint64(1024 * mib), MemoryTotalBytes: 24564 * mib, TemperatureCelsius: 51},
+			{Index: 1, Name: "NVIDIA GeForce RTX 3060", UtilizationPercent: 0, MemoryUsedBytes: proto.Uint64(0), MemoryTotalBytes: 12288 * mib, TemperatureCelsius: 40},
 		}},
 		{"not available", "0, Tesla T4, [N/A], 10, 15360, [N/A]\n", []*pb.GpuMetrics{
-			{Index: 0, Name: "Tesla T4", UtilizationPercent: -1, MemoryUsedBytes: 10 * mib, MemoryTotalBytes: 15360 * mib, TemperatureCelsius: -1},
+			{Index: 0, Name: "Tesla T4", UtilizationPercent: -1, MemoryUsedBytes: proto.Uint64(10 * mib), MemoryTotalBytes: 15360 * mib, TemperatureCelsius: -1},
 		}},
 	}
 	for _, tt := range tests {
@@ -45,7 +46,7 @@ func TestParseNvidiaSMI(t *testing.T) {
 			for i, w := range tt.want {
 				g := got[i]
 				if g.Vendor != "nvidia" || g.Index != w.Index || g.Name != w.Name || g.UtilizationPercent != w.UtilizationPercent ||
-					g.MemoryUsedBytes != w.MemoryUsedBytes || g.MemoryTotalBytes != w.MemoryTotalBytes || g.TemperatureCelsius != w.TemperatureCelsius {
+					g.GetMemoryUsedBytes() != w.GetMemoryUsedBytes() || g.MemoryTotalBytes != w.MemoryTotalBytes || g.TemperatureCelsius != w.TemperatureCelsius {
 					t.Fatalf("gpu %d = %v, want %v", i, g, w)
 				}
 			}
@@ -63,7 +64,7 @@ func TestParseROCmSMI(t *testing.T) {
 	if got[0].Name != "Radeon Pro" || got[0].UtilizationPercent != 0 || got[0].TemperatureCelsius != -1 {
 		t.Fatalf("card0 = %v", got[0])
 	}
-	if got[1].Name != "Radeon RX 7900 XTX" || got[1].MemoryTotalBytes != 25753026560 || got[1].MemoryUsedBytes != 1048576 || got[1].TemperatureCelsius != 44 || got[1].Vendor != "amd" {
+	if got[1].Name != "Radeon RX 7900 XTX" || got[1].MemoryTotalBytes != 25753026560 || got[1].GetMemoryUsedBytes() != 1048576 || got[1].TemperatureCelsius != 44 || got[1].Vendor != "amd" {
 		t.Fatalf("card1 = %v", got[1])
 	}
 	if parseROCmSMI([]byte("not json")) != nil {

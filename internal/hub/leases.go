@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -635,6 +636,10 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, allowFamily bool, blocked
 		return nil, "arch " + st.Metrics.Arch
 	case sel.GetMinFreeMemoryBytes() > 0 && st.Metrics.GetMemory().GetAvailableBytes() < sel.MinFreeMemoryBytes:
 		return nil, "not enough free memory"
+	case sel.GetGpu() != "" && !slices.ContainsFunc(st.Metrics.Gpus, func(g *pb.GpuMetrics) bool { return accelMatches(g.Vendor, g.Name, sel.Gpu) }):
+		return nil, "no gpu matching " + sel.Gpu
+	case sel.GetNpu() != "" && !slices.ContainsFunc(st.Metrics.Npus, func(n *pb.AcceleratorMetrics) bool { return accelMatches(n.Vendor, n.Name, sel.Npu) }):
+		return nil, "no npu matching " + sel.Npu
 	}
 	if sel.GetGpuVramBytes() == 0 {
 		if l := blocked(name, nil); l != nil {
@@ -645,9 +650,16 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, allowFamily bool, blocked
 	var gpu *int
 	var bestFree uint64
 	for _, g := range st.Metrics.Gpus {
-		free := uint64(0)
-		if g.MemoryTotalBytes > g.MemoryUsedBytes {
-			free = g.MemoryTotalBytes - g.MemoryUsedBytes
+		if sel.GetGpu() != "" && !accelMatches(g.Vendor, g.Name, sel.Gpu) {
+			continue
+		}
+		// Unknown use counts as free: a lease, not the figure, is what
+		// keeps two holders off one GPU.
+		free := g.MemoryTotalBytes
+		if used := g.GetMemoryUsedBytes(); used < free {
+			free -= used
+		} else {
+			free = 0
 		}
 		idx := int(g.Index)
 		if free < sel.GpuVramBytes || blocked(name, &idx) != nil {
@@ -661,6 +673,12 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, allowFamily bool, blocked
 		return nil, "no free gpu with enough vram"
 	}
 	return gpu, ""
+}
+
+// accelMatches reports whether a GPU or NPU selector text appears in the
+// device's vendor or name, ignoring case.
+func accelMatches(vendor, name, want string) bool {
+	return strings.Contains(strings.ToLower(vendor+" "+name), strings.ToLower(strings.TrimSpace(want)))
 }
 
 // loadScore ranks nodes, lower is better: mean of CPU and memory use, plus a

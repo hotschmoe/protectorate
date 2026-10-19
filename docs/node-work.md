@@ -105,6 +105,57 @@ worktrees winning ties.
   sudo. Allowed on `shared` nodes (inside the runner account on Windows),
   never on `care` nodes.
 
+## GPUs and NPUs (built)
+
+Every node lists its discrete and integrated GPUs and its NPUs in its
+metrics (`node show`, the node card and detail). The fleet is varied on
+purpose, for hardware testing:
+
+| Node | GPUs | NPU |
+|---|---|---|
+| ms-r1 (CIX P1, ACPI) | Mali-G720-Immortalis 10 cores, integrated, `mali` kbase | Zhouyi NPU, `armchina` |
+| kidsbox (CIX P1, device tree) | Mali Valhall, integrated, `panthor` | Zhouyi NPU, `armchina` |
+| snapdragon-laptop | Qualcomm Adreno X2-90, integrated | Qualcomm Hexagon NPU |
+| officepc | Intel Arc Pro B50 (16 GB), Intel Graphics (integrated) | Intel AI Boost |
+| b70-nas-server | 2x Intel Arc Pro B70 (Battlemage G31, 32 GB), `xe` | - |
+| agentworld (VM) | - | - |
+
+Detection uses only what the OS already exposes, on the slow interval for the
+inventory and on every poll for live figures:
+
+- **Linux:** PCI display controllers (virtual and BMC adapters skipped),
+  platform devices bound to a known SoC GPU or NPU driver, and the accel
+  class, all from sysfs; names from pci.ids or the driver (Mali's `gpuinfo`).
+  Utilization from amdgpu's `gpu_busy_percent`, devfreq `load`, Intel NPU
+  busy time, or for Intel GPUs the share of time the render tile left its
+  idle state (`gtidle`, i915 `rc6_residency_ms`). VRAM from amdgpu's sysfs
+  and, for xe, the driver's memory-region query on the render node; xe does
+  not tell an unprivileged reader how much is in use, so that stays unknown
+  unless `xpu-smi` is installed. Mali and the Zhouyi NPU report no
+  utilization; the NPU reports its clock.
+- **Windows:** present Display and ComputeAccelerator devices from SetupAPI
+  and their driver keys, each opened through D3DKMT for its adapter LUID;
+  utilization of GPUs and NPUs alike, and dedicated VRAM in use, from the
+  PDH "GPU Engine" and "GPU Adapter Memory" counters keyed by that LUID.
+  Software adapters (Parsec, indirect displays) are skipped.
+- `nvidia-smi` and `rocm-smi` still report their cards; a sysfs or SetupAPI
+  entry of the same vendor is then dropped.
+
+Integrated means a SoC device, a PCI device on the root bus, or (Windows) an
+adapter the kernel marks hybrid-integrated; an integrated GPU reports no VRAM.
+Unknown utilization is -1 and unknown VRAM use is unset; neither is shown as
+spare capacity.
+
+Requirements are substring matches on vendor or name, ignoring case:
+
+    job run --on 'gpu:adreno' -- ...
+    job run --on 'os=windows,npu:hexagon' -- ...
+    lease acquire --gpu battlemage --gpu-vram 24G
+
+With `gpu-vram` the reserved GPU must match `gpu:` as well. A GPU whose VRAM
+use is unknown counts its whole VRAM as free; the lease, not the figure,
+keeps two holders off one card.
+
 ## Build order
 
 1. Web Add node and Remove node (in progress).

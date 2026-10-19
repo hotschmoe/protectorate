@@ -1,0 +1,62 @@
+# Synthetic: an Intel iGPU on i915, two Arc A770 on xe, an Intel NPU on
+# intel_vpu (accel class), an AMD card on amdgpu, and a BMC and a virtio
+# display adapter that are not GPUs.
+bus/pci/devices/0000:00:02.0 -> ../../../devices/pci0000:00/0000:00:02.0
+bus/pci/devices/0000:00:0b.0 -> ../../../devices/pci0000:00/0000:00:0b.0
+bus/pci/devices/0000:03:00.0 -> ../../../devices/pci0000:00/0000:00:01.0/0000:03:00.0
+bus/pci/devices/0000:04:00.0 -> ../../../devices/pci0000:00/0000:00:01.1/0000:04:00.0
+bus/pci/devices/0000:05:00.0 -> ../../../devices/pci0000:00/0000:00:1c.0/0000:05:00.0
+bus/pci/devices/0000:06:00.0 -> ../../../devices/pci0000:00/0000:00:01.2/0000:06:00.0
+bus/pci/devices/0000:07:00.0 -> ../../../devices/pci0000:00/0000:00:01.3/0000:07:00.0
+class/accel/accel0/device -> ../../../devices/pci0000:00/0000:00:0b.0
+bus/pci/drivers/i915/
+bus/pci/drivers/xe/
+bus/pci/drivers/amdgpu/
+bus/pci/drivers/intel_vpu/
+bus/pci/drivers/ast/
+bus/pci/drivers/virtio-pci/
+devices/pci0000:00/0000:00:02.0/class = 0x030000
+devices/pci0000:00/0000:00:02.0/vendor = 0x8086
+devices/pci0000:00/0000:00:02.0/device = 0xa780
+devices/pci0000:00/0000:00:02.0/driver -> ../../../bus/pci/drivers/i915
+devices/pci0000:00/0000:00:02.0/drm/card0/gt/gt0/rc6_residency_ms = 1000
+devices/pci0000:00/0000:00:0b.0/class = 0x120000
+devices/pci0000:00/0000:00:0b.0/vendor = 0x8086
+devices/pci0000:00/0000:00:0b.0/device = 0x7d1d
+devices/pci0000:00/0000:00:0b.0/driver -> ../../../bus/pci/drivers/intel_vpu
+devices/pci0000:00/0000:00:0b.0/npu_busy_time_us = 5000000
+devices/pci0000:00/0000:00:0b.0/npu_current_frequency_mhz = 1400
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/class = 0x030000
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/vendor = 0x8086
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/device = 0x56a0
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/driver -> ../../../../bus/pci/drivers/xe
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/tile0/gt0/gtidle/name = gt0-rc
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/tile0/gt0/gtidle/idle_residency_ms = 500
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/hwmon/hwmon2/temp1_input = 47000
+devices/pci0000:00/0000:00:01.0/0000:03:00.0/drm/renderD129/
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/class = 0x038000
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/vendor = 0x8086
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/device = 0x56a0
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/driver -> ../../../../bus/pci/drivers/xe
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/tile0/gt0/gtidle/name = gt0-rc
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/tile0/gt0/gtidle/idle_residency_ms = 700
+devices/pci0000:00/0000:00:01.1/0000:04:00.0/drm/renderD130/
+devices/pci0000:00/0000:00:1c.0/0000:05:00.0/class = 0x030000
+devices/pci0000:00/0000:00:1c.0/0000:05:00.0/vendor = 0x1a03
+devices/pci0000:00/0000:00:1c.0/0000:05:00.0/device = 0x2000
+devices/pci0000:00/0000:00:1c.0/0000:05:00.0/driver -> ../../../../bus/pci/drivers/ast
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/class = 0x030000
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/vendor = 0x1002
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/device = 0x744c
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/driver -> ../../../../bus/pci/drivers/amdgpu
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/gpu_busy_percent = 37
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/mem_info_vram_total = 25753026560
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/mem_info_vram_used = 1048576
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/hwmon/hwmon3/temp1_label = edge
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/hwmon/hwmon3/temp1_input = 44000
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/hwmon/hwmon3/temp2_label = junction
+devices/pci0000:00/0000:00:01.2/0000:06:00.0/hwmon/hwmon3/temp2_input = 52000
+devices/pci0000:00/0000:00:01.3/0000:07:00.0/class = 0x030000
+devices/pci0000:00/0000:00:01.3/0000:07:00.0/vendor = 0x1af4
+devices/pci0000:00/0000:00:01.3/0000:07:00.0/device = 0x1050
+devices/pci0000:00/0000:00:01.3/0000:07:00.0/driver -> ../../../../bus/pci/drivers/virtio-pci

@@ -50,6 +50,13 @@ message NodeSelector {
   // gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease
   // then reserves that GPU instead of the whole node.
   uint64 gpu_vram_bytes = 4;
+  // gpu requires a GPU whose vendor or name contains this text, ignoring
+  // case (e.g. "adreno", "intel"); with gpu_vram_bytes the reserved GPU must
+  // match it too.
+  string gpu = 5;
+  // npu requires an NPU whose vendor or name contains this text, ignoring
+  // case (e.g. "hexagon").
+  string npu = 6;
 }
 
 message AcquireLeaseRequest {

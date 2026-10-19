@@ -388,4 +388,134 @@ void main() {
     await t.pumpAndSettle();
     expect(killed, ['alice']);
   });
+
+  group('accelerators', () {
+    final snapdragon = NodeMetrics(
+      os: 'windows',
+      arch: 'arm64',
+      cpu: CpuMetrics(logicalCores: 18, usagePercent: 3),
+      memory: MemoryMetrics(totalBytes: Int64(32 << 30), usedPercent: 27),
+      gpus: [
+        GpuMetrics(
+          vendor: 'qualcomm',
+          name: 'Qualcomm Adreno X2-90 GPU',
+          driver: 'QCDX 32.0.172.1',
+          integrated: true,
+          utilizationPercent: -1,
+          temperatureCelsius: -1,
+        ),
+      ],
+      npus: [
+        AcceleratorMetrics(
+          kind: 'npu',
+          vendor: 'qualcomm',
+          name: 'Qualcomm Hexagon NPU',
+          driver: 'qcnspmcdm 30.0.228.10000',
+          utilizationPercent: 12,
+        ),
+      ],
+    );
+
+    testWidgets('card lists integrated GPU and NPU without fake meters', (
+      t,
+    ) async {
+      await t.pumpWidget(
+        _host(
+          NodeCard(
+            status: _status(
+              'snapdragon-laptop',
+              NodeFreshness.NODE_FRESHNESS_FRESH,
+              metrics: snapdragon,
+            ),
+            age: Duration.zero,
+            onTap: () {},
+          ),
+        ),
+      );
+      expect(find.textContaining('Qualcomm Adreno X2-90 GPU'), findsOneWidget);
+      expect(find.textContaining('INTEGRATED'), findsOneWidget);
+      expect(find.textContaining('QCDX 32.0.172.1'), findsOneWidget);
+      expect(find.byKey(const ValueKey('gpu-util-0')), findsNothing);
+      expect(find.byKey(const ValueKey('gpu-vram-0')), findsNothing);
+      expect(find.textContaining('Qualcomm Hexagon NPU'), findsOneWidget);
+      expect(find.byKey(const ValueKey('npu-util-0')), findsOneWidget);
+      expect(find.text('12.0%'), findsOneWidget);
+    });
+
+    testWidgets('detail shows unknown VRAM use as dashes, not spare', (
+      t,
+    ) async {
+      t.view.physicalSize = const Size(500, 3000);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final m = NodeMetrics(
+        os: 'linux',
+        arch: 'amd64',
+        cpu: CpuMetrics(logicalCores: 32),
+        memory: MemoryMetrics(totalBytes: Int64(64 << 30)),
+        gpus: [
+          GpuMetrics(
+            index: 0,
+            vendor: 'intel',
+            name: 'Battlemage G31 [Intel Graphics]',
+            driver: 'xe',
+            utilizationPercent: 0,
+            memoryTotalBytes: Int64(32 << 30),
+            temperatureCelsius: 55,
+          ),
+        ],
+      );
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NodeDetail(
+              status: _status(
+                'b70-nas-server',
+                NodeFreshness.NODE_FRESHNESS_FRESH,
+                metrics: m,
+              ),
+              age: Duration.zero,
+              now: DateTime(2026),
+            ),
+          ),
+        ),
+      );
+      expect(find.textContaining('DISCRETE'), findsOneWidget);
+      expect(find.byKey(const ValueKey('gpu-util-0')), findsOneWidget);
+      expect(find.text('? / 32.0 GB'), findsOneWidget);
+      expect(find.text('NPUS'), findsNothing);
+    });
+
+    test('summary uses the first GPU and never invents VRAM use', () {
+      final b50 = GpuMetrics(
+        name: 'Intel Arc Pro B50 Graphics',
+        utilizationPercent: 2,
+        memoryUsedBytes: Int64(3 << 30),
+        memoryTotalBytes: Int64(16 << 30),
+      );
+      final igpu = GpuMetrics(
+        name: 'Intel Graphics',
+        integrated: true,
+        utilizationPercent: 40,
+      );
+      final office = summarizeGpus(NodeMetrics(gpus: [b50, igpu]))!;
+      expect(office.utilPercent, 2);
+      expect(office.vramPercent, closeTo(18.75, 0.01));
+      final soc = summarizeGpus(snapdragon)!;
+      expect(soc.utilPercent, isNull);
+      expect(soc.vramPercent, isNull);
+      final xe = summarizeGpus(
+        NodeMetrics(
+          gpus: [
+            GpuMetrics(
+              utilizationPercent: -1,
+              memoryTotalBytes: Int64(32 << 30),
+            ),
+          ],
+        ),
+      )!;
+      expect(xe.vramPercent, isNull);
+      expect(summarizeGpus(NodeMetrics()), isNull);
+    });
+  });
 }

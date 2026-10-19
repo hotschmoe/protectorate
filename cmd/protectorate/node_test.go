@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -213,7 +214,7 @@ func TestWriteNodeList(t *testing.T) {
 				Cpu:         &pb.CpuMetrics{UsagePercent: 34.4, Load1: &load},
 				Memory:      &pb.MemoryMetrics{UsedPercent: 21.7},
 				Filesystems: []*pb.FilesystemMetrics{{Mount: "/", UsedPercent: 36.7}, {Mount: "/data", UsedPercent: 91}},
-				Gpus:        []*pb.GpuMetrics{{UtilizationPercent: 10, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 8 << 30}, {UtilizationPercent: 30, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 8 << 30}},
+				Gpus:        []*pb.GpuMetrics{{UtilizationPercent: 10, MemoryUsedBytes: proto.Uint64(1 << 30), MemoryTotalBytes: 8 << 30}, {UtilizationPercent: 30, MemoryUsedBytes: proto.Uint64(1 << 30), MemoryTotalBytes: 8 << 30}},
 				Engine:      &pb.ContainerEngine{Containers: []*pb.ContainerMetrics{{}, {}}},
 			},
 			Alerts: []*pb.NodeAlert{{Kind: pb.AlertKind_ALERT_KIND_DISK_PERCENT, Subject: "/data"}},
@@ -226,8 +227,52 @@ func TestWriteNodeList(t *testing.T) {
 	writeNodeList(&buf, resp)
 	out := buf.String()
 	for _, want := range []string{
-		"hub*", "linux/arm64", "34%", "2x 20% 2.0GiB/16.0GiB", "22%", "91% /data", "disk:/data", "UNREACHABLE (never seen)",
+		"hub*", "linux/arm64", "34%", "2x 10% 2.0GiB/16.0GiB", "22%", "91% /data", "disk:/data", "UNREACHABLE (never seen)",
 		"STALE (2m old)", "windows/amd64", "pending",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestGpuSummary(t *testing.T) {
+	adreno := &pb.GpuMetrics{Vendor: "qualcomm", Name: "Qualcomm Adreno X2-90 GPU", Integrated: true, UtilizationPercent: -1}
+	b50 := &pb.GpuMetrics{Vendor: "intel", Name: "Intel Arc Pro B50 Graphics", UtilizationPercent: 2.4, MemoryUsedBytes: proto.Uint64(3 << 30), MemoryTotalBytes: 16 << 30}
+	igpu := &pb.GpuMetrics{Vendor: "intel", Name: "Intel Graphics", Integrated: true}
+	b70 := &pb.GpuMetrics{Vendor: "intel", Name: "Battlemage G31 [Intel Graphics]", MemoryTotalBytes: 32 << 30}
+	tests := []struct {
+		name string
+		gpus []*pb.GpuMetrics
+		want string
+	}{
+		{"none", nil, "-"},
+		{"integrated without utilization", []*pb.GpuMetrics{adreno}, "1x -"},
+		{"discrete first, integrated adds no vram", []*pb.GpuMetrics{b50, igpu}, "2x 2% 3.0GiB/16.0GiB"},
+		{"unknown vram use", []*pb.GpuMetrics{b70, b70}, "2x 0% ?/64.0GiB"},
+	}
+	for _, tt := range tests {
+		if got := gpuSummary(tt.gpus); got != tt.want {
+			t.Errorf("%s: gpuSummary = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestWriteMetricsAccelerators(t *testing.T) {
+	m := &pb.NodeMetrics{
+		Gpus: []*pb.GpuMetrics{
+			{Index: 0, Vendor: "intel", Name: "Intel Arc Pro B50 Graphics", Driver: "igfxnd 32.0.101.8805", UtilizationPercent: 2.4, MemoryUsedBytes: proto.Uint64(3 << 30), MemoryTotalBytes: 16 << 30, TemperatureCelsius: -1},
+			{Index: 1, Vendor: "arm", Name: "Mali-G720-Immortalis 10 cores", Driver: "mali r53p0-00eac0", Integrated: true, UtilizationPercent: -1, TemperatureCelsius: -1},
+		},
+		Npus: []*pb.AcceleratorMetrics{{Kind: "npu", Vendor: "armchina", Name: "Zhouyi NPU", Driver: "armchina", UtilizationPercent: -1, FrequencyHz: 1200000000}},
+	}
+	var buf bytes.Buffer
+	writeMetrics(&buf, m)
+	out := buf.String()
+	for _, want := range []string{
+		"0\tintel Intel Arc Pro B50 Graphics\tdiscrete\tigfxnd 32.0.101.8805\t2%\t3.0GiB/16.0GiB\t-\n",
+		"1\tarm Mali-G720-Immortalis 10 cores\tintegrated\tmali r53p0-00eac0\t-\tshared\t-\n",
+		"0\tarmchina Zhouyi NPU\tarmchina\t-\t1200 MHz\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)

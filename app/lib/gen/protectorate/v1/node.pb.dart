@@ -1656,6 +1656,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     $core.Iterable<DirSize>? watchDirs,
     $core.Iterable<$core.String>? warnings,
     $core.Iterable<$2.Sleeve>? sleeves,
+    $core.Iterable<AcceleratorMetrics>? npus,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -1673,6 +1674,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     if (watchDirs != null) result.watchDirs.addAll(watchDirs);
     if (warnings != null) result.warnings.addAll(warnings);
     if (sleeves != null) result.sleeves.addAll(sleeves);
+    if (npus != null) result.npus.addAll(npus);
     return result;
   }
 
@@ -1713,6 +1715,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
     ..pPS(14, _omitFieldNames ? '' : 'warnings')
     ..pPM<$2.Sleeve>(15, _omitFieldNames ? '' : 'sleeves',
         subBuilder: $2.Sleeve.$_createMessage)
+    ..pPM<AcceleratorMetrics>(16, _omitFieldNames ? '' : 'npus',
+        subBuilder: AcceleratorMetrics.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1828,7 +1832,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
   @$pb.TagNumber(10)
   $pb.PbList<FilesystemMetrics> get filesystems => $_getList(9);
 
-  /// gpus is empty when the node has none or no vendor tool is present.
+  /// gpus lists discrete and integrated GPUs: discrete first, then integrated.
+  /// Virtual display adapters are left out.
   @$pb.TagNumber(11)
   $pb.PbList<GpuMetrics> get gpus => $_getList(10);
 
@@ -1855,6 +1860,10 @@ class NodeMetrics extends $pb.GeneratedMessage {
   /// hub's own node has any.
   @$pb.TagNumber(15)
   $pb.PbList<$2.Sleeve> get sleeves => $_getList(14);
+
+  /// npus lists neural processing units.
+  @$pb.TagNumber(16)
+  $pb.PbList<AcceleratorMetrics> get npus => $_getList(15);
 }
 
 class CpuMetrics extends $pb.GeneratedMessage {
@@ -2247,6 +2256,9 @@ class GpuMetrics extends $pb.GeneratedMessage {
     $fixnum.Int64? memoryUsedBytes,
     $fixnum.Int64? memoryTotalBytes,
     $core.double? temperatureCelsius,
+    $core.bool? integrated,
+    $core.String? driver,
+    $core.String? busId,
   }) {
     final result = GpuMetrics._();
     if (index != null) result.index = index;
@@ -2258,6 +2270,9 @@ class GpuMetrics extends $pb.GeneratedMessage {
     if (memoryTotalBytes != null) result.memoryTotalBytes = memoryTotalBytes;
     if (temperatureCelsius != null)
       result.temperatureCelsius = temperatureCelsius;
+    if (integrated != null) result.integrated = integrated;
+    if (driver != null) result.driver = driver;
+    if (busId != null) result.busId = busId;
     return result;
   }
 
@@ -2286,6 +2301,9 @@ class GpuMetrics extends $pb.GeneratedMessage {
         6, _omitFieldNames ? '' : 'memoryTotalBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aD(7, _omitFieldNames ? '' : 'temperatureCelsius')
+    ..aOB(8, _omitFieldNames ? '' : 'integrated')
+    ..aOS(9, _omitFieldNames ? '' : 'driver')
+    ..aOS(10, _omitFieldNames ? '' : 'busId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2317,6 +2335,7 @@ class GpuMetrics extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearIndex() => $_clearField(1);
 
+  /// vendor is lowercase: nvidia, amd, intel, qualcomm, arm, ...
   @$pb.TagNumber(2)
   $core.String get vendor => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -2335,7 +2354,9 @@ class GpuMetrics extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   void clearName() => $_clearField(3);
 
-  /// utilization_percent is -1 when the device does not report it.
+  /// utilization_percent is -1 when the device does not report it. For Intel
+  /// GPUs on Linux without xpu-smi it is the share of time the render tile
+  /// was out of its idle power state.
   @$pb.TagNumber(4)
   $core.double get utilizationPercent => $_getN(3);
   @$pb.TagNumber(4)
@@ -2345,6 +2366,9 @@ class GpuMetrics extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   void clearUtilizationPercent() => $_clearField(4);
 
+  /// memory_* are dedicated VRAM. An integrated GPU shares system memory and
+  /// reports neither. memory_used_bytes is unset when the driver does not
+  /// report it (Intel xe on Linux without xpu-smi).
   @$pb.TagNumber(5)
   $fixnum.Int64 get memoryUsedBytes => $_getI64(4);
   @$pb.TagNumber(5)
@@ -2372,6 +2396,179 @@ class GpuMetrics extends $pb.GeneratedMessage {
   $core.bool hasTemperatureCelsius() => $_has(6);
   @$pb.TagNumber(7)
   void clearTemperatureCelsius() => $_clearField(7);
+
+  /// integrated is set for a GPU on the SoC or CPU package.
+  @$pb.TagNumber(8)
+  $core.bool get integrated => $_getBF(7);
+  @$pb.TagNumber(8)
+  set integrated($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasIntegrated() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearIntegrated() => $_clearField(8);
+
+  /// driver is the kernel driver (Linux) or driver service (Windows), with its
+  /// version when known, e.g. "xe", "mali r53p0-00eac0", "igfxnd 32.0.101.8805".
+  @$pb.TagNumber(9)
+  $core.String get driver => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set driver($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasDriver() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearDriver() => $_clearField(9);
+
+  /// bus_id identifies the adapter: the PCI address (0000:0b:00.0) or the
+  /// platform device (CIXH5000:00, ACPI\VEN_QCOM&DEV_0F36...). Empty for
+  /// GPUs reported by nvidia-smi and rocm-smi.
+  @$pb.TagNumber(10)
+  $core.String get busId => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set busId($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasBusId() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearBusId() => $_clearField(10);
+}
+
+/// AcceleratorMetrics describes a compute accelerator that is not a GPU.
+class AcceleratorMetrics extends $pb.GeneratedMessage {
+  factory AcceleratorMetrics({
+    $core.String? kind,
+    $core.String? vendor,
+    $core.String? name,
+    $core.String? driver,
+    $core.double? utilizationPercent,
+    $fixnum.Int64? frequencyHz,
+    $core.String? busId,
+  }) {
+    final result = AcceleratorMetrics._();
+    if (kind != null) result.kind = kind;
+    if (vendor != null) result.vendor = vendor;
+    if (name != null) result.name = name;
+    if (driver != null) result.driver = driver;
+    if (utilizationPercent != null)
+      result.utilizationPercent = utilizationPercent;
+    if (frequencyHz != null) result.frequencyHz = frequencyHz;
+    if (busId != null) result.busId = busId;
+    return result;
+  }
+
+  AcceleratorMetrics._();
+
+  factory AcceleratorMetrics.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      AcceleratorMetrics()..mergeFromBuffer(data, registry);
+  factory AcceleratorMetrics.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      AcceleratorMetrics()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'AcceleratorMetrics',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: AcceleratorMetrics.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'kind')
+    ..aOS(2, _omitFieldNames ? '' : 'vendor')
+    ..aOS(3, _omitFieldNames ? '' : 'name')
+    ..aOS(4, _omitFieldNames ? '' : 'driver')
+    ..aD(5, _omitFieldNames ? '' : 'utilizationPercent')
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'frequencyHz', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(7, _omitFieldNames ? '' : 'busId')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  AcceleratorMetrics clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  AcceleratorMetrics copyWith(void Function(AcceleratorMetrics) updates) =>
+      super.copyWith((message) => updates(message as AcceleratorMetrics))
+          as AcceleratorMetrics;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use AcceleratorMetrics() / AcceleratorMetrics.new instead')
+  static AcceleratorMetrics create() => AcceleratorMetrics._();
+  static $pb.GeneratedMessage $_createMessage() => AcceleratorMetrics._();
+  @$core.override
+  AcceleratorMetrics createEmptyInstance() => AcceleratorMetrics._();
+  @$core.pragma('dart2js:noInline')
+  static AcceleratorMetrics getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<AcceleratorMetrics>(
+          AcceleratorMetrics.$_createMessage);
+  static AcceleratorMetrics? _defaultInstance;
+
+  /// kind is "npu".
+  @$pb.TagNumber(1)
+  $core.String get kind => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set kind($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasKind() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearKind() => $_clearField(1);
+
+  /// vendor is lowercase: intel, amd, qualcomm, armchina, ...
+  @$pb.TagNumber(2)
+  $core.String get vendor => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set vendor($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasVendor() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearVendor() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get name => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set name($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasName() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearName() => $_clearField(3);
+
+  /// driver is as in GpuMetrics.driver.
+  @$pb.TagNumber(4)
+  $core.String get driver => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set driver($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasDriver() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearDriver() => $_clearField(4);
+
+  /// utilization_percent is -1 when the device does not report it.
+  @$pb.TagNumber(5)
+  $core.double get utilizationPercent => $_getN(4);
+  @$pb.TagNumber(5)
+  set utilizationPercent($core.double value) => $_setDouble(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasUtilizationPercent() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearUtilizationPercent() => $_clearField(5);
+
+  /// frequency_hz is the current clock, 0 when unknown.
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get frequencyHz => $_getI64(5);
+  @$pb.TagNumber(6)
+  set frequencyHz($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasFrequencyHz() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearFrequencyHz() => $_clearField(6);
+
+  /// bus_id is as in GpuMetrics.bus_id.
+  @$pb.TagNumber(7)
+  $core.String get busId => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set busId($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasBusId() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearBusId() => $_clearField(7);
 }
 
 class ContainerEngine extends $pb.GeneratedMessage {

@@ -437,46 +437,36 @@ class NodeDetail extends StatelessWidget {
           child: m.gpus.isEmpty
               ? Text('None.', style: t.small())
               : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final g in m.gpus)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '#${g.index} ${g.vendor} ${g.name}${g.temperatureCelsius >= 0 ? '  ${g.temperatureCelsius.round()} C' : ''}',
-                              style: t.data(t.p.emph),
-                            ),
-                            MeterRow(
-                              label: 'UTIL',
-                              percent: g.utilizationPercent >= 0
-                                  ? g.utilizationPercent
-                                  : null,
-                              value: g.utilizationPercent >= 0
-                                  ? formatPercent(g.utilizationPercent)
-                                  : 'n/a',
-                              dim: dim,
-                              valueChars: 17,
-                            ),
-                            MeterRow(
-                              label: 'VRAM',
-                              percent: g.memoryTotalBytes > 0
-                                  ? g.memoryUsedBytes.toInt() *
-                                        100 /
-                                        g.memoryTotalBytes.toInt()
-                                  : null,
-                              value:
-                                  '${formatBytes(g.memoryUsedBytes.toInt())} / ${formatBytes(g.memoryTotalBytes.toInt())}',
-                              dim: dim,
-                              valueChars: 17,
-                            ),
-                          ],
-                        ),
+                      GpuLines(
+                        key: ValueKey('gpu-${g.index}'),
+                        gpu: g,
+                        dim: dim,
+                        detail: true,
                       ),
                   ],
                 ),
         ),
+        if (m.npus.isNotEmpty)
+          Panel(
+            legend: 'NPUS',
+            trailing: Text('${m.npus.length}', style: t.legend()),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final (i, n) in m.npus.indexed)
+                  NpuLines(
+                    key: ValueKey('npu-$i'),
+                    npu: n,
+                    index: i,
+                    dim: dim,
+                    detail: true,
+                  ),
+              ],
+            ),
+          ),
         Panel(
           legend: 'TOP DISK OFFENDERS',
           child: _Offenders(offenders: topOffenders(m)),
@@ -677,7 +667,7 @@ class _HostPanel extends StatelessWidget {
                       percent: gpu!.utilPercent,
                       value: gpu.utilPercent!.round().toString(),
                       unit: '%',
-                      caption: gpu.count > 1 ? 'GPU x${gpu.count}' : 'GPU',
+                      caption: gpu.count > 1 ? 'GPU0 OF ${gpu.count}' : 'GPU',
                       size: size,
                       dim: dim,
                     ),
