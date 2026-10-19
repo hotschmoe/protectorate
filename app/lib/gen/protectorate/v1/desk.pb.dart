@@ -14,8 +14,16 @@ import 'dart:async' as $async;
 import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
+import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
+    as $0;
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
+    as $1;
+
+import 'desk.pbenum.dart';
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+export 'desk.pbenum.dart';
 
 class DeskTarget extends $pb.GeneratedMessage {
   factory DeskTarget({
@@ -1324,6 +1332,243 @@ class DeskActionResponse extends $pb.GeneratedMessage {
   void clearRun() => $_clearField(4);
   @$pb.TagNumber(4)
   RunResponse ensureRun() => $_ensure(3);
+}
+
+/// DeskPolicy says when a node's desktop may be driven by agents. Without a
+/// policy the desktop is always available. With one, it is available only
+/// inside the window and after the user has had no physical input (injected
+/// input, such as the node's own desk commands, does not count) for idle.
+class DeskPolicy extends $pb.GeneratedMessage {
+  factory DeskPolicy({
+    $core.String? window,
+    $0.Duration? idle,
+    $core.String? timezone,
+    $core.bool? lockAfter,
+  }) {
+    final result = DeskPolicy._();
+    if (window != null) result.window = window;
+    if (idle != null) result.idle = idle;
+    if (timezone != null) result.timezone = timezone;
+    if (lockAfter != null) result.lockAfter = lockAfter;
+    return result;
+  }
+
+  DeskPolicy._();
+
+  factory DeskPolicy.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskPolicy()..mergeFromBuffer(data, registry);
+  factory DeskPolicy.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskPolicy()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DeskPolicy',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DeskPolicy.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'window')
+    ..aOM<$0.Duration>(2, _omitFieldNames ? '' : 'idle',
+        subBuilder: $0.Duration.$_createMessage)
+    ..aOS(3, _omitFieldNames ? '' : 'timezone')
+    ..aOB(4, _omitFieldNames ? '' : 'lockAfter')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskPolicy clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskPolicy copyWith(void Function(DeskPolicy) updates) =>
+      super.copyWith((message) => updates(message as DeskPolicy)) as DeskPolicy;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DeskPolicy() / DeskPolicy.new instead')
+  static DeskPolicy create() => DeskPolicy._();
+  static $pb.GeneratedMessage $_createMessage() => DeskPolicy._();
+  @$core.override
+  DeskPolicy createEmptyInstance() => DeskPolicy._();
+  @$core.pragma('dart2js:noInline')
+  static DeskPolicy getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DeskPolicy>(DeskPolicy.$_createMessage);
+  static DeskPolicy? _defaultInstance;
+
+  /// window is "HH:MM-HH:MM" in the policy's time zone; start after end spans
+  /// midnight ("19:00-07:00").
+  @$pb.TagNumber(1)
+  $core.String get window => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set window($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasWindow() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearWindow() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $0.Duration get idle => $_getN(1);
+  @$pb.TagNumber(2)
+  set idle($0.Duration value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasIdle() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearIdle() => $_clearField(2);
+  @$pb.TagNumber(2)
+  $0.Duration ensureIdle() => $_ensure(1);
+
+  /// timezone is an IANA name; empty means the node's local time.
+  @$pb.TagNumber(3)
+  $core.String get timezone => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set timezone($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTimezone() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTimezone() => $_clearField(3);
+
+  /// lock_after locks the workstation when the window ends and when an agent
+  /// lease ends inside the window with no other lease following within a
+  /// minute. It never locks while the user is active.
+  @$pb.TagNumber(4)
+  $core.bool get lockAfter => $_getBF(3);
+  @$pb.TagNumber(4)
+  set lockAfter($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasLockAfter() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearLockAfter() => $_clearField(4);
+}
+
+/// DeskState is a node's evaluation of its policy at one moment.
+class DeskState extends $pb.GeneratedMessage {
+  factory DeskState({
+    $core.bool? available,
+    DeskReason? reason,
+    $core.String? detail,
+    $1.Timestamp? lastInput,
+    $1.Timestamp? evaluatedAt,
+    DeskPolicy? policy,
+  }) {
+    final result = DeskState._();
+    if (available != null) result.available = available;
+    if (reason != null) result.reason = reason;
+    if (detail != null) result.detail = detail;
+    if (lastInput != null) result.lastInput = lastInput;
+    if (evaluatedAt != null) result.evaluatedAt = evaluatedAt;
+    if (policy != null) result.policy = policy;
+    return result;
+  }
+
+  DeskState._();
+
+  factory DeskState.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskState()..mergeFromBuffer(data, registry);
+  factory DeskState.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskState()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DeskState',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DeskState.$_createMessage)
+    ..aOB(1, _omitFieldNames ? '' : 'available')
+    ..aE<DeskReason>(2, _omitFieldNames ? '' : 'reason',
+        enumValues: DeskReason.values)
+    ..aOS(3, _omitFieldNames ? '' : 'detail')
+    ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'lastInput',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<$1.Timestamp>(5, _omitFieldNames ? '' : 'evaluatedAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOM<DeskPolicy>(6, _omitFieldNames ? '' : 'policy',
+        subBuilder: DeskPolicy.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskState clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskState copyWith(void Function(DeskState) updates) =>
+      super.copyWith((message) => updates(message as DeskState)) as DeskState;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DeskState() / DeskState.new instead')
+  static DeskState create() => DeskState._();
+  static $pb.GeneratedMessage $_createMessage() => DeskState._();
+  @$core.override
+  DeskState createEmptyInstance() => DeskState._();
+  @$core.pragma('dart2js:noInline')
+  static DeskState getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DeskState>(DeskState.$_createMessage);
+  static DeskState? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.bool get available => $_getBF(0);
+  @$pb.TagNumber(1)
+  set available($core.bool value) => $_setBool(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasAvailable() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearAvailable() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  DeskReason get reason => $_getN(1);
+  @$pb.TagNumber(2)
+  set reason(DeskReason value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasReason() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearReason() => $_clearField(2);
+
+  /// detail is a sentence for people, e.g. "physical input 3m ago, idle 15m
+  /// required".
+  @$pb.TagNumber(3)
+  $core.String get detail => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set detail($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDetail() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDetail() => $_clearField(3);
+
+  /// last_input is the last physical keyboard or mouse input the node saw; unset
+  /// when it has seen none since the agent started.
+  @$pb.TagNumber(4)
+  $1.Timestamp get lastInput => $_getN(3);
+  @$pb.TagNumber(4)
+  set lastInput($1.Timestamp value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasLastInput() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearLastInput() => $_clearField(4);
+  @$pb.TagNumber(4)
+  $1.Timestamp ensureLastInput() => $_ensure(3);
+
+  @$pb.TagNumber(5)
+  $1.Timestamp get evaluatedAt => $_getN(4);
+  @$pb.TagNumber(5)
+  set evaluatedAt($1.Timestamp value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasEvaluatedAt() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearEvaluatedAt() => $_clearField(5);
+  @$pb.TagNumber(5)
+  $1.Timestamp ensureEvaluatedAt() => $_ensure(4);
+
+  /// policy is the policy the node evaluated; unset when none applies.
+  @$pb.TagNumber(6)
+  DeskPolicy get policy => $_getN(5);
+  @$pb.TagNumber(6)
+  set policy(DeskPolicy value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasPolicy() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearPolicy() => $_clearField(6);
+  @$pb.TagNumber(6)
+  DeskPolicy ensurePolicy() => $_ensure(5);
 }
 
 /// DeskService drives the interactive desktop of a node, for programs that

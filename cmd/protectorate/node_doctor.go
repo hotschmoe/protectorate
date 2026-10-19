@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hotschmoe/protectorate/internal/desk"
+	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
 )
 
@@ -84,6 +85,32 @@ func screenCheck(goos string, ready error, name string, err error) check {
 		d = err.Error()
 	}
 	return check{"screen", levelWarn, "state unknown: " + d}
+}
+
+// policyCheck evaluates the desk policy persisted in home as the agent would,
+// except that physical input is the agent's to measure: the user is assumed
+// idle here.
+func policyCheck(home, goos string, now time.Time, ready error, screen desk.ScreenState) check {
+	if goos != "windows" {
+		return check{"desk policy", levelInfo, "not applicable"}
+	}
+	raw, err := node.LoadDeskPolicy(home)
+	if err != nil {
+		return check{"desk policy", levelFail, err.Error()}
+	}
+	if raw == nil {
+		return check{"desk policy", levelInfo, "none: the desktop is always available (set one with `protectorate desk policy <node>` on the hub)"}
+	}
+	p, err := node.PolicyFromProto(raw)
+	if err != nil {
+		return check{"desk policy", levelFail, err.Error()}
+	}
+	v := desk.Evaluate(p, desk.Inputs{Now: now, LastInput: now.Add(-24 * time.Hour), Ready: ready, Screen: screen})
+	verdict := "unavailable"
+	if v.Available {
+		verdict = "available"
+	}
+	return check{"desk policy", levelInfo, fmt.Sprintf("window %s idle %s lock-after %t: %s now (%s); user input is tracked by the running agent and assumed idle here", p.FormatWindow(), p.Idle, p.LockAfter, verdict, v.Detail)}
 }
 
 // otherPIDs lists the PIDs in `tasklist /FO CSV /NH` output other than self.
@@ -204,6 +231,7 @@ It changes nothing.`,
 				{"platform", levelInfo, runtime.GOOS + "/" + runtime.GOARCH + ", protectorate " + version},
 				sessionCheck(ready, in.GOOS),
 				screenCheck(in.GOOS, ready, screenName, screenErr),
+				policyCheck(in.Home, in.GOOS, time.Now(), ready, desk.ClassifyInputDesktop(screenName, screenErr)),
 				startupCheck(ctx, in),
 				enrollCheck(in.Home),
 				hubCheck(ctx, o.hubURL, explicit),

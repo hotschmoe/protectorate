@@ -59,6 +59,11 @@ service NodeAgentService {
   // ApplyUpdate swaps the agent's binary for a file already transferred into
   // its file root and restarts the agent. See NodeService.ApplyUpdate.
   rpc ApplyUpdate(ApplyUpdateRequest) returns (ApplyUpdateResponse);
+
+  // GetDeskState adopts the desk policy the hub sends (none clears it) and
+  // evaluates it now. The node enforces the policy itself on every input
+  // command, so the hub's view can be a few seconds old without harm.
+  rpc GetDeskState(GetDeskStateRequest) returns (DeskState);
 }
 
 // NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -112,6 +117,46 @@ service NodeService {
   rpc ApplyUpdate(ApplyUpdateRequest) returns (ApplyUpdateResponse) {
     option (protectorate.v1.owner_only_rpc) = true;
   }
+
+  // SetDeskPolicy sets or clears (policy unset) when agents may drive a
+  // node's desktop. Only the owner token may call it. The hub keeps the
+  // policy and sends it to the node, which enforces it.
+  rpc SetDeskPolicy(SetDeskPolicyRequest) returns (DeskPolicyStatus) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+
+  // GetDeskPolicy returns a node's policy, its current evaluation and who
+  // holds the desktop lease.
+  rpc GetDeskPolicy(GetDeskPolicyRequest) returns (DeskPolicyStatus);
+}
+
+message GetDeskStateRequest {
+  // policy is the policy to enforce; unset means always available.
+  DeskPolicy policy = 1;
+  // lease_ended tells the node an agent's desktop lease just ended, so that
+  // with lock_after it can lock the workstation after a minute of quiet.
+  bool lease_ended = 2;
+}
+
+message SetDeskPolicyRequest {
+  string name = 1;
+  bool allow_family = 2;
+  // policy unset clears the policy: the desktop is always available again.
+  DeskPolicy policy = 3;
+}
+
+message GetDeskPolicyRequest {
+  string name = 1;
+  bool allow_family = 2;
+}
+
+message DeskPolicyStatus {
+  // policy is unset when the node has none.
+  DeskPolicy policy = 1;
+  // state is unset when the node has not reported.
+  DeskState state = 2;
+  // holder is who holds the desktop lease now, empty if nobody.
+  string holder = 3;
 }
 
 message ApplyUpdateRequest {
@@ -409,6 +454,10 @@ message NodeStatus {
   // error is the failure of the most recent poll, empty if it succeeded.
   string error = 6;
   repeated NodeAlert alerts = 7;
+  // desk is the node's desktop availability; unset for nodes that never
+  // reported it. desk_holder is who holds the desktop lease, if anyone.
+  DeskState desk = 8;
+  string desk_holder = 9;
 }
 
 message ListNodesRequest {}

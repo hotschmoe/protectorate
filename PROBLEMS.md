@@ -476,6 +476,19 @@ The screen stays unlocked for that window; the user accepts this (the office
 is physically secure). The node locks the workstation when the window ends or
 the agent lease is released.
 
+`[done]` (2026-10-20) Built as a per-node desk policy (`protectorate desk
+policy <node> --window 19:00-07:00 --idle 15m --lock-after`, details in
+`docs/desk.md`, "Availability while away"). The node evaluates it: inside the
+window and no physical input for the idle period, where physical means a
+low-level keyboard/mouse hook event without the injected flag (the node's own
+`SendInput` never counts). The hub grants `desk:<node>` only while the node
+reports available, polls policy nodes every 3 seconds, and ends the lease and
+mails the holder when the user returns; the node also refuses every input
+command itself, so nothing is injected after the user is back. Not yet
+verified on the real desktop: the hooks and `LockWorkStation` (the live checks
+so far ran over SSH in session 0). With `--lock-after`, a lock leaves the
+desktop unavailable to the next agent until the user unlocks it.
+
 `[later]` Always-on agent desktops on machines with Intel Arc Pro cards, which
 support SR-IOV virtual GPUs: one or more Windows VMs (Hyper-V GPU partitioning,
 or a Linux KVM host with SR-IOV vGPUs, or Windows Server with Remote Desktop

@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package protectorate.v1;
 
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
 // DeskService drives the interactive desktop of a node, for programs that
@@ -138,4 +141,50 @@ message DeskActionResponse {
     InputResponse input = 3;
     RunResponse run = 4;
   }
+}
+
+// DeskPolicy says when a node's desktop may be driven by agents. Without a
+// policy the desktop is always available. With one, it is available only
+// inside the window and after the user has had no physical input (injected
+// input, such as the node's own desk commands, does not count) for idle.
+message DeskPolicy {
+  // window is "HH:MM-HH:MM" in the policy's time zone; start after end spans
+  // midnight ("19:00-07:00").
+  string window = 1;
+  google.protobuf.Duration idle = 2;
+  // timezone is an IANA name; empty means the node's local time.
+  string timezone = 3;
+  // lock_after locks the workstation when the window ends and when an agent
+  // lease ends inside the window with no other lease following within a
+  // minute. It never locks while the user is active.
+  bool lock_after = 4;
+}
+
+enum DeskReason {
+  DESK_REASON_UNSPECIFIED = 0;
+  // AVAILABLE: no policy applies, or the policy allows agents now.
+  DESK_REASON_AVAILABLE = 1;
+  DESK_REASON_OUTSIDE_WINDOW = 2;
+  DESK_REASON_USER_ACTIVE = 3;
+  DESK_REASON_NOT_INTERACTIVE = 4;
+  DESK_REASON_LOCKED = 5;
+  DESK_REASON_UNSUPPORTED = 6;
+  // DESK_REASON_UNKNOWN: the node has not reported (an older agent, or the
+  // poll failed).
+  DESK_REASON_UNKNOWN = 7;
+}
+
+// DeskState is a node's evaluation of its policy at one moment.
+message DeskState {
+  bool available = 1;
+  DeskReason reason = 2;
+  // detail is a sentence for people, e.g. "physical input 3m ago, idle 15m
+  // required".
+  string detail = 3;
+  // last_input is the last physical keyboard or mouse input the node saw; unset
+  // when it has seen none since the agent started.
+  google.protobuf.Timestamp last_input = 4;
+  google.protobuf.Timestamp evaluated_at = 5;
+  // policy is the policy the node evaluated; unset when none applies.
+  DeskPolicy policy = 6;
 }

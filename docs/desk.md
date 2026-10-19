@@ -171,6 +171,81 @@ a caller beyond that, so do not share the id with agents that should not
 drive. The env var `PROTECTORATE_DESK_LEASE` supplies `--lease`. A desktop
 lease cannot be used as a job target.
 
+## Availability while away
+
+A workstation someone uses by day can lend its desktop to agents at night. A
+per-node policy, set from the hub with the owner token, decides when
+`desk:<node>` can be had:
+
+```
+protectorate desk policy office-pc --window 19:00-07:00 --idle 15m --lock-after
+protectorate desk policy office-pc              # show the policy and the state
+protectorate desk policy office-pc --off        # always available again
+```
+
+`--tz ZONE` (an IANA name such as `Europe/Berlin`) fixes the zone of the
+window; the default is the node's own local time. A window whose start is
+after its end spans midnight. Without a policy nothing changes: the desktop is
+always available, as before.
+
+**Rule.** The node is available when the time is inside the window **and** it
+has seen no physical input for at least the idle period. The node agent
+installs low-level keyboard and mouse hooks (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`
+on a locked OS thread with its own message loop) and keeps the time of the last
+event that does not carry the injected flag, so input from `desk click|type|key`
+(which is `SendInput`) and from other programs is not mistaken for the user.
+After the agent starts, the user is assumed to have been there at that moment,
+so the first idle period is measured from the start. If the hooks cannot be
+installed the node says so on stderr and keeps that assumption. Screen
+states count too: a locked screen, or an agent that is not in the logged-in
+user's session, is unavailable.
+
+**What the hub does.** It stores the policy (`desk-policies.yaml` in the hub
+home) and sends it to the node, which also keeps a copy (`desk-policy.json`
+in its home) for restarts. `desk:<node>`, explicit or automatic, is refused
+with the node's reason while it is unavailable. For nodes with a policy the hub
+asks the node every 3 seconds.
+
+**When the user comes back.** The node reports unavailable at once (reason
+`user active`). The hub ends every lease on that desktop within about 3 seconds
+and sends the holder a notice message saying the user returned. Agents are
+refused until the idle period has passed again inside the window. Independently
+of the hub, the node refuses every input command (`click`, `move`, `type`,
+`key`, `run`) while unavailable, checks again between pieces of a long `type`,
+and the refusal also ends the caller's lease. So no input is injected after the
+user is back, whether or not the hub has caught up; `screenshot` and `windows`
+are not gated.
+
+**`--lock-after`.** The node calls `LockWorkStation` when the window ends, and
+when an agent's lease ends or expires inside the window and no command from
+another lease follows within a minute. It never locks while the user is active
+(physical input within the idle period) and never locks an already locked
+screen. Consequence: once locked, the desktop is unavailable to agents until
+the user unlocks it, so a lock at night ends that night's agent work.
+
+**The screen must be unlocked.** Agents cannot drive a locked desktop, and
+nothing here unlocks it. For the overnight use the user leaves the screen
+unlocked when leaving: no screen saver with "on resume, display logon screen",
+sleep set to never, no lock on idle (see "Locked screens and unattended
+machines"). The user accepts the unlocked workstation because the office is
+physically secure; without `--lock-after` it stays unlocked after the window
+too.
+
+**Status.** `protectorate node ls` has a DESK column and `node <name>` a `desk`
+line: `available` (no policy), `away` (inside the window and idle), `in use by
+<holder>`, `user active`, `outside window`, `unavailable: not an interactive
+session`, `unavailable: screen locked`. `desk policy <node>` adds the detail
+and the time since the last physical input. `protectorate node doctor`, run on
+the node, prints the policy evaluation (it cannot measure input, which only the
+running agent tracks, and assumes the user is idle). The same fields
+(`NodeStatus.desk`, `desk_holder`, `DeskState`, `DeskPolicy`) are in the proto
+for the app.
+
+Limits: a node must run an agent that has these calls (`node update`); an older
+one shows `unknown` and, under a policy, is not granted. Input arriving through
+remote desktop or accessibility tools that does not carry the injected flag
+counts as the user. The hub's own node takes no policy.
+
 ## Trust model
 
 - Hub to node: the same as jobs. The agent accepts these calls only from the

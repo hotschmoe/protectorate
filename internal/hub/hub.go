@@ -51,6 +51,10 @@ type Hub struct {
 	local   nodeOps
 	events  eventBus
 
+	deskPol   *deskPolicies
+	deskMu    sync.Mutex
+	deskCache map[string]deskEntry
+
 	tailnetStatus func(context.Context) (*pb.TailnetServiceGetStatusResponse, error)
 
 	Sessions    *session.Manager
@@ -108,8 +112,11 @@ func (h *Hub) SetNodes(m *NodeMonitor) {
 // home. local runs jobs placed on the hub's own node. Call after SetNodes and
 // before Handler or Serve.
 func (h *Hub) EnableJobs(home string, local *node.Jobs) error {
-	leases, err := OpenLeases(filepath.Join(home, "leases.yaml"), h.emit)
+	leases, err := OpenLeases(filepath.Join(home, "leases.yaml"), h.leaseEvent)
 	if err != nil {
+		return err
+	}
+	if h.deskPol, err = openDeskPolicies(filepath.Join(home, "desk-policies.yaml")); err != nil {
 		return err
 	}
 	jobs, err := OpenJobs(filepath.Join(home, "jobs"), h.nodes, leases, local, h.emit)
@@ -318,9 +325,12 @@ func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) erro
 		leasesDone := make(chan struct{})
 		leasesCtx, stopLeases := context.WithCancel(ctx)
 		go func() { defer close(leasesDone); h.leases.Run(leasesCtx) }()
+		deskDone := make(chan struct{})
+		go func() { defer close(deskDone); h.watchDesks(leasesCtx) }()
 		defer func() {
 			stopLeases()
 			<-leasesDone
+			<-deskDone
 			h.jobs.Shutdown()
 		}()
 	}

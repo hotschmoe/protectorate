@@ -15,6 +15,8 @@ import (
 // included) against this machine's desktop.
 type Desk struct {
 	D desk.Desktop
+	// Guard enforces the desk policy on every input command; nil allows all.
+	Guard *DeskGuard
 }
 
 func deskErr(err error) error {
@@ -69,7 +71,7 @@ func (d *Desk) Do(_ context.Context, req *pb.DeskActionRequest) (*pb.DeskActionR
 	case *pb.DeskActionRequest_Move:
 		return d.input(func() error { return d.D.Move(int(a.Move.X), int(a.Move.Y)) })
 	case *pb.DeskActionRequest_Type:
-		return d.input(func() error { return d.D.Type(a.Type.Text) })
+		return d.input(func() error { return d.typeText(a.Type.Text) })
 	case *pb.DeskActionRequest_Key:
 		c, err := desk.ParseChord(a.Key.Chord)
 		if err != nil {
@@ -80,8 +82,8 @@ func (d *Desk) Do(_ context.Context, req *pb.DeskActionRequest) (*pb.DeskActionR
 		if a.Run.Program == "" {
 			return nil, deskErr(fmt.Errorf("%w: program is empty", desk.ErrInvalid))
 		}
-		if err := d.D.Ready(); err != nil {
-			return nil, deskErr(err)
+		if err := d.admit(); err != nil {
+			return nil, err
 		}
 		pid, err := d.D.Run(a.Run.Program, a.Run.Args)
 		if err != nil {
@@ -92,11 +94,46 @@ func (d *Desk) Do(_ context.Context, req *pb.DeskActionRequest) (*pb.DeskActionR
 	return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no desktop action set"))
 }
 
-func (d *Desk) input(do func() error) (*pb.DeskActionResponse, error) {
+// admit is the check before anything that changes the desktop: the session
+// can be driven and the policy, if any, allows agents right now.
+func (d *Desk) admit() error {
 	if err := d.D.Ready(); err != nil {
-		return nil, deskErr(err)
+		return deskErr(err)
+	}
+	if d.Guard != nil {
+		return d.Guard.Check()
+	}
+	return nil
+}
+
+// typeText sends text in short pieces, asking the guard before each so a user
+// who comes back mid-sentence is not typed over.
+func (d *Desk) typeText(text string) error {
+	rs := []rune(text)
+	for len(rs) > 0 {
+		n := min(len(rs), typeChunk)
+		if err := d.D.Type(string(rs[:n])); err != nil {
+			return err
+		}
+		rs = rs[n:]
+		if len(rs) > 0 && d.Guard != nil {
+			if err := d.Guard.Check(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (d *Desk) input(do func() error) (*pb.DeskActionResponse, error) {
+	if err := d.admit(); err != nil {
+		return nil, err
 	}
 	if err := do(); err != nil {
+		var ce *connect.Error
+		if errors.As(err, &ce) {
+			return nil, err
+		}
 		return nil, deskErr(err)
 	}
 	return &pb.DeskActionResponse{Result: &pb.DeskActionResponse_Input{Input: &pb.InputResponse{}}}, nil

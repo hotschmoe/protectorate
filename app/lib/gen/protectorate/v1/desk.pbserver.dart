@@ -15,43 +15,43 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'desk.pb.dart' as $0;
+import 'desk.pb.dart' as $2;
 import 'desk.pbjson.dart';
 
 export 'desk.pb.dart';
 
 abstract class DeskServiceBase extends $pb.GeneratedService {
-  $async.Future<$0.ScreenshotResponse> screenshot(
-      $pb.ServerContext ctx, $0.ScreenshotRequest request);
-  $async.Future<$0.ListWindowsResponse> listWindows(
-      $pb.ServerContext ctx, $0.ListWindowsRequest request);
-  $async.Future<$0.InputResponse> click(
-      $pb.ServerContext ctx, $0.ClickRequest request);
-  $async.Future<$0.InputResponse> move(
-      $pb.ServerContext ctx, $0.MoveRequest request);
-  $async.Future<$0.InputResponse> type(
-      $pb.ServerContext ctx, $0.TypeRequest request);
-  $async.Future<$0.InputResponse> key(
-      $pb.ServerContext ctx, $0.KeyRequest request);
-  $async.Future<$0.RunResponse> run(
-      $pb.ServerContext ctx, $0.RunRequest request);
+  $async.Future<$2.ScreenshotResponse> screenshot(
+      $pb.ServerContext ctx, $2.ScreenshotRequest request);
+  $async.Future<$2.ListWindowsResponse> listWindows(
+      $pb.ServerContext ctx, $2.ListWindowsRequest request);
+  $async.Future<$2.InputResponse> click(
+      $pb.ServerContext ctx, $2.ClickRequest request);
+  $async.Future<$2.InputResponse> move(
+      $pb.ServerContext ctx, $2.MoveRequest request);
+  $async.Future<$2.InputResponse> type(
+      $pb.ServerContext ctx, $2.TypeRequest request);
+  $async.Future<$2.InputResponse> key(
+      $pb.ServerContext ctx, $2.KeyRequest request);
+  $async.Future<$2.RunResponse> run(
+      $pb.ServerContext ctx, $2.RunRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'Screenshot':
-        return $0.ScreenshotRequest();
+        return $2.ScreenshotRequest();
       case 'ListWindows':
-        return $0.ListWindowsRequest();
+        return $2.ListWindowsRequest();
       case 'Click':
-        return $0.ClickRequest();
+        return $2.ClickRequest();
       case 'Move':
-        return $0.MoveRequest();
+        return $2.MoveRequest();
       case 'Type':
-        return $0.TypeRequest();
+        return $2.TypeRequest();
       case 'Key':
-        return $0.KeyRequest();
+        return $2.KeyRequest();
       case 'Run':
-        return $0.RunRequest();
+        return $2.RunRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -61,19 +61,19 @@ abstract class DeskServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'Screenshot':
-        return screenshot(ctx, request as $0.ScreenshotRequest);
+        return screenshot(ctx, request as $2.ScreenshotRequest);
       case 'ListWindows':
-        return listWindows(ctx, request as $0.ListWindowsRequest);
+        return listWindows(ctx, request as $2.ListWindowsRequest);
       case 'Click':
-        return click(ctx, request as $0.ClickRequest);
+        return click(ctx, request as $2.ClickRequest);
       case 'Move':
-        return move(ctx, request as $0.MoveRequest);
+        return move(ctx, request as $2.MoveRequest);
       case 'Type':
-        return type(ctx, request as $0.TypeRequest);
+        return type(ctx, request as $2.TypeRequest);
       case 'Key':
-        return key(ctx, request as $0.KeyRequest);
+        return key(ctx, request as $2.KeyRequest);
       case 'Run':
-        return run(ctx, request as $0.RunRequest);
+        return run(ctx, request as $2.RunRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

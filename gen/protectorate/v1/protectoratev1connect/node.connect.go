@@ -64,6 +64,9 @@ const (
 	// NodeAgentServiceApplyUpdateProcedure is the fully-qualified name of the NodeAgentService's
 	// ApplyUpdate RPC.
 	NodeAgentServiceApplyUpdateProcedure = "/protectorate.v1.NodeAgentService/ApplyUpdate"
+	// NodeAgentServiceGetDeskStateProcedure is the fully-qualified name of the NodeAgentService's
+	// GetDeskState RPC.
+	NodeAgentServiceGetDeskStateProcedure = "/protectorate.v1.NodeAgentService/GetDeskState"
 	// NodeServiceListNodesProcedure is the fully-qualified name of the NodeService's ListNodes RPC.
 	NodeServiceListNodesProcedure = "/protectorate.v1.NodeService/ListNodes"
 	// NodeServiceGetNodeProcedure is the fully-qualified name of the NodeService's GetNode RPC.
@@ -78,6 +81,12 @@ const (
 	NodeServiceGetFileProcedure = "/protectorate.v1.NodeService/GetFile"
 	// NodeServiceApplyUpdateProcedure is the fully-qualified name of the NodeService's ApplyUpdate RPC.
 	NodeServiceApplyUpdateProcedure = "/protectorate.v1.NodeService/ApplyUpdate"
+	// NodeServiceSetDeskPolicyProcedure is the fully-qualified name of the NodeService's SetDeskPolicy
+	// RPC.
+	NodeServiceSetDeskPolicyProcedure = "/protectorate.v1.NodeService/SetDeskPolicy"
+	// NodeServiceGetDeskPolicyProcedure is the fully-qualified name of the NodeService's GetDeskPolicy
+	// RPC.
+	NodeServiceGetDeskPolicyProcedure = "/protectorate.v1.NodeService/GetDeskPolicy"
 )
 
 // NodeAgentServiceClient is a client for the protectorate.v1.NodeAgentService service.
@@ -111,6 +120,10 @@ type NodeAgentServiceClient interface {
 	// ApplyUpdate swaps the agent's binary for a file already transferred into
 	// its file root and restarts the agent. See NodeService.ApplyUpdate.
 	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
+	// GetDeskState adopts the desk policy the hub sends (none clears it) and
+	// evaluates it now. The node enforces the policy itself on every input
+	// command, so the hub's view can be a few seconds old without harm.
+	GetDeskState(context.Context, *connect.Request[v1.GetDeskStateRequest]) (*connect.Response[v1.DeskState], error)
 }
 
 // NewNodeAgentServiceClient constructs a client for the protectorate.v1.NodeAgentService service.
@@ -186,6 +199,12 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(nodeAgentServiceMethods.ByName("ApplyUpdate")),
 			connect.WithClientOptions(opts...),
 		),
+		getDeskState: connect.NewClient[v1.GetDeskStateRequest, v1.DeskState](
+			httpClient,
+			baseURL+NodeAgentServiceGetDeskStateProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("GetDeskState")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -201,6 +220,7 @@ type nodeAgentServiceClient struct {
 	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
 	deskAction    *connect.Client[v1.DeskActionRequest, v1.DeskActionResponse]
 	applyUpdate   *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
+	getDeskState  *connect.Client[v1.GetDeskStateRequest, v1.DeskState]
 }
 
 // GetMetrics calls protectorate.v1.NodeAgentService.GetMetrics.
@@ -253,6 +273,11 @@ func (c *nodeAgentServiceClient) ApplyUpdate(ctx context.Context, req *connect.R
 	return c.applyUpdate.CallUnary(ctx, req)
 }
 
+// GetDeskState calls protectorate.v1.NodeAgentService.GetDeskState.
+func (c *nodeAgentServiceClient) GetDeskState(ctx context.Context, req *connect.Request[v1.GetDeskStateRequest]) (*connect.Response[v1.DeskState], error) {
+	return c.getDeskState.CallUnary(ctx, req)
+}
+
 // NodeAgentServiceHandler is an implementation of the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceHandler interface {
 	// GetMetrics collects this node's current metrics.
@@ -284,6 +309,10 @@ type NodeAgentServiceHandler interface {
 	// ApplyUpdate swaps the agent's binary for a file already transferred into
 	// its file root and restarts the agent. See NodeService.ApplyUpdate.
 	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
+	// GetDeskState adopts the desk policy the hub sends (none clears it) and
+	// evaluates it now. The node enforces the policy itself on every input
+	// command, so the hub's view can be a few seconds old without harm.
+	GetDeskState(context.Context, *connect.Request[v1.GetDeskStateRequest]) (*connect.Response[v1.DeskState], error)
 }
 
 // NewNodeAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -355,6 +384,12 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		connect.WithSchema(nodeAgentServiceMethods.ByName("ApplyUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeAgentServiceGetDeskStateHandler := connect.NewUnaryHandler(
+		NodeAgentServiceGetDeskStateProcedure,
+		svc.GetDeskState,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("GetDeskState")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeAgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeAgentServiceGetMetricsProcedure:
@@ -377,6 +412,8 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 			nodeAgentServiceDeskActionHandler.ServeHTTP(w, r)
 		case NodeAgentServiceApplyUpdateProcedure:
 			nodeAgentServiceApplyUpdateHandler.ServeHTTP(w, r)
+		case NodeAgentServiceGetDeskStateProcedure:
+			nodeAgentServiceGetDeskStateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -426,6 +463,10 @@ func (UnimplementedNodeAgentServiceHandler) ApplyUpdate(context.Context, *connec
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.ApplyUpdate is not implemented"))
 }
 
+func (UnimplementedNodeAgentServiceHandler) GetDeskState(context.Context, *connect.Request[v1.GetDeskStateRequest]) (*connect.Response[v1.DeskState], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.GetDeskState is not implemented"))
+}
+
 // NodeServiceClient is a client for the protectorate.v1.NodeService service.
 type NodeServiceClient interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -460,6 +501,13 @@ type NodeServiceClient interface {
 	// Only the owner token may call it. The hub's own node cannot be updated
 	// this way.
 	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
+	// SetDeskPolicy sets or clears (policy unset) when agents may drive a
+	// node's desktop. Only the owner token may call it. The hub keeps the
+	// policy and sends it to the node, which enforces it.
+	SetDeskPolicy(context.Context, *connect.Request[v1.SetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error)
+	// GetDeskPolicy returns a node's policy, its current evaluation and who
+	// holds the desktop lease.
+	GetDeskPolicy(context.Context, *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error)
 }
 
 // NewNodeServiceClient constructs a client for the protectorate.v1.NodeService service. By default,
@@ -517,18 +565,32 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("ApplyUpdate")),
 			connect.WithClientOptions(opts...),
 		),
+		setDeskPolicy: connect.NewClient[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus](
+			httpClient,
+			baseURL+NodeServiceSetDeskPolicyProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("SetDeskPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		getDeskPolicy: connect.NewClient[v1.GetDeskPolicyRequest, v1.DeskPolicyStatus](
+			httpClient,
+			baseURL+NodeServiceGetDeskPolicyProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("GetDeskPolicy")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // nodeServiceClient implements NodeServiceClient.
 type nodeServiceClient struct {
-	listNodes   *connect.Client[v1.ListNodesRequest, v1.ListNodesResponse]
-	getNode     *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
-	addNode     *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
-	removeNode  *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
-	putFile     *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
-	getFile     *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
-	applyUpdate *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
+	listNodes     *connect.Client[v1.ListNodesRequest, v1.ListNodesResponse]
+	getNode       *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
+	addNode       *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
+	removeNode    *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
+	putFile       *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
+	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
+	applyUpdate   *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
+	setDeskPolicy *connect.Client[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus]
+	getDeskPolicy *connect.Client[v1.GetDeskPolicyRequest, v1.DeskPolicyStatus]
 }
 
 // ListNodes calls protectorate.v1.NodeService.ListNodes.
@@ -566,6 +628,16 @@ func (c *nodeServiceClient) ApplyUpdate(ctx context.Context, req *connect.Reques
 	return c.applyUpdate.CallUnary(ctx, req)
 }
 
+// SetDeskPolicy calls protectorate.v1.NodeService.SetDeskPolicy.
+func (c *nodeServiceClient) SetDeskPolicy(ctx context.Context, req *connect.Request[v1.SetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {
+	return c.setDeskPolicy.CallUnary(ctx, req)
+}
+
+// GetDeskPolicy calls protectorate.v1.NodeService.GetDeskPolicy.
+func (c *nodeServiceClient) GetDeskPolicy(ctx context.Context, req *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {
+	return c.getDeskPolicy.CallUnary(ctx, req)
+}
+
 // NodeServiceHandler is an implementation of the protectorate.v1.NodeService service.
 type NodeServiceHandler interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -600,6 +672,13 @@ type NodeServiceHandler interface {
 	// Only the owner token may call it. The hub's own node cannot be updated
 	// this way.
 	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
+	// SetDeskPolicy sets or clears (policy unset) when agents may drive a
+	// node's desktop. Only the owner token may call it. The hub keeps the
+	// policy and sends it to the node, which enforces it.
+	SetDeskPolicy(context.Context, *connect.Request[v1.SetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error)
+	// GetDeskPolicy returns a node's policy, its current evaluation and who
+	// holds the desktop lease.
+	GetDeskPolicy(context.Context, *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error)
 }
 
 // NewNodeServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -653,6 +732,18 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("ApplyUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeServiceSetDeskPolicyHandler := connect.NewUnaryHandler(
+		NodeServiceSetDeskPolicyProcedure,
+		svc.SetDeskPolicy,
+		connect.WithSchema(nodeServiceMethods.ByName("SetDeskPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeServiceGetDeskPolicyHandler := connect.NewUnaryHandler(
+		NodeServiceGetDeskPolicyProcedure,
+		svc.GetDeskPolicy,
+		connect.WithSchema(nodeServiceMethods.ByName("GetDeskPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeServiceListNodesProcedure:
@@ -669,6 +760,10 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServiceGetFileHandler.ServeHTTP(w, r)
 		case NodeServiceApplyUpdateProcedure:
 			nodeServiceApplyUpdateHandler.ServeHTTP(w, r)
+		case NodeServiceSetDeskPolicyProcedure:
+			nodeServiceSetDeskPolicyHandler.ServeHTTP(w, r)
+		case NodeServiceGetDeskPolicyProcedure:
+			nodeServiceGetDeskPolicyHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -704,4 +799,12 @@ func (UnimplementedNodeServiceHandler) GetFile(context.Context, *connect.Request
 
 func (UnimplementedNodeServiceHandler) ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.ApplyUpdate is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) SetDeskPolicy(context.Context, *connect.Request[v1.SetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.SetDeskPolicy is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) GetDeskPolicy(context.Context, *connect.Request[v1.GetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.GetDeskPolicy is not implemented"))
 }

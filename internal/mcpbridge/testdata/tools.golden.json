@@ -971,6 +971,28 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "GetDeskPolicy returns a node's policy, its current evaluation and who holds the desktop lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allowFamily": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_get_desk_policy"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true

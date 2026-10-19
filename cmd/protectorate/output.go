@@ -230,7 +230,7 @@ func gpuSummary(gpus []*pb.GpuMetrics) string {
 }
 
 func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
-	fmt.Fprintln(w, "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tFRESHNESS\tALERTS")
+	fmt.Fprintln(w, "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tDESK\tFRESHNESS\tALERTS")
 	hubVer := hubVersionOf(r.Nodes)
 	skew := false
 	for _, s := range r.Nodes {
@@ -261,8 +261,8 @@ func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
 		if n.Local {
 			name += "*"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			name, plat, verS, cpuS, gpuS, memS, diskS, contS, nodeFreshnessLabel(s), alertLabel(s.Alerts))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			name, plat, verS, cpuS, gpuS, memS, diskS, contS, deskStatusLabel(s.Desk, s.DeskHolder, s.Desk.GetPolicy() != nil), nodeFreshnessLabel(s), alertLabel(s.Alerts))
 	}
 	fmt.Fprintln(w, "\n* the hub's own node")
 	if skew {
@@ -286,6 +286,9 @@ func writeNodeStatus(w io.Writer, s *pb.NodeStatus) {
 	fmt.Fprintf(w, "tags\t%s\n", orDash(strings.Join(n.Tags, ", ")))
 	fmt.Fprintf(w, "notes\t%s\n", orDash(n.Notes))
 	fmt.Fprintf(w, "freshness\t%s\n", nodeFreshnessLabel(s))
+	if s.Desk != nil || s.DeskHolder != "" {
+		fmt.Fprintf(w, "desk\t%s\n", deskStatusLabel(s.Desk, s.DeskHolder, s.Desk.GetPolicy() != nil))
+	}
 	if s.Error != "" {
 		fmt.Fprintf(w, "last error\t%s\n", s.Error)
 	}
