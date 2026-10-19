@@ -253,7 +253,8 @@ counts as "its own harness":
   whichever subscription has quota left, and its tool is the `protectorate`
   CLI with a scoped hub token.
 - External bridges (MCP for Claude, Grok bot, Dots, Muse) use the same scoped
-  token mechanism. "AI as orchestrator" and "AI talking to the orchestrator"
+  token mechanism (scopes, TokenService and the audit log: `docs/auth.md`).
+  "AI as orchestrator" and "AI talking to the orchestrator"
   are the same path.
 
 ## Credentials (spike 3 done: `spikes/credentials/`)

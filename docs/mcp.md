@@ -44,9 +44,18 @@ protectorate mcp --allow 'backlog_*' --allow 'quota_*'
 protectorate mcp --allow '*' --deny 'session_kill_*'
 ```
 
-The bridge uses the hub token of the user running it, so filters limit what the
-client is offered, not what the token can do. Give untrusted bridges a separate
-scoped token once the hub supports them.
+These filters only limit what the client is offered. What a bridge can actually
+do is set by the token it runs with, which the hub enforces. Give every bridge
+a scoped token (see [auth.md](auth.md)):
+
+```
+protectorate token create claude-bridge --scope read --scope 'backlog_*' --ttl 720h
+protectorate mcp --token-file ~/.protectorate/claude-bridge.token --allow 'backlog_*'
+```
+
+The token comes from `--token-file`, then env `PROTECTORATE_TOKEN`, then the
+owner token file. Scopes use the same tool names as this bridge. TokenService
+is owner-only and is never exposed as a tool.
 
 ## Registering
 
@@ -77,7 +86,7 @@ protectorate mcp --http 127.0.0.1:7480
 claude mcp add --transport http protectorate http://127.0.0.1:7480
 ```
 
-The HTTP endpoint has no authentication of its own and acts with the hub token.
+The HTTP endpoint has no authentication of its own and acts with the bridge's token.
 Keep it on loopback.
 
 ## Example tool list (`--allow '*'`)
