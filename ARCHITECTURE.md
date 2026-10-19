@@ -149,6 +149,41 @@ Design:
   requirement.
 - Windows and Android nodes run no sleeves. They're build/test targets only.
 
+## Harness sessions: attached and dispatched (spike: `spikes/drivers/`)
+
+Pending the user's confirmation that a harness's official headless mode
+counts as "its own harness":
+
+- **Attached:** the normal TUI under tmux, in a sleeve. This is what the user
+  types into from the phone.
+- **Dispatched** (backlog work, delegation): the harness's own headless
+  protocol, supervised by the hub.
+
+| Harness | Protocol | Settled signal | Approval |
+|---------|----------|----------------|----------|
+| Claude | `claude -p` stream-json in/out, `--permission-prompt-tool stdio` | `result` | `control_request can_use_tool` |
+| Codex | app-server JSON-RPC, **via the user's daemon socket** | `turn/completed` | `item/*/requestApproval` |
+| Grok | `grok agent stdio` (ACP) | `session/prompt` response | `session/request_permission` |
+| pi | `pi --mode rpc` | `agent_settled` | none built in |
+
+- **Handoff** works in both directions through native resume (`--resume`,
+  `codex resume`, `pi --session`). `{harness, cwd, session_id}` is enough to
+  resume.
+- **One owner per session id:** the hub enforces it. Only Codex enforces it
+  itself; the others let two writers corrupt the conversation.
+- **Codex:** its TUI runs through a user-level daemon that keeps the thread
+  locked, so the hub must drive that daemon's socket, not a private
+  `codex app-server`.
+- **Grok:** it honors the user's `permission_mode` config. Sending
+  `/always-approve off` on session open turns the gate on without changing
+  any config.
+- **pi:** it has no approval gate. Either treat it as ungated and rely on
+  sleeve isolation (preferred, keeps the harness untouched) or load an approval
+  extension.
+- **One protocol for all?** Not ACP: Claude, Codex and pi would each need a
+  third-party adapter. Use native drivers behind one small Go interface:
+  `Open(cwd, id) -> Session{Send, Events, Respond, Interrupt, Close}`.
+
 ## Orchestrator
 
 - The orchestrator ("Poe") is **a sleeve**, not engine code. Its harness is
