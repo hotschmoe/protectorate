@@ -28,7 +28,8 @@ covered by `chat_*`.
 - **Watch(sleeve, after_seq)** replays stored events with `seq > after_seq`,
   then streams live ones, with no gap or duplicate at the boundary.
 - **Send(sleeve, text, request_id)** starts a turn. A retry with the same
-  `request_id` (8-128 chars) returns the original `seq`. During a turn it
+  `request_id` (8-128 chars) returns the original `seq`, for an hour and across a
+  hub restart (`chat.jsonl.request-ids` beside the log). During a turn it
   steers on harnesses that can (Codex, pi) and fails with `failed_precondition`
   on the rest (Claude, Grok): interrupt first.
 - **Interrupt** cancels the running turn; a no-op when idle.

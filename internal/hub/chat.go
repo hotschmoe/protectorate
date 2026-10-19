@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/chatlog"
 	"github.com/hotschmoe/protectorate/internal/driver"
+	"github.com/hotschmoe/protectorate/internal/keylog"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
@@ -104,10 +106,13 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 		return s, nil
 	}
 	path := m.h.sleeves.ChatLogPath(name)
+	keysPath := path + ".request-ids"
 	if fresh {
-		if fi, err := os.Stat(path); err == nil && fi.Size() > 0 {
-			if err := os.Rename(path, fmt.Sprintf("%s.%d", path, time.Now().Unix())); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("move old chat log aside: %w", err))
+		for _, p := range []string{path, keysPath} {
+			if fi, err := os.Stat(p); err == nil && fi.Size() > 0 {
+				if err := os.Rename(p, fmt.Sprintf("%s.%d", p, time.Now().Unix())); err != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("move old chat log aside: %w", err))
+				}
 			}
 		}
 	}
@@ -115,7 +120,13 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	keys, saved, err := keylog.Open(keysPath, maxRequestIDs, time.Now)
+	if err != nil {
+		lg.Close()
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 	s := &chatSleeve{m: m, name: name, log: lg, approvals: map[string]bool{}, keys: sendKeys{entries: map[string]*sendEntry{}}}
+	s.keys.restore(keys, saved)
 	if c := info.Chat; c != nil {
 		s.sessionID, s.model, s.context, s.window = c.SessionID, c.Model, c.Context, c.Window
 		s.provider, s.local = c.Provider, c.LocalModel
@@ -168,6 +179,9 @@ func (m *chatManager) remove(name string) {
 	s.closeDriver()
 	if err := s.log.Close(); err != nil {
 		log.Printf("chat %s: close log: %v", name, err)
+	}
+	if err := s.keys.log.Close(); err != nil {
+		log.Printf("chat %s: close request ids: %v", name, err)
 	}
 }
 
@@ -597,8 +611,25 @@ func (s *chatSleeve) compact(ctx context.Context) (*pb.Compaction, error) {
 
 // sendKeys dedupes Send by request id for a bounded window, like SubmitJob.
 type sendKeys struct {
+	log *keylog.Log
+
 	mu      sync.Mutex
 	entries map[string]*sendEntry
+}
+
+// restore adopts the entries a previous hub persisted and records the rest in
+// log.
+func (k *sendKeys) restore(log *keylog.Log, saved []keylog.Entry) {
+	k.log = log
+	for _, p := range saved {
+		seq, err := strconv.ParseUint(p.Value, 10, 64)
+		if err != nil {
+			continue
+		}
+		e := &sendEntry{done: make(chan struct{}), seq: seq, expires: p.Expires}
+		close(e.done)
+		k.entries[p.Key] = e
+	}
 }
 
 type sendEntry struct {
@@ -646,6 +677,9 @@ func (k *sendKeys) do(ctx context.Context, key string, send func() (uint64, erro
 	e.seq, e.err = seq, err
 	if err == nil {
 		e.expires = time.Now().Add(requestIDWindow)
+		if lerr := k.log.Append(keylog.Entry{Key: key, Value: strconv.FormatUint(seq, 10), Expires: e.expires}); lerr != nil {
+			log.Printf("chat: persist request id: %v", lerr)
+		}
 	} else {
 		delete(k.entries, key)
 	}

@@ -78,13 +78,17 @@ type chatRig struct {
 	ws   string
 	name string
 	cfg  sleeve.Config
+	// harness is what spawn runs; zero means Claude.
+	harness pb.Harness
 }
 
 func newChatRig(t *testing.T) *chatRig {
 	t.Helper()
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(fakeClaude), 0o755); err != nil {
-		t.Fatal(err)
+	for _, h := range []string{"claude", "codex", "grok", "pi"} {
+		if err := os.WriteFile(filepath.Join(bin, h), []byte(fakeClaude), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	home := t.TempDir()
@@ -129,8 +133,12 @@ func newChatRig(t *testing.T) *chatRig {
 
 func (r *chatRig) spawn(mode pb.SleeveMode) *pb.Sleeve {
 	r.t.Helper()
+	harness := r.harness
+	if harness == pb.Harness_HARNESS_UNSPECIFIED {
+		harness = pb.Harness_HARNESS_CLAUDE
+	}
 	res, err := r.sl.SpawnSleeve(r.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
-		Name: r.name, Workspace: r.ws, Harness: pb.Harness_HARNESS_CLAUDE, Mode: mode,
+		Name: r.name, Workspace: r.ws, Harness: harness, Mode: mode,
 		Limits: &pb.SleeveLimits{CpuPercent: 100, MemoryBytes: 512 << 20},
 	}))
 	if err != nil {
@@ -215,6 +223,8 @@ func describe(evs []*pb.ChatEvent) string {
 			out = append(out, fmt.Sprintf("%d:approval:%s", e.Seq, b.Approval.Id))
 		case *pb.ChatEvent_ApprovalResolved:
 			out = append(out, fmt.Sprintf("%d:resolved:%s:%v:%s", e.Seq, b.ApprovalResolved.Id, b.ApprovalResolved.Allow, b.ApprovalResolved.By))
+		case *pb.ChatEvent_Error:
+			out = append(out, fmt.Sprintf("%d:error:%s", e.Seq, b.Error.Text))
 		default:
 			out = append(out, fmt.Sprintf("%d:other", e.Seq))
 		}
@@ -455,5 +465,28 @@ func TestSleeveTokenReadsOnlyItself(t *testing.T) {
 	}
 	if len(list.Msg.Sessions) != 0 {
 		t.Fatalf("another sleeve's token listed sessions: %v", list.Msg.Sessions)
+	}
+}
+
+func TestChatSendRequestIDsSurviveHubRestart(t *testing.T) {
+	r := newChatRig(t)
+	r.spawn(pb.SleeveMode_SLEEVE_MODE_UNSPECIFIED)
+	live := r.watch(0)
+	first, err := r.send("hello", "req-persist-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "turn settles", func() bool { return strings.Contains(describe(live.all()), ":settled") })
+	r.waitState(pb.ChatState_CHAT_STATE_IDLE)
+
+	r.h.chat.remove(r.name)
+	again, err := r.send("hello", "req-persist-1")
+	if err != nil || again.Seq != first.Seq {
+		t.Fatalf("send after restart: %v %v, want seq %d", err, again, first.Seq)
+	}
+	replay := r.watch(0)
+	waitFor(t, "replay", func() bool { return strings.Contains(describe(replay.all()), ":settled") })
+	if n := strings.Count(describe(replay.all()), ":user:"); n != 1 {
+		t.Fatalf("%d user messages after a deduped resend: %s", n, describe(replay.all()))
 	}
 }

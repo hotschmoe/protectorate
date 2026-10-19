@@ -336,13 +336,14 @@ node) executes.
   is selectable the instant its lease runs out. Holders that can crash should
   take a short TTL and renew it.
 - **Idempotent submit:** `SubmitJob` takes an optional `request_id` (the CLI
-  always sends a fresh 128-bit one). The hub remembers it for 1h in memory: a
+  always sends a fresh 128-bit one). The hub remembers it for 1h (kept in
+  `jobs/request-ids.jsonl`, so a restart forgets nothing): a
   repeat returns the same job, and waits if the first call is still in flight.
   A failed submit is forgotten so it can be retried. `CancelJob` accepts the
   key instead of the job id, so an interrupted CLI cancels a job whose id it
   never saw. Cancel by key awaits an in-flight submit and then cancels the
   job it created; a key the hub has not seen yet is recorded as canceled, so a
-  submit still on its way is refused (aborted). Keys are lost on a hub restart.
+  submit still on its way is refused (aborted); that record is kept too.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
   unreachable, never tier `family` unless `allow_family`, matching os, arch,
   free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`

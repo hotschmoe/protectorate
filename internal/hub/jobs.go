@@ -31,6 +31,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
+	"github.com/hotschmoe/protectorate/internal/keylog"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
 
@@ -222,6 +223,12 @@ func OpenJobs(dir string, nodes *NodeMonitor, leases *LeaseTable, local *node.Jo
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &JobManager{dir: dir, nodes: nodes, leases: leases, local: local, emit: emit, jobs: map[string]*jobEntry{}, keys: newSubmitKeys(time.Now), ctx: ctx, cancel: cancel}
+	keys, saved, err := keylog.Open(filepath.Join(dir, "request-ids.jsonl"), maxRequestIDs, time.Now)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	m.keys.restore(keys, saved)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -1135,6 +1142,9 @@ func (m *JobManager) Watch(ctx context.Context, id string, from uint64, follow b
 func (m *JobManager) Shutdown() {
 	m.cancel()
 	m.wg.Wait()
+	if m.keys.log != nil {
+		m.keys.log.Close()
+	}
 }
 
 func (h *Hub) SubmitJob(ctx context.Context, req *connect.Request[pb.SubmitJobRequest]) (*connect.Response[pb.Job], error) {

@@ -903,3 +903,26 @@ func TestArtifactDirectoryRunsInWorkdirAndKeepsModes(t *testing.T) {
 		}
 	}
 }
+
+func TestSubmitRequestIDsSurviveHubRestart(t *testing.T) {
+	e := newJobEnv(t, 1)
+	const kept, canceledFirst = "request-persist-0001", "request-persist-0002"
+	first := e.submit(t, &pb.SubmitJobRequest{RequestId: kept, Target: onNode("peer"), Command: jobtest.Script("say:once")})
+	e.wait(t, first.Id)
+	if _, err := e.jc.CancelJob(context.Background(), connect.NewRequest(&pb.CancelJobRequest{RequestId: canceledFirst})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("cancel before submit: %v", err)
+	}
+
+	e.restart(t)
+	again := e.submit(t, &pb.SubmitJobRequest{RequestId: kept, Target: onNode("peer"), Command: jobtest.Script("say:once")})
+	if again.Id != first.Id {
+		t.Fatalf("request id forgotten across the restart: %s then %s", first.Id, again.Id)
+	}
+	if n := len(e.h.jobs.List(pb.JobState_JOB_STATE_UNSPECIFIED, 0)); n != 1 {
+		t.Fatalf("%d jobs after a deduped resubmit", n)
+	}
+	_, err := e.jc.SubmitJob(context.Background(), connect.NewRequest(&pb.SubmitJobRequest{RequestId: canceledFirst, Target: onNode("peer"), Command: jobtest.Script("say:late")}))
+	if connect.CodeOf(err) != connect.CodeAborted {
+		t.Fatalf("a submit canceled by its key before it arrived must stay refused after a restart: %v", err)
+	}
+}
