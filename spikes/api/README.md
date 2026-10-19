@@ -153,6 +153,8 @@ Both clients printed events incrementally (`[345ms] sleeve.spawned`, `[1101ms] h
 
 ## Recommendation: keep Connect (with a cheap escape hatch)
 
+Ethos note: "lightweight" applies to how we interact with AI harnesses, not to the hub API. The hub API should be correct, robust and fast, so the criteria that matter are type safety across Go/Dart, schema evolution, streaming reliability and tooling robustness. Line counts, dependency counts and binary size (where B wins) are secondary. On the criteria that matter, A wins: generated types on both sides, `buf breaking` for evolution, canonical error codes with HTTP statuses, and a spec-defined stream framing with end-of-stream error trailers (NDJSON has no standard way to signal a mid-stream error or clean end, and no resume/seq contract). B's only robustness edges are rejecting unknown fields (fixable in A with a custom codec or buf.validate) and `required` in MCP schemas (fixable with annotations). Conclusion: keep Connect; the case is stronger under this ethos.
+
 At two methods the hand-written line counts are a wash (364 vs 381), and B is lighter on tooling, binary size (-2.5 MB stripped), and curl ergonomics. But B's Dart cost is O(methods + types): every message needs a hand-written class, every method a hand-written wrapper, and nothing flags drift between Go and Dart. Connect's cost is constant after the one-time setup, gives proper HTTP statuses and error codes, a binary mode, and `buf breaking` guarding schema evolution. With the stated surface (CLI, Flutter app, MCP, multi-node hub-to-node calls) one schema feeding all of them is worth +2.5 MB and five installed generators, all of which are build-time only.
 
 Mitigations to adopt:
