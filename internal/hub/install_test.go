@@ -62,7 +62,7 @@ func TestInstallScriptQuotesItsURLs(t *testing.T) {
 }
 
 // TestInstallShTarget runs the generated install.sh under each POSIX shell
-// found here, with a stub uname, and checks which build it picks.
+// found here, with a faked uname, and checks which build it picks.
 func TestInstallShTarget(t *testing.T) {
 	script, err := InstallScript("sh", "http://hub.lan:7470", "http://hs:7480")
 	if err != nil {
@@ -70,15 +70,10 @@ func TestInstallShTarget(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "install.sh")
-	if err := os.WriteFile(path, script, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stub := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(stub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	uname := "#!/bin/sh\ncase \"$1\" in\n-s) echo \"$FAKE_S\" ;;\n-m) echo \"$FAKE_M\" ;;\n-o) [ -n \"$FAKE_O\" ] || exit 1; echo \"$FAKE_O\" ;;\nesac\n"
-	if err := os.WriteFile(filepath.Join(stub, "uname"), []byte(uname), 0o755); err != nil {
+	// A shell function beats any uname on PATH, including busybox's builtin
+	// applet, so the fake holds in every shell.
+	uname := "uname() {\n\tcase \"$1\" in\n\t-s) echo \"$FAKE_S\" ;;\n\t-m) echo \"$FAKE_M\" ;;\n\t-o) [ -n \"$FAKE_O\" ] || return 1; echo \"$FAKE_O\" ;;\n\tesac\n}\n"
+	if err := os.WriteFile(path, append([]byte(uname), script...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var shells [][]string
@@ -107,7 +102,7 @@ func TestInstallShTarget(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(filepath.Base(sh[0])+"/"+tt.name, func(t *testing.T) {
 				cmd := exec.Command(sh[0], append(sh[1:], path, "--print-target")...)
-				cmd.Env = []string{"PATH=" + stub + ":" + os.Getenv("PATH"), "HOME=" + dir, "FAKE_S=" + tt.s, "FAKE_M=" + tt.m, "FAKE_O=" + tt.o}
+				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "FAKE_S=" + tt.s, "FAKE_M=" + tt.m, "FAKE_O=" + tt.o}
 				if tt.termux != "" {
 					cmd.Env = append(cmd.Env, "TERMUX_VERSION="+tt.termux)
 				}
@@ -127,7 +122,7 @@ func TestInstallShTarget(t *testing.T) {
 	}
 	t.Run("needs the key", func(t *testing.T) {
 		cmd := exec.Command(shells[0][0], append(shells[0][1:], path, "--name", "box")...)
-		cmd.Env = []string{"PATH=" + stub + ":" + os.Getenv("PATH"), "HOME=" + dir, "FAKE_S=Linux", "FAKE_M=x86_64"}
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "FAKE_S=Linux", "FAKE_M=x86_64"}
 		out, err := cmd.CombinedOutput()
 		if err == nil || !strings.Contains(string(out), "PROTECTORATE_ENROLL_KEY") {
 			t.Fatalf("err=%v\n%s", err, out)
@@ -245,6 +240,10 @@ func TestInstallEndpoints(t *testing.T) {
 	if err := os.WriteFile(self, []byte("hub's own build"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	missing := "protectorate-linux-amd64"
+	if BinaryName(runtime.GOOS, runtime.GOARCH) == missing {
+		missing = "protectorate-linux-arm64"
+	}
 	other := "windows-arm64 build"
 	if err := os.WriteFile(filepath.Join(bins, "protectorate-windows-arm64.exe"), []byte(other), 0o755); err != nil {
 		t.Fatal(err)
@@ -277,7 +276,7 @@ func TestInstallEndpoints(t *testing.T) {
 	}{
 		{"build from the binary dir", "/dl/protectorate-windows-arm64.exe", 200, other},
 		{"its digest", "/dl/protectorate-windows-arm64.exe.sha256", 200, hex.EncodeToString(sum[:]) + "  protectorate-windows-arm64.exe\n"},
-		{"missing build", "/dl/protectorate-linux-amd64", 404, "make cross"},
+		{"missing build", "/dl/" + missing, 404, "make cross"},
 		{"unknown platform", "/dl/protectorate-plan9-mips", 404, ""},
 		{"traversal", "/dl/..%2f..%2fetc%2fpasswd", 404, ""},
 		{"not a build", "/dl/token", 404, ""},
