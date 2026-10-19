@@ -82,8 +82,8 @@ verified against a live client.
 Streamable HTTP, for bridges that cannot spawn a process:
 
 ```
-protectorate mcp --http 127.0.0.1:7480
-claude mcp add --transport http protectorate http://127.0.0.1:7480 \
+protectorate mcp --http 127.0.0.1:7471
+claude mcp add --transport http protectorate http://127.0.0.1:7471 \
   --header "Authorization: Bearer $(cat $PROTECTORATE_HOME/token)"
 ```
 
@@ -92,9 +92,10 @@ gets 401. The endpoint acts with that token, so only a caller who already holds
 it can use it; this reuses the existing token machinery instead of adding a
 second secret. Requiring the bearer was chosen over only refusing non-loopback
 binds because a loopback bind still lets any local process or user, and any
-web page that can reach localhost, drive the bridge. Non-loopback binds stay
-allowed with a warning, since the token then crosses the network in cleartext:
-use a tailnet address.
+web page that can reach localhost, drive the bridge. Because the bearer is sent
+in cleartext over plain HTTP, `--http` accepts only loopback and tailnet IPs
+(100.64.0.0/10, fd7a:115c:a1e0::/48), where WireGuard encrypts it; any other
+address, including an empty host, is refused.
 
 ## Example tool list (`--allow '*'`)
 
