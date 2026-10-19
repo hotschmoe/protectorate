@@ -111,8 +111,10 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
     if (!nav.mounted) return;
     unawaited(
       nav.push(
-        MaterialPageRoute<void>(
-          builder: (_) => HubShell(
+        PageRouteBuilder<void>(
+          transitionDuration: Duration.zero,
+          reverseTransitionDuration: Duration.zero,
+          pageBuilder: (_, _, _) => HubShell(
             hub: profile,
             clientFactory: _factory,
             initialTab: req.tab,

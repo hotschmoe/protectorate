@@ -273,6 +273,7 @@ class NodeDetail extends StatelessWidget {
                               key: ValueKey('fs-${fs.mount}'),
                               label: '',
                               labelWidth: 0,
+                              trailingWidth: 200,
                               percent: fs.usedPercent,
                               trailing:
                                   '${formatPercent(fs.usedPercent)}  ${formatBytes(fs.usedBytes.toInt())} / ${formatBytes(fs.totalBytes.toInt())}',

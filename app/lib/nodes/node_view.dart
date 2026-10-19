@@ -240,6 +240,7 @@ class PercentBar extends StatelessWidget {
     required this.trailing,
     this.dim = false,
     this.labelWidth = 44,
+    this.trailingWidth = 116,
   });
 
   final String label;
@@ -247,6 +248,7 @@ class PercentBar extends StatelessWidget {
   final String trailing;
   final bool dim;
   final double labelWidth;
+  final double trailingWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -280,10 +282,10 @@ class PercentBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Flexible(
-            flex: 0,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 96),
+          SizedBox(
+            width: trailingWidth,
+            child: Align(
+              alignment: Alignment.centerRight,
               child: Text(
                 trailing,
                 textAlign: TextAlign.end,
