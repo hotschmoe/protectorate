@@ -776,8 +776,9 @@ class _Offenders extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
-    if (offenders.isEmpty)
+    if (offenders.isEmpty) {
       return Text('Nothing measured yet.', style: t.small());
+    }
     final max = offenders.first.bytes;
     return Column(
       children: [
