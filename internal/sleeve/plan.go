@@ -67,9 +67,21 @@ const envShim = `exec 3<"$1"; shift; exec "$@"`
 
 // Binary is a harness executable located on the host, with the extra
 // directories it needs mounted read-only to run.
+//
+// A chain hop that lies under a credential directory is not mounted as a
+// directory. The final regular file is bound read-only on its own (Files) and
+// each symlink hop is recreated inside the sandbox (Symlinks).
 type Binary struct {
-	Path string
-	RO   []string
+	Path     string
+	RO       []string
+	Files    []string
+	Symlinks []Link
+}
+
+// credentialFiles are base names that are never bound as a harness binary.
+var credentialFiles = map[string]bool{
+	"auth.json": true, "auth.json.lock": true, "credentials": true, "credentials.toml": true,
+	".credentials.json": true, "agent_id": true, "token": true, "id_rsa": true, "id_ed25519": true,
 }
 
 var systemDirs = []string{"/usr", "/etc", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/proc", "/dev", "/sys"}
@@ -83,19 +95,61 @@ func (c Config) Locate(h Harness) (Binary, error) {
 		if err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
 			continue
 		}
-		b := Binary{Path: p}
-		for _, dir := range symlinkDirs(p) {
-			if c.mounted(dir) || contains(b.RO, dir) {
-				continue
-			}
-			if c.touchesCredentials(dir) {
-				return Binary{}, fmt.Errorf("%w: %s resolves through %s, which would expose harness credentials", ErrUnavailable, p, dir)
-			}
-			b.RO = append(b.RO, dir)
+		b, err := c.bindChain(p)
+		if err != nil {
+			return Binary{}, err
 		}
 		return b, nil
 	}
 	return Binary{}, fmt.Errorf("%w: %s not found in %s", ErrUnavailable, h.binary(), strings.Join(c.PathDirs, ":"))
+}
+
+// bindChain works out what the sandbox must mount so p runs: each directory
+// along its symlink chain read-only, except under credential directories,
+// where only the symlinks and the final executable file are provided.
+func (c Config) bindChain(p string) (Binary, error) {
+	b := Binary{Path: p}
+	hop := p
+	for i := 0; ; i++ {
+		if i > 16 {
+			return Binary{}, fmt.Errorf("%w: %s: too many symlinks", ErrUnavailable, p)
+		}
+		dir := filepath.Dir(hop)
+		fi, err := os.Lstat(hop)
+		if err != nil {
+			return Binary{}, fmt.Errorf("%w: %s: %v", ErrUnavailable, p, err)
+		}
+		isLink := fi.Mode()&os.ModeSymlink != 0
+		switch {
+		case c.mounted(dir):
+		case !c.touchesCredentials(dir):
+			if !contains(b.RO, dir) {
+				b.RO = append(b.RO, dir)
+			}
+		case isLink:
+			t, err := os.Readlink(hop)
+			if err != nil {
+				return Binary{}, fmt.Errorf("%w: %s: %v", ErrUnavailable, p, err)
+			}
+			b.Symlinks = append(b.Symlinks, Link{Path: hop, Target: t})
+		default:
+			if !fi.Mode().IsRegular() || fi.Mode()&0o111 == 0 || credentialFiles[filepath.Base(hop)] {
+				return Binary{}, fmt.Errorf("%w: %s resolves to %s, which is not a plain executable outside credentials", ErrUnavailable, p, hop)
+			}
+			b.Files = append(b.Files, hop)
+		}
+		if !isLink {
+			return b, nil
+		}
+		t, err := os.Readlink(hop)
+		if err != nil {
+			return Binary{}, fmt.Errorf("%w: %s: %v", ErrUnavailable, p, err)
+		}
+		if !filepath.IsAbs(t) {
+			t = filepath.Join(dir, t)
+		}
+		hop = filepath.Clean(t)
+	}
 }
 
 // symlinkDirs returns the directory of p and of every symlink hop it
@@ -238,6 +292,12 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	argv = append(argv, "--bind", c.sleeveHome(spec.Name), c.UserHome)
 	for _, d := range append(append([]string(nil), c.ToolDirs...), bin.RO...) {
 		argv = append(argv, "--ro-bind", d, d)
+	}
+	for _, f := range bin.Files {
+		argv = append(argv, "--ro-bind", f, f)
+	}
+	for _, k := range bin.Symlinks {
+		argv = append(argv, "--symlink", k.Target, k.Path)
 	}
 	ro := append(append([]string(nil), c.ToolDirs...), bin.RO...)
 	for _, f := range c.masks(ro) {

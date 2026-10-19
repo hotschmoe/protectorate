@@ -237,8 +237,10 @@ Design:
   - toolchains (`~/.local/{bin,lib,opt,go}`, `~/.nvm`, `~/.cargo/bin`,
     `~/.rustup`, ...) are read-only at the same paths. `~/.cargo` and
     `~/.local/share` as a whole are not mounted; a harness binary's symlink
-    chain is mounted hop by hop and refused if a hop is a credential dir
-    (so a `grok` that resolves into `~/.grok/bin` is unavailable in sleeves).
+    chain is mounted hop by hop; under a credential dir (grok's
+    `~/.grok/bin/grok -> ../downloads/...`) only the final executable file is
+    bound and the symlink hops are recreated with `--symlink`, and a target
+    that is a credential file or not a plain executable is refused.
     `~/.cargo/credentials*` is masked with `/dev/null` if a mounted tool dir
     contains it;
   - each sleeve has its own config dirs;

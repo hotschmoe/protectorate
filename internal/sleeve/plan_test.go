@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -361,49 +362,88 @@ func TestPlanMasksCredentialFiles(t *testing.T) {
 	}
 }
 
-func TestLocateRefusesCredentialDirs(t *testing.T) {
+func TestLocateCredentialDirChains(t *testing.T) {
 	linuxHost(t)
 	uh := t.TempDir()
-	mk := func(rel string) string {
+	write := func(rel string, mode os.FileMode) string {
 		p := filepath.Join(uh, rel)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		return p
-	}
-	codex := mk(".codex/tool")
-	share := mk(".local/share/claude/versions/1")
-	for _, f := range []string{codex, share} {
-		if err := os.WriteFile(f, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), mode); err != nil {
 			t.Fatal(err)
 		}
+		return p
 	}
+	link := func(rel, target string) string {
+		p := filepath.Join(uh, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	grok := write(".grok/downloads/grok-1.0", 0o755)
+	link(".grok/bin/grok", "../downloads/grok-1.0")
+	link(".local/bin/grok", filepath.Join(uh, ".grok/bin/grok"))
+	claude := write(".local/share/claude/versions/1", 0o755)
+	link(".local/bin/claude", claude)
+	write(".codex/auth.json", 0o755)
+	link(".local/bin/codex", filepath.Join(uh, ".codex/auth.json"))
+	write(".codex/plain", 0o644)
+	link(".local/bin/pi", filepath.Join(uh, ".codex/plain"))
+
 	tests := []struct {
-		name, target string
-		wantErr      bool
-		wantRO       string
+		name    string
+		bin     string
+		wantErr bool
+		ro      []string
+		files   []string
+		links   []Link
 	}{
-		{"into credential dir", codex, true, ""},
-		{"into share versions", share, false, filepath.Dir(share)},
+		{"grok via credential dir", "grok", false, nil, []string{grok}, []Link{
+			{filepath.Join(uh, ".grok/bin/grok"), "../downloads/grok-1.0"}}},
+		{"claude via share versions", "claude", false, []string{filepath.Dir(claude)}, nil, nil},
+		{"credential file target", "codex", true, nil, nil, nil},
+		{"non-executable target", "pi", true, nil, nil, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bin := mk(".local/bin/" + strings.ReplaceAll(tt.name, " ", "-"))
-			if err := os.Symlink(tt.target, bin); err != nil {
-				t.Fatal(err)
-			}
 			c := testConfig()
 			c.UserHome, c.ToolDirs = uh, []string{filepath.Join(uh, ".local", "bin")}
 			c.PathDirs = []string{filepath.Join(uh, ".local", "bin")}
-			b, err := c.Locate(Harness(filepath.Base(bin)))
+			b, err := c.Locate(Harness(tt.bin))
 			if tt.wantErr {
 				if !errors.Is(err, ErrUnavailable) {
 					t.Fatalf("err = %v", err)
 				}
 				return
 			}
-			if err != nil || len(b.RO) != 1 || b.RO[0] != tt.wantRO {
-				t.Fatalf("RO = %v, err = %v", b.RO, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(b.RO, tt.ro) || !reflect.DeepEqual(b.Files, tt.files) || !reflect.DeepEqual(b.Symlinks, tt.links) {
+				t.Fatalf("RO %v Files %v Symlinks %v", b.RO, b.Files, b.Symlinks)
+			}
+			l, err := c.Plan(Spec{Name: "a", Harness: Shell, Workspace: "/work/x"}, b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Join(l.Argv, " ")
+			for _, f := range tt.files {
+				if !strings.Contains(args, "--ro-bind "+f+" "+f) {
+					t.Errorf("no file bind for %s", f)
+				}
+			}
+			for _, k := range tt.links {
+				if !strings.Contains(args, "--symlink "+k.Target+" "+k.Path) {
+					t.Errorf("no symlink for %s", k.Path)
+				}
+			}
+			if strings.Contains(args, "--ro-bind "+filepath.Join(uh, ".grok")+" ") {
+				t.Errorf("credential dir mounted: %s", args)
 			}
 		})
 	}
