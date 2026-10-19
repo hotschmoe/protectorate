@@ -249,7 +249,7 @@ func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
 			if m.Memory != nil {
 				memS = fmt.Sprintf("%.0f%%", m.Memory.UsedPercent)
 			}
-			if wf := node.WorstFilesystem(m); wf != nil {
+			if wf := node.PrimaryFilesystem(m); wf != nil {
 				diskS = fmt.Sprintf("%.0f%% %s", wf.UsedPercent, wf.Mount)
 			}
 			if m.Engine != nil {

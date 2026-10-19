@@ -2111,6 +2111,7 @@ class FilesystemMetrics extends $pb.GeneratedMessage {
     $fixnum.Int64? usedBytes,
     $fixnum.Int64? freeBytes,
     $core.double? usedPercent,
+    $core.bool? primary,
   }) {
     final result = FilesystemMetrics._();
     if (mount != null) result.mount = mount;
@@ -2120,6 +2121,7 @@ class FilesystemMetrics extends $pb.GeneratedMessage {
     if (usedBytes != null) result.usedBytes = usedBytes;
     if (freeBytes != null) result.freeBytes = freeBytes;
     if (usedPercent != null) result.usedPercent = usedPercent;
+    if (primary != null) result.primary = primary;
     return result;
   }
 
@@ -2150,6 +2152,7 @@ class FilesystemMetrics extends $pb.GeneratedMessage {
         6, _omitFieldNames ? '' : 'freeBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aD(7, _omitFieldNames ? '' : 'usedPercent')
+    ..aOB(8, _omitFieldNames ? '' : 'primary')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2236,6 +2239,16 @@ class FilesystemMetrics extends $pb.GeneratedMessage {
   $core.bool hasUsedPercent() => $_has(6);
   @$pb.TagNumber(7)
   void clearUsedPercent() => $_clearField(7);
+
+  /// The filesystem holding the OS or the agent home; shown as the node DISK.
+  @$pb.TagNumber(8)
+  $core.bool get primary => $_getBF(7);
+  @$pb.TagNumber(8)
+  set primary($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasPrimary() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearPrimary() => $_clearField(8);
 }
 
 class GpuMetrics extends $pb.GeneratedMessage {

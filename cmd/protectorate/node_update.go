@@ -101,27 +101,7 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 			if err != nil {
 				return err
 			}
-			var errs []error
-			matched := false
-			for _, s := range list.Msg.Nodes {
-				if !f.all && s.Node.Name != strings.ToLower(args[0]) {
-					continue
-				}
-				matched = true
-				if s.Node.Local {
-					if !f.all {
-						return errors.New(s.Node.Name + " is the hub's own node: replace the hub's binary and restart the hub")
-					}
-					continue
-				}
-				if err := updateNode(cmd, cl, s, f); err != nil {
-					errs = append(errs, fmt.Errorf("%s: %w", s.Node.Name, err))
-				}
-			}
-			if !matched {
-				return fmt.Errorf("no node %q in the inventory", args[0])
-			}
-			return errors.Join(errs...)
+			return updateNodes(cmd, cl, list.Msg.Nodes, args, f)
 		},
 	}
 	fl := c.Flags()
@@ -130,6 +110,47 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 	fl.BoolVar(&f.noWait, "no-wait", false, "return once the node swapped the binary, without waiting for it to report the new version")
 	fl.BoolVar(&f.allowFamily, "allow-family", false, "allow nodes of tier family")
 	return c
+}
+
+// updateNodes updates the named node, or every node with --all. With --all a
+// node that cannot be updated now (invited, unreachable) is skipped with a
+// printed reason; only a failed attempt makes the result an error.
+func updateNodes(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, nodes []*pb.NodeStatus, args []string, f updateFlags) error {
+	var errs []error
+	matched := false
+	for _, s := range nodes {
+		if !f.all && s.Node.Name != strings.ToLower(args[0]) {
+			continue
+		}
+		matched = true
+		if s.Node.Local {
+			if !f.all {
+				return errors.New(s.Node.Name + " is the hub's own node: replace the hub's binary and restart the hub")
+			}
+			continue
+		}
+		if f.all {
+			if why := unreachableReason(s); why != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s\tskipped: %s\n", s.Node.Name, why)
+				continue
+			}
+		}
+		if err := updateNode(cmd, cl, s, f); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s.Node.Name, err))
+		}
+	}
+	if !matched {
+		return fmt.Errorf("no node %q in the inventory", args[0])
+	}
+	return errors.Join(errs...)
+}
+
+// unreachableReason is empty when the node can be updated now.
+func unreachableReason(s *pb.NodeStatus) string {
+	if s.Freshness == pb.NodeFreshness_NODE_FRESHNESS_FRESH && s.Metrics != nil {
+		return ""
+	}
+	return "node is not reachable (" + nodeFreshnessLabel(s) + ")"
 }
 
 // updateLine renders one progress message; sending is reported only when it
@@ -160,8 +181,8 @@ func updateLine(p *pb.UpdateNodeProgress) string {
 func updateNode(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, s *pb.NodeStatus, f updateFlags) error {
 	w := cmd.OutOrStdout()
 	name := s.Node.Name
-	if s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH || s.Metrics == nil {
-		return errors.New("node is not reachable (" + nodeFreshnessLabel(s) + ")")
+	if why := unreachableReason(s); why != "" {
+		return errors.New(why)
 	}
 	stream, err := cl.UpdateNode(cmd.Context(), connect.NewRequest(&pb.UpdateNodeRequest{Name: name, AllowFamily: f.allowFamily, Force: f.force}))
 	if err != nil {

@@ -40,6 +40,7 @@ NodeMetrics _metrics({double disk = 40, double mem = 30, bool gpu = false}) =>
         ),
         FilesystemMetrics(
           mount: '/data',
+          primary: true,
           totalBytes: Int64(1000 << 30),
           usedBytes: Int64(900 << 30),
           usedPercent: disk,

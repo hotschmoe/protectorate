@@ -212,7 +212,7 @@ func TestWriteNodeList(t *testing.T) {
 			Metrics: &pb.NodeMetrics{
 				Cpu:         &pb.CpuMetrics{UsagePercent: 34.4, Load1: &load},
 				Memory:      &pb.MemoryMetrics{UsedPercent: 21.7},
-				Filesystems: []*pb.FilesystemMetrics{{Mount: "/", UsedPercent: 36.7}, {Mount: "/data", UsedPercent: 91}},
+				Filesystems: []*pb.FilesystemMetrics{{Mount: "/", UsedPercent: 36.7}, {Mount: "/data", UsedPercent: 91, Primary: true}},
 				Gpus:        []*pb.GpuMetrics{{UtilizationPercent: 10, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 8 << 30}, {UtilizationPercent: 30, MemoryUsedBytes: 1 << 30, MemoryTotalBytes: 8 << 30}},
 				Engine:      &pb.ContainerEngine{Containers: []*pb.ContainerMetrics{{}, {}}},
 			},

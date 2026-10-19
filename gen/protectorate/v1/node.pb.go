@@ -2011,14 +2011,16 @@ func (x *MemoryMetrics) GetSwapUsedPercent() float64 {
 }
 
 type FilesystemMetrics struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Mount         string                 `protobuf:"bytes,1,opt,name=mount,proto3" json:"mount,omitempty"`
-	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
-	Fstype        string                 `protobuf:"bytes,3,opt,name=fstype,proto3" json:"fstype,omitempty"`
-	TotalBytes    uint64                 `protobuf:"varint,4,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
-	UsedBytes     uint64                 `protobuf:"varint,5,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
-	FreeBytes     uint64                 `protobuf:"varint,6,opt,name=free_bytes,json=freeBytes,proto3" json:"free_bytes,omitempty"`
-	UsedPercent   float64                `protobuf:"fixed64,7,opt,name=used_percent,json=usedPercent,proto3" json:"used_percent,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Mount       string                 `protobuf:"bytes,1,opt,name=mount,proto3" json:"mount,omitempty"`
+	Device      string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
+	Fstype      string                 `protobuf:"bytes,3,opt,name=fstype,proto3" json:"fstype,omitempty"`
+	TotalBytes  uint64                 `protobuf:"varint,4,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	UsedBytes   uint64                 `protobuf:"varint,5,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	FreeBytes   uint64                 `protobuf:"varint,6,opt,name=free_bytes,json=freeBytes,proto3" json:"free_bytes,omitempty"`
+	UsedPercent float64                `protobuf:"fixed64,7,opt,name=used_percent,json=usedPercent,proto3" json:"used_percent,omitempty"`
+	// The filesystem holding the OS or the agent home; shown as the node DISK.
+	Primary       bool `protobuf:"varint,8,opt,name=primary,proto3" json:"primary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2100,6 +2102,13 @@ func (x *FilesystemMetrics) GetUsedPercent() float64 {
 		return x.UsedPercent
 	}
 	return 0
+}
+
+func (x *FilesystemMetrics) GetPrimary() bool {
+	if x != nil {
+		return x.Primary
+	}
+	return false
 }
 
 type GpuMetrics struct {
@@ -3856,7 +3865,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\fused_percent\x18\x04 \x01(\x01R\vusedPercent\x12(\n" +
 	"\x10swap_total_bytes\x18\x05 \x01(\x04R\x0eswapTotalBytes\x12&\n" +
 	"\x0fswap_used_bytes\x18\x06 \x01(\x04R\rswapUsedBytes\x12*\n" +
-	"\x11swap_used_percent\x18\a \x01(\x01R\x0fswapUsedPercent\"\xdb\x01\n" +
+	"\x11swap_used_percent\x18\a \x01(\x01R\x0fswapUsedPercent\"\xf5\x01\n" +
 	"\x11FilesystemMetrics\x12\x14\n" +
 	"\x05mount\x18\x01 \x01(\tR\x05mount\x12\x16\n" +
 	"\x06device\x18\x02 \x01(\tR\x06device\x12\x16\n" +
@@ -3867,7 +3876,8 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"used_bytes\x18\x05 \x01(\x04R\tusedBytes\x12\x1d\n" +
 	"\n" +
 	"free_bytes\x18\x06 \x01(\x04R\tfreeBytes\x12!\n" +
-	"\fused_percent\x18\a \x01(\x01R\vusedPercent\"\x8a\x02\n" +
+	"\fused_percent\x18\a \x01(\x01R\vusedPercent\x12\x18\n" +
+	"\aprimary\x18\b \x01(\bR\aprimary\"\x8a\x02\n" +
 	"\n" +
 	"GpuMetrics\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x16\n" +

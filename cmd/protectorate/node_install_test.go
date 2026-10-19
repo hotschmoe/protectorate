@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -341,5 +342,48 @@ func TestUpdateHelpers(t *testing.T) {
 		if got := versionCell(tt.node, tt.hub); got != tt.want {
 			t.Errorf("versionCell(%q,%q) = %q, want %q", tt.node, tt.hub, got, tt.want)
 		}
+	}
+}
+
+func TestLingerNote(t *testing.T) {
+	const hint = "loginctl enable-linger"
+	tests := []struct {
+		name, out, linger string
+		wantHint          int
+		wantEnabled       int
+	}{
+		{"linger off", "Linger=no\n", "no", 1, 0},
+		{"linger on", "Linger=yes\n", "yes", 0, 1},
+		{"unknown", "", "", 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := lingerValue(tt.out); got != tt.linger {
+				t.Fatalf("lingerValue = %q, want %q", got, tt.linger)
+			}
+			steps, err := planInstall(installInput{GOOS: "linux", Exe: "/p", UserHome: "/h", Home: "/h/.p", Control: "http://hub", Linger: tt.linger})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var dry, ran bytes.Buffer
+			printSteps(&dry, steps)
+			var notes []installStep
+			for _, s := range steps {
+				if s.Kind == stepNote {
+					notes = append(notes, s)
+				}
+			}
+			if err := runSteps(context.Background(), &ran, &ran, notes, nil); err != nil {
+				t.Fatal(err)
+			}
+			for name, out := range map[string]string{"dry run": dry.String(), "run": ran.String()} {
+				if n := strings.Count(out, hint); n != tt.wantHint {
+					t.Errorf("%s prints the hint %d times, want %d:\n%s", name, n, tt.wantHint, out)
+				}
+				if n := strings.Count(out, "linger is enabled"); n != tt.wantEnabled {
+					t.Errorf("%s prints 'linger is enabled' %d times, want %d", name, n, tt.wantEnabled)
+				}
+			}
+		})
 	}
 }
