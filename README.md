@@ -17,13 +17,15 @@ clients (desktop, Android, web) talk to the same API.
 
 | Area | Commands | Notes |
 |------|----------|-------|
-| Subscription quota (P1) | `quota [--refresh]` | Claude, Codex, Grok, Antigravity, local LLM; resets, reset credits, projected unused; never refreshes tokens or redeems resets |
+| Subscription quota (P1) | `quota [--refresh]`, `quota suggest` | Claude, Codex, Grok, Antigravity, local LLM; resets, reset credits, projected unused; never refreshes tokens or redeems resets |
 | Sessions (P4) | `session ls/new/attach/capture/kill` | tmux on a dedicated socket; WebSocket terminal at `/ws/terminal/{name}` |
 | Sleeves (P7, P8) | `sleeve spawn/ls/show/attach/kill` | bwrap + systemd user scope: PID isolation, CPU/memory caps, shared live credentials |
 | Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, GPU, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
-| Tailnet | `hub tailnet install/init`, `node invite/join/revoke`, `client invite` | embedded tsnet + supervised Headscale; WhoIs gating; verified with a Windows node |
+| Tailnet | `hub tailnet install/init`, `tailnet status`, `node invite/join/revoke`, `client invite` | embedded tsnet + supervised Headscale; in-process DERP relay over TLS with a pinned self-signed cert; WhoIs gating; verified direct and relay-only with a Windows node |
+| Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
+| Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("poe") with a scoped token, driving the hub through the CLI |
 | Backlog (P6) | `backlog ls/add/claim/done/edit` | one markdown file on the hub; items link to GitHub issues |
-| Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; append-only audit log |
+| Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |
 | Clients | `pair`, `mcp`, `hub serve --web` | QR pairing with a scoped device token; MCP tools generated from the API |
 | Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
 
