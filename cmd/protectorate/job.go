@@ -48,8 +48,8 @@ func jobCmd(o *opts) *cobra.Command {
 	return c
 }
 
-// parseTarget reads --on: a lease id, a selector such as os=windows,arch=amd64,
-// or a node name.
+// parseTarget reads --on: a lease id, a selector such as os=windows,arch=amd64
+// or gpu:adreno, or a node name. Node names have no '=' or ':'.
 func parseTarget(on string, allowFamily bool) (*pb.JobTarget, error) {
 	t := &pb.JobTarget{AllowFamily: allowFamily}
 	switch {
@@ -57,7 +57,7 @@ func parseTarget(on string, allowFamily bool) (*pb.JobTarget, error) {
 		return nil, errors.New("--on is required: a node, a lease id or a selector like os=windows,arch=amd64")
 	case leaseIDRe.MatchString(on):
 		t.Target = &pb.JobTarget_LeaseId{LeaseId: on}
-	case strings.Contains(on, "="):
+	case strings.ContainsAny(on, "=:"):
 		sel, err := parseSelector(on)
 		if err != nil {
 			return nil, err
@@ -72,9 +72,20 @@ func parseTarget(on string, allowFamily bool) (*pb.JobTarget, error) {
 func parseSelector(s string) (*pb.NodeSelector, error) {
 	sel := &pb.NodeSelector{}
 	for _, kv := range strings.Split(s, ",") {
+		if k, v, ok := strings.Cut(kv, ":"); ok && (k == "gpu" || k == "npu") {
+			if v == "" {
+				return nil, fmt.Errorf("bad selector term %q, want %s:<vendor or name>", kv, k)
+			}
+			if k == "gpu" {
+				sel.Gpu = v
+			} else {
+				sel.Npu = v
+			}
+			continue
+		}
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok || v == "" {
-			return nil, fmt.Errorf("bad selector term %q, want key=value", kv)
+			return nil, fmt.Errorf("bad selector term %q, want key=value, gpu:<text> or npu:<text>", kv)
 		}
 		var err error
 		switch k {
@@ -87,7 +98,7 @@ func parseSelector(s string) (*pb.NodeSelector, error) {
 		case "gpu-vram", "vram":
 			sel.GpuVramBytes, err = parseSize(v)
 		default:
-			return nil, fmt.Errorf("unknown selector key %q (os, arch, mem, gpu-vram)", k)
+			return nil, fmt.Errorf("unknown selector key %q (os, arch, mem, gpu-vram, gpu:, npu:)", k)
 		}
 		if err != nil {
 			return nil, err
@@ -134,8 +145,8 @@ func jobRunCmd(o *opts) *cobra.Command {
 		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
 		Long: `Run a command on a node chosen by --on: a node name, a lease id, or a selector
-such as os=windows,arch=amd64,mem=8G (least-loaded fresh match, never a leased
-node). The command runs in:
+such as os=windows,arch=amd64,mem=8G or gpu:adreno,npu:hexagon (least-loaded
+fresh match, never a leased node). The command runs in:
 
   --git repo@commit   a per-repo worktree on the node, reused by later jobs so
                       build caches (target/, node_modules) stay warm
@@ -189,7 +200,7 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 		},
 	}
 	f := c.Flags()
-	f.StringVar(&on, "on", "", "node name, lease id or selector (os=,arch=,mem=,gpu-vram=)")
+	f.StringVar(&on, "on", "", "node name, lease id or selector (os=,arch=,mem=,gpu-vram=,gpu:<text>,npu:<text>)")
 	f.StringVar(&gitSrc, "git", "", "run a commit of a git repository on the hub: <repo>[@<commit>]")
 	f.StringVar(&artifact, "artifact", "", "run in a job directory holding this file or directory from the hub")
 	f.StringVar(&workdir, "workdir", "", "with --artifact <dir>: run in this subdirectory of it")

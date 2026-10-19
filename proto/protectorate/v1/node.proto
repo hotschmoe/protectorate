@@ -369,7 +369,8 @@ message NodeMetrics {
   CpuMetrics cpu = 8;
   MemoryMetrics memory = 9;
   repeated FilesystemMetrics filesystems = 10;
-  // gpus is empty when the node has none or no vendor tool is present.
+  // gpus lists discrete and integrated GPUs: discrete first, then integrated.
+  // Virtual display adapters are left out.
   repeated GpuMetrics gpus = 11;
   // engine is unset when no container engine is reachable.
   ContainerEngine engine = 12;
@@ -379,6 +380,8 @@ message NodeMetrics {
   // sleeves lists the sleeves running on this node with their usage; only the
   // hub's own node has any.
   repeated Sleeve sleeves = 15;
+  // npus lists neural processing units.
+  repeated AcceleratorMetrics npus = 16;
 }
 
 message CpuMetrics {
@@ -414,14 +417,46 @@ message FilesystemMetrics {
 
 message GpuMetrics {
   int32 index = 1;
+  // vendor is lowercase: nvidia, amd, intel, qualcomm, arm, ...
   string vendor = 2;
   string name = 3;
-  // utilization_percent is -1 when the device does not report it.
+  // utilization_percent is -1 when the device does not report it. For Intel
+  // GPUs on Linux without xpu-smi it is the share of time the render tile
+  // was out of its idle power state.
   double utilization_percent = 4;
-  uint64 memory_used_bytes = 5;
+  // memory_* are dedicated VRAM. An integrated GPU shares system memory and
+  // reports neither. memory_used_bytes is unset when the driver does not
+  // report it (Intel xe on Linux without xpu-smi).
+  optional uint64 memory_used_bytes = 5;
   uint64 memory_total_bytes = 6;
   // temperature_celsius is -1 when the device does not report it.
   double temperature_celsius = 7;
+  // integrated is set for a GPU on the SoC or CPU package.
+  bool integrated = 8;
+  // driver is the kernel driver (Linux) or driver service (Windows), with its
+  // version when known, e.g. "xe", "mali r53p0-00eac0", "igfxnd 32.0.101.8805".
+  string driver = 9;
+  // bus_id identifies the adapter: the PCI address (0000:0b:00.0) or the
+  // platform device (CIXH5000:00, ACPI\VEN_QCOM&DEV_0F36...). Empty for
+  // GPUs reported by nvidia-smi and rocm-smi.
+  string bus_id = 10;
+}
+
+// AcceleratorMetrics describes a compute accelerator that is not a GPU.
+message AcceleratorMetrics {
+  // kind is "npu".
+  string kind = 1;
+  // vendor is lowercase: intel, amd, qualcomm, armchina, ...
+  string vendor = 2;
+  string name = 3;
+  // driver is as in GpuMetrics.driver.
+  string driver = 4;
+  // utilization_percent is -1 when the device does not report it.
+  double utilization_percent = 5;
+  // frequency_hz is the current clock, 0 when unknown.
+  uint64 frequency_hz = 6;
+  // bus_id is as in GpuMetrics.bus_id.
+  string bus_id = 7;
 }
 
 message ContainerEngine {

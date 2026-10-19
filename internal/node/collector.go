@@ -67,6 +67,12 @@ type Collector struct {
 	cpuMu   sync.Mutex
 	cpuPrev *cpu.TimesStat
 
+	// accel state is guarded by collectMu; the inventory is redone after
+	// SlowInterval.
+	accel     accelProbe
+	accelDevs []accelDevice
+	accelAt   time.Time
+
 	slowMu sync.RWMutex
 	dirs   []*pb.DirSize
 	df     *dockerDF
@@ -75,7 +81,7 @@ type Collector struct {
 
 func NewCollector(opts Options) *Collector {
 	opts = opts.withDefaults()
-	return &Collector{opts: opts, docker: newDockerClient(opts.DockerHost), probes: newFSProber()}
+	return &Collector{opts: opts, docker: newDockerClient(opts.DockerHost), probes: newFSProber(), accel: newAccelProbe()}
 }
 
 // Run measures the slow-changing figures now and then every SlowInterval
@@ -188,9 +194,9 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 		}
 	})
 	run(func() {
-		g := gpuMetrics(ctx)
+		g, n := c.accelMetrics(ctx)
 		mu.Lock()
-		m.Gpus = g
+		m.Gpus, m.Npus = g, n
 		mu.Unlock()
 	})
 	run(func() {

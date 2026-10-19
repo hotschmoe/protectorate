@@ -620,6 +620,14 @@ const NodeMetrics$json = {
       '6': '.protectorate.v1.Sleeve',
       '10': 'sleeves'
     },
+    {
+      '1': 'npus',
+      '3': 16,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.AcceleratorMetrics',
+      '10': 'npus'
+    },
   ],
 };
 
@@ -636,7 +644,8 @@ final $typed_data.Uint8List nodeMetricsDescriptor = $convert.base64Decode(
     'dGUudjEuR3B1TWV0cmljc1IEZ3B1cxI4CgZlbmdpbmUYDCABKAsyIC5wcm90ZWN0b3JhdGUudj'
     'EuQ29udGFpbmVyRW5naW5lUgZlbmdpbmUSNwoKd2F0Y2hfZGlycxgNIAMoCzIYLnByb3RlY3Rv'
     'cmF0ZS52MS5EaXJTaXplUgl3YXRjaERpcnMSGgoId2FybmluZ3MYDiADKAlSCHdhcm5pbmdzEj'
-    'EKB3NsZWV2ZXMYDyADKAsyFy5wcm90ZWN0b3JhdGUudjEuU2xlZXZlUgdzbGVldmVz');
+    'EKB3NsZWV2ZXMYDyADKAsyFy5wcm90ZWN0b3JhdGUudjEuU2xlZXZlUgdzbGVldmVzEjcKBG5w'
+    'dXMYECADKAsyIy5wcm90ZWN0b3JhdGUudjEuQWNjZWxlcmF0b3JNZXRyaWNzUgRucHVz');
 
 @$core.Deprecated('Use cpuMetricsDescriptor instead')
 const CpuMetrics$json = {
@@ -722,7 +731,15 @@ const GpuMetrics$json = {
       '5': 1,
       '10': 'utilizationPercent'
     },
-    {'1': 'memory_used_bytes', '3': 5, '4': 1, '5': 4, '10': 'memoryUsedBytes'},
+    {
+      '1': 'memory_used_bytes',
+      '3': 5,
+      '4': 1,
+      '5': 4,
+      '9': 0,
+      '10': 'memoryUsedBytes',
+      '17': true
+    },
     {
       '1': 'memory_total_bytes',
       '3': 6,
@@ -737,6 +754,12 @@ const GpuMetrics$json = {
       '5': 1,
       '10': 'temperatureCelsius'
     },
+    {'1': 'integrated', '3': 8, '4': 1, '5': 8, '10': 'integrated'},
+    {'1': 'driver', '3': 9, '4': 1, '5': 9, '10': 'driver'},
+    {'1': 'bus_id', '3': 10, '4': 1, '5': 9, '10': 'busId'},
+  ],
+  '8': [
+    {'1': '_memory_used_bytes'},
   ],
 };
 
@@ -744,9 +767,38 @@ const GpuMetrics$json = {
 final $typed_data.Uint8List gpuMetricsDescriptor = $convert.base64Decode(
     'CgpHcHVNZXRyaWNzEhQKBWluZGV4GAEgASgFUgVpbmRleBIWCgZ2ZW5kb3IYAiABKAlSBnZlbm'
     'RvchISCgRuYW1lGAMgASgJUgRuYW1lEi8KE3V0aWxpemF0aW9uX3BlcmNlbnQYBCABKAFSEnV0'
-    'aWxpemF0aW9uUGVyY2VudBIqChFtZW1vcnlfdXNlZF9ieXRlcxgFIAEoBFIPbWVtb3J5VXNlZE'
-    'J5dGVzEiwKEm1lbW9yeV90b3RhbF9ieXRlcxgGIAEoBFIQbWVtb3J5VG90YWxCeXRlcxIvChN0'
-    'ZW1wZXJhdHVyZV9jZWxzaXVzGAcgASgBUhJ0ZW1wZXJhdHVyZUNlbHNpdXM=');
+    'aWxpemF0aW9uUGVyY2VudBIvChFtZW1vcnlfdXNlZF9ieXRlcxgFIAEoBEgAUg9tZW1vcnlVc2'
+    'VkQnl0ZXOIAQESLAoSbWVtb3J5X3RvdGFsX2J5dGVzGAYgASgEUhBtZW1vcnlUb3RhbEJ5dGVz'
+    'Ei8KE3RlbXBlcmF0dXJlX2NlbHNpdXMYByABKAFSEnRlbXBlcmF0dXJlQ2Vsc2l1cxIeCgppbn'
+    'RlZ3JhdGVkGAggASgIUgppbnRlZ3JhdGVkEhYKBmRyaXZlchgJIAEoCVIGZHJpdmVyEhUKBmJ1'
+    'c19pZBgKIAEoCVIFYnVzSWRCFAoSX21lbW9yeV91c2VkX2J5dGVz');
+
+@$core.Deprecated('Use acceleratorMetricsDescriptor instead')
+const AcceleratorMetrics$json = {
+  '1': 'AcceleratorMetrics',
+  '2': [
+    {'1': 'kind', '3': 1, '4': 1, '5': 9, '10': 'kind'},
+    {'1': 'vendor', '3': 2, '4': 1, '5': 9, '10': 'vendor'},
+    {'1': 'name', '3': 3, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'driver', '3': 4, '4': 1, '5': 9, '10': 'driver'},
+    {
+      '1': 'utilization_percent',
+      '3': 5,
+      '4': 1,
+      '5': 1,
+      '10': 'utilizationPercent'
+    },
+    {'1': 'frequency_hz', '3': 6, '4': 1, '5': 4, '10': 'frequencyHz'},
+    {'1': 'bus_id', '3': 7, '4': 1, '5': 9, '10': 'busId'},
+  ],
+};
+
+/// Descriptor for `AcceleratorMetrics`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List acceleratorMetricsDescriptor = $convert.base64Decode(
+    'ChJBY2NlbGVyYXRvck1ldHJpY3MSEgoEa2luZBgBIAEoCVIEa2luZBIWCgZ2ZW5kb3IYAiABKA'
+    'lSBnZlbmRvchISCgRuYW1lGAMgASgJUgRuYW1lEhYKBmRyaXZlchgEIAEoCVIGZHJpdmVyEi8K'
+    'E3V0aWxpemF0aW9uX3BlcmNlbnQYBSABKAFSEnV0aWxpemF0aW9uUGVyY2VudBIhCgxmcmVxdW'
+    'VuY3lfaHoYBiABKARSC2ZyZXF1ZW5jeUh6EhUKBmJ1c19pZBgHIAEoCVIFYnVzSWQ=');
 
 @$core.Deprecated('Use containerEngineDescriptor instead')
 const ContainerEngine$json = {
@@ -1447,6 +1499,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveLimits': $2.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $2.SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
+  '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
   '.protectorate.v1.PrepareJobRequest': $4.PrepareJobRequest$json,
   '.protectorate.v1.PrepareJobResponse': $4.PrepareJobResponse$json,
@@ -1621,6 +1674,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveLimits': $2.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $2.SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
+  '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,

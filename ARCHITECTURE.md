@@ -346,7 +346,8 @@ node) executes.
   which also fails every running job.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
   unreachable, never tier `family` unless `allow_family`, matching os, arch,
-  free memory and (for GPUs) free VRAM, and not under a conflicting lease.
+  free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`
+  text, (for GPUs) free VRAM, and not under a conflicting lease.
   Load is `(cpu% + mem%)/2` plus one core's worth per job already placed, so a
   burst of submits spreads out; a node that already ran a job from the same
   repo counts 20 points lighter, because its `target/` is warm.

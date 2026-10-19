@@ -48,6 +48,8 @@ const NodeSelector$json = {
       '10': 'minFreeMemoryBytes'
     },
     {'1': 'gpu_vram_bytes', '3': 4, '4': 1, '5': 4, '10': 'gpuVramBytes'},
+    {'1': 'gpu', '3': 5, '4': 1, '5': 9, '10': 'gpu'},
+    {'1': 'npu', '3': 6, '4': 1, '5': 9, '10': 'npu'},
   ],
 };
 
@@ -55,7 +57,8 @@ const NodeSelector$json = {
 final $typed_data.Uint8List nodeSelectorDescriptor = $convert.base64Decode(
     'CgxOb2RlU2VsZWN0b3ISDgoCb3MYASABKAlSAm9zEhIKBGFyY2gYAiABKAlSBGFyY2gSMQoVbW'
     'luX2ZyZWVfbWVtb3J5X2J5dGVzGAMgASgEUhJtaW5GcmVlTWVtb3J5Qnl0ZXMSJAoOZ3B1X3Zy'
-    'YW1fYnl0ZXMYBCABKARSDGdwdVZyYW1CeXRlcw==');
+    'YW1fYnl0ZXMYBCABKARSDGdwdVZyYW1CeXRlcxIQCgNncHUYBSABKAlSA2dwdRIQCgNucHUYBi'
+    'ABKAlSA25wdQ==');
 
 @$core.Deprecated('Use acquireLeaseRequestDescriptor instead')
 const AcquireLeaseRequest$json = {

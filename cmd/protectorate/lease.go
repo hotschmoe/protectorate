@@ -45,12 +45,12 @@ func defaultHolder() string {
 }
 
 func leaseAcquireCmd(o *opts) *cobra.Command {
-	var resource, osName, arch, mem, vram, holder string
+	var resource, osName, arch, mem, vram, gpu, npu, holder string
 	var ttl time.Duration
 	var allowFamily, wait bool
 	var priority int32
 	c := &cobra.Command{
-		Use:   "acquire [--node <name[:gpuN]> | --os <os> --arch <arch> --min-free-mem 8G --gpu-vram 24G] --ttl 30m",
+		Use:   "acquire [--node <name[:gpuN]> | --os <os> --arch <arch> --min-free-mem 8G --gpu-vram 24G --gpu <text> --npu <text>] --ttl 30m",
 		Short: "Reserve a node, a GPU, or the least-loaded node matching a selector",
 		Long: `Print the lease id and the chosen resource. The lease expires unless renewed
 before the TTL runs out (lease renew), so a crashed holder frees the hardware.
@@ -64,7 +64,7 @@ with 'lease renew <id>'. Without --wait a held resource is an error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			req := &pb.AcquireLeaseRequest{Holder: holder, Ttl: durationpb.New(ttl), AllowFamily: allowFamily, Wait: wait, Priority: priority}
-			sel := &pb.NodeSelector{Os: osName, Arch: arch}
+			sel := &pb.NodeSelector{Os: osName, Arch: arch, Gpu: gpu, Npu: npu}
 			var err error
 			if sel.MinFreeMemoryBytes, err = parseOptSize(mem); err != nil {
 				return err
@@ -73,7 +73,7 @@ with 'lease renew <id>'. Without --wait a held resource is an error.`,
 				return err
 			}
 			if resource != "" {
-				if osName != "" || arch != "" || mem != "" || vram != "" {
+				if osName != "" || arch != "" || mem != "" || vram != "" || gpu != "" || npu != "" {
 					return fmt.Errorf("--node and selector flags are exclusive")
 				}
 				req.Target = &pb.AcquireLeaseRequest_Resource{Resource: resource}
@@ -97,6 +97,8 @@ with 'lease renew <id>'. Without --wait a held resource is an error.`,
 	f.StringVar(&arch, "arch", "", "required GOARCH, e.g. arm64")
 	f.StringVar(&mem, "min-free-mem", "", "least available memory, e.g. 8G")
 	f.StringVar(&vram, "gpu-vram", "", "reserve one GPU with at least this much free VRAM, e.g. 24G")
+	f.StringVar(&gpu, "gpu", "", "require a GPU whose vendor or name contains this, e.g. adreno")
+	f.StringVar(&npu, "npu", "", "require an NPU whose vendor or name contains this, e.g. hexagon")
 	f.StringVar(&holder, "holder", defaultHolder(), "who holds the lease")
 	f.DurationVar(&ttl, "ttl", 30*time.Minute, "lease lifetime without a renewal (at most 24h)")
 	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")

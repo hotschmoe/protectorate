@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -245,7 +246,7 @@ func status(name, tier string, fresh pb.NodeFreshness, os, arch string, cpu, mem
 }
 
 func gpu(idx int32, used, total uint64) *pb.GpuMetrics {
-	return &pb.GpuMetrics{Index: idx, MemoryUsedBytes: used, MemoryTotalBytes: total}
+	return &pb.GpuMetrics{Index: idx, MemoryUsedBytes: proto.Uint64(used), MemoryTotalBytes: total}
 }
 
 const gib = 1 << 30
@@ -348,6 +349,49 @@ func TestPickNode(t *testing.T) {
 	}
 }
 
+func TestNodeFitsAccelerators(t *testing.T) {
+	none := func(string, *int) *pb.Lease { return nil }
+	fresh := pb.NodeFreshness_NODE_FRESHNESS_FRESH
+	snap := status("snap", TierServer, fresh, "windows", "arm64", 5, 30, 12, 16*gib,
+		&pb.GpuMetrics{Index: 0, Vendor: "qualcomm", Name: "Qualcomm Adreno X2-90 GPU", Integrated: true})
+	snap.Metrics.Npus = []*pb.AcceleratorMetrics{{Kind: "npu", Vendor: "qualcomm", Name: "Snapdragon X2 Elite Extreme - X2E94100 - Qualcomm Hexagon NPU"}}
+	office := status("office", TierServer, fresh, "windows", "amd64", 5, 30, 20, 16*gib,
+		&pb.GpuMetrics{Index: 0, Vendor: "intel", Name: "Intel Arc Pro B50 Graphics", MemoryUsedBytes: proto.Uint64(3 * gib), MemoryTotalBytes: 16 * gib},
+		&pb.GpuMetrics{Index: 1, Vendor: "intel", Name: "Intel Graphics", Integrated: true})
+	llm := status("llm", TierServer, fresh, "linux", "amd64", 5, 30, 32, 64*gib,
+		&pb.GpuMetrics{Index: 0, Vendor: "intel", Name: "Battlemage G31 [Intel Graphics]", MemoryTotalBytes: 32 * gib},
+		&pb.GpuMetrics{Index: 1, Vendor: "intel", Name: "Battlemage G31 [Intel Graphics]", MemoryTotalBytes: 32 * gib})
+	tests := []struct {
+		name    string
+		st      *pb.NodeStatus
+		sel     *pb.NodeSelector
+		wantGPU int
+		why     string
+	}{
+		{"gpu by name", snap, &pb.NodeSelector{Gpu: "adreno"}, -1, ""},
+		{"gpu by vendor, any case", snap, &pb.NodeSelector{Gpu: "QUALCOMM"}, -1, ""},
+		{"npu by name", snap, &pb.NodeSelector{Npu: "hexagon"}, -1, ""},
+		{"no such npu", office, &pb.NodeSelector{Npu: "hexagon"}, -1, "no npu matching hexagon"},
+		{"no such gpu", snap, &pb.NodeSelector{Gpu: "arc"}, -1, "no gpu matching arc"},
+		{"integrated gpu has no vram to reserve", snap, &pb.NodeSelector{Gpu: "adreno", GpuVramBytes: gib}, -1, "no free gpu"},
+		{"vram reserves the matching discrete gpu", office, &pb.NodeSelector{Gpu: "arc", GpuVramBytes: 8 * gib}, 0, ""},
+		{"vram respects the gpu filter", office, &pb.NodeSelector{Gpu: "intel graphics", GpuVramBytes: 8 * gib}, -1, "no free gpu"},
+		{"unknown use counts as free", llm, &pb.NodeSelector{Gpu: "battlemage", GpuVramBytes: 24 * gib}, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g, why := nodeFits(tt.st, tt.sel, false, none)
+			got := -1
+			if g != nil {
+				got = *g
+			}
+			if !strings.Contains(why, tt.why) || (tt.why == "" && why != "") || got != tt.wantGPU {
+				t.Fatalf("nodeFits = gpu %d %q, want gpu %d %q", got, why, tt.wantGPU, tt.why)
+			}
+		})
+	}
+}
+
 func TestParseResource(t *testing.T) {
 	tests := []struct {
 		in      string
@@ -419,7 +463,7 @@ func TestLeaseServiceEndToEnd(t *testing.T) {
 		t.Fatalf("lease job = %v", held)
 	}
 
-	if _, err := acquire(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: other + ":gpu0"}, Holder: "bob", Ttl: ttl}); connect.CodeOf(err) != connect.CodeNotFound {
+	if _, err := acquire(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: other + ":gpu99"}, Holder: "bob", Ttl: ttl}); connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("gpu that does not exist: %v", err)
 	}
 	if _, err := acquire(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "ghost"}, Holder: "bob", Ttl: ttl}); connect.CodeOf(err) != connect.CodeNotFound {

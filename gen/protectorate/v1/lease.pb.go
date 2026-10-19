@@ -82,7 +82,14 @@ type NodeSelector struct {
 	MinFreeMemoryBytes uint64 `protobuf:"varint,3,opt,name=min_free_memory_bytes,json=minFreeMemoryBytes,proto3" json:"min_free_memory_bytes,omitempty"`
 	// gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease
 	// then reserves that GPU instead of the whole node.
-	GpuVramBytes  uint64 `protobuf:"varint,4,opt,name=gpu_vram_bytes,json=gpuVramBytes,proto3" json:"gpu_vram_bytes,omitempty"`
+	GpuVramBytes uint64 `protobuf:"varint,4,opt,name=gpu_vram_bytes,json=gpuVramBytes,proto3" json:"gpu_vram_bytes,omitempty"`
+	// gpu requires a GPU whose vendor or name contains this text, ignoring
+	// case (e.g. "adreno", "intel"); with gpu_vram_bytes the reserved GPU must
+	// match it too.
+	Gpu string `protobuf:"bytes,5,opt,name=gpu,proto3" json:"gpu,omitempty"`
+	// npu requires an NPU whose vendor or name contains this text, ignoring
+	// case (e.g. "hexagon").
+	Npu           string `protobuf:"bytes,6,opt,name=npu,proto3" json:"npu,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -143,6 +150,20 @@ func (x *NodeSelector) GetGpuVramBytes() uint64 {
 		return x.GpuVramBytes
 	}
 	return 0
+}
+
+func (x *NodeSelector) GetGpu() string {
+	if x != nil {
+		return x.Gpu
+	}
+	return ""
+}
+
+func (x *NodeSelector) GetNpu() string {
+	if x != nil {
+		return x.Npu
+	}
+	return ""
 }
 
 type AcquireLeaseRequest struct {
@@ -610,12 +631,14 @@ var File_protectorate_v1_lease_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_lease_proto_rawDesc = "" +
 	"\n" +
-	"\x1bprotectorate/v1/lease.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8b\x01\n" +
+	"\x1bprotectorate/v1/lease.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaf\x01\n" +
 	"\fNodeSelector\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x02 \x01(\tR\x04arch\x121\n" +
 	"\x15min_free_memory_bytes\x18\x03 \x01(\x04R\x12minFreeMemoryBytes\x12$\n" +
-	"\x0egpu_vram_bytes\x18\x04 \x01(\x04R\fgpuVramBytes\"\x92\x02\n" +
+	"\x0egpu_vram_bytes\x18\x04 \x01(\x04R\fgpuVramBytes\x12\x10\n" +
+	"\x03gpu\x18\x05 \x01(\tR\x03gpu\x12\x10\n" +
+	"\x03npu\x18\x06 \x01(\tR\x03npu\"\x92\x02\n" +
 	"\x13AcquireLeaseRequest\x12\x1c\n" +
 	"\bresource\x18\x01 \x01(\tH\x00R\bresource\x12;\n" +
 	"\bselector\x18\x02 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12\x16\n" +

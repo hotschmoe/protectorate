@@ -34,6 +34,8 @@ class NodeSelector extends $pb.GeneratedMessage {
     $core.String? arch,
     $fixnum.Int64? minFreeMemoryBytes,
     $fixnum.Int64? gpuVramBytes,
+    $core.String? gpu,
+    $core.String? npu,
   }) {
     final result = NodeSelector._();
     if (os != null) result.os = os;
@@ -41,6 +43,8 @@ class NodeSelector extends $pb.GeneratedMessage {
     if (minFreeMemoryBytes != null)
       result.minFreeMemoryBytes = minFreeMemoryBytes;
     if (gpuVramBytes != null) result.gpuVramBytes = gpuVramBytes;
+    if (gpu != null) result.gpu = gpu;
+    if (npu != null) result.npu = npu;
     return result;
   }
 
@@ -66,6 +70,8 @@ class NodeSelector extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         4, _omitFieldNames ? '' : 'gpuVramBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(5, _omitFieldNames ? '' : 'gpu')
+    ..aOS(6, _omitFieldNames ? '' : 'npu')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -129,6 +135,29 @@ class NodeSelector extends $pb.GeneratedMessage {
   $core.bool hasGpuVramBytes() => $_has(3);
   @$pb.TagNumber(4)
   void clearGpuVramBytes() => $_clearField(4);
+
+  /// gpu requires a GPU whose vendor or name contains this text, ignoring
+  /// case (e.g. "adreno", "intel"); with gpu_vram_bytes the reserved GPU must
+  /// match it too.
+  @$pb.TagNumber(5)
+  $core.String get gpu => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set gpu($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasGpu() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearGpu() => $_clearField(5);
+
+  /// npu requires an NPU whose vendor or name contains this text, ignoring
+  /// case (e.g. "hexagon").
+  @$pb.TagNumber(6)
+  $core.String get npu => $_getSZ(5);
+  @$pb.TagNumber(6)
+  set npu($core.String value) => $_setString(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasNpu() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearNpu() => $_clearField(6);
 }
 
 enum AcquireLeaseRequest_Target { resource, selector, notSet }

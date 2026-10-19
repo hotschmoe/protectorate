@@ -1,0 +1,19 @@
+# kidsbox: the same CIX P1 on a device tree, mainline-based 6.18.14-sky1-msr1.
+# Mali on panthor (no model name, only the architecture), the Zhouyi NPU on
+# armchina (module armchina_npu).
+bus/platform/devices/15000000.gpu -> ../../../devices/platform/soc@0/15000000.gpu
+bus/platform/devices/14260000.aipu -> ../../../devices/platform/soc@0/14260000.aipu
+bus/platform/devices/14010000.disp-controller -> ../../../devices/platform/soc@0/14010000.disp-controller
+bus/platform/drivers/panthor/module -> ../../../../module/panthor
+bus/platform/drivers/armchina/module -> ../../../../module/armchina_npu
+bus/platform/drivers/linlondp/
+module/panthor/
+module/armchina_npu/
+devices/platform/soc@0/15000000.gpu/driver -> ../../../../bus/platform/drivers/panthor
+devices/platform/soc@0/15000000.gpu/of_node/compatible = arm,mali-valhall
+devices/platform/soc@0/15000000.gpu/devfreq/15000000.gpu/cur_freq = 72000000
+devices/platform/soc@0/14260000.aipu/driver -> ../../../../bus/platform/drivers/armchina
+devices/platform/soc@0/14260000.aipu/of_node/compatible = armchina,zhouyi
+devices/platform/soc@0/14260000.aipu/devfreq/14260000.aipu/cur_freq = 1200000000
+devices/platform/soc@0/14010000.disp-controller/driver -> ../../../../bus/platform/drivers/linlondp
+devices/platform/soc@0/14010000.disp-controller/of_node/compatible = armchina,linlon-d6
