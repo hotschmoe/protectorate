@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"text/tabwriter"
@@ -142,5 +144,41 @@ func TestWriteSuggest(t *testing.T) {
 	}
 	if strings.Contains(lines[3], "%") {
 		t.Errorf("a provider without data must show no percentages: %q", lines[3])
+	}
+}
+
+func TestLoginStatus(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "auth", "codex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "auth", "codex", "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"status", []string{"login", "--status", "--home", home}, "claude  missing\ncodex   logged in\ngrok    missing\npi      missing\n"},
+		{"status with harness", []string{"login", "--status", "codex", "--home", home}, ""},
+		{"unknown harness", []string{"login", "nope", "--home", home}, ""},
+		{"no harness", []string{"login", "--home", home}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd := newRoot()
+			cmd.SetOut(&buf)
+			cmd.SetErr(&buf)
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if (err != nil) != (tt.want == "") {
+				t.Fatalf("err = %v, output %q", err, buf.String())
+			}
+			if tt.want != "" && buf.String() != tt.want {
+				t.Fatalf("output %q, want %q", buf.String(), tt.want)
+			}
+		})
 	}
 }

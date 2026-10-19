@@ -448,6 +448,7 @@ Setup, scoping and widening: `docs/orchestrator.md`.
 - Never bind-mount a single file. A rename-over fails with `EBUSY` (shown in
   the docker test). Mount the shared credential **directory** into each sleeve.
 - Share only the auth. Config, sessions and history stay per sleeve.
+- `protectorate login <harness>` runs the CLI's own login with these same env vars (Codex and Grok write straight into the shared dir, never through a symlink), so the credential lands where sleeves read it.
 
 | CLI | Per-sleeve config | Shared credential | Notes |
 |-----|-------------------|-------------------|-------|
