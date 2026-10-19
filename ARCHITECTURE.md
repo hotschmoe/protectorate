@@ -116,16 +116,38 @@ SSH stays as the bootstrap and break-glass path (`spikes/ssh-agentless/`).
 - **Fallback:** plain `wireguard-go` hub-and-spoke with our own key
   distribution. The hub has a public IP, so it needs no NAT traversal.
 
-## Workspaces (sleeves) and isolation (spike)
+## Workspaces (sleeves) and isolation (spike 2 done: `spikes/isolation/`)
 
-- A sleeve is one workspace plus one harness session, isolated so agents can't
-  see or kill each other's processes (P8). It also gets cgroup CPU/RAM limits.
-- The default runtime is a container on Linux hosts, with the harness running
-  under tmux inside it. The runtime sits behind a small interface so a microVM
-  runtime could be added later for untrusted work (donated work on public
-  repos, P6).
-- Variants being measured: Docker, bubblewrap, `systemd-run` scopes + PID
-  namespaces, Firecracker microVMs.
+A sleeve is one workspace plus one harness session. It's isolated so agents
+can't see or kill each other's processes (P8), with cgroup CPU/RAM limits.
+
+Measured on the hub (linux/arm64, rootless):
+
+| Runtime | Cold start | Overhead | Limits | Harness from host | Use |
+|---------|-----------|----------|--------|-------------------|-----|
+| **bwrap in `systemd-run --user --scope`** | ~111 ms | ~2.7 MB cgroup | CPU + memory enforced | yes, unmodified | **default on Linux** |
+| Docker | 530-700 ms | ~120 MB daemon + shim | enforced | yes (ro mounts) | fallback: macOS/Windows hosts, per-sleeve networking |
+| Firecracker | ~50 ms to userspace, ~1 s to systemd | 45-100 MB | VM size | no (own OS image) | later: untrusted work (donated public repos, P6) |
+| plain `unshare` | 66 ms | - | none | - | rejected: exposes all of `$HOME` |
+
+Every isolated variant blocked `kill -9` on processes outside the sandbox.
+
+Design:
+- **tmux stays on the host** (the existing session manager and socket). A
+  sleeve session's pane command is
+  `systemd-run --user --scope --unit=prot-sleeve-<name> -p MemoryMax=.. -p CPUQuota=.. -p OOMPolicy=continue -- bwrap ... -- <harness>`.
+  The harness and everything it spawns live inside the sandbox. The hub
+  attaches, captures and streams exactly as with plain sessions.
+- Mounts:
+  - the workspace is read-write;
+  - toolchains and harness installs (`~/.local`, `~/.nvm`, ...) are read-only
+    at the same paths;
+  - each sleeve has its own config dirs;
+  - shared credential **dirs** are laid out per the credential table below.
+- Known gap: bwrap shares the host network, so two sleeves' dev servers can
+  collide on ports. Docker covers per-sleeve networking if that becomes a hard
+  requirement.
+- Windows and Android nodes run no sleeves. They're build/test targets only.
 
 ## Orchestrator
 
