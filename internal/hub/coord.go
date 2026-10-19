@@ -129,4 +129,5 @@ func (c *coordinator) refresh(ctx context.Context) {
 	if err := c.dir.Update(scans); err != nil {
 		log.Printf("coordination: update directory: %v", err)
 	}
+	c.checkReleases(ctx)
 }

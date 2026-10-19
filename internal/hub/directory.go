@@ -78,7 +78,7 @@ func projectToProto(v directory.View, display map[string]string) *pb.DirectoryPr
 	}
 	p.DependsOn, p.Dependents = edges(v.DependsOn), edges(v.Dependents)
 	if r := v.Refs; r != nil {
-		p.DefaultBranch, p.LatestTag = r.Default, r.LatestTag
+		p.DefaultBranch, p.LatestTag = r.Default, r.LatestTag()
 	}
 	return p
 }

@@ -284,7 +284,7 @@ func TestDirectoryPersistsAndKeepsAbsentProjects(t *testing.T) {
 	if err := d.Update([]Scan{mkScan("a", "/w/lib", "example.com/lib", lib), mkScan("b", "/w/app", "example.com/app", app)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetRefs("example.com/lib", RefState{Default: "main", DefaultTip: "abc", Tags: map[string]string{"v1": "abc"}}); err != nil {
+	if err := d.SetRefs("example.com/lib", RefState{Default: "main", DefaultTip: "abc", Tags: []Tag{{Name: "v1", Sha: "abc", Unix: 1}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.SetRefs("example.com/none", RefState{}); !errors.Is(err, ErrNotFound) {

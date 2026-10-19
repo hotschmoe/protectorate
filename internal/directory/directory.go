@@ -34,13 +34,28 @@ type Owner struct {
 	Head   string
 }
 
+// Tag is a tag with the commit it points at and when it was made.
+type Tag struct {
+	Name string `json:"name"`
+	Sha  string `json:"sha"`
+	Unix int64  `json:"unix"`
+}
+
 // RefState is the last release state seen for a project: its default branch
-// tip and its tags. It is what dependency notices are computed against.
+// tip and its tags, oldest first. It is what dependency notices are computed
+// against.
 type RefState struct {
-	Default    string            `json:"default,omitempty"`
-	DefaultTip string            `json:"default_tip,omitempty"`
-	Tags       map[string]string `json:"tags,omitempty"`
-	LatestTag  string            `json:"latest_tag,omitempty"`
+	Default    string `json:"default,omitempty"`
+	DefaultTip string `json:"default_tip,omitempty"`
+	Tags       []Tag  `json:"tags,omitempty"`
+}
+
+// LatestTag is the name of the newest tag, or "".
+func (r RefState) LatestTag() string {
+	if len(r.Tags) == 0 {
+		return ""
+	}
+	return r.Tags[len(r.Tags)-1].Name
 }
 
 // Project is one repository or directory the sleeves work in. Provides and
