@@ -10,14 +10,22 @@ import "lease.pb.dart" as protectoratev1lease;
 /// renewed expires on its own, so a dead agent cannot hold hardware forever.
 /// Leases are kept across hub restarts and announced on EventService as
 /// "lease.acquired", "lease.renewed", "lease.released" and "lease.expired"
-/// (subject = lease id).
+/// (subject = lease id), and for the queue as "lease.queued", "lease.granted"
+/// and "lease.dropped" (subject = ticket id).
 abstract final class LeaseService {
   /// Fully-qualified name of the LeaseService service.
   static const name = 'protectorate.v1.LeaseService';
 
   /// AcquireLease reserves one resource exclusively: a node name ("win1"), one
   /// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-  /// least-loaded fresh matching node that is not already leased.
+  /// least-loaded fresh matching node that is not already leased. When the
+  /// resource is held, the call fails with failed_precondition, unless the
+  /// request sets wait: then the caller is queued first in first out (highest
+  /// priority first) and gets a ticket, a Lease in state QUEUED. When the hub
+  /// grants a ticket it holds the lease for the waiter for a short claim
+  /// window and sends it a notice message; RenewLease with no ttl claims the
+  /// lease for the requested ttl, otherwise it passes to the next waiter.
+  /// ReleaseLease on a ticket leaves the queue.
   static const acquireLease = connect.Spec(
     '/$name/AcquireLease',
     connect.StreamType.unary,
@@ -42,7 +50,7 @@ abstract final class LeaseService {
     protectoratev1lease.ReleaseLeaseResponse.new,
   );
 
-  /// ListLeases returns every live lease.
+  /// ListLeases returns every live lease, then every queued ticket.
   static const listLeases = connect.Spec(
     '/$name/ListLeases',
     connect.StreamType.unary,

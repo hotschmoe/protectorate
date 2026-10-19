@@ -454,7 +454,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node that is not already leased.",
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node that is not already leased. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -465,6 +465,10 @@
         "holder": {
           "description": "holder labels who holds the lease, e.g. a sleeve or agent name.",
           "type": "string"
+        },
+        "priority": {
+          "description": "priority orders the queue: larger first, then first come first served.",
+          "type": "integer"
         },
         "resource": {
           "description": "resource is a node name or \"\u003cnode\u003e:gpu\u003cindex\u003e\".",
@@ -495,6 +499,10 @@
           "description": "ttl is how long the lease lives without a renewal; at most 24h.",
           "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
           "type": "string"
+        },
+        "wait": {
+          "description": "wait queues the caller when the resource is held instead of failing.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -507,7 +515,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "ListLeases returns every live lease.",
+    "description": "ListLeases returns every live lease, then every queued ticket.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},

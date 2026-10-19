@@ -11,11 +11,19 @@ import "lease.connect.spec.dart" as specs;
 /// renewed expires on its own, so a dead agent cannot hold hardware forever.
 /// Leases are kept across hub restarts and announced on EventService as
 /// "lease.acquired", "lease.renewed", "lease.released" and "lease.expired"
-/// (subject = lease id).
+/// (subject = lease id), and for the queue as "lease.queued", "lease.granted"
+/// and "lease.dropped" (subject = ticket id).
 extension type LeaseServiceClient (connect.Transport _transport) {
   /// AcquireLease reserves one resource exclusively: a node name ("win1"), one
   /// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-  /// least-loaded fresh matching node that is not already leased.
+  /// least-loaded fresh matching node that is not already leased. When the
+  /// resource is held, the call fails with failed_precondition, unless the
+  /// request sets wait: then the caller is queued first in first out (highest
+  /// priority first) and gets a ticket, a Lease in state QUEUED. When the hub
+  /// grants a ticket it holds the lease for the waiter for a short claim
+  /// window and sends it a notice message; RenewLease with no ttl claims the
+  /// lease for the requested ttl, otherwise it passes to the next waiter.
+  /// ReleaseLease on a ticket leaves the queue.
   Future<protectoratev1lease.Lease> acquireLease(
     protectoratev1lease.AcquireLeaseRequest input, {
     connect.Headers? headers,
@@ -70,7 +78,7 @@ extension type LeaseServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// ListLeases returns every live lease.
+  /// ListLeases returns every live lease, then every queued ticket.
   Future<protectoratev1lease.ListLeasesResponse> listLeases(
     protectoratev1lease.ListLeasesRequest input, {
     connect.Headers? headers,

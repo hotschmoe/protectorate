@@ -20,6 +20,20 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $1;
 
+@$core.Deprecated('Use leaseStateDescriptor instead')
+const LeaseState$json = {
+  '1': 'LeaseState',
+  '2': [
+    {'1': 'LEASE_STATE_UNSPECIFIED', '2': 0},
+    {'1': 'LEASE_STATE_QUEUED', '2': 1},
+  ],
+};
+
+/// Descriptor for `LeaseState`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List leaseStateDescriptor = $convert.base64Decode(
+    'CgpMZWFzZVN0YXRlEhsKF0xFQVNFX1NUQVRFX1VOU1BFQ0lGSUVEEAASFgoSTEVBU0VfU1RBVE'
+    'VfUVVFVUVEEAE=');
+
 @$core.Deprecated('Use nodeSelectorDescriptor instead')
 const NodeSelector$json = {
   '1': 'NodeSelector',
@@ -67,6 +81,8 @@ const AcquireLeaseRequest$json = {
       '10': 'ttl'
     },
     {'1': 'allow_family', '3': 5, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'wait', '3': 6, '4': 1, '5': 8, '10': 'wait'},
+    {'1': 'priority', '3': 7, '4': 1, '5': 5, '10': 'priority'},
   ],
   '8': [
     {'1': 'target'},
@@ -78,8 +94,8 @@ final $typed_data.Uint8List acquireLeaseRequestDescriptor = $convert.base64Decod
     'ChNBY3F1aXJlTGVhc2VSZXF1ZXN0EhwKCHJlc291cmNlGAEgASgJSABSCHJlc291cmNlEjsKCH'
     'NlbGVjdG9yGAIgASgLMh0ucHJvdGVjdG9yYXRlLnYxLk5vZGVTZWxlY3RvckgAUghzZWxlY3Rv'
     'chIWCgZob2xkZXIYAyABKAlSBmhvbGRlchIrCgN0dGwYBCABKAsyGS5nb29nbGUucHJvdG9idW'
-    'YuRHVyYXRpb25SA3R0bBIhCgxhbGxvd19mYW1pbHkYBSABKAhSC2FsbG93RmFtaWx5QggKBnRh'
-    'cmdldA==');
+    'YuRHVyYXRpb25SA3R0bBIhCgxhbGxvd19mYW1pbHkYBSABKAhSC2FsbG93RmFtaWx5EhIKBHdh'
+    'aXQYBiABKAhSBHdhaXQSGgoIcHJpb3JpdHkYByABKAVSCHByaW9yaXR5QggKBnRhcmdldA==');
 
 @$core.Deprecated('Use renewLeaseRequestDescriptor instead')
 const RenewLeaseRequest$json = {
@@ -193,6 +209,15 @@ const Lease$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'expiresAt'
     },
+    {
+      '1': 'state',
+      '3': 9,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.LeaseState',
+      '10': 'state'
+    },
+    {'1': 'queue_position', '3': 10, '4': 1, '5': 5, '10': 'queuePosition'},
   ],
   '8': [
     {'1': '_gpu_index'},
@@ -206,7 +231,9 @@ final $typed_data.Uint8List leaseDescriptor = $convert.base64Decode(
     'bGRlchgFIAEoCVIGaG9sZGVyEisKA3R0bBgGIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdG'
     'lvblIDdHRsEjsKC2FjcXVpcmVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFt'
     'cFIKYWNxdWlyZWRBdBI5CgpleHBpcmVzX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbW'
-    'VzdGFtcFIJZXhwaXJlc0F0QgwKCl9ncHVfaW5kZXg=');
+    'VzdGFtcFIJZXhwaXJlc0F0EjEKBXN0YXRlGAkgASgOMhsucHJvdGVjdG9yYXRlLnYxLkxlYXNl'
+    'U3RhdGVSBXN0YXRlEiUKDnF1ZXVlX3Bvc2l0aW9uGAogASgFUg1xdWV1ZVBvc2l0aW9uQgwKCl'
+    '9ncHVfaW5kZXg=');
 
 const $core.Map<$core.String, $core.dynamic> LeaseServiceBase$json = {
   '1': 'LeaseService',

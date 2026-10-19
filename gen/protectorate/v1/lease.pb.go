@@ -23,6 +23,54 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type LeaseState int32
+
+const (
+	// UNSPECIFIED is a lease that is held.
+	LeaseState_LEASE_STATE_UNSPECIFIED LeaseState = 0
+	// QUEUED is a ticket waiting for its resource; id is the ticket id.
+	LeaseState_LEASE_STATE_QUEUED LeaseState = 1
+)
+
+// Enum value maps for LeaseState.
+var (
+	LeaseState_name = map[int32]string{
+		0: "LEASE_STATE_UNSPECIFIED",
+		1: "LEASE_STATE_QUEUED",
+	}
+	LeaseState_value = map[string]int32{
+		"LEASE_STATE_UNSPECIFIED": 0,
+		"LEASE_STATE_QUEUED":      1,
+	}
+)
+
+func (x LeaseState) Enum() *LeaseState {
+	p := new(LeaseState)
+	*p = x
+	return p
+}
+
+func (x LeaseState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LeaseState) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_lease_proto_enumTypes[0].Descriptor()
+}
+
+func (LeaseState) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_lease_proto_enumTypes[0]
+}
+
+func (x LeaseState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LeaseState.Descriptor instead.
+func (LeaseState) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_lease_proto_rawDescGZIP(), []int{0}
+}
+
 // NodeSelector describes the nodes a lease or job may land on. Zero fields
 // match anything.
 type NodeSelector struct {
@@ -109,7 +157,11 @@ type AcquireLeaseRequest struct {
 	// ttl is how long the lease lives without a renewal; at most 24h.
 	Ttl *durationpb.Duration `protobuf:"bytes,4,opt,name=ttl,proto3" json:"ttl,omitempty"`
 	// allow_family admits nodes of tier "family", which are skipped otherwise.
-	AllowFamily   bool `protobuf:"varint,5,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	AllowFamily bool `protobuf:"varint,5,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	// wait queues the caller when the resource is held instead of failing.
+	Wait bool `protobuf:"varint,6,opt,name=wait,proto3" json:"wait,omitempty"`
+	// priority orders the queue: larger first, then first come first served.
+	Priority      int32 `protobuf:"varint,7,opt,name=priority,proto3" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -188,6 +240,20 @@ func (x *AcquireLeaseRequest) GetAllowFamily() bool {
 		return x.AllowFamily
 	}
 	return false
+}
+
+func (x *AcquireLeaseRequest) GetWait() bool {
+	if x != nil {
+		return x.Wait
+	}
+	return false
+}
+
+func (x *AcquireLeaseRequest) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
 }
 
 type isAcquireLeaseRequest_Target interface {
@@ -420,7 +486,7 @@ func (x *ListLeasesResponse) GetLeases() []*Lease {
 	return nil
 }
 
-// Lease is one reservation.
+// Lease is one reservation, or a ticket waiting for one.
 type Lease struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -428,11 +494,14 @@ type Lease struct {
 	Resource string `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
 	Node     string `protobuf:"bytes,3,opt,name=node,proto3" json:"node,omitempty"`
 	// gpu_index is set when the lease covers a single GPU.
-	GpuIndex      *int32                 `protobuf:"varint,4,opt,name=gpu_index,json=gpuIndex,proto3,oneof" json:"gpu_index,omitempty"`
-	Holder        string                 `protobuf:"bytes,5,opt,name=holder,proto3" json:"holder,omitempty"`
-	Ttl           *durationpb.Duration   `protobuf:"bytes,6,opt,name=ttl,proto3" json:"ttl,omitempty"`
-	AcquiredAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=acquired_at,json=acquiredAt,proto3" json:"acquired_at,omitempty"`
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	GpuIndex   *int32                 `protobuf:"varint,4,opt,name=gpu_index,json=gpuIndex,proto3,oneof" json:"gpu_index,omitempty"`
+	Holder     string                 `protobuf:"bytes,5,opt,name=holder,proto3" json:"holder,omitempty"`
+	Ttl        *durationpb.Duration   `protobuf:"bytes,6,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	AcquiredAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=acquired_at,json=acquiredAt,proto3" json:"acquired_at,omitempty"`
+	ExpiresAt  *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	State      LeaseState             `protobuf:"varint,9,opt,name=state,proto3,enum=protectorate.v1.LeaseState" json:"state,omitempty"`
+	// queue_position is 1 for the next ticket to be granted; set when QUEUED.
+	QueuePosition int32 `protobuf:"varint,10,opt,name=queue_position,json=queuePosition,proto3" json:"queue_position,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -523,6 +592,20 @@ func (x *Lease) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Lease) GetState() LeaseState {
+	if x != nil {
+		return x.State
+	}
+	return LeaseState_LEASE_STATE_UNSPECIFIED
+}
+
+func (x *Lease) GetQueuePosition() int32 {
+	if x != nil {
+		return x.QueuePosition
+	}
+	return 0
+}
+
 var File_protectorate_v1_lease_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_lease_proto_rawDesc = "" +
@@ -532,13 +615,15 @@ const file_protectorate_v1_lease_proto_rawDesc = "" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x02 \x01(\tR\x04arch\x121\n" +
 	"\x15min_free_memory_bytes\x18\x03 \x01(\x04R\x12minFreeMemoryBytes\x12$\n" +
-	"\x0egpu_vram_bytes\x18\x04 \x01(\x04R\fgpuVramBytes\"\xe2\x01\n" +
+	"\x0egpu_vram_bytes\x18\x04 \x01(\x04R\fgpuVramBytes\"\x92\x02\n" +
 	"\x13AcquireLeaseRequest\x12\x1c\n" +
 	"\bresource\x18\x01 \x01(\tH\x00R\bresource\x12;\n" +
 	"\bselector\x18\x02 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12\x16\n" +
 	"\x06holder\x18\x03 \x01(\tR\x06holder\x12+\n" +
 	"\x03ttl\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\x12!\n" +
-	"\fallow_family\x18\x05 \x01(\bR\vallowFamilyB\b\n" +
+	"\fallow_family\x18\x05 \x01(\bR\vallowFamily\x12\x12\n" +
+	"\x04wait\x18\x06 \x01(\bR\x04wait\x12\x1a\n" +
+	"\bpriority\x18\a \x01(\x05R\bpriorityB\b\n" +
 	"\x06target\"P\n" +
 	"\x11RenewLeaseRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
@@ -548,7 +633,7 @@ const file_protectorate_v1_lease_proto_rawDesc = "" +
 	"\x14ReleaseLeaseResponse\"\x13\n" +
 	"\x11ListLeasesRequest\"D\n" +
 	"\x12ListLeasesResponse\x12.\n" +
-	"\x06leases\x18\x01 \x03(\v2\x16.protectorate.v1.LeaseR\x06leases\"\xb4\x02\n" +
+	"\x06leases\x18\x01 \x03(\v2\x16.protectorate.v1.LeaseR\x06leases\"\x8e\x03\n" +
 	"\x05Lease\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bresource\x18\x02 \x01(\tR\bresource\x12\x12\n" +
@@ -559,9 +644,16 @@ const file_protectorate_v1_lease_proto_rawDesc = "" +
 	"\vacquired_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"acquiredAt\x129\n" +
 	"\n" +
-	"expires_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAtB\f\n" +
+	"expires_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x121\n" +
+	"\x05state\x18\t \x01(\x0e2\x1b.protectorate.v1.LeaseStateR\x05state\x12%\n" +
+	"\x0equeue_position\x18\n" +
+	" \x01(\x05R\rqueuePositionB\f\n" +
 	"\n" +
-	"_gpu_index2\xdf\x02\n" +
+	"_gpu_index*A\n" +
+	"\n" +
+	"LeaseState\x12\x1b\n" +
+	"\x17LEASE_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12LEASE_STATE_QUEUED\x10\x012\xdf\x02\n" +
 	"\fLeaseService\x12L\n" +
 	"\fAcquireLease\x12$.protectorate.v1.AcquireLeaseRequest\x1a\x16.protectorate.v1.Lease\x12H\n" +
 	"\n" +
@@ -582,40 +674,43 @@ func file_protectorate_v1_lease_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_lease_proto_rawDescData
 }
 
+var file_protectorate_v1_lease_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_protectorate_v1_lease_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_protectorate_v1_lease_proto_goTypes = []any{
-	(*NodeSelector)(nil),          // 0: protectorate.v1.NodeSelector
-	(*AcquireLeaseRequest)(nil),   // 1: protectorate.v1.AcquireLeaseRequest
-	(*RenewLeaseRequest)(nil),     // 2: protectorate.v1.RenewLeaseRequest
-	(*ReleaseLeaseRequest)(nil),   // 3: protectorate.v1.ReleaseLeaseRequest
-	(*ReleaseLeaseResponse)(nil),  // 4: protectorate.v1.ReleaseLeaseResponse
-	(*ListLeasesRequest)(nil),     // 5: protectorate.v1.ListLeasesRequest
-	(*ListLeasesResponse)(nil),    // 6: protectorate.v1.ListLeasesResponse
-	(*Lease)(nil),                 // 7: protectorate.v1.Lease
-	(*durationpb.Duration)(nil),   // 8: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	(LeaseState)(0),               // 0: protectorate.v1.LeaseState
+	(*NodeSelector)(nil),          // 1: protectorate.v1.NodeSelector
+	(*AcquireLeaseRequest)(nil),   // 2: protectorate.v1.AcquireLeaseRequest
+	(*RenewLeaseRequest)(nil),     // 3: protectorate.v1.RenewLeaseRequest
+	(*ReleaseLeaseRequest)(nil),   // 4: protectorate.v1.ReleaseLeaseRequest
+	(*ReleaseLeaseResponse)(nil),  // 5: protectorate.v1.ReleaseLeaseResponse
+	(*ListLeasesRequest)(nil),     // 6: protectorate.v1.ListLeasesRequest
+	(*ListLeasesResponse)(nil),    // 7: protectorate.v1.ListLeasesResponse
+	(*Lease)(nil),                 // 8: protectorate.v1.Lease
+	(*durationpb.Duration)(nil),   // 9: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
 }
 var file_protectorate_v1_lease_proto_depIdxs = []int32{
-	0,  // 0: protectorate.v1.AcquireLeaseRequest.selector:type_name -> protectorate.v1.NodeSelector
-	8,  // 1: protectorate.v1.AcquireLeaseRequest.ttl:type_name -> google.protobuf.Duration
-	8,  // 2: protectorate.v1.RenewLeaseRequest.ttl:type_name -> google.protobuf.Duration
-	7,  // 3: protectorate.v1.ListLeasesResponse.leases:type_name -> protectorate.v1.Lease
-	8,  // 4: protectorate.v1.Lease.ttl:type_name -> google.protobuf.Duration
-	9,  // 5: protectorate.v1.Lease.acquired_at:type_name -> google.protobuf.Timestamp
-	9,  // 6: protectorate.v1.Lease.expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 7: protectorate.v1.LeaseService.AcquireLease:input_type -> protectorate.v1.AcquireLeaseRequest
-	2,  // 8: protectorate.v1.LeaseService.RenewLease:input_type -> protectorate.v1.RenewLeaseRequest
-	3,  // 9: protectorate.v1.LeaseService.ReleaseLease:input_type -> protectorate.v1.ReleaseLeaseRequest
-	5,  // 10: protectorate.v1.LeaseService.ListLeases:input_type -> protectorate.v1.ListLeasesRequest
-	7,  // 11: protectorate.v1.LeaseService.AcquireLease:output_type -> protectorate.v1.Lease
-	7,  // 12: protectorate.v1.LeaseService.RenewLease:output_type -> protectorate.v1.Lease
-	4,  // 13: protectorate.v1.LeaseService.ReleaseLease:output_type -> protectorate.v1.ReleaseLeaseResponse
-	6,  // 14: protectorate.v1.LeaseService.ListLeases:output_type -> protectorate.v1.ListLeasesResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	1,  // 0: protectorate.v1.AcquireLeaseRequest.selector:type_name -> protectorate.v1.NodeSelector
+	9,  // 1: protectorate.v1.AcquireLeaseRequest.ttl:type_name -> google.protobuf.Duration
+	9,  // 2: protectorate.v1.RenewLeaseRequest.ttl:type_name -> google.protobuf.Duration
+	8,  // 3: protectorate.v1.ListLeasesResponse.leases:type_name -> protectorate.v1.Lease
+	9,  // 4: protectorate.v1.Lease.ttl:type_name -> google.protobuf.Duration
+	10, // 5: protectorate.v1.Lease.acquired_at:type_name -> google.protobuf.Timestamp
+	10, // 6: protectorate.v1.Lease.expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 7: protectorate.v1.Lease.state:type_name -> protectorate.v1.LeaseState
+	2,  // 8: protectorate.v1.LeaseService.AcquireLease:input_type -> protectorate.v1.AcquireLeaseRequest
+	3,  // 9: protectorate.v1.LeaseService.RenewLease:input_type -> protectorate.v1.RenewLeaseRequest
+	4,  // 10: protectorate.v1.LeaseService.ReleaseLease:input_type -> protectorate.v1.ReleaseLeaseRequest
+	6,  // 11: protectorate.v1.LeaseService.ListLeases:input_type -> protectorate.v1.ListLeasesRequest
+	8,  // 12: protectorate.v1.LeaseService.AcquireLease:output_type -> protectorate.v1.Lease
+	8,  // 13: protectorate.v1.LeaseService.RenewLease:output_type -> protectorate.v1.Lease
+	5,  // 14: protectorate.v1.LeaseService.ReleaseLease:output_type -> protectorate.v1.ReleaseLeaseResponse
+	7,  // 15: protectorate.v1.LeaseService.ListLeases:output_type -> protectorate.v1.ListLeasesResponse
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_lease_proto_init() }
@@ -633,13 +728,14 @@ func file_protectorate_v1_lease_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_lease_proto_rawDesc), len(file_protectorate_v1_lease_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_protectorate_v1_lease_proto_goTypes,
 		DependencyIndexes: file_protectorate_v1_lease_proto_depIdxs,
+		EnumInfos:         file_protectorate_v1_lease_proto_enumTypes,
 		MessageInfos:      file_protectorate_v1_lease_proto_msgTypes,
 	}.Build()
 	File_protectorate_v1_lease_proto = out.File

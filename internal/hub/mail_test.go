@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -25,28 +24,11 @@ import (
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
-type fakeClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *fakeClock) now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.t
-}
-
-func (c *fakeClock) advance(d time.Duration) {
-	c.mu.Lock()
-	c.t = c.t.Add(d)
-	c.mu.Unlock()
-}
-
 type mailRig struct {
 	*chatRig
 	home  string
 	url   string
-	clock *fakeClock
+	clock *clock
 	owner protectoratev1connect.MessageServiceClient
 }
 
@@ -56,7 +38,7 @@ func newMailRig(t *testing.T) *mailRig {
 	t.Setenv("PROTECTORATE_HOME", t.TempDir())
 	r.h.SetBacklog(backlog.NewStore(filepath.Join(t.TempDir(), "backlog.md")))
 	r.h.SelfURL = "http://127.0.0.1:1"
-	m := &mailRig{chatRig: r, home: t.TempDir(), clock: &fakeClock{t: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)}}
+	m := &mailRig{chatRig: r, home: t.TempDir(), clock: &clock{t: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)}}
 	if err := r.h.EnableCoordination(m.home); err != nil {
 		t.Fatal(err)
 	}
@@ -505,5 +487,54 @@ func TestMailProjectAddressing(t *testing.T) {
 	}
 	if m, _ := r.h.coord.mail.Get(waiting.Message.Id); len(m.Recipients) != 1 || m.Recipients[0] != "libdev2" {
 		t.Fatalf("recipients = %v", m.Recipients)
+	}
+}
+
+func TestLeaseGrantSendsNotice(t *testing.T) {
+	r := newMailRig(t)
+	r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
+	tb, err := OpenLeases(filepath.Join(t.TempDir(), "leases.yaml"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb.onGrant = r.h.leaseGranted
+	r.h.leases = tb
+	busy := func(blocked func(string, *int) *pb.Lease) (string, *int, error) {
+		if l := blocked("gpubox", nil); l != nil {
+			return "", nil, busyErr("leased by %s", l.Holder)
+		}
+		return "gpubox", nil, nil
+	}
+	held, err := tb.Acquire("someone", time.Hour, busy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := tb.AcquireWait(Wait{Holder: r.name, Notify: r.name, Resource: "gpubox", TTL: 45 * time.Minute}, busy)
+	if err != nil || ticket.State != pb.LeaseState_LEASE_STATE_QUEUED {
+		t.Fatalf("ticket = %v %v", ticket, err)
+	}
+	if got := r.users(r.name); len(got) != 0 {
+		t.Fatalf("notified before the grant: %v", got)
+	}
+	if err := tb.Release(held.Id); err != nil {
+		t.Fatal(err)
+	}
+	r.pass()
+	r.waitIdle(r.name)
+	us := r.users(r.name)
+	if len(us) != 1 || us[0].from != "hub" {
+		t.Fatalf("user messages = %v", us)
+	}
+	granted := tb.List()
+	if len(granted) != 1 || granted[0].Holder != r.name {
+		t.Fatalf("leases = %v", granted)
+	}
+	for _, want := range []string{"[notice m1 from hub", "gpubox", "protectorate lease renew " + granted[0].Id, "45m0s"} {
+		if !strings.Contains(us[0].text, want) {
+			t.Errorf("notice lacks %q:\n%s", want, us[0].text)
+		}
+	}
+	if strings.Contains(us[0].text, "msg reply") {
+		t.Errorf("a hub notice must not offer a reply:\n%s", us[0].text)
 	}
 }

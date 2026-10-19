@@ -47,17 +47,23 @@ func defaultHolder() string {
 func leaseAcquireCmd(o *opts) *cobra.Command {
 	var resource, osName, arch, mem, vram, holder string
 	var ttl time.Duration
-	var allowFamily bool
+	var allowFamily, wait bool
+	var priority int32
 	c := &cobra.Command{
 		Use:   "acquire [--node <name[:gpuN]> | --os <os> --arch <arch> --min-free-mem 8G --gpu-vram 24G] --ttl 30m",
 		Short: "Reserve a node, a GPU, or the least-loaded node matching a selector",
 		Long: `Print the lease id and the chosen resource. The lease expires unless renewed
 before the TTL runs out (lease renew), so a crashed holder frees the hardware.
 Selectors pick the least-loaded fresh node; nodes of tier family are skipped
-unless --allow-family is set.`,
+unless --allow-family is set.
+
+With --wait, a resource that is held queues you (first in first out, larger
+--priority first) and prints a ticket. When your turn comes the hub holds the
+lease for you for a short claim window and sends you a notice message; claim it
+with 'lease renew <id>'. Without --wait a held resource is an error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			req := &pb.AcquireLeaseRequest{Holder: holder, Ttl: durationpb.New(ttl), AllowFamily: allowFamily}
+			req := &pb.AcquireLeaseRequest{Holder: holder, Ttl: durationpb.New(ttl), AllowFamily: allowFamily, Wait: wait, Priority: priority}
 			sel := &pb.NodeSelector{Os: osName, Arch: arch}
 			var err error
 			if sel.MinFreeMemoryBytes, err = parseOptSize(mem); err != nil {
@@ -94,6 +100,8 @@ unless --allow-family is set.`,
 	f.StringVar(&holder, "holder", defaultHolder(), "who holds the lease")
 	f.DurationVar(&ttl, "ttl", 30*time.Minute, "lease lifetime without a renewal (at most 24h)")
 	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")
+	f.BoolVar(&wait, "wait", false, "queue when the resource is held instead of failing")
+	f.Int32Var(&priority, "priority", 0, "with --wait, larger goes first; ties are first come first served")
 	return c
 }
 
@@ -105,6 +113,10 @@ func parseOptSize(s string) (uint64, error) {
 }
 
 func writeLease(w io.Writer, l *pb.Lease) {
+	if l.State == pb.LeaseState_LEASE_STATE_QUEUED {
+		fmt.Fprintf(w, "ticket\t%s\nresource\t%s\nholder\t%s\nposition\t%d\n", l.Id, l.Resource, l.Holder, l.QueuePosition)
+		return
+	}
 	fmt.Fprintf(w, "lease\t%s\nresource\t%s\nholder\t%s\nexpires\t%s\n", l.Id, l.Resource, l.Holder, fmtStamp(l.ExpiresAt, "-"))
 }
 
@@ -125,11 +137,18 @@ func leaseLsCmd(o *opts) *cobra.Command {
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
 				fmt.Fprintln(w, "ID\tRESOURCE\tHOLDER\tEXPIRES IN")
 				for _, l := range res.Msg.Leases {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", l.Id, l.Resource, l.Holder, time.Until(l.ExpiresAt.AsTime()).Round(time.Second))
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", l.Id, l.Resource, l.Holder, leaseExpiry(l))
 				}
 			})
 		},
 	}
+}
+
+func leaseExpiry(l *pb.Lease) string {
+	if l.State == pb.LeaseState_LEASE_STATE_QUEUED {
+		return fmt.Sprintf("queued #%d", l.QueuePosition)
+	}
+	return time.Until(l.ExpiresAt.AsTime()).Round(time.Second).String()
 }
 
 func leaseRenewCmd(o *opts) *cobra.Command {
@@ -150,7 +169,7 @@ func leaseRenewCmd(o *opts) *cobra.Command {
 			return o.out(cmd).print(res.Msg, func(w io.Writer) { writeLease(w, res.Msg) })
 		},
 	}
-	c.Flags().DurationVar(&ttl, "ttl", 0, "new lifetime; default the lease's own")
+	c.Flags().DurationVar(&ttl, "ttl", 0, "new lifetime; default the lease's own, or what you asked for when claiming a granted ticket")
 	return c
 }
 

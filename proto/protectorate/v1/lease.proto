@@ -11,11 +11,19 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // renewed expires on its own, so a dead agent cannot hold hardware forever.
 // Leases are kept across hub restarts and announced on EventService as
 // "lease.acquired", "lease.renewed", "lease.released" and "lease.expired"
-// (subject = lease id).
+// (subject = lease id), and for the queue as "lease.queued", "lease.granted"
+// and "lease.dropped" (subject = ticket id).
 service LeaseService {
   // AcquireLease reserves one resource exclusively: a node name ("win1"), one
   // GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-  // least-loaded fresh matching node that is not already leased.
+  // least-loaded fresh matching node that is not already leased. When the
+  // resource is held, the call fails with failed_precondition, unless the
+  // request sets wait: then the caller is queued first in first out (highest
+  // priority first) and gets a ticket, a Lease in state QUEUED. When the hub
+  // grants a ticket it holds the lease for the waiter for a short claim
+  // window and sends it a notice message; RenewLease with no ttl claims the
+  // lease for the requested ttl, otherwise it passes to the next waiter.
+  // ReleaseLease on a ticket leaves the queue.
   rpc AcquireLease(AcquireLeaseRequest) returns (Lease);
 
   // RenewLease pushes the expiry of a live lease to now plus a TTL.
@@ -25,7 +33,7 @@ service LeaseService {
   // is an error.
   rpc ReleaseLease(ReleaseLeaseRequest) returns (ReleaseLeaseResponse);
 
-  // ListLeases returns every live lease.
+  // ListLeases returns every live lease, then every queued ticket.
   rpc ListLeases(ListLeasesRequest) returns (ListLeasesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -56,6 +64,10 @@ message AcquireLeaseRequest {
   google.protobuf.Duration ttl = 4;
   // allow_family admits nodes of tier "family", which are skipped otherwise.
   bool allow_family = 5;
+  // wait queues the caller when the resource is held instead of failing.
+  bool wait = 6;
+  // priority orders the queue: larger first, then first come first served.
+  int32 priority = 7;
 }
 
 message RenewLeaseRequest {
@@ -76,7 +88,14 @@ message ListLeasesResponse {
   repeated Lease leases = 1;
 }
 
-// Lease is one reservation.
+enum LeaseState {
+  // UNSPECIFIED is a lease that is held.
+  LEASE_STATE_UNSPECIFIED = 0;
+  // QUEUED is a ticket waiting for its resource; id is the ticket id.
+  LEASE_STATE_QUEUED = 1;
+}
+
+// Lease is one reservation, or a ticket waiting for one.
 message Lease {
   string id = 1;
   // resource is the chosen resource: a node name or "<node>:gpu<index>".
@@ -88,4 +107,7 @@ message Lease {
   google.protobuf.Duration ttl = 6;
   google.protobuf.Timestamp acquired_at = 7;
   google.protobuf.Timestamp expires_at = 8;
+  LeaseState state = 9;
+  // queue_position is 1 for the next ticket to be granted; set when QUEUED.
+  int32 queue_position = 10;
 }

@@ -111,6 +111,7 @@ func (h *Hub) EnableJobs(home string, local *node.Jobs) error {
 	if err != nil {
 		return err
 	}
+	leases.chooser, leases.onGrant = h.leaseChooserFromJSON, h.leaseGranted
 	h.leases, h.jobs = leases, jobs
 	return nil
 }
