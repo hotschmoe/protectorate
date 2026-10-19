@@ -4,6 +4,7 @@ package protectorate.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/desk.proto";
 import "protectorate/v1/job.proto";
 import "protectorate/v1/options.proto";
 import "protectorate/v1/sleeve.proto";
@@ -43,6 +44,17 @@ service NodeAgentService {
 
   // CancelJob kills a running job's process tree.
   rpc CancelJob(NodeAgentServiceCancelJobRequest) returns (NodeAgentServiceCancelJobResponse);
+
+  // PutFile receives one chunk of a file or directory transfer into the
+  // node's file root. The hub relays the caller's chunks unchanged.
+  rpc PutFile(PutFileRequest) returns (PutFileResponse);
+
+  // GetFile streams a file or directory out of the node's file root.
+  rpc GetFile(GetFileRequest) returns (stream GetFileResponse);
+
+  // DeskAction runs one desktop command in the node agent's interactive
+  // session. See DeskService.
+  rpc DeskAction(DeskActionRequest) returns (DeskActionResponse);
 }
 
 // NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -71,6 +83,99 @@ service NodeService {
   // RemoveNode removes a node from the hub inventory. It does not touch the
   // machine itself.
   rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+
+  // PutFile copies a file or directory to a node, one chunk per call so it
+  // works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
+  // transfer_id with consecutive offsets; the call with last set carries the
+  // size and SHA-256 of the whole (uncompressed) stream, and only then is the
+  // destination replaced, atomically. The hub relays chunks without storing
+  // them. The remote path is confined to the node's file root unless the
+  // node agent was started unconfined.
+  rpc PutFile(PutFileRequest) returns (PutFileResponse);
+
+  // GetFile streams a file or directory from a node: a header, chunks and a
+  // trailer with the size and SHA-256 the receiver must verify.
+  rpc GetFile(GetFileRequest) returns (stream GetFileResponse);
+}
+
+enum FileKind {
+  FILE_KIND_UNSPECIFIED = 0;
+  FILE_KIND_FILE = 1;
+  // FILE_KIND_DIRECTORY travels as a tar stream of regular files and
+  // directories; symlinks and special files are skipped.
+  FILE_KIND_DIRECTORY = 2;
+}
+
+// FileChunk is a slice of the uncompressed stream, zstd-compressed only when
+// that made it smaller.
+message FileChunk {
+  bytes data = 1;
+  bool compressed = 2;
+  // raw_size is the length after decompression.
+  uint32 raw_size = 3;
+}
+
+message FileTrailer {
+  // size and sha256 (hex) cover the uncompressed stream.
+  uint64 size = 1;
+  string sha256 = 2;
+  // skipped counts directory entries that were not sent (symlinks, devices).
+  uint32 skipped = 3;
+}
+
+message PutFileRequest {
+  // name is the node name.
+  string name = 1;
+  bool allow_family = 2;
+  // transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
+  string transfer_id = 3;
+  // path, kind, mode and overwrite are read on the first call (offset 0).
+  // A relative path is under the node's file root; the path names the
+  // destination itself, not a directory to put it in.
+  string path = 4;
+  FileKind kind = 5;
+  // mode holds the permission bits of a file; ignored for directories.
+  uint32 mode = 6;
+  // overwrite replaces an existing destination instead of failing with
+  // ALREADY_EXISTS.
+  bool overwrite = 7;
+  // offset is the number of uncompressed bytes sent in earlier calls.
+  uint64 offset = 8;
+  FileChunk chunk = 9;
+  // last ends the transfer; trailer is then required.
+  bool last = 10;
+  FileTrailer trailer = 11;
+}
+
+message PutFileResponse {
+  // path is the resolved destination, set once the transfer is complete.
+  string path = 1;
+  uint64 received = 2;
+  bool done = 3;
+}
+
+message GetFileRequest {
+  string name = 1;
+  bool allow_family = 2;
+  string path = 3;
+  // no_compress sends every chunk as is.
+  bool no_compress = 4;
+}
+
+message FileHeader {
+  FileKind kind = 1;
+  uint32 mode = 2;
+  // size is the file size; 0 for directories, whose size is known at the end.
+  uint64 size = 3;
+  string path = 4;
+}
+
+message GetFileResponse {
+  oneof part {
+    FileHeader header = 1;
+    FileChunk chunk = 2;
+    FileTrailer trailer = 3;
+  }
 }
 
 message GetMetricsRequest {}

@@ -32,6 +32,10 @@ type Agent struct {
 	Authorize func(*http.Request) error
 	// Jobs executes hub jobs; nil refuses them.
 	Jobs *Jobs
+	// Files serves file transfers; nil refuses them.
+	Files *Files
+	// Desk drives the desktop; nil refuses it.
+	Desk *Desk
 }
 
 // TokenAuthorizer accepts requests carrying the given bearer token.
@@ -173,4 +177,38 @@ func (a *Agent) CancelJob(_ context.Context, req *connect.Request[pb.NodeAgentSe
 		return nil, errNoJobs
 	}
 	return connect.NewResponse(&pb.NodeAgentServiceCancelJobResponse{Found: a.Jobs.Cancel(req.Msg.JobId)}), nil
+}
+
+var (
+	errNoFiles = connect.NewError(connect.CodeUnimplemented, errors.New("this node does not serve file transfers"))
+	errNoDesk  = connect.NewError(connect.CodeUnimplemented, errors.New("this node does not serve desktop commands"))
+)
+
+func (a *Agent) PutFile(_ context.Context, req *connect.Request[pb.PutFileRequest]) (*connect.Response[pb.PutFileResponse], error) {
+	if a.Files == nil {
+		return nil, errNoFiles
+	}
+	res, err := a.Files.Put(req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (a *Agent) GetFile(ctx context.Context, req *connect.Request[pb.GetFileRequest], stream *connect.ServerStream[pb.GetFileResponse]) error {
+	if a.Files == nil {
+		return errNoFiles
+	}
+	return a.Files.Get(ctx, req.Msg, stream.Send)
+}
+
+func (a *Agent) DeskAction(ctx context.Context, req *connect.Request[pb.DeskActionRequest]) (*connect.Response[pb.DeskActionResponse], error) {
+	if a.Desk == nil {
+		return nil, errNoDesk
+	}
+	res, err := a.Desk.Do(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
 }

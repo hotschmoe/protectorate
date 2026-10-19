@@ -20,6 +20,7 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
+import 'desk.pb.dart' as $4;
 import 'job.pb.dart' as $3;
 import 'node.pbenum.dart';
 import 'sleeve.pb.dart' as $1;
@@ -27,6 +28,757 @@ import 'sleeve.pb.dart' as $1;
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'node.pbenum.dart';
+
+/// FileChunk is a slice of the uncompressed stream, zstd-compressed only when
+/// that made it smaller.
+class FileChunk extends $pb.GeneratedMessage {
+  factory FileChunk({
+    $core.List<$core.int>? data,
+    $core.bool? compressed,
+    $core.int? rawSize,
+  }) {
+    final result = FileChunk._();
+    if (data != null) result.data = data;
+    if (compressed != null) result.compressed = compressed;
+    if (rawSize != null) result.rawSize = rawSize;
+    return result;
+  }
+
+  FileChunk._();
+
+  factory FileChunk.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      FileChunk()..mergeFromBuffer(data, registry);
+  factory FileChunk.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      FileChunk()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'FileChunk',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: FileChunk.$_createMessage)
+    ..a<$core.List<$core.int>>(
+        1, _omitFieldNames ? '' : 'data', $pb.PbFieldType.OY)
+    ..aOB(2, _omitFieldNames ? '' : 'compressed')
+    ..aI(3, _omitFieldNames ? '' : 'rawSize', fieldType: $pb.PbFieldType.OU3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FileChunk clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FileChunk copyWith(void Function(FileChunk) updates) =>
+      super.copyWith((message) => updates(message as FileChunk)) as FileChunk;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use FileChunk() / FileChunk.new instead')
+  static FileChunk create() => FileChunk._();
+  static $pb.GeneratedMessage $_createMessage() => FileChunk._();
+  @$core.override
+  FileChunk createEmptyInstance() => FileChunk._();
+  @$core.pragma('dart2js:noInline')
+  static FileChunk getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<FileChunk>(FileChunk.$_createMessage);
+  static FileChunk? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.List<$core.int> get data => $_getN(0);
+  @$pb.TagNumber(1)
+  set data($core.List<$core.int> value) => $_setBytes(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasData() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearData() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get compressed => $_getBF(1);
+  @$pb.TagNumber(2)
+  set compressed($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCompressed() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCompressed() => $_clearField(2);
+
+  /// raw_size is the length after decompression.
+  @$pb.TagNumber(3)
+  $core.int get rawSize => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set rawSize($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasRawSize() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearRawSize() => $_clearField(3);
+}
+
+class FileTrailer extends $pb.GeneratedMessage {
+  factory FileTrailer({
+    $fixnum.Int64? size,
+    $core.String? sha256,
+    $core.int? skipped,
+  }) {
+    final result = FileTrailer._();
+    if (size != null) result.size = size;
+    if (sha256 != null) result.sha256 = sha256;
+    if (skipped != null) result.skipped = skipped;
+    return result;
+  }
+
+  FileTrailer._();
+
+  factory FileTrailer.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      FileTrailer()..mergeFromBuffer(data, registry);
+  factory FileTrailer.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      FileTrailer()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'FileTrailer',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: FileTrailer.$_createMessage)
+    ..a<$fixnum.Int64>(1, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(2, _omitFieldNames ? '' : 'sha256')
+    ..aI(3, _omitFieldNames ? '' : 'skipped', fieldType: $pb.PbFieldType.OU3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FileTrailer clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FileTrailer copyWith(void Function(FileTrailer) updates) =>
+      super.copyWith((message) => updates(message as FileTrailer))
+          as FileTrailer;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use FileTrailer() / FileTrailer.new instead')
+  static FileTrailer create() => FileTrailer._();
+  static $pb.GeneratedMessage $_createMessage() => FileTrailer._();
+  @$core.override
+  FileTrailer createEmptyInstance() => FileTrailer._();
+  @$core.pragma('dart2js:noInline')
+  static FileTrailer getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<FileTrailer>(
+          FileTrailer.$_createMessage);
+  static FileTrailer? _defaultInstance;
+
+  /// size and sha256 (hex) cover the uncompressed stream.
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get size => $_getI64(0);
+  @$pb.TagNumber(1)
+  set size($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSize() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSize() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get sha256 => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set sha256($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSha256() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSha256() => $_clearField(2);
+
+  /// skipped counts directory entries that were not sent (symlinks, devices).
+  @$pb.TagNumber(3)
+  $core.int get skipped => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set skipped($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSkipped() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSkipped() => $_clearField(3);
+}
+
+class PutFileRequest extends $pb.GeneratedMessage {
+  factory PutFileRequest({
+    $core.String? name,
+    $core.bool? allowFamily,
+    $core.String? transferId,
+    $core.String? path,
+    FileKind? kind,
+    $core.int? mode,
+    $core.bool? overwrite,
+    $fixnum.Int64? offset,
+    FileChunk? chunk,
+    $core.bool? last,
+    FileTrailer? trailer,
+  }) {
+    final result = PutFileRequest._();
+    if (name != null) result.name = name;
+    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (transferId != null) result.transferId = transferId;
+    if (path != null) result.path = path;
+    if (kind != null) result.kind = kind;
+    if (mode != null) result.mode = mode;
+    if (overwrite != null) result.overwrite = overwrite;
+    if (offset != null) result.offset = offset;
+    if (chunk != null) result.chunk = chunk;
+    if (last != null) result.last = last;
+    if (trailer != null) result.trailer = trailer;
+    return result;
+  }
+
+  PutFileRequest._();
+
+  factory PutFileRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PutFileRequest()..mergeFromBuffer(data, registry);
+  factory PutFileRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PutFileRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PutFileRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: PutFileRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOS(3, _omitFieldNames ? '' : 'transferId')
+    ..aOS(4, _omitFieldNames ? '' : 'path')
+    ..aE<FileKind>(5, _omitFieldNames ? '' : 'kind',
+        enumValues: FileKind.values)
+    ..aI(6, _omitFieldNames ? '' : 'mode', fieldType: $pb.PbFieldType.OU3)
+    ..aOB(7, _omitFieldNames ? '' : 'overwrite')
+    ..a<$fixnum.Int64>(8, _omitFieldNames ? '' : 'offset', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOM<FileChunk>(9, _omitFieldNames ? '' : 'chunk',
+        subBuilder: FileChunk.$_createMessage)
+    ..aOB(10, _omitFieldNames ? '' : 'last')
+    ..aOM<FileTrailer>(11, _omitFieldNames ? '' : 'trailer',
+        subBuilder: FileTrailer.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PutFileRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PutFileRequest copyWith(void Function(PutFileRequest) updates) =>
+      super.copyWith((message) => updates(message as PutFileRequest))
+          as PutFileRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PutFileRequest() / PutFileRequest.new instead')
+  static PutFileRequest create() => PutFileRequest._();
+  static $pb.GeneratedMessage $_createMessage() => PutFileRequest._();
+  @$core.override
+  PutFileRequest createEmptyInstance() => PutFileRequest._();
+  @$core.pragma('dart2js:noInline')
+  static PutFileRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PutFileRequest>(
+          PutFileRequest.$_createMessage);
+  static PutFileRequest? _defaultInstance;
+
+  /// name is the node name.
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get allowFamily => $_getBF(1);
+  @$pb.TagNumber(2)
+  set allowFamily($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAllowFamily() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAllowFamily() => $_clearField(2);
+
+  /// transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
+  @$pb.TagNumber(3)
+  $core.String get transferId => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set transferId($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTransferId() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTransferId() => $_clearField(3);
+
+  /// path, kind, mode and overwrite are read on the first call (offset 0).
+  /// A relative path is under the node's file root; the path names the
+  /// destination itself, not a directory to put it in.
+  @$pb.TagNumber(4)
+  $core.String get path => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set path($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasPath() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearPath() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  FileKind get kind => $_getN(4);
+  @$pb.TagNumber(5)
+  set kind(FileKind value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasKind() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearKind() => $_clearField(5);
+
+  /// mode holds the permission bits of a file; ignored for directories.
+  @$pb.TagNumber(6)
+  $core.int get mode => $_getIZ(5);
+  @$pb.TagNumber(6)
+  set mode($core.int value) => $_setUnsignedInt32(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasMode() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearMode() => $_clearField(6);
+
+  /// overwrite replaces an existing destination instead of failing with
+  /// ALREADY_EXISTS.
+  @$pb.TagNumber(7)
+  $core.bool get overwrite => $_getBF(6);
+  @$pb.TagNumber(7)
+  set overwrite($core.bool value) => $_setBool(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasOverwrite() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearOverwrite() => $_clearField(7);
+
+  /// offset is the number of uncompressed bytes sent in earlier calls.
+  @$pb.TagNumber(8)
+  $fixnum.Int64 get offset => $_getI64(7);
+  @$pb.TagNumber(8)
+  set offset($fixnum.Int64 value) => $_setInt64(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasOffset() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearOffset() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  FileChunk get chunk => $_getN(8);
+  @$pb.TagNumber(9)
+  set chunk(FileChunk value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasChunk() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearChunk() => $_clearField(9);
+  @$pb.TagNumber(9)
+  FileChunk ensureChunk() => $_ensure(8);
+
+  /// last ends the transfer; trailer is then required.
+  @$pb.TagNumber(10)
+  $core.bool get last => $_getBF(9);
+  @$pb.TagNumber(10)
+  set last($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasLast() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearLast() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  FileTrailer get trailer => $_getN(10);
+  @$pb.TagNumber(11)
+  set trailer(FileTrailer value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasTrailer() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearTrailer() => $_clearField(11);
+  @$pb.TagNumber(11)
+  FileTrailer ensureTrailer() => $_ensure(10);
+}
+
+class PutFileResponse extends $pb.GeneratedMessage {
+  factory PutFileResponse({
+    $core.String? path,
+    $fixnum.Int64? received,
+    $core.bool? done,
+  }) {
+    final result = PutFileResponse._();
+    if (path != null) result.path = path;
+    if (received != null) result.received = received;
+    if (done != null) result.done = done;
+    return result;
+  }
+
+  PutFileResponse._();
+
+  factory PutFileResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PutFileResponse()..mergeFromBuffer(data, registry);
+  factory PutFileResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      PutFileResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'PutFileResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: PutFileResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'path')
+    ..a<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'received', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOB(3, _omitFieldNames ? '' : 'done')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PutFileResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  PutFileResponse copyWith(void Function(PutFileResponse) updates) =>
+      super.copyWith((message) => updates(message as PutFileResponse))
+          as PutFileResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use PutFileResponse() / PutFileResponse.new instead')
+  static PutFileResponse create() => PutFileResponse._();
+  static $pb.GeneratedMessage $_createMessage() => PutFileResponse._();
+  @$core.override
+  PutFileResponse createEmptyInstance() => PutFileResponse._();
+  @$core.pragma('dart2js:noInline')
+  static PutFileResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<PutFileResponse>(
+          PutFileResponse.$_createMessage);
+  static PutFileResponse? _defaultInstance;
+
+  /// path is the resolved destination, set once the transfer is complete.
+  @$pb.TagNumber(1)
+  $core.String get path => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set path($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPath() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPath() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get received => $_getI64(1);
+  @$pb.TagNumber(2)
+  set received($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasReceived() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearReceived() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get done => $_getBF(2);
+  @$pb.TagNumber(3)
+  set done($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDone() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDone() => $_clearField(3);
+}
+
+class GetFileRequest extends $pb.GeneratedMessage {
+  factory GetFileRequest({
+    $core.String? name,
+    $core.bool? allowFamily,
+    $core.String? path,
+    $core.bool? noCompress,
+  }) {
+    final result = GetFileRequest._();
+    if (name != null) result.name = name;
+    if (allowFamily != null) result.allowFamily = allowFamily;
+    if (path != null) result.path = path;
+    if (noCompress != null) result.noCompress = noCompress;
+    return result;
+  }
+
+  GetFileRequest._();
+
+  factory GetFileRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetFileRequest()..mergeFromBuffer(data, registry);
+  factory GetFileRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetFileRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetFileRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetFileRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
+    ..aOS(3, _omitFieldNames ? '' : 'path')
+    ..aOB(4, _omitFieldNames ? '' : 'noCompress')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetFileRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetFileRequest copyWith(void Function(GetFileRequest) updates) =>
+      super.copyWith((message) => updates(message as GetFileRequest))
+          as GetFileRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GetFileRequest() / GetFileRequest.new instead')
+  static GetFileRequest create() => GetFileRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetFileRequest._();
+  @$core.override
+  GetFileRequest createEmptyInstance() => GetFileRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetFileRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<GetFileRequest>(
+          GetFileRequest.$_createMessage);
+  static GetFileRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get allowFamily => $_getBF(1);
+  @$pb.TagNumber(2)
+  set allowFamily($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasAllowFamily() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearAllowFamily() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get path => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set path($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPath() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPath() => $_clearField(3);
+
+  /// no_compress sends every chunk as is.
+  @$pb.TagNumber(4)
+  $core.bool get noCompress => $_getBF(3);
+  @$pb.TagNumber(4)
+  set noCompress($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasNoCompress() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearNoCompress() => $_clearField(4);
+}
+
+class FileHeader extends $pb.GeneratedMessage {
+  factory FileHeader({
+    FileKind? kind,
+    $core.int? mode,
+    $fixnum.Int64? size,
+    $core.String? path,
+  }) {
+    final result = FileHeader._();
+    if (kind != null) result.kind = kind;
+    if (mode != null) result.mode = mode;
+    if (size != null) result.size = size;
+    if (path != null) result.path = path;
+    return result;
+  }
+
+  FileHeader._();
+
+  factory FileHeader.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      FileHeader()..mergeFromBuffer(data, registry);
+  factory FileHeader.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      FileHeader()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'FileHeader',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: FileHeader.$_createMessage)
+    ..aE<FileKind>(1, _omitFieldNames ? '' : 'kind',
+        enumValues: FileKind.values)
+    ..aI(2, _omitFieldNames ? '' : 'mode', fieldType: $pb.PbFieldType.OU3)
+    ..a<$fixnum.Int64>(3, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(4, _omitFieldNames ? '' : 'path')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FileHeader clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  FileHeader copyWith(void Function(FileHeader) updates) =>
+      super.copyWith((message) => updates(message as FileHeader)) as FileHeader;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use FileHeader() / FileHeader.new instead')
+  static FileHeader create() => FileHeader._();
+  static $pb.GeneratedMessage $_createMessage() => FileHeader._();
+  @$core.override
+  FileHeader createEmptyInstance() => FileHeader._();
+  @$core.pragma('dart2js:noInline')
+  static FileHeader getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<FileHeader>(FileHeader.$_createMessage);
+  static FileHeader? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  FileKind get kind => $_getN(0);
+  @$pb.TagNumber(1)
+  set kind(FileKind value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasKind() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearKind() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get mode => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set mode($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasMode() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearMode() => $_clearField(2);
+
+  /// size is the file size; 0 for directories, whose size is known at the end.
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get size => $_getI64(2);
+  @$pb.TagNumber(3)
+  set size($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSize() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSize() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get path => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set path($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasPath() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearPath() => $_clearField(4);
+}
+
+enum GetFileResponse_Part { header, chunk, trailer, notSet }
+
+class GetFileResponse extends $pb.GeneratedMessage {
+  factory GetFileResponse({
+    FileHeader? header,
+    FileChunk? chunk,
+    FileTrailer? trailer,
+  }) {
+    final result = GetFileResponse._();
+    if (header != null) result.header = header;
+    if (chunk != null) result.chunk = chunk;
+    if (trailer != null) result.trailer = trailer;
+    return result;
+  }
+
+  GetFileResponse._();
+
+  factory GetFileResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetFileResponse()..mergeFromBuffer(data, registry);
+  factory GetFileResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetFileResponse()..mergeFromJson(json, registry);
+
+  static const $core.Map<$core.int, GetFileResponse_Part>
+      _GetFileResponse_PartByTag = {
+    1: GetFileResponse_Part.header,
+    2: GetFileResponse_Part.chunk,
+    3: GetFileResponse_Part.trailer,
+    0: GetFileResponse_Part.notSet
+  };
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetFileResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetFileResponse.$_createMessage)
+    ..oo(0, [1, 2, 3])
+    ..aOM<FileHeader>(1, _omitFieldNames ? '' : 'header',
+        subBuilder: FileHeader.$_createMessage)
+    ..aOM<FileChunk>(2, _omitFieldNames ? '' : 'chunk',
+        subBuilder: FileChunk.$_createMessage)
+    ..aOM<FileTrailer>(3, _omitFieldNames ? '' : 'trailer',
+        subBuilder: FileTrailer.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetFileResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetFileResponse copyWith(void Function(GetFileResponse) updates) =>
+      super.copyWith((message) => updates(message as GetFileResponse))
+          as GetFileResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GetFileResponse() / GetFileResponse.new instead')
+  static GetFileResponse create() => GetFileResponse._();
+  static $pb.GeneratedMessage $_createMessage() => GetFileResponse._();
+  @$core.override
+  GetFileResponse createEmptyInstance() => GetFileResponse._();
+  @$core.pragma('dart2js:noInline')
+  static GetFileResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<GetFileResponse>(
+          GetFileResponse.$_createMessage);
+  static GetFileResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  GetFileResponse_Part whichPart() =>
+      _GetFileResponse_PartByTag[$_whichOneof(0)]!;
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  void clearPart() => $_clearField($_whichOneof(0));
+
+  @$pb.TagNumber(1)
+  FileHeader get header => $_getN(0);
+  @$pb.TagNumber(1)
+  set header(FileHeader value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasHeader() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearHeader() => $_clearField(1);
+  @$pb.TagNumber(1)
+  FileHeader ensureHeader() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  FileChunk get chunk => $_getN(1);
+  @$pb.TagNumber(2)
+  set chunk(FileChunk value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasChunk() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearChunk() => $_clearField(2);
+  @$pb.TagNumber(2)
+  FileChunk ensureChunk() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  FileTrailer get trailer => $_getN(2);
+  @$pb.TagNumber(3)
+  set trailer(FileTrailer value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTrailer() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTrailer() => $_clearField(3);
+  @$pb.TagNumber(3)
+  FileTrailer ensureTrailer() => $_ensure(2);
+}
 
 class GetMetricsRequest extends $pb.GeneratedMessage {
   factory GetMetricsRequest() => GetMetricsRequest._();
@@ -2294,6 +3046,26 @@ class NodeAgentServiceApi {
           'CancelJob',
           request,
           $3.NodeAgentServiceCancelJobResponse());
+
+  /// PutFile receives one chunk of a file or directory transfer into the
+  /// node's file root. The hub relays the caller's chunks unchanged.
+  $async.Future<PutFileResponse> putFile(
+          $pb.ClientContext? ctx, PutFileRequest request) =>
+      _client.invoke<PutFileResponse>(
+          ctx, 'NodeAgentService', 'PutFile', request, PutFileResponse());
+
+  /// GetFile streams a file or directory out of the node's file root.
+  $async.Future<GetFileResponse> getFile(
+          $pb.ClientContext? ctx, GetFileRequest request) =>
+      _client.invoke<GetFileResponse>(
+          ctx, 'NodeAgentService', 'GetFile', request, GetFileResponse());
+
+  /// DeskAction runs one desktop command in the node agent's interactive
+  /// session. See DeskService.
+  $async.Future<$4.DeskActionResponse> deskAction(
+          $pb.ClientContext? ctx, $4.DeskActionRequest request) =>
+      _client.invoke<$4.DeskActionResponse>(ctx, 'NodeAgentService',
+          'DeskAction', request, $4.DeskActionResponse());
 }
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -2332,6 +3104,25 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, RemoveNodeRequest request) =>
       _client.invoke<RemoveNodeResponse>(
           ctx, 'NodeService', 'RemoveNode', request, RemoveNodeResponse());
+
+  /// PutFile copies a file or directory to a node, one chunk per call so it
+  /// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
+  /// transfer_id with consecutive offsets; the call with last set carries the
+  /// size and SHA-256 of the whole (uncompressed) stream, and only then is the
+  /// destination replaced, atomically. The hub relays chunks without storing
+  /// them. The remote path is confined to the node's file root unless the
+  /// node agent was started unconfined.
+  $async.Future<PutFileResponse> putFile(
+          $pb.ClientContext? ctx, PutFileRequest request) =>
+      _client.invoke<PutFileResponse>(
+          ctx, 'NodeService', 'PutFile', request, PutFileResponse());
+
+  /// GetFile streams a file or directory from a node: a header, chunks and a
+  /// trailer with the size and SHA-256 the receiver must verify.
+  $async.Future<GetFileResponse> getFile(
+          $pb.ClientContext? ctx, GetFileRequest request) =>
+      _client.invoke<GetFileResponse>(
+          ctx, 'NodeService', 'GetFile', request, GetFileResponse());
 }
 
 const $core.bool _omitFieldNames =

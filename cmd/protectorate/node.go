@@ -21,6 +21,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/desk"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
@@ -78,12 +79,17 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 	if err != nil {
 		return err
 	}
+	files, err := node.NewFiles(filepath.Join(home, "node-files"), false)
+	if err != nil {
+		return err
+	}
+	h.EnableNodeOps(files, &node.Desk{D: desk.New()})
 	return h.EnableJobs(home, local)
 }
 
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
-	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o))
+	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o))
 	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
 }
@@ -185,7 +191,8 @@ func nodeRmCmd(o *opts) *cobra.Command {
 }
 
 func nodeServeCmd() *cobra.Command {
-	var listen, tokenFile, jobDir string
+	var listen, tokenFile, jobDir, fileRoot string
+	var fileUnconfined bool
 	var watch []string
 	var slow time.Duration
 	var jobSlots int
@@ -211,6 +218,13 @@ func nodeServeCmd() *cobra.Command {
 				}
 				watch = append(watch, a.Jobs.Dir())
 			}
+			if fileRoot == "" {
+				fileRoot = filepath.Join(home, "node-files")
+			}
+			if a.Files, err = node.NewFiles(fileRoot, fileUnconfined); err != nil {
+				return err
+			}
+			a.Desk = &node.Desk{D: desk.New()}
 			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow})
 			tsDir := filepath.Join(home, "tsnet")
 			if tailnet.Joined(tsDir) {
@@ -247,6 +261,8 @@ func nodeServeCmd() *cobra.Command {
 	f.StringVar(&tokenFile, "node-token-file", "", "file holding the bearer token the hub must present when not enrolled in a tailnet (or the token itself in env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")
 	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs)")
+	f.StringVar(&fileRoot, "file-root", "", "directory file transfers are confined to (default $PROTECTORATE_HOME/node-files)")
+	f.BoolVar(&fileUnconfined, "file-unconfined", false, "let file transfers touch any path this user can, like a job can; --file-root then only anchors relative paths")
 	f.IntVar(&jobSlots, "job-concurrency", 1, "jobs that may run at once; 0 refuses jobs")
 	f.DurationVar(&slow, "watch-interval", 15*time.Minute, "how often to measure watched directories and engine disk usage")
 	return c

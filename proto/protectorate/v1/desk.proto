@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// DeskService drives the interactive desktop of a node, for programs that
+// only have a GUI. It works only when the node agent runs in the logged-in
+// user's session (`protectorate service windows-task`); otherwise calls fail
+// with FAILED_PRECONDITION. Only Windows nodes implement it.
+//
+// The desktop is a lease resource named "desk:<node>". Every command that
+// changes the desktop (click, move, type, key, run) must name a live lease on
+// it; screenshot and windows do not. Coordinates are pixels of the
+// screenshot, whose origin is the top-left of the virtual screen.
+service DeskService {
+  // Screenshot captures the whole virtual screen as a PNG.
+  rpc Screenshot(ScreenshotRequest) returns (ScreenshotResponse);
+
+  // ListWindows lists visible top-level windows, topmost first.
+  rpc ListWindows(ListWindowsRequest) returns (ListWindowsResponse);
+
+  // Click moves the pointer and clicks. Needs a desk lease.
+  rpc Click(ClickRequest) returns (InputResponse);
+
+  // Move puts the pointer at a position. Needs a desk lease.
+  rpc Move(MoveRequest) returns (InputResponse);
+
+  // Type enters text as Unicode key events into the focused window. Needs a desk
+  // lease.
+  rpc Type(TypeRequest) returns (InputResponse);
+
+  // Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
+  // lease.
+  rpc Key(KeyRequest) returns (InputResponse);
+
+  // Run starts a program in the interactive session and returns at once. Needs
+  // a desk lease.
+  rpc Run(RunRequest) returns (RunResponse);
+}
+
+message DeskTarget {
+  // name is the node name.
+  string name = 1;
+  // lease_id names a live lease on "desk:<name>"; required by mutating
+  // commands.
+  string lease_id = 2;
+  bool allow_family = 3;
+}
+
+message ScreenshotRequest {
+  DeskTarget target = 1;
+}
+
+message ScreenshotResponse {
+  bytes png = 1;
+  int32 width = 2;
+  int32 height = 3;
+}
+
+message ListWindowsRequest {
+  DeskTarget target = 1;
+}
+
+message DeskWindow {
+  string title = 1;
+  int32 x = 2;
+  int32 y = 3;
+  int32 width = 4;
+  int32 height = 5;
+  uint32 pid = 6;
+  bool minimized = 7;
+}
+
+message ListWindowsResponse {
+  repeated DeskWindow windows = 1;
+}
+
+message ClickRequest {
+  DeskTarget target = 1;
+  int32 x = 2;
+  int32 y = 3;
+  // button is "left" (default), "right" or "middle".
+  string button = 4;
+  bool double = 5;
+}
+
+message MoveRequest {
+  DeskTarget target = 1;
+  int32 x = 2;
+  int32 y = 3;
+}
+
+message TypeRequest {
+  DeskTarget target = 1;
+  string text = 2;
+}
+
+message KeyRequest {
+  DeskTarget target = 1;
+  string chord = 2;
+}
+
+message RunRequest {
+  DeskTarget target = 1;
+  string program = 2;
+  repeated string args = 3;
+}
+
+message InputResponse {}
+
+message RunResponse {
+  uint32 pid = 1;
+}
+
+// DeskActionRequest is the one call the hub makes to a node agent; the hub
+// has already checked the lease.
+message DeskActionRequest {
+  oneof action {
+    ScreenshotRequest screenshot = 1;
+    ListWindowsRequest list_windows = 2;
+    ClickRequest click = 3;
+    MoveRequest move = 4;
+    TypeRequest type = 5;
+    KeyRequest key = 6;
+    RunRequest run = 7;
+  }
+}
+
+message DeskActionResponse {
+  oneof result {
+    ScreenshotResponse screenshot = 1;
+    ListWindowsResponse list_windows = 2;
+    InputResponse input = 3;
+    RunResponse run = 4;
+  }
+}

@@ -6,6 +6,7 @@
 import "package:connectrpc/connect.dart" as connect;
 import "node.pb.dart" as protectoratev1node;
 import "job.pb.dart" as protectoratev1job;
+import "desk.pb.dart" as protectoratev1desk;
 
 /// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
 /// is for live views. The job RPCs are called by the hub only and are unary
@@ -69,6 +70,32 @@ abstract final class NodeAgentService {
     protectoratev1job.NodeAgentServiceCancelJobRequest.new,
     protectoratev1job.NodeAgentServiceCancelJobResponse.new,
   );
+
+  /// PutFile receives one chunk of a file or directory transfer into the
+  /// node's file root. The hub relays the caller's chunks unchanged.
+  static const putFile = connect.Spec(
+    '/$name/PutFile',
+    connect.StreamType.unary,
+    protectoratev1node.PutFileRequest.new,
+    protectoratev1node.PutFileResponse.new,
+  );
+
+  /// GetFile streams a file or directory out of the node's file root.
+  static const getFile = connect.Spec(
+    '/$name/GetFile',
+    connect.StreamType.server,
+    protectoratev1node.GetFileRequest.new,
+    protectoratev1node.GetFileResponse.new,
+  );
+
+  /// DeskAction runs one desktop command in the node agent's interactive
+  /// session. See DeskService.
+  static const deskAction = connect.Spec(
+    '/$name/DeskAction',
+    connect.StreamType.unary,
+    protectoratev1desk.DeskActionRequest.new,
+    protectoratev1desk.DeskActionResponse.new,
+  );
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -114,5 +141,28 @@ abstract final class NodeService {
     connect.StreamType.unary,
     protectoratev1node.RemoveNodeRequest.new,
     protectoratev1node.RemoveNodeResponse.new,
+  );
+
+  /// PutFile copies a file or directory to a node, one chunk per call so it
+  /// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
+  /// transfer_id with consecutive offsets; the call with last set carries the
+  /// size and SHA-256 of the whole (uncompressed) stream, and only then is the
+  /// destination replaced, atomically. The hub relays chunks without storing
+  /// them. The remote path is confined to the node's file root unless the
+  /// node agent was started unconfined.
+  static const putFile = connect.Spec(
+    '/$name/PutFile',
+    connect.StreamType.unary,
+    protectoratev1node.PutFileRequest.new,
+    protectoratev1node.PutFileResponse.new,
+  );
+
+  /// GetFile streams a file or directory from a node: a header, chunks and a
+  /// trailer with the size and SHA-256 the receiver must verify.
+  static const getFile = connect.Spec(
+    '/$name/GetFile',
+    connect.StreamType.server,
+    protectoratev1node.GetFileRequest.new,
+    protectoratev1node.GetFileResponse.new,
   );
 }

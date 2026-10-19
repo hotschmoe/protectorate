@@ -52,6 +52,15 @@ const (
 	// NodeAgentServiceCancelJobProcedure is the fully-qualified name of the NodeAgentService's
 	// CancelJob RPC.
 	NodeAgentServiceCancelJobProcedure = "/protectorate.v1.NodeAgentService/CancelJob"
+	// NodeAgentServicePutFileProcedure is the fully-qualified name of the NodeAgentService's PutFile
+	// RPC.
+	NodeAgentServicePutFileProcedure = "/protectorate.v1.NodeAgentService/PutFile"
+	// NodeAgentServiceGetFileProcedure is the fully-qualified name of the NodeAgentService's GetFile
+	// RPC.
+	NodeAgentServiceGetFileProcedure = "/protectorate.v1.NodeAgentService/GetFile"
+	// NodeAgentServiceDeskActionProcedure is the fully-qualified name of the NodeAgentService's
+	// DeskAction RPC.
+	NodeAgentServiceDeskActionProcedure = "/protectorate.v1.NodeAgentService/DeskAction"
 	// NodeServiceListNodesProcedure is the fully-qualified name of the NodeService's ListNodes RPC.
 	NodeServiceListNodesProcedure = "/protectorate.v1.NodeService/ListNodes"
 	// NodeServiceGetNodeProcedure is the fully-qualified name of the NodeService's GetNode RPC.
@@ -60,6 +69,10 @@ const (
 	NodeServiceAddNodeProcedure = "/protectorate.v1.NodeService/AddNode"
 	// NodeServiceRemoveNodeProcedure is the fully-qualified name of the NodeService's RemoveNode RPC.
 	NodeServiceRemoveNodeProcedure = "/protectorate.v1.NodeService/RemoveNode"
+	// NodeServicePutFileProcedure is the fully-qualified name of the NodeService's PutFile RPC.
+	NodeServicePutFileProcedure = "/protectorate.v1.NodeService/PutFile"
+	// NodeServiceGetFileProcedure is the fully-qualified name of the NodeService's GetFile RPC.
+	NodeServiceGetFileProcedure = "/protectorate.v1.NodeService/GetFile"
 )
 
 // NodeAgentServiceClient is a client for the protectorate.v1.NodeAgentService service.
@@ -82,6 +95,14 @@ type NodeAgentServiceClient interface {
 	RunJob(context.Context, *connect.Request[v1.RunJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error)
 	// CancelJob kills a running job's process tree.
 	CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error)
+	// PutFile receives one chunk of a file or directory transfer into the
+	// node's file root. The hub relays the caller's chunks unchanged.
+	PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error)
+	// GetFile streams a file or directory out of the node's file root.
+	GetFile(context.Context, *connect.Request[v1.GetFileRequest]) (*connect.ServerStreamForClient[v1.GetFileResponse], error)
+	// DeskAction runs one desktop command in the node agent's interactive
+	// session. See DeskService.
+	DeskAction(context.Context, *connect.Request[v1.DeskActionRequest]) (*connect.Response[v1.DeskActionResponse], error)
 }
 
 // NewNodeAgentServiceClient constructs a client for the protectorate.v1.NodeAgentService service.
@@ -133,6 +154,24 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(nodeAgentServiceMethods.ByName("CancelJob")),
 			connect.WithClientOptions(opts...),
 		),
+		putFile: connect.NewClient[v1.PutFileRequest, v1.PutFileResponse](
+			httpClient,
+			baseURL+NodeAgentServicePutFileProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("PutFile")),
+			connect.WithClientOptions(opts...),
+		),
+		getFile: connect.NewClient[v1.GetFileRequest, v1.GetFileResponse](
+			httpClient,
+			baseURL+NodeAgentServiceGetFileProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("GetFile")),
+			connect.WithClientOptions(opts...),
+		),
+		deskAction: connect.NewClient[v1.DeskActionRequest, v1.DeskActionResponse](
+			httpClient,
+			baseURL+NodeAgentServiceDeskActionProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("DeskAction")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -144,6 +183,9 @@ type nodeAgentServiceClient struct {
 	uploadJobData *connect.Client[v1.UploadJobDataRequest, v1.UploadJobDataResponse]
 	runJob        *connect.Client[v1.RunJobRequest, v1.JobEvent]
 	cancelJob     *connect.Client[v1.NodeAgentServiceCancelJobRequest, v1.NodeAgentServiceCancelJobResponse]
+	putFile       *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
+	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
+	deskAction    *connect.Client[v1.DeskActionRequest, v1.DeskActionResponse]
 }
 
 // GetMetrics calls protectorate.v1.NodeAgentService.GetMetrics.
@@ -176,6 +218,21 @@ func (c *nodeAgentServiceClient) CancelJob(ctx context.Context, req *connect.Req
 	return c.cancelJob.CallUnary(ctx, req)
 }
 
+// PutFile calls protectorate.v1.NodeAgentService.PutFile.
+func (c *nodeAgentServiceClient) PutFile(ctx context.Context, req *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error) {
+	return c.putFile.CallUnary(ctx, req)
+}
+
+// GetFile calls protectorate.v1.NodeAgentService.GetFile.
+func (c *nodeAgentServiceClient) GetFile(ctx context.Context, req *connect.Request[v1.GetFileRequest]) (*connect.ServerStreamForClient[v1.GetFileResponse], error) {
+	return c.getFile.CallServerStream(ctx, req)
+}
+
+// DeskAction calls protectorate.v1.NodeAgentService.DeskAction.
+func (c *nodeAgentServiceClient) DeskAction(ctx context.Context, req *connect.Request[v1.DeskActionRequest]) (*connect.Response[v1.DeskActionResponse], error) {
+	return c.deskAction.CallUnary(ctx, req)
+}
+
 // NodeAgentServiceHandler is an implementation of the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceHandler interface {
 	// GetMetrics collects this node's current metrics.
@@ -196,6 +253,14 @@ type NodeAgentServiceHandler interface {
 	RunJob(context.Context, *connect.Request[v1.RunJobRequest], *connect.ServerStream[v1.JobEvent]) error
 	// CancelJob kills a running job's process tree.
 	CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error)
+	// PutFile receives one chunk of a file or directory transfer into the
+	// node's file root. The hub relays the caller's chunks unchanged.
+	PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error)
+	// GetFile streams a file or directory out of the node's file root.
+	GetFile(context.Context, *connect.Request[v1.GetFileRequest], *connect.ServerStream[v1.GetFileResponse]) error
+	// DeskAction runs one desktop command in the node agent's interactive
+	// session. See DeskService.
+	DeskAction(context.Context, *connect.Request[v1.DeskActionRequest]) (*connect.Response[v1.DeskActionResponse], error)
 }
 
 // NewNodeAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -243,6 +308,24 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		connect.WithSchema(nodeAgentServiceMethods.ByName("CancelJob")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeAgentServicePutFileHandler := connect.NewUnaryHandler(
+		NodeAgentServicePutFileProcedure,
+		svc.PutFile,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("PutFile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeAgentServiceGetFileHandler := connect.NewServerStreamHandler(
+		NodeAgentServiceGetFileProcedure,
+		svc.GetFile,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("GetFile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeAgentServiceDeskActionHandler := connect.NewUnaryHandler(
+		NodeAgentServiceDeskActionProcedure,
+		svc.DeskAction,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("DeskAction")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeAgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeAgentServiceGetMetricsProcedure:
@@ -257,6 +340,12 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 			nodeAgentServiceRunJobHandler.ServeHTTP(w, r)
 		case NodeAgentServiceCancelJobProcedure:
 			nodeAgentServiceCancelJobHandler.ServeHTTP(w, r)
+		case NodeAgentServicePutFileProcedure:
+			nodeAgentServicePutFileHandler.ServeHTTP(w, r)
+		case NodeAgentServiceGetFileProcedure:
+			nodeAgentServiceGetFileHandler.ServeHTTP(w, r)
+		case NodeAgentServiceDeskActionProcedure:
+			nodeAgentServiceDeskActionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -290,6 +379,18 @@ func (UnimplementedNodeAgentServiceHandler) CancelJob(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.CancelJob is not implemented"))
 }
 
+func (UnimplementedNodeAgentServiceHandler) PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.PutFile is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) GetFile(context.Context, *connect.Request[v1.GetFileRequest], *connect.ServerStream[v1.GetFileResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.GetFile is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) DeskAction(context.Context, *connect.Request[v1.DeskActionRequest]) (*connect.Response[v1.DeskActionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.DeskAction is not implemented"))
+}
+
 // NodeServiceClient is a client for the protectorate.v1.NodeService service.
 type NodeServiceClient interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -304,6 +405,17 @@ type NodeServiceClient interface {
 	// RemoveNode removes a node from the hub inventory. It does not touch the
 	// machine itself.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// PutFile copies a file or directory to a node, one chunk per call so it
+	// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
+	// transfer_id with consecutive offsets; the call with last set carries the
+	// size and SHA-256 of the whole (uncompressed) stream, and only then is the
+	// destination replaced, atomically. The hub relays chunks without storing
+	// them. The remote path is confined to the node's file root unless the
+	// node agent was started unconfined.
+	PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error)
+	// GetFile streams a file or directory from a node: a header, chunks and a
+	// trailer with the size and SHA-256 the receiver must verify.
+	GetFile(context.Context, *connect.Request[v1.GetFileRequest]) (*connect.ServerStreamForClient[v1.GetFileResponse], error)
 }
 
 // NewNodeServiceClient constructs a client for the protectorate.v1.NodeService service. By default,
@@ -343,6 +455,18 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("RemoveNode")),
 			connect.WithClientOptions(opts...),
 		),
+		putFile: connect.NewClient[v1.PutFileRequest, v1.PutFileResponse](
+			httpClient,
+			baseURL+NodeServicePutFileProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("PutFile")),
+			connect.WithClientOptions(opts...),
+		),
+		getFile: connect.NewClient[v1.GetFileRequest, v1.GetFileResponse](
+			httpClient,
+			baseURL+NodeServiceGetFileProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("GetFile")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -352,6 +476,8 @@ type nodeServiceClient struct {
 	getNode    *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
 	addNode    *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
 	removeNode *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
+	putFile    *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
+	getFile    *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
 }
 
 // ListNodes calls protectorate.v1.NodeService.ListNodes.
@@ -374,6 +500,16 @@ func (c *nodeServiceClient) RemoveNode(ctx context.Context, req *connect.Request
 	return c.removeNode.CallUnary(ctx, req)
 }
 
+// PutFile calls protectorate.v1.NodeService.PutFile.
+func (c *nodeServiceClient) PutFile(ctx context.Context, req *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error) {
+	return c.putFile.CallUnary(ctx, req)
+}
+
+// GetFile calls protectorate.v1.NodeService.GetFile.
+func (c *nodeServiceClient) GetFile(ctx context.Context, req *connect.Request[v1.GetFileRequest]) (*connect.ServerStreamForClient[v1.GetFileResponse], error) {
+	return c.getFile.CallServerStream(ctx, req)
+}
+
 // NodeServiceHandler is an implementation of the protectorate.v1.NodeService service.
 type NodeServiceHandler interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -388,6 +524,17 @@ type NodeServiceHandler interface {
 	// RemoveNode removes a node from the hub inventory. It does not touch the
 	// machine itself.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// PutFile copies a file or directory to a node, one chunk per call so it
+	// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
+	// transfer_id with consecutive offsets; the call with last set carries the
+	// size and SHA-256 of the whole (uncompressed) stream, and only then is the
+	// destination replaced, atomically. The hub relays chunks without storing
+	// them. The remote path is confined to the node's file root unless the
+	// node agent was started unconfined.
+	PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error)
+	// GetFile streams a file or directory from a node: a header, chunks and a
+	// trailer with the size and SHA-256 the receiver must verify.
+	GetFile(context.Context, *connect.Request[v1.GetFileRequest], *connect.ServerStream[v1.GetFileResponse]) error
 }
 
 // NewNodeServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -423,6 +570,18 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("RemoveNode")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeServicePutFileHandler := connect.NewUnaryHandler(
+		NodeServicePutFileProcedure,
+		svc.PutFile,
+		connect.WithSchema(nodeServiceMethods.ByName("PutFile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeServiceGetFileHandler := connect.NewServerStreamHandler(
+		NodeServiceGetFileProcedure,
+		svc.GetFile,
+		connect.WithSchema(nodeServiceMethods.ByName("GetFile")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeServiceListNodesProcedure:
@@ -433,6 +592,10 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServiceAddNodeHandler.ServeHTTP(w, r)
 		case NodeServiceRemoveNodeProcedure:
 			nodeServiceRemoveNodeHandler.ServeHTTP(w, r)
+		case NodeServicePutFileProcedure:
+			nodeServicePutFileHandler.ServeHTTP(w, r)
+		case NodeServiceGetFileProcedure:
+			nodeServiceGetFileHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -456,4 +619,12 @@ func (UnimplementedNodeServiceHandler) AddNode(context.Context, *connect.Request
 
 func (UnimplementedNodeServiceHandler) RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.RemoveNode is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.PutFile is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) GetFile(context.Context, *connect.Request[v1.GetFileRequest], *connect.ServerStream[v1.GetFileResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.GetFile is not implemented"))
 }

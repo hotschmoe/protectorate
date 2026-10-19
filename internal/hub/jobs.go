@@ -395,6 +395,9 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 		if err != nil {
 			return nil, nil, err
 		}
+		if strings.HasPrefix(l.Node, "desk:") {
+			return nil, nil, invalid("lease %s is on %s, which is a desktop and cannot run jobs", t.LeaseId, l.Resource)
+		}
 		name = l.Node
 		if l.GpuIndex != nil {
 			g := int(*l.GpuIndex)

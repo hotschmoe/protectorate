@@ -116,7 +116,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), leaseCmd(o), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), leaseCmd(o), deskCmd(o), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
 	return root
 }
 

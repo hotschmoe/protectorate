@@ -34,6 +34,9 @@ type jobEnv struct {
 	lc     protectoratev1connect.LeaseServiceClient
 	srv    *httptest.Server
 	remote *node.Jobs
+	// peerRoot and hubRoot are the file roots of "peer" and "hubhost".
+	peerRoot, hubRoot string
+	peerDesk, hubDesk *fakeDesk
 }
 
 // newJobEnv wires a hub (node "hubhost") to one remote node agent ("peer") on
@@ -50,10 +53,21 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	peerFiles, err := node.NewFiles(filepath.Join(t.TempDir(), "peer-files"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubFiles, err := node.NewFiles(filepath.Join(t.TempDir(), "hub-files"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerDesk, hubDesk := &fakeDesk{}, &fakeDesk{}
 	agent := &node.Agent{
 		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
 		Authorize: node.TokenAuthorizer(agentToken),
 		Jobs:      remote,
+		Files:     peerFiles,
+		Desk:      &node.Desk{D: peerDesk},
 	}
 	agentSrv := httptest.NewServer(agent.Handler())
 	t.Cleanup(agentSrv.Close)
@@ -68,6 +82,7 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	h := New("test", testToken)
 	h.SetNodes(NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
 		NodeOptions{Interval: 100 * time.Millisecond, Token: agentToken}))
+	h.EnableNodeOps(hubFiles, &node.Desk{D: hubDesk})
 	if err := h.EnableJobs(home, local); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +102,7 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	})
 
 	hc := &http.Client{Transport: bearer{testToken}}
-	e := &jobEnv{h: h, home: home, srv: srv, remote: remote,
+	e := &jobEnv{h: h, home: home, srv: srv, remote: remote, peerRoot: peerFiles.Root(), hubRoot: hubFiles.Root(), peerDesk: peerDesk, hubDesk: hubDesk,
 		jc: protectoratev1connect.NewJobServiceClient(hc, srv.URL),
 		lc: protectoratev1connect.NewLeaseServiceClient(hc, srv.URL)}
 	waitUntil(t, 10*time.Second, "nodes fresh", func() bool {

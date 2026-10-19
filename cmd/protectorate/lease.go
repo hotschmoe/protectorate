@@ -86,7 +86,7 @@ unless --allow-family is set.`,
 		},
 	}
 	f := c.Flags()
-	f.StringVar(&resource, "node", "", "node name, or <node>:gpu<index> for one GPU")
+	f.StringVar(&resource, "node", "", "node name, <node>:gpu<index> for one GPU, or desk:<node> for the desktop")
 	f.StringVar(&osName, "os", "", "required GOOS, e.g. windows")
 	f.StringVar(&arch, "arch", "", "required GOARCH, e.g. arm64")
 	f.StringVar(&mem, "min-free-mem", "", "least available memory, e.g. 8G")

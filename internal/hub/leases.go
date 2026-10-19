@@ -472,6 +472,9 @@ func (h *Hub) AcquireLease(_ context.Context, req *connect.Request[pb.AcquireLea
 		if sel := m.GetSelector(); sel != nil {
 			return pickNode(h.nodes.Statuses(), sel, m.AllowFamily, h.jobs.busy, blocked, nil)
 		}
+		if desk, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(m.GetResource())), "desk:"); ok {
+			return h.acquireDesk(desk, m.AllowFamily, blocked)
+		}
 		node, gpu, err := parseResource(m.GetResource())
 		if err != nil {
 			return "", nil, err
@@ -507,4 +510,21 @@ func (h *Hub) ReleaseLease(_ context.Context, req *connect.Request[pb.ReleaseLea
 
 func (h *Hub) ListLeases(context.Context, *connect.Request[pb.ListLeasesRequest]) (*connect.Response[pb.ListLeasesResponse], error) {
 	return connect.NewResponse(&pb.ListLeasesResponse{Leases: h.leases.List()}), nil
+}
+
+// acquireDesk picks the "desk:<node>" resource. The lease record keeps the
+// whole resource name as its node, so it overlaps only other leases on the
+// same desktop and never blocks jobs or GPU leases on that node.
+func (h *Hub) acquireDesk(node string, allowFamily bool, blocked func(string, *int) *pb.Lease) (string, *int, error) {
+	if !nodeNameRe.MatchString(node) {
+		return "", nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid resource desk:%s", node))
+	}
+	if err := h.nodes.namedNode(node, nil, allowFamily); err != nil {
+		return "", nil, err
+	}
+	res := deskResource(node)
+	if l := blocked(res, nil); l != nil {
+		return "", nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is leased by %s until %s", l.Resource, l.Holder, l.ExpiresAt.AsTime().Local().Format(time.RFC3339)))
+	}
+	return res, nil, nil
 }
