@@ -1,0 +1,388 @@
+# Problems
+
+What hurts today, what we think the fix looks like, and what is still open.
+This is a thinking document, not a spec. Started 2026-10-19.
+
+Status key: `[idea]` the user's proposed direction, `[decided]` settled in
+discussion, `[note]` discussion and suggestions, `[open]` unanswered questions
+for the interview.
+
+---
+
+## Ethos (applies to everything below)
+
+- **Let the harness do the work.** Claude Code, Codex, Grok, Antigravity and pi
+  are each built by teams tuning them for their own models. We do not modify
+  them, wrap their prompts, or try to out-think them.
+- **Be as lightweight as possible.** Every layer we add is a layer that can get
+  in our own way. Default to "don't build it" until it hurts.
+- **One pane of glass** over accounts, machines, sessions and work.
+- **Everything is drivable from the CLI.** Anything the UI can do, the CLI can
+  do, with machine-readable output. That lets an MCP server or bridge (Claude,
+  Grok bot, Dots, Muse, ...) drive Protectorate later, either *as* the
+  orchestrator or by talking *to* the orchestrator, which in turn drives each
+  sleeve.
+
+---
+
+## P1. No visibility into subscription usage
+
+**Problem.** I pay for Claude, Grok, Codex and Antigravity, and I run a capable
+local LLM through the pi harness. For each subscription I don't know:
+- how much usage is left (percent),
+- when it resets,
+- whether I have any reset credits I could redeem.
+
+So tokens expire unused while I hold back on other accounts.
+
+`[idea]` A single dashboard listing every subscription with remaining %, reset
+time and redeemable resets, so I can spend each allotment before it resets.
+
+`[note]`
+- This is the most self-contained problem and probably the best first thing to
+  ship. It is useful on day one, even with nothing else built.
+- Data sources per provider (research 2026-10-19):
+
+  | Provider | Windows | How to read it | Redeemable resets |
+  |----------|---------|----------------|-------------------|
+  | Claude | 5h, 7d, per-model weekly, extra usage | Official: the status line JSON `rate_limits.{five_hour,seven_day}`. Undocumented: `GET api.anthropic.com/api/oauth/usage` (beta header, `user:profile` scope). | Occasional "Reset for free", redeemed only in web/Desktop Settings > Usage |
+  | Codex | primary + secondary, credits | `codex app-server` JSON-RPC `account/rateLimits/read` (schema unstable). Undocumented: `chatgpt.com/backend-api/wham/usage`. | **Banked reset credits** from grants and referrals that expire after about 30 days. Redeemed via `/usage` in the CLI. Most likely what "resets on account" means. |
+  | Grok | one weekly shared pool | Undocumented `cli-chat-proxy.grok.com/v1/billing?format=credits` | One-time reset coupons (`GetRemainingResets`) |
+  | Antigravity | quota fraction + reset | **Local only:** `agy -p /usage --output-format json`, or the local language server. Do not call Google's remote endpoints from our code (ban risk). | unknown |
+
+- **CodexBar** (`references/CodexBar`) already aggregates all four and
+  documents each data source in `docs/<provider>.md`. It's the key reference
+  for P1. It's a Swift macOS menu-bar app, so we borrow its data sources, not
+  its code.
+  ccusage and claude-monitor only total local logs, not server-side quota.
+- Redeeming a reset can't be undone, so the dashboard should show resets but
+  only redeem one on explicit confirmation.
+- The local LLM has no quota. Its useful metrics are availability, current load
+  and tokens/sec. It works as the "free" fallback tier.
+
+`[open]` Do the Codex banked resets match what you see, or do you also get them
+on Claude or Grok?
+
+---
+
+## P2. Logging in on every machine
+
+**Problem.** I have a headless main dev machine, plus a desktop, laptop, media
+server, GPU server, and my wife's and kids' computers. I log coding CLIs into
+these for maintenance: NAS dismounts, rebuilding game servers and docker
+containers, installing things. The harnesses log you out after too many
+machines or a week of inactivity, so I keep logging in again, for example on
+the media server.
+
+`[idea]` One central machine holds all logins, credentials and work. It has SSH
+keys to every other machine and does maintenance remotely. No extra logins on
+other machines. There's a list of machines with add and remove.
+
+`[note]`
+- This fits well with "let the harness do the work". The agent runs on the
+  central machine with its own login and just uses `ssh host '...'` as a tool.
+  The harnesses are already good at this. The main pieces we need are an
+  inventory (host, OS/arch, user, how to reach it, notes) and key distribution.
+- Plain sshd works on all five platforms: Windows ships OpenSSH Server, and
+  Android can run sshd under Termux. So P2 can work without our own daemon
+  installed anywhere.
+- **Security.** The central machine becomes the crown jewels: every
+  subscription plus a key into every machine in the house, kids' PCs included.
+  Worth considering:
+  - per-host or per-purpose keys, or short-lived SSH certificates from our own
+    small CA (`ssh-keygen -s`), so revoking one machine is one step,
+  - an audit log of every remote command an agent ran,
+  - an approval step for the family machines, versus auto-approve for the
+    servers.
+- Generate the inventory as a skill/context file so any harness knows which
+  hosts exist and how to reach them without us wiring anything in.
+
+`[decided]` Agents get admin on the other machines.
+
+`[open]` (revisit) Gate it so nothing accidental or malicious can come through
+the tunnel. Options to weigh later:
+- the node accepts commands only from the hub's identity (mutual TLS / pinned
+  key), never from arbitrary peers on the network,
+- a per-host policy: allowlisted commands run freely, everything else needs
+  approval (from the phone),
+- extra confirmation for destructive classes (rm, disk/partition, service
+  removal, user/credential changes),
+- short-lived credentials (SSH certs with a TTL) instead of standing keys,
+- an append-only audit log of every remote command, kept on a machine the
+  agent can't write to.
+
+---
+
+## P3. Five architectures, idle hardware, and reliance on GitHub Actions
+
+**Problem.** I use Windows x86, Windows ARM, Linux x86, Linux ARM and Android
+often. Cross-compiling and cross-testing goes through GitHub Actions, while my
+own idle machines sit unused.
+
+`[idea]` Like the SSH list, keep a registry of hardware devices that builds and
+tests can be sent to. That spreads big builds onto idle machines and tests
+across real architectures.
+
+`[note]`
+- Suggest **job-level dispatch, not a distributed compiler.** "Run
+  `cargo test` on win-arm at commit abc123 and give me logs + artifacts" is
+  simple and covers both cross-arch testing and offloading. Splitting one build
+  across machines (distcc, sccache-dist, Bazel remote execution) is a much
+  bigger problem. Leave that to existing tools if it's ever needed.
+- Rough job flow:
+  ```
+  agent --> hub: run(job, target=win-arm, commit=abc123)
+  hub   --> node: git bundle / fetch abc123, run command
+  node  --> hub: streamed logs, exit code, artifacts
+  hub   --> agent: result
+  ```
+- This is where SSH alone stops being enough. Live CPU/GPU/RAM reporting and
+  reservations (see P8) need something resident on each node, either a small
+  daemon or a container.
+- Android as a target: Termux (native ARM64 Linux userland) or `adb` from a
+  Linux node. Its role is probably "run tests", not "build host".
+
+`[decided]` The main goal is **using idle resources** (offloading build
+throughput). Cross-arch testing is a bonus.
+
+`[note]` What this implies:
+- Scheduling matters: pick the least-loaded node that has the right toolchain
+  and enough free RAM, and avoid machines someone is actively using (the
+  family PCs).
+- Toolchains are the hard part of offloading. Every node needs the right
+  compiler, SDK and dependencies. Container images (the build image carries
+  the toolchain) solve this on Linux nodes and are a point in favor of
+  "nodes run containers". Windows and Android nodes would need native
+  toolchains.
+- Warm caches matter as much as raw CPU. A node that keeps a persistent
+  `target/` or build cache per repo beats a faster cold one, so prefer sending
+  repeat jobs to the same node.
+
+---
+
+## P4. Long-running sessions are unreachable from my phone
+
+**Problem.** I keep several tmux coding sessions open for days on the main
+machine and reach them from home over a WireGuard VPN to the office. My phone
+can't reach them unless it's a Claude Code session with remote control enabled.
+
+`[idea]` The single pane of glass (native desktop or web) plus an Android
+companion app.
+
+`[note]`
+- tmux stays the source of truth for sessions. That's already how you work,
+  it's harness-agnostic, and we don't need to own the process.
+- A web terminal (xterm.js over a WebSocket attached to tmux) works on a phone
+  browser right away, before any native app exists. t3code is a good reference
+  for a web UI over coding sessions.
+- A native Android app is worth it for what a browser does badly:
+  notifications ("agent is waiting on you", "quota resets in 2h with 40%
+  left"), quick replies, and approvals.
+- If the UI is Flutter, one codebase covers desktop, Android and web, which
+  argues for Flutter (see P7).
+- The hub will usually be headless, so a desktop app is a *client* that
+  connects to the hub, the same as the Android app. I prefer native desktop
+  apps over web apps.
+
+`[decided]` I **type in sessions on the phone**, not only watch.
+
+`[note]` This raises the bar for mobile:
+- Typing in a terminal through a mobile browser is painful (no Esc/Ctrl/Tab,
+  the soft keyboard covers the screen). A real terminal needs an extra-keys bar
+  like Termux or Blink: Esc, Ctrl, Tab, arrows, and harness-specific shortcuts.
+- That makes the native Android app more important than a web view. Flutter
+  has terminal widgets (for example `xterm.dart`) that we can attach to the
+  same tmux-backed WebSocket stream.
+- Useful extras: a compose box for longer prompts (type the whole message,
+  then send it), plus voice input.
+
+---
+
+## P5. One harness for everything?
+
+**Problem.** Each subscription probably works best in its own harness, but
+running everything through pi (and pi-durable) would be simpler. Do Claude,
+Codex, Grok and Antigravity subscriptions work in pi, and is that allowed?
+
+`[note]` Evidence so far, from pi's own source (`references/secondary/pi`):
+- **Anthropic.** pi still has Claude Pro/Max OAuth login, but since April 2026
+  it shows a warning: *"Anthropic third-party usage draws from extra usage and
+  is billed per token"* (`packages/coding-agent/CHANGELOG.md`). So a Claude
+  subscription in pi does not use your plan's included usage. It bills as
+  extra usage.
+- **Google Antigravity / Gemini CLI.** pi *removed* its built-in OAuth support
+  for both around late April 2026 (`packages/ai/CHANGELOG.md`).
+- **OpenAI Codex / ChatGPT, xAI.** pi still ships OAuth flows for both
+  (`packages/ai/src/auth/oauth/`).
+Web research (2026-10-19, confidence in parentheses):
+
+| Provider | Subscription in pi / third-party harness | Ban risk |
+|----------|------------------------------------------|----------|
+| Anthropic | Allowed, but bills as per-token "extra usage" since 2026-04-04, not plan quota. Plan OAuth is for "Claude Code and other native Anthropic applications". Note that Help Center wording on "third-party apps" conflicts and is ambiguous. (high) | Low if you pay extra usage. Real if a harness pretends to be Claude Code. |
+| OpenAI | Explicitly allowed. "Sign in with ChatGPT" (DevDay 2026-09-29) shares plan usage with partner apps, and pi and OpenCode are launch partners. Per-app caps of 10-100% of weekly usage. pi's old Codex OAuth is now "legacy", so use the new flow. (high) | Low |
+| xAI | Explicitly allowed. xAI announced SuperGrok OAuth in OpenCode and Kilo Code (2026-05), and reportedly T3 Code. (high) | Low |
+| Google Antigravity | Prohibited. Accounts were banned in 2026-02, amnesty followed on 2026-02-27, and a second offence is a permanent ban. Use an AI Studio / Vertex API key instead. (high) | **High** |
+
+So pi can legitimately run Codex, Grok and the local LLM on plan quota. Claude
+and Antigravity stay in their own harnesses.
+
+Leaning: **stay multi-harness.** It matches the ethos (each vendor tunes its own
+harness), keeps every subscription's included usage, and avoids ban risk. pi is
+the harness for the local LLM, and possibly for Codex/xAI if their terms
+allow. That puts the switching logic in *our* layer (which harness gets the next
+task) instead of inside one harness.
+
+`[note]` on pi-durable: it's an experimental *library* for building a harness
+whose transcript and state are committed to storage before display, so a
+crashed process resumes mid-turn. It persists *pi's* conversations. It can't
+hold a Claude Code or Codex session, so it isn't a cross-harness memory layer.
+Cross-harness "resleeve" memory still has to be harness-agnostic files that any
+CLI can read (the cortical-stack idea). Worth a deeper read for its design
+ideas: forks, child tasks, task graph, handoff, compaction.
+
+---
+
+## P6. Unused tokens expire
+
+**Problem.** When I'm busy, subscription allotments reset unused.
+
+`[idea]` A low-priority todo list I can check off, and agents get dispatched to
+those items when spare capacity exists. Items include project stretch goals,
+fixing issues on my own repos, and "donating" tokens to public open-source repos
+by attacking their issues. Example: 50% of Grok left a day before reset, so
+spend it on a public repo.
+
+`[note]`
+- This builds on P1. With quota and reset times known, a simple rule triggers
+  work: "projected unused capacity at reset > X% and no high-priority work in
+  the queue => dispatch the next backlog item to that harness".
+- **Caution for public repos.** Many maintainers are now hostile to unsolicited
+  AI PRs. pi itself auto-closes issues and PRs from new contributors (see its
+  README). Suggest that donated work always lands in a **review inbox** (a
+  branch on your fork plus a summary) and nothing public goes out without your
+  approval. Prefer repos that explicitly welcome it (labels like
+  `help wanted` / `good first issue`, or a stated AI policy).
+- Your own repos can be more automatic: open a draft PR, never merge.
+- Each item should record which harness/model attempted it, so we learn which
+  subscription is good at what.
+
+`[decided]` Our own, simple, markdown-based backlog. Items can link to GitHub
+issues instead of copying them. Beads is too heavy and invasive and is only a
+reference for how others do it.
+
+`[open]` One backlog file per project in the project repo, or a central
+backlog on the hub that covers all projects (including public repos we don't
+own)? A central backlog seems necessary for the "donate" case at least.
+
+---
+
+## P7. Architecture of the thing itself (revisiting the archive)
+
+**Problem/idea.** The earlier design (`archive/`) used containers per
+workspace for isolation, shared persistent memory (cortical stack) and
+inter-sleeve messaging (needlecast). I still like it. Shared memory across
+harnesses is what makes switching harness by remaining quota possible,
+especially with an overseer dispatching across all of them.
+
+Questions raised:
+1. **Isolation unit:** containers, microVMs, or something else?
+2. **Runtime/language:** 100% Rust (UI + core), or a mix such as Flutter UI
+   plus a Go/Rust/Zig engine? Elixir/OTP for supervision?
+3. **Agent messaging:** between agents and sub-agents, and across harnesses.
+4. **Build vs fork:** fork Factory or t3code, or study them and build our own?
+5. **Networking between machines:** own domains + public IPs, WireGuard,
+   Tailscale, or our own tunnel?
+6. **Node footprint:** a single binary that phones home, or a container any
+   docker host can run?
+
+`[note]` First thoughts, to discuss:
+- **Isolation.** The PID-clobbering problem (P8) is exactly what PID
+  namespaces solve, and containers give you that cheaply. MicroVMs
+  (Firecracker, Cloud Hypervisor) mainly add a security boundary against
+  hostile code, at the cost of more complexity, and aren't needed for your own
+  agents on your own repos. Lighter options exist (bubblewrap,
+  `systemd-run --scope` / `unshare --pid`). Rootless podman/docker is a good
+  middle ground.
+- **Elixir.** OTP supervision trees fit "many long-lived workers that crash and
+  restart" well, but the BEAM runtime has to be on every node, which fights the
+  single-tiny-binary goal. Go or Rust static binaries cross-compile to all five
+  targets (Android via Termux) from one machine.
+- **Language split.** Flutter is the only option that gives desktop + Android +
+  web from one UI codebase with a mature mobile story. Rust-native UI (egui,
+  Dioxus, Tauri) is weaker on Android. My leaning is a Flutter UI plus a
+  Go-or-Rust engine, but this deserves its own conversation.
+- **Build vs fork.** Studying is cheap, and both are in `references/`. Forking
+  takes on their stack (TypeScript/Node for t3code) and their assumptions. Given
+  the "lightweight, ours" ethos, I lean toward building from scratch and
+  borrowing ideas, but let's look at their internals first.
+- **Networking.** Tailscale is WireGuard plus a coordination server for keys
+  and NAT traversal. **Headscale** is an open-source, self-hosted coordination
+  server, so you get the convenience without the corporate dependency. Simplest
+  of all: nodes *dial out* to the hub over TLS (WebSocket/QUIC) on one of your
+  domains. No inbound ports on nodes, and it works behind any NAT.
+- **Messaging.** References: the archive's needlecast (markdown inbox/outbox),
+  `mcp_agent_mail` (identities, inboxes, file-reservation leases; note the
+  Python repo says it's superseded by `mcp_agent_mail_rust`), and Tincan
+  (hosted rooms for cross-harness agent chat). An MCP server is the most
+  harness-neutral way to give every CLI the same messaging tools.
+
+---
+
+## P8. Agents clobber each other's processes
+
+**Problem.** With five agents in five repos on one machine, an agent sees a
+heavy build process, assumes it's its own stray process, and kills another
+agent's PID.
+
+`[idea]` Workspaces still need isolation from each other, even if containers
+aren't the final answer.
+
+`[note]` The minimum fix is a separate PID namespace per workspace, so an agent
+can't *see* other agents' processes. Containers do this. So do
+`unshare --pid --fork` and bubblewrap, if we want something lighter. Cgroups
+per workspace also give per-workspace CPU/RAM limits and accounting for free.
+
+---
+
+## P9. Shared hardware dashboard with reservations
+
+**Problem/idea.** Machines on the network report CPU, GPU and RAM. Agents can
+see what's free, reserve it (for example a specific GPU), deploy work there,
+and get results or build artifacts back.
+
+`[note]`
+- This extends P3: the node agent reports utilization, and the hub holds
+  **leases** (resource, holder, TTL). A lease that isn't renewed expires, so a
+  dead agent can't hold a GPU forever.
+- Expose it to agents as tools (MCP or a CLI): `nodes list`,
+  `reserve gpu --vram 24G`, `run --on gpu-server ...`, `release`.
+- It can be built as a sequence: SSH inventory (P2), then a resident node agent
+  with metrics, then reservations, then job dispatch.
+
+---
+
+## Emerging shape
+
+The problems reduce to a handful of primitives:
+
+```
++------------------- HUB (central machine) ---------------------+
+|  Accounts     subscriptions, credentials, quota, resets   P1 P5 |
+|  Nodes        inventory, ssh, metrics, leases          P2 P3 P9 |
+|  Sessions     tmux-backed harness sessions, web/mobile    P4    |
+|  Workspaces   isolated (pid ns / container) + memory      P7 P8 |
+|  Backlog      low-priority work, quota-aware dispatch     P6    |
++---------------------------------------------------------------+
+        |  dial-out tunnel (TLS / WireGuard / Headscale)
+        v
+   node agents: win-x86, win-arm, linux-x86, linux-arm, android
+```
+
+Possible order (each step useful on its own):
+1. Quota dashboard (P1)
+2. Node inventory + SSH keys, exposed to harnesses (P2)
+3. Session viewer, web first and phone-reachable (P4)
+4. Workspace isolation (P8)
+5. Node agent: metrics, then leases, then job dispatch (P3, P9)
+6. Quota-aware backlog dispatch (P6)
+7. Cross-harness memory and messaging (P7)
