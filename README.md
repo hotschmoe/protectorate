@@ -24,6 +24,7 @@ clients (desktop, Android, web) talk to the same API.
 | Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, GPU, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
 | Tailnet | `hub tailnet install/init`, `tailnet status`, `node invite/join/revoke`, `client invite` | embedded tsnet + supervised Headscale; in-process DERP relay over TLS with a pinned self-signed cert; WhoIs gating; verified direct and relay-only with a Windows node |
 | Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
+| Files and desktop (P11, `docs/desk.md`) | `node put/get`, `desk <node> screenshot/windows/click/move/type/key/run` | zstd-adaptive, sha256-verified, atomic file copies confined to a node file root; Windows screen and input from the logged-in session behind a `desk:<node>` lease |
 | Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("poe") with a scoped token, driving the hub through the CLI |
 | Backlog (P6) | `backlog ls/add/claim/done/edit` | one markdown file on the hub; items link to GitHub issues |
 | Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |
@@ -56,5 +57,5 @@ protectorate pair                               # QR code for the phone app
 - [PROBLEMS.md](PROBLEMS.md): what hurts and why
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system and the decisions behind it
 - [docs/install.md](docs/install.md): hub, node and phone setup
-- [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md)
+- [docs/desk.md](docs/desk.md), [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md)
 - `spikes/`: the experiments behind each decision, with measurements

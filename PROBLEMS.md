@@ -437,19 +437,24 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
    ArchiCAD. Something must run inside the interactive session: the node agent
    started at logon (`service windows-task`).
 
-`[idea]` Layered, most deterministic first:
+`[decided]` Layered, most deterministic first (commands in `docs/desk.md`):
 - **The program's own API** where it has one (ArchiCAD has a JSON interface
   on localhost and a Python package; ENERCALC's automation surface is
   unverified). Agents call it through `ssh` or `job run`. Repeatable and cheap.
-- **Files in, files out**: put inputs, run a batch/export, fetch results. Also
+- **Files in, files out**: `node put` and `node get` move files and directories
+  (zstd only where it shrinks, size and sha256 checked, atomic, confined to the
+  node's file root); a batch/export runs as a job or over `ssh`. Also
   deterministic.
 - **Screen and input** only as a fallback: the node agent in the desktop
-  session exposes `protectorate desk screenshot|click|type|key|run` for the
-  harness's own computer-use. Screenshots are files the harness reads; no MCP
-  or harness changes needed.
+  session serves `protectorate desk <node> screenshot|windows|click|move|type|key|run`
+  for the harness's own computer-use (Windows only, syscalls only, no cgo).
+  Screenshots are files the harness reads; no MCP or harness changes needed.
+  It refuses with `failed_precondition` unless the agent runs in the logged-in
+  user's session (`service windows-task`, trigger logon).
 - The desktop is one shared resource with licensed seats, so it is **leased**
-  (P9): one sleeve drives a node's desktop at a time, and the phone app can
-  show the current screen.
+  (P9) as `desk:<node>`: one sleeve drives a node's desktop at a time (the
+  mutating commands check the lease; screenshot and windows do not), and the
+  phone app can show the current screen.
 
 `[open]` Which ArchiCAD and ENERCALC workflows are first, and whether they can
 be done through APIs and files without the GUI.
