@@ -1,0 +1,220 @@
+RESULT|none|cold_start_ms_median|40
+RESULT|none|cold_start_ms_all|40 36 41 42 28
+RESULT|none|idle_rss_kb_sum|3968
+RESULT|none|idle_procs|sh(2688k) sleep(1280k) 
+RESULT|none|host_pid_of_B_sleep|none
+RESULT|none|A_sees_host_and_B_sleeps|2
+RESULT|none|A_total_visible_procs|398
+RESULT|none|A_kill_by_hostpid|rc=0 
+RESULT|none|A_pkill_rc|0
+RESULT|none|host_dummy_survived|NO
+RESULT|none|B_sleep_survived|NO
+RESULT|none|cpu_cores_used_with_4_hogs|0.00
+RESULT|none|memhog_exit_code|not_run_no_limit
+RESULT|none|ws_rw_visible_on_host|rw
+RESULT|none|shared_dir_rename_seen_by_B|v2
+RESULT|none|single_file_bind_rename|n/a_no_mount_ns
+RESULT|none|symlink_file_rename_B_sees|v2
+RESULT|none|symlink_file_still_symlink|no
+RESULT|none|symlink_dir_rename_B_sees|v4
+RESULT|none|tool_claude|2.1.303 (Claude Code)
+RESULT|none|tool_codex|codex-cli 0.163.0
+RESULT|none|tool_pi|1.3.0
+RESULT|none|tool_grok|grok 1.0.52 (0920c8169e27) [stable]
+RESULT|none|tool_gcc|gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+RESULT|none|tool_git|git version 2.39.5
+RESULT|none|tool_node|v22.23.1
+RESULT|none|tool_go|sh: line 1: go: command not found
+RESULT|none|tool_tmux|tmux 3.3a
+RESULT|none|sees_host_home_files|Android Downloads agent-board-charter.md agent-world-vm.md agent_board android_vm b70_migration_capture bombardiers-guild-research build cli crazytown dart_tests development ed10.py ed4.py ed5.py ed6.py ed7.py ed8.py ed9.py github go hyp_spec_antlers jdks junk kerf-demo kerf-eval lagrange_yolo laminae-alignment-zig-vs-rust-2026-09-25.md n8wine numen-evals omp_tests pi_tests pln-tooling redroid-data tests tools wasm_persistent 
+RESULT|none|hub_send_keys_effect|hub-sent
+RESULT|none|hub_capture_pane|2
+RESULT|none|hub_interactive_attach_via_pty|2
+RESULT|none|tmux_server_pid_seen_by_itself|338748
+RESULT|docker|cold_start_ms_median|699
+RESULT|docker|cold_start_ms_all|763 821 667 699 690
+RESULT|docker|idle_rss_kb_sum|23604
+RESULT|docker|idle_procs|containerd-shim(14620k) docker-init(384k) sh(1280k) sleep(896k) tmux:(3352k) bash(3072k) 
+RESULT|docker|docker_stats_mem|2.258MiB / 256MiB
+RESULT|docker|host_pid_of_B_sleep|341426
+RESULT|docker|A_sees_host_and_B_sleeps|0
+RESULT|docker|A_total_visible_procs|8
+RESULT|docker|A_kill_by_hostpid|sh: 1: kill: No such process  sh: 1: kill: No such process  rc=1 
+RESULT|docker|A_pkill_rc|1
+RESULT|docker|host_dummy_survived|yes
+RESULT|docker|B_sleep_survived|yes
+RESULT|docker|cpu_cores_used_with_4_hogs|1.24
+RESULT|docker|memhog_exit_code|137
+RESULT|docker|host_free_mb|2951
+RESULT|docker|sandbox_alive_after_oom|yes
+RESULT|docker|ws_rw_visible_on_host|rw
+RESULT|docker|shared_dir_rename_seen_by_B|v2
+RESULT|docker|single_file_bind_rename|mv: cannot move '/single/.t' to '/single/cred.json': Device or resource busy
+RESULT|docker|symlink_file_rename_B_sees|v2
+RESULT|docker|symlink_file_still_symlink|no
+RESULT|docker|symlink_dir_rename_B_sees|v4
+RESULT|docker|tool_claude|2.1.303 (Claude Code)
+RESULT|docker|tool_codex|codex-cli 0.163.0
+RESULT|docker|tool_pi|1.3.0
+RESULT|docker|tool_grok|grok 1.0.52 (0920c8169e27) [stable]
+RESULT|docker|tool_gcc|gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+RESULT|docker|tool_git|git version 2.39.5
+RESULT|docker|tool_node|v22.23.1
+RESULT|docker|tool_go|sh: 1: go: not found
+RESULT|docker|tool_tmux|tmux 3.3a
+RESULT|docker|sees_host_home_files|
+RESULT|docker|hub_send_keys_effect|hub-sent
+RESULT|docker|hub_capture_pane|1
+RESULT|docker|hub_interactive_attach_via_pty|2
+RESULT|docker|tmux_server_pid_seen_by_itself|10
+RESULT|docker|docker_exec_tmux|main: 1 windows (created Mon Oct 19 08:16:37 2026)
+RESULT|bwrap|cold_start_ms_median|49
+RESULT|bwrap|cold_start_ms_all|47 74 44 58 49
+RESULT|bwrap|idle_rss_kb_sum|13488
+RESULT|bwrap|idle_procs|bwrap(1664k) bwrap(1040k) sh(2688k) sleep(1280k) tmux:(3488k) bash(3328k) 
+RESULT|bwrap|host_pid_of_B_sleep|350545
+RESULT|bwrap|A_sees_host_and_B_sleeps|0
+RESULT|bwrap|A_total_visible_procs|9
+RESULT|bwrap|A_kill_by_hostpid|sh: line 1: kill: (350542) - No such process sh: line 1: kill: (350545) - No such process rc=1 
+RESULT|bwrap|A_pkill_rc|1
+RESULT|bwrap|host_dummy_survived|yes
+RESULT|bwrap|B_sleep_survived|yes
+RESULT|bwrap|cpu_cores_used_with_4_hogs|4.35
+RESULT|bwrap|memhog_exit_code|not_run_no_limit
+RESULT|bwrap|ws_rw_visible_on_host|rw
+RESULT|bwrap|shared_dir_rename_seen_by_B|v2
+RESULT|bwrap|single_file_bind_rename|mv: cannot move '/mnt/.t' to '/mnt/cred.json': Device or resource busy
+RESULT|bwrap|symlink_file_rename_B_sees|v2
+RESULT|bwrap|symlink_file_still_symlink|no
+RESULT|bwrap|symlink_dir_rename_B_sees|v4
+RESULT|bwrap|tool_claude|2.1.303 (Claude Code)
+RESULT|bwrap|tool_codex|codex-cli 0.163.0
+RESULT|bwrap|tool_pi|1.3.0
+RESULT|bwrap|tool_grok|grok 1.0.62 (1474f9cbdd91) [stable]
+RESULT|bwrap|tool_gcc|gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+RESULT|bwrap|tool_git|git version 2.39.5
+RESULT|bwrap|tool_node|v22.23.1
+RESULT|bwrap|tool_go|sh: line 1: go: command not found
+RESULT|bwrap|tool_tmux|tmux 3.3a
+RESULT|bwrap|sees_host_home_files|
+RESULT|bwrap|hub_send_keys_effect|hub-sent
+RESULT|bwrap|hub_capture_pane|1
+RESULT|bwrap|hub_interactive_attach_via_pty|2
+RESULT|bwrap|tmux_server_pid_seen_by_itself|5
+RESULT|bwrap-cg|cold_start_ms_median|111
+RESULT|bwrap-cg|cold_start_ms_all|108 111 122 76 125
+RESULT|bwrap-cg|idle_rss_kb_sum|13484
+RESULT|bwrap-cg|idle_procs|bwrap(1664k) bwrap(1036k) sh(2688k) sleep(1280k) tmux:(3488k) bash(3328k) 
+RESULT|bwrap-cg|cgroup_mem_current_kb|2668
+RESULT|bwrap-cg|host_pid_of_B_sleep|353405
+RESULT|bwrap-cg|A_sees_host_and_B_sleeps|0
+RESULT|bwrap-cg|A_total_visible_procs|9
+RESULT|bwrap-cg|A_kill_by_hostpid|sh: line 1: kill: (353400) - No such process sh: line 1: kill: (353405) - No such process rc=1 
+RESULT|bwrap-cg|A_pkill_rc|1
+RESULT|bwrap-cg|host_dummy_survived|yes
+RESULT|bwrap-cg|B_sleep_survived|yes
+RESULT|bwrap-cg|cpu_cores_used_with_4_hogs|1.14
+RESULT|bwrap-cg|memhog_exit_code|137
+RESULT|bwrap-cg|host_free_mb|1937
+RESULT|bwrap-cg|sandbox_alive_after_oom|yes
+RESULT|bwrap-cg|ws_rw_visible_on_host|rw
+RESULT|bwrap-cg|shared_dir_rename_seen_by_B|v2
+RESULT|bwrap-cg|single_file_bind_rename|mv: cannot move '/mnt/.t' to '/mnt/cred.json': Device or resource busy
+RESULT|bwrap-cg|symlink_file_rename_B_sees|v2
+RESULT|bwrap-cg|symlink_file_still_symlink|no
+RESULT|bwrap-cg|symlink_dir_rename_B_sees|v4
+RESULT|bwrap-cg|tool_claude|2.1.303 (Claude Code)
+RESULT|bwrap-cg|tool_codex|codex-cli 0.163.0
+RESULT|bwrap-cg|tool_pi|1.3.0
+RESULT|bwrap-cg|tool_grok|grok 1.0.62 (1474f9cbdd91) [stable]
+RESULT|bwrap-cg|tool_gcc|gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+RESULT|bwrap-cg|tool_git|git version 2.39.5
+RESULT|bwrap-cg|tool_node|v22.23.1
+RESULT|bwrap-cg|tool_go|sh: line 1: go: command not found
+RESULT|bwrap-cg|tool_tmux|tmux 3.3a
+RESULT|bwrap-cg|sees_host_home_files|
+RESULT|bwrap-cg|hub_send_keys_effect|hub-sent
+RESULT|bwrap-cg|hub_capture_pane|1
+RESULT|bwrap-cg|hub_interactive_attach_via_pty|2
+RESULT|bwrap-cg|tmux_server_pid_seen_by_itself|5
+RESULT|unshare|cold_start_ms_median|66
+RESULT|unshare|cold_start_ms_all|66 69 39 71 40
+RESULT|unshare|idle_rss_kb_sum|19884
+RESULT|unshare|idle_procs|unshare(1280k) sh(2816k) tmux:(3372k) bash(11136k) sleep(1280k) 
+RESULT|unshare|host_pid_of_B_sleep|356971
+RESULT|unshare|A_sees_host_and_B_sleeps|0
+RESULT|unshare|A_total_visible_procs|8
+RESULT|unshare|A_kill_by_hostpid|sh: line 1: kill: (356538) - No such process sh: line 1: kill: (356971) - No such process rc=1 
+RESULT|unshare|A_pkill_rc|1
+RESULT|unshare|host_dummy_survived|yes
+RESULT|unshare|B_sleep_survived|yes
+RESULT|unshare|cpu_cores_used_with_4_hogs|4.50
+RESULT|unshare|memhog_exit_code|not_run_no_limit
+RESULT|unshare|ws_rw_visible_on_host|rw
+RESULT|unshare|shared_dir_rename_seen_by_B|v2
+RESULT|unshare|single_file_bind_rename|n/a_no_mount_ns
+RESULT|unshare|symlink_file_rename_B_sees|v2
+RESULT|unshare|symlink_file_still_symlink|no
+RESULT|unshare|symlink_dir_rename_B_sees|v4
+RESULT|unshare|tool_claude|2.1.303 (Claude Code)
+RESULT|unshare|tool_codex|codex-cli 0.163.0
+RESULT|unshare|tool_pi|1.3.0
+RESULT|unshare|tool_grok|grok 1.0.62 (1474f9cbdd91) [stable]
+RESULT|unshare|tool_gcc|gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+RESULT|unshare|tool_git|git version 2.39.5
+RESULT|unshare|tool_node|v22.23.1
+RESULT|unshare|tool_go|sh: line 1: go: command not found
+RESULT|unshare|tool_tmux|tmux 3.3a
+RESULT|unshare|sees_host_home_files|Android Downloads agent-board-charter.md agent-world-vm.md agent_board android_vm b70_migration_capture bombardiers-guild-research build cli crazytown dart_tests development ed10.py ed4.py ed5.py ed6.py ed7.py ed8.py ed9.py github go hyp_spec_antlers jdks junk kerf-demo kerf-eval lagrange_yolo laminae-alignment-zig-vs-rust-2026-09-25.md n8wine numen-evals omp_tests pi_tests pln-tooling redroid-data tests tools wasm_persistent 
+RESULT|unshare|hub_send_keys_effect|hub-sent
+RESULT|unshare|hub_capture_pane|2
+RESULT|unshare|hub_interactive_attach_via_pty|2
+RESULT|unshare|tmux_server_pid_seen_by_itself|4
+RESULT|unshare-cg|cold_start_ms_median|94
+RESULT|unshare-cg|cold_start_ms_all|94 72 102 109 80
+RESULT|unshare-cg|idle_rss_kb_sum|20012
+RESULT|unshare-cg|idle_procs|unshare(1280k) sh(2688k) tmux:(3500k) bash(11264k) sleep(1280k) 
+RESULT|unshare-cg|cgroup_mem_current_kb|10460
+RESULT|unshare-cg|host_pid_of_B_sleep|none
+RESULT|unshare-cg|A_sees_host_and_B_sleeps|0
+RESULT|unshare-cg|A_total_visible_procs|8
+RESULT|unshare-cg|A_kill_by_hostpid|sh: line 1: kill: (361017) - No such process rc=1 
+RESULT|unshare-cg|A_pkill_rc|1
+RESULT|unshare-cg|host_dummy_survived|yes
+RESULT|unshare-cg|B_sleep_survived|yes
+RESULT|unshare-cg|cpu_cores_used_with_4_hogs|1.10
+RESULT|unshare-cg|memhog_exit_code|137
+RESULT|unshare-cg|host_free_mb|2732
+RESULT|unshare-cg|sandbox_alive_after_oom|yes
+RESULT|unshare-cg|ws_rw_visible_on_host|rw
+RESULT|unshare-cg|shared_dir_rename_seen_by_B|v2
+RESULT|unshare-cg|single_file_bind_rename|n/a_no_mount_ns
+RESULT|unshare-cg|symlink_file_rename_B_sees|v2
+RESULT|unshare-cg|symlink_file_still_symlink|no
+RESULT|unshare-cg|symlink_dir_rename_B_sees|v4
+RESULT|unshare-cg|tool_claude|2.1.303 (Claude Code)
+RESULT|unshare-cg|tool_codex|codex-cli 0.163.0
+RESULT|unshare-cg|tool_pi|1.3.0
+RESULT|unshare-cg|tool_grok|grok 1.0.62 (1474f9cbdd91) [stable]
+RESULT|unshare-cg|tool_gcc|gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+RESULT|unshare-cg|tool_git|git version 2.39.5
+RESULT|unshare-cg|tool_node|v22.23.1
+RESULT|unshare-cg|tool_go|sh: line 1: go: command not found
+RESULT|unshare-cg|tool_tmux|tmux 3.3a
+RESULT|unshare-cg|sees_host_home_files|Android Downloads agent-board-charter.md agent-world-vm.md agent_board android_vm b70_migration_capture bombardiers-guild-research build cli crazytown dart_tests development ed10.py ed4.py ed5.py ed6.py ed7.py ed8.py ed9.py github go hyp_spec_antlers jdks junk kerf-demo kerf-eval lagrange_yolo laminae-alignment-zig-vs-rust-2026-09-25.md n8wine numen-evals omp_tests pi_tests pln-tooling redroid-data tests tools wasm_persistent 
+RESULT|unshare-cg|hub_send_keys_effect|hub-sent (needed 1.5s wait)
+RESULT|unshare-cg|hub_capture_pane|2
+RESULT|unshare-cg|hub_interactive_attach_via_pty|2
+RESULT|unshare-cg|tmux_server_pid_seen_by_itself|4
+RESULT|firecracker|minit1_boot_ms|48
+RESULT|firecracker|minit1_host_rss_kb|45208 (mem_size 256MiB, vcpus 1)
+RESULT|firecracker|minit2_boot_ms|59
+RESULT|firecracker|minit2_host_rss_kb|43044 (mem_size 256MiB, vcpus 1)
+RESULT|firecracker|minit3_boot_ms|66
+RESULT|firecracker|minit3_host_rss_kb|45200 (mem_size 256MiB, vcpus 1)
+RESULT|firecracker|systemd_boot_ms|930
+RESULT|firecracker|systemd_host_rss_kb|100500 (mem_size 256MiB, vcpus 1)
+RESULT|gvisor-systrap|do_ms|343|ok 4 pid1-visible 
+RESULT|gvisor-ptrace|do_ms|312|ok 4 pid1-visible 
+RESULT|gvisor-kvm|do_ms|370|ok 4 pid1-visible 
+RESULT|gvisor-systrap|tools_ms|1207|2.1.303 (Claude Code) codex-cli 0.163.0 tmux 3.3a m: 1 windows (created Mon Oct 19 16:18:56 2026) 
