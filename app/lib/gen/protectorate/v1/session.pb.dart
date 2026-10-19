@@ -761,7 +761,8 @@ class CapturePaneRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  /// Number of history lines above the visible screen to include.
+  /// Number of history lines above the visible screen to include. Values
+  /// above 10000 are clamped to 10000.
   @$pb.TagNumber(2)
   $core.int get lines => $_getIZ(1);
   @$pb.TagNumber(2)

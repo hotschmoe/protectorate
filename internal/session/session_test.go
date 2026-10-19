@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -309,5 +310,65 @@ func TestAttachCmdExitedIsReadOnly(t *testing.T) {
 		if got := slices.Contains(cmd.Args, "-r"); got != wantRO || (s.State == Exited) != wantRO {
 			t.Errorf("%s: read-only = %v, state %s", name, got, s.State)
 		}
+	}
+}
+
+func fakeTmux(t *testing.T, script string) *Manager {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	bin := filepath.Join(t.TempDir(), "tmux")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return &Manager{Socket: "x", Bin: bin}
+}
+
+func TestCaptureClampsLines(t *testing.T) {
+	m := fakeTmux(t, `echo "$@"`)
+	tests := []struct {
+		lines int
+		want  string
+	}{
+		{-5, "-S 0 "},
+		{50, "-S -50 "},
+		{MaxCaptureLines, "-S -10000 "},
+		{MaxCaptureLines + 1, "-S -10000 "},
+		{1 << 30, "-S -10000 "},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.lines), func(t *testing.T) {
+			out, err := m.Capture(context.Background(), "s", tt.lines)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, tt.want) {
+				t.Fatalf("args %q lack %q", out, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunLimitsOutput(t *testing.T) {
+	m := fakeTmux(t, `exec yes`)
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.runLimited(context.Background(), 1<<16, "capture-pane")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errOutputTooLarge) {
+			t.Fatalf("err = %v, want errOutputTooLarge", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not stop an endless output stream")
+	}
+
+	small := fakeTmux(t, `echo hello`)
+	out, err := small.runLimited(context.Background(), 1<<16, "x")
+	if err != nil || out != "hello\n" {
+		t.Fatalf("small output = %q, %v", out, err)
 	}
 }

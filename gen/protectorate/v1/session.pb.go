@@ -582,7 +582,8 @@ type CapturePaneRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name of the session to read.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// Number of history lines above the visible screen to include.
+	// Number of history lines above the visible screen to include. Values
+	// above 10000 are clamped to 10000.
 	Lines         int32 `protobuf:"varint,2,opt,name=lines,proto3" json:"lines,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

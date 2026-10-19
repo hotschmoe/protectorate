@@ -84,14 +84,53 @@ func (m *Manager) cmd(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, m.Bin, append([]string{"-L", m.Socket}, args...)...)
 }
 
+// MaxCaptureLines caps the scrollback Capture reads; larger requests are
+// clamped to it.
+const MaxCaptureLines = 10000
+
+// maxOutputBytes bounds the stdout run buffers from tmux.
+const maxOutputBytes = 8 << 20
+
+var errOutputTooLarge = errors.New("tmux output too large")
+
+// limitWriter buffers up to max bytes and, on the first byte beyond, stops
+// the command through cancel.
+type limitWriter struct {
+	buf    bytes.Buffer
+	max    int
+	cancel context.CancelFunc
+	over   bool
+}
+
+func (w *limitWriter) Write(p []byte) (int, error) {
+	if w.over || w.buf.Len()+len(p) > w.max {
+		if !w.over {
+			w.over = true
+			w.cancel()
+		}
+		return 0, errOutputTooLarge
+	}
+	return w.buf.Write(p)
+}
+
 func (m *Manager) run(ctx context.Context, args ...string) (string, error) {
-	var stdout, stderr bytes.Buffer
+	return m.runLimited(ctx, maxOutputBytes, args...)
+}
+
+func (m *Manager) runLimited(ctx context.Context, max int, args ...string) (string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stdout := &limitWriter{max: max, cancel: cancel}
+	var stderr bytes.Buffer
 	c := m.cmd(ctx, args...)
-	c.Stdout, c.Stderr = &stdout, &stderr
+	c.Stdout, c.Stderr = stdout, &stderr
 	if err := c.Run(); err != nil {
+		if stdout.over {
+			return "", fmt.Errorf("%w: more than %d bytes", errOutputTooLarge, max)
+		}
 		return "", classify(strings.TrimSpace(stderr.String()), err)
 	}
-	return stdout.String(), nil
+	return stdout.buf.String(), nil
 }
 
 type noServerError struct{}
@@ -358,14 +397,13 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 // escapes preserved and wrapped lines joined. It works on exited sessions
 // with tmux's "Pane is dead" banner removed. tmux scrolls the screen up one
 // line to draw that banner, so the first screen line of a dead pane's output
-// moves into scrollback: pass lines >= 1 to see it.
+// moves into scrollback: pass lines >= 1 to see it. lines is clamped to
+// MaxCaptureLines.
 func (m *Manager) Capture(ctx context.Context, name string, lines int) (string, error) {
 	if err := ValidName(name); err != nil {
 		return "", err
 	}
-	if lines < 0 {
-		lines = 0
-	}
+	lines = min(max(lines, 0), MaxCaptureLines)
 	out, err := m.run(ctx, "capture-pane", "-p", "-e", "-J", "-S", strconv.Itoa(-lines), "-t", target(name))
 	if noSessions(err) {
 		return "", ErrNotFound

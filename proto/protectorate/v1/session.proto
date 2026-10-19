@@ -118,7 +118,8 @@ message RespawnSessionResponse {
 message CapturePaneRequest {
   // name of the session to read.
   string name = 1;
-  // Number of history lines above the visible screen to include.
+  // Number of history lines above the visible screen to include. Values
+  // above 10000 are clamped to 10000.
   int32 lines = 2;
 }
 
