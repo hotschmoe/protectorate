@@ -3,12 +3,14 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
@@ -116,6 +118,13 @@ func sleeveErr(err error) error {
 
 func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSleeveRequest]) (*connect.Response[pb.SpawnSleeveResponse], error) {
 	m := req.Msg
+	// The orchestrator's name owns the orchestrator directory and its token,
+	// so only the owner (through `orchestrator spawn`) may claim it.
+	if m.Name == sleeve.OrchestratorName {
+		if p := auth.PrincipalFrom(ctx); p == nil || !p.Owner {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; spawn it with the owner token via `protectorate orchestrator spawn`", m.Name))
+		}
+	}
 	r := sleeve.SpawnRequest{
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env,

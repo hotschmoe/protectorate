@@ -125,6 +125,14 @@ var maskedFiles = []string{".cargo/credentials", ".cargo/credentials.toml"}
 // as a workspace.
 var credentialDirs = []string{".claude", ".codex", ".grok", ".pi", ".ssh", ".gnupg", ".aws"}
 
+// secretPaths under $HOME hold other tokens or application data. Narrow tool
+// mounts may reach inside some of them, but a workspace, which is bound
+// read-write without masks, may neither be inside nor contain one.
+var secretPaths = []string{
+	".cargo", ".local/share", ".config", ".docker", ".kube", ".netrc", ".git-credentials",
+	".npmrc", ".pypirc", ".password-store",
+}
+
 // DefaultConfig probes the host. toolDirs replaces the default toolchain
 // list when non-nil; every entry must exist.
 func DefaultConfig(home string, toolDirs []string) (Config, error) {
@@ -213,6 +221,20 @@ func (c Config) protectedDirs() []string {
 	out := append([]string(nil), c.Protected...)
 	for _, d := range credentialDirs {
 		out = append(out, filepath.Join(c.UserHome, d))
+	}
+	return out
+}
+
+// workspaceDenied lists every path a workspace may neither be inside nor
+// contain, lexically and resolved.
+func (c Config) workspaceDenied() []string {
+	out := c.protectedDirs()
+	for _, d := range secretPaths {
+		p := filepath.Join(c.UserHome, d)
+		out = append(out, p)
+		if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+			out = append(out, r)
+		}
 	}
 	return out
 }

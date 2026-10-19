@@ -213,9 +213,12 @@ func (c Config) CheckWorkspace(name, ws string) error {
 	if within(c.UserHome, ws) {
 		return bad("contains the user home directory")
 	}
-	for _, d := range c.protectedDirs() {
+	for _, d := range c.workspaceDenied() {
 		if within(ws, d) {
-			return bad("is inside a directory holding harness credentials")
+			return bad("is inside " + d + ", which holds credentials or application data")
+		}
+		if within(d, ws) {
+			return bad("contains " + d + ", which holds credentials or application data")
 		}
 	}
 	if within(c.Home, ws) {

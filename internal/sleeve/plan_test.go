@@ -255,6 +255,12 @@ func TestCheckWorkspaceStateOwnership(t *testing.T) {
 		{"alice", "/", false},
 		{"alice", "/home/u", false},
 		{"alice", "/home/u/.codex/sessions", false},
+		{"alice", "/home/u/.cargo", false},
+		{"alice", "/home/u/.local", false},
+		{"alice", "/home/u/.local/share/app", false},
+		{"alice", "/home/u/.config", false},
+		{"alice", "/home/u/.netrc", false},
+		{"alice", "/home/u/src/app", true},
 		{"alice", "/work/x", true},
 	}
 	for _, tt := range tests {
@@ -269,7 +275,7 @@ func TestCheckWorkspaceProtectedTargets(t *testing.T) {
 	c := testConfig()
 	c.Protected = []string{"/mnt/secrets/codex"}
 	for ws, ok := range map[string]bool{
-		"/mnt/secrets/codex": false, "/mnt/secrets/codex/x": false, "/mnt/secrets": true,
+		"/mnt/secrets/codex": false, "/mnt/secrets/codex/x": false, "/mnt/secrets": false, "/mnt/other": true,
 	} {
 		if err := c.CheckWorkspace("alice", ws); (err == nil) != ok {
 			t.Errorf("CheckWorkspace(%s) = %v, want ok=%v", ws, err, ok)

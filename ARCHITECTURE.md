@@ -274,8 +274,11 @@ Design:
   - the workspace is read-write. Inside the state directory only the sleeve's
     own `workspaces/<name>` (or `orchestrator/` for `poe`) is allowed; the
     state directory, the shared `workspaces/` parent and other sleeves'
-    directories are refused. Home, the user home and credential dirs are
-    symlink-resolved before any comparison;
+    directories are refused. Only the owner token may spawn the name `poe`.
+    A workspace may neither be inside nor contain a credential dir or another
+    secret path (`~/.cargo`, `~/.local/share`, `~/.config`, `~/.docker`,
+    `~/.kube`, `~/.netrc`, ...), since it is bound without masks. Home, the
+    user home and these paths are symlink-resolved before any comparison;
   - toolchains (`~/.local/{bin,lib,opt,go}`, `~/.nvm`, `~/.cargo/bin`,
     `~/.rustup`, ...) are read-only at the same paths. `~/.cargo` and
     `~/.local/share` as a whole are not mounted; a harness binary's symlink
