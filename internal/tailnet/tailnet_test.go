@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -574,5 +576,30 @@ func TestHubAddr(t *testing.T) {
 	st.Peer[key.NewNode().Public()] = &ipnstate.PeerStatus{Tags: tags(TagHub, TagClient), TailscaleIPs: []netip.Addr{want, netip.MustParseAddr("fd7a::1")}}
 	if got, ok := hubAddr(st); !ok || got != want {
 		t.Fatalf("hubAddr = %v, %v; want %v", got, ok, want)
+	}
+}
+
+func TestQuietDERPLog(t *testing.T) {
+	reset := &net.OpError{Op: "read", Err: os.NewSyscallError("read", syscall.ECONNRESET)}
+	tests := []struct {
+		name   string
+		format string
+		args   []any
+		logged bool
+	}{
+		{"eof", "derp: %s: %v", []any{"1.2.3.4:5", fmt.Errorf("client abcd: readFrameHeader: %w", io.EOF)}, false},
+		{"reset", "derp: %s: %v", []any{"1.2.3.4:5", fmt.Errorf("client abcd: readFrameHeader: %w", reset)}, false},
+		{"closed", "derp: %s: %v", []any{"1.2.3.4:5", fmt.Errorf("write: %w", net.ErrClosed)}, false},
+		{"real error", "derp: %s: %v", []any{"1.2.3.4:5", errors.New("bad frame length")}, true},
+		{"other message", "DERP relay on %s", []any{"x"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var n int
+			quietDERPLog(func(string, ...any) { n++ })(tt.format, tt.args...)
+			if (n == 1) != tt.logged {
+				t.Fatalf("logged %d times, want logged=%v", n, tt.logged)
+			}
+		})
 	}
 }

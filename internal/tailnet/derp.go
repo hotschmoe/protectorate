@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,7 +23,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"tailscale.com/derp/derpserver"
@@ -218,7 +221,7 @@ func StartDERP(home string, cfg Config, logf func(string, ...any)) (*DERPServer,
 		ln.Close()
 		return nil, fmt.Errorf("listen STUN on %s: %w", cfg.STUNListen, err)
 	}
-	s := derpserver.New(priv, logf)
+	s := derpserver.New(priv, quietDERPLog(logf))
 	s.SetVerifyClientURL("http://" + loopback(cfg.Listen) + "/verify")
 	mux := http.NewServeMux()
 	mux.Handle("/derp", derpserver.Handler(s))
@@ -235,6 +238,25 @@ func StartDERP(home string, cfg Config, logf func(string, ...any)) (*DERPServer,
 	d.wg.Go(func() { serveSTUN(pc) })
 	logf("DERP relay on %s (TLS, pinned self-signed cert), STUN on %s", cfg.DERPListen, cfg.STUNListen)
 	return d, nil
+}
+
+// quietDERPLog drops the per-connection errors derpserver logs when a client
+// simply goes away (killed process, dropped link): EOF, reset, closed
+// connection. Anything else, including all non-connection messages, passes.
+func quietDERPLog(logf func(string, ...any)) func(string, ...any) {
+	return func(format string, args ...any) {
+		if strings.HasPrefix(format, "derp: ") && len(args) > 0 {
+			if err, ok := args[len(args)-1].(error); ok && expectedDisconnect(err) {
+				return
+			}
+		}
+		logf(format, args...)
+	}
+}
+
+func expectedDisconnect(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
 }
 
 func serveSTUN(pc net.PacketConn) {
