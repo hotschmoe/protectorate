@@ -60,6 +60,9 @@ HOME
 PATH
 /home/u/.local/bin:/usr/bin:/bin
 --setenv
+PROTECTORATE_SLEEVE_PATH
+/home/u/.local/bin:/usr/bin:/bin
+--setenv
 USER
 u
 --setenv

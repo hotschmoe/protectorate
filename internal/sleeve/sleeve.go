@@ -295,7 +295,7 @@ func (c Config) defaultPath(hostPath string) []string {
 			add(d)
 		}
 	}
-	for _, d := range []string{".local/bin", ".cargo/bin", "go/bin"} {
+	for _, d := range []string{".local/bin", ".local/go/bin", ".cargo/bin", "go/bin"} {
 		if c.underTools(filepath.Join(c.UserHome, d)) {
 			add(filepath.Join(c.UserHome, d))
 		}
