@@ -154,11 +154,11 @@ Run with the owner token on the hub machine.`,
 					verb = "respawned"
 				}
 				fmt.Fprintf(w, "%s\t%s\nharness\t%s (%s)\nworkspace\t%s\n", verb, res.Sleeve.Name, res.Harness, res.Reason, res.Workspace)
-				fmt.Fprintf(w, "token\t%s\nscopes\t%s\nattach\tprotectorate sleeve attach %s\n", res.Token.Id, strings.Join(res.Token.Scopes, ", "), res.Sleeve.Name)
+				fmt.Fprintf(w, "token\t%s\nscopes\t%s\nchat\tprotectorate chat watch %s\n", res.Token.Id, strings.Join(res.Token.Scopes, ", "), res.Sleeve.Name)
 			})
 		},
 	}
-	c.Flags().StringVar(&harness, "harness", "auto", "auto (top of quota suggest), claude, codex, grok or pi; shell runs a bare shell for testing")
+	c.Flags().StringVar(&harness, "harness", "auto", "auto (top of quota suggest), claude, codex, grok or pi")
 	c.Flags().StringSliceVar(&scopes, "scopes", nil, "replace the default scopes (comma separated or repeated)")
 	c.Flags().StringSliceVar(&addScopes, "add-scopes", nil, "scopes to add to the defaults")
 	c.Flags().DurationVar(&ttl, "ttl", 720*time.Hour, "token lifetime; 0 never expires")

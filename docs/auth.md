@@ -17,8 +17,10 @@ terminal, and the tailnet listener. Nothing else reads a token.
 - **Sleeve tokens**: minted by the hub itself for every sleeve at spawn (name
   `sleeve:<name>`, scopes `read`, `backlog_*`, `directory_*`, `lease_*`,
   `message_*`), written into the sleeve's home, revoked on kill and replaced on
-  respawn. They are how the hub knows who sent a message. See
-  `docs/coordination.md`.
+  respawn. They are how the hub knows who sent a message. Despite `read`, a
+  sleeve token can watch only its own sleeve's chat and list or capture only
+  its own session; the hub checks the authenticated identity, not the request.
+  See `docs/coordination.md`.
 
 Unknown, expired, revoked and malformed credentials all fail as
 `unauthenticated` (HTTP 401). A valid token without the needed scope fails as

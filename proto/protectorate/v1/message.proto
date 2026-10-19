@@ -65,8 +65,9 @@ message MessageServiceSendRequest {
   // thread_id continues an existing thread; empty starts a new one.
   string thread_id = 3;
   MessageKind kind = 4;
-  // ack_required starts the ack timer.
-  bool ack_required = 5;
+  // ack_required starts the ack timer. Unset, a request asks for an ack and
+  // other kinds do not; set false, even a request asks for none.
+  optional bool ack_required = 5;
   // request_id (8-128 chars) makes a retry return the original message.
   string request_id = 6;
 }

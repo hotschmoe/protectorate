@@ -67,8 +67,10 @@ protectorate msg thread t7
 
 - **Addresses:** a sleeve name, `project:<id|owner/repo|name>`,
   `orchestrator` (sleeve `poe`) or `owner`.
-- **Kinds:** `note`, `request` (asks for action; `--ack` is the default),
-  `notice` (facts, usually from the hub).
+- **Kinds:** `note`, `request` (asks for action), `notice` (facts, usually
+  from the hub). `ack_required` is optional in the API: unset, a `request`
+  requires an ack and other kinds do not; an explicit false (`--ack=false`)
+  turns it off for a request.
 - **Threads:** `thread_id` groups messages (`t<n>`); `reply` keeps the thread
   and also acks the original. Messages are `m<n>`.
 - **Dedupe:** a retry with the same `request_id` from the same sender returns
@@ -94,13 +96,20 @@ protectorate msg thread t7
   Reply: protectorate msg reply m42 "..."
   Ack: protectorate msg ack m42
   ```
-  Hub notices omit the Reply line.
+  Hub notices cannot be replied to, so they end with their own reply line in
+  the body: `Reply: protectorate msg send project:<upstream> --thread <id>
+  "..."` for a dependency notice, `... msg send <recipient> --thread <id>` for
+  an escalation, and the `lease renew` / `lease release` commands for a lease
+  grant.
 - A recipient in **terminal mode**, and the owner, get no injection; they read
   `msg inbox`.
 - A **project address** resolves to the sleeves working on the project now
   (excluding the sender). With none live the message waits, and a `request`
-  also becomes a backlog item for the project (`<sender> asks: ...`). When a
-  sleeve for the project appears the waiting messages are delivered to it.
+  also becomes a backlog item for the project (`<sender> asks: ...`), and the
+  message is stored pending with a reference to that item. When a sleeve for
+  the project appears the message is delivered once, and says the request is
+  already backlog item `<id>` to work from the backlog; the item is the only
+  actionable copy.
 - **Ack timers:** an `ack_required` message that stays unacked for the timeout
   (`hub serve --msg-ack-timeout`, default 30m, counted from delivery, or from
   addressing for terminal recipients) is delivered again once. Unacked for

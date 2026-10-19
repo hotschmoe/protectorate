@@ -39,6 +39,9 @@ type sendArgs struct {
 	AckRequired bool
 	RequestID   string
 	ReplyTo     string
+	// ReplyVia is the address a recipient of a hub notice answers to with
+	// msg send; the notice ends with that command.
+	ReplyVia string
 	// Direct skips address validation: a reply goes back to a sender that may
 	// have gone.
 	Direct bool
@@ -139,7 +142,7 @@ func (c *coordinator) send(sender string, a sendArgs) (sendResult, error) {
 	m, created, err := c.mail.Send(mailbox.NewMessage{
 		From: sender, To: strings.TrimSpace(a.To), Kind: a.Kind, AckRequired: a.AckRequired, Body: a.Body,
 		RequestID: a.RequestID, Thread: a.Thread, ReplyTo: a.ReplyTo,
-		FromProject: fromProject, Project: project, Recipients: rcpts,
+		FromProject: fromProject, Project: project, Recipients: rcpts, Footer: replyFooter(a.ReplyVia),
 	})
 	if err != nil {
 		return sendResult{}, connect.NewError(connect.CodeInternal, err)
@@ -155,6 +158,18 @@ func (c *coordinator) send(sender string, a sendArgs) (sendResult, error) {
 	}
 	c.nudge()
 	return res, nil
+}
+
+// replyFooter is the last line of a hub notice that tells the reader how to
+// answer it. A hub notice cannot be replied to, so it points at msg send on
+// the notice's thread.
+func replyFooter(via string) func(thread string) string {
+	if via == "" {
+		return nil
+	}
+	return func(thread string) string {
+		return fmt.Sprintf("Reply: protectorate msg send %s --thread %s \"...\"", via, thread)
+	}
 }
 
 // armInboxOnly starts the ack timer for recipients that cannot be injected.
@@ -387,6 +402,7 @@ func (c *coordinator) escalate(m mailbox.Message, rcpt string) {
 		m.ID, m.Thread, m.From, m.To, rcpt, firstLine(m.Body, 300))
 	if _, err := c.send(hubName, sendArgs{
 		To: sleeve.OrchestratorName, Direct: true, Body: body, Thread: m.Thread, Kind: mailbox.Notice, RequestID: "escalate-" + m.ID,
+		ReplyVia: rcpt,
 	}); err != nil {
 		log.Printf("mailbox: notify orchestrator of %s: %v", m.ID, err)
 	}
@@ -416,6 +432,9 @@ func renderMessage(m mailbox.Message, project string, reminder bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s]\n%s\n", head, strings.TrimRight(m.Body, "\n"))
 	b.WriteByte('\n')
+	if m.BacklogItem != "" {
+		fmt.Fprintf(&b, "This request is already filed as backlog item %s for the project. Work it from the backlog; do not add another item for it.\n", m.BacklogItem)
+	}
 	if m.From != hubName {
 		fmt.Fprintf(&b, "Reply: protectorate msg reply %s \"...\"\n", m.ID)
 	}
@@ -499,8 +518,12 @@ func (s messageService) Send(ctx context.Context, req *connect.Request[pb.Messag
 	if !ok {
 		return nil, invalid("unknown message kind")
 	}
+	ack := kind == mailbox.Request
+	if m.AckRequired != nil {
+		ack = *m.AckRequired
+	}
 	res, err := s.c.send(identity(ctx), sendArgs{
-		To: m.To, Body: m.Body, Thread: m.ThreadId, Kind: kind, AckRequired: m.AckRequired, RequestID: m.RequestId,
+		To: m.To, Body: m.Body, Thread: m.ThreadId, Kind: kind, AckRequired: ack, RequestID: m.RequestId,
 	})
 	if err != nil {
 		return nil, err

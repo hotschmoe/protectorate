@@ -38,7 +38,7 @@ type Hub interface {
 type Options struct {
 	Home    string // $PROTECTORATE_HOME
 	HubURL  string // reached from inside the sandbox
-	Harness string // auto, claude, codex, grok, pi or shell
+	Harness string // auto, claude, codex, grok or pi
 	Scopes  []string
 	TTL     time.Duration
 	Tools   []Tool
@@ -59,7 +59,7 @@ type Result struct {
 
 var harnessNames = map[string]pb.Harness{
 	"claude": pb.Harness_HARNESS_CLAUDE, "codex": pb.Harness_HARNESS_CODEX, "grok": pb.Harness_HARNESS_GROK,
-	"pi": pb.Harness_HARNESS_PI, "shell": pb.Harness_HARNESS_SHELL,
+	"pi": pb.Harness_HARNESS_PI,
 }
 
 func harnessLabel(h pb.Harness) string {
@@ -137,7 +137,7 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 	}
 
 	spawned, err := hub.SpawnSleeve(ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
-		Name: SleeveName, Workspace: ws, Harness: harness, Mode: pb.SleeveMode_SLEEVE_MODE_TERMINAL,
+		Name: SleeveName, Workspace: ws, Harness: harness, Mode: pb.SleeveMode_SLEEVE_MODE_CHAT,
 		Env: map[string]string{"PROTECTORATE_HUB": o.HubURL, "PROTECTORATE_TOKEN_FILE": tokenPath},
 	}))
 	if err != nil {

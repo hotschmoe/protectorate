@@ -271,6 +271,8 @@ type NewMessage struct {
 	FromProject string
 	Project     string
 	Recipients  []string
+	// Footer, if set, is appended to the body once the thread id is known.
+	Footer func(thread string) string
 }
 
 // Send stores a message. A retry from the same sender with the same
@@ -292,6 +294,9 @@ func (s *Store) Send(n NewMessage) (m Message, created bool, err error) {
 	}
 	if msg.Thread == "" {
 		msg.Thread = "t" + strconv.Itoa(s.nextThr+1)
+	}
+	if n.Footer != nil {
+		msg.Body = strings.TrimRight(msg.Body, "\n") + "\n\n" + n.Footer(msg.Thread)
 	}
 	if err := s.commit(record{Op: "send", At: msg.Created, Msg: msg}); err != nil {
 		return Message{}, false, err

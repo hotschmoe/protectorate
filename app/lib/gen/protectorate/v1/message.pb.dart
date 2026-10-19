@@ -129,7 +129,8 @@ class MessageServiceSendRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   void clearKind() => $_clearField(4);
 
-  /// ack_required starts the ack timer.
+  /// ack_required starts the ack timer. Unset, a request asks for an ack and
+  /// other kinds do not; set false, even a request asks for none.
   @$pb.TagNumber(5)
   $core.bool get ackRequired => $_getBF(4);
   @$pb.TagNumber(5)

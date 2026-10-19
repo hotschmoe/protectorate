@@ -97,7 +97,15 @@ type entry struct {
 	cpuAt   time.Time
 	oomSeen uint64
 	peak    uint64
+	// scopeGone is when Reconcile first saw the scope missing under a session
+	// that tmux still reports as running.
+	scopeGone time.Time
 }
+
+// scopeGrace is how long tmux gets to record the exit status of a command
+// whose scope has already vanished. The scope goes the moment the last process
+// exits, slightly before tmux reaps the pane.
+const scopeGrace = 5 * time.Second
 
 type Manager struct {
 	opts Options
@@ -159,7 +167,7 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 	}
 	for _, n := range m.cfg.scopeNames() {
 		if m.sleeves[n] == nil {
-			log.Printf("sleeve scope %s has no record in %s; leaving it running", UnitName(n), m.path)
+			log.Printf("sleeve scope %s has no record in %s; leaving it running", m.cfg.UnitName(n), m.path)
 		}
 	}
 	m.mu.Lock()
@@ -283,7 +291,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, fmt.Errorf("%w: %s", ErrExists, req.Name)
 	}
 	if m.cfg.scopeAlive(req.Name) {
-		return Info{}, fmt.Errorf("%w: scope %s is still running", ErrExists, UnitName(req.Name))
+		return Info{}, fmt.Errorf("%w: scope %s is still running", ErrExists, m.cfg.UnitName(req.Name))
 	}
 
 	ws, err := m.resolveWorkspace(ctx, req.Name, req.Workspace)
@@ -501,11 +509,22 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 			continue
 		}
 		s, ok := live[e.Session]
+		alive := m.cfg.scopeAlive(name)
+		if alive {
+			e.scopeGone = time.Time{}
+		}
 		switch {
 		case !ok:
 			out = append(out, gone{e: e})
-		case s.State == session.Exited || !m.cfg.scopeAlive(name):
+		case s.State == session.Exited:
 			out = append(out, gone{e: e, s: &s})
+		case !alive:
+			if e.scopeGone.IsZero() {
+				e.scopeGone = time.Now()
+			}
+			if time.Since(e.scopeGone) >= scopeGrace {
+				out = append(out, gone{e: e, s: &s})
+			}
 		}
 	}
 	m.mu.Unlock()

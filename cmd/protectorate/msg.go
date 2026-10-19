@@ -66,8 +66,9 @@ not acked within the hub's timeout is re-delivered once, then escalated.`,
 			if !ok {
 				return fmt.Errorf("unknown kind %q, want note, request or notice", kind)
 			}
-			if k == pb.MessageKind_MESSAGE_KIND_REQUEST && !cmd.Flags().Changed("ack") {
-				ack = true
+			var askAck *bool
+			if cmd.Flags().Changed("ack") {
+				askAck = &ack
 			}
 			body, err := bodyArg(cmd, args[1:])
 			if err != nil {
@@ -78,7 +79,7 @@ not acked within the hub's timeout is re-delivered once, then escalated.`,
 				return err
 			}
 			res, err := cl.Send(cmd.Context(), connect.NewRequest(&pb.MessageServiceSendRequest{
-				To: args[0], Body: body, ThreadId: thread, Kind: k, AckRequired: ack, RequestId: requestID,
+				To: args[0], Body: body, ThreadId: thread, Kind: k, AckRequired: askAck, RequestId: requestID,
 			}))
 			if err != nil {
 				return err

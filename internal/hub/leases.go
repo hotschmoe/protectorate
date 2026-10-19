@@ -793,7 +793,7 @@ func (h *Hub) leaseGranted(t ticketRecord, l *pb.Lease) {
 		return
 	}
 	window := time.Until(l.ExpiresAt.AsTime()).Round(time.Second)
-	body := fmt.Sprintf("Your queued lease on %s is granted as %s. It is held for you for %s; claim it with:\n  protectorate lease renew %s\nwhich keeps it for %s. Unclaimed, it passes to the next waiter. Release it with:\n  protectorate lease release %s",
+	body := fmt.Sprintf("Your queued lease on %s is granted as %s. It is held for you for %s; unclaimed, it passes to the next waiter.\n\nReply: claim it with `protectorate lease renew %s` (keeps it for %s), or give it up with `protectorate lease release %s`.",
 		l.Resource, l.Id, window, l.Id, t.TTL, l.Id)
 	if _, err := h.coord.send(hubName, sendArgs{
 		To: t.Notify, Direct: true, Body: body, Kind: mailbox.Notice, RequestID: "lease-grant-" + l.Id,

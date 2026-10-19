@@ -672,6 +672,9 @@ func actor(ctx context.Context) string {
 }
 
 func (c chatService) Watch(ctx context.Context, req *connect.Request[pb.WatchRequest], stream *connect.ServerStream[pb.ChatEvent]) error {
+	if err := ownSleeveOnly(ctx, req.Msg.Sleeve); err != nil {
+		return err
+	}
 	s, err := c.sleeve(req.Msg.Sleeve)
 	if err != nil {
 		return err
