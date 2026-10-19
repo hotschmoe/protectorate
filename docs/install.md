@@ -22,6 +22,16 @@ sudo loginctl enable-linger $USER                                    # keep runn
 
 The unit uses `KillMode=control-group` so a killed hub cannot orphan headscale. Prefer the user unit when the hub runs sleeves (they use `systemd-run --user`). For a headless box without a user session, `--user-name NAME` renders a system unit for `/etc/systemd/system`.
 
+Log in to each harness once on the hub. This runs the harness's own login in your terminal and stores the credential in `~/.protectorate/auth/<harness>`, which every sleeve shares:
+
+```
+protectorate login claude
+protectorate login codex                  # headless box: protectorate login codex -- --device-auth
+protectorate login grok                   # or: protectorate login grok -- --device-auth
+protectorate login pi                     # type /login in pi, then exit it
+protectorate login --status               # logged in / missing, from file presence only
+```
+
 Relay fallback needs no domain or certificate. The hub runs its own DERP relay (TCP 7483, TLS with a self-signed certificate it generates in `tailnet/`) and STUN (UDP 3478). Clients trust the relay by the certificate hash carried in the DERP map, so nothing is installed on nodes or phones. Open TCP 7483 and UDP 3478 on the hub for anything outside the LAN; the `--server-url` host must be an address or name those clients can reach. Upgrading from a config without `derp_listen` needs no change (it defaults to `0.0.0.0:7483`); restart the hub. The stock Tailscale app needs a version that understands the `sha256-raw:` pin (current releases do).
 
 ## Nodes

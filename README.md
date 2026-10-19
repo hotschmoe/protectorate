@@ -45,6 +45,7 @@ make app-check  # flutter analyze + test
 
 ```
 protectorate hub serve [--web app/build/web]   # owner token at ~/.protectorate/token
+protectorate login claude                       # once per harness, on the hub; --status lists them
 protectorate quota
 protectorate session new demo -- claude
 protectorate sleeve spawn alice --workspace ~/src/proj --harness codex --mem 8G
