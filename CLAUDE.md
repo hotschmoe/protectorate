@@ -49,4 +49,4 @@ make cross   # linux/windows amd64+arm64 and android/arm64 into bin/
 gofmt -l .   # must print nothing
 ```
 
-Never hand-edit `gen/`; change the .proto and run `make gen`. Go lives in `~/.local/go/bin`.
+Never hand-edit or reformat `gen/` or `app/lib/gen/` (no `dart format` there); change the .proto and run `make gen`. Go lives in `~/.local/go/bin`.

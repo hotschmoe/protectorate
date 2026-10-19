@@ -10,7 +10,7 @@ import "quota.connect.spec.dart" as specs;
 /// QuotaService reports subscription usage. Updates are also announced on
 /// EventService as events with kind "quota.updated" (subject = provider,
 /// payload = the ProviderQuota in proto-JSON form).
-extension type QuotaServiceClient(connect.Transport _transport) {
+extension type QuotaServiceClient (connect.Transport _transport) {
   /// GetQuota returns the usage windows, resets and freshness of every
   /// provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).
   Future<protectoratev1quota.GetQuotaResponse> getQuota(

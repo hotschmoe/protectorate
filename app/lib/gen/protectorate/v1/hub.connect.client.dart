@@ -8,7 +8,7 @@ import "hub.pb.dart" as protectoratev1hub;
 import "hub.connect.spec.dart" as specs;
 
 /// HubService reports on the hub process itself.
-extension type HubServiceClient(connect.Transport _transport) {
+extension type HubServiceClient (connect.Transport _transport) {
   /// GetStatus returns the hub version, host platform and uptime.
   Future<protectoratev1hub.GetStatusResponse> getStatus(
     protectoratev1hub.GetStatusRequest input, {

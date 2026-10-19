@@ -9,7 +9,7 @@ import "session.connect.spec.dart" as specs;
 
 /// SessionService manages tmux-backed harness sessions. Interactive access is
 /// the WebSocket terminal at GET /ws/terminal/{name}, not an RPC.
-extension type SessionServiceClient(connect.Transport _transport) {
+extension type SessionServiceClient (connect.Transport _transport) {
   /// ListSessions returns all live sessions.
   Future<protectoratev1session.ListSessionsResponse> listSessions(
     protectoratev1session.ListSessionsRequest input, {
