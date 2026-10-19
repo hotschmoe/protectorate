@@ -204,19 +204,37 @@ func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
 	}
 }
 
-func (m *NodeMonitor) fetchHTTP(ctx context.Context, n *pb.NodeInfo) (*pb.NodeMetrics, error) {
-	opts := []connect.ClientOption{connect.WithProtoJSON()}
+// agentClient talks to one node agent, presenting the node token if any.
+func (m *NodeMonitor) agentClient(n *pb.NodeInfo, opts ...connect.ClientOption) protectoratev1connect.NodeAgentServiceClient {
 	if m.opts.Token != "" {
-		tok := m.opts.Token
-		opts = append(opts, connect.WithInterceptors(connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-			return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-				req.Header().Set("Authorization", "Bearer "+tok)
-				return next(ctx, req)
-			}
-		})))
+		opts = append(opts, connect.WithInterceptors(bearerInterceptor{token: m.opts.Token}))
 	}
-	c := protectoratev1connect.NewNodeAgentServiceClient(m.opts.Client, AgentURL(n.Address), opts...)
-	res, err := c.GetMetrics(ctx, connect.NewRequest(&pb.GetMetricsRequest{}))
+	return protectoratev1connect.NewNodeAgentServiceClient(m.opts.Client, AgentURL(n.Address), opts...)
+}
+
+type bearerInterceptor struct{ token string }
+
+func (b bearerInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		req.Header().Set("Authorization", "Bearer "+b.token)
+		return next(ctx, req)
+	}
+}
+
+func (b bearerInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		conn.RequestHeader().Set("Authorization", "Bearer "+b.token)
+		return conn
+	}
+}
+
+func (b bearerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return next
+}
+
+func (m *NodeMonitor) fetchHTTP(ctx context.Context, n *pb.NodeInfo) (*pb.NodeMetrics, error) {
+	res, err := m.agentClient(n, connect.WithProtoJSON()).GetMetrics(ctx, connect.NewRequest(&pb.GetMetricsRequest{}))
 	if err != nil {
 		return nil, err
 	}
@@ -404,4 +422,13 @@ func nodeErr(err error) error {
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return connect.NewError(connect.CodeInternal, err)
+}
+
+// info returns the inventory record of a node, or the hub's own.
+func (m *NodeMonitor) info(name string) (*pb.NodeInfo, error) {
+	name = strings.ToLower(name)
+	if name == m.self.Name {
+		return m.self, nil
+	}
+	return m.inv.Get(name)
 }

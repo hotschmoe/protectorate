@@ -131,6 +131,299 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
+    "description": "CancelJob stops a job and its whole process tree. Cancelling a finished job is a no-op that returns its record.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_cancel_job"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetJob returns one job record.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_get_job"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListJobs returns job records, newest first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "limit caps the result; zero means 50.",
+          "type": "integer"
+        },
+        "state": {
+          "description": "state, when set, keeps only jobs in that state.",
+          "enum": [
+            "JOB_STATE_UNSPECIFIED",
+            "JOB_STATE_PREPARING",
+            "JOB_STATE_RUNNING",
+            "JOB_STATE_SUCCEEDED",
+            "JOB_STATE_FAILED",
+            "JOB_STATE_CANCELED",
+            "JOB_STATE_TIMED_OUT"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_list_jobs"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "SubmitJob queues a job and returns at once with its id. Follow it with WatchJob.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactGlobs": {
+          "description": "artifact_globs select files, relative to the working directory, that are sent back to $PROTECTORATE_HOME/jobs/\u003cid\u003e/artifacts/. A glob that matches a directory takes the files below it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "command is the argv to execute; argv[0] is resolved on the node, relative to the working directory when it contains a path separator.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "source": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact": {
+              "additionalProperties": false,
+              "description": "artifact runs in a fresh job directory holding the file.",
+              "properties": {
+                "path": {
+                  "description": "path is a file on the hub.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "git": {
+              "additionalProperties": false,
+              "description": "git checks the commit out in a per-repo worktree on the node that is reused by later jobs, so build caches stay warm.",
+              "properties": {
+                "commit": {
+                  "description": "commit is any revision the repository resolves; empty means HEAD. The job record holds the full id.",
+                  "type": "string"
+                },
+                "repo": {
+                  "description": "repo is a path to a git repository on the hub.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "description": "allow_family admits nodes of tier \"family\".",
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id runs on the node of a live lease (and on its GPU, if any).",
+              "type": "string"
+            },
+            "node": {
+              "description": "node is a node name.",
+              "type": "string"
+            },
+            "selector": {
+              "additionalProperties": false,
+              "description": "selector picks the least-loaded fresh matching node that is not leased.",
+              "properties": {
+                "arch": {
+                  "type": "string"
+                },
+                "gpuVramBytes": {
+                  "description": "gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease then reserves that GPU instead of the whole node.",
+                  "type": "integer"
+                },
+                "minFreeMemoryBytes": {
+                  "description": "min_free_memory_bytes is the least available memory the node must report.",
+                  "type": "integer"
+                },
+                "os": {
+                  "description": "os and arch are Go GOOS/GOARCH values such as \"windows\" and \"arm64\".",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "timeout": {
+          "description": "timeout bounds the command's run time; zero means 1h, at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_submit_job"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node that is not already leased.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allowFamily": {
+          "description": "allow_family admits nodes of tier \"family\", which are skipped otherwise.",
+          "type": "boolean"
+        },
+        "holder": {
+          "description": "holder labels who holds the lease, e.g. a sleeve or agent name.",
+          "type": "string"
+        },
+        "resource": {
+          "description": "resource is a node name or \"\u003cnode\u003e:gpu\u003cindex\u003e\".",
+          "type": "string"
+        },
+        "selector": {
+          "additionalProperties": false,
+          "properties": {
+            "arch": {
+              "type": "string"
+            },
+            "gpuVramBytes": {
+              "description": "gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease then reserves that GPU instead of the whole node.",
+              "type": "integer"
+            },
+            "minFreeMemoryBytes": {
+              "description": "min_free_memory_bytes is the least available memory the node must report.",
+              "type": "integer"
+            },
+            "os": {
+              "description": "os and arch are Go GOOS/GOARCH values such as \"windows\" and \"arm64\".",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "ttl": {
+          "description": "ttl is how long the lease lives without a renewal; at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "lease_acquire_lease"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListLeases returns every live lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "lease_list_leases"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "ReleaseLease frees a lease at once. Releasing an unknown or expired lease is an error.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "lease_release_lease"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RenewLease pushes the expiry of a live lease to now plus a TTL.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ttl": {
+          "description": "ttl replaces the lease's TTL; zero keeps the current one.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "lease_renew_lease"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "description": "AddNode adds or updates a node in the hub inventory.",
     "inputSchema": {
       "additionalProperties": false,

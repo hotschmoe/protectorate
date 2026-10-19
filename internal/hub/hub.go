@@ -26,6 +26,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/backlog"
 	"github.com/hotschmoe/protectorate/internal/codec"
+	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
@@ -39,6 +40,8 @@ type Hub struct {
 	seq     atomic.Uint64
 	quota   *QuotaCache
 	nodes   *NodeMonitor
+	leases  *LeaseTable
+	jobs    *JobManager
 	events  eventBus
 
 	Sessions    *session.Manager
@@ -84,6 +87,22 @@ func (h *Hub) SetNodes(m *NodeMonitor) {
 	m.publish = h.emit
 	m.localSleeves = h.sleeveRows
 	h.nodes = m
+}
+
+// EnableJobs enables LeaseService and JobService, keeping their state under
+// home. local runs jobs placed on the hub's own node. Call after SetNodes and
+// before Handler or Serve.
+func (h *Hub) EnableJobs(home string, local *node.Jobs) error {
+	leases, err := OpenLeases(filepath.Join(home, "leases.yaml"), h.emit)
+	if err != nil {
+		return err
+	}
+	jobs, err := OpenJobs(filepath.Join(home, "jobs"), h.nodes, leases, local, h.emit)
+	if err != nil {
+		return err
+	}
+	h.leases, h.jobs = leases, jobs
+	return nil
 }
 
 // SetQuota installs the quota cache and publishes its updates as
@@ -176,6 +195,10 @@ func (h *Hub) Handler() http.Handler {
 	if h.nodes != nil {
 		mux.Handle(protectoratev1connect.NewNodeServiceHandler(h, opts))
 	}
+	if h.jobs != nil {
+		mux.Handle(protectoratev1connect.NewLeaseServiceHandler(h, opts))
+		mux.Handle(protectoratev1connect.NewJobServiceHandler(h, opts))
+	}
 	if h.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
 	}
@@ -255,6 +278,17 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener, extra ...Extra) error {
 		go func() {
 			defer close(nodesDone)
 			h.nodes.Run(nodesCtx)
+		}()
+	}
+
+	if h.jobs != nil {
+		leasesDone := make(chan struct{})
+		leasesCtx, stopLeases := context.WithCancel(ctx)
+		go func() { defer close(leasesDone); h.leases.Run(leasesCtx) }()
+		defer func() {
+			stopLeases()
+			<-leasesDone
+			h.jobs.Shutdown()
 		}()
 	}
 
