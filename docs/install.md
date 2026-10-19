@@ -125,17 +125,18 @@ Not verified on a real phone: Android 11+ restricts netlink for apps (tsnet's in
 
 ```
 make cross                                   # on the hub box: bin/protectorate-<os>-<arch>[.exe]
+protectorate hub serve --binary-dir bin      # where the hub finds those builds (default: the directory of its own executable)
 protectorate node ls                         # VERSION column; (!) marks a node that differs from the hub
-protectorate node update <node>              # or: node update --all [--binary-dir bin] [--force]
+protectorate node update <node>              # or: node update --all [--force]
 ```
 
-Nothing updates by itself. `node update` sends one binary per node over the file transfer (zstd where it shrinks, size and SHA-256 checked): this executable for nodes of its own OS and architecture, the matching `make cross` file from `--binary-dir` (default `bin/`) for the rest. Run it where the build is, normally the hub box. The node then:
+Nothing updates by itself. `node update` asks the hub (`NodeService.UpdateNode`, owner-only, also behind the app's "Update node" button), which sends one binary per node over the file transfer (zstd where it shrinks, size and SHA-256 checked): its own executable for nodes of its own OS and architecture, the matching `protectorate-<os>-<arch>` file from its `--binary-dir` for the rest. The hub box therefore needs the `make cross` output (or the CI artifacts) in that directory. The node then:
 
 1. checks size and SHA-256 again, copies the file next to its own binary and runs `<new> version --json` (it must report the node's OS and architecture);
 2. swaps it in and keeps exactly one previous binary: `protectorate.exe.old` / `protectorate.old` next to it, overwritten by the next update. Linux and Termux copy the old one aside and rename the new one over it atomically; Windows cannot overwrite a running exe, so it renames the running exe to `.old` and puts the new one in place;
 3. answers, shuts down and restarts: `systemctl --user restart` for the unit `node install` wrote, `schtasks /Run` for the Windows logon task (after it exits; the task's restart-on-failure is the fallback), `sv restart` for the Termux service, exit status 75 under a supervisor that restarts on failure (a systemd system unit or Windows service), and otherwise by starting itself again from the same path with the same arguments.
 
-The CLI waits (`--timeout`, default 3 minutes) until `node ls` shows the new version. The new binary is on trial, recorded in `protectorate.exe.update` next to the binary (a marker file that is rewritten, never deleted): the first hub poll that reaches it confirms the update. If the new binary is started twice without the hub reaching it, or four minutes pass without contact, it puts the `.old` binary back (on Windows the failed one stays as `.failed`) and restarts. A node that has no supervisor and whose new binary dies before running any code stays down; that is why `version --json` is run first. The hub's own node is updated by replacing the hub binary and restarting the hub. Updating is owner-only (the `NodeService.ApplyUpdate` RPC is not offered to scoped tokens or the MCP bridge).
+The hub streams the progress (sending, verifying, swapping, restarting) and waits up to 3 minutes until the node reports the new version, or reports that it came back on the old one. The new binary is on trial, recorded in `protectorate.exe.update` next to the binary (a marker file that is rewritten, never deleted): the first hub poll that reaches it confirms the update. If the new binary is started twice without the hub reaching it, or four minutes pass without contact, it puts the `.old` binary back (on Windows the failed one stays as `.failed`) and restarts. A node that has no supervisor and whose new binary dies before running any code stays down; that is why `version --json` is run first. The hub's own node is updated by replacing the hub binary and restarting the hub. Updating is owner-only (the `NodeService.ApplyUpdate` and `UpdateNode` RPCs are not offered to scoped tokens or the MCP bridge).
 
 ## Phone client
 
@@ -152,3 +153,9 @@ protectorate pair --app                      # QR for the native app; without --
 - A peer that stays on DERP while both sides are on one LAN usually has UDP blocked between them; the relay still works.
 - A peer with `online no` and an old handshake is down or revoked; `node ls` also lists nodes that were invited but never joined.
 - A node killed without a clean shutdown makes the relay see a dropped connection; those expected disconnects are not logged, other relay errors are.
+
+## Versions
+
+The version is the git tag; nothing else defines it. `make version` prints it (`git describe --tags --always --dirty`), and every build takes it from there: `make build` and `make cross` stamp the Go binaries, `make app-build-web`, `make apk` and `make app-build-linux` pass `--build-name` (the x.y.z of the nearest tag, `0.0.0` without one), `--build-number` (commits on HEAD, so it only grows; `make version-app` prints `name+number`) and `--dart-define=PROTECTORATE_VERSION=<version>` to Flutter. `app/pubspec.yaml` holds the placeholder `0.0.0+0`, which every build overrides. `make check-version` fails if the placeholder changed or a make target, script or CI workflow builds without those flags; `make check` runs it with the rest of the checks. Tag with `git tag vX.Y.Z` and build from a full clone (CI uses `fetch-depth: 0`).
+
+The app shows its own version in the hub list and the hub's in the overview, and lights VERSION SKEW on the overview when it differs from the hub's or any node's does.

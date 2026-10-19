@@ -6,7 +6,9 @@ import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../nodes/node_update.dart';
 import '../nodes/node_view.dart';
+import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
@@ -23,8 +25,10 @@ class NodeDetailScreen extends StatefulWidget {
     required this.name,
     this.now,
     this.history,
+    this.versions = const Versions(),
   });
 
+  final Versions versions;
   final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
@@ -117,6 +121,17 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
               error: _error,
               cpuHistory: _history.cpu(widget.name),
               memHistory: _history.mem(widget.name),
+              versions: widget.versions,
+              onUpdate: s.node.local
+                  ? null
+                  : () => showNodeUpdate(
+                      context,
+                      client: widget.client,
+                      node: s.node.name,
+                      nodeVersion: nodeVersion(s),
+                      hubVersion: widget.versions.hub,
+                      onFinished: _refresh,
+                    ),
               onManageSleeves: s.node.local
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -133,6 +148,59 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
   }
 }
 
+class _VersionPanel extends StatelessWidget {
+  const _VersionPanel({
+    required this.nodeVersion,
+    required this.versions,
+    required this.skewed,
+    required this.onUpdate,
+  });
+
+  final String nodeVersion;
+  final Versions versions;
+  final bool skewed;
+  final VoidCallback? onUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    Widget row(String legend, String v) => Row(
+      children: [
+        SizedBox(width: 56, child: Text(legend, style: t.legend())),
+        Text(v.isEmpty ? '-' : v, style: t.data(t.p.emph)),
+      ],
+    );
+    return Panel(
+      legend: 'VERSION',
+      trailing: skewed
+          ? const LampLegend(label: 'SKEW', tone: Tone.warn)
+          : nodeVersion.isNotEmpty && versions.hub.isNotEmpty
+          ? const LampLegend(label: 'MATCH', tone: Tone.ok)
+          : null,
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                row('NODE', nodeVersion),
+                const SizedBox(height: 4),
+                row('HUB', versions.hub),
+              ],
+            ),
+          ),
+          if (onUpdate != null)
+            OutlinedButton(
+              key: const ValueKey('update-node'),
+              onPressed: onUpdate,
+              child: const Text('UPDATE NODE'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class NodeDetail extends StatelessWidget {
   const NodeDetail({
     super.key,
@@ -141,11 +209,15 @@ class NodeDetail extends StatelessWidget {
     required this.now,
     this.error,
     this.onManageSleeves,
+    this.onUpdate,
+    this.versions = const Versions(),
     this.cpuHistory = const [],
     this.memHistory = const [],
   });
 
   final VoidCallback? onManageSleeves;
+  final VoidCallback? onUpdate;
+  final Versions versions;
   final NodeStatus status;
   final Duration age;
   final DateTime now;
@@ -186,6 +258,12 @@ class NodeDetail extends StatelessWidget {
             style: t.small(),
           ),
         ],
+      ),
+      _VersionPanel(
+        nodeVersion: nodeVersion(status),
+        versions: versions,
+        skewed: nodeSkewed(status, versions.hub),
+        onUpdate: down ? null : onUpdate,
       ),
       if (error != null)
         NoteStrip(

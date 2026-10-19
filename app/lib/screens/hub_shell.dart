@@ -6,7 +6,10 @@ import '../gen/protectorate/v1/events.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../gen/protectorate/v1/hub.pb.dart';
 import '../nodes/node_view.dart';
+import '../nodes/version_skew.dart';
+import '../version.dart' as ver;
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
@@ -47,7 +50,10 @@ class HubShell extends StatefulWidget {
     this.initialTab,
     this.openSession,
     this.openNode,
+    this.appVersion = ver.appVersion,
   });
+
+  final String appVersion;
 
   final HubProfile hub;
   final HubClient Function(HubProfile) clientFactory;
@@ -66,12 +72,16 @@ class _HubShellState extends State<HubShell> {
   )..start();
   late int _index = tabIndex(widget.initialTab);
   final _history = NodeHistory();
+  String _hubVersion = '';
+  FeedState _lastFeedState = FeedState.connecting;
   DateTime _clock = DateTime.now();
   Timer? _tick;
 
   @override
   void initState() {
     super.initState();
+    _loadHubVersion();
+    _feed.addListener(_feedChanged);
     _tick = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _clock = DateTime.now());
     });
@@ -89,6 +99,7 @@ class _HubShellState extends State<HubShell> {
               feed: _feed,
               name: node,
               history: _history,
+              versions: _versions,
             ),
           ),
         );
@@ -96,8 +107,30 @@ class _HubShellState extends State<HubShell> {
     }
   }
 
+  Versions get _versions => Versions(hub: _hubVersion, app: widget.appVersion);
+
+  Future<void> _loadHubVersion() async {
+    try {
+      final s = await _client.hub.getStatus(GetStatusRequest());
+      if (mounted) setState(() => _hubVersion = s.version);
+    } on Object {
+      // Skew is hidden until the hub's version is known.
+    }
+  }
+
+  // A hub that restarted may run another build; read it again when the event
+  // stream comes back.
+  void _feedChanged() {
+    final s = _feed.state;
+    if (s == FeedState.live && _lastFeedState != FeedState.live) {
+      _loadHubVersion();
+    }
+    _lastFeedState = s;
+  }
+
   @override
   void dispose() {
+    _feed.removeListener(_feedChanged);
     _tick?.cancel();
     _feed.dispose();
     super.dispose();
@@ -109,12 +142,14 @@ class _HubShellState extends State<HubShell> {
       client: _client,
       feed: _feed,
       history: _history,
+      versions: _versions,
     ),
     1 => NodesTab(
       hub: widget.hub,
       client: _client,
       feed: _feed,
       history: _history,
+      versions: _versions,
     ),
     2 => QuotaTab(client: _client, feed: _feed),
     3 => SessionsTab(

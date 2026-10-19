@@ -118,6 +118,19 @@ service NodeService {
     option (protectorate.v1.owner_only_rpc) = true;
   }
 
+  // UpdateNode brings a node to the hub's version: the hub sends the node
+  // the binary for its OS and architecture (its own executable for the hub's
+  // platform, otherwise protectorate-<os>-<arch> from its binary dir), has
+  // the node verify and swap it in as ApplyUpdate does, then watches until
+  // the node reports the new version or puts the old binary back. It streams
+  // the progress and ends when the update is confirmed, rolled back or
+  // skipped (the node is already at the hub's version and force is unset);
+  // any failure ends the stream with an error. Only the owner token may call
+  // it. The hub's own node cannot be updated this way.
+  rpc UpdateNode(UpdateNodeRequest) returns (stream UpdateNodeProgress) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+
   // SetDeskPolicy sets or clears (policy unset) when agents may drive a
   // node's desktop. Only the owner token may call it. The hub keeps the
   // policy and sends it to the node, which enforces it.
@@ -159,6 +172,50 @@ message DeskPolicyStatus {
   string holder = 3;
   // inputs is today's desktop input commands per caller.
   repeated DeskUse inputs = 4;
+}
+
+enum UpdatePhase {
+  UPDATE_PHASE_UNSPECIFIED = 0;
+  // UPDATE_PHASE_SKIPPED: the node already runs the hub's version.
+  UPDATE_PHASE_SKIPPED = 1;
+  // UPDATE_PHASE_SENDING: the binary is on its way; sent_bytes of total_bytes.
+  UPDATE_PHASE_SENDING = 2;
+  // UPDATE_PHASE_VERIFYING: the node checks size, SHA-256 and that it runs.
+  UPDATE_PHASE_VERIFYING = 3;
+  // UPDATE_PHASE_SWAPPING: the node swapped the binary in (version and
+  // previous_version are set) and is about to restart.
+  UPDATE_PHASE_SWAPPING = 4;
+  // UPDATE_PHASE_RESTARTING: waiting for the node to come back.
+  UPDATE_PHASE_RESTARTING = 5;
+  // UPDATE_PHASE_CONFIRMED: the node reports the new version. Final.
+  UPDATE_PHASE_CONFIRMED = 6;
+  // UPDATE_PHASE_ROLLED_BACK: the node came back on its previous binary.
+  // Final.
+  UPDATE_PHASE_ROLLED_BACK = 7;
+}
+
+message UpdateNodeRequest {
+  string name = 1;
+  bool allow_family = 2;
+  // force sends the binary even when the node reports the hub's version.
+  bool force = 3;
+}
+
+message UpdateNodeProgress {
+  UpdatePhase phase = 1;
+  // sent_bytes and total_bytes are uncompressed bytes of the binary; set from
+  // SENDING on.
+  uint64 sent_bytes = 2;
+  uint64 total_bytes = 3;
+  // version is what the new binary reports, previous_version what the node
+  // ran before; set from SWAPPING on (SKIPPED carries the node's version in
+  // both).
+  string version = 4;
+  string previous_version = 5;
+  // restart is how the node restarts, as in ApplyUpdateResponse.
+  string restart = 6;
+  // message is a human line about the step.
+  string message = 7;
 }
 
 message ApplyUpdateRequest {

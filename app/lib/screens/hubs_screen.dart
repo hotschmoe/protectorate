@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../version.dart';
 import '../theme/tokens.dart';
 import '../vfd/panel.dart';
 import 'hub_shell.dart';
@@ -96,6 +97,7 @@ class HubsScreen extends StatelessWidget {
                   ),
                   child: Panel(
                     legend: 'PAIRING',
+                    trailing: Text('APP $appVersion', style: t.legend()),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

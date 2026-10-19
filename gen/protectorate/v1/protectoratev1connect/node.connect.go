@@ -81,6 +81,8 @@ const (
 	NodeServiceGetFileProcedure = "/protectorate.v1.NodeService/GetFile"
 	// NodeServiceApplyUpdateProcedure is the fully-qualified name of the NodeService's ApplyUpdate RPC.
 	NodeServiceApplyUpdateProcedure = "/protectorate.v1.NodeService/ApplyUpdate"
+	// NodeServiceUpdateNodeProcedure is the fully-qualified name of the NodeService's UpdateNode RPC.
+	NodeServiceUpdateNodeProcedure = "/protectorate.v1.NodeService/UpdateNode"
 	// NodeServiceSetDeskPolicyProcedure is the fully-qualified name of the NodeService's SetDeskPolicy
 	// RPC.
 	NodeServiceSetDeskPolicyProcedure = "/protectorate.v1.NodeService/SetDeskPolicy"
@@ -501,6 +503,16 @@ type NodeServiceClient interface {
 	// Only the owner token may call it. The hub's own node cannot be updated
 	// this way.
 	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
+	// UpdateNode brings a node to the hub's version: the hub sends the node
+	// the binary for its OS and architecture (its own executable for the hub's
+	// platform, otherwise protectorate-<os>-<arch> from its binary dir), has
+	// the node verify and swap it in as ApplyUpdate does, then watches until
+	// the node reports the new version or puts the old binary back. It streams
+	// the progress and ends when the update is confirmed, rolled back or
+	// skipped (the node is already at the hub's version and force is unset);
+	// any failure ends the stream with an error. Only the owner token may call
+	// it. The hub's own node cannot be updated this way.
+	UpdateNode(context.Context, *connect.Request[v1.UpdateNodeRequest]) (*connect.ServerStreamForClient[v1.UpdateNodeProgress], error)
 	// SetDeskPolicy sets or clears (policy unset) when agents may drive a
 	// node's desktop. Only the owner token may call it. The hub keeps the
 	// policy and sends it to the node, which enforces it.
@@ -565,6 +577,12 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("ApplyUpdate")),
 			connect.WithClientOptions(opts...),
 		),
+		updateNode: connect.NewClient[v1.UpdateNodeRequest, v1.UpdateNodeProgress](
+			httpClient,
+			baseURL+NodeServiceUpdateNodeProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("UpdateNode")),
+			connect.WithClientOptions(opts...),
+		),
 		setDeskPolicy: connect.NewClient[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus](
 			httpClient,
 			baseURL+NodeServiceSetDeskPolicyProcedure,
@@ -589,6 +607,7 @@ type nodeServiceClient struct {
 	putFile       *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
 	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
 	applyUpdate   *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
+	updateNode    *connect.Client[v1.UpdateNodeRequest, v1.UpdateNodeProgress]
 	setDeskPolicy *connect.Client[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus]
 	getDeskPolicy *connect.Client[v1.GetDeskPolicyRequest, v1.DeskPolicyStatus]
 }
@@ -626,6 +645,11 @@ func (c *nodeServiceClient) GetFile(ctx context.Context, req *connect.Request[v1
 // ApplyUpdate calls protectorate.v1.NodeService.ApplyUpdate.
 func (c *nodeServiceClient) ApplyUpdate(ctx context.Context, req *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
 	return c.applyUpdate.CallUnary(ctx, req)
+}
+
+// UpdateNode calls protectorate.v1.NodeService.UpdateNode.
+func (c *nodeServiceClient) UpdateNode(ctx context.Context, req *connect.Request[v1.UpdateNodeRequest]) (*connect.ServerStreamForClient[v1.UpdateNodeProgress], error) {
+	return c.updateNode.CallServerStream(ctx, req)
 }
 
 // SetDeskPolicy calls protectorate.v1.NodeService.SetDeskPolicy.
@@ -672,6 +696,16 @@ type NodeServiceHandler interface {
 	// Only the owner token may call it. The hub's own node cannot be updated
 	// this way.
 	ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error)
+	// UpdateNode brings a node to the hub's version: the hub sends the node
+	// the binary for its OS and architecture (its own executable for the hub's
+	// platform, otherwise protectorate-<os>-<arch> from its binary dir), has
+	// the node verify and swap it in as ApplyUpdate does, then watches until
+	// the node reports the new version or puts the old binary back. It streams
+	// the progress and ends when the update is confirmed, rolled back or
+	// skipped (the node is already at the hub's version and force is unset);
+	// any failure ends the stream with an error. Only the owner token may call
+	// it. The hub's own node cannot be updated this way.
+	UpdateNode(context.Context, *connect.Request[v1.UpdateNodeRequest], *connect.ServerStream[v1.UpdateNodeProgress]) error
 	// SetDeskPolicy sets or clears (policy unset) when agents may drive a
 	// node's desktop. Only the owner token may call it. The hub keeps the
 	// policy and sends it to the node, which enforces it.
@@ -732,6 +766,12 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("ApplyUpdate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeServiceUpdateNodeHandler := connect.NewServerStreamHandler(
+		NodeServiceUpdateNodeProcedure,
+		svc.UpdateNode,
+		connect.WithSchema(nodeServiceMethods.ByName("UpdateNode")),
+		connect.WithHandlerOptions(opts...),
+	)
 	nodeServiceSetDeskPolicyHandler := connect.NewUnaryHandler(
 		NodeServiceSetDeskPolicyProcedure,
 		svc.SetDeskPolicy,
@@ -760,6 +800,8 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServiceGetFileHandler.ServeHTTP(w, r)
 		case NodeServiceApplyUpdateProcedure:
 			nodeServiceApplyUpdateHandler.ServeHTTP(w, r)
+		case NodeServiceUpdateNodeProcedure:
+			nodeServiceUpdateNodeHandler.ServeHTTP(w, r)
 		case NodeServiceSetDeskPolicyProcedure:
 			nodeServiceSetDeskPolicyHandler.ServeHTTP(w, r)
 		case NodeServiceGetDeskPolicyProcedure:
@@ -799,6 +841,10 @@ func (UnimplementedNodeServiceHandler) GetFile(context.Context, *connect.Request
 
 func (UnimplementedNodeServiceHandler) ApplyUpdate(context.Context, *connect.Request[v1.ApplyUpdateRequest]) (*connect.Response[v1.ApplyUpdateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.ApplyUpdate is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) UpdateNode(context.Context, *connect.Request[v1.UpdateNodeRequest], *connect.ServerStream[v1.UpdateNodeProgress]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.UpdateNode is not implemented"))
 }
 
 func (UnimplementedNodeServiceHandler) SetDeskPolicy(context.Context, *connect.Request[v1.SetDeskPolicyRequest]) (*connect.Response[v1.DeskPolicyStatus], error) {

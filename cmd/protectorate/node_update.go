@@ -1,18 +1,10 @@
 package main
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
-	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -21,37 +13,6 @@ import (
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
-
-const updateStage = "updates/protectorate-next"
-
-// binaryName is the file `make cross` writes for a platform.
-func binaryName(goos, arch string) string {
-	n := "protectorate-" + goos + "-" + arch
-	if goos == "windows" {
-		n += ".exe"
-	}
-	return n
-}
-
-// pickBinary chooses what to push to a node: this executable for this
-// platform, otherwise the build in dir.
-func pickBinary(dir, goos, arch, selfOS, selfArch, self string) string {
-	if goos == selfOS && arch == selfArch && self != "" {
-		return self
-	}
-	return filepath.Join(dir, binaryName(goos, arch))
-}
-
-// needsUpdate reports whether a node should be updated and why not if not.
-func needsUpdate(nodeVersion, hubVersion string, force bool) (bool, string) {
-	switch {
-	case nodeVersion == "":
-		return true, ""
-	case nodeVersion == hubVersion && !force:
-		return false, "already at " + hubVersion
-	}
-	return true, ""
-}
 
 // versionCell is the VERSION column of `node ls`: the node's version, marked
 // when it differs from the hub's.
@@ -106,22 +67,20 @@ func finishRestart(k node.RestartKind, exe string, args []string) error {
 
 type updateFlags struct {
 	all, force, allowFamily, noWait bool
-	dir                             string
-	timeout                         time.Duration
 }
 
 func nodeUpdateCmd(o *opts) *cobra.Command {
 	var f updateFlags
 	c := &cobra.Command{
-		Use:   "update <node> | --all [--binary-dir bin]",
-		Short: "Push this build to a node and restart it onto it",
-		Long: `Send the right binary to a node over the file transfer, then have the node
-verify it (size, SHA-256, and that it runs), swap it in, and restart itself:
-through its systemd unit, Windows logon task or Termux service when it has
-one, by re-executing otherwise. Run it on the hub with the hub's own build:
-this executable goes to nodes of its own OS and architecture, and the
-protectorate-<os>-<arch> files that 'make cross' writes into --binary-dir go
-to the rest.
+		Use:   "update <node> | --all",
+		Short: "Push the hub's build to a node and restart it onto it",
+		Long: `Ask the hub to bring a node to the hub's version. The hub sends the right
+binary over the file transfer, the node verifies it (size, SHA-256, and that
+it runs), swaps it in and restarts itself: through its systemd unit, Windows
+logon task or Termux service when it has one, by re-executing otherwise. The
+hub sends its own executable to nodes of its own OS and architecture, and the
+protectorate-<os>-<arch> files that 'make cross' writes into its --binary-dir
+(default: the directory of the hub's executable) to the rest.
 
 The node keeps exactly one previous binary (protectorate.exe.old, or
 protectorate.old) and puts it back if the hub does not reach the new one within
@@ -142,10 +101,6 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 			if err != nil {
 				return err
 			}
-			hubVer := hubVersionOf(list.Msg.Nodes)
-			if hubVer == "" {
-				hubVer = version
-			}
 			var errs []error
 			matched := false
 			for _, s := range list.Msg.Nodes {
@@ -159,7 +114,7 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 					}
 					continue
 				}
-				if err := updateNode(cmd, cl, s, hubVer, f); err != nil {
+				if err := updateNode(cmd, cl, s, f); err != nil {
 					errs = append(errs, fmt.Errorf("%s: %w", s.Node.Name, err))
 				}
 			}
@@ -171,79 +126,64 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 	}
 	fl := c.Flags()
 	fl.BoolVar(&f.all, "all", false, "update every node")
-	fl.StringVar(&f.dir, "binary-dir", "bin", "directory with the protectorate-<os>-<arch> builds from `make cross`")
 	fl.BoolVar(&f.force, "force", false, "push even when the node already reports the hub's version")
-	fl.BoolVar(&f.noWait, "no-wait", false, "return once the node accepted the update")
-	fl.DurationVar(&f.timeout, "timeout", 3*time.Minute, "how long to wait for the node to report the new version")
+	fl.BoolVar(&f.noWait, "no-wait", false, "return once the node swapped the binary, without waiting for it to report the new version")
 	fl.BoolVar(&f.allowFamily, "allow-family", false, "allow nodes of tier family")
 	return c
 }
 
-func fileDigest(path string) (size uint64, sum string, err error) {
-	fh, err := os.Open(path)
-	if err != nil {
-		return 0, "", err
+// updateLine renders one progress message; sending is reported only when it
+// finishes.
+func updateLine(p *pb.UpdateNodeProgress) string {
+	switch p.Phase {
+	case pb.UpdatePhase_UPDATE_PHASE_SKIPPED:
+		return p.Message
+	case pb.UpdatePhase_UPDATE_PHASE_SENDING:
+		if p.TotalBytes == 0 || p.SentBytes < p.TotalBytes {
+			return ""
+		}
+		return "sent " + fmtBytes(p.SentBytes)
+	case pb.UpdatePhase_UPDATE_PHASE_VERIFYING:
+		return "verifying"
+	case pb.UpdatePhase_UPDATE_PHASE_SWAPPING:
+		return fmt.Sprintf("swapped %s -> %s, restarting (%s)", p.PreviousVersion, p.Version, p.Restart)
+	case pb.UpdatePhase_UPDATE_PHASE_RESTARTING:
+		return "waiting for the node to come back"
+	case pb.UpdatePhase_UPDATE_PHASE_CONFIRMED:
+		return "reports " + p.Version
+	case pb.UpdatePhase_UPDATE_PHASE_ROLLED_BACK:
+		return "rolled back: " + p.Message
 	}
-	defer fh.Close()
-	h := sha256.New()
-	n, err := io.Copy(h, fh)
-	if err != nil {
-		return 0, "", err
-	}
-	return uint64(n), hex.EncodeToString(h.Sum(nil)), nil
+	return ""
 }
 
-func updateNode(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, s *pb.NodeStatus, hubVer string, f updateFlags) error {
+func updateNode(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, s *pb.NodeStatus, f updateFlags) error {
 	w := cmd.OutOrStdout()
 	name := s.Node.Name
 	if s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH || s.Metrics == nil {
 		return errors.New("node is not reachable (" + nodeFreshnessLabel(s) + ")")
 	}
-	if ok, why := needsUpdate(s.Metrics.AgentVersion, hubVer, f.force); !ok {
-		fmt.Fprintf(w, "%s\t%s\n", name, why)
-		return nil
-	}
-	self, _ := os.Executable()
-	bin := pickBinary(f.dir, s.Node.Os, s.Node.Arch, runtime.GOOS, runtime.GOARCH, self)
-	size, sum, err := fileDigest(bin)
-	if err != nil {
-		return fmt.Errorf("read %s (run `make cross`, or pass --binary-dir): %w", bin, err)
-	}
-	ctx := cmd.Context()
-	start := time.Now()
-	put, wire, _, err := putFile(ctx, cl, name, bin, updateStage, transferFlags{overwrite: true, allowFamily: f.allowFamily})
+	stream, err := cl.UpdateNode(cmd.Context(), connect.NewRequest(&pb.UpdateNodeRequest{Name: name, AllowFamily: f.allowFamily, Force: f.force}))
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "%s\tsent %s (%s on the wire, %s)\n", name, filepath.Base(bin), fmtBytes(uint64(wire)), time.Since(start).Round(time.Millisecond))
-	res, err := cl.ApplyUpdate(ctx, connect.NewRequest(&pb.ApplyUpdateRequest{Name: name, AllowFamily: f.allowFamily, Path: put.Path, Size: size, Sha256: sum}))
-	if err != nil {
-		return fmt.Errorf("apply: %w", err)
-	}
-	fmt.Fprintf(w, "%s\tswapped %s -> %s, restarting (%s)\n", name, res.Msg.PreviousVersion, res.Msg.Version, res.Msg.Restart)
-	if f.noWait {
-		return nil
-	}
-	if res.Msg.Version == res.Msg.PreviousVersion {
-		fmt.Fprintf(w, "%s\tsame version as before; not waiting\n", name)
-		return nil
-	}
-	return waitVersion(ctx, cl, name, res.Msg.Version, f.timeout, w)
-}
-
-func waitVersion(ctx context.Context, cl protectoratev1connect.NodeServiceClient, name, want string, timeout time.Duration, w io.Writer) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
+	defer stream.Close()
+	var last pb.UpdatePhase
+	for stream.Receive() {
+		p := stream.Msg()
+		last = p.Phase
+		if line := updateLine(p); line != "" {
+			fmt.Fprintf(w, "%s\t%s\n", name, line)
 		}
-		st, err := cl.GetNode(ctx, connect.NewRequest(&pb.GetNodeRequest{Name: name}))
-		if err == nil && st.Msg.Freshness == pb.NodeFreshness_NODE_FRESHNESS_FRESH && st.Msg.Metrics != nil && st.Msg.Metrics.AgentVersion == want {
-			fmt.Fprintf(w, "%s\treports %s\n", name, want)
+		if f.noWait && p.Phase == pb.UpdatePhase_UPDATE_PHASE_SWAPPING {
 			return nil
 		}
 	}
-	return fmt.Errorf("did not report %s within %s; the node puts its previous binary back if the hub cannot reach the new one within a few minutes", want, timeout)
+	if err := stream.Err(); err != nil {
+		return err
+	}
+	if last == pb.UpdatePhase_UPDATE_PHASE_ROLLED_BACK {
+		return errors.New("the node came back on its previous version")
+	}
+	return nil
 }

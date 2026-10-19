@@ -371,6 +371,32 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
+  /// UpdateNode brings a node to the hub's version: the hub sends the node
+  /// the binary for its OS and architecture (its own executable for the hub's
+  /// platform, otherwise protectorate-<os>-<arch> from its binary dir), has
+  /// the node verify and swap it in as ApplyUpdate does, then watches until
+  /// the node reports the new version or puts the old binary back. It streams
+  /// the progress and ends when the update is confirmed, rolled back or
+  /// skipped (the node is already at the hub's version and force is unset);
+  /// any failure ends the stream with an error. Only the owner token may call
+  /// it. The hub's own node cannot be updated this way.
+  Stream<protectoratev1node.UpdateNodeProgress> updateNode(
+    protectoratev1node.UpdateNodeRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).server(
+      specs.NodeService.updateNode,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
   /// SetDeskPolicy sets or clears (policy unset) when agents may drive a
   /// node's desktop. Only the owner token may call it. The hub keeps the
   /// policy and sends it to the node, which enforces it.

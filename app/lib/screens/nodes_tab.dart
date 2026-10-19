@@ -8,6 +8,7 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
+import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
@@ -29,8 +30,10 @@ class NodesTab extends StatefulWidget {
     this.now,
     this.pollInterval = const Duration(seconds: 30),
     this.history,
+    this.versions = const Versions(),
   });
 
+  final Versions versions;
   final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
@@ -108,6 +111,7 @@ class _NodesTabState extends State<NodesTab> {
           name: s.node.name,
           now: widget.now,
           history: _history,
+          versions: widget.versions,
         ),
       ),
     );
@@ -160,6 +164,7 @@ class _NodesTabState extends State<NodesTab> {
                                   status: s,
                                   age: statusAge(s, _receivedAt, _now()),
                                   cpuHistory: _history.cpu(s.node.name),
+                                  hubVersion: widget.versions.hub,
                                   onTap: () => _open(s),
                                 ),
                               ),
@@ -324,8 +329,10 @@ class NodeCard extends StatelessWidget {
     required this.age,
     required this.onTap,
     this.cpuHistory = const [],
+    this.hubVersion = '',
   });
 
+  final String hubVersion;
   final NodeStatus status;
   final Duration age;
   final VoidCallback onTap;
@@ -438,6 +445,15 @@ class NodeCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: AlertStrip(badges: badges),
+            ),
+          if (nodeSkewed(status, hubVersion))
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: SkewBadge(
+                key: const ValueKey('skew'),
+                nodeVersion: nodeVersion(status),
+                hubVersion: hubVersion,
+              ),
             ),
         ],
       ),
