@@ -45,7 +45,7 @@ Native handling uses the `app_links` package. Android registers an intent filter
 
 ## Screenshots
 
-`scripts/e2e-screens.sh` builds the web app, runs a throwaway hub with demo data and screenshots every main screen at 412x860 and 1280x800 into `e2e-out/`.
+`scripts/e2e-screens.sh` builds the web app, runs a throwaway hub with demo data and screenshots every main screen at 412x860 and 1280x800 into `e2e-out/`, each in light and dark (`E2E_ONLY=<name glob>` limits the pass). A fake unreachable node `ghost` is added to show that styling.
 
 ## Known limitations
 

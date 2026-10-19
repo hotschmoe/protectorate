@@ -68,8 +68,10 @@ class _HubShellState extends State<HubShell> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => NodeDetailScreen(
+          PageRouteBuilder<void>(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (_, _, _) => NodeDetailScreen(
               hub: widget.hub,
               client: _client,
               feed: _feed,

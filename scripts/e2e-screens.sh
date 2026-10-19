@@ -47,6 +47,7 @@ web=$("$bin" pair --url "http://127.0.0.1:$port" --name "demo hub" | sed -n 's/^
 
 shot() {
   local name=$1 size=$2 url=$3 theme=${4:-light} profile scheme=()
+  [ -z "${E2E_ONLY:-}" ] || [[ $name == $E2E_ONLY ]] || return 0
   [ "$theme" = dark ] && scheme=(--blink-settings=preferredColorScheme=0)
   profile=$(mktemp -d "$work/chrome.XXXXXX")
   "$chromium" --headless=new --disable-gpu --no-sandbox --user-data-dir="$profile" \
