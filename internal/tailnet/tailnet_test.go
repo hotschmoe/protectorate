@@ -1,8 +1,10 @@
 package tailnet
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,10 +64,13 @@ func TestHeadscaleConfig(t *testing.T) {
 		mutate func(*Config)
 		check  func(t *testing.T, m map[string]any)
 	}{
-		{"defaults: embedded DERP on, public map off", func(*Config) {}, func(t *testing.T, m map[string]any) {
+		{"defaults: hub DERP map file, headscale's own DERP off, public map off", func(*Config) {}, func(t *testing.T, m map[string]any) {
 			derp := m["derp"].(map[string]any)
-			if derp["server"].(map[string]any)["enabled"] != true {
-				t.Error("embedded derp disabled")
+			if derp["server"].(map[string]any)["enabled"] != false {
+				t.Error("headscale's plain-HTTP embedded DERP enabled")
+			}
+			if paths := derp["paths"].([]any); len(paths) != 1 || !strings.HasSuffix(paths[0].(string), "derpmap.json") {
+				t.Errorf("paths = %v", paths)
 			}
 			if len(derp["urls"].([]any)) != 0 || derp["auto_update_enabled"] != false {
 				t.Errorf("public derp map enabled: %v", derp)
@@ -86,12 +91,12 @@ func TestHeadscaleConfig(t *testing.T) {
 			}
 		}},
 		{"embedded off", func(c *Config) { c.EmbeddedDERP, c.PublicDERP = false, true }, func(t *testing.T, m map[string]any) {
-			if m["derp"].(map[string]any)["server"].(map[string]any)["enabled"] != false {
-				t.Error("embedded derp enabled")
+			if paths := m["derp"].(map[string]any)["paths"].([]any); len(paths) != 0 {
+				t.Errorf("paths = %v", paths)
 			}
 		}},
-		{"derp ipv4 and tls", func(c *Config) { c.DERPIPv4, c.TLSCert, c.TLSKey = "203.0.113.5", "/c", "/k" }, func(t *testing.T, m map[string]any) {
-			if m["derp"].(map[string]any)["server"].(map[string]any)["ipv4"] != "203.0.113.5" || m["tls_cert_path"] != "/c" {
+		{"tls", func(c *Config) { c.TLSCert, c.TLSKey = "/c", "/k" }, func(t *testing.T, m map[string]any) {
+			if m["tls_cert_path"] != "/c" {
 				t.Errorf("config = %v", m)
 			}
 		}},
@@ -109,6 +114,69 @@ func TestHeadscaleConfig(t *testing.T) {
 				t.Fatal(err)
 			}
 			tt.check(t, m)
+		})
+	}
+}
+
+func TestDERPMapAndCert(t *testing.T) {
+	tests := []struct {
+		name   string
+		server string
+		ipv4   string
+		host   string
+		stun   string
+		ipSAN  bool
+	}{
+		{"lan ip", "http://10.0.0.1:7480", "", "10.0.0.1", "0.0.0.0:3478", true},
+		{"dns name and ipv4 override", "https://hub.example.com", "203.0.113.5", "hub.example.com", "0.0.0.0:3478", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			c := DefaultConfig(tt.server)
+			c.DERPIPv4 = tt.ipv4
+			if err := c.writeDERPMap(home); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(derpMapPath(home))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m struct {
+				Regions map[string]struct {
+					Nodes []map[string]any
+				}
+			}
+			// The file is YAML flow syntax; the integer region key is the only non-JSON part.
+			if err := json.Unmarshal(bytes.Replace(raw, []byte("{999:"), []byte(`{"999":`), 1), &m); err != nil {
+				t.Fatalf("%v\n%s", err, raw)
+			}
+			n := m.Regions["999"].Nodes[0]
+			cert, err := loadDERPCert(home, tt.host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n["hostname"] != tt.host || n["certname"] != certPin(cert) || n["derpport"] != float64(7483) || n["stunport"] != float64(3478) {
+				t.Errorf("node = %v", n)
+			}
+			if (n["ipv4"] != nil) != (tt.ipv4 != "") {
+				t.Errorf("ipv4 = %v", n["ipv4"])
+			}
+			leaf, err := x509.ParseCertificate(cert.Certificate[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := leaf.VerifyHostname(tt.host); err != nil || (len(leaf.IPAddresses) == 1) != tt.ipSAN {
+				t.Errorf("SAN: %v ips=%v", err, leaf.IPAddresses)
+			}
+			again, err := loadDERPCert(home, tt.host)
+			if err != nil || certPin(again) != certPin(cert) {
+				t.Errorf("cert not stable across loads: %v", err)
+			}
+			other, err := loadDERPCert(home, "other.example.com")
+			if err != nil || certPin(other) == certPin(cert) {
+				t.Errorf("cert not regenerated for a new host: %v", err)
+			}
 		})
 	}
 }

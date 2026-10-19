@@ -13,6 +13,7 @@ type Service struct {
 	Net   *Net
 	Admin *Admin
 
+	derp *DERPServer
 	stop context.CancelFunc
 	wg   sync.WaitGroup
 }
@@ -22,6 +23,18 @@ func Start(ctx context.Context, home string, cfg Config, logf func(string, ...an
 	admin := NewAdmin(home, cfg)
 	supCtx, stop := context.WithCancel(context.Background())
 	s := &Service{Admin: admin, stop: stop}
+	if cfg.EmbeddedDERP {
+		if err := cfg.WriteFiles(home); err != nil {
+			stop()
+			return nil, err
+		}
+		d, err := StartDERP(home, cfg, logf)
+		if err != nil {
+			stop()
+			return nil, err
+		}
+		s.derp = d
+	}
 	supErr := make(chan error, 1)
 	s.wg.Go(func() {
 		sup := &Supervisor{Home: home, Cfg: cfg, Logf: logf}
@@ -79,5 +92,8 @@ func (s *Service) Close() error {
 	}
 	s.stop()
 	s.wg.Wait()
+	if s.derp != nil {
+		s.derp.Close()
+	}
 	return err
 }

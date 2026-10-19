@@ -43,6 +43,7 @@ type Config struct {
 	BaseDomain    string   `json:"base_domain"`
 	HubName       string   `json:"hub_name"`
 	EmbeddedDERP  bool     `json:"embedded_derp"`
+	DERPListen    string   `json:"derp_listen"`
 	STUNListen    string   `json:"stun_listen"`
 	DERPIPv4      string   `json:"derp_ipv4,omitempty"`
 	PublicDERP    bool     `json:"public_derp"`
@@ -62,6 +63,7 @@ func DefaultConfig(serverURL string) Config {
 		BaseDomain:    "tn.protectorate.internal",
 		HubName:       "protectorate-hub",
 		EmbeddedDERP:  true,
+		DERPListen:    "0.0.0.0:7483",
 		STUNListen:    "0.0.0.0:3478",
 		KeyExpiryDays: 180,
 	}
@@ -78,6 +80,9 @@ func (c Config) Validate() error {
 		}
 	}
 	if c.EmbeddedDERP {
+		if _, _, err := net.SplitHostPort(c.DERPListen); err != nil {
+			return fmt.Errorf("derp_listen %q: %w", c.DERPListen, err)
+		}
 		if _, _, err := net.SplitHostPort(c.STUNListen); err != nil {
 			return fmt.Errorf("stun_listen %q: %w", c.STUNListen, err)
 		}
@@ -114,7 +119,7 @@ func LoadConfig(home string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read tailnet config: %w", err)
 	}
-	var c Config
+	c := DefaultConfig("")
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("parse tailnet config: %w", err)
 	}
@@ -176,21 +181,9 @@ func (c Config) HeadscaleConfig(home string) ([]byte, error) {
 	if c.PublicDERP {
 		derpURLs = append(derpURLs, publicDERPMap)
 	}
-	server := map[string]any{"enabled": c.EmbeddedDERP}
+	derpPaths := []string{}
 	if c.EmbeddedDERP {
-		server = map[string]any{
-			"enabled":                                c.EmbeddedDERP,
-			"region_id":                              999,
-			"region_code":                            "protectorate",
-			"region_name":                            "Protectorate DERP",
-			"verify_clients":                         true,
-			"stun_listen_addr":                       c.STUNListen,
-			"private_key_path":                       filepath.Join(dir, "derp_server_private.key"),
-			"automatically_add_embedded_derp_region": true,
-		}
-		if c.DERPIPv4 != "" {
-			server["ipv4"] = c.DERPIPv4
-		}
+		derpPaths = append(derpPaths, derpMapPath(home))
 	}
 	cfg := map[string]any{
 		"server_url":          c.ServerURL,
@@ -205,9 +198,9 @@ func (c Config) HeadscaleConfig(home string) ([]byte, error) {
 			"allocation": "sequential",
 		},
 		"derp": map[string]any{
-			"server":              server,
+			"server":              map[string]any{"enabled": false},
 			"urls":                derpURLs,
-			"paths":               []string{},
+			"paths":               derpPaths,
 			"auto_update_enabled": c.PublicDERP,
 			"update_frequency":    "3h",
 		},
@@ -293,5 +286,11 @@ func (c Config) WriteFiles(home string) error {
 	if err := writeFile(filepath.Join(dir, "headscale.yaml"), append(hc, '\n'), 0o600); err != nil {
 		return err
 	}
-	return writeFile(filepath.Join(dir, "policy.json"), append(pol, '\n'), 0o600)
+	if err := writeFile(filepath.Join(dir, "policy.json"), append(pol, '\n'), 0o600); err != nil {
+		return err
+	}
+	if c.EmbeddedDERP {
+		return c.writeDERPMap(home)
+	}
+	return nil
 }
