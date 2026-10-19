@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/backlog"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
 
@@ -45,6 +47,8 @@ type Hub struct {
 	scanMu sync.Mutex
 	known  map[string]session.Session
 	seeded bool
+
+	backlog *backlog.Store
 }
 
 func New(version, token string) *Hub {
@@ -58,6 +62,9 @@ func New(version, token string) *Hub {
 		started:      time.Now(),
 	}
 	h.SetQuota(NewQuotaCache(nil, QuotaOptions{}))
+	if home, err := Home(); err == nil {
+		h.SetBacklog(backlog.NewStore(filepath.Join(home, "backlog.md")))
+	}
 	return h
 }
 
@@ -161,6 +168,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
+	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
 	return mux
 }
 

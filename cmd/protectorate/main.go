@@ -76,7 +76,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), versionCmd(o))
 	return root
 }
 
