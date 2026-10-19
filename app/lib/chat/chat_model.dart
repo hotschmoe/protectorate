@@ -71,6 +71,8 @@ class ChatTranscript {
   final Map<String, ToolItem> _tools = {};
   final Map<String, ApprovalItem> _approvals = {};
   int lastSeq = 0;
+  bool _lastWasText = false;
+  int? _replaceSeq;
   ChatState reported = ChatState.CHAT_STATE_UNSPECIFIED;
   int contextTokens = 0;
   int contextWindow = 0;
@@ -94,12 +96,31 @@ class ChatTranscript {
     contextWindow = s.contextWindow.toInt();
   }
 
-  // Returns false for an event at or before lastSeq, which a resumed watch
-  // can legitimately repeat.
+  // The after_seq for the next Watch. Text deltas share their message's seq,
+  // so after a text event the watch restarts one earlier and the first text
+  // it sends for that seq (the whole message so far) replaces ours.
+  int resumeAfter() {
+    if (!_lastWasText) return lastSeq;
+    _replaceSeq = lastSeq;
+    return lastSeq - 1;
+  }
+
+  // Returns false for an event already applied, which a resumed watch can
+  // legitimately repeat.
   bool apply(ChatEvent e) {
     final seq = e.seq.toInt();
-    if (seq <= lastSeq) return false;
+    final isText = e.whichBody() == ChatEvent_Body.text;
+    if (seq < lastSeq) return false;
+    if (seq == lastSeq) {
+      if (!isText || !_lastWasText) return false;
+      final replace = _replaceSeq == seq;
+      _replaceSeq = null;
+      _text(seq, e.text, replace: replace);
+      return true;
+    }
     lastSeq = seq;
+    _lastWasText = isText;
+    _replaceSeq = null;
     switch (e.whichBody()) {
       case ChatEvent_Body.user:
         items.add(UserItem(seq, e.user.text, e.user.from));
@@ -155,7 +176,7 @@ class ChatTranscript {
     return true;
   }
 
-  void _text(int seq, AssistantText t) {
+  void _text(int seq, AssistantText t, {bool replace = false}) {
     final key = '${t.thinking}:${t.messageId}';
     var m = _messages[key];
     if (m == null && t.messageId.isEmpty && items.isNotEmpty) {
@@ -167,7 +188,7 @@ class ChatTranscript {
       _messages[key] = m;
       items.add(m);
     }
-    m.text += t.delta;
+    m.text = replace ? t.delta : m.text + t.delta;
   }
 
   void _result(int seq, ToolResult r) {

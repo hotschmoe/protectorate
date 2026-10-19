@@ -40,11 +40,11 @@ ChatEvent _state(int seq, ChatState s) =>
 
 void main() {
   group('transcript folding', () {
-    test('deltas with one message_id append, a new id starts a message', () {
+    test('deltas share their message seq and append; a new seq starts one', () {
       final t = ChatTranscript();
       t.apply(_text(1, 'm1', 'Hel'));
-      t.apply(_text(2, 'm1', 'lo'));
-      t.apply(_text(3, 'm2', 'next'));
+      t.apply(_text(1, 'm1', 'lo'));
+      t.apply(_text(2, 'm2', 'next'));
       expect(t.items.length, 2);
       expect((t.items[0] as AssistantItem).text, 'Hello');
       expect((t.items[1] as AssistantItem).text, 'next');
@@ -60,8 +60,8 @@ void main() {
     test('a coalesced replay folds to the same transcript as the stream', () {
       final streamed = ChatTranscript()
         ..apply(_text(1, 'm', 'a'))
-        ..apply(_text(2, 'm', 'b'));
-      final replayed = ChatTranscript()..apply(_text(2, 'm', 'ab'));
+        ..apply(_text(1, 'm', 'b'));
+      final replayed = ChatTranscript()..apply(_text(1, 'm', 'ab'));
       expect(
         (replayed.items.single as AssistantItem).text,
         (streamed.items.single as AssistantItem).text,
@@ -226,35 +226,40 @@ void main() {
   });
 
   group('controller', () {
-    test('reconnect resumes from the last seq without duplicates', () async {
-      final after = <int>[];
-      var calls = 0;
-      final transport = FakeTransportBuilder().server(ChatService.watch, (
-        WatchRequest r,
-        ctx,
-      ) async* {
-        after.add(r.afterSeq.toInt());
-        calls++;
-        if (calls == 1) {
-          yield _text(1, 'm', 'a');
-          yield _text(2, 'm', 'b');
-          throw ConnectException(Code.unavailable, 'drop');
-        }
-        yield _text(2, 'm', 'b');
-        yield _text(3, 'm', 'c');
-        await Completer<void>().future;
-      }).build();
-      final c = ChatController(
-        client: ChatServiceClient(transport),
-        sleeve: 's',
-        initialDelay: const Duration(milliseconds: 5),
-      )..start();
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      c.dispose();
-      expect(after, [0, 2]);
-      expect(c.transcript.lastSeq, 3);
-      expect((c.transcript.items.single as AssistantItem).text, 'abc');
-    });
+    test(
+      'reconnect mid-message resumes one earlier and replaces the text',
+      () async {
+        final after = <int>[];
+        var calls = 0;
+        final transport = FakeTransportBuilder().server(ChatService.watch, (
+          WatchRequest r,
+          ctx,
+        ) async* {
+          after.add(r.afterSeq.toInt());
+          calls++;
+          if (calls == 1) {
+            yield _state(1, ChatState.CHAT_STATE_WORKING);
+            yield _text(2, 'm', 'a');
+            yield _text(2, 'm', 'b');
+            throw ConnectException(Code.unavailable, 'drop');
+          }
+          yield _text(2, 'm', 'abc');
+          yield _text(2, 'm', 'd');
+          yield _state(3, ChatState.CHAT_STATE_IDLE);
+          await Completer<void>().future;
+        }).build();
+        final c = ChatController(
+          client: ChatServiceClient(transport),
+          sleeve: 's',
+          initialDelay: const Duration(milliseconds: 5),
+        )..start();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        c.dispose();
+        expect(after, [0, 1]);
+        expect(c.transcript.lastSeq, 3);
+        expect((c.transcript.items.single as AssistantItem).text, 'abcd');
+      },
+    );
 
     test('send retries keep one request_id', () async {
       final ids = <String>[];

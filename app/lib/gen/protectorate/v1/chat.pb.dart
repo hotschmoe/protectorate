@@ -332,7 +332,8 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(20)
   void clearBody() => $_clearField($_whichOneof(0));
 
-  /// seq increases by one per event within a sleeve, starting at 1.
+  /// seq increases by one per event within a sleeve, starting at 1. All text
+  /// deltas of one assistant message share that message's seq.
   @$pb.TagNumber(1)
   $fixnum.Int64 get seq => $_getI64(0);
   @$pb.TagNumber(1)
@@ -547,9 +548,10 @@ class UserMessage extends $pb.GeneratedMessage {
   void clearFrom() => $_clearField(2);
 }
 
-/// AssistantText is streamed as deltas; consecutive deltas with the same
-/// message_id form one message. The stored log coalesces them once the message
-/// is complete, so a replay sends whole messages.
+/// AssistantText is streamed as deltas that share one seq and message_id. The
+/// stored log keeps the whole message under that seq, and a watch that starts
+/// at it first sends the text so far, then the remaining deltas. To resume
+/// after a text event, watch from its seq minus one and replace that message.
 class AssistantText extends $pb.GeneratedMessage {
   factory AssistantText({
     $core.String? messageId,

@@ -245,7 +245,8 @@ func (x *ChatStatus) GetLastActivityAt() *timestamppb.Timestamp {
 
 type ChatEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// seq increases by one per event within a sleeve, starting at 1.
+	// seq increases by one per event within a sleeve, starting at 1. All text
+	// deltas of one assistant message share that message's seq.
 	Seq  uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
 	Time *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=time,proto3" json:"time,omitempty"`
 	// Types that are valid to be assigned to Body:
@@ -540,9 +541,10 @@ func (x *UserMessage) GetFrom() string {
 	return ""
 }
 
-// AssistantText is streamed as deltas; consecutive deltas with the same
-// message_id form one message. The stored log coalesces them once the message
-// is complete, so a replay sends whole messages.
+// AssistantText is streamed as deltas that share one seq and message_id. The
+// stored log keeps the whole message under that seq, and a watch that starts
+// at it first sends the text so far, then the remaining deltas. To resume
+// after a text event, watch from its seq minus one and replace that message.
 type AssistantText struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	MessageId string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`

@@ -77,7 +77,8 @@ message ChatStatus {
 }
 
 message ChatEvent {
-  // seq increases by one per event within a sleeve, starting at 1.
+  // seq increases by one per event within a sleeve, starting at 1. All text
+  // deltas of one assistant message share that message's seq.
   uint64 seq = 1;
   google.protobuf.Timestamp time = 2;
   oneof body {
@@ -102,9 +103,10 @@ message UserMessage {
   string from = 2;
 }
 
-// AssistantText is streamed as deltas; consecutive deltas with the same
-// message_id form one message. The stored log coalesces them once the message
-// is complete, so a replay sends whole messages.
+// AssistantText is streamed as deltas that share one seq and message_id. The
+// stored log keeps the whole message under that seq, and a watch that starts
+// at it first sends the text so far, then the remaining deltas. To resume
+// after a text event, watch from its seq minus one and replace that message.
 message AssistantText {
   string message_id = 1;
   string delta = 2;

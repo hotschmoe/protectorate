@@ -62,7 +62,10 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
     _sub = client
         .watch(
-          WatchRequest(sleeve: sleeve, afterSeq: Int64(transcript.lastSeq)),
+          WatchRequest(
+            sleeve: sleeve,
+            afterSeq: Int64(transcript.resumeAfter()),
+          ),
         )
         .listen(
           (e) {
