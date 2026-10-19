@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,6 +34,11 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs []string) error {
 	cfg, err := sleeve.DefaultConfig(home, toolDirs)
 	if err != nil {
 		return err
+	}
+	if exe, err := os.Executable(); err == nil {
+		if err := cfg.AddBinaryDir(exe); err != nil {
+			log.Printf("sleeves will not have the protectorate CLI: %v", err)
+		}
 	}
 	m, err := sleeve.Open(ctx, h.SleeveOptions(cfg))
 	if err != nil {

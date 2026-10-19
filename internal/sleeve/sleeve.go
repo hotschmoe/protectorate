@@ -146,6 +146,31 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	return c, nil
 }
 
+// AddBinaryDir makes the directory holding exe, and every directory along its
+// symlink chain, readable inside sleeves and last on their PATH, so a sleeve
+// can run the protectorate CLI. Directories that are already mounted are not
+// mounted again; one that would expose credentials is refused.
+func (c *Config) AddBinaryDir(exe string) error {
+	if !filepath.IsAbs(exe) {
+		return fmt.Errorf("%w: binary path %q must be absolute", ErrInvalid, exe)
+	}
+	dirs := symlinkDirs(exe)
+	for _, d := range dirs {
+		if !c.mounted(d) && c.touchesCredentials(d) {
+			return fmt.Errorf("%w: %s would expose harness credentials", ErrInvalid, d)
+		}
+	}
+	for _, d := range dirs {
+		if !c.mounted(d) {
+			c.ToolDirs = append(c.ToolDirs, d)
+		}
+	}
+	if dir := filepath.Dir(exe); !contains(c.PathDirs, dir) {
+		c.PathDirs = append(append([]string(nil), c.PathDirs...), dir)
+	}
+	return nil
+}
+
 func (c Config) touchesCredentials(p string) bool {
 	if within(c.UserHome, p) {
 		return true

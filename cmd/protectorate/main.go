@@ -44,19 +44,27 @@ type opts struct {
 	json      bool
 }
 
-const tokenEnv = "PROTECTORATE_TOKEN"
+const (
+	tokenEnv     = "PROTECTORATE_TOKEN"
+	tokenFileEnv = "PROTECTORATE_TOKEN_FILE"
+)
 
-// token resolves the bearer secret: --token-file, then env PROTECTORATE_TOKEN,
-// then the owner token file of a hub on this machine.
+// token resolves the bearer secret: --token-file, then env
+// PROTECTORATE_TOKEN_FILE, then env PROTECTORATE_TOKEN, then the owner token
+// file of a hub on this machine.
 func (o *opts) token() (string, error) {
-	if o.tokenFile != "" {
-		b, err := os.ReadFile(o.tokenFile)
+	file := o.tokenFile
+	if file == "" {
+		file = os.Getenv(tokenFileEnv)
+	}
+	if file != "" {
+		b, err := os.ReadFile(file)
 		if err != nil {
 			return "", fmt.Errorf("read token file: %w", err)
 		}
 		tok := strings.TrimSpace(string(b))
 		if tok == "" {
-			return "", fmt.Errorf("token file %s is empty", o.tokenFile)
+			return "", fmt.Errorf("token file %s is empty", file)
 		}
 		return tok, nil
 	}
@@ -101,10 +109,10 @@ func newRoot() *cobra.Command {
 		hubDefault = v
 	}
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
-	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenEnv+"; default: this machine's owner token)")
+	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 

@@ -35,6 +35,9 @@ func TestPlanGolden(t *testing.T) {
 		{"codex", Spec{Name: "bob", Harness: Codex, Workspace: "/work/x", Args: []string{"--model", "o3"}}, Binary{Path: "/home/u/.nvm/bin/codex"}},
 		{"grok", Spec{Name: "carol", Harness: Grok, Workspace: "/work/x"}, Binary{Path: "/home/u/.local/bin/grok", RO: []string{"/home/u/.grok/downloads"}}},
 		{"pi", Spec{Name: "dave", Harness: Pi, Workspace: "/work/x", Limits: Limits{MemoryBytes: 1 << 30}}, Binary{Path: "/home/u/.local/bin/pi"}},
+		{"poe", Spec{Name: "poe", Harness: Claude, Workspace: "/state/orchestrator", Limits: Limits{CPUPercent: 200, MemoryBytes: 4 << 30},
+			Env: map[string]string{"PROTECTORATE_HUB": "http://127.0.0.1:7470", "PROTECTORATE_TOKEN_FILE": "/state/orchestrator/.protectorate-token"}},
+			Binary{Path: "/home/u/.local/bin/claude"}},
 		{"shell", Spec{Name: "eve", Harness: Shell, Workspace: "/work/x", Args: []string{"sleep", "600"}}, Binary{Path: "/usr/bin/bash"}},
 		{"shell-interactive", Spec{Name: "frank", Harness: Shell, Workspace: "/work/x"}, Binary{Path: "/usr/bin/bash"}},
 	}
@@ -161,5 +164,63 @@ func TestLocateFollowsSymlinkChain(t *testing.T) {
 	}
 	if _, err := c.Locate(Pi); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("missing harness err = %v", err)
+	}
+}
+
+func TestAddBinaryDir(t *testing.T) {
+	t.Run("unmounted dir is mounted and on PATH last", func(t *testing.T) {
+		c := testConfig()
+		if err := c.AddBinaryDir("/opt/prot/bin/protectorate"); err != nil {
+			t.Fatal(err)
+		}
+		if !contains(c.ToolDirs, "/opt/prot/bin") {
+			t.Errorf("ToolDirs = %v", c.ToolDirs)
+		}
+		if got := c.PathDirs[len(c.PathDirs)-1]; got != "/opt/prot/bin" {
+			t.Errorf("PathDirs = %v", c.PathDirs)
+		}
+		l, err := c.Plan(Spec{Name: "a", Harness: Shell, Workspace: "/work/x"}, Binary{Path: "/usr/bin/bash"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Join(l.Argv, " ")
+		if !strings.Contains(args, "--ro-bind /opt/prot/bin /opt/prot/bin") || !strings.Contains(args, ":/opt/prot/bin") {
+			t.Errorf("sandbox lacks the binary dir: %s", args)
+		}
+	})
+	t.Run("already mounted dir is not mounted twice", func(t *testing.T) {
+		c := testConfig()
+		n := len(c.ToolDirs)
+		if err := c.AddBinaryDir("/home/u/.local/bin/protectorate"); err != nil {
+			t.Fatal(err)
+		}
+		if len(c.ToolDirs) != n || len(c.PathDirs) != 3 {
+			t.Errorf("ToolDirs = %v PathDirs = %v", c.ToolDirs, c.PathDirs)
+		}
+	})
+	t.Run("credential dirs and the user home are refused", func(t *testing.T) {
+		for _, exe := range []string{"/home/u/protectorate", "/home/u/.ssh/protectorate", "/home/u/.claude/bin/protectorate"} {
+			c := testConfig()
+			if err := c.AddBinaryDir(exe); !errors.Is(err, ErrInvalid) {
+				t.Errorf("%s: err = %v", exe, err)
+			}
+		}
+	})
+	t.Run("relative path", func(t *testing.T) {
+		c := testConfig()
+		if err := c.AddBinaryDir("bin/protectorate"); !errors.Is(err, ErrInvalid) {
+			t.Errorf("err = %v", err)
+		}
+	})
+}
+
+func TestOrchestratorWorkspace(t *testing.T) {
+	c := testConfig()
+	for ws, ok := range map[string]bool{
+		"/state/orchestrator": true, "/state/sleeves/poe": false, "/state/auth/claude": false, "/state": false,
+	} {
+		if err := c.CheckWorkspace(ws); (err == nil) != ok {
+			t.Errorf("CheckWorkspace(%s) = %v, want ok=%v", ws, err, ok)
+		}
 	}
 }

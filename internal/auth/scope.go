@@ -107,3 +107,19 @@ func scopesAllowTerminal(scopes []string, readOnly bool) bool {
 	}
 	return false
 }
+
+// Grants reports whether a token holding scopes may call the named tool, with
+// the same rules the hub applies. An unknown or owner-only tool is never
+// granted.
+func Grants(scopes []string, tool string) bool {
+	ms, err := Methods()
+	if err != nil {
+		return false
+	}
+	for _, m := range ms {
+		if m.Tool == tool {
+			return scopesAllow(scopes, m)
+		}
+	}
+	return false
+}
