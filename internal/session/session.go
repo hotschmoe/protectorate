@@ -5,6 +5,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 
 const DefaultSocket = "protectorate"
 
+// The command is stored base64-encoded: tmux 3.4 backslash-escapes "$" in
+// option values, which breaks JSON.
 const commandOption = "@protectorate_command"
 
 var (
@@ -241,8 +244,10 @@ func parseList(out string) ([]Session, error) {
 			}
 		}
 		if f[11] != "" {
-			if err := json.Unmarshal([]byte(f[11]), &s.Command); err != nil {
-				s.Command = nil
+			if raw, err := base64.RawURLEncoding.DecodeString(f[11]); err == nil {
+				if err := json.Unmarshal(raw, &s.Command); err != nil {
+					s.Command = nil
+				}
 			}
 		}
 		res = append(res, s)
@@ -355,7 +360,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (Session, error) 
 	args = append(args, ";", "set-option", "-w", "-t", target(o.Name), "remain-on-exit", "on")
 	if len(o.Command) > 0 {
 		raw, _ := json.Marshal(o.Command)
-		args = append(args, ";", "set-option", "-t", target(o.Name), commandOption, string(raw))
+		args = append(args, ";", "set-option", "-t", target(o.Name), commandOption, base64.RawURLEncoding.EncodeToString(raw))
 	}
 	if _, err := m.run(ctx, args...); err != nil {
 		return Session{}, fmt.Errorf("create session %q: %w", o.Name, err)

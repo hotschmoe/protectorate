@@ -127,6 +127,28 @@ func envOr(key, def string) string {
 	return def
 }
 
+// installedDir returns flag when set, else the directory install-hub.sh fills
+// (~/.local/share/protectorate/<name>) when it exists and holds marker (any
+// entry when marker is empty), else "".
+func installedDir(flag, name, marker string) string {
+	if flag != "" {
+		return flag
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".local", "share", "protectorate", name)
+	probe := dir
+	if marker != "" {
+		probe = filepath.Join(dir, marker)
+	}
+	if _, err := os.Stat(probe); err != nil {
+		return ""
+	}
+	return dir
+}
+
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
 	var listen, tmuxSocket, webDir, binaryDir, publicURL string
@@ -173,8 +195,8 @@ func hubCmd() *cobra.Command {
 			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
 			h.DeadRetention = deadRetention
-			h.WebDir = webDir
-			h.BinaryDir = binaryDir
+			h.WebDir = installedDir(webDir, "web", "index.html")
+			h.BinaryDir = installedDir(binaryDir, "bin", "")
 			h.PublicURL = publicURL
 			h.LocalModelHosts = localModelHosts
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
@@ -211,8 +233,8 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringSliceVar(&localModelHosts, "local-model-host", nil, "hostname of a model server of your own that the app flags as a local model, beyond private and tailnet addresses (repeatable)")
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
-	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")
-	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: the directory of this executable)")
+	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at / (default: ~/.local/share/protectorate/web when it exists)")
+	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: ~/.local/share/protectorate/bin when it exists, else the directory of this executable)")
 	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
 	c.AddCommand(serve, hubTailnetCmd())
