@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -237,5 +238,37 @@ func TestWebDir(t *testing.T) {
 				t.Fatalf("status = %d, want %d", res.StatusCode, tt.want)
 			}
 		})
+	}
+}
+
+type failingListener struct {
+	net.Listener
+	err error
+}
+
+func (f failingListener) Accept() (net.Conn, error) { return nil, f.err }
+
+func TestServeListenerFailureReturns(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("accept failed")
+	h := New("test", testToken)
+	done := make(chan error, 1)
+	go func() {
+		done <- h.Serve(context.Background(), l, Extra{Listener: failingListener{x, boom}})
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, boom) {
+			t.Fatalf("Serve error = %v, want %v", err, boom)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Serve did not return after listener failure")
 	}
 }

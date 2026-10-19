@@ -230,7 +230,8 @@ type Extra struct {
 
 // Serve accepts HTTP/1.1 and cleartext HTTP/2 on l, plus on each extra
 // listener, until ctx is cancelled.
-func (h *Hub) Serve(ctx context.Context, l net.Listener, extra ...Extra) error {
+func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) error {
+	ctx, cancelWorkers := context.WithCancel(parent)
 	newServer := func(handler http.Handler) *http.Server {
 		srv := &http.Server{
 			Handler:           handler,
@@ -291,6 +292,9 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener, extra ...Extra) error {
 			h.jobs.Shutdown()
 		}()
 	}
+
+	// Registered last so it runs first: workers must stop before the waits above.
+	defer cancelWorkers()
 
 	errc := make(chan error, len(servers))
 	for srv, ln := range servers {
