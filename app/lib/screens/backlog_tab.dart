@@ -88,6 +88,7 @@ class _BacklogTabState extends State<BacklogTab> {
     final projects = groups.keys.toList()..sort();
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         key: const ValueKey('add-item'),
         onPressed: _add,
         icon: const Icon(Icons.add),

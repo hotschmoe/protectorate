@@ -143,6 +143,7 @@ class _SessionsTabState extends State<SessionsTab> {
   Widget build(BuildContext context) {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         key: const ValueKey('new-session'),
         onPressed: _create,
         icon: const Icon(Icons.add),

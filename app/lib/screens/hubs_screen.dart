@@ -27,6 +27,7 @@ class HubsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Hubs')),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         key: const ValueKey('add-hub'),
         onPressed: () => _edit(context),
         icon: const Icon(Icons.add),
