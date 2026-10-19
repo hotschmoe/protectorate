@@ -1,6 +1,7 @@
 package node
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -267,6 +268,10 @@ func validateRun(req *pb.RunJobRequest) error {
 		return badArg("invalid repo key or commit")
 	case req.ArtifactName != "" && !ValidArtifactName(req.ArtifactName):
 		return badArg("invalid artifact name")
+	case req.ArtifactArchive && (req.RepoKey != "" || req.ArtifactName != ""):
+		return badArg("a job has one source")
+	case req.Workdir != "" && (!req.ArtifactArchive || !fs.ValidPath(req.Workdir)):
+		return badArg("invalid workdir %q", req.Workdir)
 	}
 	for k := range req.Env {
 		if k == "" || strings.ContainsAny(k, "=\x00") {
@@ -363,6 +368,19 @@ func (j *Jobs) workspace(ctx context.Context, req *pb.RunJobRequest, jobDir stri
 	switch {
 	case req.RepoKey != "":
 		return j.checkout(ctx, req, jobDir)
+	case req.ArtifactArchive:
+		root := filepath.Join(jobDir, "work")
+		if err := extractZip(filepath.Join(jobDir, "upload"), root); err != nil {
+			return "", false, fmt.Errorf("extract artifact: %w", err)
+		}
+		workdir := root
+		if req.Workdir != "" {
+			workdir = filepath.Join(root, filepath.FromSlash(req.Workdir))
+		}
+		if fi, err := os.Stat(workdir); err != nil || !fi.IsDir() {
+			return "", false, fmt.Errorf("workdir %q is not in the artifact", req.Workdir)
+		}
+		return workdir, false, nil
 	case req.ArtifactName != "":
 		dst := filepath.Join(jobDir, req.ArtifactName)
 		if err := os.Rename(filepath.Join(jobDir, "upload"), dst); err != nil {
@@ -576,6 +594,11 @@ func sendFile(ctx context.Context, path, rel string, buf []byte, send func(*pb.J
 		return err
 	}
 	defer f.Close()
+	var mode uint32
+	if fi, err := f.Stat(); err == nil {
+		mode = uint32(fi.Mode().Perm())
+	}
+	first := true
 	for {
 		n, err := io.ReadFull(f, buf)
 		last := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
@@ -585,7 +608,11 @@ func sendFile(ctx context.Context, path, rel string, buf []byte, send func(*pb.J
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		ev := &pb.JobEvent{Event: &pb.JobEvent_Artifact{Artifact: &pb.JobArtifactChunk{Path: rel, Data: append([]byte(nil), buf[:n]...), Last: last}}}
+		chunk := &pb.JobArtifactChunk{Path: rel, Data: append([]byte(nil), buf[:n]...), Last: last}
+		if first {
+			chunk.Mode, first = mode, false
+		}
+		ev := &pb.JobEvent{Event: &pb.JobEvent_Artifact{Artifact: chunk}}
 		if err := send(ev); err != nil {
 			return err
 		}
@@ -593,4 +620,66 @@ func sendFile(ctx context.Context, path, rel string, buf []byte, send func(*pb.J
 			return nil
 		}
 	}
+}
+
+const (
+	maxArchiveBytes   = 4 << 30
+	maxArchiveEntries = 200000
+)
+
+// extractZip unpacks the zip at src below dst, keeping permission bits where
+// the OS has them. Entries that escape dst and symlinks are refused.
+func extractZip(src, dst string) error {
+	zr, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	if len(zr.File) > maxArchiveEntries {
+		return fmt.Errorf("archive has %d entries", len(zr.File))
+	}
+	if err := os.MkdirAll(dst, 0o700); err != nil {
+		return err
+	}
+	var total uint64
+	for _, zf := range zr.File {
+		if !fs.ValidPath(strings.TrimSuffix(zf.Name, "/")) || zf.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("unsafe archive entry %q", zf.Name)
+		}
+		total += zf.UncompressedSize64
+		if total > maxArchiveBytes {
+			return errors.New("archive is too large")
+		}
+		path := filepath.Join(dst, filepath.FromSlash(zf.Name))
+		if zf.FileInfo().IsDir() {
+			if err := os.MkdirAll(path, 0o700); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := extractZipFile(zf, path); err != nil {
+			return fmt.Errorf("%s: %w", zf.Name, err)
+		}
+	}
+	return nil
+}
+
+func extractZipFile(zf *zip.File, path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	rc, err := zf.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, zf.Mode().Perm()|0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

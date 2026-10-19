@@ -109,12 +109,14 @@ const ArtifactSource$json = {
   '1': 'ArtifactSource',
   '2': [
     {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'workdir', '3': 2, '4': 1, '5': 9, '10': 'workdir'},
   ],
 };
 
 /// Descriptor for `ArtifactSource`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List artifactSourceDescriptor =
-    $convert.base64Decode('Cg5BcnRpZmFjdFNvdXJjZRISCgRwYXRoGAEgASgJUgRwYXRo');
+final $typed_data.Uint8List artifactSourceDescriptor = $convert.base64Decode(
+    'Cg5BcnRpZmFjdFNvdXJjZRISCgRwYXRoGAEgASgJUgRwYXRoEhgKB3dvcmtkaXIYAiABKAlSB3'
+    'dvcmtkaXI=');
 
 @$core.Deprecated('Use jobSourceDescriptor instead')
 const JobSource$json = {
@@ -345,13 +347,14 @@ const JobArtifact$json = {
   '2': [
     {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
     {'1': 'size_bytes', '3': 2, '4': 1, '5': 4, '10': 'sizeBytes'},
+    {'1': 'mode', '3': 3, '4': 1, '5': 13, '10': 'mode'},
   ],
 };
 
 /// Descriptor for `JobArtifact`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List jobArtifactDescriptor = $convert.base64Decode(
     'CgtKb2JBcnRpZmFjdBISCgRwYXRoGAEgASgJUgRwYXRoEh0KCnNpemVfYnl0ZXMYAiABKARSCX'
-    'NpemVCeXRlcw==');
+    'NpemVCeXRlcxISCgRtb2RlGAMgASgNUgRtb2Rl');
 
 @$core.Deprecated('Use jobDescriptor instead')
 const Job$json = {
@@ -571,6 +574,8 @@ const RunJobRequest$json = {
       '10': 'timeout'
     },
     {'1': 'artifact_globs', '3': 9, '4': 3, '5': 9, '10': 'artifactGlobs'},
+    {'1': 'artifact_archive', '3': 10, '4': 1, '5': 8, '10': 'artifactArchive'},
+    {'1': 'workdir', '3': 11, '4': 1, '5': 9, '10': 'workdir'},
   ],
   '3': [RunJobRequest_EnvEntry$json],
 };
@@ -593,8 +598,9 @@ final $typed_data.Uint8List runJobRequestDescriptor = $convert.base64Decode(
     'USGAoHY29tbWFuZBgGIAMoCVIHY29tbWFuZBI5CgNlbnYYByADKAsyJy5wcm90ZWN0b3JhdGUu'
     'djEuUnVuSm9iUmVxdWVzdC5FbnZFbnRyeVIDZW52EjMKB3RpbWVvdXQYCCABKAsyGS5nb29nbG'
     'UucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQSJQoOYXJ0aWZhY3RfZ2xvYnMYCSADKAlSDWFy'
-    'dGlmYWN0R2xvYnMaNgoIRW52RW50cnkSEAoDa2V5GAEgASgJUgNrZXkSFAoFdmFsdWUYAiABKA'
-    'lSBXZhbHVlOgI4AQ==');
+    'dGlmYWN0R2xvYnMSKQoQYXJ0aWZhY3RfYXJjaGl2ZRgKIAEoCFIPYXJ0aWZhY3RBcmNoaXZlEh'
+    'gKB3dvcmtkaXIYCyABKAlSB3dvcmtkaXIaNgoIRW52RW50cnkSEAoDa2V5GAEgASgJUgNrZXkS'
+    'FAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AQ==');
 
 @$core.Deprecated('Use jobStartedDescriptor instead')
 const JobStarted$json = {
@@ -628,13 +634,14 @@ const JobArtifactChunk$json = {
     {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
     {'1': 'data', '3': 2, '4': 1, '5': 12, '10': 'data'},
     {'1': 'last', '3': 3, '4': 1, '5': 8, '10': 'last'},
+    {'1': 'mode', '3': 4, '4': 1, '5': 13, '10': 'mode'},
   ],
 };
 
 /// Descriptor for `JobArtifactChunk`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List jobArtifactChunkDescriptor = $convert.base64Decode(
     'ChBKb2JBcnRpZmFjdENodW5rEhIKBHBhdGgYASABKAlSBHBhdGgSEgoEZGF0YRgCIAEoDFIEZG'
-    'F0YRISCgRsYXN0GAMgASgIUgRsYXN0');
+    'F0YRISCgRsYXN0GAMgASgIUgRsYXN0EhIKBG1vZGUYBCABKA1SBG1vZGU=');
 
 @$core.Deprecated('Use jobFinishedDescriptor instead')
 const JobFinished$json = {

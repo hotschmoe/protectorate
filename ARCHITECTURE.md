@@ -256,9 +256,15 @@ node) executes.
   worktree, one per hub repository, and checks the commit out with
   `--force --detach` but never cleans, so `target/` and `node_modules` survive
   between jobs. Jobs on one repo run one at a time.
-- **Artifact sources** copy one hub file into a fresh job directory, executable:
-  `GOOS=windows go test -c` on the hub, run the binary on a Windows node with no
-  toolchain there (`protectorate job test-cross`).
+- **Artifact sources** copy one hub file into a fresh job directory, executable,
+  or a hub directory as a zip extracted with its layout and permission bits,
+  with the command running in a chosen subdirectory. `protectorate job
+  test-cross` uses the directory form: `GOOS=windows go test -c` on the hub,
+  then each test binary ships with its package directory (testdata and any
+  file the tests open) and go.mod/go.sum, and runs with the package directory
+  as working directory on a node with no toolchain. Unlike a git source this
+  carries uncommitted edits and needs no git on the node. Artifacts that
+  come back keep their permission bits.
 - **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)
   and `--job-dir`. Timeout and cancel signal the process group (SIGTERM, then
   SIGKILL after 3s); on Windows the command runs in a job object that kills the

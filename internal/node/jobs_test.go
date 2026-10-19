@@ -1,6 +1,7 @@
 package node
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -444,4 +445,25 @@ func (t tokenRT) RoundTrip(r *http.Request) (*http.Response, error) {
 		r.Header.Set("Authorization", "Bearer "+string(t))
 	}
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestExtractZipRefusesUnsafeEntries(t *testing.T) {
+	for _, name := range []string{"../evil", "/abs", "a/../../evil"} {
+		t.Run(name, func(t *testing.T) {
+			src := filepath.Join(t.TempDir(), "a.zip")
+			f, err := os.Create(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			zw := zip.NewWriter(f)
+			w, _ := zw.Create(name)
+			_, _ = w.Write([]byte("x"))
+			zw.Close()
+			f.Close()
+			dst := filepath.Join(t.TempDir(), "out")
+			if err := extractZip(src, dst); err == nil {
+				t.Fatalf("accepted %q", name)
+			}
+		})
+	}
 }

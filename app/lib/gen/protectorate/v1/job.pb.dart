@@ -217,14 +217,17 @@ class GitSource extends $pb.GeneratedMessage {
   void clearCommit() => $_clearField(2);
 }
 
-/// ArtifactSource copies one file from the hub into the job directory and
-/// marks it executable.
+/// ArtifactSource copies a file or a directory from the hub into a fresh job
+/// directory. A file is marked executable. A directory is shipped as a zip and
+/// extracted with its relative layout and permission bits.
 class ArtifactSource extends $pb.GeneratedMessage {
   factory ArtifactSource({
     $core.String? path,
+    $core.String? workdir,
   }) {
     final result = ArtifactSource._();
     if (path != null) result.path = path;
+    if (workdir != null) result.workdir = workdir;
     return result;
   }
 
@@ -243,6 +246,7 @@ class ArtifactSource extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ArtifactSource.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'path')
+    ..aOS(2, _omitFieldNames ? '' : 'workdir')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -267,7 +271,7 @@ class ArtifactSource extends $pb.GeneratedMessage {
           ArtifactSource.$_createMessage);
   static ArtifactSource? _defaultInstance;
 
-  /// path is a file on the hub.
+  /// path is a file or directory on the hub.
   @$pb.TagNumber(1)
   $core.String get path => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -276,6 +280,17 @@ class ArtifactSource extends $pb.GeneratedMessage {
   $core.bool hasPath() => $_has(0);
   @$pb.TagNumber(1)
   void clearPath() => $_clearField(1);
+
+  /// workdir is the directory, relative to the job directory, the command runs
+  /// in; empty means the job directory itself. Directories only.
+  @$pb.TagNumber(2)
+  $core.String get workdir => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set workdir($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasWorkdir() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearWorkdir() => $_clearField(2);
 }
 
 enum JobSource_Kind { git, artifact, notSet }
@@ -989,10 +1004,12 @@ class JobArtifact extends $pb.GeneratedMessage {
   factory JobArtifact({
     $core.String? path,
     $fixnum.Int64? sizeBytes,
+    $core.int? mode,
   }) {
     final result = JobArtifact._();
     if (path != null) result.path = path;
     if (sizeBytes != null) result.sizeBytes = sizeBytes;
+    if (mode != null) result.mode = mode;
     return result;
   }
 
@@ -1014,6 +1031,7 @@ class JobArtifact extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         2, _omitFieldNames ? '' : 'sizeBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aI(3, _omitFieldNames ? '' : 'mode', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1056,6 +1074,16 @@ class JobArtifact extends $pb.GeneratedMessage {
   $core.bool hasSizeBytes() => $_has(1);
   @$pb.TagNumber(2)
   void clearSizeBytes() => $_clearField(2);
+
+  /// mode holds the file's permission bits as the node reported them.
+  @$pb.TagNumber(3)
+  $core.int get mode => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set mode($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasMode() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearMode() => $_clearField(3);
 }
 
 /// Job is the persisted record of one job.
@@ -1721,6 +1749,8 @@ class RunJobRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
     $1.Duration? timeout,
     $core.Iterable<$core.String>? artifactGlobs,
+    $core.bool? artifactArchive,
+    $core.String? workdir,
   }) {
     final result = RunJobRequest._();
     if (jobId != null) result.jobId = jobId;
@@ -1732,6 +1762,8 @@ class RunJobRequest extends $pb.GeneratedMessage {
     if (env != null) result.env.addEntries(env);
     if (timeout != null) result.timeout = timeout;
     if (artifactGlobs != null) result.artifactGlobs.addAll(artifactGlobs);
+    if (artifactArchive != null) result.artifactArchive = artifactArchive;
+    if (workdir != null) result.workdir = workdir;
     return result;
   }
 
@@ -1763,6 +1795,8 @@ class RunJobRequest extends $pb.GeneratedMessage {
     ..aOM<$1.Duration>(8, _omitFieldNames ? '' : 'timeout',
         subBuilder: $1.Duration.$_createMessage)
     ..pPS(9, _omitFieldNames ? '' : 'artifactGlobs')
+    ..aOB(10, _omitFieldNames ? '' : 'artifactArchive')
+    ..aOS(11, _omitFieldNames ? '' : 'workdir')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1855,6 +1889,27 @@ class RunJobRequest extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(9)
   $pb.PbList<$core.String> get artifactGlobs => $_getList(8);
+
+  /// artifact_archive says the upload is a zip to extract into the job
+  /// directory instead of a single file named artifact_name.
+  @$pb.TagNumber(10)
+  $core.bool get artifactArchive => $_getBF(9);
+  @$pb.TagNumber(10)
+  set artifactArchive($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasArtifactArchive() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearArtifactArchive() => $_clearField(10);
+
+  /// workdir is relative to the job directory; only valid with an archive.
+  @$pb.TagNumber(11)
+  $core.String get workdir => $_getSZ(10);
+  @$pb.TagNumber(11)
+  set workdir($core.String value) => $_setString(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasWorkdir() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearWorkdir() => $_clearField(11);
 }
 
 class JobStarted extends $pb.GeneratedMessage {
@@ -1977,11 +2032,13 @@ class JobArtifactChunk extends $pb.GeneratedMessage {
     $core.String? path,
     $core.List<$core.int>? data,
     $core.bool? last,
+    $core.int? mode,
   }) {
     final result = JobArtifactChunk._();
     if (path != null) result.path = path;
     if (data != null) result.data = data;
     if (last != null) result.last = last;
+    if (mode != null) result.mode = mode;
     return result;
   }
 
@@ -2003,6 +2060,7 @@ class JobArtifactChunk extends $pb.GeneratedMessage {
     ..a<$core.List<$core.int>>(
         2, _omitFieldNames ? '' : 'data', $pb.PbFieldType.OY)
     ..aOB(3, _omitFieldNames ? '' : 'last')
+    ..aI(4, _omitFieldNames ? '' : 'mode', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2053,6 +2111,16 @@ class JobArtifactChunk extends $pb.GeneratedMessage {
   $core.bool hasLast() => $_has(2);
   @$pb.TagNumber(3)
   void clearLast() => $_clearField(3);
+
+  /// mode is the file's permission bits; set on the first frame of a file.
+  @$pb.TagNumber(4)
+  $core.int get mode => $_getIZ(3);
+  @$pb.TagNumber(4)
+  set mode($core.int value) => $_setUnsignedInt32(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasMode() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearMode() => $_clearField(4);
 }
 
 class JobFinished extends $pb.GeneratedMessage {

@@ -78,11 +78,15 @@ message GitSource {
   string commit = 2;
 }
 
-// ArtifactSource copies one file from the hub into the job directory and
-// marks it executable.
+// ArtifactSource copies a file or a directory from the hub into a fresh job
+// directory. A file is marked executable. A directory is shipped as a zip and
+// extracted with its relative layout and permission bits.
 message ArtifactSource {
-  // path is a file on the hub.
+  // path is a file or directory on the hub.
   string path = 1;
+  // workdir is the directory, relative to the job directory, the command runs
+  // in; empty means the job directory itself. Directories only.
+  string workdir = 2;
 }
 
 // JobSource is what the command runs against. Without a source the command
@@ -159,6 +163,8 @@ message JobArtifact {
   // path is relative to the job's artifacts directory.
   string path = 1;
   uint64 size_bytes = 2;
+  // mode holds the file's permission bits as the node reported them.
+  uint32 mode = 3;
 }
 
 // Job is the persisted record of one job.
@@ -242,6 +248,11 @@ message RunJobRequest {
   map<string, string> env = 7;
   google.protobuf.Duration timeout = 8;
   repeated string artifact_globs = 9;
+  // artifact_archive says the upload is a zip to extract into the job
+  // directory instead of a single file named artifact_name.
+  bool artifact_archive = 10;
+  // workdir is relative to the job directory; only valid with an archive.
+  string workdir = 11;
 }
 
 message JobStarted {
@@ -258,6 +269,8 @@ message JobArtifactChunk {
   string path = 1;
   bytes data = 2;
   bool last = 3;
+  // mode is the file's permission bits; set on the first frame of a file.
+  uint32 mode = 4;
 }
 
 enum JobEnd {

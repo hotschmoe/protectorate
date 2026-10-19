@@ -490,6 +490,8 @@ func TestSubmitValidation(t *testing.T) {
 		{"huge timeout", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, Timeout: durationpb.New(48 * time.Hour)}, connect.CodeInvalidArgument},
 		{"bad glob", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, ArtifactGlobs: []string{"../x"}}, connect.CodeInvalidArgument},
 		{"missing artifact", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, Source: &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: "/nonexistent/x"}}}}, connect.CodeInvalidArgument},
+		{"workdir escape", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, Source: &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: ".", Workdir: "../x"}}}}, connect.CodeInvalidArgument},
+		{"workdir on file", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, Source: &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: "../../go.mod", Workdir: "x"}}}}, connect.CodeInvalidArgument},
 		{"not a repo", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, Source: gitSource(t.TempDir(), "")}, connect.CodeInvalidArgument},
 		{"option injection as rev", &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}, Source: gitSource(".", "--output=/tmp/x")}, connect.CodeInvalidArgument},
 	}
@@ -702,4 +704,32 @@ func TestWarmNodes(t *testing.T) {
 	if m.warmNodes("") != nil {
 		t.Fatal("jobs without a repo have no warm nodes")
 	}
+}
+
+func TestArtifactDirectoryRunsInWorkdirAndKeepsModes(t *testing.T) {
+	e := newJobEnv(t, 1)
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), []byte("module x\n"), 0o644)
+	writeFile(t, filepath.Join(root, "pkg", "testdata", "in.txt"), []byte("data\n"), 0o644)
+	writeFile(t, filepath.Join(root, "pkg", "run.sh"), []byte("#!/bin/sh\ncat testdata/in.txt\npwd\nmkdir out\ncp testdata/in.txt out/tool\nchmod 755 out/tool\ncp testdata/in.txt out/plain\n"), 0o755)
+
+	j := e.submit(t, &pb.SubmitJobRequest{
+		Target: onNode("peer"), Source: &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: root, Workdir: "pkg"}}},
+		Command: []string{"./run.sh"}, ArtifactGlobs: []string{"out"},
+	})
+	j = e.wait(t, j.Id)
+	if j.State != pb.JobState_JOB_STATE_SUCCEEDED {
+		t.Fatalf("job = %v\n%s", j, e.logOf(t, j.Id))
+	}
+	log := e.logOf(t, j.Id)
+	if !strings.HasPrefix(log, "data\n") || !strings.HasSuffix(log, "/work/pkg\n") {
+		t.Fatalf("log = %q", log)
+	}
+	for name, want := range map[string]os.FileMode{"tool": 0o755, "plain": 0o644} {
+		fi, err := os.Stat(filepath.Join(e.home, "jobs", j.Id, "artifacts", "out", name))
+		if err != nil || fi.Mode().Perm()&0o111 != want&0o111 {
+			t.Fatalf("%s = %v, %v; want mode %v", name, fi, err, want)
+		}
+	}
+
 }

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -338,6 +339,7 @@ func validateSubmit(req *pb.SubmitJobRequest) (time.Duration, error) {
 type sourcePlan struct {
 	repo, commit, key string
 	file, name        string
+	dir, workdir      string
 }
 
 func (m *JobManager) planSource(ctx context.Context, src *pb.JobSource) (*sourcePlan, *pb.JobSource, error) {
@@ -357,8 +359,19 @@ func (m *JobManager) planSource(ctx context.Context, src *pb.JobSource) (*source
 			return nil, nil, invalid("artifact path: %v", err)
 		}
 		fi, err := os.Stat(abs)
-		if err != nil || !fi.Mode().IsRegular() {
-			return nil, nil, invalid("artifact %q is not a file on the hub", k.Artifact.Path)
+		if err != nil {
+			return nil, nil, invalid("artifact %q is not a file or directory on the hub", k.Artifact.Path)
+		}
+		if fi.IsDir() {
+			wd := k.Artifact.Workdir
+			if wd != "" && !fs.ValidPath(wd) {
+				return nil, nil, invalid("invalid artifact workdir %q", wd)
+			}
+			return &sourcePlan{dir: abs, workdir: wd},
+				&pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: abs, Workdir: wd}}}, nil
+		}
+		if !fi.Mode().IsRegular() || k.Artifact.Workdir != "" {
+			return nil, nil, invalid("artifact %q is not a file on the hub, or workdir was given for a file", k.Artifact.Path)
 		}
 		name := filepath.Base(abs)
 		if !node.ValidArtifactName(name) {
@@ -497,6 +510,7 @@ func (m *JobManager) Submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	run := &pb.RunJobRequest{
 		JobId: id, Command: req.Command, Env: env, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
 		RepoKey: plan.key, Commit: plan.commit, ArtifactName: plan.name,
+		ArtifactArchive: plan.dir != "", Workdir: plan.workdir,
 	}
 	snap := proto.Clone(job).(*pb.Job)
 	m.wg.Add(1)
@@ -545,6 +559,8 @@ func (m *JobManager) drive(ctx context.Context, e *jobEntry, ex nodeExec, plan *
 		sent, err = m.shipGit(ctx, ex, plan, run)
 	case plan.file != "":
 		sent, err = shipFile(ctx, ex, run.JobId, plan.file)
+	case plan.dir != "":
+		sent, err = shipDir(ctx, ex, run.JobId, plan.dir)
 	}
 	if err != nil {
 		return fmt.Errorf("ship source: %w", err)
@@ -583,6 +599,67 @@ func shipFile(ctx context.Context, ex nodeExec, jobID, path string) (uint64, err
 	}
 	defer f.Close()
 	return upload(ctx, ex, jobID, f, nil)
+}
+
+// shipDir uploads dir as a zip built on the fly.
+func shipDir(ctx context.Context, ex nodeExec, jobID, dir string) (uint64, error) {
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := writeZip(pw, dir)
+		pw.CloseWithError(err)
+		done <- err
+	}()
+	n, err := upload(ctx, ex, jobID, pr, func() error { return <-done })
+	pr.CloseWithError(err)
+	return n, err
+}
+
+// writeZip archives the regular files and directories below dir. Symlinks
+// are skipped.
+func writeZip(w io.Writer, dir string) error {
+	zw := zip.NewWriter(w)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == dir {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !fi.IsDir() && !fi.Mode().IsRegular() {
+			return nil
+		}
+		hdr, err := zip.FileInfoHeader(fi)
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(rel)
+		if fi.IsDir() {
+			hdr.Name += "/"
+		} else {
+			hdr.Method = zip.Deflate
+		}
+		fw, err := zw.CreateHeader(hdr)
+		if err != nil || fi.IsDir() {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(fw, f)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return zw.Close()
 }
 
 // upload sends r in ChunkSize frames. before runs once r is drained, before
@@ -703,7 +780,7 @@ func (a *artifactSink) write(c *pb.JobArtifactChunk) error {
 		if err != nil {
 			return err
 		}
-		a.f, a.cur = f, &pb.JobArtifact{Path: c.Path}
+		a.f, a.cur = f, &pb.JobArtifact{Path: c.Path, Mode: c.Mode}
 	}
 	if _, err := a.f.Write(c.Data); err != nil {
 		return err
@@ -712,6 +789,9 @@ func (a *artifactSink) write(c *pb.JobArtifactChunk) error {
 	a.total += uint64(len(c.Data))
 	if c.Last {
 		err := a.f.Close()
+		if err == nil && a.cur.Mode != 0 {
+			err = os.Chmod(filepath.Join(a.dir, filepath.FromSlash(a.cur.Path)), os.FileMode(a.cur.Mode).Perm()|0o600)
+		}
 		a.files, a.f, a.cur = append(a.files, a.cur), nil, nil
 		return err
 	}

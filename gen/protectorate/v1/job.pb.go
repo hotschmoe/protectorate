@@ -310,12 +310,16 @@ func (x *GitSource) GetCommit() string {
 	return ""
 }
 
-// ArtifactSource copies one file from the hub into the job directory and
-// marks it executable.
+// ArtifactSource copies a file or a directory from the hub into a fresh job
+// directory. A file is marked executable. A directory is shipped as a zip and
+// extracted with its relative layout and permission bits.
 type ArtifactSource struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// path is a file on the hub.
-	Path          string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// path is a file or directory on the hub.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// workdir is the directory, relative to the job directory, the command runs
+	// in; empty means the job directory itself. Directories only.
+	Workdir       string `protobuf:"bytes,2,opt,name=workdir,proto3" json:"workdir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -353,6 +357,13 @@ func (*ArtifactSource) Descriptor() ([]byte, []int) {
 func (x *ArtifactSource) GetPath() string {
 	if x != nil {
 		return x.Path
+	}
+	return ""
+}
+
+func (x *ArtifactSource) GetWorkdir() string {
+	if x != nil {
+		return x.Workdir
 	}
 	return ""
 }
@@ -923,8 +934,10 @@ func (x *JobLog) GetData() []byte {
 type JobArtifact struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// path is relative to the job's artifacts directory.
-	Path          string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	SizeBytes     uint64 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	Path      string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	SizeBytes uint64 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	// mode holds the file's permission bits as the node reported them.
+	Mode          uint32 `protobuf:"varint,3,opt,name=mode,proto3" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -969,6 +982,13 @@ func (x *JobArtifact) GetPath() string {
 func (x *JobArtifact) GetSizeBytes() uint64 {
 	if x != nil {
 		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *JobArtifact) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
 	}
 	return 0
 }
@@ -1451,6 +1471,11 @@ type RunJobRequest struct {
 	Env           map[string]string    `protobuf:"bytes,7,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Timeout       *durationpb.Duration `protobuf:"bytes,8,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	ArtifactGlobs []string             `protobuf:"bytes,9,rep,name=artifact_globs,json=artifactGlobs,proto3" json:"artifact_globs,omitempty"`
+	// artifact_archive says the upload is a zip to extract into the job
+	// directory instead of a single file named artifact_name.
+	ArtifactArchive bool `protobuf:"varint,10,opt,name=artifact_archive,json=artifactArchive,proto3" json:"artifact_archive,omitempty"`
+	// workdir is relative to the job directory; only valid with an archive.
+	Workdir       string `protobuf:"bytes,11,opt,name=workdir,proto3" json:"workdir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1548,6 +1573,20 @@ func (x *RunJobRequest) GetArtifactGlobs() []string {
 	return nil
 }
 
+func (x *RunJobRequest) GetArtifactArchive() bool {
+	if x != nil {
+		return x.ArtifactArchive
+	}
+	return false
+}
+
+func (x *RunJobRequest) GetWorkdir() string {
+	if x != nil {
+		return x.Workdir
+	}
+	return ""
+}
+
 type JobStarted struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceReused bool                   `protobuf:"varint,1,opt,name=workspace_reused,json=workspaceReused,proto3" json:"workspace_reused,omitempty"`
@@ -1639,10 +1678,12 @@ func (x *JobOutput) GetData() []byte {
 // JobArtifactChunk is one frame of an artifact file; the last frame of a file
 // has last set.
 type JobArtifactChunk struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	Last          bool                   `protobuf:"varint,3,opt,name=last,proto3" json:"last,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Data  []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	Last  bool                   `protobuf:"varint,3,opt,name=last,proto3" json:"last,omitempty"`
+	// mode is the file's permission bits; set on the first frame of a file.
+	Mode          uint32 `protobuf:"varint,4,opt,name=mode,proto3" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1696,6 +1737,13 @@ func (x *JobArtifactChunk) GetLast() bool {
 		return x.Last
 	}
 	return false
+}
+
+func (x *JobArtifactChunk) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
 }
 
 type JobFinished struct {
@@ -1982,9 +2030,10 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x06target\"7\n" +
 	"\tGitSource\x12\x12\n" +
 	"\x04repo\x18\x01 \x01(\tR\x04repo\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\"$\n" +
+	"\x06commit\x18\x02 \x01(\tR\x06commit\">\n" +
 	"\x0eArtifactSource\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"\x82\x01\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\aworkdir\x18\x02 \x01(\tR\aworkdir\"\x82\x01\n" +
 	"\tJobSource\x12.\n" +
 	"\x03git\x18\x01 \x01(\v2\x1a.protectorate.v1.GitSourceH\x00R\x03git\x12=\n" +
 	"\bartifact\x18\x02 \x01(\v2\x1f.protectorate.v1.ArtifactSourceH\x00R\bartifactB\x06\n" +
@@ -2019,11 +2068,12 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x05event\"4\n" +
 	"\x06JobLog\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"@\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"T\n" +
 	"\vJobArtifact\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
 	"\n" +
-	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\"\xb1\a\n" +
+	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x12\n" +
+	"\x04mode\x18\x03 \x01(\rR\x04mode\"\xb1\a\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12/\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x19.protectorate.v1.JobStateR\x05state\x122\n" +
@@ -2067,7 +2117,7 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x04last\x18\x04 \x01(\bR\x04last\x12\x16\n" +
 	"\x06sha256\x18\x05 \x01(\tR\x06sha256\"3\n" +
 	"\x15UploadJobDataResponse\x12\x1a\n" +
-	"\breceived\x18\x01 \x01(\x04R\breceived\"\x90\x03\n" +
+	"\breceived\x18\x01 \x01(\x04R\breceived\"\xd5\x03\n" +
 	"\rRunJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x19\n" +
 	"\brepo_key\x18\x02 \x01(\tR\arepoKey\x12\x16\n" +
@@ -2077,7 +2127,10 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\acommand\x18\x06 \x03(\tR\acommand\x129\n" +
 	"\x03env\x18\a \x03(\v2'.protectorate.v1.RunJobRequest.EnvEntryR\x03env\x123\n" +
 	"\atimeout\x18\b \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12%\n" +
-	"\x0eartifact_globs\x18\t \x03(\tR\rartifactGlobs\x1a6\n" +
+	"\x0eartifact_globs\x18\t \x03(\tR\rartifactGlobs\x12)\n" +
+	"\x10artifact_archive\x18\n" +
+	" \x01(\bR\x0fartifactArchive\x12\x18\n" +
+	"\aworkdir\x18\v \x01(\tR\aworkdir\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"7\n" +
@@ -2085,11 +2138,12 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"JobStarted\x12)\n" +
 	"\x10workspace_reused\x18\x01 \x01(\bR\x0fworkspaceReused\"\x1f\n" +
 	"\tJobOutput\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\"N\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\"b\n" +
 	"\x10JobArtifactChunk\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x12\n" +
-	"\x04last\x18\x03 \x01(\bR\x04last\"\xa1\x01\n" +
+	"\x04last\x18\x03 \x01(\bR\x04last\x12\x12\n" +
+	"\x04mode\x18\x04 \x01(\rR\x04mode\"\xa1\x01\n" +
 	"\vJobFinished\x12)\n" +
 	"\x03end\x18\x01 \x01(\x0e2\x17.protectorate.v1.JobEndR\x03end\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x14\n" +

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -460,10 +461,12 @@ func jobTestCrossCmd(o *opts) *cobra.Command {
 		Short: "Compile Go tests here and run the test binaries on a matching node",
 		Long: `Runs "go test -c" for every package with GOOS/GOARCH set, uploads each test
 binary as an artifact job and runs it on one node that matches the platform (a
-lease pins the node for the whole run). The node needs no Go toolchain. Tests
-run in an empty directory, so tests that read files next to their sources
-(testdata) will not find them. Arguments after -- go to the test binaries,
-e.g. -test.run TestX -test.v.`,
+lease pins the node for the whole run). The node needs no Go toolchain. Each
+binary ships in a zip with its package directory (testdata and the other files
+tests open) and the module's go.mod/go.sum, laid out as in the module, and runs
+with the package directory as working directory, as "go test" does. Files over
+8 MiB and .git, node_modules and target directories are left out. Arguments
+after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkgArgs, testArgs := args, []string(nil)
@@ -505,22 +508,27 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 	if goos == "windows" {
 		ext = ".exe"
 	}
-	type bin struct{ pkg, path, name string }
+	type bin struct{ pkg, stage, workdir, name string }
 	var bins []bin
-	for _, pkg := range pkgs {
-		name := unsafeName.ReplaceAllString(pkg, "_") + ".test" + ext
-		path := filepath.Join(tmp, name)
-		build := exec.CommandContext(ctx, "go", "test", "-c", "-o", path, pkg)
+	for i, pkg := range pkgs {
+		stage := filepath.Join(tmp, fmt.Sprintf("stage%d", i))
+		rel, err := stagePackage(pkg.dir, pkg.modDir, stage)
+		if err != nil {
+			return fmt.Errorf("stage %s: %w", pkg.path, err)
+		}
+		name := unsafeName.ReplaceAllString(pkg.path, "_") + ".test" + ext
+		path := filepath.Join(stage, filepath.FromSlash(rel), name)
+		build := exec.CommandContext(ctx, "go", "test", "-c", "-o", path, pkg.path)
 		build.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
 		build.Stderr = stderr
 		if err := build.Run(); err != nil {
-			return fmt.Errorf("compile tests of %s for %s/%s: %w", pkg, goos, goarch, err)
+			return fmt.Errorf("compile tests of %s for %s/%s: %w", pkg.path, goos, goarch, err)
 		}
 		if _, err := os.Stat(path); err != nil {
-			fmt.Fprintf(stderr, "%s: no test files\n", pkg)
+			fmt.Fprintf(stderr, "%s: no test files\n", pkg.path)
 			continue
 		}
-		bins = append(bins, bin{pkg, path, name})
+		bins = append(bins, bin{pkg.path, stage, rel, name})
 	}
 	if len(bins) == 0 {
 		return errors.New("no package has tests")
@@ -564,7 +572,7 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 		}
 		j, err := runJob(ctx, o, cmd, jc, &pb.SubmitJobRequest{
 			Target:  target,
-			Source:  &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: b.path}}},
+			Source:  &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: b.stage, Workdir: b.workdir}}},
 			Command: append([]string{exe}, testArgs...),
 			Timeout: durationpb.New(timeout),
 		})
@@ -581,12 +589,87 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, ttl, timeou
 	return nil
 }
 
-func goList(ctx context.Context, patterns []string) ([]string, error) {
+type goPackage struct{ path, dir, modDir string }
+
+func goList(ctx context.Context, patterns []string) ([]goPackage, error) {
 	var out, errb bytes.Buffer
-	cmd := exec.CommandContext(ctx, "go", append([]string{"list"}, patterns...)...)
+	cmd := exec.CommandContext(ctx, "go", append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}\t{{with .Module}}{{.Dir}}{{end}}"}, patterns...)...)
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("go list: %w: %s", err, strings.TrimSpace(errb.String()))
 	}
-	return strings.Fields(out.String()), nil
+	var pkgs []goPackage
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		f := strings.Split(strings.TrimSpace(line), "\t")
+		if len(f) != 3 || f[2] == "" {
+			return nil, fmt.Errorf("go list: unexpected line %q", line)
+		}
+		pkgs = append(pkgs, goPackage{f[0], f[1], f[2]})
+	}
+	return pkgs, nil
+}
+
+const stageMaxFile = 8 << 20
+
+var stageSkipDirs = map[string]bool{".git": true, "node_modules": true, "target": true}
+
+// stagePackage copies a package directory and its module's go.mod/go.sum into
+// stage, keeping the module-relative layout, and returns the package's
+// slash-separated path below stage.
+func stagePackage(pkgDir, modDir, stage string) (string, error) {
+	rel, err := filepath.Rel(modDir, pkgDir)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("package directory %s is outside its module %s", pkgDir, modDir)
+	}
+	for _, f := range []string{"go.mod", "go.sum"} {
+		if err := copyFileMode(filepath.Join(modDir, f), filepath.Join(stage, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	dst := filepath.Join(stage, rel)
+	err = filepath.WalkDir(pkgDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		r, err := filepath.Rel(pkgDir, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if r != "." && stageSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dst, r), 0o755)
+		}
+		fi, err := d.Info()
+		if err != nil || !fi.Mode().IsRegular() || fi.Size() > stageMaxFile {
+			return err
+		}
+		return copyFileMode(path, filepath.Join(dst, r))
+	})
+	return filepath.ToSlash(rel), err
+}
+
+func copyFileMode(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fi.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
