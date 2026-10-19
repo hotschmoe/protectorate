@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:fixnum/fixnum.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:protectorate/gen/protectorate/v1/quota.pb.dart';
 import 'package:protectorate/screens/quota_tab.dart';
 import 'package:protectorate/theme/tokens.dart';
 import 'package:protectorate/vfd/lamp.dart';
 import 'package:protectorate/vfd/meter.dart';
 import 'package:protectorate/vfd/panel.dart';
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
 
 Widget _host(Widget child, {bool reduced = false, bool dark = true}) =>
     MaterialApp(
@@ -152,6 +155,62 @@ void main() {
       ),
     );
     expect(ring, findsOneWidget);
+  });
+
+  test('only multi-day windows resetting within a day count as soon', () {
+    final now = DateTime.utc(2026, 10, 20, 12);
+    QuotaWindow w(String name, int windowHours, Duration? left) => QuotaWindow(
+      name: name,
+      windowSeconds: Int64(windowHours * 3600),
+      resetsAt: left == null ? null : Timestamp.fromDateTime(now.add(left)),
+    );
+    for (final (win, want) in [
+      (w('7d', 168, const Duration(hours: 20)), true),
+      (w('7d fable', 168, const Duration(hours: 24)), true),
+      (w('7d', 168, const Duration(hours: 25)), false),
+      (w('5h', 5, const Duration(hours: 2)), false),
+      (w('24h', 24, const Duration(hours: 3)), false),
+      (w('7d', 168, const Duration(minutes: -5)), false),
+      (w('7d', 168, null), false),
+      (w('weekly', 0, const Duration(hours: 6)), true),
+      (w('5h', 0, const Duration(hours: 1)), false),
+    ]) {
+      expect(resetsSoon(win, now), want, reason: '${win.name} $win');
+    }
+  });
+
+  testWidgets('a new beat flickers the lamp once; reduced motion does not', (
+    t,
+  ) async {
+    Color? fill() => t
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byType(Lamp),
+            matching: find.byType(Container),
+          ),
+        )
+        .map((c) => c.decoration)
+        .whereType<BoxDecoration>()
+        .map((d) => d.color)
+        .whereType<Color>()
+        .first;
+
+    await t.pumpWidget(_host(const Lamp(tone: Tone.ok, beat: 1)));
+    final steady = fill();
+    await t.pumpWidget(_host(const Lamp(tone: Tone.ok, beat: 2)));
+    await t.pump(Tokens.beat * 0.1);
+    expect(fill(), isNot(steady));
+    await t.pumpAndSettle();
+    expect(fill(), steady);
+
+    await t.pumpWidget(
+      _host(const Lamp(tone: Tone.ok, beat: 3), reduced: true),
+    );
+    await t.pumpWidget(
+      _host(const Lamp(tone: Tone.ok, beat: 4), reduced: true),
+    );
+    await t.pump(Tokens.beat * 0.1);
+    expect(fill(), steady);
   });
 
   testWidgets('steady lamp schedules no frames', (t) async {

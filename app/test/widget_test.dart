@@ -78,6 +78,7 @@ HubClient _fakeClient(HubProfile p, {void Function(String?)? onAuth}) {
         ),
       )
       .server(EventService.subscribe, (SubscribeRequest r, ctx) async* {
+        yield Event(kind: 'heartbeat', subject: 'hub');
         yield Event(kind: 'session.started', subject: 'alice');
         await Completer<void>().future;
       })
@@ -157,6 +158,8 @@ void main() {
       expect(find.byKey(const ValueKey('nav-rail')), findsNothing);
       expect(find.text('EVENTS LIVE'), findsOneWidget);
       expect(find.text('box (linux/arm64)'), findsOneWidget);
+      expect(find.text('session.started'), findsOneWidget);
+      expect(find.text('heartbeat'), findsNothing);
       await tester.tap(find.text('SESSIONS'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('session-work')), findsOneWidget);

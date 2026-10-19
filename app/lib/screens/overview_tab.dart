@@ -48,6 +48,8 @@ class _OverviewTabState extends State<OverviewTab> {
   final Map<String, ProviderQuota> _quotas = {};
   Object? _quotaError;
   StreamSubscription<Event>? _sub;
+  int _hubBeat = 0;
+  final Map<String, int> _nodeBeats = {};
   Timer? _poll;
   Timer? _debounce;
 
@@ -60,6 +62,12 @@ class _OverviewTabState extends State<OverviewTab> {
     _sub = _feed.incoming.listen((e) {
       final q = quotaFromEvent(e);
       if (q != null) setState(() => _quotas[q.provider] = q);
+      if (e.kind == heartbeatKind) setState(() => _hubBeat++);
+      if (e.kind == 'node.metrics') {
+        setState(
+          () => _nodeBeats.update(e.subject, (n) => n + 1, ifAbsent: () => 1),
+        );
+      }
       if (nodeEventKinds.contains(e.kind)) {
         _debounce?.cancel();
         _debounce = Timer(const Duration(milliseconds: 300), _loadNodes);
@@ -140,6 +148,7 @@ class _OverviewTabState extends State<OverviewTab> {
           feed: _feed,
           hub: _status,
           onRetry: () => setState(() => _status = _loadStatus()),
+          beat: _hubBeat,
           hubCpu: _history.cpu(
             _nodes.where((n) => n.node.local).firstOrNull?.node.name ?? '',
           ),
@@ -157,6 +166,7 @@ class _OverviewTabState extends State<OverviewTab> {
             loaded: _nodesLoaded,
             error: _nodesError,
             ageOf: (s) => statusAge(s, _receivedAt, _now()),
+            beats: _nodeBeats,
             wide: wide,
             onOpen: _open,
           ),
@@ -209,6 +219,7 @@ class _StatusPanel extends StatelessWidget {
     required this.feed,
     required this.hub,
     required this.onRetry,
+    required this.beat,
     required this.hubCpu,
     required this.wide,
   });
@@ -218,6 +229,7 @@ class _StatusPanel extends StatelessWidget {
   final EventFeed feed;
   final Future<GetStatusResponse> hub;
   final VoidCallback onRetry;
+  final int beat;
   final List<double?> hubCpu;
   final bool wide;
 
@@ -284,6 +296,7 @@ class _StatusPanel extends StatelessWidget {
         listenable: feed,
         builder: (context, _) => LampLegend(
           key: const ValueKey('events-lamp'),
+          beat: beat,
           label: switch (feed.state) {
             FeedState.connecting => 'EVENTS CONNECTING',
             FeedState.live => 'EVENTS LIVE',
@@ -422,6 +435,7 @@ class _Board extends StatelessWidget {
     required this.loaded,
     required this.error,
     required this.ageOf,
+    required this.beats,
     required this.wide,
     required this.onOpen,
   });
@@ -430,6 +444,7 @@ class _Board extends StatelessWidget {
   final bool loaded;
   final Object? error;
   final Duration Function(NodeStatus) ageOf;
+  final Map<String, int> beats;
   final bool wide;
   final void Function(NodeStatus) onOpen;
 
@@ -518,7 +533,7 @@ class _Board extends StatelessWidget {
           ];
     final name = Row(
       children: [
-        Lamp(tone: freshnessTone(f)),
+        Lamp(tone: freshnessTone(f), beat: beats[s.node.name]),
         const SizedBox(width: 10),
         Flexible(
           child: Text(
@@ -696,46 +711,59 @@ class _QuotaSummary extends StatelessWidget {
               excludeSemantics: true,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 38,
-                      child: Text(w.name.toUpperCase(), style: t.legend()),
-                    ),
-                    Expanded(
-                      child: SegmentMeter(
-                        percent: w.usedPercent,
-                        height: 8,
-                        dim: stale,
+                child: ResetSoonFrame(
+                  on: resetsSoon(w, now),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              w.name.toUpperCase(),
+                              style: t.legend(),
+                            ),
+                          ),
+                          Text(
+                            w.hasResetsAt()
+                                ? formatCountdown(
+                                    w.resetsAt.toDateTime().difference(now),
+                                  )
+                                : '?',
+                            style: t.small(
+                              resetsSoon(w, now) ? t.p.warn : t.p.info,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    SizedBox(
-                      width: 48,
-                      child: Text(
-                        '${w.usedPercent.round()}%',
-                        textAlign: TextAlign.end,
-                        style: t.data(
-                          stale
-                              ? t.p.dim
-                              : t.levelTone(w.usedPercent) == Tone.lit
-                              ? t.p.emph
-                              : t.level(w.usedPercent),
-                        ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SegmentMeter(
+                              percent: w.usedPercent,
+                              height: 8,
+                              dim: stale,
+                            ),
+                          ),
+                          SizedBox(
+                            width: 48,
+                            child: Text(
+                              '${w.usedPercent.round()}%',
+                              textAlign: TextAlign.end,
+                              style: t.data(
+                                stale
+                                    ? t.p.dim
+                                    : t.levelTone(w.usedPercent) == Tone.lit
+                                    ? t.p.emph
+                                    : t.level(w.usedPercent),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    SizedBox(
-                      width: 70,
-                      child: Text(
-                        w.hasResetsAt()
-                            ? formatCountdown(
-                                w.resetsAt.toDateTime().difference(now),
-                              )
-                            : '?',
-                        textAlign: TextAlign.end,
-                        style: t.small(t.p.info),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -814,7 +842,10 @@ class _EventLog extends StatelessWidget {
         listenable: feed,
         builder: (context, _) {
           final events = feed.events
-              .where((e) => !nodeEventKinds.contains(e.kind))
+              .where(
+                (e) =>
+                    e.kind != heartbeatKind && !nodeEventKinds.contains(e.kind),
+              )
               .take(_shown)
               .toList();
           if (events.isEmpty) {

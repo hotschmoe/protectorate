@@ -16,6 +16,10 @@ import 'node_detail_screen.dart';
 
 const nodeEventKinds = {'node.metrics', 'node.unreachable'};
 
+// The hub's keep-alive on the event stream; it shows as a lamp flicker, not a
+// log line.
+const heartbeatKind = 'heartbeat';
+
 class NodesTab extends StatefulWidget {
   const NodesTab({
     super.key,

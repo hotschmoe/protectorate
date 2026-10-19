@@ -176,6 +176,7 @@ class Tokens {
   static const fill = Duration(milliseconds: 260);
   static const warmUp = Duration(milliseconds: 450);
   static const blink = Duration(milliseconds: 1600);
+  static const beat = Duration(milliseconds: 420);
   static const chase = Duration(milliseconds: 1100);
   // JetBrains Mono advance width per em.
   static const monoAdvance = 0.6;

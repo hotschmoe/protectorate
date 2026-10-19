@@ -175,9 +175,43 @@ String quotaBadge(ProviderQuota q) {
   }
 }
 
+// A window longer than a day that resets within the next day: its unused share
+// is about to expire. Shorter windows reset all the time and are left out.
+bool resetsSoon(QuotaWindow w, DateTime now) {
+  if (!w.hasResetsAt()) return false;
+  final long = w.windowSeconds > 0
+      ? w.windowSeconds > const Duration(days: 1).inSeconds
+      : !w.name.toLowerCase().endsWith('h');
+  final left = w.resetsAt.toDateTime().difference(now);
+  return long && !left.isNegative && left <= const Duration(days: 1);
+}
+
+class ResetSoonFrame extends StatelessWidget {
+  const ResetSoonFrame({super.key, required this.on, required this.child});
+
+  final bool on;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!on) return child;
+    final t = Tokens.of(context);
+    return Container(
+      key: const ValueKey('reset-soon'),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+      decoration: BoxDecoration(
+        border: Border.all(color: t.p.warn, width: 1.2),
+        borderRadius: BorderRadius.circular(Tokens.innerRadius),
+      ),
+      child: child,
+    );
+  }
+}
+
 String windowSemantics(QuotaWindow w, DateTime now) =>
     '${w.name}: ${w.usedPercent.toStringAsFixed(0)}% used'
-    '${w.hasResetsAt() ? ', resets in ${formatCountdown(w.resetsAt.toDateTime().difference(now))}' : ''}';
+    '${w.hasResetsAt() ? ', resets in ${formatCountdown(w.resetsAt.toDateTime().difference(now))}' : ''}'
+    '${resetsSoon(w, now) ? ', resets within a day' : ''}';
 
 class ProviderCard extends StatelessWidget {
   const ProviderCard({super.key, required this.quota, required this.now});
@@ -263,57 +297,64 @@ class ProviderCard extends StatelessWidget {
       excludeSemantics: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: ReadoutTile(
-                    legend: '${w.name.toUpperCase()} WINDOW',
-                    readout: SegmentReadout(
-                      value: pct.toStringAsFixed(0),
-                      unit: '% USED',
-                      size: Tokens.readoutL,
-                      color: color,
+        child: ResetSoonFrame(
+          on: resetsSoon(w, now),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: ReadoutTile(
+                      legend: '${w.name.toUpperCase()} WINDOW',
+                      readout: SegmentReadout(
+                        value: pct.toStringAsFixed(0),
+                        unit: '% USED',
+                        size: Tokens.readoutL,
+                        color: color,
+                      ),
                     ),
                   ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('RESETS IN', style: t.legend()),
-                    const SizedBox(height: 6),
-                    w.hasResetsAt()
-                        ? SegmentReadout.parts(
-                            parts: countdownParts(
-                              w.resetsAt.toDateTime().difference(now),
-                            ),
-                            size: Tokens.readoutM,
-                            color: stale ? t.p.dim : t.p.info,
-                          )
-                        : Text('UNKNOWN', style: t.legend(t.p.warn)),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SegmentMeter(
-              key: ValueKey('bar-${w.name}'),
-              percent: pct,
-              dim: stale,
-              height: 12,
-            ),
-            if (w.hasEstimatedUnusedPercentAtReset())
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '~${w.estimatedUnusedPercentAtReset.toStringAsFixed(0)}% unused at reset (est.)',
-                  style: t.small(),
-                ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('RESETS IN', style: t.legend()),
+                      const SizedBox(height: 6),
+                      w.hasResetsAt()
+                          ? SegmentReadout.parts(
+                              parts: countdownParts(
+                                w.resetsAt.toDateTime().difference(now),
+                              ),
+                              size: Tokens.readoutM,
+                              color: stale
+                                  ? t.p.dim
+                                  : resetsSoon(w, now)
+                                  ? t.p.warn
+                                  : t.p.info,
+                            )
+                          : Text('UNKNOWN', style: t.legend(t.p.warn)),
+                    ],
+                  ),
+                ],
               ),
-          ],
+              const SizedBox(height: 10),
+              SegmentMeter(
+                key: ValueKey('bar-${w.name}'),
+                percent: pct,
+                dim: stale,
+                height: 12,
+              ),
+              if (w.hasEstimatedUnusedPercentAtReset())
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '~${w.estimatedUnusedPercentAtReset.toStringAsFixed(0)}% unused at reset (est.)',
+                    style: t.small(),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -55,12 +55,15 @@ class Lamp extends StatefulWidget {
     required this.tone,
     this.on = true,
     this.blink = false,
+    this.beat,
     this.size = Tokens.lampSize,
   });
 
   final Tone tone;
   final bool on;
   final bool blink;
+  // A change of beat flickers the lamp off and back once, like a heartbeat.
+  final Object? beat;
   final double size;
 
   @override
@@ -68,6 +71,12 @@ class Lamp extends StatefulWidget {
 }
 
 class _LampState extends State<Lamp> with TickerProviderStateMixin, _Pulse {
+  late final AnimationController _beat = AnimationController(
+    vsync: this,
+    duration: Tokens.beat,
+    value: 1,
+  );
+
   @override
   bool get pulsing => widget.on && widget.blink;
 
@@ -75,6 +84,15 @@ class _LampState extends State<Lamp> with TickerProviderStateMixin, _Pulse {
   void didUpdateWidget(Lamp old) {
     super.didUpdateWidget(old);
     syncPulse();
+    if (widget.beat != old.beat && old.beat != null && !reduced) {
+      _beat.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _beat.dispose();
+    super.dispose();
   }
 
   @override
@@ -83,31 +101,35 @@ class _LampState extends State<Lamp> with TickerProviderStateMixin, _Pulse {
     final c = t.tone(widget.tone);
     final s = widget.size;
     final ring = widget.on && widget.blink && reduced;
-    return pulse((v) {
-      final on = widget.on && widget.tone != Tone.ghost;
-      final fill = on ? Color.lerp(t.p.ghost, c, v)! : t.p.ghost;
-      return Container(
-        width: s + (ring ? 6 : 0),
-        height: s + (ring ? 6 : 0),
-        alignment: Alignment.center,
-        decoration: ring
-            ? BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: c, width: 1.5),
-              )
-            : null,
-        child: Container(
-          width: s,
-          height: s,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: fill,
-            border: on ? null : Border.all(color: t.p.bezelHi),
-            boxShadow: on ? t.boxGlow(c.withValues(alpha: v)) : null,
+    return AnimatedBuilder(
+      animation: _beat,
+      builder: (_, _) => pulse((p) {
+        final v = p * (0.2 + 0.8 * Curves.easeIn.transform(_beat.value));
+        final on = widget.on && widget.tone != Tone.ghost;
+        final fill = on ? Color.lerp(t.p.ghost, c, v)! : t.p.ghost;
+        return Container(
+          width: s + (ring ? 6 : 0),
+          height: s + (ring ? 6 : 0),
+          alignment: Alignment.center,
+          decoration: ring
+              ? BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: c, width: 1.5),
+                )
+              : null,
+          child: Container(
+            width: s,
+            height: s,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: fill,
+              border: on ? null : Border.all(color: t.p.bezelHi),
+              boxShadow: on ? t.boxGlow(c.withValues(alpha: v)) : null,
+            ),
           ),
-        ),
-      );
-    });
+        );
+      }),
+    );
   }
 }
 
@@ -119,6 +141,7 @@ class LampLegend extends StatelessWidget {
     required this.tone,
     this.on = true,
     this.blink = false,
+    this.beat,
     this.big = false,
   });
 
@@ -126,6 +149,7 @@ class LampLegend extends StatelessWidget {
   final Tone tone;
   final bool on;
   final bool blink;
+  final Object? beat;
   final bool big;
 
   @override
@@ -135,7 +159,7 @@ class LampLegend extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Lamp(tone: tone, on: on, blink: blink),
+        Lamp(tone: tone, on: on, blink: blink, beat: beat),
         SizedBox(width: big ? 8 : 6),
         Flexible(
           child: Text(

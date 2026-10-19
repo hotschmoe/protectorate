@@ -517,6 +517,12 @@ List<ProviderQuota> _quotas() => [
         resetsAt: _in(const Duration(days: 3, hours: 4)),
         estimatedUnusedPercentAtReset: 22,
       ),
+      QuotaWindow(
+        name: '7d fable',
+        usedPercent: 71,
+        windowSeconds: Int64(7 * 24 * 3600),
+        resetsAt: _in(const Duration(hours: 18, minutes: 5)),
+      ),
     ],
     resets: [
       ResetCredit(
