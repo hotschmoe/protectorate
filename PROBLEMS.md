@@ -472,8 +472,9 @@ a desktop in the background while the user works on the same PC.
 leasable **while the user is away** (overnight). The node offers `desk:<node>`
 only inside an availability window and after a period without physical input,
 and ends the agent's lease the moment physical (non-injected) input arrives.
-The screen must stay unlocked for that window, which is a physical-security
-trade-off in the office.
+The screen stays unlocked for that window; the user accepts this (the office
+is physically secure). The node locks the workstation when the window ends or
+the agent lease is released.
 
 `[later]` Always-on agent desktops on machines with Intel Arc Pro cards, which
 support SR-IOV virtual GPUs: one or more Windows VMs (Hyper-V GPU partitioning,
