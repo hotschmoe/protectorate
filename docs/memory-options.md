@@ -1,6 +1,6 @@
 # Memory, handoff and messaging: options (P7)
 
-Status: decision document, not code. Date 2026-10-19.
+Status: decision document, not code. Options 2026-10-19, decisions 2026-10-20 (section 4).
 Ethos: harnesses run untouched (their own project-context files and interfaces
 only). The orchestration layer may be as robust as needed.
 
@@ -111,9 +111,8 @@ outgoing model to write its own handoff fails exactly when it is needed.
 Split by problem:
 - (a) native resume, nothing new.
 - (b) hub-composed HANDOFF.md + native store pointers.
-- (c) one hub-managed `NOTES`/decisions section in the generated AGENTS.md
-  (human-editable, in git). No new format.
-- (d) hub `MessageService`, delivered by the driver `Send` path.
+- (c) outside AGENTS.md (see decision 4 in section 4); store still open.
+- (d) open (decision 5); hub-native delivery is the strongest candidate.
 
 ### Resleeve flow
 
@@ -128,10 +127,11 @@ Split by problem:
                                          backlog item, last N user msgs and
                                          final assistant msg read from the
                                          outgoing native jsonl, session ids
-                                      3. optional summary: a harness WITH quota
-                                         (or local pi) reads facts + tail and
-                                         fills Goal / State / Next / Gotchas
-                                      4. write <ws>/.protectorate/HANDOFF.md
+                                      3. summary: best subscription with quota
+                                         (fallback local pi, user notified)
+                                         reads facts + tail and fills Goal /
+                                         State / Unfinished / Next / Gotchas
+                                      4. overwrite <ws>/.protectorate/HANDOFF.md
                                          (+ copy in ~/.protectorate/handoffs/)
                                       5. spawn new sleeve, same workspace,
                                          harness chosen by quota suggest
@@ -141,16 +141,13 @@ Split by problem:
 ```
 
 - Who writes: the hub always writes the factual part (cannot fail when quota
-  is gone). A different, healthy harness writes the narrative summary. The
-  outgoing harness is asked only if it still has quota (best quality; a
-  normal user prompt, not a trick).
+  is gone). A separate summarizer writes the narrative. The outgoing harness
+  is never asked.
 - Where: `<workspace>/.protectorate/HANDOFF.md`, excluded from git; archived
   copies on the hub. Same path for every harness and node.
-- How the new harness is told: two ordinary channels. The generated
-  AGENTS.md/CLAUDE.md carries a standing rule ("if `.protectorate/HANDOFF.md`
-  exists and is newer than your session start, read it before acting"), and
-  the hub's first `Send` is a plain user message naming the file. Both are
-  project-context and normal input, so harnesses stay untouched.
+- How the new harness is told: the hub's first prompt is a plain user
+  message naming the file. Normal input, so harnesses stay untouched and
+  AGENTS.md carries nothing about it.
 - Returning later to the original harness: native resume of its old session
   plus the newer HANDOFF.md as a delta note, not a replay.
 - Rule: handoff is data to read, not authority. It never carries credentials
@@ -160,9 +157,7 @@ Split by problem:
 1. `protectorate sleeve resleeve <name> [--to auto|harness]` doing steps 1, 2,
    4, 5, 6 with facts only (no summary model). Roughly one command, no new
    service.
-2. Add the standing rule to the generated AGENTS.md.
-3. Later: summary pass (step 3), then `MessageService`, then decisions
-   section for (c).
+2. Summary pass (step 3), then coordination (decision 5), then (c).
 
 ### What to measure
 - Resume success: does the new harness's first turn reference the right file,
@@ -174,16 +169,37 @@ Split by problem:
   id, handoff ignored (harness did not read it).
 - Message delivery latency to an idle sleeve, per harness.
 
-## 4. Open questions
-1. Is the outgoing harness allowed to be asked for a final summary when it
-   still has a little quota, or do you want facts-only plus a third-party
-   summarizer always?
-2. Should the summarizer be the local pi model (free, weaker) or the
-   healthiest subscription?
-3. Handoff in the repo (reviewable, shareable) or excluded and hub-archived?
-4. Do decisions/learnings (c) belong in AGENTS.md, or in a separate
-   `DECISIONS.md` that AGENTS.md points to?
-5. Is sleeve <-> sleeve messaging needed before the orchestrator-mediated
-   path (orchestrator relays everything) has been tried?
-6. Is an overseer allowed to resleeve without confirmation, or does it
-   propose and you approve from the phone?
+## 4. Decisions (2026-10-20)
+
+Principle: anything that can be deterministic is code, not a model call, so
+it costs no tokens and repeats exactly. One code path, not fallbacks between
+model behaviours. Never bust a harness's native prompt cache without reason.
+
+1. **Outgoing harness is never asked.** Facts are always composed by the hub.
+   A separate summarizer reads the tail of the outgoing native transcript
+   (read-only) and writes summary plus unfinished tasks.
+2. **Summarizer:** the subscription with the most spare quota, falling back
+   to local pi. A local fallback is surfaced to the user (notification, and
+   the sleeve card shows which model is active, colour coded).
+3. **Nothing of ours lands in a worked-on repo.** `.protectorate/` is excluded
+   by code (`.git/info/exclude`), handoffs are archived on the hub, and
+   `HANDOFF.md` is overwritten on every resleeve so a stale one never
+   confuses a later sleeve. Outside PRs work the same as internal ones.
+4. **AGENTS.md is one tiny, project-agnostic rule set the user owns**, the same
+   in every project, with `CLAUDE.md` a symlink to it. No project specifics, no
+   hub-managed sections, no hooks or skills added to harnesses. Decisions and
+   learnings (c) live elsewhere. Consequence: the orchestrator's generated
+   role document (`internal/orchestrator/doc.go`) must move out of AGENTS.md.
+5. **Coordination: open.** Candidates: an excluded mailbox file, GitHub issues
+   with the orchestrator pinging the workspace, a small in-binary mailbox in
+   the shape of mcp_agent_mail, or a separate coordinator (deterministic
+   server, light model or a decision model on the local LLM server) so the
+   orchestrator stays clear of routing.
+6. **The orchestrator resleeves without confirmation** at this stage.
+   Deterministic watchers ping it on quota levels, problems and idle. It needs
+   tools that say whether an action busts the cache and whether to trigger the
+   harness's native compaction first (at a turn boundary), and the summary may
+   run in parallel while the outgoing sleeve winds down.
+
+Runtime: sleeves stay bwrap in a systemd scope (no Docker); per-sleeve network
+namespaces are being evaluated in `spikes/netns/`.
