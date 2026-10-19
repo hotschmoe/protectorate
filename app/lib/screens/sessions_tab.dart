@@ -1,3 +1,4 @@
+import 'package:connectrpc/connect.dart';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/session.pb.dart';
@@ -125,6 +126,14 @@ class _SessionsTabState extends State<SessionsTab> {
       final r = await widget.client.sessions.createSession(req);
       await _refresh();
       if (mounted) _open(r.session.name);
+    } on ConnectException catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _error = e.code == Code.permissionDenied
+            ? 'Raw sessions run unsandboxed and need the owner token. '
+                  'Start work in a sleeve instead (Nodes, this hub, Sleeves).'
+            : e,
+      );
     } on Object catch (e) {
       if (mounted) setState(() => _error = e);
     }
