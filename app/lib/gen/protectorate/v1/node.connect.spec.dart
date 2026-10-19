@@ -72,7 +72,8 @@ abstract final class NodeAgentService {
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
-/// name, payload = summary) and "node.unreachable".
+/// name, payload = summary), "node.unreachable", "node.joined" (an invited
+/// node answered its first poll) and "node.name_mismatch".
 abstract final class NodeService {
   /// Fully-qualified name of the NodeService service.
   static const name = 'protectorate.v1.NodeService';

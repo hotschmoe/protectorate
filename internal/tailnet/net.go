@@ -222,7 +222,7 @@ func UpHub(ctx context.Context, home string, cfg Config, admin *Admin) (*Net, er
 	dir := filepath.Join(Dir(home), "tsnet-hub")
 	var key string
 	if _, err := os.Stat(filepath.Join(dir, "tailscaled.state")); errors.Is(err, os.ErrNotExist) {
-		key, err = admin.CreateKey(ctx, []string{TagHub}, 10*time.Minute)
+		key, _, err = admin.CreateKey(ctx, []string{TagHub}, 10*time.Minute)
 		if err != nil {
 			return nil, fmt.Errorf("hub preauth key: %w", err)
 		}

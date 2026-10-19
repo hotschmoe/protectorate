@@ -182,6 +182,7 @@ String freshnessLabel(NodeFreshness f, Duration age) => switch (f) {
   NodeFreshness.NODE_FRESHNESS_UNREACHABLE => 'UNREACHABLE',
   NodeFreshness.NODE_FRESHNESS_STALE => 'STALE ${formatAge(age)}',
   NodeFreshness.NODE_FRESHNESS_FRESH => 'LIVE',
+  NodeFreshness.NODE_FRESHNESS_INVITED => 'INVITED',
   _ => 'UNKNOWN',
 };
 

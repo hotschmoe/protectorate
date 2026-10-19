@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 
+	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
 )
@@ -106,7 +108,7 @@ func admin(ctx context.Context) (*tailnet.Admin, tailnet.Config, error) {
 }
 
 // nodeEnrollCmds are the tailnet enrollment commands under `node`.
-func nodeEnrollCmds() []*cobra.Command {
+func nodeEnrollCmds(o *opts) []*cobra.Command {
 	var tier string
 	var expires time.Duration
 	var pools []string
@@ -131,12 +133,16 @@ func nodeEnrollCmds() []*cobra.Command {
 			for _, p := range pools {
 				tags = append(tags, tailnet.PoolTag(p))
 			}
-			key, err := a.Invite(cmd.Context(), args[0], tags, expires)
+			key, keyID, err := a.Invite(cmd.Context(), args[0], tags, expires)
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "protectorate node join --control %s --key %s --name %s\n", cfg.ServerURL, key, args[0])
 			fmt.Fprintf(cmd.ErrOrStderr(), "key is single-use and expires in %s\n", expires)
+			if err := recordInvite(cmd.Context(), o, args[0], tier, pools, keyID); err != nil {
+				return fmt.Errorf("key issued but the node is not in the inventory (is the hub running?): %w", err)
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s is in the inventory as invited, not yet joined\n", args[0])
 			return nil
 		},
 	}
@@ -214,6 +220,21 @@ func nodeEnrollCmds() []*cobra.Command {
 	return []*cobra.Command{invite, join, revoke, renew}
 }
 
+// recordInvite puts the invited node into the hub's inventory so it shows in
+// `node ls` before it joins.
+func recordInvite(ctx context.Context, o *opts, name, tier string, pools []string, keyID uint64) error {
+	cl, err := o.nodeClient()
+	if err != nil {
+		return err
+	}
+	n := &pb.NodeInfo{Name: name, Address: name, Tier: tier, Invited: true, InviteKeyId: keyID}
+	for _, p := range pools {
+		n.Tags = append(n.Tags, "pool-"+p)
+	}
+	_, err = cl.AddNode(ctx, connect.NewRequest(&pb.AddNodeRequest{Node: n, Update: true}))
+	return err
+}
+
 func clientCmd() *cobra.Command {
 	c := &cobra.Command{Use: "client", Short: "Enroll phones and laptops"}
 	var name string
@@ -227,7 +248,7 @@ func clientCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			key, err := a.Invite(cmd.Context(), name, []string{tailnet.TagClient}, expires)
+			key, _, err := a.Invite(cmd.Context(), name, []string{tailnet.TagClient}, expires)
 			if err != nil {
 				return err
 			}
@@ -271,28 +292,54 @@ Then reach the hub at http://%[4]s:%[5]d. The key is single-use and expires in %
 
 // startTailnet brings up headscale and the hub's tailnet listener when the
 // tailnet has been initialised; otherwise the hub serves localhost only.
-func startTailnet(ctx context.Context, logw io.Writer) ([]hub.Extra, *http.Client, func(), error) {
+func startTailnet(ctx context.Context, logw io.Writer) (tailnetHub, error) {
 	home, err := hub.Home()
 	if err != nil {
-		return nil, nil, nil, err
+		return tailnetHub{}, err
 	}
 	cfg, err := tailnet.LoadConfig(home)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, func() {}, nil
+		return tailnetHub{Close: func() {}}, nil
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return tailnetHub{}, err
 	}
 	logf := func(format string, args ...any) { fmt.Fprintf(logw, "tailnet: "+format+"\n", args...) }
 	svc, err := tailnet.Start(ctx, home, cfg, logf)
 	if err != nil {
-		return nil, nil, nil, err
+		return tailnetHub{}, err
 	}
 	ln, err := svc.Net.Listen(tailnet.HubAPIPort)
 	if err != nil {
 		svc.Close()
-		return nil, nil, nil, err
+		return tailnetHub{}, err
 	}
 	logf("hub %s serving on tailnet port %d", cfg.HubName, tailnet.HubAPIPort)
-	return []hub.Extra{{Listener: ln, Identify: svc.Net.IdentifyAPI()}}, svc.Net.HTTPClient(), func() { svc.Close() }, nil
+	return tailnetHub{
+		Extra:  []hub.Extra{{Listener: ln, Identify: svc.Net.IdentifyAPI()}},
+		Client: svc.Net.HTTPClient(),
+		Peers:  func(ctx context.Context) ([]hub.Peer, error) { return peers(ctx, svc.Admin) },
+		Close:  func() { svc.Close() },
+	}, nil
+}
+
+// tailnetHub is what the hub gets from its tailnet; zero apart from Close
+// when none is configured.
+type tailnetHub struct {
+	Extra  []hub.Extra
+	Client *http.Client
+	Peers  func(context.Context) ([]hub.Peer, error)
+	Close  func()
+}
+
+func peers(ctx context.Context, a *tailnet.Admin) ([]hub.Peer, error) {
+	nodes, err := a.Nodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hub.Peer, len(nodes))
+	for i, n := range nodes {
+		out[i] = hub.Peer{Name: n.GivenName, KeyID: n.EnrolledWith()}
+	}
+	return out, nil
 }

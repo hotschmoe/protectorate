@@ -28,7 +28,7 @@ func TestNodeCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := hub.New("test", tok)
-	if err := attachNodes(h, time.Hour, "nt", nil, nil); err != nil {
+	if err := attachNodes(h, time.Hour, "nt", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	hl, err := net.Listen("tcp", "127.0.0.1:0")
@@ -121,6 +121,25 @@ func TestNodeCLI(t *testing.T) {
 		js, err := run(t, "node", "metrics", "--local", "--json")
 		if err != nil || !strings.Contains(js, `"hostname":`) {
 			t.Fatalf("err=%v\n%s", err, js)
+		}
+	})
+	t.Run("invite recorded", func(t *testing.T) {
+		o := &opts{hubURL: url}
+		for _, tier := range []string{"family", "server"} {
+			if err := recordInvite(context.Background(), o, "newbox", tier, []string{"gpu"}, 5); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, err := run(t, "node", "ls")
+		if err != nil || !strings.Contains(out, "newbox") || !strings.Contains(out, "invited, not yet joined") || strings.Contains(out, "UNREACHABLE") {
+			t.Fatalf("err=%v\n%s", err, out)
+		}
+		show, err := run(t, "node", "show", "newbox")
+		if err != nil || !strings.Contains(show, "server") || !strings.Contains(show, "pool-gpu") {
+			t.Fatalf("err=%v\n%s", err, show)
+		}
+		if _, err := run(t, "node", "rm", "newbox"); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("rm", func(t *testing.T) {

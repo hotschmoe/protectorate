@@ -2,6 +2,7 @@ package hub
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -44,6 +46,9 @@ type nodeRecord struct {
 	SSH   string   `yaml:"ssh,omitempty"`
 	Tier  string   `yaml:"tier"`
 	Notes string   `yaml:"notes,omitempty"`
+
+	Invited     bool   `yaml:"invited,omitempty"`
+	InviteKeyID uint64 `yaml:"invite_key_id,omitempty"`
 }
 
 type inventoryFile struct {
@@ -138,7 +143,7 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 func (r nodeRecord) info() *pb.NodeInfo {
 	return &pb.NodeInfo{
 		Name: r.Name, Address: r.Addr, Os: r.OS, Arch: r.Arch, Tags: append([]string(nil), r.Tags...),
-		SshAlias: r.SSH, Tier: r.Tier, Notes: r.Notes,
+		SshAlias: r.SSH, Tier: r.Tier, Notes: r.Notes, Invited: r.Invited, InviteKeyId: r.InviteKeyID,
 	}
 }
 
@@ -165,25 +170,60 @@ func (i *Inventory) Get(name string) (*pb.NodeInfo, error) {
 	return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, name)
 }
 
-func (i *Inventory) Add(n *pb.NodeInfo) (*pb.NodeInfo, error) {
-	rec, err := normalize(&nodeRecord{
+func (i *Inventory) Add(n *pb.NodeInfo) (*pb.NodeInfo, error) { return i.put(n, false) }
+
+// Upsert adds n or, when a node of that name exists, replaces its record.
+// Address, platform, ssh alias and notes left empty in n keep their stored
+// values.
+func (i *Inventory) Upsert(n *pb.NodeInfo) (*pb.NodeInfo, error) { return i.put(n, true) }
+
+func (i *Inventory) put(n *pb.NodeInfo, update bool) (*pb.NodeInfo, error) {
+	raw := nodeRecord{
 		Name: n.GetName(), Addr: n.GetAddress(), OS: n.GetOs(), Arch: n.GetArch(), Tags: n.GetTags(),
 		SSH: n.GetSshAlias(), Tier: n.GetTier(), Notes: n.GetNotes(),
-	})
-	if err != nil {
-		return nil, err
+		Invited: n.GetInvited(), InviteKeyID: n.GetInviteKeyId(),
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	name := strings.ToLower(strings.TrimSpace(raw.Name))
+	at := slices.IndexFunc(i.nodes, func(r nodeRecord) bool { return r.Name == name })
+	if at >= 0 && update {
+		old := i.nodes[at]
+		raw.Addr, raw.OS, raw.Arch = cmp.Or(raw.Addr, old.Addr), cmp.Or(raw.OS, old.OS), cmp.Or(raw.Arch, old.Arch)
+		raw.SSH, raw.Notes = cmp.Or(raw.SSH, old.SSH), cmp.Or(raw.Notes, old.Notes)
+	}
+	rec, err := normalize(&raw)
+	if err != nil {
+		return nil, err
+	}
 	if rec.Name == i.local.GetName() {
 		return nil, fmt.Errorf("%w: %s is the hub's own node", ErrNodeExists, rec.Name)
 	}
-	for _, r := range i.nodes {
-		if r.Name == rec.Name {
-			return nil, fmt.Errorf("%w: %s", ErrNodeExists, rec.Name)
-		}
+	next := append([]nodeRecord(nil), i.nodes...)
+	switch {
+	case at < 0:
+		next = append(next, *rec)
+	case update:
+		next[at] = *rec
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrNodeExists, rec.Name)
 	}
-	return rec.info(), i.commit(append(append([]nodeRecord(nil), i.nodes...), *rec))
+	return rec.info(), i.commit(next)
+}
+
+// ClearInvited records that an invited node has answered a poll.
+func (i *Inventory) ClearInvited(name string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for k, r := range i.nodes {
+		if r.Name != name || !r.Invited {
+			continue
+		}
+		next := append([]nodeRecord(nil), i.nodes...)
+		next[k].Invited, next[k].InviteKeyID = false, 0
+		return i.commit(next)
+	}
+	return nil
 }
 
 func (i *Inventory) Remove(name string) error {
@@ -263,7 +303,11 @@ func renderHosts(local *pb.NodeInfo, nodes []nodeRecord) []byte {
 	}
 	row(local.GetName()+" (this machine, hub)", local.GetOs(), local.GetArch(), "local", "", local.GetTier(), local.GetTags(), local.GetNotes())
 	for _, n := range nodes {
-		row(n.Name, n.OS, n.Arch, n.Addr, n.SSH, n.Tier, n.Tags, n.Notes)
+		notes := n.Notes
+		if n.Invited {
+			notes = strings.TrimSpace("invited, not yet joined. " + notes)
+		}
+		row(n.Name, n.OS, n.Arch, n.Addr, n.SSH, n.Tier, n.Tags, notes)
 	}
 	b.WriteString("\n")
 	b.WriteString("- Reach a node with `ssh <SSH alias>` when one is set.\n")

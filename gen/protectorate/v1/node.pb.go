@@ -35,6 +35,9 @@ const (
 	// NODE_FRESHNESS_UNREACHABLE: no good poll within the stale window (or
 	// ever). Cached metrics, if any, are old.
 	NodeFreshness_NODE_FRESHNESS_UNREACHABLE NodeFreshness = 3
+	// NODE_FRESHNESS_INVITED: the node was invited and has never answered a
+	// poll. Not an outage: no unreachable alert or event is raised.
+	NodeFreshness_NODE_FRESHNESS_INVITED NodeFreshness = 4
 )
 
 // Enum value maps for NodeFreshness.
@@ -44,12 +47,14 @@ var (
 		1: "NODE_FRESHNESS_FRESH",
 		2: "NODE_FRESHNESS_STALE",
 		3: "NODE_FRESHNESS_UNREACHABLE",
+		4: "NODE_FRESHNESS_INVITED",
 	}
 	NodeFreshness_value = map[string]int32{
 		"NODE_FRESHNESS_UNSPECIFIED": 0,
 		"NODE_FRESHNESS_FRESH":       1,
 		"NODE_FRESHNESS_STALE":       2,
 		"NODE_FRESHNESS_UNREACHABLE": 3,
+		"NODE_FRESHNESS_INVITED":     4,
 	}
 )
 
@@ -87,6 +92,9 @@ const (
 	AlertKind_ALERT_KIND_DISK_PERCENT AlertKind = 1
 	AlertKind_ALERT_KIND_MEM_PRESSURE AlertKind = 2
 	AlertKind_ALERT_KIND_UNREACHABLE  AlertKind = 3
+	// ALERT_KIND_NAME_MISMATCH: an invited node joined the tailnet under a
+	// different name than it was invited as, so the hub cannot reach it.
+	AlertKind_ALERT_KIND_NAME_MISMATCH AlertKind = 4
 )
 
 // Enum value maps for AlertKind.
@@ -96,12 +104,14 @@ var (
 		1: "ALERT_KIND_DISK_PERCENT",
 		2: "ALERT_KIND_MEM_PRESSURE",
 		3: "ALERT_KIND_UNREACHABLE",
+		4: "ALERT_KIND_NAME_MISMATCH",
 	}
 	AlertKind_value = map[string]int32{
-		"ALERT_KIND_UNSPECIFIED":  0,
-		"ALERT_KIND_DISK_PERCENT": 1,
-		"ALERT_KIND_MEM_PRESSURE": 2,
-		"ALERT_KIND_UNREACHABLE":  3,
+		"ALERT_KIND_UNSPECIFIED":   0,
+		"ALERT_KIND_DISK_PERCENT":  1,
+		"ALERT_KIND_MEM_PRESSURE":  2,
+		"ALERT_KIND_UNREACHABLE":   3,
+		"ALERT_KIND_NAME_MISMATCH": 4,
 	}
 )
 
@@ -1251,7 +1261,13 @@ type NodeInfo struct {
 	Tier  string `protobuf:"bytes,7,opt,name=tier,proto3" json:"tier,omitempty"`
 	Notes string `protobuf:"bytes,8,opt,name=notes,proto3" json:"notes,omitempty"`
 	// local marks the hub's own node, which is not stored in the inventory.
-	Local         bool `protobuf:"varint,9,opt,name=local,proto3" json:"local,omitempty"`
+	Local bool `protobuf:"varint,9,opt,name=local,proto3" json:"local,omitempty"`
+	// invited marks a node whose enrollment key was issued but which has not
+	// answered a poll yet; the hub clears it on the first successful poll.
+	Invited bool `protobuf:"varint,10,opt,name=invited,proto3" json:"invited,omitempty"`
+	// invite_key_id is the tailnet pre-auth key id issued for the invite, used
+	// to notice a node that joined under a different name.
+	InviteKeyId   uint64 `protobuf:"varint,11,opt,name=invite_key_id,json=inviteKeyId,proto3" json:"invite_key_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1347,6 +1363,20 @@ func (x *NodeInfo) GetLocal() bool {
 		return x.Local
 	}
 	return false
+}
+
+func (x *NodeInfo) GetInvited() bool {
+	if x != nil {
+		return x.Invited
+	}
+	return false
+}
+
+func (x *NodeInfo) GetInviteKeyId() uint64 {
+	if x != nil {
+		return x.InviteKeyId
+	}
+	return 0
 }
 
 type NodeStatus struct {
@@ -1568,8 +1598,11 @@ func (x *GetNodeRequest) GetName() string {
 }
 
 type AddNodeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Node          *NodeInfo              `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Node  *NodeInfo              `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	// update replaces an existing record instead of failing with
+	// ALREADY_EXISTS; fields left empty keep their stored value.
+	Update        bool `protobuf:"varint,2,opt,name=update,proto3" json:"update,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1609,6 +1642,13 @@ func (x *AddNodeRequest) GetNode() *NodeInfo {
 		return x.Node
 	}
 	return nil
+}
+
+func (x *AddNodeRequest) GetUpdate() bool {
+	if x != nil {
+		return x.Update
+	}
+	return false
 }
 
 type RemoveNodeRequest struct {
@@ -1810,7 +1850,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\asubject\x18\x02 \x01(\tR\asubject\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x14\n" +
 	"\x05value\x18\x04 \x01(\x01R\x05value\x12\x1c\n" +
-	"\tthreshold\x18\x05 \x01(\x01R\tthreshold\"\xcd\x01\n" +
+	"\tthreshold\x18\x05 \x01(\x01R\tthreshold\"\x8b\x02\n" +
 	"\bNodeInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x0e\n" +
@@ -1820,7 +1860,10 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\tssh_alias\x18\x06 \x01(\tR\bsshAlias\x12\x12\n" +
 	"\x04tier\x18\a \x01(\tR\x04tier\x12\x14\n" +
 	"\x05notes\x18\b \x01(\tR\x05notes\x12\x14\n" +
-	"\x05local\x18\t \x01(\bR\x05local\"\xe3\x02\n" +
+	"\x05local\x18\t \x01(\bR\x05local\x12\x18\n" +
+	"\ainvited\x18\n" +
+	" \x01(\bR\ainvited\x12\"\n" +
+	"\rinvite_key_id\x18\v \x01(\x04R\vinviteKeyId\"\xe3\x02\n" +
 	"\n" +
 	"NodeStatus\x12-\n" +
 	"\x04node\x18\x01 \x01(\v2\x19.protectorate.v1.NodeInfoR\x04node\x126\n" +
@@ -1835,22 +1878,25 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x11ListNodesResponse\x121\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x1b.protectorate.v1.NodeStatusR\x05nodes\"$\n" +
 	"\x0eGetNodeRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"?\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"W\n" +
 	"\x0eAddNodeRequest\x12-\n" +
-	"\x04node\x18\x01 \x01(\v2\x19.protectorate.v1.NodeInfoR\x04node\"'\n" +
+	"\x04node\x18\x01 \x01(\v2\x19.protectorate.v1.NodeInfoR\x04node\x12\x16\n" +
+	"\x06update\x18\x02 \x01(\bR\x06update\"'\n" +
 	"\x11RemoveNodeRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoveNodeResponse*\x83\x01\n" +
+	"\x12RemoveNodeResponse*\x9f\x01\n" +
 	"\rNodeFreshness\x12\x1e\n" +
 	"\x1aNODE_FRESHNESS_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14NODE_FRESHNESS_FRESH\x10\x01\x12\x18\n" +
 	"\x14NODE_FRESHNESS_STALE\x10\x02\x12\x1e\n" +
-	"\x1aNODE_FRESHNESS_UNREACHABLE\x10\x03*}\n" +
+	"\x1aNODE_FRESHNESS_UNREACHABLE\x10\x03\x12\x1a\n" +
+	"\x16NODE_FRESHNESS_INVITED\x10\x04*\x9b\x01\n" +
 	"\tAlertKind\x12\x1a\n" +
 	"\x16ALERT_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ALERT_KIND_DISK_PERCENT\x10\x01\x12\x1b\n" +
 	"\x17ALERT_KIND_MEM_PRESSURE\x10\x02\x12\x1a\n" +
-	"\x16ALERT_KIND_UNREACHABLE\x10\x032\xba\x04\n" +
+	"\x16ALERT_KIND_UNREACHABLE\x10\x03\x12\x1c\n" +
+	"\x18ALERT_KIND_NAME_MISMATCH\x10\x042\xba\x04\n" +
 	"\x10NodeAgentService\x12S\n" +
 	"\n" +
 	"GetMetrics\x12\".protectorate.v1.GetMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x01\x12Y\n" +

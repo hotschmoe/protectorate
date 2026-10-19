@@ -173,21 +173,21 @@ func hubCmd() *cobra.Command {
 			h.DeadRetention = deadRetention
 			h.WebDir = webDir
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
-			extra, nodeClient, closeTailnet, err := startTailnet(ctx, cmd.ErrOrStderr())
+			ts, err := startTailnet(ctx, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			defer closeTailnet()
+			defer ts.Close()
 			if nodeToken == "" {
 				nodeToken = os.Getenv(nodeTokenEnv)
 			}
-			if err := attachNodes(h, nodeInterval, nodeToken, watch, nodeClient); err != nil {
+			if err := attachNodes(h, nodeInterval, nodeToken, watch, ts.Client, ts.Peers); err != nil {
 				return err
 			}
 			if err := attachSleeves(ctx, h, toolDirs); err != nil {
 				return err
 			}
-			return h.Serve(ctx, l, extra...)
+			return h.Serve(ctx, l, ts.Extra...)
 		},
 	}
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")

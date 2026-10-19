@@ -1604,6 +1604,8 @@ class NodeInfo extends $pb.GeneratedMessage {
     $core.String? tier,
     $core.String? notes,
     $core.bool? local,
+    $core.bool? invited,
+    $fixnum.Int64? inviteKeyId,
   }) {
     final result = NodeInfo._();
     if (name != null) result.name = name;
@@ -1615,6 +1617,8 @@ class NodeInfo extends $pb.GeneratedMessage {
     if (tier != null) result.tier = tier;
     if (notes != null) result.notes = notes;
     if (local != null) result.local = local;
+    if (invited != null) result.invited = invited;
+    if (inviteKeyId != null) result.inviteKeyId = inviteKeyId;
     return result;
   }
 
@@ -1641,6 +1645,10 @@ class NodeInfo extends $pb.GeneratedMessage {
     ..aOS(7, _omitFieldNames ? '' : 'tier')
     ..aOS(8, _omitFieldNames ? '' : 'notes')
     ..aOB(9, _omitFieldNames ? '' : 'local')
+    ..aOB(10, _omitFieldNames ? '' : 'invited')
+    ..a<$fixnum.Int64>(
+        11, _omitFieldNames ? '' : 'inviteKeyId', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1742,6 +1750,28 @@ class NodeInfo extends $pb.GeneratedMessage {
   $core.bool hasLocal() => $_has(8);
   @$pb.TagNumber(9)
   void clearLocal() => $_clearField(9);
+
+  /// invited marks a node whose enrollment key was issued but which has not
+  /// answered a poll yet; the hub clears it on the first successful poll.
+  @$pb.TagNumber(10)
+  $core.bool get invited => $_getBF(9);
+  @$pb.TagNumber(10)
+  set invited($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasInvited() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearInvited() => $_clearField(10);
+
+  /// invite_key_id is the tailnet pre-auth key id issued for the invite, used
+  /// to notice a node that joined under a different name.
+  @$pb.TagNumber(11)
+  $fixnum.Int64 get inviteKeyId => $_getI64(10);
+  @$pb.TagNumber(11)
+  set inviteKeyId($fixnum.Int64 value) => $_setInt64(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasInviteKeyId() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearInviteKeyId() => $_clearField(11);
 }
 
 class NodeStatus extends $pb.GeneratedMessage {
@@ -2038,9 +2068,11 @@ class GetNodeRequest extends $pb.GeneratedMessage {
 class AddNodeRequest extends $pb.GeneratedMessage {
   factory AddNodeRequest({
     NodeInfo? node,
+    $core.bool? update,
   }) {
     final result = AddNodeRequest._();
     if (node != null) result.node = node;
+    if (update != null) result.update = update;
     return result;
   }
 
@@ -2060,6 +2092,7 @@ class AddNodeRequest extends $pb.GeneratedMessage {
       createEmptyInstance: AddNodeRequest.$_createMessage)
     ..aOM<NodeInfo>(1, _omitFieldNames ? '' : 'node',
         subBuilder: NodeInfo.$_createMessage)
+    ..aOB(2, _omitFieldNames ? '' : 'update')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2094,6 +2127,17 @@ class AddNodeRequest extends $pb.GeneratedMessage {
   void clearNode() => $_clearField(1);
   @$pb.TagNumber(1)
   NodeInfo ensureNode() => $_ensure(0);
+
+  /// update replaces an existing record instead of failing with
+  /// ALREADY_EXISTS; fields left empty keep their stored value.
+  @$pb.TagNumber(2)
+  $core.bool get update => $_getBF(1);
+  @$pb.TagNumber(2)
+  set update($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasUpdate() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearUpdate() => $_clearField(2);
 }
 
 class RemoveNodeRequest extends $pb.GeneratedMessage {
@@ -2254,7 +2298,8 @@ class NodeAgentServiceApi {
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
-/// name, payload = summary) and "node.unreachable".
+/// name, payload = summary), "node.unreachable", "node.joined" (an invited
+/// node answered its first poll) and "node.name_mismatch".
 class NodeServiceApi {
   final $pb.RpcClient _client;
 

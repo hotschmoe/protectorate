@@ -442,6 +442,14 @@
             "arch": {
               "type": "string"
             },
+            "inviteKeyId": {
+              "description": "invite_key_id is the tailnet pre-auth key id issued for the invite, used to notice a node that joined under a different name.",
+              "type": "integer"
+            },
+            "invited": {
+              "description": "invited marks a node whose enrollment key was issued but which has not answered a poll yet; the hub clears it on the first successful poll.",
+              "type": "boolean"
+            },
             "local": {
               "description": "local marks the hub's own node, which is not stored in the inventory.",
               "type": "boolean"
@@ -471,6 +479,10 @@
             }
           },
           "type": "object"
+        },
+        "update": {
+          "description": "update replaces an existing record instead of failing with ALREADY_EXISTS; fields left empty keep their stored value.",
+          "type": "boolean"
         }
       },
       "type": "object"

@@ -32,15 +32,21 @@ class NodeFreshness extends $pb.ProtobufEnum {
   static const NodeFreshness NODE_FRESHNESS_UNREACHABLE =
       NodeFreshness._(3, _omitEnumNames ? '' : 'NODE_FRESHNESS_UNREACHABLE');
 
+  /// NODE_FRESHNESS_INVITED: the node was invited and has never answered a
+  /// poll. Not an outage: no unreachable alert or event is raised.
+  static const NodeFreshness NODE_FRESHNESS_INVITED =
+      NodeFreshness._(4, _omitEnumNames ? '' : 'NODE_FRESHNESS_INVITED');
+
   static const $core.List<NodeFreshness> values = <NodeFreshness>[
     NODE_FRESHNESS_UNSPECIFIED,
     NODE_FRESHNESS_FRESH,
     NODE_FRESHNESS_STALE,
     NODE_FRESHNESS_UNREACHABLE,
+    NODE_FRESHNESS_INVITED,
   ];
 
   static final $core.List<NodeFreshness?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 3);
+      $pb.ProtobufEnum.$_initByValueList(values, 4);
   static NodeFreshness? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
@@ -57,15 +63,21 @@ class AlertKind extends $pb.ProtobufEnum {
   static const AlertKind ALERT_KIND_UNREACHABLE =
       AlertKind._(3, _omitEnumNames ? '' : 'ALERT_KIND_UNREACHABLE');
 
+  /// ALERT_KIND_NAME_MISMATCH: an invited node joined the tailnet under a
+  /// different name than it was invited as, so the hub cannot reach it.
+  static const AlertKind ALERT_KIND_NAME_MISMATCH =
+      AlertKind._(4, _omitEnumNames ? '' : 'ALERT_KIND_NAME_MISMATCH');
+
   static const $core.List<AlertKind> values = <AlertKind>[
     ALERT_KIND_UNSPECIFIED,
     ALERT_KIND_DISK_PERCENT,
     ALERT_KIND_MEM_PRESSURE,
     ALERT_KIND_UNREACHABLE,
+    ALERT_KIND_NAME_MISMATCH,
   ];
 
   static final $core.List<AlertKind?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 3);
+      $pb.ProtobufEnum.$_initByValueList(values, 4);
   static AlertKind? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,17 @@ type NodeOptions struct {
 	DiskAlertPercent float64       // default 90
 	MemAlertPercent  float64       // default 90
 	Now              func() time.Time
+	// Peers lists the machines enrolled in the tailnet; it lets the monitor
+	// notice an invited node that joined under another name. Nil when there
+	// is no tailnet.
+	Peers func(ctx context.Context) ([]Peer, error)
+}
+
+// Peer is a machine enrolled in the tailnet and the id of the pre-auth key it
+// enrolled with (0 if none).
+type Peer struct {
+	Name  string
+	KeyID uint64
 }
 
 func (o NodeOptions) withDefaults() NodeOptions {
@@ -85,12 +97,14 @@ type NodeMonitor struct {
 	mu     sync.Mutex
 	state  map[string]*nodeState
 	runCtx context.Context
+	// mismatch maps an invited node's name to the tailnet name it joined as.
+	mismatch map[string]string
 }
 
 // NewNodeMonitor builds the monitor. self describes the hub's own node and
 // must carry its name; local collects its metrics.
 func NewNodeMonitor(inv *Inventory, self *pb.NodeInfo, local *node.Collector, opts NodeOptions) *NodeMonitor {
-	m := &NodeMonitor{opts: opts.withDefaults(), inv: inv, local: local, self: self, state: map[string]*nodeState{}}
+	m := &NodeMonitor{opts: opts.withDefaults(), inv: inv, local: local, self: self, state: map[string]*nodeState{}, mismatch: map[string]string{}}
 	m.fetchRemote = m.fetchHTTP
 	return m
 }
@@ -148,6 +162,51 @@ func (m *NodeMonitor) pollAll(ctx context.Context) {
 		}
 	}
 	m.mu.Unlock()
+	m.checkInvited(ctx, targets)
+}
+
+// checkInvited finds invited nodes that enrolled under a different tailnet
+// name than they were invited as.
+func (m *NodeMonitor) checkInvited(ctx context.Context, targets []*pb.NodeInfo) {
+	if m.opts.Peers == nil {
+		return
+	}
+	var invited []*pb.NodeInfo
+	for _, n := range targets {
+		if n.Invited && n.InviteKeyId != 0 {
+			invited = append(invited, n)
+		}
+	}
+	m.mu.Lock()
+	for name := range m.mismatch {
+		if !slices.ContainsFunc(invited, func(n *pb.NodeInfo) bool { return n.Name == name }) {
+			delete(m.mismatch, name)
+		}
+	}
+	m.mu.Unlock()
+	if len(invited) == 0 {
+		return
+	}
+	peers, err := m.opts.Peers(ctx)
+	if err != nil {
+		log.Printf("node invites: list tailnet peers: %v", err)
+		return
+	}
+	for _, n := range invited {
+		i := slices.IndexFunc(peers, func(p Peer) bool { return p.KeyID == n.InviteKeyId })
+		if i < 0 || peers[i].Name == n.Name {
+			continue
+		}
+		as := peers[i].Name
+		m.mu.Lock()
+		prev := m.mismatch[n.Name]
+		m.mismatch[n.Name] = as
+		m.mu.Unlock()
+		if prev != as && m.publish != nil {
+			p, _ := structpb.NewStruct(map[string]any{"invited_as": n.Name, "joined_as": as})
+			m.publish("node.name_mismatch", n.Name, p)
+		}
+	}
 }
 
 func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
@@ -168,6 +227,11 @@ func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
 		return
 	}
 
+	joined := err == nil && n.Invited
+	if joined {
+		n = proto.Clone(n).(*pb.NodeInfo)
+		n.Invited, n.InviteKeyId = false, 0
+	}
 	now := m.opts.Now()
 	m.mu.Lock()
 	st := m.state[n.Name]
@@ -188,6 +252,17 @@ func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
 	}
 	m.mu.Unlock()
 
+	if joined {
+		if cerr := m.inv.ClearInvited(n.Name); cerr != nil {
+			log.Printf("node %s: clear invited: %v", n.Name, cerr)
+		} else if m.publish != nil {
+			p, _ := structpb.NewStruct(map[string]any{"address": n.Address})
+			m.publish("node.joined", n.Name, p)
+		}
+		m.mu.Lock()
+		delete(m.mismatch, n.Name)
+		m.mu.Unlock()
+	}
 	if err == nil && !n.Local {
 		if perr := m.inv.SetPlatform(n.Name, metrics.Os, metrics.Arch); perr != nil {
 			log.Printf("node %s: record platform: %v", n.Name, perr)
@@ -283,6 +358,18 @@ func (m *NodeMonitor) Status(name string) (*pb.NodeStatus, error) {
 
 func (m *NodeMonitor) statusLocked(n *pb.NodeInfo, st *nodeState, now time.Time) *pb.NodeStatus {
 	s := &pb.NodeStatus{Node: n}
+	if n.Invited {
+		s.Freshness = pb.NodeFreshness_NODE_FRESHNESS_INVITED
+		s.Error = "invited, not yet joined"
+		if as := m.mismatch[n.Name]; as != "" {
+			s.Error = fmt.Sprintf("joined the tailnet as %q, not the invited name %q", as, n.Name)
+			s.Alerts = []*pb.NodeAlert{{
+				Kind: pb.AlertKind_ALERT_KIND_NAME_MISMATCH, Subject: as,
+				Message: fmt.Sprintf("invited as %q but joined as %q: `node rm %s`, then `node add %s --addr %s`", n.Name, as, n.Name, as, as),
+			}}
+		}
+		return s
+	}
 	if st == nil || !st.attempted {
 		s.Freshness = pb.NodeFreshness_NODE_FRESHNESS_UNSPECIFIED
 		s.Error = "awaiting first poll"
@@ -394,7 +481,11 @@ func (h *Hub) GetNode(_ context.Context, req *connect.Request[pb.GetNodeRequest]
 }
 
 func (h *Hub) AddNode(_ context.Context, req *connect.Request[pb.AddNodeRequest]) (*connect.Response[pb.NodeInfo], error) {
-	info, err := h.nodes.inv.Add(req.Msg.Node)
+	add := h.nodes.inv.Add
+	if req.Msg.Update {
+		add = h.nodes.inv.Upsert
+	}
+	info, err := add(req.Msg.Node)
 	if err != nil {
 		return nil, nodeErr(err)
 	}

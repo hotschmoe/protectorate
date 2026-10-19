@@ -31,6 +31,7 @@ const NodeFreshness$json = {
     {'1': 'NODE_FRESHNESS_FRESH', '2': 1},
     {'1': 'NODE_FRESHNESS_STALE', '2': 2},
     {'1': 'NODE_FRESHNESS_UNREACHABLE', '2': 3},
+    {'1': 'NODE_FRESHNESS_INVITED', '2': 4},
   ],
 };
 
@@ -38,7 +39,7 @@ const NodeFreshness$json = {
 final $typed_data.Uint8List nodeFreshnessDescriptor = $convert.base64Decode(
     'Cg1Ob2RlRnJlc2huZXNzEh4KGk5PREVfRlJFU0hORVNTX1VOU1BFQ0lGSUVEEAASGAoUTk9ERV'
     '9GUkVTSE5FU1NfRlJFU0gQARIYChROT0RFX0ZSRVNITkVTU19TVEFMRRACEh4KGk5PREVfRlJF'
-    'U0hORVNTX1VOUkVBQ0hBQkxFEAM=');
+    'U0hORVNTX1VOUkVBQ0hBQkxFEAMSGgoWTk9ERV9GUkVTSE5FU1NfSU5WSVRFRBAE');
 
 @$core.Deprecated('Use alertKindDescriptor instead')
 const AlertKind$json = {
@@ -48,6 +49,7 @@ const AlertKind$json = {
     {'1': 'ALERT_KIND_DISK_PERCENT', '2': 1},
     {'1': 'ALERT_KIND_MEM_PRESSURE', '2': 2},
     {'1': 'ALERT_KIND_UNREACHABLE', '2': 3},
+    {'1': 'ALERT_KIND_NAME_MISMATCH', '2': 4},
   ],
 };
 
@@ -55,7 +57,7 @@ const AlertKind$json = {
 final $typed_data.Uint8List alertKindDescriptor = $convert.base64Decode(
     'CglBbGVydEtpbmQSGgoWQUxFUlRfS0lORF9VTlNQRUNJRklFRBAAEhsKF0FMRVJUX0tJTkRfRE'
     'lTS19QRVJDRU5UEAESGwoXQUxFUlRfS0lORF9NRU1fUFJFU1NVUkUQAhIaChZBTEVSVF9LSU5E'
-    'X1VOUkVBQ0hBQkxFEAM=');
+    'X1VOUkVBQ0hBQkxFEAMSHAoYQUxFUlRfS0lORF9OQU1FX01JU01BVENIEAQ=');
 
 @$core.Deprecated('Use getMetricsRequestDescriptor instead')
 const GetMetricsRequest$json = {
@@ -510,6 +512,8 @@ const NodeInfo$json = {
     {'1': 'tier', '3': 7, '4': 1, '5': 9, '10': 'tier'},
     {'1': 'notes', '3': 8, '4': 1, '5': 9, '10': 'notes'},
     {'1': 'local', '3': 9, '4': 1, '5': 8, '10': 'local'},
+    {'1': 'invited', '3': 10, '4': 1, '5': 8, '10': 'invited'},
+    {'1': 'invite_key_id', '3': 11, '4': 1, '5': 4, '10': 'inviteKeyId'},
   ],
 };
 
@@ -518,7 +522,8 @@ final $typed_data.Uint8List nodeInfoDescriptor = $convert.base64Decode(
     'CghOb2RlSW5mbxISCgRuYW1lGAEgASgJUgRuYW1lEhgKB2FkZHJlc3MYAiABKAlSB2FkZHJlc3'
     'MSDgoCb3MYAyABKAlSAm9zEhIKBGFyY2gYBCABKAlSBGFyY2gSEgoEdGFncxgFIAMoCVIEdGFn'
     'cxIbCglzc2hfYWxpYXMYBiABKAlSCHNzaEFsaWFzEhIKBHRpZXIYByABKAlSBHRpZXISFAoFbm'
-    '90ZXMYCCABKAlSBW5vdGVzEhQKBWxvY2FsGAkgASgIUgVsb2NhbA==');
+    '90ZXMYCCABKAlSBW5vdGVzEhQKBWxvY2FsGAkgASgIUgVsb2NhbBIYCgdpbnZpdGVkGAogASgI'
+    'UgdpbnZpdGVkEiIKDWludml0ZV9rZXlfaWQYCyABKARSC2ludml0ZUtleUlk');
 
 @$core.Deprecated('Use nodeStatusDescriptor instead')
 const NodeStatus$json = {
@@ -639,13 +644,14 @@ const AddNodeRequest$json = {
       '6': '.protectorate.v1.NodeInfo',
       '10': 'node'
     },
+    {'1': 'update', '3': 2, '4': 1, '5': 8, '10': 'update'},
   ],
 };
 
 /// Descriptor for `AddNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List addNodeRequestDescriptor = $convert.base64Decode(
     'Cg5BZGROb2RlUmVxdWVzdBItCgRub2RlGAEgASgLMhkucHJvdGVjdG9yYXRlLnYxLk5vZGVJbm'
-    'ZvUgRub2Rl');
+    'ZvUgRub2RlEhYKBnVwZGF0ZRgCIAEoCFIGdXBkYXRl');
 
 @$core.Deprecated('Use removeNodeRequestDescriptor instead')
 const RemoveNodeRequest$json = {

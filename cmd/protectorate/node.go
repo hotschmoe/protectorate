@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -40,7 +41,7 @@ func localNodeName() string {
 }
 
 // attachNodes wires NodeService into h with this machine as the hub's node.
-func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []string, client *http.Client) error {
+func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []string, client *http.Client, peers func(context.Context) ([]hub.Peer, error)) error {
 	home, err := hub.Home()
 	if err != nil {
 		return err
@@ -54,7 +55,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 		return fmt.Errorf("write hosts.md: %w", err)
 	}
 	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch})
-	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client}))
+	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client, Peers: peers}))
 	local, err := node.NewJobs(filepath.Join(home, "local-jobs"), 1)
 	if err != nil {
 		return err
@@ -65,7 +66,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
 	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o))
-	c.AddCommand(nodeEnrollCmds()...)
+	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
 }
 

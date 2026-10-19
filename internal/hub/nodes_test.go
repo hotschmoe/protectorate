@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -397,5 +398,91 @@ func TestNodeServiceEndToEnd(t *testing.T) {
 	}
 	if _, err := cl.GetNode(ctx, connect.NewRequest(&pb.GetNodeRequest{Name: "peer"})); connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("get removed code = %v", connect.CodeOf(err))
+	}
+}
+
+func TestInvitedNodeLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	inv, err := OpenInventory(dir, testSelf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Address: "box", Tier: "family", Tags: []string{"pool-gpu"}, Invited: true, InviteKeyId: 7, Notes: "n"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Tier: "server", Invited: true, InviteKeyId: 8}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := inv.Get("box")
+	if got.Address != "box" || got.Tier != "server" || got.Notes != "n" || !got.Invited || got.InviteKeyId != 8 || len(got.Tags) != 0 {
+		t.Fatalf("upsert = %v", got)
+	}
+	reopened, err := OpenInventory(dir, testSelf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := reopened.Get("box"); !g.Invited || g.InviteKeyId != 8 {
+		t.Fatalf("invited state not persisted: %v", g)
+	}
+	if _, err := inv.Add(&pb.NodeInfo{Name: "box", Address: "box"}); !errors.Is(err, ErrNodeExists) {
+		t.Fatalf("Add over existing = %v", err)
+	}
+
+	fleet := &fakeFleet{now: time.Unix(1_000_000, 0), down: map[string]bool{"box": true}, calls: map[string]int{}}
+	var peers []Peer
+	m := NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}), NodeOptions{
+		Interval: time.Minute, Now: func() time.Time { return fleet.now },
+		Peers: func(context.Context) ([]Peer, error) { return peers, nil },
+	})
+	m.fetchRemote = fleet.fetch
+	var mu sync.Mutex
+	var events []string
+	m.publish = func(kind, subject string, _ *structpb.Struct) {
+		mu.Lock()
+		defer mu.Unlock()
+		if subject == "box" {
+			events = append(events, kind+" "+subject)
+		}
+	}
+	status := func() *pb.NodeStatus {
+		s, err := m.Status("box")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+
+	for range 4 {
+		fleet.now = fleet.now.Add(time.Minute)
+		m.pollAll(context.Background())
+	}
+	if s := status(); s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_INVITED || len(s.Alerts) != 0 {
+		t.Fatalf("invited node = %v %v", s.Freshness, s.Alerts)
+	}
+	if len(events) != 0 {
+		t.Fatalf("invited node raised events: %v", events)
+	}
+
+	peers = []Peer{{Name: "other", KeyID: 8}, {Name: "unrelated", KeyID: 3}}
+	m.pollAll(context.Background())
+	m.pollAll(context.Background())
+	s := status()
+	if s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_INVITED || len(s.Alerts) != 1 || s.Alerts[0].Kind != pb.AlertKind_ALERT_KIND_NAME_MISMATCH || s.Alerts[0].Subject != "other" || !strings.Contains(s.Error, "other") {
+		t.Fatalf("mismatch status = %v", s)
+	}
+	if n := slices.Index(events, "node.name_mismatch box"); n < 0 || slices.Index(events[n+1:], "node.name_mismatch box") >= 0 {
+		t.Fatalf("mismatch events = %v, want exactly one", events)
+	}
+
+	fleet.down["box"] = false
+	m.pollAll(context.Background())
+	if s := status(); s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH || s.Node.Invited || len(s.Alerts) != 1 {
+		t.Fatalf("joined node = %v invited=%v alerts=%v", s.Freshness, s.Node.Invited, s.Alerts)
+	}
+	if g, _ := inv.Get("box"); g.Invited || g.InviteKeyId != 0 {
+		t.Fatalf("invited not cleared: %v", g)
+	}
+	if !slices.Contains(events, "node.joined box") || !slices.Contains(events, "node.metrics box") {
+		t.Fatalf("events = %v", events)
 	}
 }

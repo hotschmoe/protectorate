@@ -47,7 +47,8 @@ service NodeAgentService {
 
 // NodeService runs on the hub: the inventory plus the latest metrics of each
 // node. Polls are announced on EventService as "node.metrics" (subject = node
-// name, payload = summary) and "node.unreachable".
+// name, payload = summary), "node.unreachable", "node.joined" (an invited
+// node answered its first poll) and "node.name_mismatch".
 service NodeService {
   // ListNodes returns every node with its latest metrics summary,
   // freshness and alerts.
@@ -204,6 +205,9 @@ enum NodeFreshness {
   // NODE_FRESHNESS_UNREACHABLE: no good poll within the stale window (or
   // ever). Cached metrics, if any, are old.
   NODE_FRESHNESS_UNREACHABLE = 3;
+  // NODE_FRESHNESS_INVITED: the node was invited and has never answered a
+  // poll. Not an outage: no unreachable alert or event is raised.
+  NODE_FRESHNESS_INVITED = 4;
 }
 
 enum AlertKind {
@@ -211,6 +215,9 @@ enum AlertKind {
   ALERT_KIND_DISK_PERCENT = 1;
   ALERT_KIND_MEM_PRESSURE = 2;
   ALERT_KIND_UNREACHABLE = 3;
+  // ALERT_KIND_NAME_MISMATCH: an invited node joined the tailnet under a
+  // different name than it was invited as, so the hub cannot reach it.
+  ALERT_KIND_NAME_MISMATCH = 4;
 }
 
 message NodeAlert {
@@ -238,6 +245,12 @@ message NodeInfo {
   string notes = 8;
   // local marks the hub's own node, which is not stored in the inventory.
   bool local = 9;
+  // invited marks a node whose enrollment key was issued but which has not
+  // answered a poll yet; the hub clears it on the first successful poll.
+  bool invited = 10;
+  // invite_key_id is the tailnet pre-auth key id issued for the invite, used
+  // to notice a node that joined under a different name.
+  uint64 invite_key_id = 11;
 }
 
 message NodeStatus {
@@ -264,6 +277,9 @@ message GetNodeRequest {
 
 message AddNodeRequest {
   NodeInfo node = 1;
+  // update replaces an existing record instead of failing with
+  // ALREADY_EXISTS; fields left empty keep their stored value.
+  bool update = 2;
 }
 
 message RemoveNodeRequest {

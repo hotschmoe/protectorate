@@ -441,3 +441,25 @@ func TestRotatingLog(t *testing.T) {
 		t.Errorf("reopen did not append: %q", got)
 	}
 }
+
+func TestNodeEnrolledWith(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want uint64
+	}{
+		{"preauth", `{"id":"4","givenName":"a","preAuthKey":{"id":"12","key":"x"}}`, 12},
+		{"interactive login", `{"id":"5","givenName":"b"}`, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var n Node
+			if err := json.Unmarshal([]byte(tt.raw), &n); err != nil {
+				t.Fatal(err)
+			}
+			if got := n.EnrolledWith(); got != tt.want {
+				t.Fatalf("EnrolledWith = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

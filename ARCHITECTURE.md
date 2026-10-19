@@ -125,6 +125,12 @@ protectorate node revoke|renew <name>
 protectorate client invite --name phone      # stock Tailscale app, tag:client
 ```
 
+- `node invite` also upserts the node into `nodes.yaml` (address = name, tier,
+  `pool-X` tags) through the running hub, so `node ls` shows it as `invited, not
+  yet joined` (freshness INVITED: no unreachable alert or event). The first good
+  poll clears the flag and emits `node.joined`. The hub matches headscale nodes
+  to invites by pre-auth key id; one that enrolled under another name raises a
+  `name-mismatch` alert and a `node.name_mismatch` event.
 - Config lives in `tailnet/config.json`; headscale's `headscale.yaml` (JSON,
   which is valid YAML) and `policy.json` are regenerated from it on every start.
   Embedded DERP + STUN are on, Tailscale's public DERP map is off

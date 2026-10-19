@@ -180,8 +180,9 @@ func (a *Admin) ensureUser(ctx context.Context) error {
 	return nil
 }
 
-// CreateKey issues a single-use preauth key that enrolls a node with tags.
-func (a *Admin) CreateKey(ctx context.Context, tags []string, ttl time.Duration) (string, error) {
+// CreateKey issues a single-use preauth key that enrolls a node with tags and
+// returns it with headscale's id for it.
+func (a *Admin) CreateKey(ctx context.Context, tags []string, ttl time.Duration) (string, uint64, error) {
 	req := map[string]any{
 		"user":       strconv.FormatUint(a.userID, 10),
 		"reusable":   false,
@@ -191,16 +192,17 @@ func (a *Admin) CreateKey(ctx context.Context, tags []string, ttl time.Duration)
 	}
 	var res struct {
 		PreAuthKey struct {
+			ID  uint64 `json:"id,string"`
 			Key string `json:"key"`
 		} `json:"preAuthKey"`
 	}
 	if err := a.call(ctx, http.MethodPost, "/api/v1/preauthkey", req, &res); err != nil {
-		return "", fmt.Errorf("create preauth key: %w", err)
+		return "", 0, fmt.Errorf("create preauth key: %w", err)
 	}
 	if res.PreAuthKey.Key == "" {
-		return "", errors.New("create preauth key: empty key in response")
+		return "", 0, errors.New("create preauth key: empty key in response")
 	}
-	return res.PreAuthKey.Key, nil
+	return res.PreAuthKey.Key, res.PreAuthKey.ID, nil
 }
 
 // Node is a machine registered with headscale.
@@ -211,6 +213,18 @@ type Node struct {
 	Tags      []string `json:"tags"`
 	Online    bool     `json:"online"`
 	Expiry    string   `json:"expiry"`
+	// PreAuthKey is the key the node enrolled with, nil for other logins.
+	PreAuthKey *struct {
+		ID uint64 `json:"id,string"`
+	} `json:"preAuthKey"`
+}
+
+// EnrolledWith returns the id of the pre-auth key n enrolled with, or 0.
+func (n Node) EnrolledWith() uint64 {
+	if n.PreAuthKey == nil {
+		return 0
+	}
+	return n.PreAuthKey.ID
 }
 
 func (a *Admin) Nodes(ctx context.Context) ([]Node, error) {
@@ -270,21 +284,21 @@ func SanitizeLabel(s string) string {
 }
 
 // Invite creates a single-use key for a machine called name, refusing names
-// already registered.
-func (a *Admin) Invite(ctx context.Context, name string, tags []string, ttl time.Duration) (string, error) {
+// already registered, and returns the key with its headscale id.
+func (a *Admin) Invite(ctx context.Context, name string, tags []string, ttl time.Duration) (string, uint64, error) {
 	if !validLabel.MatchString(name) {
-		return "", fmt.Errorf("name %q must be a lowercase DNS label (a-z, 0-9, -)", name)
+		return "", 0, fmt.Errorf("name %q must be a lowercase DNS label (a-z, 0-9, -)", name)
 	}
 	if ttl <= 0 {
-		return "", errors.New("expiry must be positive")
+		return "", 0, errors.New("expiry must be positive")
 	}
 	nodes, err := a.Nodes(ctx)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	for _, n := range nodes {
 		if n.GivenName == name || n.Name == name || name == a.cfg.HubName {
-			return "", fmt.Errorf("name %q is already in use (revoke it first)", name)
+			return "", 0, fmt.Errorf("name %q is already in use (revoke it first)", name)
 		}
 	}
 	return a.CreateKey(ctx, tags, ttl)

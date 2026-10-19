@@ -45,7 +45,7 @@ type member struct {
 // node port behind the hub-only authorizer.
 func enroll(ctx context.Context, t *testing.T, a *tailnet.Admin, control, name string, tags []string, serve bool) member {
 	t.Helper()
-	key, err := a.Invite(ctx, name, tags, 5*time.Minute)
+	key, _, err := a.Invite(ctx, name, tags, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("invite %s: %v", name, err)
 	}

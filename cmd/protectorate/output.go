@@ -179,6 +179,8 @@ func nodeFreshnessLabel(s *pb.NodeStatus) string {
 		return "fresh"
 	case pb.NodeFreshness_NODE_FRESHNESS_STALE:
 		return "STALE" + age
+	case pb.NodeFreshness_NODE_FRESHNESS_INVITED:
+		return "invited, not yet joined"
 	case pb.NodeFreshness_NODE_FRESHNESS_UNREACHABLE:
 		if s.Metrics == nil {
 			return "UNREACHABLE (never seen)"
@@ -198,6 +200,8 @@ func alertLabel(alerts []*pb.NodeAlert) string {
 			parts = append(parts, "mem")
 		case pb.AlertKind_ALERT_KIND_UNREACHABLE:
 			parts = append(parts, "down")
+		case pb.AlertKind_ALERT_KIND_NAME_MISMATCH:
+			parts = append(parts, "name-mismatch:"+a.Subject)
 		}
 	}
 	return orDash(strings.Join(parts, ","))
@@ -257,6 +261,13 @@ func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
 			name, plat, cpuS, gpuS, memS, diskS, contS, nodeFreshnessLabel(s), alertLabel(s.Alerts))
 	}
 	fmt.Fprintln(w, "\n* the hub's own node")
+	for _, s := range r.Nodes {
+		for _, a := range s.Alerts {
+			if a.Kind == pb.AlertKind_ALERT_KIND_NAME_MISMATCH {
+				fmt.Fprintf(w, "warning: %s\n", a.Message)
+			}
+		}
+	}
 }
 
 func writeNodeStatus(w io.Writer, s *pb.NodeStatus) {

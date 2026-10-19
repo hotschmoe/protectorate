@@ -446,6 +446,8 @@ func (m *NodeMonitor) namedNode(name string, gpu *int, allowFamily bool) error {
 	switch {
 	case st.Freshness == pb.NodeFreshness_NODE_FRESHNESS_UNREACHABLE:
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is unreachable", name))
+	case st.Freshness == pb.NodeFreshness_NODE_FRESHNESS_INVITED:
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is invited but has not joined yet", name))
 	case st.Node.Tier == TierFamily && !allowFamily:
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is tier family: set allow_family to use it", name))
 	}

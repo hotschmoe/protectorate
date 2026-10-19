@@ -128,7 +128,8 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
-/// name, payload = summary) and "node.unreachable".
+/// name, payload = summary), "node.unreachable", "node.joined" (an invited
+/// node answered its first poll) and "node.name_mismatch".
 extension type NodeServiceClient (connect.Transport _transport) {
   /// ListNodes returns every node with its latest metrics summary,
   /// freshness and alerts.
