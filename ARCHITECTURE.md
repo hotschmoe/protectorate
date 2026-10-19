@@ -229,9 +229,18 @@ Design:
   elapses, when the hub removes them and publishes `session.removed`. The
   WebSocket terminal shows an exited pane read-only with a notice frame.
 - Mounts:
-  - the workspace is read-write;
-  - toolchains and harness installs (`~/.local`, `~/.nvm`, ...) are read-only
-    at the same paths;
+  - the workspace is read-write. Inside the state directory only the sleeve's
+    own `workspaces/<name>` (or `orchestrator/` for `poe`) is allowed; the
+    state directory, the shared `workspaces/` parent and other sleeves'
+    directories are refused. Home, the user home and credential dirs are
+    symlink-resolved before any comparison;
+  - toolchains (`~/.local/{bin,lib,opt,go}`, `~/.nvm`, `~/.cargo/bin`,
+    `~/.rustup`, ...) are read-only at the same paths. `~/.cargo` and
+    `~/.local/share` as a whole are not mounted; a harness binary's symlink
+    chain is mounted hop by hop and refused if a hop is a credential dir
+    (so a `grok` that resolves into `~/.grok/bin` is unavailable in sleeves).
+    `~/.cargo/credentials*` is masked with `/dev/null` if a mounted tool dir
+    contains it;
   - each sleeve has its own config dirs;
   - shared credential **dirs** are laid out per the credential table below.
 - Known gap: bwrap shares the host network, so two sleeves' dev servers can
