@@ -335,6 +335,13 @@ func TestNodeServiceEndToEnd(t *testing.T) {
 	defer func() { cancel(); <-done }()
 
 	cl := protectoratev1connect.NewNodeServiceClient(&http.Client{Transport: bearer{testToken}}, srv.URL)
+	sctx, scancel := context.WithTimeout(ctx, 10*time.Second)
+	defer scancel()
+	sub, err := protectoratev1connect.NewEventServiceClient(&http.Client{Transport: bearer{testToken}}, srv.URL).
+		Subscribe(sctx, connect.NewRequest(&pb.SubscribeRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := func(n *pb.NodeInfo) *connect.Request[pb.AddNodeRequest] {
 		return connect.NewRequest(&pb.AddNodeRequest{Node: n})
 	}
@@ -364,6 +371,17 @@ func TestNodeServiceEndToEnd(t *testing.T) {
 	}
 	if peer == nil || peer.Metrics.GetMemory() == nil || peer.Node.Os == "" {
 		t.Fatalf("peer never became fresh: %v", peer)
+	}
+
+	var sawEvent bool
+	for sub.Receive() {
+		if e := sub.Msg(); e.Kind == "node.metrics" && e.Subject == "peer" {
+			sawEvent = e.Payload.Fields["mem_percent"] != nil && e.Payload.Fields["freshness"].GetStringValue() == "fresh"
+			break
+		}
+	}
+	if !sawEvent {
+		t.Fatalf("no node.metrics event for peer: %v", sub.Err())
 	}
 
 	list, err := cl.ListNodes(ctx, connect.NewRequest(&pb.ListNodesRequest{}))

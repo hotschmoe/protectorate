@@ -359,6 +359,10 @@ func filesystemMetrics(ctx context.Context) ([]*pb.FilesystemMetrics, []error) {
 			defer cancel()
 			ch := make(chan result, 1)
 			go func() {
+				if fi, err := os.Stat(p.Mountpoint); err == nil && !fi.IsDir() {
+					ch <- result{}
+					return
+				}
 				u, err := disk.UsageWithContext(uctx, p.Mountpoint)
 				if err != nil {
 					ch <- result{err: fmt.Errorf("%s: %w", p.Mountpoint, err)}
@@ -383,6 +387,9 @@ func filesystemMetrics(ctx context.Context) ([]*pb.FilesystemMetrics, []error) {
 	for _, r := range results {
 		if r.err != nil {
 			errs = append(errs, r.err)
+			continue
+		}
+		if r.fs == nil {
 			continue
 		}
 		all = append(all, r.fs)
