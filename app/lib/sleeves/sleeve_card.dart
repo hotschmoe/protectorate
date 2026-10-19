@@ -5,7 +5,39 @@ import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../nodes/node_view.dart';
 import '../theme/tokens.dart';
+import '../vfd/meter.dart';
+import '../vfd/panel.dart';
 import 'sleeve_info.dart';
+
+ChatState sleeveState(Sleeve s) {
+  if (s.state == SleeveState.SLEEVE_STATE_EXITED) {
+    return ChatState.CHAT_STATE_EXITED;
+  }
+  return s.hasChat() ? s.chat.state : ChatState.CHAT_STATE_UNSPECIFIED;
+}
+
+class SleeveStateLamp extends StatelessWidget {
+  const SleeveStateLamp({super.key, required this.sleeve, this.big = false});
+
+  final Sleeve sleeve;
+  final bool big;
+
+  @override
+  Widget build(BuildContext context) {
+    final st = sleeveState(sleeve);
+    if (st != ChatState.CHAT_STATE_UNSPECIFIED) {
+      return StateLamp(state: st, big: big);
+    }
+    if (sleeve.state == SleeveState.SLEEVE_STATE_RUNNING) {
+      return StateLamp(
+        state: ChatState.CHAT_STATE_IDLE,
+        label: 'Running',
+        big: big,
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
 
 class SleeveCard extends StatelessWidget {
   const SleeveCard({
@@ -14,27 +46,21 @@ class SleeveCard extends StatelessWidget {
     required this.now,
     required this.onOpen,
     required this.onKill,
+    this.selected = false,
+    this.compact = false,
   });
 
   final Sleeve sleeve;
   final DateTime now;
   final VoidCallback onOpen;
   final VoidCallback onKill;
-
-  ChatState get _state {
-    if (sleeve.state == SleeveState.SLEEVE_STATE_EXITED) {
-      return ChatState.CHAT_STATE_EXITED;
-    }
-    return sleeve.hasChat()
-        ? sleeve.chat.state
-        : ChatState.CHAT_STATE_UNSPECIFIED;
-  }
+  final bool selected;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    final accent = Tokens.of(context).model(
+    final t = Tokens.of(context);
+    final accent = t.model(
       sleeve.harness,
       sleeveProvider(sleeve),
       local: isLocalModel(sleeve),
@@ -56,139 +82,146 @@ class SleeveCard extends StatelessWidget {
                 .clamp(0, 1 << 31),
           )
         : null;
-    return Card(
+    final attention =
+        sleeveState(sleeve) == ChatState.CHAT_STATE_AWAITING_APPROVAL;
+    return Panel(
       key: ValueKey('sleeve-${sleeve.name}'),
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      child: InkWell(
-        onTap: running ? onOpen : null,
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                key: const ValueKey('harness-accent'),
-                width: 6,
+      tone: selected ? Tone.info : (attention ? Tone.warn : null),
+      onTap: running ? onOpen : null,
+      padding: EdgeInsets.zero,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              key: const ValueKey('harness-accent'),
+              width: 4,
+              decoration: BoxDecoration(
                 color: accent.fg,
+                boxShadow: t.boxGlow(accent.fg, radius: 8),
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(Tokens.gap),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              sleeve.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            sleeve.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.title(),
                           ),
-                          if (_state != ChatState.CHAT_STATE_UNSPECIFIED)
-                            StatusPill(state: _state)
-                          else if (running)
-                            const StatusPill(
-                              state: ChatState.CHAT_STATE_IDLE,
-                              label: 'Running',
-                            ),
+                        ),
+                        const SizedBox(width: 8),
+                        SleeveStateLamp(sleeve: sleeve),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        HarnessBadge(
+                          harness: sleeve.harness,
+                          provider: sleeveProvider(sleeve),
+                          local: isLocalModel(sleeve),
+                        ),
+                        if (model.isNotEmpty)
+                          Text(model, style: t.data(t.p.emph)),
+                        if (isLocalModel(sleeve)) const LocalModelBadge(),
+                        Text(chatMode ? 'CHAT' : 'TERMINAL', style: t.legend()),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: workspaceName, style: t.data(t.p.lit)),
+                          if (uptime != null)
+                            TextSpan(text: '  up $uptime', style: t.small()),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          HarnessBadge(
-                            harness: sleeve.harness,
-                            provider: sleeveProvider(sleeve),
-                            local: isLocalModel(sleeve),
-                          ),
-                          if (model.isNotEmpty)
-                            Text(model, style: text.labelMedium),
-                          if (isLocalModel(sleeve)) const LocalModelBadge(),
-                          Text(
-                            chatMode ? 'chat' : 'terminal',
-                            style: text.labelSmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '$workspaceName${uptime == null ? '' : '  up $uptime'}',
-                        style: text.bodySmall,
-                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (!compact)
                       Text(
                         sleeve.workspace,
                         overflow: TextOverflow.ellipsis,
-                        style: text.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
+                        style: t.small(),
                       ),
-                      if (sleeve.hasChat() &&
-                          sleeve.chat.contextWindow > 0) ...[
-                        const SizedBox(height: 8),
-                        ContextMeter(
-                          tokens: sleeve.chat.contextTokens.toInt(),
-                          window: sleeve.chat.contextWindow.toInt(),
+                    if (sleeve.hasChat() && sleeve.chat.contextWindow > 0) ...[
+                      const SizedBox(height: 10),
+                      ContextMeter(
+                        tokens: sleeve.chat.contextTokens.toInt(),
+                        window: sleeve.chat.contextWindow.toInt(),
+                        width: null,
+                      ),
+                    ],
+                    if (running) ...[
+                      const SizedBox(height: 4),
+                      MeterRow(
+                        label: 'CPU',
+                        labelChars: 3,
+                        percent: cpuLimit > 0
+                            ? u.cpuPercent * 100 / cpuLimit
+                            : null,
+                        value:
+                            '${u.cpuPercent.toStringAsFixed(0)}%${cpuLimit > 0 ? ' / $cpuLimit%' : ''}',
+                        valueChars: 17,
+                      ),
+                      MeterRow(
+                        label: 'MEM',
+                        labelChars: 3,
+                        percent: memLimit > 0
+                            ? u.memoryCurrentBytes.toInt() * 100 / memLimit
+                            : null,
+                        value:
+                            '${formatBytes(u.memoryCurrentBytes.toInt())}${memLimit > 0 ? ' / ${formatBytes(memLimit)}' : ''}',
+                        valueChars: 17,
+                      ),
+                      if (u.oomKills > 0)
+                        Text(
+                          '${u.oomKills} OOM kills',
+                          style: t.small(t.p.alarm),
                         ),
-                      ],
-                      if (running) ...[
-                        const SizedBox(height: 6),
-                        PercentBar(
-                          label: 'CPU',
-                          percent: cpuLimit > 0
-                              ? u.cpuPercent * 100 / cpuLimit
-                              : null,
-                          trailing:
-                              '${u.cpuPercent.toStringAsFixed(0)}%${cpuLimit > 0 ? ' / $cpuLimit%' : ''}',
-                        ),
-                        PercentBar(
-                          label: 'MEM',
-                          percent: memLimit > 0
-                              ? u.memoryCurrentBytes.toInt() * 100 / memLimit
-                              : null,
-                          trailing:
-                              '${formatBytes(u.memoryCurrentBytes.toInt())}${memLimit > 0 ? ' / ${formatBytes(memLimit)}' : ''}',
-                        ),
-                        if (u.oomKills > 0)
-                          Text(
-                            '${u.oomKills} OOM kills',
-                            style: text.bodySmall?.copyWith(color: cs.error),
-                          ),
-                      ],
-                      OverflowBar(
-                        alignment: MainAxisAlignment.end,
+                    ],
+                    if (!compact) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          FilledButton.tonal(
+                          OutlinedButton(
+                            key: ValueKey('kill-${sleeve.name}'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: t.p.alarm,
+                              side: BorderSide(
+                                color: t.p.alarm.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            onPressed: onKill,
+                            child: const Text('KILL'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton(
                             key: ValueKey('open-${sleeve.name}'),
                             onPressed: running ? onOpen : null,
                             child: Text(
-                              chatMode ? 'Open chat' : 'Open terminal',
+                              chatMode ? 'OPEN CHAT' : 'OPEN TERMINAL',
                             ),
-                          ),
-                          TextButton(
-                            key: ValueKey('kill-${sleeve.name}'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: cs.error,
-                            ),
-                            onPressed: onKill,
-                            child: const Text('Kill'),
                           ),
                         ],
                       ),
                     ],
-                  ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

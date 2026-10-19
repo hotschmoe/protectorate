@@ -4,6 +4,9 @@ import 'package:xterm/xterm.dart';
 import '../gen/protectorate/v1/session.pb.dart';
 import '../hubs/hub_client.dart';
 import '../terminal/terminal_style.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/panel.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.client, required this.session});
@@ -67,19 +70,28 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     _lines += _step;
                     _load();
                   },
-            child: const Text('Load more'),
+            child: const Text('LOAD MORE'),
           ),
         ],
       ),
       body: Column(
         children: [
-          if (_loading) const LinearProgressIndicator(),
-          if (_error != null) ListTile(title: Text(_error!)),
+          if (_loading) const BusyBar(),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.all(Tokens.gap),
+              child: NoteStrip(_error!, tone: Tone.alarm),
+            ),
           Expanded(
-            child: TerminalView(
-              _terminal,
-              readOnly: true,
-              textStyle: terminalTextStyle,
+            child: Container(
+              color: Tokens.of(context).p.glass,
+              padding: const EdgeInsets.all(6),
+              child: TerminalView(
+                _terminal,
+                readOnly: true,
+                textStyle: terminalTextStyle,
+                theme: terminalTheme(context),
+              ),
             ),
           ),
         ],

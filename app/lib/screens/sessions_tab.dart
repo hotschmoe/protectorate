@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import '../gen/protectorate/v1/session.pb.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/panel.dart';
 import 'terminal_screen.dart';
 
 class SessionsTab extends StatefulWidget {
@@ -78,6 +81,7 @@ class _SessionsTabState extends State<SessionsTab> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('New session'),
+        scrollable: true,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -101,12 +105,12 @@ class _SessionsTabState extends State<SessionsTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: const Text('CANCEL'),
           ),
           FilledButton(
             key: const ValueKey('new-create'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Create'),
+            child: const Text('CREATE'),
           ),
         ],
       ),
@@ -150,44 +154,108 @@ class _SessionsTabState extends State<SessionsTab> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Tokens.of(context);
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
         key: const ValueKey('new-session'),
         onPressed: _create,
         icon: const Icon(Icons.add),
-        label: const Text('New session'),
+        label: const Text('NEW SESSION'),
       ),
       body: Column(
         children: [
-          if (_loading) const LinearProgressIndicator(),
-          if (_error != null) ListTile(title: Text('$_error')),
+          if (_loading) const BusyBar(),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: NoteStrip('$_error', tone: Tone.alarm),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(
+                  Tokens.gap,
+                  Tokens.gap,
+                  Tokens.gap,
+                  96,
+                ),
                 children: [
-                  for (final s in _sessions)
-                    ListTile(
-                      key: ValueKey('session-${s.name}'),
-                      leading: const Icon(Icons.terminal),
-                      title: Text(s.name),
-                      subtitle: Text(
-                        '${s.cwd}  (${s.attachedClients} attached)',
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: Tokens.contentMaxWidth,
                       ),
-                      onTap: () => _open(s.name),
-                      trailing: IconButton(
-                        tooltip: 'Kill',
-                        icon: const Icon(Icons.stop_circle_outlined),
-                        onPressed: () => _kill(s.name),
+                      child: Panel(
+                        legend: 'TERMINAL SESSIONS',
+                        trailing: Text(
+                          '${_sessions.length}',
+                          style: t.legend(),
+                        ),
+                        padding: const EdgeInsets.all(4),
+                        child: _sessions.isEmpty
+                            ? Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Text(
+                                  _loading ? '' : 'NO SESSIONS',
+                                  style: t.legend(),
+                                ),
+                              )
+                            : Column(
+                                children: [
+                                  for (var i = 0; i < _sessions.length; i++)
+                                    _row(t, i, _sessions[i]),
+                                ],
+                              ),
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _row(Tokens t, int i, Session s) {
+    final attached = s.attachedClients;
+    return InkWell(
+      key: ValueKey('session-${s.name}'),
+      borderRadius: BorderRadius.circular(Tokens.innerRadius),
+      onTap: () => _open(s.name),
+      child: BarRow(
+        index: i,
+        padding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
+        child: Row(
+          children: [
+            Lamp(tone: Tone.ok, on: attached > 0),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name, style: t.data(t.p.emph)),
+                  Text(
+                    s.cwd,
+                    style: t.small(),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Text('$attached ATTACHED', style: t.legend()),
+            IconButton(
+              tooltip: 'Kill',
+              color: t.p.alarm,
+              icon: const Icon(Icons.stop_circle_outlined),
+              onPressed: () => _kill(s.name),
+            ),
+          ],
+        ),
       ),
     );
   }

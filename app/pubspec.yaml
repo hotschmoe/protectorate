@@ -73,6 +73,11 @@ flutter:
           weight: 700
         - asset: assets/fonts/JetBrainsMonoNL-Italic.ttf
           style: italic
+    - family: DSEG7 Classic
+      fonts:
+        - asset: assets/fonts/DSEG7Classic-Regular.ttf
+        - asset: assets/fonts/DSEG7Classic-Bold.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:

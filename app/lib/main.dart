@@ -13,6 +13,7 @@ import 'screens/hub_shell.dart';
 import 'screens/hubs_screen.dart';
 import 'screens/pair_dialog.dart';
 import 'theme/tokens.dart';
+import 'vfd/panel.dart';
 
 const _e2eAutoConfirm = bool.fromEnvironment('E2E_AUTOCONFIRM');
 
@@ -135,6 +136,7 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
       themeMode: ThemeMode.system,
       theme: appTheme(Brightness.light),
       darkTheme: appTheme(Brightness.dark),
+      builder: (context, child) => WarmUp(child: child ?? const SizedBox()),
       home: HubsScreen(store: widget.store, clientFactory: _factory),
     );
   }

@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
-
-const warnPercent = 75.0;
-const critPercent = 90.0;
+import '../theme/tokens.dart';
+import '../vfd/meter.dart';
 
 String formatBytes(num bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
@@ -202,137 +201,46 @@ List<AlertBadge> alertBadges(NodeStatus s) {
   return out;
 }
 
-class Severity {
-  const Severity(this.fill, this.container, this.onContainer);
-
-  final Color fill;
-  final Color container;
-  final Color onContainer;
-}
-
-Severity severityFor(BuildContext context, double? percent) {
-  final cs = Theme.of(context).colorScheme;
-  final dark = Theme.of(context).brightness == Brightness.dark;
-  if (percent != null && percent >= critPercent) {
-    return Severity(cs.error, cs.errorContainer, cs.onErrorContainer);
-  }
-  if (percent != null && percent >= warnPercent) {
-    return dark
-        ? const Severity(
-            Color(0xFFFFB74D),
-            Color(0xFF5C3A00),
-            Color(0xFFFFE0B2),
-          )
-        : const Severity(
-            Color(0xFFB26A00),
-            Color(0xFFFFE0B2),
-            Color(0xFF4A2C00),
-          );
-  }
-  return Severity(cs.primary, cs.secondaryContainer, cs.onSecondaryContainer);
-}
-
-class PercentBar extends StatelessWidget {
-  const PercentBar({
-    super.key,
-    required this.label,
-    required this.percent,
-    required this.trailing,
-    this.dim = false,
-    this.labelWidth = 44,
-    this.trailingWidth = 116,
-  });
-
-  final String label;
-  final double? percent;
-  final String trailing;
-  final bool dim;
-  final double labelWidth;
-  final double trailingWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final sev = severityFor(context, percent);
-    final style = Theme.of(context).textTheme.bodySmall!;
-    final fg = dim ? cs.onSurfaceVariant.withValues(alpha: 0.7) : cs.onSurface;
-    final fill = dim ? cs.outline : sev.fill;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          SizedBox(
-            width: labelWidth,
-            child: Text(
-              label,
-              style: style.copyWith(color: cs.onSurfaceVariant),
-            ),
-          ),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: SizedBox(
-                height: 8,
-                child: LinearProgressIndicator(
-                  value: ((percent ?? 0) / 100).clamp(0.0, 1.0),
-                  color: fill,
-                  backgroundColor: cs.surfaceContainerHighest,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: trailingWidth,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                trailing,
-                textAlign: TextAlign.end,
-                overflow: TextOverflow.ellipsis,
-                style: style.copyWith(
-                  color: fg,
-                  fontWeight: (percent ?? 0) >= critPercent && !dim
-                      ? FontWeight.w700
-                      : null,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class StatusBadge extends StatelessWidget {
-  const StatusBadge({super.key, required this.text, required this.sev});
-
-  final String text;
-  final Severity sev;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: sev.container,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.labelSmall!.copyWith(
-          color: sev.onContainer,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
 String harnessLabel(Harness h) =>
     h.name.replaceFirst('HARNESS_', '').toLowerCase();
+
+// Samples a client has seen while watching, per node; the hub keeps no
+// history, so graphs start empty and fill as polls arrive.
+class NodeHistory {
+  NodeHistory({this.capacity = 72});
+
+  final int capacity;
+  final _cpu = <String, List<double?>>{};
+  final _mem = <String, List<double?>>{};
+  final _last = <String, DateTime>{};
+
+  void record(NodeStatus s) {
+    if (!s.hasMetrics() ||
+        s.freshness == NodeFreshness.NODE_FRESHNESS_UNREACHABLE) {
+      return;
+    }
+    final name = s.node.name;
+    final m = s.metrics;
+    if (m.hasCollectedAt()) {
+      final at = m.collectedAt.toDateTime();
+      if (_last[name] == at) return;
+      _last[name] = at;
+    }
+    void add(Map<String, List<double?>> into, double v) {
+      final list = into.putIfAbsent(name, () => []);
+      list.add(v);
+      if (list.length > capacity) list.removeAt(0);
+    }
+
+    add(_cpu, m.cpu.usagePercent);
+    add(_mem, m.memory.usedPercent);
+  }
+
+  void recordAll(Iterable<NodeStatus> nodes) => nodes.forEach(record);
+
+  List<double?> cpu(String name) => List.unmodifiable(_cpu[name] ?? const []);
+  List<double?> mem(String name) => List.unmodifiable(_mem[name] ?? const []);
+}
 
 class SleeveRow extends StatelessWidget {
   const SleeveRow({super.key, required this.sleeve, this.dim = false});
@@ -342,56 +250,67 @@ class SleeveRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
+    final t = Tokens.of(context);
     final u = sleeve.usage;
     final exited = sleeve.state == SleeveState.SLEEVE_STATE_EXITED;
     final limit = sleeve.limits.memoryBytes.toInt();
     final memPct = limit > 0
         ? u.memoryCurrentBytes.toInt() * 100 / limit
         : null;
+    final accent = t.harness(sleeve.harness).fg;
     return Padding(
       key: ValueKey('sleeve-${sleeve.name}'),
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Expanded(
-                child: Text(
-                  '${sleeve.name}  ${harnessLabel(sleeve.harness)}${exited ? '  (exited)' : ''}',
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: sleeve.name, style: t.data(t.p.emph)),
+                      TextSpan(
+                        text: '  ${harnessLabel(sleeve.harness).toUpperCase()}',
+                        style: t.legend(accent),
+                      ),
+                      if (exited)
+                        TextSpan(text: '  EXITED', style: t.legend(t.p.dim)),
+                    ],
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Text(
                 'ws ${u.workspaceDiskBytes > 0 ? formatBytes(u.workspaceDiskBytes.toInt()) : '-'}',
-                style: text.bodySmall,
+                style: t.small(),
               ),
             ],
           ),
           if (!exited) ...[
-            PercentBar(
+            const SizedBox(height: 2),
+            MeterRow(
               label: 'CPU',
               percent: sleeve.limits.cpuPercent > 0
                   ? u.cpuPercent * 100 / sleeve.limits.cpuPercent
                   : null,
-              trailing:
+              value:
                   '${u.cpuPercent.toStringAsFixed(0)}%${sleeve.limits.cpuPercent > 0 ? ' / ${sleeve.limits.cpuPercent}%' : ''}',
               dim: dim,
+              valueChars: 17,
             ),
-            PercentBar(
+            MeterRow(
               label: 'MEM',
               percent: memPct,
-              trailing:
+              value:
                   '${formatBytes(u.memoryCurrentBytes.toInt())}${limit > 0 ? ' / ${formatBytes(limit)}' : ''}',
               dim: dim,
+              valueChars: 17,
             ),
             Text(
               'peak ${formatBytes(u.memoryPeakBytes.toInt())}  ${u.pids} pids${u.oomKills > 0 ? '  ${u.oomKills} OOM kills' : ''}',
-              style: text.bodySmall?.copyWith(
-                color: u.oomKills > 0 ? cs.error : cs.onSurfaceVariant,
-              ),
+              style: t.small(u.oomKills > 0 ? t.p.alarm : null),
             ),
           ],
         ],

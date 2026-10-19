@@ -8,6 +8,10 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
+import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
+import '../vfd/meter.dart';
+import '../vfd/panel.dart';
 import 'node_detail_screen.dart';
 
 const nodeEventKinds = {'node.metrics', 'node.unreachable'};
@@ -20,6 +24,7 @@ class NodesTab extends StatefulWidget {
     required this.feed,
     this.now,
     this.pollInterval = const Duration(seconds: 30),
+    this.history,
   });
 
   final HubProfile hub;
@@ -27,6 +32,7 @@ class NodesTab extends StatefulWidget {
   final EventFeed feed;
   final DateTime Function()? now;
   final Duration pollInterval;
+  final NodeHistory? history;
 
   @override
   State<NodesTab> createState() => _NodesTabState();
@@ -41,6 +47,8 @@ class _NodesTabState extends State<NodesTab> {
   Timer? _poll;
   Timer? _tick;
   Timer? _debounce;
+
+  late final NodeHistory _history = widget.history ?? NodeHistory();
 
   DateTime _now() => (widget.now ?? DateTime.now)();
 
@@ -71,6 +79,7 @@ class _NodesTabState extends State<NodesTab> {
   Future<void> _refresh() async {
     try {
       final r = await widget.client.node.listNodes(ListNodesRequest());
+      _history.recordAll(r.nodes);
       if (mounted) {
         setState(() {
           _nodes = sortNodes(r.nodes);
@@ -94,6 +103,7 @@ class _NodesTabState extends State<NodesTab> {
           feed: widget.feed,
           name: s.node.name,
           now: widget.now,
+          history: _history,
         ),
       ),
     );
@@ -101,32 +111,42 @@ class _NodesTabState extends State<NodesTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const LinearProgressIndicator();
+    final t = Tokens.of(context);
+    if (_loading) return const BusyBar();
     return Column(
       children: [
         if (_error != null)
-          MaterialBanner(
-            content: Text('Showing the last list. Refresh failed: $_error'),
-            actions: [
-              TextButton(onPressed: _refresh, child: const Text('Retry')),
-            ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: NoteStrip(
+                    'Showing the last list. Refresh failed: $_error',
+                  ),
+                ),
+                TextButton(onPressed: _refresh, child: const Text('RETRY')),
+              ],
+            ),
           ),
         Expanded(
           child: _nodes.isEmpty
-              ? const Center(child: Text('No nodes.'))
+              ? Center(child: Text('NO NODES', style: t.legend()))
               : RefreshIndicator(
                   onRefresh: _refresh,
                   child: LayoutBuilder(
                     builder: (context, box) {
+                      const pad = Tokens.gap;
+                      const gap = Tokens.gap;
                       final w = box.maxWidth;
                       final cols = (w / 420).floor().clamp(1, 6);
-                      final cardW = (w - 16 - (cols - 1) * 8) / cols;
+                      final cardW = (w - 2 * pad - (cols - 1) * gap) / cols;
                       return SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(pad),
                         child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
+                          spacing: gap,
+                          runSpacing: gap,
                           children: [
                             for (final s in _nodes)
                               SizedBox(
@@ -135,6 +155,7 @@ class _NodesTabState extends State<NodesTab> {
                                   key: ValueKey('node-${s.node.name}'),
                                   status: s,
                                   age: statusAge(s, _receivedAt, _now()),
+                                  cpuHistory: _history.cpu(s.node.name),
                                   onTap: () => _open(s),
                                 ),
                               ),
@@ -165,18 +186,13 @@ List<NodeStatus> sortNodes(Iterable<NodeStatus> nodes) {
   return list;
 }
 
-Severity freshnessSeverity(BuildContext context, NodeFreshness f) {
-  final cs = Theme.of(context).colorScheme;
-  return switch (f) {
-    NodeFreshness.NODE_FRESHNESS_UNREACHABLE => Severity(
-      cs.error,
-      cs.errorContainer,
-      cs.onErrorContainer,
-    ),
-    NodeFreshness.NODE_FRESHNESS_STALE => severityFor(context, warnPercent),
-    _ => severityFor(context, 0),
-  };
-}
+Tone freshnessTone(NodeFreshness f) => switch (f) {
+  NodeFreshness.NODE_FRESHNESS_UNREACHABLE => Tone.alarm,
+  NodeFreshness.NODE_FRESHNESS_STALE => Tone.warn,
+  NodeFreshness.NODE_FRESHNESS_FRESH => Tone.ok,
+  NodeFreshness.NODE_FRESHNESS_INVITED => Tone.info,
+  _ => Tone.dim,
+};
 
 String freshnessLabel(NodeFreshness f, Duration age) => switch (f) {
   NodeFreshness.NODE_FRESHNESS_UNREACHABLE => 'UNREACHABLE',
@@ -186,202 +202,240 @@ String freshnessLabel(NodeFreshness f, Duration age) => switch (f) {
   _ => 'UNKNOWN',
 };
 
+class FreshnessLamp extends StatelessWidget {
+  const FreshnessLamp({super.key, required this.freshness, required this.age});
+
+  final NodeFreshness freshness;
+  final Duration age;
+
+  @override
+  Widget build(BuildContext context) => LampLegend(
+    label: freshnessLabel(freshness, age),
+    tone: freshnessTone(freshness),
+  );
+}
+
+class AlertStrip extends StatelessWidget {
+  const AlertStrip({super.key, required this.badges});
+
+  final List<AlertBadge> badges;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      for (final b in badges)
+        Annunciator(
+          key: ValueKey('alert-${b.label}'),
+          label: b.label,
+          tone: b.critical ? Tone.alarm : Tone.warn,
+        ),
+    ],
+  );
+}
+
+List<Widget> nodeMeters(
+  NodeMetrics m, {
+  required bool dim,
+  bool detail = false,
+}) {
+  final rows = <Widget>[
+    MeterRow(
+      key: const ValueKey('cpu'),
+      label: 'CPU',
+      percent: m.cpu.usagePercent,
+      value: '${formatPercent(m.cpu.usagePercent)}  ${m.cpu.logicalCores}c',
+      dim: dim,
+    ),
+    MeterRow(
+      key: const ValueKey('mem'),
+      label: 'MEM',
+      percent: m.memory.usedPercent,
+      value: detail
+          ? '${formatBytes(m.memory.usedBytes.toInt())} / ${formatBytes(m.memory.totalBytes.toInt())}'
+          : '${formatPercent(m.memory.usedPercent)}  ${formatBytes(m.memory.totalBytes.toInt())}',
+      dim: dim,
+    ),
+  ];
+  if (detail) {
+    if (m.memory.swapTotalBytes > 0) {
+      rows.add(
+        MeterRow(
+          key: const ValueKey('swap'),
+          label: 'SWAP',
+          percent: m.memory.swapUsedPercent,
+          value:
+              '${formatBytes(m.memory.swapUsedBytes.toInt())} / ${formatBytes(m.memory.swapTotalBytes.toInt())}',
+          dim: dim,
+        ),
+      );
+    }
+    return rows;
+  }
+  final gpu = summarizeGpus(m);
+  if (gpu != null) {
+    rows.add(
+      MeterRow(
+        key: const ValueKey('gpu'),
+        label: gpu.count > 1 ? 'GPU${gpu.count}' : 'GPU',
+        percent: gpu.utilPercent,
+        value: gpu.utilPercent == null
+            ? 'n/a'
+            : formatPercent(gpu.utilPercent!),
+        dim: dim,
+      ),
+    );
+    if (gpu.vramPercent != null) {
+      rows.add(
+        MeterRow(
+          key: const ValueKey('vram'),
+          label: 'VRAM',
+          percent: gpu.vramPercent,
+          value: '${formatBytes(gpu.vramUsed)} / ${formatBytes(gpu.vramTotal)}',
+          dim: dim,
+        ),
+      );
+    }
+  }
+  final worst = worstFilesystem(m);
+  if (worst != null) {
+    rows.add(
+      MeterRow(
+        key: const ValueKey('disk'),
+        label: 'DISK',
+        percent: worst.usedPercent,
+        value: '${formatPercent(worst.usedPercent)}  ${worst.mount}',
+        dim: dim,
+      ),
+    );
+  }
+  return rows;
+}
+
 class NodeCard extends StatelessWidget {
   const NodeCard({
     super.key,
     required this.status,
     required this.age,
     required this.onTap,
+    this.cpuHistory = const [],
   });
 
   final NodeStatus status;
   final Duration age;
   final VoidCallback onTap;
+  final List<double?> cpuHistory;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
+    final t = Tokens.of(context);
     final f = status.freshness;
     final down = f == NodeFreshness.NODE_FRESHNESS_UNREACHABLE;
     final stale = f == NodeFreshness.NODE_FRESHNESS_STALE;
     final m = status.hasMetrics() ? status.metrics : null;
-    final fsev = freshnessSeverity(context, f);
     final badges = alertBadges(status);
     final os = m != null && m.os.isNotEmpty ? m.os : status.node.os;
     final arch = m != null && m.arch.isNotEmpty ? m.arch : status.node.arch;
-    final dim = stale;
 
-    final rows = <Widget>[];
-    if (m != null && !down) {
-      rows.add(
-        PercentBar(
-          key: const ValueKey('cpu'),
-          label: 'CPU',
-          percent: m.cpu.usagePercent,
-          trailing:
-              '${formatPercent(m.cpu.usagePercent)}  ${m.cpu.logicalCores}c',
-          dim: dim,
-        ),
-      );
-      rows.add(
-        PercentBar(
-          key: const ValueKey('mem'),
-          label: 'MEM',
-          percent: m.memory.usedPercent,
-          trailing:
-              '${formatPercent(m.memory.usedPercent)}  ${formatBytes(m.memory.totalBytes.toInt())}',
-          dim: dim,
-        ),
-      );
-      final gpu = summarizeGpus(m);
-      if (gpu != null) {
-        rows.add(
-          PercentBar(
-            key: const ValueKey('gpu'),
-            label: gpu.count > 1 ? 'GPU x${gpu.count}' : 'GPU',
-            percent: gpu.utilPercent,
-            trailing: gpu.utilPercent == null
-                ? 'n/a'
-                : formatPercent(gpu.utilPercent!),
-            dim: dim,
-            labelWidth: 44,
-          ),
-        );
-        if (gpu.vramPercent != null) {
-          rows.add(
-            PercentBar(
-              key: const ValueKey('vram'),
-              label: 'VRAM',
-              percent: gpu.vramPercent,
-              trailing:
-                  '${formatBytes(gpu.vramUsed)} / ${formatBytes(gpu.vramTotal)}',
-              dim: dim,
-            ),
-          );
-        }
-      }
-      final worst = worstFilesystem(m);
-      if (worst != null) {
-        rows.add(
-          PercentBar(
-            key: const ValueKey('disk'),
-            label: 'DISK',
-            percent: worst.usedPercent,
-            trailing: '${formatPercent(worst.usedPercent)}  ${worst.mount}',
-            dim: dim,
-          ),
-        );
-      }
-    }
-
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: down ? cs.error : (stale ? fsev.fill : cs.outlineVariant),
-          width: down || stale ? 2 : 1,
-        ),
-      ),
-      color: down ? cs.errorContainer.withValues(alpha: 0.18) : null,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Panel(
+      tone: down ? Tone.alarm : (stale ? Tone.warn : null),
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Icon(
-                    down ? Icons.cloud_off : Icons.memory,
-                    size: 18,
-                    color: down ? cs.error : cs.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      status.node.name,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.titleSmall,
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        status.node.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.title(down ? t.p.alarm : null),
+                      ),
                     ),
-                  ),
-                  if (status.node.local) ...[
-                    const SizedBox(width: 6),
-                    Text('hub', style: text.labelSmall),
+                    if (status.node.local) ...[
+                      const SizedBox(width: 8),
+                      const Annunciator(label: 'HUB', tone: Tone.info),
+                    ],
                   ],
-                  const Spacer(),
-                  StatusBadge(
-                    key: const ValueKey('freshness'),
-                    text: freshnessLabel(f, age),
-                    sev: fsev,
+                ),
+              ),
+              const SizedBox(width: 8),
+              FreshnessLamp(
+                key: const ValueKey('freshness'),
+                freshness: f,
+                age: age,
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            [
+              if (os.isNotEmpty) '$os/$arch',
+              if (m != null && m.platform.isNotEmpty) m.platform,
+              if (m != null && !down)
+                'up ${formatUptime(m.uptimeSeconds.toInt())}',
+            ].join('  '),
+            style: t.small(),
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 10),
+          if (down)
+            Text(
+              [
+                m == null
+                    ? 'Never reached.'
+                    : 'No metrics since ${formatAge(age)}.',
+                if (status.error.isNotEmpty) status.error,
+              ].join(' '),
+              key: const ValueKey('down-note'),
+              style: t.data(t.p.alarm),
+            )
+          else if (m == null)
+            Text('No metrics yet.', style: t.small())
+          else ...[
+            ...nodeMeters(m, dim: stale),
+            if (cpuHistory.length > 1) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  SizedBox(
+                    width: 4 * (11 * Tokens.monoAdvance + 1.4) + 8,
+                    child: Text('HIST', style: t.legend()),
+                  ),
+                  Expanded(
+                    child: DotMatrixGraph(
+                      samples: cpuHistory,
+                      rows: 6,
+                      pitch: 5,
+                      dim: stale,
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Text(
-                [
-                  if (os.isNotEmpty) '$os/$arch',
-                  if (m != null && m.platform.isNotEmpty) m.platform,
-                  if (m != null && !down)
-                    'up ${formatUptime(m.uptimeSeconds.toInt())}',
-                ].join('  '),
-                style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 6),
-              if (down)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                    [
-                      m == null
-                          ? 'Never reached.'
-                          : 'No metrics since ${formatAge(age)}.',
-                      if (status.error.isNotEmpty) status.error,
-                    ].join(' '),
-                    key: const ValueKey('down-note'),
-                    style: text.bodySmall?.copyWith(color: cs.error),
-                  ),
-                )
-              else if (m == null)
-                Text('No metrics yet.', style: text.bodySmall)
-              else
-                ...rows,
-              if (m != null && !down)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    m.hasEngine()
-                        ? '${m.engine.kind}: ${m.engine.containers.length} containers'
-                        : 'no container engine',
-                    key: const ValueKey('containers'),
-                    style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                ),
-              if (badges.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      for (final b in badges)
-                        StatusBadge(
-                          key: ValueKey('alert-${b.label}'),
-                          text: b.label,
-                          sev: b.critical
-                              ? severityFor(context, 100)
-                              : severityFor(context, warnPercent),
-                        ),
-                    ],
-                  ),
-                ),
             ],
-          ),
-        ),
+          ],
+          if (m != null && !down)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                m.hasEngine()
+                    ? '${m.engine.kind}: ${m.engine.containers.length} containers'
+                    : 'no container engine',
+                key: const ValueKey('containers'),
+                style: t.small(),
+              ),
+            ),
+          if (badges.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: AlertStrip(badges: badges),
+            ),
+        ],
       ),
     );
   }

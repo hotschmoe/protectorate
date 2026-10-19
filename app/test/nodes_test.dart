@@ -379,7 +379,7 @@ void main() {
     expect(find.text('1.00 GB / 4.00 GB'), findsOneWidget);
     await t.tap(find.byKey(const ValueKey('kill-alice')));
     await t.pumpAndSettle();
-    await t.tap(find.text('Cancel'));
+    await t.tap(find.text('CANCEL'));
     await t.pumpAndSettle();
     expect(killed, isEmpty);
     await t.tap(find.byKey(const ValueKey('kill-alice')));
