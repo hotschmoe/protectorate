@@ -98,7 +98,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sleeves  map[string]*entry
-	pending  map[string]bool
+	pending  map[string]chan struct{}
 	diskBusy bool
 	runCtx   context.Context
 }
@@ -127,7 +127,7 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 	}
 	m := &Manager{
 		opts: opts, cfg: opts.Config, path: filepath.Join(opts.Config.Home, "sleeves.yaml"),
-		sleeves: map[string]*entry{}, pending: map[string]bool{}, runCtx: context.Background(),
+		sleeves: map[string]*entry{}, pending: map[string]chan struct{}{}, runCtx: context.Background(),
 	}
 	raw, err := os.ReadFile(m.path)
 	switch {
@@ -228,20 +228,43 @@ func (m *Manager) Get(name string) (Info, error) {
 	return e.Info, nil
 }
 
-// reserve claims name for an operation in progress.
-func (m *Manager) reserve(name string) error {
+// reserve claims name for an operation, waiting for one already in progress
+// (such as recording an exit) until ctx ends.
+func (m *Manager) reserve(ctx context.Context, name string) error {
+	for {
+		m.mu.Lock()
+		busy, ok := m.pending[name]
+		if !ok {
+			m.pending[name] = make(chan struct{})
+			m.mu.Unlock()
+			return nil
+		}
+		m.mu.Unlock()
+		select {
+		case <-busy:
+		case <-ctx.Done():
+			return fmt.Errorf("%w: %s is being changed: %w", ErrExists, name, ctx.Err())
+		}
+	}
+}
+
+// tryReserve claims name only if no operation is in progress.
+func (m *Manager) tryReserve(name string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.pending[name] {
-		return fmt.Errorf("%w: %s is being changed", ErrExists, name)
+	if _, ok := m.pending[name]; ok {
+		return false
 	}
-	m.pending[name] = true
-	return nil
+	m.pending[name] = make(chan struct{})
+	return true
 }
 
 func (m *Manager) release(name string) {
 	m.mu.Lock()
-	delete(m.pending, name)
+	if busy, ok := m.pending[name]; ok {
+		close(busy)
+		delete(m.pending, name)
+	}
 	m.mu.Unlock()
 }
 
@@ -263,7 +286,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err := req.Limits.validate(); err != nil {
 		return Info{}, err
 	}
-	if err := m.reserve(req.Name); err != nil {
+	if err := m.reserve(ctx, req.Name); err != nil {
 		return Info{}, err
 	}
 	defer m.release(req.Name)
@@ -399,7 +422,7 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 // Kill stops the sleeve's processes and forgets it. Its workspace and home
 // directory stay on disk.
 func (m *Manager) Kill(ctx context.Context, name string) error {
-	if err := m.reserve(name); err != nil {
+	if err := m.reserve(ctx, name); err != nil {
 		return err
 	}
 	defer m.release(name)
@@ -450,7 +473,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 	m.mu.Lock()
 	var out []gone
 	for name, e := range m.sleeves {
-		if e.State != Running || m.pending[name] {
+		if _, busy := m.pending[name]; e.State != Running || busy {
 			continue
 		}
 		s, ok := live[e.Session]
@@ -479,7 +502,7 @@ func exitLabel(s session.Session) string {
 
 // markExited records e as exited. s is its tmux session if one still exists.
 func (m *Manager) markExited(ctx context.Context, e *entry, s *session.Session) error {
-	if err := m.reserve(e.Name); err != nil {
+	if !m.tryReserve(e.Name) {
 		return nil
 	}
 	defer m.release(e.Name)
