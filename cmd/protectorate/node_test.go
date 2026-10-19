@@ -28,7 +28,7 @@ func TestNodeCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := hub.New("test", tok)
-	if err := attachNodes(h, time.Hour, "nt", nil); err != nil {
+	if err := attachNodes(h, time.Hour, "nt", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	hl, err := net.Listen("tcp", "127.0.0.1:0")
