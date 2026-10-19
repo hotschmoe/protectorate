@@ -13,7 +13,7 @@
     <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author"><Exec>
-    <Command>cmd.exe</Command>
-    <Arguments>/c &#34;set PROTECTORATE_HOME=C:\ProgramData\protectorate&amp;&amp; &#34;C:\Program Files\protectorate\protectorate.exe&#34; node serve --watch &#34;D:\build cache&#34;&#34;</Arguments>
+    <Command>C:\Program Files\protectorate\protectorate.exe</Command>
+    <Arguments>node serve --home C:\ProgramData\protectorate --watch &#34;D:\build cache&#34;</Arguments>
   </Exec></Actions>
 </Task>

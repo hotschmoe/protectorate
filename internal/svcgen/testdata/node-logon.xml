@@ -13,7 +13,7 @@
     <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author"><Exec>
-    <Command>cmd.exe</Command>
-    <Arguments>/c &#34;set PROTECTORATE_HOME=/home/ops/.protectorate&amp;&amp; &#34;/usr/local/bin/protectorate&#34; node serve --watch /var/cache/build&#34;</Arguments>
+    <Command>/usr/local/bin/protectorate</Command>
+    <Arguments>node serve --home /home/ops/.protectorate --watch /var/cache/build --hide-console</Arguments>
   </Exec></Actions>
 </Task>

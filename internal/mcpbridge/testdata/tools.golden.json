@@ -226,7 +226,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -268,7 +268,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -301,7 +301,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -334,7 +334,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -382,7 +382,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -415,7 +415,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -448,7 +448,7 @@
               "type": "boolean"
             },
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {

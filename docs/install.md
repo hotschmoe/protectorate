@@ -34,7 +34,37 @@ protectorate login --status               # logged in / missing, from file prese
 
 Relay fallback needs no domain or certificate. The hub runs its own DERP relay (TCP 7483, TLS with a self-signed certificate it generates in `tailnet/`) and STUN (UDP 3478). Clients trust the relay by the certificate hash carried in the DERP map, so nothing is installed on nodes or phones. Open TCP 7483 and UDP 3478 on the hub for anything outside the LAN; the `--server-url` host must be an address or name those clients can reach. Upgrading from a config without `derp_listen` needs no change (it defaults to `0.0.0.0:7483`); restart the hub. The stock Tailscale app needs a version that understands the `sha256-raw:` pin (current releases do).
 
-## Nodes
+## Install a node
+
+On the hub, `protectorate node invite <name>` prints the control URL and a single-use key (valid one hour by default). On the machine, run the release binary once:
+
+```
+# Windows (PowerShell, as the user who stays logged in; not elevated)
+$env:PROTECTORATE_ENROLL_KEY = "KEY"
+.\protectorate-windows-amd64.exe node install --control http://HUB:7480 --name office
+
+# Linux
+PROTECTORATE_ENROLL_KEY=KEY ./protectorate-linux-amd64 node install --control http://HUB:7480 --name box
+
+# Termux
+PROTECTORATE_ENROLL_KEY=KEY ./protectorate-android-arm64 node install --control http://HUB:7480 --name phone
+```
+
+The key may also come from `--key-file FILE` or `--key KEY` (visible in the process list, so prefer the other two). `node install` does, in order:
+
+| | Windows | Linux | Termux |
+|---|---|---|---|
+| binary | `%LOCALAPPDATA%\Programs\protectorate\protectorate.exe` | `~/.local/bin/protectorate` | `$PREFIX/bin/protectorate` |
+| enroll | `node join` into `$PROTECTORATE_HOME/tsnet`, skipped when already enrolled (no key needed on a re-run) | same | same |
+| startup | logon task `protectorate-node` for the current user, registered with `schtasks /Create /XML ... /F`, then started | `~/.config/systemd/user/protectorate-node.service`, `systemctl --user enable`, then `restart` | termux-services run script and Termux:Boot script, `sv-enable` |
+
+It is idempotent: run it again with a newer binary to update the binary and the task or unit (the running agent is stopped for the copy and started again). The Windows task needs no elevation. It starts `protectorate.exe node serve --home DIR --hide-console` directly, with no `cmd.exe` wrapper, and the agent hides its own console window when no other process shares it. `--elevated` registers the task with the highest available privileges; that needs a terminal opened with Run as administrator, and is only for driving elevated windows (Windows blocks input from a normal process to an elevated window, UIPI). Arguments after `--` are passed to `node serve`, for example `-- --watch D:\build`.
+
+`node install --dry-run` prints every action, including the file contents it would write, and changes nothing. `node install --home DIR` uses another state directory. On Linux the install prints (and does not run) `sudo loginctl enable-linger $USER`, needed to keep the agent running while logged out.
+
+`protectorate node uninstall` stops the agent and unregisters the task, unit or service. It never deletes anything: it prints the binary, definition and state paths you may delete yourself, and the `node revoke` command for the hub. `protectorate node doctor` checks the machine: interactive session, screen lock, startup registration, enrollment and (with `--hub URL`) hub reachability; see docs/desk.md.
+
+## Nodes (manual steps)
 
 On the hub: `protectorate node invite <name>`. It prints a `node join ...` line; run that on the node, then run `node serve` as a service.
 
@@ -54,7 +84,7 @@ protectorate.exe service install-windows --home C:\ProgramData\protectorate > in
 REM review install.cmd, then run it from an elevated prompt
 ```
 
-Do not rely on an SSH session for the long-running agent: its lifetime depends on how it was started. A plain foreground run dies with the session, `Start-Process -WindowStyle Hidden` from an SSH PowerShell also died when the session ended, while a process created through WMI (`Invoke-CimMethod Win32_Process -MethodName Create`) or one left over from an interrupted session kept running unsupervised. Use a service or scheduled task. Alternative without service rights: `protectorate.exe service windows-task --trigger logon --write .` then `schtasks /Create /TN protectorate-node /XML protectorate-node.xml`. The logon task is also the only way `protectorate desk` can work: screen and input need the agent in the logged-in user's session, not session 0 (see docs/desk.md).
+Do not rely on an SSH session for the long-running agent: its lifetime depends on how it was started. A plain foreground run dies with the session, `Start-Process -WindowStyle Hidden` from an SSH PowerShell also died when the session ended, while a process created through WMI (`Invoke-CimMethod Win32_Process -MethodName Create`) or one left over from an interrupted session kept running unsupervised. Use a service or scheduled task. Without service rights, `node install` (above) registers the logon task; `service windows-task --trigger logon --write .` plus `schtasks /Create /TN protectorate-node /XML protectorate-node.xml` is the manual equivalent. The logon task is also the only way `protectorate desk` can work: screen and input need the agent in the logged-in user's session, not session 0 (see docs/desk.md).
 
 ### Android (Termux)
 

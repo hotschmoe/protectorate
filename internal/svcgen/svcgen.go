@@ -25,6 +25,10 @@ type Spec struct {
 	User string
 	// Path overrides the default PATH of the unit.
 	Path string
+	// Elevated makes a logon task run with the highest available privileges.
+	Elevated bool
+	// WinUser (DOMAIN\user) restricts a logon task to one account.
+	WinUser string
 }
 
 // Name is the service name for the role.

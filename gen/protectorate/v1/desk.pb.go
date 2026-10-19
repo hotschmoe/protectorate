@@ -25,8 +25,8 @@ type DeskTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name is the node name.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// lease_id names a live lease on "desk:<name>"; required by mutating
-	// commands.
+	// lease_id names a live lease on "desk:<name>". Optional for mutating
+	// commands: when empty the hub leases the desktop for the caller.
 	LeaseId       string `protobuf:"bytes,2,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
 	AllowFamily   bool   `protobuf:"varint,3,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
 	unknownFields protoimpl.UnknownFields

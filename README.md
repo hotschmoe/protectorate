@@ -30,6 +30,7 @@ clients (desktop, Android, web) talk to the same API.
 | Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |
 | Clients | `pair`, `mcp`, `hub serve --web` | QR pairing with a scoped device token; MCP tools generated from the API |
 | Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
+| Nodes | `node install/uninstall/doctor` | one-command node setup per OS, dry-run first; uninstall deletes nothing |
 
 ## Build
 

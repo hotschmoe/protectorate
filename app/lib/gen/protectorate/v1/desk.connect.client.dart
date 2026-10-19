@@ -9,11 +9,15 @@ import "desk.connect.spec.dart" as specs;
 
 /// DeskService drives the interactive desktop of a node, for programs that
 /// only have a GUI. It works only when the node agent runs in the logged-in
-/// user's session (`protectorate service windows-task`); otherwise calls fail
+/// user's session (`protectorate node install`); otherwise calls fail
 /// with FAILED_PRECONDITION. Only Windows nodes implement it.
 /// The desktop is a lease resource named "desk:<node>". Every command that
-/// changes the desktop (click, move, type, key, run) must name a live lease on
-/// it; screenshot and windows do not. Coordinates are pixels of the
+/// changes the desktop (click, move, type, key, run) runs under a live lease on
+/// it; screenshot and windows need none. A command that names no lease makes
+/// the hub take a 2 minute lease for the caller when the desktop is free (the
+/// id and expiry come back in the Protectorate-Desk-Lease and
+/// Protectorate-Desk-Lease-Expires response headers), renew the caller's own,
+/// or refuse when another holder has it. Coordinates are pixels of the
 /// screenshot, whose origin is the top-left of the virtual screen.
 extension type DeskServiceClient (connect.Transport _transport) {
   /// Screenshot captures the whole virtual screen as a PNG.
