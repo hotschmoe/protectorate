@@ -86,7 +86,10 @@ type SleeveState int32
 const (
 	SleeveState_SLEEVE_STATE_UNSPECIFIED SleeveState = 0
 	SleeveState_SLEEVE_STATE_RUNNING     SleeveState = 1
-	// The harness ended or the session was killed outside KillSleeve.
+	// The harness ended or the session was killed outside KillSleeve. When the
+	// harness ended on its own, its tmux session is kept with the final screen
+	// (read it with CapturePane) until KillSleeve, a respawn, or the hub's
+	// dead-session retention sweep.
 	SleeveState_SLEEVE_STATE_EXITED SleeveState = 2
 )
 
@@ -306,13 +309,23 @@ type Sleeve struct {
 	// workspace is the absolute path bound read-write into the sandbox.
 	Workspace string `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// session is the tmux session name to use with SessionService and the terminal.
-	Session       string                 `protobuf:"bytes,4,opt,name=session,proto3" json:"session,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	State         SleeveState            `protobuf:"varint,6,opt,name=state,proto3,enum=protectorate.v1.SleeveState" json:"state,omitempty"`
-	Limits        *SleeveLimits          `protobuf:"bytes,7,opt,name=limits,proto3" json:"limits,omitempty"`
-	Usage         *SleeveUsage           `protobuf:"bytes,8,opt,name=usage,proto3" json:"usage,omitempty"`
-	Args          []string               `protobuf:"bytes,9,rep,name=args,proto3" json:"args,omitempty"`
-	ExitedAt      *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=exited_at,json=exitedAt,proto3" json:"exited_at,omitempty"`
+	Session   string                 `protobuf:"bytes,4,opt,name=session,proto3" json:"session,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	State     SleeveState            `protobuf:"varint,6,opt,name=state,proto3,enum=protectorate.v1.SleeveState" json:"state,omitempty"`
+	Limits    *SleeveLimits          `protobuf:"bytes,7,opt,name=limits,proto3" json:"limits,omitempty"`
+	Usage     *SleeveUsage           `protobuf:"bytes,8,opt,name=usage,proto3" json:"usage,omitempty"`
+	Args      []string               `protobuf:"bytes,9,rep,name=args,proto3" json:"args,omitempty"`
+	ExitedAt  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=exited_at,json=exitedAt,proto3" json:"exited_at,omitempty"`
+	// exit_code is the harness's exit status, or 128+exit_signal when a signal
+	// ended it. Unset while running and when the exit status is unknown, such
+	// as a session killed outside the hub.
+	ExitCode   *int32 `protobuf:"varint,11,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
+	ExitSignal int32  `protobuf:"varint,12,opt,name=exit_signal,json=exitSignal,proto3" json:"exit_signal,omitempty"`
+	// oom_killed is true when the harness exited with SIGKILL status (137) and
+	// the kernel's OOM killer had fired in its memory cgroup. The OOM kill is
+	// read from the cgroup before it disappears; a harness that dies within a
+	// few milliseconds of the kill may still be reported as a plain exit 137.
+	OomKilled     bool `protobuf:"varint,13,opt,name=oom_killed,json=oomKilled,proto3" json:"oom_killed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -415,6 +428,27 @@ func (x *Sleeve) GetExitedAt() *timestamppb.Timestamp {
 		return x.ExitedAt
 	}
 	return nil
+}
+
+func (x *Sleeve) GetExitCode() int32 {
+	if x != nil && x.ExitCode != nil {
+		return *x.ExitCode
+	}
+	return 0
+}
+
+func (x *Sleeve) GetExitSignal() int32 {
+	if x != nil {
+		return x.ExitSignal
+	}
+	return 0
+}
+
+func (x *Sleeve) GetOomKilled() bool {
+	if x != nil {
+		return x.OomKilled
+	}
+	return false
 }
 
 type SpawnSleeveRequest struct {
@@ -818,7 +852,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xaf\x03\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\x9f\x04\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -831,7 +865,14 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x05usage\x18\b \x01(\v2\x1c.protectorate.v1.SleeveUsageR\x05usage\x12\x12\n" +
 	"\x04args\x18\t \x03(\tR\x04args\x127\n" +
 	"\texited_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\bexitedAt\"\xbd\x02\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\bexitedAt\x12 \n" +
+	"\texit_code\x18\v \x01(\x05H\x00R\bexitCode\x88\x01\x01\x12\x1f\n" +
+	"\vexit_signal\x18\f \x01(\x05R\n" +
+	"exitSignal\x12\x1d\n" +
+	"\n" +
+	"oom_killed\x18\r \x01(\bR\toomKilledB\f\n" +
+	"\n" +
+	"_exit_code\"\xbd\x02\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
@@ -940,6 +981,7 @@ func file_protectorate_v1_sleeve_proto_init() {
 		return
 	}
 	file_protectorate_v1_options_proto_init()
+	file_protectorate_v1_sleeve_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

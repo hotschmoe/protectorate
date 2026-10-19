@@ -286,6 +286,9 @@ class Sleeve extends $pb.GeneratedMessage {
     SleeveUsage? usage,
     $core.Iterable<$core.String>? args,
     $0.Timestamp? exitedAt,
+    $core.int? exitCode,
+    $core.int? exitSignal,
+    $core.bool? oomKilled,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -298,6 +301,9 @@ class Sleeve extends $pb.GeneratedMessage {
     if (usage != null) result.usage = usage;
     if (args != null) result.args.addAll(args);
     if (exitedAt != null) result.exitedAt = exitedAt;
+    if (exitCode != null) result.exitCode = exitCode;
+    if (exitSignal != null) result.exitSignal = exitSignal;
+    if (oomKilled != null) result.oomKilled = oomKilled;
     return result;
   }
 
@@ -331,6 +337,9 @@ class Sleeve extends $pb.GeneratedMessage {
     ..pPS(9, _omitFieldNames ? '' : 'args')
     ..aOM<$0.Timestamp>(10, _omitFieldNames ? '' : 'exitedAt',
         subBuilder: $0.Timestamp.$_createMessage)
+    ..aI(11, _omitFieldNames ? '' : 'exitCode')
+    ..aI(12, _omitFieldNames ? '' : 'exitSignal')
+    ..aOB(13, _omitFieldNames ? '' : 'oomKilled')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -446,6 +455,40 @@ class Sleeve extends $pb.GeneratedMessage {
   void clearExitedAt() => $_clearField(10);
   @$pb.TagNumber(10)
   $0.Timestamp ensureExitedAt() => $_ensure(9);
+
+  /// exit_code is the harness's exit status, or 128+exit_signal when a signal
+  /// ended it. Unset while running and when the exit status is unknown, such
+  /// as a session killed outside the hub.
+  @$pb.TagNumber(11)
+  $core.int get exitCode => $_getIZ(10);
+  @$pb.TagNumber(11)
+  set exitCode($core.int value) => $_setSignedInt32(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasExitCode() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearExitCode() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  $core.int get exitSignal => $_getIZ(11);
+  @$pb.TagNumber(12)
+  set exitSignal($core.int value) => $_setSignedInt32(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasExitSignal() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearExitSignal() => $_clearField(12);
+
+  /// oom_killed is true when the harness exited with SIGKILL status (137) and
+  /// the kernel's OOM killer had fired in its memory cgroup. The OOM kill is
+  /// read from the cgroup before it disappears; a harness that dies within a
+  /// few milliseconds of the kill may still be reported as a plain exit 137.
+  @$pb.TagNumber(13)
+  $core.bool get oomKilled => $_getBF(12);
+  @$pb.TagNumber(13)
+  set oomKilled($core.bool value) => $_setBool(12, value);
+  @$pb.TagNumber(13)
+  $core.bool hasOomKilled() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearOomKilled() => $_clearField(13);
 }
 
 class SpawnSleeveRequest extends $pb.GeneratedMessage {
@@ -957,7 +1000,8 @@ class SleeveServiceApi {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
   /// a git URL cloned into the hub's workspaces directory. Respawning the name
-  /// of an exited sleeve reuses its home directory and workspace.
+  /// of an exited sleeve reuses its home directory and workspace and replaces
+  /// its kept session.
   $async.Future<SpawnSleeveResponse> spawnSleeve(
           $pb.ClientContext? ctx, SpawnSleeveRequest request) =>
       _client.invoke<SpawnSleeveResponse>(

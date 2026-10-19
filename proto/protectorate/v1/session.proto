@@ -9,8 +9,16 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 
 // SessionService manages tmux-backed harness sessions. Interactive access is
 // the WebSocket terminal at GET /ws/terminal/{name}, not an RPC.
+//
+// When a session's command ends, the session stays in state EXITED with its
+// last screen, exit code and exit signal until it is killed, respawned, or
+// removed by the hub's dead-session retention sweep (--dead-retention).
+// Changes are announced on EventService: "session.created", "session.exited"
+// (command ended; payload has exit_code, exit_signal and exited_at) and
+// "session.removed" (session gone). The WebSocket terminal attaches to an
+// exited session read-only and sends a notice frame saying so.
 service SessionService {
-  // ListSessions returns all live sessions.
+  // ListSessions returns all sessions, running and exited.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -19,15 +27,32 @@ service SessionService {
   // default shell when command is empty.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
 
-  // KillSession terminates a session and every process in it.
+  // KillSession terminates a session and every process in it. It also removes
+  // an exited session, discarding its final screen.
   rpc KillSession(KillSessionRequest) returns (KillSessionResponse) {
     option (protectorate.v1.destructive) = true;
   }
 
-  // CapturePane returns the current text of a session's active pane.
+  // RespawnSession restarts an exited session with its original command and
+  // working directory. The previous output stays in scrollback. It fails with
+  // FAILED_PRECONDITION while the session is still running. Respawning a sleeve
+  // session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve
+  // to restart a sleeve.
+  rpc RespawnSession(RespawnSessionRequest) returns (RespawnSessionResponse);
+
+  // CapturePane returns the current text of a session's active pane. It also
+  // works on exited sessions, which is how a crash is diagnosed. Include at
+  // least one history line to see the whole final screen of an exited session.
   rpc CapturePane(CapturePaneRequest) returns (CapturePaneResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_RUNNING = 1;
+  // The command ended; the pane is kept with its last output.
+  SESSION_STATE_EXITED = 2;
 }
 
 // Session is one tmux-backed harness session.
@@ -43,6 +68,14 @@ message Session {
   google.protobuf.Timestamp last_activity = 6;
   int32 pane_cols = 7;
   int32 pane_rows = 8;
+  SessionState state = 9;
+  // exit_code is the command's exit status, or 128+exit_signal when a signal
+  // ended it. Only meaningful when state is EXITED.
+  int32 exit_code = 10;
+  // exit_signal is the terminating signal number, 0 when the command exited
+  // on its own.
+  int32 exit_signal = 11;
+  google.protobuf.Timestamp exited_at = 12;
 }
 
 message ListSessionsRequest {}
@@ -72,6 +105,15 @@ message KillSessionRequest {
 }
 
 message KillSessionResponse {}
+
+message RespawnSessionRequest {
+  // name of the exited session to restart.
+  string name = 1;
+}
+
+message RespawnSessionResponse {
+  Session session = 1;
+}
 
 message CapturePaneRequest {
   // name of the session to read.

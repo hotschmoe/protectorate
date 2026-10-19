@@ -50,8 +50,8 @@ protectorate hub serve            # the engine, runs as a systemd service on the
 protectorate node serve           # node agent on any machine (joins the tailnet)
 protectorate node join <token>    # enroll a machine
 protectorate quota                # every other subcommand is a CLI client of the hub API
-protectorate sleeve ls|spawn|kill
-protectorate session ls|new|attach
+protectorate sleeve ls|spawn|show|kill
+protectorate session ls|new|attach|capture|respawn|kill
 protectorate api call <Method> '<json>'   # generic escape hatch
 ```
 
@@ -201,6 +201,14 @@ Design:
   `systemd-run --user --scope --unit=prot-sleeve-<name> -p MemoryMax=.. -p CPUQuota=.. -p OOMPolicy=continue -- bwrap ... -- <harness>`.
   The harness and everything it spawns live inside the sandbox. The hub
   attaches, captures and streams exactly as with plain sessions.
+- **Exits are kept, not erased.** Every session sets tmux `remain-on-exit` on
+  its own window, so a command that ends (or crashes) leaves its pane, exit
+  code and signal behind. The session reports state `exited`, the hub publishes
+  `session.exited`, and the sleeve manager records the same status on the
+  sleeve (an exit 137 after a cgroup OOM kill is labelled OOM). Exited sessions
+  stay until killed, respawned, or `hub serve --dead-retention` (default 24h)
+  elapses, when the hub removes them and publishes `session.removed`. The
+  WebSocket terminal shows an exited pane read-only with a notice frame.
 - Mounts:
   - the workspace is read-write;
   - toolchains and harness installs (`~/.local`, `~/.nvm`, ...) are read-only

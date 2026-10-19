@@ -17,7 +17,8 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
   /// a git URL cloned into the hub's workspaces directory. Respawning the name
-  /// of an exited sleeve reuses its home directory and workspace.
+  /// of an exited sleeve reuses its home directory and workspace and replaces
+  /// its kept session.
   Future<protectoratev1sleeve.SpawnSleeveResponse> spawnSleeve(
     protectoratev1sleeve.SpawnSleeveRequest input, {
     connect.Headers? headers,

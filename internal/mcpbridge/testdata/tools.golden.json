@@ -256,7 +256,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "CapturePane returns the current text of a session's active pane.",
+    "description": "CapturePane returns the current text of a session's active pane. It also works on exited sessions, which is how a crash is diagnosed. Include at least one history line to see the whole final screen of an exited session.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -318,7 +318,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "KillSession terminates a session and every process in it.",
+    "description": "KillSession terminates a session and every process in it. It also removes an exited session, discarding its final screen.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -337,13 +337,33 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "ListSessions returns all live sessions.",
+    "description": "ListSessions returns all sessions, running and exited.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
       "type": "object"
     },
     "name": "session_list_sessions"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RespawnSession restarts an exited session with its original command and working directory. The previous output stays in scrollback. It fails with FAILED_PRECONDITION while the session is still running. Respawning a sleeve session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve to restart a sleeve.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "name of the exited session to restart.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "session_respawn_session"
   },
   {
     "annotations": {
@@ -403,7 +423,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is an existing directory (bound read-write at the same path) or a git URL cloned into the hub's workspaces directory. Respawning the name of an exited sleeve reuses its home directory and workspace.",
+    "description": "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is an existing directory (bound read-write at the same path) or a git URL cloned into the hub's workspaces directory. Respawning the name of an exited sleeve reuses its home directory and workspace and replaces its kept session.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

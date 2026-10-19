@@ -168,7 +168,118 @@ func TestSessionEvents(t *testing.T) {
 	if err := h.Sessions.Kill(ctx, "ev"); err != nil {
 		t.Fatal(err)
 	}
-	expect(EventSessionExited)
+	expect(EventSessionRemoved)
+}
+
+func TestSessionExitEvents(t *testing.T) {
+	h, url, _ := newSessionHub(t)
+	hc := &http.Client{Transport: bearer{testToken}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := protectoratev1connect.NewEventServiceClient(hc, url).Subscribe(ctx, connect.NewRequest(&pb.SubscribeRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	events := make(chan *pb.Event, 64)
+	go func() {
+		for stream.Receive() {
+			events <- stream.Msg()
+		}
+		close(events)
+	}()
+	next := func(kind string) *pb.Event {
+		t.Helper()
+		timeout := time.After(5 * time.Second)
+		for {
+			select {
+			case e, ok := <-events:
+				if !ok {
+					t.Fatalf("stream closed waiting for %s", kind)
+				}
+				if e.Kind == kind {
+					return e
+				}
+			case <-timeout:
+				t.Fatalf("timed out waiting for %s", kind)
+			}
+		}
+	}
+
+	if _, err := h.Sessions.Create(ctx, session.CreateOptions{Name: "crash", Command: []string{"sh", "-c", "echo boom; sleep 0.3; exit 3"}}); err != nil {
+		t.Fatal(err)
+	}
+	next(EventSessionCreated)
+	e := next(EventSessionExited)
+	f := e.Payload.AsMap()
+	if e.Subject != "crash" || f["exit_code"] != float64(3) || f["exit_signal"] != float64(0) || f["state"] != "exited" || f["exited_at"] == nil {
+		t.Fatalf("exited event = %v", e)
+	}
+	c := protectoratev1connect.NewSessionServiceClient(hc, url)
+	list, err := c.ListSessions(ctx, connect.NewRequest(&pb.ListSessionsRequest{}))
+	if err != nil || len(list.Msg.Sessions) != 1 {
+		t.Fatalf("dead session must still be listed: %v, %v", list, err)
+	}
+	if s := list.Msg.Sessions[0]; s.State != pb.SessionState_SESSION_STATE_EXITED || s.ExitCode != 3 || s.ExitedAt == nil {
+		t.Fatalf("session = %v", s)
+	}
+	cap, err := c.CapturePane(ctx, connect.NewRequest(&pb.CapturePaneRequest{Name: "crash", Lines: 10}))
+	if err != nil || !strings.Contains(cap.Msg.Text, "boom") {
+		t.Fatalf("capture = %v, %v", cap, err)
+	}
+
+	if _, err := c.RespawnSession(ctx, connect.NewRequest(&pb.RespawnSessionRequest{Name: "ghost"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("respawn missing: %v", err)
+	}
+	if _, err := c.RespawnSession(ctx, connect.NewRequest(&pb.RespawnSessionRequest{Name: "crash"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RespawnSession(ctx, connect.NewRequest(&pb.RespawnSessionRequest{Name: "crash"})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("respawn running: %v", err)
+	}
+	next(EventSessionExited)
+
+	if _, err := c.KillSession(ctx, connect.NewRequest(&pb.KillSessionRequest{Name: "crash"})); err != nil {
+		t.Fatalf("kill dead session: %v", err)
+	}
+	if e := next(EventSessionRemoved); e.Subject != "crash" {
+		t.Fatalf("removed event = %v", e)
+	}
+}
+
+func TestDeadRetentionSweep(t *testing.T) {
+	h, _, _ := newSessionHub(t)
+	h.DeadRetention = 1500 * time.Millisecond
+	ctx := context.Background()
+	for name, cmd := range map[string][]string{"dead": {"sh", "-c", "exit 1"}, "alive": {"sleep", "60"}} {
+		if _, err := h.Sessions.Create(ctx, session.CreateOptions{Name: name, Command: cmd}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor(t, "dead session kept", func() bool {
+		s, err := h.Sessions.Get(ctx, "dead")
+		return err == nil && s.State == session.Exited
+	})
+	waitFor(t, "dead session swept", func() bool {
+		_, err := h.Sessions.Get(ctx, "dead")
+		return err != nil
+	})
+	if s, err := h.Sessions.Get(ctx, "alive"); err != nil || s.State != session.Running {
+		t.Fatalf("running session touched: %+v, %v", s, err)
+	}
+}
+
+func TestDeadRetentionDisabled(t *testing.T) {
+	h, _, _ := newSessionHub(t)
+	h.DeadRetention = 0
+	ctx := context.Background()
+	if _, err := h.Sessions.Create(ctx, session.CreateOptions{Name: "dead", Command: []string{"sh", "-c", "exit 1"}}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if _, err := h.Sessions.Get(ctx, "dead"); err != nil {
+		t.Fatalf("session removed with retention disabled: %v", err)
+	}
 }
 
 func wsURL(base, name, query string) string {
@@ -338,24 +449,67 @@ func TestTerminalAttachLifecycle(t *testing.T) {
 	}
 }
 
+// readFrames collects server frames until one of type typ contains want.
+func readFrame(t *testing.T, c *websocket.Conn, typ byte, want string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var acc bytes.Buffer
+	for {
+		mt, msg, err := c.Read(ctx)
+		if err != nil {
+			t.Fatalf("waiting for frame %q containing %q, got %q: %v", typ, want, acc.String(), err)
+		}
+		if mt == websocket.MessageBinary && len(msg) > 0 && msg[0] == typ {
+			acc.Write(msg[1:])
+			if strings.Contains(acc.String(), want) {
+				return acc.String()
+			}
+		}
+	}
+}
+
+func TestTerminalExitedSessionIsReadOnly(t *testing.T) {
+	h, url, sock := newSessionHub(t)
+	ctx := context.Background()
+	if _, err := h.Sessions.Create(ctx, session.CreateOptions{Name: "dead", Command: []string{"sh", "-c", "echo final-screen; exit 7"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "exit", func() bool {
+		s, err := h.Sessions.Get(ctx, "dead")
+		return err == nil && s.State == session.Exited
+	})
+	auth := &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + testToken}}}
+	c := dial(t, wsURL(url, "dead", ""), auth)
+	notice := readFrame(t, c, FrameNotice, "read-only")
+	if !strings.Contains(notice, "exited with code 7") {
+		t.Fatalf("notice = %q", notice)
+	}
+	sendData(t, c, "typed-into-dead-pane\r")
+	time.Sleep(200 * time.Millisecond)
+	text, err := h.Sessions.Capture(ctx, "dead", 50)
+	if err != nil || strings.Contains(text, "typed-into-dead-pane") {
+		t.Fatalf("input reached dead pane: %q, %v", text, err)
+	}
+	c.Close(websocket.StatusNormalClosure, "")
+	waitFor(t, "no stray tmux attach", func() bool { return attachProcesses(sock) == 0 })
+}
+
 func TestTerminalSessionExit(t *testing.T) {
 	h, url, sock := newSessionHub(t)
 	ctx := context.Background()
-	if _, err := h.Sessions.Create(ctx, session.CreateOptions{Name: "short", Command: []string{"sh", "-c", "read x; echo bye"}}); err != nil {
+	if _, err := h.Sessions.Create(ctx, session.CreateOptions{Name: "short", Command: []string{"sh", "-c", "read x; echo bye; exit 5"}}); err != nil {
 		t.Fatal(err)
 	}
 	c := dial(t, wsURL(url, "short", ""), &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + testToken}}})
 	sendData(t, c, "go\r")
-	readUntil(t, c, "bye")
-	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	for {
-		if _, _, err := c.Read(rctx); err != nil {
-			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
-				t.Fatalf("want normal close, got %v", err)
-			}
-			break
-		}
+	notice := readFrame(t, c, FrameNotice, "exited with code 5")
+	if !strings.Contains(notice, "final screen") {
+		t.Fatalf("notice = %q", notice)
 	}
+	c.Close(websocket.StatusNormalClosure, "")
 	waitFor(t, "no stray tmux attach", func() bool { return attachProcesses(sock) == 0 })
+	if s, err := h.Sessions.Get(ctx, "short"); err != nil || s.State != session.Exited {
+		t.Fatalf("session = %+v, %v", s, err)
+	}
 }

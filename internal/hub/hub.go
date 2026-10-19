@@ -41,9 +41,12 @@ type Hub struct {
 	nodes   *NodeMonitor
 	events  eventBus
 
-	Sessions     *session.Manager
-	SessionPoll  time.Duration
-	PingInterval time.Duration
+	Sessions    *session.Manager
+	SessionPoll time.Duration
+	// DeadRetention is how long an exited session is kept before the hub
+	// kills it; 0 keeps them until killed or respawned.
+	DeadRetention time.Duration
+	PingInterval  time.Duration
 
 	scanMu sync.Mutex
 	known  map[string]session.Session
@@ -59,13 +62,14 @@ type Hub struct {
 
 func New(version, token string) *Hub {
 	h := &Hub{
-		Version:      version,
-		Heartbeat:    5 * time.Second,
-		Sessions:     session.New(session.DefaultSocket),
-		SessionPoll:  time.Second,
-		PingInterval: 20 * time.Second,
-		authz:        auth.New(token, nil, nil),
-		started:      time.Now(),
+		Version:       version,
+		Heartbeat:     5 * time.Second,
+		Sessions:      session.New(session.DefaultSocket),
+		SessionPoll:   time.Second,
+		DeadRetention: 24 * time.Hour,
+		PingInterval:  20 * time.Second,
+		authz:         auth.New(token, nil, nil),
+		started:       time.Now(),
 	}
 	h.SetQuota(NewQuotaCache(nil, QuotaOptions{}))
 	if home, err := Home(); err == nil {

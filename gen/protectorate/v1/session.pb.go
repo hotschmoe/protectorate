@@ -22,6 +22,56 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SessionState int32
+
+const (
+	SessionState_SESSION_STATE_UNSPECIFIED SessionState = 0
+	SessionState_SESSION_STATE_RUNNING     SessionState = 1
+	// The command ended; the pane is kept with its last output.
+	SessionState_SESSION_STATE_EXITED SessionState = 2
+)
+
+// Enum value maps for SessionState.
+var (
+	SessionState_name = map[int32]string{
+		0: "SESSION_STATE_UNSPECIFIED",
+		1: "SESSION_STATE_RUNNING",
+		2: "SESSION_STATE_EXITED",
+	}
+	SessionState_value = map[string]int32{
+		"SESSION_STATE_UNSPECIFIED": 0,
+		"SESSION_STATE_RUNNING":     1,
+		"SESSION_STATE_EXITED":      2,
+	}
+)
+
+func (x SessionState) Enum() *SessionState {
+	p := new(SessionState)
+	*p = x
+	return p
+}
+
+func (x SessionState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SessionState) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_session_proto_enumTypes[0].Descriptor()
+}
+
+func (SessionState) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_session_proto_enumTypes[0]
+}
+
+func (x SessionState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SessionState.Descriptor instead.
+func (SessionState) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{0}
+}
+
 // Session is one tmux-backed harness session.
 type Session struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -36,8 +86,16 @@ type Session struct {
 	LastActivity    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_activity,json=lastActivity,proto3" json:"last_activity,omitempty"`
 	PaneCols        int32                  `protobuf:"varint,7,opt,name=pane_cols,json=paneCols,proto3" json:"pane_cols,omitempty"`
 	PaneRows        int32                  `protobuf:"varint,8,opt,name=pane_rows,json=paneRows,proto3" json:"pane_rows,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	State           SessionState           `protobuf:"varint,9,opt,name=state,proto3,enum=protectorate.v1.SessionState" json:"state,omitempty"`
+	// exit_code is the command's exit status, or 128+exit_signal when a signal
+	// ended it. Only meaningful when state is EXITED.
+	ExitCode int32 `protobuf:"varint,10,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	// exit_signal is the terminating signal number, 0 when the command exited
+	// on its own.
+	ExitSignal    int32                  `protobuf:"varint,11,opt,name=exit_signal,json=exitSignal,proto3" json:"exit_signal,omitempty"`
+	ExitedAt      *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=exited_at,json=exitedAt,proto3" json:"exited_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Session) Reset() {
@@ -124,6 +182,34 @@ func (x *Session) GetPaneRows() int32 {
 		return x.PaneRows
 	}
 	return 0
+}
+
+func (x *Session) GetState() SessionState {
+	if x != nil {
+		return x.State
+	}
+	return SessionState_SESSION_STATE_UNSPECIFIED
+}
+
+func (x *Session) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *Session) GetExitSignal() int32 {
+	if x != nil {
+		return x.ExitSignal
+	}
+	return 0
+}
+
+func (x *Session) GetExitedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExitedAt
+	}
+	return nil
 }
 
 type ListSessionsRequest struct {
@@ -403,6 +489,95 @@ func (*KillSessionResponse) Descriptor() ([]byte, []int) {
 	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{6}
 }
 
+type RespawnSessionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name of the exited session to restart.
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RespawnSessionRequest) Reset() {
+	*x = RespawnSessionRequest{}
+	mi := &file_protectorate_v1_session_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespawnSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespawnSessionRequest) ProtoMessage() {}
+
+func (x *RespawnSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_session_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespawnSessionRequest.ProtoReflect.Descriptor instead.
+func (*RespawnSessionRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RespawnSessionRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RespawnSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Session       *Session               `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RespawnSessionResponse) Reset() {
+	*x = RespawnSessionResponse{}
+	mi := &file_protectorate_v1_session_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespawnSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespawnSessionResponse) ProtoMessage() {}
+
+func (x *RespawnSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_session_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespawnSessionResponse.ProtoReflect.Descriptor instead.
+func (*RespawnSessionResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RespawnSessionResponse) GetSession() *Session {
+	if x != nil {
+		return x.Session
+	}
+	return nil
+}
+
 type CapturePaneRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name of the session to read.
@@ -415,7 +590,7 @@ type CapturePaneRequest struct {
 
 func (x *CapturePaneRequest) Reset() {
 	*x = CapturePaneRequest{}
-	mi := &file_protectorate_v1_session_proto_msgTypes[7]
+	mi := &file_protectorate_v1_session_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -427,7 +602,7 @@ func (x *CapturePaneRequest) String() string {
 func (*CapturePaneRequest) ProtoMessage() {}
 
 func (x *CapturePaneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_session_proto_msgTypes[7]
+	mi := &file_protectorate_v1_session_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -440,7 +615,7 @@ func (x *CapturePaneRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturePaneRequest.ProtoReflect.Descriptor instead.
 func (*CapturePaneRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{7}
+	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CapturePaneRequest) GetName() string {
@@ -467,7 +642,7 @@ type CapturePaneResponse struct {
 
 func (x *CapturePaneResponse) Reset() {
 	*x = CapturePaneResponse{}
-	mi := &file_protectorate_v1_session_proto_msgTypes[8]
+	mi := &file_protectorate_v1_session_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -479,7 +654,7 @@ func (x *CapturePaneResponse) String() string {
 func (*CapturePaneResponse) ProtoMessage() {}
 
 func (x *CapturePaneResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_session_proto_msgTypes[8]
+	mi := &file_protectorate_v1_session_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -492,7 +667,7 @@ func (x *CapturePaneResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturePaneResponse.ProtoReflect.Descriptor instead.
 func (*CapturePaneResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{8}
+	return file_protectorate_v1_session_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CapturePaneResponse) GetText() string {
@@ -506,7 +681,7 @@ var File_protectorate_v1_session_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_session_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotectorate/v1/session.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\xaa\x02\n" +
+	"\x1dprotectorate/v1/session.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\xd6\x03\n" +
 	"\aSession\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x18\n" +
@@ -516,7 +691,13 @@ const file_protectorate_v1_session_proto_rawDesc = "" +
 	"\x10attached_clients\x18\x05 \x01(\x05R\x0fattachedClients\x12?\n" +
 	"\rlast_activity\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\flastActivity\x12\x1b\n" +
 	"\tpane_cols\x18\a \x01(\x05R\bpaneCols\x12\x1b\n" +
-	"\tpane_rows\x18\b \x01(\x05R\bpaneRows\"\x15\n" +
+	"\tpane_rows\x18\b \x01(\x05R\bpaneRows\x123\n" +
+	"\x05state\x18\t \x01(\x0e2\x1d.protectorate.v1.SessionStateR\x05state\x12\x1b\n" +
+	"\texit_code\x18\n" +
+	" \x01(\x05R\bexitCode\x12\x1f\n" +
+	"\vexit_signal\x18\v \x01(\x05R\n" +
+	"exitSignal\x127\n" +
+	"\texited_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\bexitedAt\"\x15\n" +
 	"\x13ListSessionsRequest\"L\n" +
 	"\x14ListSessionsResponse\x124\n" +
 	"\bsessions\x18\x01 \x03(\v2\x18.protectorate.v1.SessionR\bsessions\"\xd0\x01\n" +
@@ -532,16 +713,25 @@ const file_protectorate_v1_session_proto_rawDesc = "" +
 	"\asession\x18\x01 \x01(\v2\x18.protectorate.v1.SessionR\asession\"(\n" +
 	"\x12KillSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x15\n" +
-	"\x13KillSessionResponse\">\n" +
+	"\x13KillSessionResponse\"+\n" +
+	"\x15RespawnSessionRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"L\n" +
+	"\x16RespawnSessionResponse\x122\n" +
+	"\asession\x18\x01 \x01(\v2\x18.protectorate.v1.SessionR\asession\">\n" +
 	"\x12CapturePaneRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05lines\x18\x02 \x01(\x05R\x05lines\")\n" +
 	"\x13CapturePaneResponse\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text2\x91\x03\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text*b\n" +
+	"\fSessionState\x12\x1d\n" +
+	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15SESSION_STATE_RUNNING\x10\x01\x12\x18\n" +
+	"\x14SESSION_STATE_EXITED\x10\x022\xf4\x03\n" +
 	"\x0eSessionService\x12`\n" +
 	"\fListSessions\x12$.protectorate.v1.ListSessionsRequest\x1a%.protectorate.v1.ListSessionsResponse\"\x03\x90\x02\x01\x12^\n" +
 	"\rCreateSession\x12%.protectorate.v1.CreateSessionRequest\x1a&.protectorate.v1.CreateSessionResponse\x12^\n" +
-	"\vKillSession\x12#.protectorate.v1.KillSessionRequest\x1a$.protectorate.v1.KillSessionResponse\"\x04\x88\xb5\x18\x01\x12]\n" +
+	"\vKillSession\x12#.protectorate.v1.KillSessionRequest\x1a$.protectorate.v1.KillSessionResponse\"\x04\x88\xb5\x18\x01\x12a\n" +
+	"\x0eRespawnSession\x12&.protectorate.v1.RespawnSessionRequest\x1a'.protectorate.v1.RespawnSessionResponse\x12]\n" +
 	"\vCapturePane\x12#.protectorate.v1.CapturePaneRequest\x1a$.protectorate.v1.CapturePaneResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
@@ -556,39 +746,48 @@ func file_protectorate_v1_session_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_session_proto_rawDescData
 }
 
-var file_protectorate_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_protectorate_v1_session_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_protectorate_v1_session_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_protectorate_v1_session_proto_goTypes = []any{
-	(*Session)(nil),               // 0: protectorate.v1.Session
-	(*ListSessionsRequest)(nil),   // 1: protectorate.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),  // 2: protectorate.v1.ListSessionsResponse
-	(*CreateSessionRequest)(nil),  // 3: protectorate.v1.CreateSessionRequest
-	(*CreateSessionResponse)(nil), // 4: protectorate.v1.CreateSessionResponse
-	(*KillSessionRequest)(nil),    // 5: protectorate.v1.KillSessionRequest
-	(*KillSessionResponse)(nil),   // 6: protectorate.v1.KillSessionResponse
-	(*CapturePaneRequest)(nil),    // 7: protectorate.v1.CapturePaneRequest
-	(*CapturePaneResponse)(nil),   // 8: protectorate.v1.CapturePaneResponse
-	nil,                           // 9: protectorate.v1.CreateSessionRequest.EnvEntry
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(SessionState)(0),              // 0: protectorate.v1.SessionState
+	(*Session)(nil),                // 1: protectorate.v1.Session
+	(*ListSessionsRequest)(nil),    // 2: protectorate.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),   // 3: protectorate.v1.ListSessionsResponse
+	(*CreateSessionRequest)(nil),   // 4: protectorate.v1.CreateSessionRequest
+	(*CreateSessionResponse)(nil),  // 5: protectorate.v1.CreateSessionResponse
+	(*KillSessionRequest)(nil),     // 6: protectorate.v1.KillSessionRequest
+	(*KillSessionResponse)(nil),    // 7: protectorate.v1.KillSessionResponse
+	(*RespawnSessionRequest)(nil),  // 8: protectorate.v1.RespawnSessionRequest
+	(*RespawnSessionResponse)(nil), // 9: protectorate.v1.RespawnSessionResponse
+	(*CapturePaneRequest)(nil),     // 10: protectorate.v1.CapturePaneRequest
+	(*CapturePaneResponse)(nil),    // 11: protectorate.v1.CapturePaneResponse
+	nil,                            // 12: protectorate.v1.CreateSessionRequest.EnvEntry
+	(*timestamppb.Timestamp)(nil),  // 13: google.protobuf.Timestamp
 }
 var file_protectorate_v1_session_proto_depIdxs = []int32{
-	10, // 0: protectorate.v1.Session.created_at:type_name -> google.protobuf.Timestamp
-	10, // 1: protectorate.v1.Session.last_activity:type_name -> google.protobuf.Timestamp
-	0,  // 2: protectorate.v1.ListSessionsResponse.sessions:type_name -> protectorate.v1.Session
-	9,  // 3: protectorate.v1.CreateSessionRequest.env:type_name -> protectorate.v1.CreateSessionRequest.EnvEntry
-	0,  // 4: protectorate.v1.CreateSessionResponse.session:type_name -> protectorate.v1.Session
-	1,  // 5: protectorate.v1.SessionService.ListSessions:input_type -> protectorate.v1.ListSessionsRequest
-	3,  // 6: protectorate.v1.SessionService.CreateSession:input_type -> protectorate.v1.CreateSessionRequest
-	5,  // 7: protectorate.v1.SessionService.KillSession:input_type -> protectorate.v1.KillSessionRequest
-	7,  // 8: protectorate.v1.SessionService.CapturePane:input_type -> protectorate.v1.CapturePaneRequest
-	2,  // 9: protectorate.v1.SessionService.ListSessions:output_type -> protectorate.v1.ListSessionsResponse
-	4,  // 10: protectorate.v1.SessionService.CreateSession:output_type -> protectorate.v1.CreateSessionResponse
-	6,  // 11: protectorate.v1.SessionService.KillSession:output_type -> protectorate.v1.KillSessionResponse
-	8,  // 12: protectorate.v1.SessionService.CapturePane:output_type -> protectorate.v1.CapturePaneResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	13, // 0: protectorate.v1.Session.created_at:type_name -> google.protobuf.Timestamp
+	13, // 1: protectorate.v1.Session.last_activity:type_name -> google.protobuf.Timestamp
+	0,  // 2: protectorate.v1.Session.state:type_name -> protectorate.v1.SessionState
+	13, // 3: protectorate.v1.Session.exited_at:type_name -> google.protobuf.Timestamp
+	1,  // 4: protectorate.v1.ListSessionsResponse.sessions:type_name -> protectorate.v1.Session
+	12, // 5: protectorate.v1.CreateSessionRequest.env:type_name -> protectorate.v1.CreateSessionRequest.EnvEntry
+	1,  // 6: protectorate.v1.CreateSessionResponse.session:type_name -> protectorate.v1.Session
+	1,  // 7: protectorate.v1.RespawnSessionResponse.session:type_name -> protectorate.v1.Session
+	2,  // 8: protectorate.v1.SessionService.ListSessions:input_type -> protectorate.v1.ListSessionsRequest
+	4,  // 9: protectorate.v1.SessionService.CreateSession:input_type -> protectorate.v1.CreateSessionRequest
+	6,  // 10: protectorate.v1.SessionService.KillSession:input_type -> protectorate.v1.KillSessionRequest
+	8,  // 11: protectorate.v1.SessionService.RespawnSession:input_type -> protectorate.v1.RespawnSessionRequest
+	10, // 12: protectorate.v1.SessionService.CapturePane:input_type -> protectorate.v1.CapturePaneRequest
+	3,  // 13: protectorate.v1.SessionService.ListSessions:output_type -> protectorate.v1.ListSessionsResponse
+	5,  // 14: protectorate.v1.SessionService.CreateSession:output_type -> protectorate.v1.CreateSessionResponse
+	7,  // 15: protectorate.v1.SessionService.KillSession:output_type -> protectorate.v1.KillSessionResponse
+	9,  // 16: protectorate.v1.SessionService.RespawnSession:output_type -> protectorate.v1.RespawnSessionResponse
+	11, // 17: protectorate.v1.SessionService.CapturePane:output_type -> protectorate.v1.CapturePaneResponse
+	13, // [13:18] is the sub-list for method output_type
+	8,  // [8:13] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_session_proto_init() }
@@ -602,13 +801,14 @@ func file_protectorate_v1_session_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_session_proto_rawDesc), len(file_protectorate_v1_session_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   10,
+			NumEnums:      1,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_protectorate_v1_session_proto_goTypes,
 		DependencyIndexes: file_protectorate_v1_session_proto_depIdxs,
+		EnumInfos:         file_protectorate_v1_session_proto_enumTypes,
 		MessageInfos:      file_protectorate_v1_session_proto_msgTypes,
 	}.Build()
 	File_protectorate_v1_session_proto = out.File

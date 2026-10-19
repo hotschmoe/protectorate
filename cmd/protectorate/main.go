@@ -118,7 +118,7 @@ func envOr(key, def string) string {
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
 	var listen, tmuxSocket, webDir string
-	var quotaInterval time.Duration
+	var quotaInterval, deadRetention time.Duration
 	var localURLs []string
 	var nodeInterval time.Duration
 	var nodeToken string
@@ -158,6 +158,7 @@ func hubCmd() *cobra.Command {
 			h := hub.New(version, tok)
 			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
+			h.DeadRetention = deadRetention
 			h.WebDir = webDir
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
 			extra, nodeClient, closeTailnet, err := startTailnet(ctx, cmd.ErrOrStderr())
@@ -187,6 +188,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
 	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")
+	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
 	c.AddCommand(serve, hubTailnetCmd())
 	return c
 }

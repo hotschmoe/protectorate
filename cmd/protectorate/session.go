@@ -32,7 +32,7 @@ func sessionClient(o *opts) (protectoratev1connect.SessionServiceClient, error) 
 
 func sessionCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "session", Aliases: []string{"sessions"}, Short: "Manage tmux-backed harness sessions"}
-	c.AddCommand(sessionLsCmd(o), sessionNewCmd(o), sessionKillCmd(o), sessionAttachCmd(o), sessionCaptureCmd(o))
+	c.AddCommand(sessionLsCmd(o), sessionNewCmd(o), sessionKillCmd(o), sessionRespawnCmd(o), sessionAttachCmd(o), sessionCaptureCmd(o))
 	return c
 }
 
@@ -51,14 +51,25 @@ func sessionLsCmd(o *opts) *cobra.Command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tCLIENTS\tSIZE\tACTIVE\tCWD\tCOMMAND")
+				fmt.Fprintln(w, "NAME\tSTATE\tCLIENTS\tSIZE\tACTIVE\tCWD\tCOMMAND")
 				for _, s := range res.Msg.Sessions {
-					fmt.Fprintf(w, "%s\t%d\t%dx%d\t%s\t%s\t%s\n", s.Name, s.AttachedClients, s.PaneCols, s.PaneRows,
+					fmt.Fprintf(w, "%s\t%s\t%d\t%dx%d\t%s\t%s\t%s\n", s.Name, sessionStateLabel(s), s.AttachedClients, s.PaneCols, s.PaneRows,
 						s.LastActivity.AsTime().Local().Format("15:04:05"), s.Cwd, strings.Join(s.Command, " "))
 				}
 			})
 		},
 	}
+}
+
+// sessionStateLabel is "running", or "exited(3)" / "exited(signal 9)".
+func sessionStateLabel(s *pb.Session) string {
+	if s.State != pb.SessionState_SESSION_STATE_EXITED {
+		return "running"
+	}
+	if s.ExitSignal > 0 {
+		return fmt.Sprintf("exited(signal %d)", s.ExitSignal)
+	}
+	return fmt.Sprintf("exited(%d)", s.ExitCode)
 }
 
 func sessionNewCmd(o *opts) *cobra.Command {
@@ -118,6 +129,25 @@ func sessionKillCmd(o *opts) *cobra.Command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "killed\t%s\n", args[0]) })
+		},
+	}
+}
+
+func sessionRespawnCmd(o *opts) *cobra.Command {
+	return &cobra.Command{
+		Use:   "respawn <name>",
+		Short: "Restart an exited session with its original command",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := sessionClient(o)
+			if err != nil {
+				return err
+			}
+			res, err := c.RespawnSession(cmd.Context(), connect.NewRequest(&pb.RespawnSessionRequest{Name: args[0]}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "respawned\t%s\n", args[0]) })
 		},
 	}
 }
@@ -247,9 +277,13 @@ func attach(ctx context.Context, o *opts, name string, readOnly bool, esc int) e
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var detached atomic.Bool
+	var notice string
 	defer func() {
 		_ = term.Restore(in, state)
 		os.Stdout.WriteString(terminalReset)
+		if notice != "" {
+			fmt.Fprintf(os.Stderr, "[%s]\n", notice)
+		}
 		if detached.Load() {
 			fmt.Fprintf(os.Stderr, "[detached from %s]\n", name)
 		} else {
@@ -272,11 +306,17 @@ func attach(ctx context.Context, o *opts, name string, readOnly bool, esc int) e
 			}
 			return err
 		}
-		if typ == websocket.MessageBinary && len(msg) > 1 && msg[0] == hub.FrameData {
+		if typ != websocket.MessageBinary || len(msg) < 2 {
+			continue
+		}
+		switch msg[0] {
+		case hub.FrameData:
 			if _, err := os.Stdout.Write(msg[1:]); err != nil {
 				conn.CloseNow()
 				return err
 			}
+		case hub.FrameNotice:
+			notice = string(msg[1:])
 		}
 	}
 }

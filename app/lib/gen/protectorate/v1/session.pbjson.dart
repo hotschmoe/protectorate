@@ -18,6 +18,21 @@ import 'dart:typed_data' as $typed_data;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
+@$core.Deprecated('Use sessionStateDescriptor instead')
+const SessionState$json = {
+  '1': 'SessionState',
+  '2': [
+    {'1': 'SESSION_STATE_UNSPECIFIED', '2': 0},
+    {'1': 'SESSION_STATE_RUNNING', '2': 1},
+    {'1': 'SESSION_STATE_EXITED', '2': 2},
+  ],
+};
+
+/// Descriptor for `SessionState`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List sessionStateDescriptor = $convert.base64Decode(
+    'CgxTZXNzaW9uU3RhdGUSHQoZU0VTU0lPTl9TVEFURV9VTlNQRUNJRklFRBAAEhkKFVNFU1NJT0'
+    '5fU1RBVEVfUlVOTklORxABEhgKFFNFU1NJT05fU1RBVEVfRVhJVEVEEAI=');
+
 @$core.Deprecated('Use sessionDescriptor instead')
 const Session$json = {
   '1': 'Session',
@@ -44,6 +59,24 @@ const Session$json = {
     },
     {'1': 'pane_cols', '3': 7, '4': 1, '5': 5, '10': 'paneCols'},
     {'1': 'pane_rows', '3': 8, '4': 1, '5': 5, '10': 'paneRows'},
+    {
+      '1': 'state',
+      '3': 9,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.SessionState',
+      '10': 'state'
+    },
+    {'1': 'exit_code', '3': 10, '4': 1, '5': 5, '10': 'exitCode'},
+    {'1': 'exit_signal', '3': 11, '4': 1, '5': 5, '10': 'exitSignal'},
+    {
+      '1': 'exited_at',
+      '3': 12,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'exitedAt'
+    },
   ],
 };
 
@@ -54,7 +87,10 @@ final $typed_data.Uint8List sessionDescriptor = $convert.base64Decode(
     'LlRpbWVzdGFtcFIJY3JlYXRlZEF0EikKEGF0dGFjaGVkX2NsaWVudHMYBSABKAVSD2F0dGFjaG'
     'VkQ2xpZW50cxI/Cg1sYXN0X2FjdGl2aXR5GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVz'
     'dGFtcFIMbGFzdEFjdGl2aXR5EhsKCXBhbmVfY29scxgHIAEoBVIIcGFuZUNvbHMSGwoJcGFuZV'
-    '9yb3dzGAggASgFUghwYW5lUm93cw==');
+    '9yb3dzGAggASgFUghwYW5lUm93cxIzCgVzdGF0ZRgJIAEoDjIdLnByb3RlY3RvcmF0ZS52MS5T'
+    'ZXNzaW9uU3RhdGVSBXN0YXRlEhsKCWV4aXRfY29kZRgKIAEoBVIIZXhpdENvZGUSHwoLZXhpdF'
+    '9zaWduYWwYCyABKAVSCmV4aXRTaWduYWwSNwoJZXhpdGVkX2F0GAwgASgLMhouZ29vZ2xlLnBy'
+    'b3RvYnVmLlRpbWVzdGFtcFIIZXhpdGVkQXQ=');
 
 @$core.Deprecated('Use listSessionsRequestDescriptor instead')
 const ListSessionsRequest$json = {
@@ -162,6 +198,40 @@ const KillSessionResponse$json = {
 final $typed_data.Uint8List killSessionResponseDescriptor =
     $convert.base64Decode('ChNLaWxsU2Vzc2lvblJlc3BvbnNl');
 
+@$core.Deprecated('Use respawnSessionRequestDescriptor instead')
+const RespawnSessionRequest$json = {
+  '1': 'RespawnSessionRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+  ],
+};
+
+/// Descriptor for `RespawnSessionRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List respawnSessionRequestDescriptor =
+    $convert.base64Decode(
+        'ChVSZXNwYXduU2Vzc2lvblJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZQ==');
+
+@$core.Deprecated('Use respawnSessionResponseDescriptor instead')
+const RespawnSessionResponse$json = {
+  '1': 'RespawnSessionResponse',
+  '2': [
+    {
+      '1': 'session',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Session',
+      '10': 'session'
+    },
+  ],
+};
+
+/// Descriptor for `RespawnSessionResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List respawnSessionResponseDescriptor =
+    $convert.base64Decode(
+        'ChZSZXNwYXduU2Vzc2lvblJlc3BvbnNlEjIKB3Nlc3Npb24YASABKAsyGC5wcm90ZWN0b3JhdG'
+        'UudjEuU2Vzc2lvblIHc2Vzc2lvbg==');
+
 @$core.Deprecated('Use capturePaneRequestDescriptor instead')
 const CapturePaneRequest$json = {
   '1': 'CapturePaneRequest',
@@ -209,6 +279,11 @@ const $core.Map<$core.String, $core.dynamic> SessionServiceBase$json = {
       '4': {}
     },
     {
+      '1': 'RespawnSession',
+      '2': '.protectorate.v1.RespawnSessionRequest',
+      '3': '.protectorate.v1.RespawnSessionResponse'
+    },
+    {
       '1': 'CapturePane',
       '2': '.protectorate.v1.CapturePaneRequest',
       '3': '.protectorate.v1.CapturePaneResponse',
@@ -230,6 +305,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.CreateSessionResponse': CreateSessionResponse$json,
   '.protectorate.v1.KillSessionRequest': KillSessionRequest$json,
   '.protectorate.v1.KillSessionResponse': KillSessionResponse$json,
+  '.protectorate.v1.RespawnSessionRequest': RespawnSessionRequest$json,
+  '.protectorate.v1.RespawnSessionResponse': RespawnSessionResponse$json,
   '.protectorate.v1.CapturePaneRequest': CapturePaneRequest$json,
   '.protectorate.v1.CapturePaneResponse': CapturePaneResponse$json,
 };
@@ -241,6 +318,8 @@ final $typed_data.Uint8List sessionServiceDescriptor = $convert.base64Decode(
     'kAIBEl4KDUNyZWF0ZVNlc3Npb24SJS5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlcX'
     'Vlc3QaJi5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlU2Vzc2lvblJlc3BvbnNlEl4KC0tpbGxTZXNz'
     'aW9uEiMucHJvdGVjdG9yYXRlLnYxLktpbGxTZXNzaW9uUmVxdWVzdBokLnByb3RlY3RvcmF0ZS'
-    '52MS5LaWxsU2Vzc2lvblJlc3BvbnNlIgSItRgBEl0KC0NhcHR1cmVQYW5lEiMucHJvdGVjdG9y'
-    'YXRlLnYxLkNhcHR1cmVQYW5lUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5DYXB0dXJlUGFuZV'
-    'Jlc3BvbnNlIgOQAgE=');
+    '52MS5LaWxsU2Vzc2lvblJlc3BvbnNlIgSItRgBEmEKDlJlc3Bhd25TZXNzaW9uEiYucHJvdGVj'
+    'dG9yYXRlLnYxLlJlc3Bhd25TZXNzaW9uUmVxdWVzdBonLnByb3RlY3RvcmF0ZS52MS5SZXNwYX'
+    'duU2Vzc2lvblJlc3BvbnNlEl0KC0NhcHR1cmVQYW5lEiMucHJvdGVjdG9yYXRlLnYxLkNhcHR1'
+    'cmVQYW5lUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5DYXB0dXJlUGFuZVJlc3BvbnNlIgOQAg'
+    'E=');

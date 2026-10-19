@@ -53,7 +53,10 @@ class SleeveState extends $pb.ProtobufEnum {
   static const SleeveState SLEEVE_STATE_RUNNING =
       SleeveState._(1, _omitEnumNames ? '' : 'SLEEVE_STATE_RUNNING');
 
-  /// The harness ended or the session was killed outside KillSleeve.
+  /// The harness ended or the session was killed outside KillSleeve. When the
+  /// harness ended on its own, its tmux session is kept with the final screen
+  /// (read it with CapturePane) until KillSleeve, a respawn, or the hub's
+  /// dead-session retention sweep.
   static const SleeveState SLEEVE_STATE_EXITED =
       SleeveState._(2, _omitEnumNames ? '' : 'SLEEVE_STATE_EXITED');
 

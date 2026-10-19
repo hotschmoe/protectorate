@@ -175,6 +175,20 @@ const Sleeve$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'exitedAt'
     },
+    {
+      '1': 'exit_code',
+      '3': 11,
+      '4': 1,
+      '5': 5,
+      '9': 0,
+      '10': 'exitCode',
+      '17': true
+    },
+    {'1': 'exit_signal', '3': 12, '4': 1, '5': 5, '10': 'exitSignal'},
+    {'1': 'oom_killed', '3': 13, '4': 1, '5': 8, '10': 'oomKilled'},
+  ],
+  '8': [
+    {'1': '_exit_code'},
   ],
 };
 
@@ -187,7 +201,9 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'YXRlLnYxLlNsZWV2ZVN0YXRlUgVzdGF0ZRI1CgZsaW1pdHMYByABKAsyHS5wcm90ZWN0b3JhdG'
     'UudjEuU2xlZXZlTGltaXRzUgZsaW1pdHMSMgoFdXNhZ2UYCCABKAsyHC5wcm90ZWN0b3JhdGUu'
     'djEuU2xlZXZlVXNhZ2VSBXVzYWdlEhIKBGFyZ3MYCSADKAlSBGFyZ3MSNwoJZXhpdGVkX2F0GA'
-    'ogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIIZXhpdGVkQXQ=');
+    'ogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIIZXhpdGVkQXQSIAoJZXhpdF9jb2Rl'
+    'GAsgASgFSABSCGV4aXRDb2RliAEBEh8KC2V4aXRfc2lnbmFsGAwgASgFUgpleGl0U2lnbmFsEh'
+    '0KCm9vbV9raWxsZWQYDSABKAhSCW9vbUtpbGxlZEIMCgpfZXhpdF9jb2Rl');
 
 @$core.Deprecated('Use spawnSleeveRequestDescriptor instead')
 const SpawnSleeveRequest$json = {

@@ -42,6 +42,9 @@ const (
 	// SessionServiceKillSessionProcedure is the fully-qualified name of the SessionService's
 	// KillSession RPC.
 	SessionServiceKillSessionProcedure = "/protectorate.v1.SessionService/KillSession"
+	// SessionServiceRespawnSessionProcedure is the fully-qualified name of the SessionService's
+	// RespawnSession RPC.
+	SessionServiceRespawnSessionProcedure = "/protectorate.v1.SessionService/RespawnSession"
 	// SessionServiceCapturePaneProcedure is the fully-qualified name of the SessionService's
 	// CapturePane RPC.
 	SessionServiceCapturePaneProcedure = "/protectorate.v1.SessionService/CapturePane"
@@ -49,14 +52,23 @@ const (
 
 // SessionServiceClient is a client for the protectorate.v1.SessionService service.
 type SessionServiceClient interface {
-	// ListSessions returns all live sessions.
+	// ListSessions returns all sessions, running and exited.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// CreateSession starts a detached tmux session running command, or the
 	// default shell when command is empty.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
-	// KillSession terminates a session and every process in it.
+	// KillSession terminates a session and every process in it. It also removes
+	// an exited session, discarding its final screen.
 	KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error)
-	// CapturePane returns the current text of a session's active pane.
+	// RespawnSession restarts an exited session with its original command and
+	// working directory. The previous output stays in scrollback. It fails with
+	// FAILED_PRECONDITION while the session is still running. Respawning a sleeve
+	// session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve
+	// to restart a sleeve.
+	RespawnSession(context.Context, *connect.Request[v1.RespawnSessionRequest]) (*connect.Response[v1.RespawnSessionResponse], error)
+	// CapturePane returns the current text of a session's active pane. It also
+	// works on exited sessions, which is how a crash is diagnosed. Include at
+	// least one history line to see the whole final screen of an exited session.
 	CapturePane(context.Context, *connect.Request[v1.CapturePaneRequest]) (*connect.Response[v1.CapturePaneResponse], error)
 }
 
@@ -90,6 +102,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("KillSession")),
 			connect.WithClientOptions(opts...),
 		),
+		respawnSession: connect.NewClient[v1.RespawnSessionRequest, v1.RespawnSessionResponse](
+			httpClient,
+			baseURL+SessionServiceRespawnSessionProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("RespawnSession")),
+			connect.WithClientOptions(opts...),
+		),
 		capturePane: connect.NewClient[v1.CapturePaneRequest, v1.CapturePaneResponse](
 			httpClient,
 			baseURL+SessionServiceCapturePaneProcedure,
@@ -102,10 +120,11 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
-	listSessions  *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	createSession *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	killSession   *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
-	capturePane   *connect.Client[v1.CapturePaneRequest, v1.CapturePaneResponse]
+	listSessions   *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	createSession  *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	killSession    *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
+	respawnSession *connect.Client[v1.RespawnSessionRequest, v1.RespawnSessionResponse]
+	capturePane    *connect.Client[v1.CapturePaneRequest, v1.CapturePaneResponse]
 }
 
 // ListSessions calls protectorate.v1.SessionService.ListSessions.
@@ -123,6 +142,11 @@ func (c *sessionServiceClient) KillSession(ctx context.Context, req *connect.Req
 	return c.killSession.CallUnary(ctx, req)
 }
 
+// RespawnSession calls protectorate.v1.SessionService.RespawnSession.
+func (c *sessionServiceClient) RespawnSession(ctx context.Context, req *connect.Request[v1.RespawnSessionRequest]) (*connect.Response[v1.RespawnSessionResponse], error) {
+	return c.respawnSession.CallUnary(ctx, req)
+}
+
 // CapturePane calls protectorate.v1.SessionService.CapturePane.
 func (c *sessionServiceClient) CapturePane(ctx context.Context, req *connect.Request[v1.CapturePaneRequest]) (*connect.Response[v1.CapturePaneResponse], error) {
 	return c.capturePane.CallUnary(ctx, req)
@@ -130,14 +154,23 @@ func (c *sessionServiceClient) CapturePane(ctx context.Context, req *connect.Req
 
 // SessionServiceHandler is an implementation of the protectorate.v1.SessionService service.
 type SessionServiceHandler interface {
-	// ListSessions returns all live sessions.
+	// ListSessions returns all sessions, running and exited.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// CreateSession starts a detached tmux session running command, or the
 	// default shell when command is empty.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
-	// KillSession terminates a session and every process in it.
+	// KillSession terminates a session and every process in it. It also removes
+	// an exited session, discarding its final screen.
 	KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error)
-	// CapturePane returns the current text of a session's active pane.
+	// RespawnSession restarts an exited session with its original command and
+	// working directory. The previous output stays in scrollback. It fails with
+	// FAILED_PRECONDITION while the session is still running. Respawning a sleeve
+	// session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve
+	// to restart a sleeve.
+	RespawnSession(context.Context, *connect.Request[v1.RespawnSessionRequest]) (*connect.Response[v1.RespawnSessionResponse], error)
+	// CapturePane returns the current text of a session's active pane. It also
+	// works on exited sessions, which is how a crash is diagnosed. Include at
+	// least one history line to see the whole final screen of an exited session.
 	CapturePane(context.Context, *connect.Request[v1.CapturePaneRequest]) (*connect.Response[v1.CapturePaneResponse], error)
 }
 
@@ -167,6 +200,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("KillSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceRespawnSessionHandler := connect.NewUnaryHandler(
+		SessionServiceRespawnSessionProcedure,
+		svc.RespawnSession,
+		connect.WithSchema(sessionServiceMethods.ByName("RespawnSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceCapturePaneHandler := connect.NewUnaryHandler(
 		SessionServiceCapturePaneProcedure,
 		svc.CapturePane,
@@ -182,6 +221,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceCreateSessionHandler.ServeHTTP(w, r)
 		case SessionServiceKillSessionProcedure:
 			sessionServiceKillSessionHandler.ServeHTTP(w, r)
+		case SessionServiceRespawnSessionProcedure:
+			sessionServiceRespawnSessionHandler.ServeHTTP(w, r)
 		case SessionServiceCapturePaneProcedure:
 			sessionServiceCapturePaneHandler.ServeHTTP(w, r)
 		default:
@@ -203,6 +244,10 @@ func (UnimplementedSessionServiceHandler) CreateSession(context.Context, *connec
 
 func (UnimplementedSessionServiceHandler) KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SessionService.KillSession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) RespawnSession(context.Context, *connect.Request[v1.RespawnSessionRequest]) (*connect.Response[v1.RespawnSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SessionService.RespawnSession is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) CapturePane(context.Context, *connect.Request[v1.CapturePaneRequest]) (*connect.Response[v1.CapturePaneResponse], error) {

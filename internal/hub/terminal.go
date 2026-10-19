@@ -23,9 +23,16 @@ import (
 // followed by the payload. Server to client: FrameData carries raw PTY output.
 // Client to server: FrameData is keyboard input, FrameResize is JSON
 // {"cols":N,"rows":N}. Unknown frame types are ignored.
+//
+// Attaching to an exited session shows its final screen read-only: input
+// frames are dropped, and the server sends one FrameNotice (server to client,
+// UTF-8 text) right after the upgrade saying so. If the session's command ends
+// while a client is attached, the same notice is sent then and the connection
+// stays open on the final screen.
 const (
 	FrameData   byte = '0'
 	FrameResize byte = '1'
+	FrameNotice byte = '2'
 
 	// TerminalProtocol is the WebSocket subprotocol clients offer and the
 	// server selects.
@@ -107,7 +114,7 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	cmd, err := h.Sessions.AttachCmd(r.Context(), name, readOnly)
+	cmd, sess, err := h.Sessions.AttachCmd(r.Context(), name, readOnly)
 	if err != nil {
 		h.authz.Record(r.Context(), p, procedure, name, err, "attach_failed")
 	}
@@ -134,6 +141,13 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(maxFrame)
+	if sess.State == session.Exited {
+		readOnly = true
+		if sendNotice(r.Context(), conn, sess) != nil {
+			conn.CloseNow()
+			return
+		}
+	}
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -147,6 +161,10 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
+	if sess.State != session.Exited {
+		wg.Add(1)
+		go func() { defer wg.Done(); h.noticeOnExit(ctx, conn, name) }()
+	}
 	go func() { defer wg.Done(); defer cancel(); pumpOutput(ctx, conn, ptmx) }()
 	go func() { defer wg.Done(); pingLoop(ctx, conn, h.PingInterval, cancel) }()
 
@@ -156,6 +174,38 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	teardown(cmd, ptmx)
 	conn.Close(websocket.StatusNormalClosure, "detached")
 	wg.Wait()
+}
+
+func exitNotice(s session.Session) string {
+	how := "exited with code " + strconv.Itoa(s.ExitCode)
+	if s.ExitSignal > 0 {
+		how = "killed by signal " + strconv.Itoa(s.ExitSignal)
+	}
+	return "session " + s.Name + " " + how + "; showing its final screen read-only (respawn it to run again)"
+}
+
+func sendNotice(ctx context.Context, conn *websocket.Conn, s session.Session) error {
+	return conn.Write(ctx, websocket.MessageBinary, append([]byte{FrameNotice}, exitNotice(s)...))
+}
+
+func (h *Hub) noticeOnExit(ctx context.Context, conn *websocket.Conn, name string) {
+	t := time.NewTicker(h.SessionPoll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		s, err := h.Sessions.Get(ctx, name)
+		if err != nil {
+			return
+		}
+		if s.State == session.Exited {
+			_ = sendNotice(ctx, conn, s)
+			return
+		}
+	}
 }
 
 func pumpOutput(ctx context.Context, conn *websocket.Conn, ptmx *os.File) {

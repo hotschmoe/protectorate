@@ -27,6 +27,8 @@ abstract class SessionServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $1.CreateSessionRequest request);
   $async.Future<$1.KillSessionResponse> killSession(
       $pb.ServerContext ctx, $1.KillSessionRequest request);
+  $async.Future<$1.RespawnSessionResponse> respawnSession(
+      $pb.ServerContext ctx, $1.RespawnSessionRequest request);
   $async.Future<$1.CapturePaneResponse> capturePane(
       $pb.ServerContext ctx, $1.CapturePaneRequest request);
 
@@ -38,6 +40,8 @@ abstract class SessionServiceBase extends $pb.GeneratedService {
         return $1.CreateSessionRequest();
       case 'KillSession':
         return $1.KillSessionRequest();
+      case 'RespawnSession':
+        return $1.RespawnSessionRequest();
       case 'CapturePane':
         return $1.CapturePaneRequest();
       default:
@@ -54,6 +58,8 @@ abstract class SessionServiceBase extends $pb.GeneratedService {
         return createSession(ctx, request as $1.CreateSessionRequest);
       case 'KillSession':
         return killSession(ctx, request as $1.KillSessionRequest);
+      case 'RespawnSession':
+        return respawnSession(ctx, request as $1.RespawnSessionRequest);
       case 'CapturePane':
         return capturePane(ctx, request as $1.CapturePaneRequest);
       default:

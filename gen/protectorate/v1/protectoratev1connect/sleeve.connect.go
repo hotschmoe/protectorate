@@ -51,7 +51,8 @@ type SleeveServiceClient interface {
 	// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
 	// workspace is an existing directory (bound read-write at the same path) or
 	// a git URL cloned into the hub's workspaces directory. Respawning the name
-	// of an exited sleeve reuses its home directory and workspace.
+	// of an exited sleeve reuses its home directory and workspace and replaces
+	// its kept session.
 	SpawnSleeve(context.Context, *connect.Request[v1.SpawnSleeveRequest]) (*connect.Response[v1.SpawnSleeveResponse], error)
 	// ListSleeves returns every known sleeve, running or exited, with its latest
 	// resource usage.
@@ -137,7 +138,8 @@ type SleeveServiceHandler interface {
 	// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
 	// workspace is an existing directory (bound read-write at the same path) or
 	// a git URL cloned into the hub's workspaces directory. Respawning the name
-	// of an exited sleeve reuses its home directory and workspace.
+	// of an exited sleeve reuses its home directory and workspace and replaces
+	// its kept session.
 	SpawnSleeve(context.Context, *connect.Request[v1.SpawnSleeveRequest]) (*connect.Response[v1.SpawnSleeveResponse], error)
 	// ListSleeves returns every known sleeve, running or exited, with its latest
 	// resource usage.

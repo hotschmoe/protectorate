@@ -17,7 +17,11 @@ import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
+import 'session.pbenum.dart';
+
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+export 'session.pbenum.dart';
 
 /// Session is one tmux-backed harness session.
 class Session extends $pb.GeneratedMessage {
@@ -30,6 +34,10 @@ class Session extends $pb.GeneratedMessage {
     $0.Timestamp? lastActivity,
     $core.int? paneCols,
     $core.int? paneRows,
+    SessionState? state,
+    $core.int? exitCode,
+    $core.int? exitSignal,
+    $0.Timestamp? exitedAt,
   }) {
     final result = Session._();
     if (name != null) result.name = name;
@@ -40,6 +48,10 @@ class Session extends $pb.GeneratedMessage {
     if (lastActivity != null) result.lastActivity = lastActivity;
     if (paneCols != null) result.paneCols = paneCols;
     if (paneRows != null) result.paneRows = paneRows;
+    if (state != null) result.state = state;
+    if (exitCode != null) result.exitCode = exitCode;
+    if (exitSignal != null) result.exitSignal = exitSignal;
+    if (exitedAt != null) result.exitedAt = exitedAt;
     return result;
   }
 
@@ -67,6 +79,12 @@ class Session extends $pb.GeneratedMessage {
         subBuilder: $0.Timestamp.$_createMessage)
     ..aI(7, _omitFieldNames ? '' : 'paneCols')
     ..aI(8, _omitFieldNames ? '' : 'paneRows')
+    ..aE<SessionState>(9, _omitFieldNames ? '' : 'state',
+        enumValues: SessionState.values)
+    ..aI(10, _omitFieldNames ? '' : 'exitCode')
+    ..aI(11, _omitFieldNames ? '' : 'exitSignal')
+    ..aOM<$0.Timestamp>(12, _omitFieldNames ? '' : 'exitedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -161,6 +179,48 @@ class Session extends $pb.GeneratedMessage {
   $core.bool hasPaneRows() => $_has(7);
   @$pb.TagNumber(8)
   void clearPaneRows() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  SessionState get state => $_getN(8);
+  @$pb.TagNumber(9)
+  set state(SessionState value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasState() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearState() => $_clearField(9);
+
+  /// exit_code is the command's exit status, or 128+exit_signal when a signal
+  /// ended it. Only meaningful when state is EXITED.
+  @$pb.TagNumber(10)
+  $core.int get exitCode => $_getIZ(9);
+  @$pb.TagNumber(10)
+  set exitCode($core.int value) => $_setSignedInt32(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasExitCode() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearExitCode() => $_clearField(10);
+
+  /// exit_signal is the terminating signal number, 0 when the command exited
+  /// on its own.
+  @$pb.TagNumber(11)
+  $core.int get exitSignal => $_getIZ(10);
+  @$pb.TagNumber(11)
+  set exitSignal($core.int value) => $_setSignedInt32(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasExitSignal() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearExitSignal() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  $0.Timestamp get exitedAt => $_getN(11);
+  @$pb.TagNumber(12)
+  set exitedAt($0.Timestamp value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasExitedAt() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearExitedAt() => $_clearField(12);
+  @$pb.TagNumber(12)
+  $0.Timestamp ensureExitedAt() => $_ensure(11);
 }
 
 class ListSessionsRequest extends $pb.GeneratedMessage {
@@ -516,6 +576,130 @@ class KillSessionResponse extends $pb.GeneratedMessage {
   static KillSessionResponse? _defaultInstance;
 }
 
+class RespawnSessionRequest extends $pb.GeneratedMessage {
+  factory RespawnSessionRequest({
+    $core.String? name,
+  }) {
+    final result = RespawnSessionRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  RespawnSessionRequest._();
+
+  factory RespawnSessionRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RespawnSessionRequest()..mergeFromBuffer(data, registry);
+  factory RespawnSessionRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RespawnSessionRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RespawnSessionRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: RespawnSessionRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RespawnSessionRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RespawnSessionRequest copyWith(
+          void Function(RespawnSessionRequest) updates) =>
+      super.copyWith((message) => updates(message as RespawnSessionRequest))
+          as RespawnSessionRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use RespawnSessionRequest() / RespawnSessionRequest.new instead')
+  static RespawnSessionRequest create() => RespawnSessionRequest._();
+  static $pb.GeneratedMessage $_createMessage() => RespawnSessionRequest._();
+  @$core.override
+  RespawnSessionRequest createEmptyInstance() => RespawnSessionRequest._();
+  @$core.pragma('dart2js:noInline')
+  static RespawnSessionRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RespawnSessionRequest>(
+          RespawnSessionRequest.$_createMessage);
+  static RespawnSessionRequest? _defaultInstance;
+
+  /// name of the exited session to restart.
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class RespawnSessionResponse extends $pb.GeneratedMessage {
+  factory RespawnSessionResponse({
+    Session? session,
+  }) {
+    final result = RespawnSessionResponse._();
+    if (session != null) result.session = session;
+    return result;
+  }
+
+  RespawnSessionResponse._();
+
+  factory RespawnSessionResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RespawnSessionResponse()..mergeFromBuffer(data, registry);
+  factory RespawnSessionResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RespawnSessionResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RespawnSessionResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: RespawnSessionResponse.$_createMessage)
+    ..aOM<Session>(1, _omitFieldNames ? '' : 'session',
+        subBuilder: Session.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RespawnSessionResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RespawnSessionResponse copyWith(
+          void Function(RespawnSessionResponse) updates) =>
+      super.copyWith((message) => updates(message as RespawnSessionResponse))
+          as RespawnSessionResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use RespawnSessionResponse() / RespawnSessionResponse.new instead')
+  static RespawnSessionResponse create() => RespawnSessionResponse._();
+  static $pb.GeneratedMessage $_createMessage() => RespawnSessionResponse._();
+  @$core.override
+  RespawnSessionResponse createEmptyInstance() => RespawnSessionResponse._();
+  @$core.pragma('dart2js:noInline')
+  static RespawnSessionResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RespawnSessionResponse>(
+          RespawnSessionResponse.$_createMessage);
+  static RespawnSessionResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  Session get session => $_getN(0);
+  @$pb.TagNumber(1)
+  set session(Session value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSession() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSession() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Session ensureSession() => $_ensure(0);
+}
+
 class CapturePaneRequest extends $pb.GeneratedMessage {
   factory CapturePaneRequest({
     $core.String? name,
@@ -650,12 +834,20 @@ class CapturePaneResponse extends $pb.GeneratedMessage {
 
 /// SessionService manages tmux-backed harness sessions. Interactive access is
 /// the WebSocket terminal at GET /ws/terminal/{name}, not an RPC.
+///
+/// When a session's command ends, the session stays in state EXITED with its
+/// last screen, exit code and exit signal until it is killed, respawned, or
+/// removed by the hub's dead-session retention sweep (--dead-retention).
+/// Changes are announced on EventService: "session.created", "session.exited"
+/// (command ended; payload has exit_code, exit_signal and exited_at) and
+/// "session.removed" (session gone). The WebSocket terminal attaches to an
+/// exited session read-only and sends a notice frame saying so.
 class SessionServiceApi {
   final $pb.RpcClient _client;
 
   SessionServiceApi(this._client);
 
-  /// ListSessions returns all live sessions.
+  /// ListSessions returns all sessions, running and exited.
   $async.Future<ListSessionsResponse> listSessions(
           $pb.ClientContext? ctx, ListSessionsRequest request) =>
       _client.invoke<ListSessionsResponse>(ctx, 'SessionService',
@@ -668,13 +860,26 @@ class SessionServiceApi {
       _client.invoke<CreateSessionResponse>(ctx, 'SessionService',
           'CreateSession', request, CreateSessionResponse());
 
-  /// KillSession terminates a session and every process in it.
+  /// KillSession terminates a session and every process in it. It also removes
+  /// an exited session, discarding its final screen.
   $async.Future<KillSessionResponse> killSession(
           $pb.ClientContext? ctx, KillSessionRequest request) =>
       _client.invoke<KillSessionResponse>(
           ctx, 'SessionService', 'KillSession', request, KillSessionResponse());
 
-  /// CapturePane returns the current text of a session's active pane.
+  /// RespawnSession restarts an exited session with its original command and
+  /// working directory. The previous output stays in scrollback. It fails with
+  /// FAILED_PRECONDITION while the session is still running. Respawning a sleeve
+  /// session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve
+  /// to restart a sleeve.
+  $async.Future<RespawnSessionResponse> respawnSession(
+          $pb.ClientContext? ctx, RespawnSessionRequest request) =>
+      _client.invoke<RespawnSessionResponse>(ctx, 'SessionService',
+          'RespawnSession', request, RespawnSessionResponse());
+
+  /// CapturePane returns the current text of a session's active pane. It also
+  /// works on exited sessions, which is how a crash is diagnosed. Include at
+  /// least one history line to see the whole final screen of an exited session.
   $async.Future<CapturePaneResponse> capturePane(
           $pb.ClientContext? ctx, CapturePaneRequest request) =>
       _client.invoke<CapturePaneResponse>(
