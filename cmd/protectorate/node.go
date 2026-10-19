@@ -205,6 +205,7 @@ func nodeServeCmd() *cobra.Command {
 					return err
 				}
 				a.Authorize = n.AuthorizeHub()
+				go n.KeepHubReachable(ctx, func(f string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), "tailnet: "+f+"\n", args...) })
 				fmt.Fprintf(cmd.ErrOrStderr(), "node agent %s serving on the tailnet, port %d (hub only)\n", version, node.DefaultPort)
 			} else {
 				if token == "" {

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,7 +20,10 @@ import (
 	"time"
 
 	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tailcfg"
+	"tailscale.com/types/key"
+	"tailscale.com/types/views"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -461,5 +465,46 @@ func TestNodeEnrolledWith(t *testing.T) {
 				t.Fatalf("EnrolledWith = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTransportBoundsEveryPhase(t *testing.T) {
+	old := dialAttemptTimeout
+	dialAttemptTimeout = 100 * time.Millisecond
+	defer func() { dialAttemptTimeout = old }()
+
+	hang := func(ctx context.Context, _, _ string) (net.Conn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	tr := newTransport(hang, func() time.Duration { return time.Minute })
+	if tr.ResponseHeaderTimeout <= 0 || tr.IdleConnTimeout <= 0 || tr.IdleConnTimeout > time.Minute {
+		t.Fatalf("unbounded transport: header=%s idle=%s", tr.ResponseHeaderTimeout, tr.IdleConnTimeout)
+	}
+	c := &http.Client{Transport: tr}
+	start := time.Now()
+	_, err := c.Get("http://peer:7475/")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("hung dial = %v, want deadline exceeded", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("hung dial took %s", d)
+	}
+}
+
+func TestHubAddr(t *testing.T) {
+	tags := func(v ...string) *views.Slice[string] { s := views.SliceOf(v); return &s }
+	st := &ipnstate.Status{Peer: map[key.NodePublic]*ipnstate.PeerStatus{
+		key.NewNode().Public(): {Tags: tags(TagNode), TailscaleIPs: []netip.Addr{netip.MustParseAddr("100.64.0.9")}},
+		key.NewNode().Public(): {Tags: tags(TagHub)},
+		key.NewNode().Public(): {},
+	}}
+	if _, ok := hubAddr(st); ok {
+		t.Fatal("hub without addresses accepted")
+	}
+	want := netip.MustParseAddr("100.64.0.1")
+	st.Peer[key.NewNode().Public()] = &ipnstate.PeerStatus{Tags: tags(TagHub, TagClient), TailscaleIPs: []netip.Addr{want, netip.MustParseAddr("fd7a::1")}}
+	if got, ok := hubAddr(st); !ok || got != want {
+		t.Fatalf("hubAddr = %v, %v; want %v", got, ok, want)
 	}
 }

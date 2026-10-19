@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -484,5 +486,120 @@ func TestInvitedNodeLifecycle(t *testing.T) {
 	}
 	if !slices.Contains(events, "node.joined box") || !slices.Contains(events, "node.metrics box") {
 		t.Fatalf("events = %v", events)
+	}
+}
+
+// tunnel forwards to target and can silently kill connections the way a
+// vanished tailnet peer does: no FIN, no RST, bytes just stop arriving.
+type tunnel struct {
+	ln     net.Listener
+	target string
+	mu     sync.Mutex
+	down   bool
+	conns  []*tunnelConn
+}
+
+type tunnelConn struct{ dead atomic.Bool }
+
+func newTunnel(t *testing.T, target string) *tunnel {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn := &tunnel{ln: ln, target: target}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go tn.serve(c)
+		}
+	}()
+	t.Cleanup(func() { ln.Close() })
+	return tn
+}
+
+func (tn *tunnel) serve(c net.Conn) {
+	defer c.Close()
+	tc := &tunnelConn{}
+	tn.mu.Lock()
+	tc.dead.Store(tn.down)
+	tn.conns = append(tn.conns, tc)
+	tn.mu.Unlock()
+	up, err := net.Dial("tcp", tn.target)
+	if err != nil {
+		return
+	}
+	defer up.Close()
+	pipe := func(dst, src net.Conn) {
+		buf := make([]byte, 4096)
+		for {
+			n, err := src.Read(buf)
+			if n > 0 && !tc.dead.Load() {
+				dst.Write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+	go pipe(up, c)
+	pipe(c, up)
+}
+
+// Break blackholes every open connection; with down set, new ones too.
+func (tn *tunnel) Break(down bool) {
+	tn.mu.Lock()
+	defer tn.mu.Unlock()
+	tn.down = down
+	for _, c := range tn.conns {
+		c.dead.Store(true)
+	}
+}
+
+func TestPollRecoversFromDeadPooledConnection(t *testing.T) {
+	agent := &node.Agent{
+		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+		Authorize: node.TokenAuthorizer("tok"),
+	}
+	agentSrv := httptest.NewServer(agent.Handler())
+	defer agentSrv.Close()
+	tn := newTunnel(t, agentSrv.Listener.Addr().String())
+
+	inv, err := OpenInventory(t.TempDir(), testSelf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Add(&pb.NodeInfo{Name: "box", Address: "http://" + tn.ln.Addr().String()}); err != nil {
+		t.Fatal(err)
+	}
+	const fetchTimeout = 2 * time.Second
+	m := NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+		NodeOptions{Interval: time.Hour, FetchTimeout: fetchTimeout, Token: "tok", Client: &http.Client{Transport: &http.Transport{}}})
+	status := func() pb.NodeFreshness {
+		s, err := m.Status("box")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Freshness
+	}
+	ctx := context.Background()
+	box, _ := inv.Get("box")
+
+	m.pollOne(ctx, box)
+	if got := status(); got != pb.NodeFreshness_NODE_FRESHNESS_FRESH {
+		t.Fatalf("first poll = %v", got)
+	}
+
+	tn.Break(false)
+	start := time.Now()
+	m.pollOne(ctx, box)
+	if got := status(); got != pb.NodeFreshness_NODE_FRESHNESS_FRESH {
+		t.Fatalf("poll over a dead pooled connection = %v", got)
+	}
+	if d := time.Since(start); d > fetchTimeout {
+		t.Fatalf("recovery took %s, over the %s fetch budget", d, fetchTimeout)
 	}
 }

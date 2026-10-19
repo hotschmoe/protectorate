@@ -234,3 +234,108 @@ func TestTailnetEndToEnd(t *testing.T) {
 		}
 	})
 }
+
+func serveNode(t *testing.T, n *tailnet.Net, name string) func() {
+	t.Helper()
+	ln, err := n.Listen(tailnet.NodePort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello from %s", name)
+	})}
+	go srv.Serve(ln)
+	return func() { srv.Close() }
+}
+
+// TestNodeRestartRecovery restarts a node agent and checks the hub's tailnet
+// client reaches it again within two poll intervals, without a hub restart.
+func TestNodeRestartRecovery(t *testing.T) {
+	if os.Getenv("PROT_TAILNET_IT") != "1" {
+		t.Skip("set PROT_TAILNET_IT=1 to run (downloads headscale, starts real processes)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	home := t.TempDir()
+	if _, err := tailnet.Install(ctx, home, tailnet.HeadscaleVersion, nil); err != nil {
+		t.Fatal(err)
+	}
+	listen := freeAddr(t, "tcp")
+	cfg := tailnet.DefaultConfig("http://" + listen)
+	cfg.Listen = listen
+	cfg.GRPCListen = freeAddr(t, "tcp")
+	cfg.MetricsListen = freeAddr(t, "tcp")
+	cfg.STUNListen = freeAddr(t, "udp")
+	if err := cfg.Save(home); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := tailnet.Start(ctx, home, cfg, t.Logf)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer svc.Close()
+
+	key, _, err := svc.Admin.Invite(ctx, "alpha", []string{tailnet.TagNode, tailnet.TierTag("server")}, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "tsnet")
+	if err := tailnet.Join(ctx, dir, cfg.ServerURL, key, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	// start runs one node agent process: tsnet, listener and the hub keepalive.
+	start := func() (stop func()) {
+		n, err := tailnet.OpenNode(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kctx, kstop := context.WithCancel(ctx)
+		kdone := make(chan struct{})
+		go func() { defer close(kdone); n.KeepHubReachable(kctx, t.Logf) }()
+		stopSrv := serveNode(t, n, "alpha")
+		return func() {
+			kstop()
+			<-kdone
+			stopSrv()
+			n.Close()
+		}
+	}
+	stop := start()
+
+	const (
+		interval     = 5 * time.Second
+		fetchTimeout = 15 * time.Second
+	)
+	hc := svc.Net.HTTPClient()
+	url := fmt.Sprintf("http://alpha:%d/", tailnet.NodePort)
+	if code, _, err := get(ctx, hc, url, 40*time.Second); err != nil || code != 200 {
+		t.Fatalf("before restart: %d %v", code, err)
+	}
+
+	stop()
+	stop = start()
+	defer func() { stop() }()
+
+	begin := time.Now()
+	for polls := 1; ; polls++ {
+		t0 := time.Now()
+		code, _, err := get(ctx, hc, url, fetchTimeout)
+		t.Logf("poll %d at +%s: code=%d err=%v", polls, time.Since(begin).Round(time.Second), code, err)
+		if err == nil && code == 200 {
+			t.Logf("recovered after %s", time.Since(begin).Round(time.Second))
+			return
+		}
+		if polls >= 2 {
+			if st, serr := svc.Net.LocalClientForTest().Status(ctx); serr == nil {
+				for _, p := range st.Peer {
+					t.Logf("hub view of %s: online=%v curaddr=%q last handshake %s", p.HostName, p.Online, p.CurAddr, p.LastHandshake.Format(time.TimeOnly))
+				}
+			}
+			t.Fatalf("node not reachable %s after restart (%d polls)", time.Since(begin).Round(time.Second), polls)
+		}
+		if d := interval - time.Since(t0); d > 0 {
+			time.Sleep(d)
+		}
+	}
+}

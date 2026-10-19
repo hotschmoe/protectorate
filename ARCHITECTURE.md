@@ -154,6 +154,18 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
   and by the authorizer. Node agents accept only `tag:hub`.
 - Right after a join the netmap may not yet hold every peer, so the hub's
   tailnet `http.Client` retries "no such host" lookups for up to 15s.
+- Reconnection after a node restart: a restarted member gets a new disco key,
+  but a peer that learned the old one over TSMP keeps probing with it and
+  only switches when it sees the new key in a packet from that member. The
+  hub never hears from an agent that only answers, so the node agent pings
+  the hub (disco ping, 2s retry until it works, then every 30s) from
+  `node serve`. Without it the hub showed the node UNREACHABLE for as long as
+  the node stayed silent (over 4 minutes in the reproduction). The hub side
+  bounds every phase of a request (30s dial attempt, 30s response headers,
+  20s idle connections), and a poll that fails on the transport drops the
+  pool and retries once on a fresh connection within the same fetch budget.
+  Embedded DERP needs TLS: with an `http://` control URL DERP clients fail the
+  TLS handshake, so there is no relay fallback and only direct UDP paths work.
 
 SSH stays as the bootstrap and break-glass path (`spikes/ssh-agentless/`).
 

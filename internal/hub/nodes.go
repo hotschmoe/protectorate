@@ -308,12 +308,33 @@ func (b bearerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFun
 	return next
 }
 
+// fetchHTTP gives the first attempt half the fetch budget. A node that died
+// leaves a pooled connection that never errors, so on a transport failure the
+// pool is dropped and the rest of the budget is spent on a fresh connection.
 func (m *NodeMonitor) fetchHTTP(ctx context.Context, n *pb.NodeInfo) (*pb.NodeMetrics, error) {
-	res, err := m.agentClient(n, connect.WithProtoJSON()).GetMetrics(ctx, connect.NewRequest(&pb.GetMetricsRequest{}))
-	if err != nil {
-		return nil, err
+	call := func(ctx context.Context) (*pb.NodeMetrics, error) {
+		res, err := m.agentClient(n, connect.WithProtoJSON()).GetMetrics(ctx, connect.NewRequest(&pb.GetMetricsRequest{}))
+		if err != nil {
+			return nil, err
+		}
+		return res.Msg, nil
 	}
-	return res.Msg, nil
+	actx, cancel := context.WithTimeout(ctx, m.opts.FetchTimeout/2)
+	metrics, err := call(actx)
+	cancel()
+	if err == nil || ctx.Err() != nil || !transportFailure(err) {
+		return metrics, err
+	}
+	m.opts.Client.CloseIdleConnections()
+	return call(ctx)
+}
+
+func transportFailure(err error) bool {
+	switch connect.CodeOf(err) {
+	case connect.CodeUnavailable, connect.CodeDeadlineExceeded:
+		return true
+	}
+	return false
 }
 
 // AgentURL turns a tailnet name or address into the node agent's base URL.

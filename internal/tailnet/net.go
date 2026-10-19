@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 
 	"tailscale.com/client/local"
 	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
 
@@ -82,16 +85,100 @@ func (n *Net) Listen(port int) (net.Listener, error) {
 	return l, nil
 }
 
+// Transport bounds. A peer that vanishes (killed process, dead phone) never
+// resets a tunneled connection, so every phase needs its own deadline.
+const (
+	responseHeaderTimeout = 30 * time.Second
+	idleConnTimeout       = 20 * time.Second
+)
+
+var dialAttemptTimeout = 30 * time.Second
+
 // HTTPClient returns a client that dials over the tailnet by MagicDNS name,
 // retrying lookups that fail right after a join.
 func (n *Net) HTTPClient() *http.Client {
-	return &http.Client{Transport: &http.Transport{
+	return &http.Client{Transport: newTransport(n.srv.Dial, func() time.Duration { return n.LookupRetry })}
+}
+
+func newTransport(dial dialFunc, lookupRetry func() time.Duration) *http.Transport {
+	attempt := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, dialAttemptTimeout)
+		defer cancel()
+		return dial(ctx, network, addr)
+	}
+	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return retryDial(ctx, n.srv.Dial, n.LookupRetry, network, addr)
+			return retryDial(ctx, attempt, lookupRetry(), network, addr)
 		},
-		MaxIdleConnsPerHost: 4,
-		IdleConnTimeout:     90 * time.Second,
-	}}
+		MaxIdleConnsPerHost:   4,
+		IdleConnTimeout:       idleConnTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+	}
+}
+
+const (
+	hubPingTimeout  = 10 * time.Second
+	hubPingRetry    = 2 * time.Second
+	hubPingInterval = 30 * time.Second
+)
+
+// KeepHubReachable pings the hub over the tailnet until ctx ends: quickly
+// while it fails, every hubPingInterval once it works.
+//
+// A restarted member gets a new disco key. A peer that learned the old key
+// over TSMP keeps sending discovery pings with it, and the restarted member
+// cannot decrypt them, so the hub never finds a path back. A member that
+// speaks first with its new key makes the peer switch at once. A node agent
+// only ever answers, so it must do this itself.
+func (n *Net) KeepHubReachable(ctx context.Context, logf func(string, ...any)) {
+	wait, failing := time.Duration(0), false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		err := n.pingHub(ctx)
+		switch {
+		case err == nil:
+			wait, failing = hubPingInterval, false
+		default:
+			if !failing && ctx.Err() == nil {
+				logf("hub not reachable yet: %v", err)
+			}
+			wait, failing = hubPingRetry, true
+		}
+	}
+}
+
+func (n *Net) pingHub(ctx context.Context) error {
+	st, err := n.lc.Status(ctx)
+	if err != nil {
+		return err
+	}
+	ip, ok := hubAddr(st)
+	if !ok {
+		return errors.New("hub not in the netmap")
+	}
+	ctx, cancel := context.WithTimeout(ctx, hubPingTimeout)
+	defer cancel()
+	res, err := n.lc.Ping(ctx, ip, tailcfg.PingDisco)
+	if err != nil {
+		return err
+	}
+	if res.Err != "" {
+		return errors.New(res.Err)
+	}
+	return nil
+}
+
+func hubAddr(st *ipnstate.Status) (netip.Addr, bool) {
+	for _, p := range st.Peer {
+		if p.Tags != nil && p.Tags.ContainsFunc(func(t string) bool { return t == TagHub }) && len(p.TailscaleIPs) > 0 {
+			return p.TailscaleIPs[0], true
+		}
+	}
+	return netip.Addr{}, false
 }
 
 type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
