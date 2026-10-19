@@ -2,3 +2,4 @@ references/
 /protectorate
 /bin/
 *.test
+.claude/worktrees/
