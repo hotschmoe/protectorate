@@ -97,7 +97,15 @@ type entry struct {
 	cpuAt   time.Time
 	oomSeen uint64
 	peak    uint64
+	// scopeGone is when Reconcile first saw the scope missing under a session
+	// that tmux still reports as running.
+	scopeGone time.Time
 }
+
+// scopeGrace is how long tmux gets to record the exit status of a command
+// whose scope has already vanished. The scope goes the moment the last process
+// exits, slightly before tmux reaps the pane.
+const scopeGrace = 5 * time.Second
 
 type Manager struct {
 	opts Options
@@ -501,11 +509,22 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 			continue
 		}
 		s, ok := live[e.Session]
+		alive := m.cfg.scopeAlive(name)
+		if alive {
+			e.scopeGone = time.Time{}
+		}
 		switch {
 		case !ok:
 			out = append(out, gone{e: e})
-		case s.State == session.Exited || !m.cfg.scopeAlive(name):
+		case s.State == session.Exited:
 			out = append(out, gone{e: e, s: &s})
+		case !alive:
+			if e.scopeGone.IsZero() {
+				e.scopeGone = time.Now()
+			}
+			if time.Since(e.scopeGone) >= scopeGrace {
+				out = append(out, gone{e: e, s: &s})
+			}
 		}
 	}
 	m.mu.Unlock()

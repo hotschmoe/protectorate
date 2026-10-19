@@ -298,9 +298,7 @@ func TestSleeveExitKeepsSession(t *testing.T) {
 	if i.ExitCode == nil || *i.ExitCode != 3 || i.ExitSignal != 0 || i.OOMKilled || i.Exited.IsZero() {
 		t.Fatalf("info = %+v", i)
 	}
-	if !r.rec.has("sleeve.exited " + info.Name) {
-		t.Errorf("no exited event: %v", r.rec.events)
-	}
+	waitFor(t, "exited event", func() bool { return r.rec.has("sleeve.exited " + info.Name) })
 	if r.cfg.scopeAlive(info.Name) {
 		t.Error("scope alive after exit")
 	}
