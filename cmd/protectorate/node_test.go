@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +20,37 @@ import (
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
+
+// fakeTailnet hands out numbered keys and records what was expired.
+type fakeTailnet struct {
+	mu      sync.Mutex
+	next    uint64
+	expired []uint64
+}
+
+func (f *fakeTailnet) ControlURL() string { return "http://hs.lan:7480" }
+
+func (f *fakeTailnet) InviteNode(_ context.Context, _, _ string, _ []string, _ time.Duration) (string, uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.next++
+	return fmt.Sprintf("hskey-auth-%d-test", f.next), f.next, nil
+}
+
+func (f *fakeTailnet) ExpireKey(_ context.Context, id uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.expired = append(f.expired, id)
+	return nil
+}
+
+func (f *fakeTailnet) Revoke(context.Context, string) (bool, error) { return false, nil }
+
+func (f *fakeTailnet) expiredKeys() []uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.expired)
+}
 
 func TestNodeCLI(t *testing.T) {
 	t.Setenv("PROTECTORATE_HOME", t.TempDir())
@@ -34,6 +68,8 @@ func TestNodeCLI(t *testing.T) {
 	if err := attachNodes(h, time.Hour, "nt", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	ts := &fakeTailnet{}
+	h.SetTailnetAdmin(ts)
 	hl, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -127,22 +163,35 @@ func TestNodeCLI(t *testing.T) {
 		}
 	})
 	t.Run("invite recorded", func(t *testing.T) {
-		o := &opts{hubURL: url}
-		for _, tier := range []string{"family", "server"} {
-			if err := recordInvite(context.Background(), o, "newbox", tier, []string{"gpu"}, 5); err != nil {
-				t.Fatal(err)
+		out, err := run(t, "node", "invite", "newbox", "--tier", "family", "--pool", "gpu", "--url", "http://hub.lan:7470")
+		for _, w := range []string{
+			"WINDOWS (PowerShell):\n  $env:PROTECTORATE_ENROLL_KEY='hskey-auth-1-test'; $env:PROTECTORATE_NODE_NAME='newbox'; irm 'http://hub.lan:7470/install.ps1' | iex",
+			"LINUX (sh):\n  curl -fsSL 'http://hub.lan:7470/install.sh' | PROTECTORATE_ENROLL_KEY='hskey-auth-1-test' sh -s -- --name 'newbox'",
+			"PROTECTORATE_ENROLL_KEY=hskey-auth-1-test protectorate node install --control http://hs.lan:7480 --name newbox",
+		} {
+			if err != nil || !strings.Contains(out, w) {
+				t.Fatalf("err=%v, missing %q in\n%s", err, w, out)
 			}
 		}
-		out, err := run(t, "node", "ls")
-		if err != nil || !strings.Contains(out, "newbox") || !strings.Contains(out, "invited, not yet joined") || strings.Contains(out, "UNREACHABLE") {
-			t.Fatalf("err=%v\n%s", err, out)
+		if _, err := run(t, "node", "invite", "newbox"); err != nil {
+			t.Fatalf("re-invite: %v", err)
+		}
+		ls, err := run(t, "node", "ls")
+		if err != nil || !strings.Contains(ls, "newbox") || !strings.Contains(ls, "invited, not yet joined") || strings.Contains(ls, "UNREACHABLE") {
+			t.Fatalf("err=%v\n%s", err, ls)
 		}
 		show, err := run(t, "node", "show", "newbox")
-		if err != nil || !strings.Contains(show, "server") || !strings.Contains(show, "pool-gpu") {
+		if err != nil || !strings.Contains(show, "server") {
 			t.Fatalf("err=%v\n%s", err, show)
 		}
-		if _, err := run(t, "node", "rm", "newbox"); err != nil {
-			t.Fatal(err)
+		if out, err := run(t, "node", "rm", "newbox"); err != nil || !strings.Contains(out, "expired the invite key") {
+			t.Fatalf("cancel invite: err=%v\n%s", err, out)
+		}
+		if got := ts.expiredKeys(); !slices.Equal(got, []uint64{1, 2}) {
+			t.Fatalf("expired keys %v, want the first on re-invite and the second on cancel", got)
+		}
+		if _, err := run(t, "node", "invite", "Bad_Name"); err == nil {
+			t.Fatal("invalid name accepted")
 		}
 	})
 	t.Run("rm", func(t *testing.T) {

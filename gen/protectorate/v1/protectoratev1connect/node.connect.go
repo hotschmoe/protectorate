@@ -67,6 +67,9 @@ const (
 	// NodeAgentServiceGetDeskStateProcedure is the fully-qualified name of the NodeAgentService's
 	// GetDeskState RPC.
 	NodeAgentServiceGetDeskStateProcedure = "/protectorate.v1.NodeAgentService/GetDeskState"
+	// NodeAgentServiceUninstallProcedure is the fully-qualified name of the NodeAgentService's
+	// Uninstall RPC.
+	NodeAgentServiceUninstallProcedure = "/protectorate.v1.NodeAgentService/Uninstall"
 	// NodeServiceListNodesProcedure is the fully-qualified name of the NodeService's ListNodes RPC.
 	NodeServiceListNodesProcedure = "/protectorate.v1.NodeService/ListNodes"
 	// NodeServiceGetNodeProcedure is the fully-qualified name of the NodeService's GetNode RPC.
@@ -75,6 +78,11 @@ const (
 	NodeServiceAddNodeProcedure = "/protectorate.v1.NodeService/AddNode"
 	// NodeServiceRemoveNodeProcedure is the fully-qualified name of the NodeService's RemoveNode RPC.
 	NodeServiceRemoveNodeProcedure = "/protectorate.v1.NodeService/RemoveNode"
+	// NodeServiceInviteNodeProcedure is the fully-qualified name of the NodeService's InviteNode RPC.
+	NodeServiceInviteNodeProcedure = "/protectorate.v1.NodeService/InviteNode"
+	// NodeServiceWatchNodeSetupProcedure is the fully-qualified name of the NodeService's
+	// WatchNodeSetup RPC.
+	NodeServiceWatchNodeSetupProcedure = "/protectorate.v1.NodeService/WatchNodeSetup"
 	// NodeServicePutFileProcedure is the fully-qualified name of the NodeService's PutFile RPC.
 	NodeServicePutFileProcedure = "/protectorate.v1.NodeService/PutFile"
 	// NodeServiceGetFileProcedure is the fully-qualified name of the NodeService's GetFile RPC.
@@ -126,6 +134,10 @@ type NodeAgentServiceClient interface {
 	// evaluates it now. The node enforces the policy itself on every input
 	// command, so the hub's view can be a few seconds old without harm.
 	GetDeskState(context.Context, *connect.Request[v1.GetDeskStateRequest]) (*connect.Response[v1.DeskState], error)
+	// Uninstall unregisters the agent's startup (the logon task, systemd user
+	// unit or termux service `node install` registered) and stops the agent
+	// once it has answered. It deletes nothing; the response names what is left.
+	Uninstall(context.Context, *connect.Request[v1.UninstallRequest]) (*connect.Response[v1.UninstallResponse], error)
 }
 
 // NewNodeAgentServiceClient constructs a client for the protectorate.v1.NodeAgentService service.
@@ -207,6 +219,12 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(nodeAgentServiceMethods.ByName("GetDeskState")),
 			connect.WithClientOptions(opts...),
 		),
+		uninstall: connect.NewClient[v1.UninstallRequest, v1.UninstallResponse](
+			httpClient,
+			baseURL+NodeAgentServiceUninstallProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("Uninstall")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -223,6 +241,7 @@ type nodeAgentServiceClient struct {
 	deskAction    *connect.Client[v1.DeskActionRequest, v1.DeskActionResponse]
 	applyUpdate   *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
 	getDeskState  *connect.Client[v1.GetDeskStateRequest, v1.DeskState]
+	uninstall     *connect.Client[v1.UninstallRequest, v1.UninstallResponse]
 }
 
 // GetMetrics calls protectorate.v1.NodeAgentService.GetMetrics.
@@ -280,6 +299,11 @@ func (c *nodeAgentServiceClient) GetDeskState(ctx context.Context, req *connect.
 	return c.getDeskState.CallUnary(ctx, req)
 }
 
+// Uninstall calls protectorate.v1.NodeAgentService.Uninstall.
+func (c *nodeAgentServiceClient) Uninstall(ctx context.Context, req *connect.Request[v1.UninstallRequest]) (*connect.Response[v1.UninstallResponse], error) {
+	return c.uninstall.CallUnary(ctx, req)
+}
+
 // NodeAgentServiceHandler is an implementation of the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceHandler interface {
 	// GetMetrics collects this node's current metrics.
@@ -315,6 +339,10 @@ type NodeAgentServiceHandler interface {
 	// evaluates it now. The node enforces the policy itself on every input
 	// command, so the hub's view can be a few seconds old without harm.
 	GetDeskState(context.Context, *connect.Request[v1.GetDeskStateRequest]) (*connect.Response[v1.DeskState], error)
+	// Uninstall unregisters the agent's startup (the logon task, systemd user
+	// unit or termux service `node install` registered) and stops the agent
+	// once it has answered. It deletes nothing; the response names what is left.
+	Uninstall(context.Context, *connect.Request[v1.UninstallRequest]) (*connect.Response[v1.UninstallResponse], error)
 }
 
 // NewNodeAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -392,6 +420,12 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		connect.WithSchema(nodeAgentServiceMethods.ByName("GetDeskState")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeAgentServiceUninstallHandler := connect.NewUnaryHandler(
+		NodeAgentServiceUninstallProcedure,
+		svc.Uninstall,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("Uninstall")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeAgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeAgentServiceGetMetricsProcedure:
@@ -416,6 +450,8 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 			nodeAgentServiceApplyUpdateHandler.ServeHTTP(w, r)
 		case NodeAgentServiceGetDeskStateProcedure:
 			nodeAgentServiceGetDeskStateHandler.ServeHTTP(w, r)
+		case NodeAgentServiceUninstallProcedure:
+			nodeAgentServiceUninstallHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -469,6 +505,10 @@ func (UnimplementedNodeAgentServiceHandler) GetDeskState(context.Context, *conne
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.GetDeskState is not implemented"))
 }
 
+func (UnimplementedNodeAgentServiceHandler) Uninstall(context.Context, *connect.Request[v1.UninstallRequest]) (*connect.Response[v1.UninstallResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.Uninstall is not implemented"))
+}
+
 // NodeServiceClient is a client for the protectorate.v1.NodeService service.
 type NodeServiceClient interface {
 	// ListNodes returns every node with its latest metrics summary,
@@ -480,9 +520,25 @@ type NodeServiceClient interface {
 	// AddNode adds or updates a node in the hub inventory. The hub polls the
 	// address with its node token, so only the owner token may call it.
 	AddNode(context.Context, *connect.Request[v1.AddNodeRequest]) (*connect.Response[v1.NodeInfo], error)
-	// RemoveNode removes a node from the hub inventory. It does not touch the
-	// machine itself.
-	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// RemoveNode takes a node out of service and forgets it. It drains the
+	// node first (no new jobs or leases; running jobs are waited for or
+	// cancelled as jobs says), optionally asks the agent to uninstall itself,
+	// expires an unused invite key, revokes the node's tailnet enrollment,
+	// releases its leases and removes the inventory entry. It streams the
+	// steps and fails, leaving the node in service, if any step fails. A
+	// revoked machine that comes back cannot rejoin without a new invite.
+	// Cancelling a pending invite is the same call. Only the owner token may
+	// call it.
+	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.ServerStreamForClient[v1.RemoveNodeProgress], error)
+	// InviteNode creates a single-use tailnet enrollment key for a new node,
+	// records the node in the inventory as invited and returns the one-line
+	// installers that use it. Inviting a pending node again expires its
+	// previous key. Only the owner token may call it.
+	InviteNode(context.Context, *connect.Request[v1.InviteNodeRequest]) (*connect.Response[v1.InviteNodeResponse], error)
+	// WatchNodeSetup follows a node from its invite to ready. It sends the
+	// current stage at once and again whenever the stage or its problems
+	// change, and ends after READY.
+	WatchNodeSetup(context.Context, *connect.Request[v1.WatchNodeSetupRequest]) (*connect.ServerStreamForClient[v1.NodeSetupProgress], error)
 	// PutFile copies a file or directory to a node, one chunk per call so it
 	// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
 	// transfer_id with consecutive offsets; the call with last set carries the
@@ -553,10 +609,23 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("AddNode")),
 			connect.WithClientOptions(opts...),
 		),
-		removeNode: connect.NewClient[v1.RemoveNodeRequest, v1.RemoveNodeResponse](
+		removeNode: connect.NewClient[v1.RemoveNodeRequest, v1.RemoveNodeProgress](
 			httpClient,
 			baseURL+NodeServiceRemoveNodeProcedure,
 			connect.WithSchema(nodeServiceMethods.ByName("RemoveNode")),
+			connect.WithClientOptions(opts...),
+		),
+		inviteNode: connect.NewClient[v1.InviteNodeRequest, v1.InviteNodeResponse](
+			httpClient,
+			baseURL+NodeServiceInviteNodeProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("InviteNode")),
+			connect.WithClientOptions(opts...),
+		),
+		watchNodeSetup: connect.NewClient[v1.WatchNodeSetupRequest, v1.NodeSetupProgress](
+			httpClient,
+			baseURL+NodeServiceWatchNodeSetupProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("WatchNodeSetup")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		putFile: connect.NewClient[v1.PutFileRequest, v1.PutFileResponse](
@@ -600,16 +669,18 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 
 // nodeServiceClient implements NodeServiceClient.
 type nodeServiceClient struct {
-	listNodes     *connect.Client[v1.ListNodesRequest, v1.ListNodesResponse]
-	getNode       *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
-	addNode       *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
-	removeNode    *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
-	putFile       *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
-	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
-	applyUpdate   *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
-	updateNode    *connect.Client[v1.UpdateNodeRequest, v1.UpdateNodeProgress]
-	setDeskPolicy *connect.Client[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus]
-	getDeskPolicy *connect.Client[v1.GetDeskPolicyRequest, v1.DeskPolicyStatus]
+	listNodes      *connect.Client[v1.ListNodesRequest, v1.ListNodesResponse]
+	getNode        *connect.Client[v1.GetNodeRequest, v1.NodeStatus]
+	addNode        *connect.Client[v1.AddNodeRequest, v1.NodeInfo]
+	removeNode     *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeProgress]
+	inviteNode     *connect.Client[v1.InviteNodeRequest, v1.InviteNodeResponse]
+	watchNodeSetup *connect.Client[v1.WatchNodeSetupRequest, v1.NodeSetupProgress]
+	putFile        *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
+	getFile        *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
+	applyUpdate    *connect.Client[v1.ApplyUpdateRequest, v1.ApplyUpdateResponse]
+	updateNode     *connect.Client[v1.UpdateNodeRequest, v1.UpdateNodeProgress]
+	setDeskPolicy  *connect.Client[v1.SetDeskPolicyRequest, v1.DeskPolicyStatus]
+	getDeskPolicy  *connect.Client[v1.GetDeskPolicyRequest, v1.DeskPolicyStatus]
 }
 
 // ListNodes calls protectorate.v1.NodeService.ListNodes.
@@ -628,8 +699,18 @@ func (c *nodeServiceClient) AddNode(ctx context.Context, req *connect.Request[v1
 }
 
 // RemoveNode calls protectorate.v1.NodeService.RemoveNode.
-func (c *nodeServiceClient) RemoveNode(ctx context.Context, req *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
-	return c.removeNode.CallUnary(ctx, req)
+func (c *nodeServiceClient) RemoveNode(ctx context.Context, req *connect.Request[v1.RemoveNodeRequest]) (*connect.ServerStreamForClient[v1.RemoveNodeProgress], error) {
+	return c.removeNode.CallServerStream(ctx, req)
+}
+
+// InviteNode calls protectorate.v1.NodeService.InviteNode.
+func (c *nodeServiceClient) InviteNode(ctx context.Context, req *connect.Request[v1.InviteNodeRequest]) (*connect.Response[v1.InviteNodeResponse], error) {
+	return c.inviteNode.CallUnary(ctx, req)
+}
+
+// WatchNodeSetup calls protectorate.v1.NodeService.WatchNodeSetup.
+func (c *nodeServiceClient) WatchNodeSetup(ctx context.Context, req *connect.Request[v1.WatchNodeSetupRequest]) (*connect.ServerStreamForClient[v1.NodeSetupProgress], error) {
+	return c.watchNodeSetup.CallServerStream(ctx, req)
 }
 
 // PutFile calls protectorate.v1.NodeService.PutFile.
@@ -673,9 +754,25 @@ type NodeServiceHandler interface {
 	// AddNode adds or updates a node in the hub inventory. The hub polls the
 	// address with its node token, so only the owner token may call it.
 	AddNode(context.Context, *connect.Request[v1.AddNodeRequest]) (*connect.Response[v1.NodeInfo], error)
-	// RemoveNode removes a node from the hub inventory. It does not touch the
-	// machine itself.
-	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// RemoveNode takes a node out of service and forgets it. It drains the
+	// node first (no new jobs or leases; running jobs are waited for or
+	// cancelled as jobs says), optionally asks the agent to uninstall itself,
+	// expires an unused invite key, revokes the node's tailnet enrollment,
+	// releases its leases and removes the inventory entry. It streams the
+	// steps and fails, leaving the node in service, if any step fails. A
+	// revoked machine that comes back cannot rejoin without a new invite.
+	// Cancelling a pending invite is the same call. Only the owner token may
+	// call it.
+	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest], *connect.ServerStream[v1.RemoveNodeProgress]) error
+	// InviteNode creates a single-use tailnet enrollment key for a new node,
+	// records the node in the inventory as invited and returns the one-line
+	// installers that use it. Inviting a pending node again expires its
+	// previous key. Only the owner token may call it.
+	InviteNode(context.Context, *connect.Request[v1.InviteNodeRequest]) (*connect.Response[v1.InviteNodeResponse], error)
+	// WatchNodeSetup follows a node from its invite to ready. It sends the
+	// current stage at once and again whenever the stage or its problems
+	// change, and ends after READY.
+	WatchNodeSetup(context.Context, *connect.Request[v1.WatchNodeSetupRequest], *connect.ServerStream[v1.NodeSetupProgress]) error
 	// PutFile copies a file or directory to a node, one chunk per call so it
 	// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
 	// transfer_id with consecutive offsets; the call with last set carries the
@@ -742,10 +839,23 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("AddNode")),
 		connect.WithHandlerOptions(opts...),
 	)
-	nodeServiceRemoveNodeHandler := connect.NewUnaryHandler(
+	nodeServiceRemoveNodeHandler := connect.NewServerStreamHandler(
 		NodeServiceRemoveNodeProcedure,
 		svc.RemoveNode,
 		connect.WithSchema(nodeServiceMethods.ByName("RemoveNode")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeServiceInviteNodeHandler := connect.NewUnaryHandler(
+		NodeServiceInviteNodeProcedure,
+		svc.InviteNode,
+		connect.WithSchema(nodeServiceMethods.ByName("InviteNode")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeServiceWatchNodeSetupHandler := connect.NewServerStreamHandler(
+		NodeServiceWatchNodeSetupProcedure,
+		svc.WatchNodeSetup,
+		connect.WithSchema(nodeServiceMethods.ByName("WatchNodeSetup")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	nodeServicePutFileHandler := connect.NewUnaryHandler(
@@ -794,6 +904,10 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServiceAddNodeHandler.ServeHTTP(w, r)
 		case NodeServiceRemoveNodeProcedure:
 			nodeServiceRemoveNodeHandler.ServeHTTP(w, r)
+		case NodeServiceInviteNodeProcedure:
+			nodeServiceInviteNodeHandler.ServeHTTP(w, r)
+		case NodeServiceWatchNodeSetupProcedure:
+			nodeServiceWatchNodeSetupHandler.ServeHTTP(w, r)
 		case NodeServicePutFileProcedure:
 			nodeServicePutFileHandler.ServeHTTP(w, r)
 		case NodeServiceGetFileProcedure:
@@ -827,8 +941,16 @@ func (UnimplementedNodeServiceHandler) AddNode(context.Context, *connect.Request
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.AddNode is not implemented"))
 }
 
-func (UnimplementedNodeServiceHandler) RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.RemoveNode is not implemented"))
+func (UnimplementedNodeServiceHandler) RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest], *connect.ServerStream[v1.RemoveNodeProgress]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.RemoveNode is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) InviteNode(context.Context, *connect.Request[v1.InviteNodeRequest]) (*connect.Response[v1.InviteNodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.InviteNode is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) WatchNodeSetup(context.Context, *connect.Request[v1.WatchNodeSetupRequest], *connect.ServerStream[v1.NodeSetupProgress]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeService.WatchNodeSetup is not implemented"))
 }
 
 func (UnimplementedNodeServiceHandler) PutFile(context.Context, *connect.Request[v1.PutFileRequest]) (*connect.Response[v1.PutFileResponse], error) {

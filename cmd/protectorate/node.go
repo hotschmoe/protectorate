@@ -18,6 +18,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -171,23 +172,64 @@ func nodeAddCmd(o *opts) *cobra.Command {
 	return c
 }
 
+var removeJobs = map[string]pb.RemoveJobs{
+	"":       pb.RemoveJobs_REMOVE_JOBS_UNSPECIFIED,
+	"wait":   pb.RemoveJobs_REMOVE_JOBS_WAIT,
+	"cancel": pb.RemoveJobs_REMOVE_JOBS_CANCEL,
+}
+
 func nodeRmCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+	var jobs string
+	var uninstall bool
+	var wait time.Duration
+	c := &cobra.Command{
 		Use:   "rm <name>",
-		Short: "Remove a node from the inventory",
-		Args:  cobra.ExactArgs(1),
+		Short: "Drain, revoke and remove a node (or cancel a pending invite)",
+		Long: `Takes a node out of service on the hub: no new jobs or leases go to it,
+running jobs are waited for (--jobs wait) or cancelled (--jobs cancel; without
+--jobs a node with running jobs is refused), then its tailnet enrollment and any
+unused invite key are revoked, its leases released and its inventory entry
+removed. A revoked machine cannot rejoin without a new invite. --uninstall
+first asks a reachable agent to unregister its startup and stop; it deletes
+nothing on the machine. For a node that was invited but never joined this
+cancels the invite.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode, ok := removeJobs[jobs]
+			if !ok {
+				return fmt.Errorf("--jobs must be wait or cancel, not %q", jobs)
+			}
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
 			}
-			res, err := cl.RemoveNode(cmd.Context(), connect.NewRequest(&pb.RemoveNodeRequest{Name: args[0]}))
+			req := &pb.RemoveNodeRequest{Name: args[0], Jobs: mode, Uninstall: uninstall}
+			if wait > 0 {
+				req.WaitTimeout = durationpb.New(wait)
+			}
+			stream, err := cl.RemoveNode(cmd.Context(), connect.NewRequest(req))
 			if err != nil {
 				return err
 			}
-			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "removed %s\n", args[0]) })
+			defer stream.Close()
+			pr := o.out(cmd)
+			for stream.Receive() {
+				p := stream.Msg()
+				if err := pr.print(p, func(w io.Writer) { fmt.Fprintf(w, "%s\t%s\n", removePhaseLabel(p.Phase), p.Message) }); err != nil {
+					return err
+				}
+			}
+			return stream.Err()
 		},
 	}
+	c.Flags().StringVar(&jobs, "jobs", "", "running jobs: wait (let them finish) or cancel")
+	c.Flags().DurationVar(&wait, "wait-timeout", 0, "with --jobs wait, give up after this long (default 1h)")
+	c.Flags().BoolVar(&uninstall, "uninstall", false, "also ask the agent, if reachable, to unregister its startup and stop (deletes nothing)")
+	return c
+}
+
+func removePhaseLabel(p pb.RemovePhase) string {
+	return strings.ToLower(strings.TrimPrefix(p.String(), "REMOVE_PHASE_"))
 }
 
 func nodeServeCmd() *cobra.Command {
@@ -265,6 +307,7 @@ func nodeServeCmd() *cobra.Command {
 					}
 					cancelRun()
 				}}
+			a.Uninstaller = agentUninstaller(cmd.ErrOrStderr(), cancelRun)
 			if rolledBack, err := a.Updater.Start(); err != nil {
 				return err
 			} else if rolledBack {

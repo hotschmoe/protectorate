@@ -94,6 +94,8 @@ caps beside them.
   for "needs you" (pending approval).
 - **Annunciator**: a strip of legend tiles that light in their state colour:
   hub status, node alerts, approval prompts.
+- **ChoiceKeys**: a row of annunciator keys of which one is lit, a selector
+  switch (machine type, drain options).
 - **BusyBar**: a segment chaser in place of indeterminate progress.
 
 ## Layout

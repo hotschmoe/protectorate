@@ -394,10 +394,10 @@ func TestNodeServiceEndToEnd(t *testing.T) {
 		t.Fatalf("list = %v, %v", list, err)
 	}
 
-	if _, err := cl.RemoveNode(ctx, connect.NewRequest(&pb.RemoveNodeRequest{Name: "hubhost"})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+	if _, err := removeAll(t, cl, &pb.RemoveNodeRequest{Name: "hubhost"}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("remove self code = %v", connect.CodeOf(err))
 	}
-	if _, err := cl.RemoveNode(ctx, connect.NewRequest(&pb.RemoveNodeRequest{Name: "peer"})); err != nil {
+	if _, err := removeAll(t, cl, &pb.RemoveNodeRequest{Name: "peer"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cl.GetNode(ctx, connect.NewRequest(&pb.GetNodeRequest{Name: "peer"})); connect.CodeOf(err) != connect.CodeNotFound {

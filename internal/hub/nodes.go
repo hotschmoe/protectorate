@@ -99,12 +99,16 @@ type NodeMonitor struct {
 	runCtx context.Context
 	// mismatch maps an invited node's name to the tailnet name it joined as.
 	mismatch map[string]string
+	// draining holds the nodes being removed.
+	draining map[string]bool
+	// kicking holds the nodes with an out-of-turn poll in flight.
+	kicking map[string]bool
 }
 
 // NewNodeMonitor builds the monitor. self describes the hub's own node and
 // must carry its name; local collects its metrics.
 func NewNodeMonitor(inv *Inventory, self *pb.NodeInfo, local *node.Collector, opts NodeOptions) *NodeMonitor {
-	m := &NodeMonitor{opts: opts.withDefaults(), inv: inv, local: local, self: self, state: map[string]*nodeState{}, mismatch: map[string]string{}}
+	m := &NodeMonitor{opts: opts.withDefaults(), inv: inv, local: local, self: self, state: map[string]*nodeState{}, mismatch: map[string]string{}, draining: map[string]bool{}, kicking: map[string]bool{}}
 	m.fetchRemote = m.fetchHTTP
 	return m
 }
@@ -381,7 +385,7 @@ func (m *NodeMonitor) Status(name string) (*pb.NodeStatus, error) {
 }
 
 func (m *NodeMonitor) statusLocked(n *pb.NodeInfo, st *nodeState, now time.Time) *pb.NodeStatus {
-	s := &pb.NodeStatus{Node: n}
+	s := &pb.NodeStatus{Node: n, Draining: m.draining[n.Name]}
 	if n.Invited {
 		s.Freshness = pb.NodeFreshness_NODE_FRESHNESS_INVITED
 		s.Error = "invited, not yet joined"
@@ -482,14 +486,26 @@ func unreachableSummary(s *pb.NodeStatus) *structpb.Struct {
 }
 
 // kick polls one node now, so a freshly added node does not wait for the
-// next interval.
+// next interval. A kick while one for the same node is in flight is dropped.
 func (m *NodeMonitor) kick(n *pb.NodeInfo) {
 	m.mu.Lock()
 	ctx := m.runCtx
-	m.mu.Unlock()
-	if ctx != nil {
-		go m.pollOne(ctx, n)
+	busy := m.kicking[n.Name]
+	if ctx != nil && !busy {
+		m.kicking[n.Name] = true
 	}
+	m.mu.Unlock()
+	if ctx == nil || busy {
+		return
+	}
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			delete(m.kicking, n.Name)
+			m.mu.Unlock()
+		}()
+		m.pollOne(ctx, n)
+	}()
 }
 
 func (h *Hub) ListNodes(context.Context, *connect.Request[pb.ListNodesRequest]) (*connect.Response[pb.ListNodesResponse], error) {
@@ -519,16 +535,6 @@ func (h *Hub) AddNode(_ context.Context, req *connect.Request[pb.AddNodeRequest]
 	}
 	h.nodes.kick(info)
 	return connect.NewResponse(info), nil
-}
-
-func (h *Hub) RemoveNode(_ context.Context, req *connect.Request[pb.RemoveNodeRequest]) (*connect.Response[pb.RemoveNodeResponse], error) {
-	if strings.EqualFold(req.Msg.Name, h.nodes.self.Name) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the hub's own node cannot be removed"))
-	}
-	if err := h.nodes.inv.Remove(req.Msg.Name); err != nil {
-		return nil, nodeErr(err)
-	}
-	return connect.NewResponse(&pb.RemoveNodeResponse{}), nil
 }
 
 func nodeErr(err error) error {

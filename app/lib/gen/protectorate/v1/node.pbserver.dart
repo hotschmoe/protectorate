@@ -45,6 +45,8 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.ApplyUpdateRequest request);
   $async.Future<$0.DeskState> getDeskState(
       $pb.ServerContext ctx, $6.GetDeskStateRequest request);
+  $async.Future<$6.UninstallResponse> uninstall(
+      $pb.ServerContext ctx, $6.UninstallRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -70,6 +72,8 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return $6.ApplyUpdateRequest();
       case 'GetDeskState':
         return $6.GetDeskStateRequest();
+      case 'Uninstall':
+        return $6.UninstallRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -100,6 +104,8 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return applyUpdate(ctx, request as $6.ApplyUpdateRequest);
       case 'GetDeskState':
         return getDeskState(ctx, request as $6.GetDeskStateRequest);
+      case 'Uninstall':
+        return uninstall(ctx, request as $6.UninstallRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -117,8 +123,12 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $6.GetNodeRequest request);
   $async.Future<$6.NodeInfo> addNode(
       $pb.ServerContext ctx, $6.AddNodeRequest request);
-  $async.Future<$6.RemoveNodeResponse> removeNode(
+  $async.Future<$6.RemoveNodeProgress> removeNode(
       $pb.ServerContext ctx, $6.RemoveNodeRequest request);
+  $async.Future<$6.InviteNodeResponse> inviteNode(
+      $pb.ServerContext ctx, $6.InviteNodeRequest request);
+  $async.Future<$6.NodeSetupProgress> watchNodeSetup(
+      $pb.ServerContext ctx, $6.WatchNodeSetupRequest request);
   $async.Future<$6.PutFileResponse> putFile(
       $pb.ServerContext ctx, $6.PutFileRequest request);
   $async.Future<$6.GetFileResponse> getFile(
@@ -142,6 +152,10 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return $6.AddNodeRequest();
       case 'RemoveNode':
         return $6.RemoveNodeRequest();
+      case 'InviteNode':
+        return $6.InviteNodeRequest();
+      case 'WatchNodeSetup':
+        return $6.WatchNodeSetupRequest();
       case 'PutFile':
         return $6.PutFileRequest();
       case 'GetFile':
@@ -170,6 +184,10 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return addNode(ctx, request as $6.AddNodeRequest);
       case 'RemoveNode':
         return removeNode(ctx, request as $6.RemoveNodeRequest);
+      case 'InviteNode':
+        return inviteNode(ctx, request as $6.InviteNodeRequest);
+      case 'WatchNodeSetup':
+        return watchNodeSetup(ctx, request as $6.WatchNodeSetupRequest);
       case 'PutFile':
         return putFile(ctx, request as $6.PutFileRequest);
       case 'GetFile':

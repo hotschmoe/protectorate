@@ -221,6 +221,26 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// Uninstall unregisters the agent's startup (the logon task, systemd user
+  /// unit or termux service `node install` registered) and stops the agent
+  /// once it has answered. It deletes nothing; the response names what is left.
+  Future<protectoratev1node.UninstallResponse> uninstall(
+    protectoratev1node.UninstallRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeAgentService.uninstall,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -284,17 +304,65 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// RemoveNode removes a node from the hub inventory. It does not touch the
-  /// machine itself.
-  Future<protectoratev1node.RemoveNodeResponse> removeNode(
+  /// RemoveNode takes a node out of service and forgets it. It drains the
+  /// node first (no new jobs or leases; running jobs are waited for or
+  /// cancelled as jobs says), optionally asks the agent to uninstall itself,
+  /// expires an unused invite key, revokes the node's tailnet enrollment,
+  /// releases its leases and removes the inventory entry. It streams the
+  /// steps and fails, leaving the node in service, if any step fails. A
+  /// revoked machine that comes back cannot rejoin without a new invite.
+  /// Cancelling a pending invite is the same call. Only the owner token may
+  /// call it.
+  Stream<protectoratev1node.RemoveNodeProgress> removeNode(
     protectoratev1node.RemoveNodeRequest input, {
     connect.Headers? headers,
     connect.AbortSignal? signal,
     Function(connect.Headers)? onHeader,
     Function(connect.Headers)? onTrailer,
   }) {
-    return connect.Client(_transport).unary(
+    return connect.Client(_transport).server(
       specs.NodeService.removeNode,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// InviteNode creates a single-use tailnet enrollment key for a new node,
+  /// records the node in the inventory as invited and returns the one-line
+  /// installers that use it. Inviting a pending node again expires its
+  /// previous key. Only the owner token may call it.
+  Future<protectoratev1node.InviteNodeResponse> inviteNode(
+    protectoratev1node.InviteNodeRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeService.inviteNode,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// WatchNodeSetup follows a node from its invite to ready. It sends the
+  /// current stage at once and again whenever the stage or its problems
+  /// change, and ends after READY.
+  Stream<protectoratev1node.NodeSetupProgress> watchNodeSetup(
+    protectoratev1node.WatchNodeSetupRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).server(
+      specs.NodeService.watchNodeSetup,
       input,
       signal: signal,
       headers: headers,

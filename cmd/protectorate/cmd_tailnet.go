@@ -7,12 +7,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -175,46 +175,43 @@ func admin(ctx context.Context) (*tailnet.Admin, tailnet.Config, error) {
 
 // nodeEnrollCmds are the tailnet enrollment commands under `node`.
 func nodeEnrollCmds(o *opts) []*cobra.Command {
-	var tier string
+	var tier, installURL string
 	var expires time.Duration
 	var pools []string
 	invite := &cobra.Command{
 		Use:   "invite <name>",
-		Short: "Create a single-use enrollment key and print the join command",
-		Args:  cobra.ExactArgs(1),
+		Short: "Create a single-use enrollment key and print the install commands",
+		Long: `Asks the hub for a single-use enrollment key for a new node, records the node
+in the inventory as invited and prints one line per platform that downloads
+the hub's installer and runs it with the key, plus the manual node install
+line. The commands hold the key; it expires (--expires, default 1h). Inviting
+a pending node again expires its previous key. The install URL defaults to the
+hub's --public-url, else the --hub URL this command talks to; pass --url when
+new machines reach the hub at another address.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !slices.Contains(tailnet.Tiers, tier) {
-				return fmt.Errorf("--tier must be one of %s", strings.Join(tailnet.Tiers, ", "))
-			}
-			a, cfg, err := admin(cmd.Context())
+			cl, err := o.nodeClient()
 			if err != nil {
 				return err
 			}
-			for _, p := range pools {
-				if !slices.Contains(cfg.Pools, p) {
-					return fmt.Errorf("pool %q is not configured (`hub tailnet init --pool`)", p)
-				}
-			}
-			tags := []string{tailnet.TagNode, tailnet.TierTag(tier)}
-			for _, p := range pools {
-				tags = append(tags, tailnet.PoolTag(p))
-			}
-			key, keyID, err := a.Invite(cmd.Context(), args[0], tags, expires)
+			res, err := cl.InviteNode(cmd.Context(), connect.NewRequest(&pb.InviteNodeRequest{
+				Name: args[0], Tier: tier, Pools: pools, Ttl: durationpb.New(expires), InstallUrl: installURL,
+			}))
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "protectorate node join --control %s --key %s --name %s\n", cfg.ServerURL, key, args[0])
-			fmt.Fprintf(cmd.ErrOrStderr(), "key is single-use and expires in %s\n", expires)
-			if err := recordInvite(cmd.Context(), o, args[0], tier, pools, keyID); err != nil {
-				return fmt.Errorf("key issued but the node is not in the inventory (is the hub running?): %w", err)
+			r := res.Msg
+			if err := o.out(cmd).print(r, func(w io.Writer) { writeInvite(w, r) }); err != nil {
+				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "%s is in the inventory as invited, not yet joined\n", args[0])
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s is in the inventory as invited; the key is single-use and expires %s\n", r.Node.Name, r.ExpiresAt.AsTime().Local().Format(time.RFC3339))
 			return nil
 		},
 	}
 	invite.Flags().StringVar(&tier, "tier", "server", "trust tier: "+strings.Join(tailnet.Tiers, "|"))
-	invite.Flags().DurationVar(&expires, "expires", time.Hour, "how long the key can be redeemed")
+	invite.Flags().DurationVar(&expires, "expires", time.Hour, "how long the key can be redeemed (at most 24h)")
 	invite.Flags().StringSliceVar(&pools, "pool", nil, "build pool to join (repeatable)")
+	invite.Flags().StringVar(&installURL, "url", "", "hub URL the new machine downloads the installer from (default: the hub's --public-url, else --hub)")
 
 	var control, key, keyFile, name string
 	join := &cobra.Command{
@@ -258,8 +255,12 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.Revoke(cmd.Context(), args[0]); err != nil {
+			ok, err := a.Revoke(cmd.Context(), args[0])
+			if err != nil {
 				return err
+			}
+			if !ok {
+				return fmt.Errorf("no node named %q is enrolled", args[0])
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "revoked %s\n", args[0])
 			return nil
@@ -287,19 +288,11 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 	return []*cobra.Command{invite, join, revoke, renew}
 }
 
-// recordInvite puts the invited node into the hub's inventory so it shows in
-// `node ls` before it joins.
-func recordInvite(ctx context.Context, o *opts, name, tier string, pools []string, keyID uint64) error {
-	cl, err := o.nodeClient()
-	if err != nil {
-		return err
+func writeInvite(w io.Writer, r *pb.InviteNodeResponse) {
+	for _, c := range r.Commands {
+		fmt.Fprintf(w, "%s (%s):\n  %s\n\n", strings.TrimPrefix(c.Platform.String(), "INSTALL_PLATFORM_"), c.Shell, c.Command)
 	}
-	n := &pb.NodeInfo{Name: name, Address: name, Tier: tier, Invited: true, InviteKeyId: keyID}
-	for _, p := range pools {
-		n.Tags = append(n.Tags, "pool-"+p)
-	}
-	_, err = cl.AddNode(ctx, connect.NewRequest(&pb.AddNodeRequest{Node: n, Update: true}))
-	return err
+	fmt.Fprintf(w, "Manual, with a protectorate binary already on the machine:\n  PROTECTORATE_ENROLL_KEY=%s protectorate node install --control %s --name %s\n", r.Key, r.ControlUrl, r.Node.Name)
 }
 
 func clientCmd() *cobra.Command {
@@ -387,6 +380,7 @@ func startTailnet(ctx context.Context, logw io.Writer) (tailnetHub, error) {
 		Client: svc.Net.HTTPClient(),
 		Peers:  func(ctx context.Context) ([]hub.Peer, error) { return peers(ctx, svc.Admin) },
 		Status: svc.Net.Status,
+		Admin:  svc.Admin,
 		Close:  func() { svc.Close() },
 	}, nil
 }
@@ -398,6 +392,7 @@ type tailnetHub struct {
 	Client *http.Client
 	Peers  func(context.Context) ([]hub.Peer, error)
 	Status func(context.Context) (*pb.TailnetServiceGetStatusResponse, error)
+	Admin  *tailnet.Admin
 	Close  func()
 }
 

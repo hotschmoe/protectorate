@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +42,10 @@ type jobEnv struct {
 	// peerGuard enforces desk policy on "peer" under peerClock.
 	peerGuard *node.DeskGuard
 	peerClock *clock
+	// tn is the hub's tailnet administration; uninstalled is set once the
+	// peer agent ran its uninstall.
+	tn          *recordingAdmin
+	uninstalled atomic.Bool
 }
 
 // newJobEnv wires a hub (node "hubhost") to one remote node agent ("peer") on
@@ -69,12 +74,16 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	peerClock := &clock{t: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)}
 	peerGuard := &node.DeskGuard{D: peerDesk, Now: peerClock.now, Screen: func() desk.ScreenState { return desk.ScreenUnlocked }, Lock: func() error { return nil }, Input: desk.NewTracker(peerClock.now)}
 	peerClock.advance(24 * time.Hour)
+	e := &jobEnv{home: home, remote: remote, peerRoot: peerFiles.Root(), hubRoot: hubFiles.Root(), peerDesk: peerDesk, hubDesk: hubDesk, peerGuard: peerGuard, peerClock: peerClock, tn: newRecordingAdmin()}
 	agent := &node.Agent{
 		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
 		Authorize: node.TokenAuthorizer(agentToken),
 		Jobs:      remote,
 		Files:     peerFiles,
 		Desk:      &node.Desk{D: peerDesk, Guard: peerGuard},
+		Uninstaller: func() ([]string, []string, func(), error) {
+			return []string{"unregister the startup"}, []string{"/home/peer/.local/bin/protectorate"}, func() { e.uninstalled.Store(true) }, nil
+		},
 	}
 	agentSrv := httptest.NewServer(agent.Handler())
 	t.Cleanup(agentSrv.Close)
@@ -93,6 +102,7 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	if err := h.EnableJobs(home, local); err != nil {
 		t.Fatal(err)
 	}
+	h.SetTailnetAdmin(e.tn)
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(srv.Close)
 
@@ -109,9 +119,9 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	})
 
 	hc := &http.Client{Transport: bearer{testToken}}
-	e := &jobEnv{h: h, home: home, srv: srv, remote: remote, peerRoot: peerFiles.Root(), hubRoot: hubFiles.Root(), peerDesk: peerDesk, hubDesk: hubDesk, peerGuard: peerGuard, peerClock: peerClock,
-		jc: protectoratev1connect.NewJobServiceClient(hc, srv.URL),
-		lc: protectoratev1connect.NewLeaseServiceClient(hc, srv.URL)}
+	e.h, e.srv = h, srv
+	e.jc = protectoratev1connect.NewJobServiceClient(hc, srv.URL)
+	e.lc = protectoratev1connect.NewLeaseServiceClient(hc, srv.URL)
 	waitUntil(t, 10*time.Second, "nodes fresh", func() bool {
 		for _, n := range []string{"hubhost", "peer"} {
 			s, err := h.nodes.Status(n)

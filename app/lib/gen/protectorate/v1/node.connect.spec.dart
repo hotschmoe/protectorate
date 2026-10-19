@@ -115,6 +115,16 @@ abstract final class NodeAgentService {
     protectoratev1node.GetDeskStateRequest.new,
     protectoratev1desk.DeskState.new,
   );
+
+  /// Uninstall unregisters the agent's startup (the logon task, systemd user
+  /// unit or termux service `node install` registered) and stops the agent
+  /// once it has answered. It deletes nothing; the response names what is left.
+  static const uninstall = connect.Spec(
+    '/$name/Uninstall',
+    connect.StreamType.unary,
+    protectoratev1node.UninstallRequest.new,
+    protectoratev1node.UninstallResponse.new,
+  );
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -153,13 +163,42 @@ abstract final class NodeService {
     protectoratev1node.NodeInfo.new,
   );
 
-  /// RemoveNode removes a node from the hub inventory. It does not touch the
-  /// machine itself.
+  /// RemoveNode takes a node out of service and forgets it. It drains the
+  /// node first (no new jobs or leases; running jobs are waited for or
+  /// cancelled as jobs says), optionally asks the agent to uninstall itself,
+  /// expires an unused invite key, revokes the node's tailnet enrollment,
+  /// releases its leases and removes the inventory entry. It streams the
+  /// steps and fails, leaving the node in service, if any step fails. A
+  /// revoked machine that comes back cannot rejoin without a new invite.
+  /// Cancelling a pending invite is the same call. Only the owner token may
+  /// call it.
   static const removeNode = connect.Spec(
     '/$name/RemoveNode',
-    connect.StreamType.unary,
+    connect.StreamType.server,
     protectoratev1node.RemoveNodeRequest.new,
-    protectoratev1node.RemoveNodeResponse.new,
+    protectoratev1node.RemoveNodeProgress.new,
+  );
+
+  /// InviteNode creates a single-use tailnet enrollment key for a new node,
+  /// records the node in the inventory as invited and returns the one-line
+  /// installers that use it. Inviting a pending node again expires its
+  /// previous key. Only the owner token may call it.
+  static const inviteNode = connect.Spec(
+    '/$name/InviteNode',
+    connect.StreamType.unary,
+    protectoratev1node.InviteNodeRequest.new,
+    protectoratev1node.InviteNodeResponse.new,
+  );
+
+  /// WatchNodeSetup follows a node from its invite to ready. It sends the
+  /// current stage at once and again whenever the stage or its problems
+  /// change, and ends after READY.
+  static const watchNodeSetup = connect.Spec(
+    '/$name/WatchNodeSetup',
+    connect.StreamType.server,
+    protectoratev1node.WatchNodeSetupRequest.new,
+    protectoratev1node.NodeSetupProgress.new,
+    idempotency: connect.Idempotency.noSideEffects,
   );
 
   /// PutFile copies a file or directory to a node, one chunk per call so it

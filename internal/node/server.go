@@ -38,7 +38,15 @@ type Agent struct {
 	Desk *Desk
 	// Updater swaps the agent's binary; nil refuses updates.
 	Updater *Updater
+	// Uninstaller plans unregistering the agent's startup; nil refuses. It
+	// returns the actions, what stays on disk and run, which the agent calls
+	// once it has answered: run does the actions and stops the agent.
+	Uninstaller func() (actions, left []string, run func(), err error)
 }
+
+// uninstallDelay lets the answer to Uninstall reach the hub before the agent
+// starts taking itself down.
+const uninstallDelay = time.Second
 
 // TokenAuthorizer accepts requests carrying the given bearer token.
 func TokenAuthorizer(token string) func(*http.Request) error {
@@ -241,4 +249,16 @@ func (a *Agent) GetDeskState(_ context.Context, req *connect.Request[pb.GetDeskS
 		g.LeaseEnded()
 	}
 	return connect.NewResponse(g.State()), nil
+}
+
+func (a *Agent) Uninstall(context.Context, *connect.Request[pb.UninstallRequest]) (*connect.Response[pb.UninstallResponse], error) {
+	if a.Uninstaller == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("this agent cannot uninstall itself"))
+	}
+	actions, left, run, err := a.Uninstaller()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	time.AfterFunc(uninstallDelay, run)
+	return connect.NewResponse(&pb.UninstallResponse{Actions: actions, Left: left}), nil
 }

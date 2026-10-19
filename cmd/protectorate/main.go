@@ -129,7 +129,7 @@ func envOr(key, def string) string {
 
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
-	var listen, tmuxSocket, webDir, binaryDir string
+	var listen, tmuxSocket, webDir, binaryDir, publicURL string
 	var quotaInterval, deadRetention time.Duration
 	var localURLs, localModelHosts []string
 	var nodeInterval, ackTimeout time.Duration
@@ -175,6 +175,7 @@ func hubCmd() *cobra.Command {
 			h.DeadRetention = deadRetention
 			h.WebDir = webDir
 			h.BinaryDir = binaryDir
+			h.PublicURL = publicURL
 			h.LocalModelHosts = localModelHosts
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
 			ts, err := startTailnet(ctx, cmd.ErrOrStderr())
@@ -183,6 +184,9 @@ func hubCmd() *cobra.Command {
 			}
 			defer ts.Close()
 			h.SetTailnetStatus(ts.Status)
+			if ts.Admin != nil {
+				h.SetTailnetAdmin(ts.Admin)
+			}
 			nodeTok, err := nodeToken(nodeTokenFile)
 			if err != nil {
 				return err
@@ -209,6 +213,7 @@ func hubCmd() *cobra.Command {
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
 	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")
 	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: the directory of this executable)")
+	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
 	c.AddCommand(serve, hubTailnetCmd())
 	return c

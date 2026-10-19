@@ -3295,6 +3295,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     $0.DeskState? desk,
     $core.String? deskHolder,
     $core.Iterable<$0.DeskUse>? deskInputs,
+    $core.bool? draining,
   }) {
     final result = NodeStatus._();
     if (node != null) result.node = node;
@@ -3307,6 +3308,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     if (desk != null) result.desk = desk;
     if (deskHolder != null) result.deskHolder = deskHolder;
     if (deskInputs != null) result.deskInputs.addAll(deskInputs);
+    if (draining != null) result.draining = draining;
     return result;
   }
 
@@ -3342,6 +3344,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     ..aOS(9, _omitFieldNames ? '' : 'deskHolder')
     ..pPM<$0.DeskUse>(10, _omitFieldNames ? '' : 'deskInputs',
         subBuilder: $0.DeskUse.$_createMessage)
+    ..aOB(11, _omitFieldNames ? '' : 'draining')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3456,6 +3459,16 @@ class NodeStatus extends $pb.GeneratedMessage {
   /// desk_inputs is today's desktop input commands per caller.
   @$pb.TagNumber(10)
   $pb.PbList<$0.DeskUse> get deskInputs => $_getList(9);
+
+  /// draining marks a node being removed: no new jobs or leases go to it.
+  @$pb.TagNumber(11)
+  $core.bool get draining => $_getBF(10);
+  @$pb.TagNumber(11)
+  set draining($core.bool value) => $_setBool(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasDraining() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearDraining() => $_clearField(11);
 }
 
 class ListNodesRequest extends $pb.GeneratedMessage {
@@ -3689,9 +3702,15 @@ class AddNodeRequest extends $pb.GeneratedMessage {
 class RemoveNodeRequest extends $pb.GeneratedMessage {
   factory RemoveNodeRequest({
     $core.String? name,
+    RemoveJobs? jobs,
+    $core.bool? uninstall,
+    $3.Duration? waitTimeout,
   }) {
     final result = RemoveNodeRequest._();
     if (name != null) result.name = name;
+    if (jobs != null) result.jobs = jobs;
+    if (uninstall != null) result.uninstall = uninstall;
+    if (waitTimeout != null) result.waitTimeout = waitTimeout;
     return result;
   }
 
@@ -3710,6 +3729,11 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: RemoveNodeRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aE<RemoveJobs>(2, _omitFieldNames ? '' : 'jobs',
+        enumValues: RemoveJobs.values)
+    ..aOB(3, _omitFieldNames ? '' : 'uninstall')
+    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'waitTimeout',
+        subBuilder: $3.Duration.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3742,48 +3766,713 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
   $core.bool hasName() => $_has(0);
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  RemoveJobs get jobs => $_getN(1);
+  @$pb.TagNumber(2)
+  set jobs(RemoveJobs value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasJobs() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearJobs() => $_clearField(2);
+
+  /// uninstall asks a reachable agent to unregister its startup and stop
+  /// (UninstallResponse); an unreachable one is skipped with a message.
+  @$pb.TagNumber(3)
+  $core.bool get uninstall => $_getBF(2);
+  @$pb.TagNumber(3)
+  set uninstall($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasUninstall() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearUninstall() => $_clearField(3);
+
+  /// wait_timeout bounds REMOVE_JOBS_WAIT; unset means 1h.
+  @$pb.TagNumber(4)
+  $3.Duration get waitTimeout => $_getN(3);
+  @$pb.TagNumber(4)
+  set waitTimeout($3.Duration value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasWaitTimeout() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearWaitTimeout() => $_clearField(4);
+  @$pb.TagNumber(4)
+  $3.Duration ensureWaitTimeout() => $_ensure(3);
 }
 
-class RemoveNodeResponse extends $pb.GeneratedMessage {
-  factory RemoveNodeResponse() => RemoveNodeResponse._();
+class RemoveNodeProgress extends $pb.GeneratedMessage {
+  factory RemoveNodeProgress({
+    RemovePhase? phase,
+    $core.int? runningJobs,
+    $core.String? message,
+  }) {
+    final result = RemoveNodeProgress._();
+    if (phase != null) result.phase = phase;
+    if (runningJobs != null) result.runningJobs = runningJobs;
+    if (message != null) result.message = message;
+    return result;
+  }
 
-  RemoveNodeResponse._();
+  RemoveNodeProgress._();
 
-  factory RemoveNodeResponse.fromBuffer($core.List<$core.int> data,
+  factory RemoveNodeProgress.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      RemoveNodeResponse()..mergeFromBuffer(data, registry);
-  factory RemoveNodeResponse.fromJson($core.String json,
+      RemoveNodeProgress()..mergeFromBuffer(data, registry);
+  factory RemoveNodeProgress.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      RemoveNodeResponse()..mergeFromJson(json, registry);
+      RemoveNodeProgress()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'RemoveNodeResponse',
+      _omitMessageNames ? '' : 'RemoveNodeProgress',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
-      createEmptyInstance: RemoveNodeResponse.$_createMessage)
+      createEmptyInstance: RemoveNodeProgress.$_createMessage)
+    ..aE<RemovePhase>(1, _omitFieldNames ? '' : 'phase',
+        enumValues: RemovePhase.values)
+    ..aI(2, _omitFieldNames ? '' : 'runningJobs',
+        fieldType: $pb.PbFieldType.OU3)
+    ..aOS(3, _omitFieldNames ? '' : 'message')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  RemoveNodeResponse clone() => deepCopy();
+  RemoveNodeProgress clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  RemoveNodeResponse copyWith(void Function(RemoveNodeResponse) updates) =>
-      super.copyWith((message) => updates(message as RemoveNodeResponse))
-          as RemoveNodeResponse;
+  RemoveNodeProgress copyWith(void Function(RemoveNodeProgress) updates) =>
+      super.copyWith((message) => updates(message as RemoveNodeProgress))
+          as RemoveNodeProgress;
 
   @$core.override
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
-  @$core.Deprecated('Use RemoveNodeResponse() / RemoveNodeResponse.new instead')
-  static RemoveNodeResponse create() => RemoveNodeResponse._();
-  static $pb.GeneratedMessage $_createMessage() => RemoveNodeResponse._();
+  @$core.Deprecated('Use RemoveNodeProgress() / RemoveNodeProgress.new instead')
+  static RemoveNodeProgress create() => RemoveNodeProgress._();
+  static $pb.GeneratedMessage $_createMessage() => RemoveNodeProgress._();
   @$core.override
-  RemoveNodeResponse createEmptyInstance() => RemoveNodeResponse._();
+  RemoveNodeProgress createEmptyInstance() => RemoveNodeProgress._();
   @$core.pragma('dart2js:noInline')
-  static RemoveNodeResponse getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<RemoveNodeResponse>(
-          RemoveNodeResponse.$_createMessage);
-  static RemoveNodeResponse? _defaultInstance;
+  static RemoveNodeProgress getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RemoveNodeProgress>(
+          RemoveNodeProgress.$_createMessage);
+  static RemoveNodeProgress? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  RemovePhase get phase => $_getN(0);
+  @$pb.TagNumber(1)
+  set phase(RemovePhase value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPhase() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPhase() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get runningJobs => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set runningJobs($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasRunningJobs() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearRunningJobs() => $_clearField(2);
+
+  /// message is a human line about the step.
+  @$pb.TagNumber(3)
+  $core.String get message => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set message($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasMessage() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearMessage() => $_clearField(3);
+}
+
+class UninstallRequest extends $pb.GeneratedMessage {
+  factory UninstallRequest() => UninstallRequest._();
+
+  UninstallRequest._();
+
+  factory UninstallRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UninstallRequest()..mergeFromBuffer(data, registry);
+  factory UninstallRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UninstallRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UninstallRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: UninstallRequest.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UninstallRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UninstallRequest copyWith(void Function(UninstallRequest) updates) =>
+      super.copyWith((message) => updates(message as UninstallRequest))
+          as UninstallRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UninstallRequest() / UninstallRequest.new instead')
+  static UninstallRequest create() => UninstallRequest._();
+  static $pb.GeneratedMessage $_createMessage() => UninstallRequest._();
+  @$core.override
+  UninstallRequest createEmptyInstance() => UninstallRequest._();
+  @$core.pragma('dart2js:noInline')
+  static UninstallRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UninstallRequest>(
+          UninstallRequest.$_createMessage);
+  static UninstallRequest? _defaultInstance;
+}
+
+class UninstallResponse extends $pb.GeneratedMessage {
+  factory UninstallResponse({
+    $core.Iterable<$core.String>? actions,
+    $core.Iterable<$core.String>? left,
+  }) {
+    final result = UninstallResponse._();
+    if (actions != null) result.actions.addAll(actions);
+    if (left != null) result.left.addAll(left);
+    return result;
+  }
+
+  UninstallResponse._();
+
+  factory UninstallResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UninstallResponse()..mergeFromBuffer(data, registry);
+  factory UninstallResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UninstallResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UninstallResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: UninstallResponse.$_createMessage)
+    ..pPS(1, _omitFieldNames ? '' : 'actions')
+    ..pPS(2, _omitFieldNames ? '' : 'left')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UninstallResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UninstallResponse copyWith(void Function(UninstallResponse) updates) =>
+      super.copyWith((message) => updates(message as UninstallResponse))
+          as UninstallResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use UninstallResponse() / UninstallResponse.new instead')
+  static UninstallResponse create() => UninstallResponse._();
+  static $pb.GeneratedMessage $_createMessage() => UninstallResponse._();
+  @$core.override
+  UninstallResponse createEmptyInstance() => UninstallResponse._();
+  @$core.pragma('dart2js:noInline')
+  static UninstallResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<UninstallResponse>(
+          UninstallResponse.$_createMessage);
+  static UninstallResponse? _defaultInstance;
+
+  /// actions are the steps the agent takes after answering.
+  @$pb.TagNumber(1)
+  $pb.PbList<$core.String> get actions => $_getList(0);
+
+  /// left lists files and directories the user may delete.
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.String> get left => $_getList(1);
+}
+
+class InviteNodeRequest extends $pb.GeneratedMessage {
+  factory InviteNodeRequest({
+    $core.String? name,
+    $core.String? tier,
+    $core.Iterable<$core.String>? pools,
+    $3.Duration? ttl,
+    $core.String? installUrl,
+  }) {
+    final result = InviteNodeRequest._();
+    if (name != null) result.name = name;
+    if (tier != null) result.tier = tier;
+    if (pools != null) result.pools.addAll(pools);
+    if (ttl != null) result.ttl = ttl;
+    if (installUrl != null) result.installUrl = installUrl;
+    return result;
+  }
+
+  InviteNodeRequest._();
+
+  factory InviteNodeRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InviteNodeRequest()..mergeFromBuffer(data, registry);
+  factory InviteNodeRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InviteNodeRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'InviteNodeRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: InviteNodeRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'tier')
+    ..pPS(3, _omitFieldNames ? '' : 'pools')
+    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'ttl',
+        subBuilder: $3.Duration.$_createMessage)
+    ..aOS(5, _omitFieldNames ? '' : 'installUrl')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InviteNodeRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InviteNodeRequest copyWith(void Function(InviteNodeRequest) updates) =>
+      super.copyWith((message) => updates(message as InviteNodeRequest))
+          as InviteNodeRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use InviteNodeRequest() / InviteNodeRequest.new instead')
+  static InviteNodeRequest create() => InviteNodeRequest._();
+  static $pb.GeneratedMessage $_createMessage() => InviteNodeRequest._();
+  @$core.override
+  InviteNodeRequest createEmptyInstance() => InviteNodeRequest._();
+  @$core.pragma('dart2js:noInline')
+  static InviteNodeRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<InviteNodeRequest>(
+          InviteNodeRequest.$_createMessage);
+  static InviteNodeRequest? _defaultInstance;
+
+  /// name must be a lowercase DNS label (a-z, 0-9, '-'), at most 63 long.
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  /// tier is "server" (default) or "family".
+  @$pb.TagNumber(2)
+  $core.String get tier => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set tier($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTier() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTier() => $_clearField(2);
+
+  /// pools are build pools configured on the hub's tailnet.
+  @$pb.TagNumber(3)
+  $pb.PbList<$core.String> get pools => $_getList(2);
+
+  /// ttl is how long the key can be redeemed; unset means 1h, at most 24h.
+  @$pb.TagNumber(4)
+  $3.Duration get ttl => $_getN(3);
+  @$pb.TagNumber(4)
+  set ttl($3.Duration value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasTtl() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearTtl() => $_clearField(4);
+  @$pb.TagNumber(4)
+  $3.Duration ensureTtl() => $_ensure(3);
+
+  /// install_url is the hub URL the new machine downloads from. Empty means
+  /// the hub's --public-url, else the URL this request was sent to.
+  @$pb.TagNumber(5)
+  $core.String get installUrl => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set installUrl($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasInstallUrl() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearInstallUrl() => $_clearField(5);
+}
+
+class InstallCommand extends $pb.GeneratedMessage {
+  factory InstallCommand({
+    InstallPlatform? platform,
+    $core.String? shell,
+    $core.String? command,
+    $core.String? note,
+  }) {
+    final result = InstallCommand._();
+    if (platform != null) result.platform = platform;
+    if (shell != null) result.shell = shell;
+    if (command != null) result.command = command;
+    if (note != null) result.note = note;
+    return result;
+  }
+
+  InstallCommand._();
+
+  factory InstallCommand.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InstallCommand()..mergeFromBuffer(data, registry);
+  factory InstallCommand.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InstallCommand()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'InstallCommand',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: InstallCommand.$_createMessage)
+    ..aE<InstallPlatform>(1, _omitFieldNames ? '' : 'platform',
+        enumValues: InstallPlatform.values)
+    ..aOS(2, _omitFieldNames ? '' : 'shell')
+    ..aOS(3, _omitFieldNames ? '' : 'command')
+    ..aOS(4, _omitFieldNames ? '' : 'note')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InstallCommand clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InstallCommand copyWith(void Function(InstallCommand) updates) =>
+      super.copyWith((message) => updates(message as InstallCommand))
+          as InstallCommand;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use InstallCommand() / InstallCommand.new instead')
+  static InstallCommand create() => InstallCommand._();
+  static $pb.GeneratedMessage $_createMessage() => InstallCommand._();
+  @$core.override
+  InstallCommand createEmptyInstance() => InstallCommand._();
+  @$core.pragma('dart2js:noInline')
+  static InstallCommand getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<InstallCommand>(
+          InstallCommand.$_createMessage);
+  static InstallCommand? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  InstallPlatform get platform => $_getN(0);
+  @$pb.TagNumber(1)
+  set platform(InstallPlatform value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPlatform() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPlatform() => $_clearField(1);
+
+  /// shell is where to paste command, e.g. "PowerShell".
+  @$pb.TagNumber(2)
+  $core.String get shell => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set shell($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasShell() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearShell() => $_clearField(2);
+
+  /// command is one line that downloads the hub's installer and runs it with
+  /// the key. It holds the key: treat it like one.
+  @$pb.TagNumber(3)
+  $core.String get command => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set command($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasCommand() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearCommand() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get note => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set note($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasNote() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearNote() => $_clearField(4);
+}
+
+class InviteNodeResponse extends $pb.GeneratedMessage {
+  factory InviteNodeResponse({
+    NodeInfo? node,
+    $core.String? controlUrl,
+    $core.String? key,
+    $1.Timestamp? expiresAt,
+    $core.String? installUrl,
+    $core.Iterable<InstallCommand>? commands,
+  }) {
+    final result = InviteNodeResponse._();
+    if (node != null) result.node = node;
+    if (controlUrl != null) result.controlUrl = controlUrl;
+    if (key != null) result.key = key;
+    if (expiresAt != null) result.expiresAt = expiresAt;
+    if (installUrl != null) result.installUrl = installUrl;
+    if (commands != null) result.commands.addAll(commands);
+    return result;
+  }
+
+  InviteNodeResponse._();
+
+  factory InviteNodeResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InviteNodeResponse()..mergeFromBuffer(data, registry);
+  factory InviteNodeResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      InviteNodeResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'InviteNodeResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: InviteNodeResponse.$_createMessage)
+    ..aOM<NodeInfo>(1, _omitFieldNames ? '' : 'node',
+        subBuilder: NodeInfo.$_createMessage)
+    ..aOS(2, _omitFieldNames ? '' : 'controlUrl')
+    ..aOS(3, _omitFieldNames ? '' : 'key')
+    ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'expiresAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOS(5, _omitFieldNames ? '' : 'installUrl')
+    ..pPM<InstallCommand>(6, _omitFieldNames ? '' : 'commands',
+        subBuilder: InstallCommand.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InviteNodeResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  InviteNodeResponse copyWith(void Function(InviteNodeResponse) updates) =>
+      super.copyWith((message) => updates(message as InviteNodeResponse))
+          as InviteNodeResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use InviteNodeResponse() / InviteNodeResponse.new instead')
+  static InviteNodeResponse create() => InviteNodeResponse._();
+  static $pb.GeneratedMessage $_createMessage() => InviteNodeResponse._();
+  @$core.override
+  InviteNodeResponse createEmptyInstance() => InviteNodeResponse._();
+  @$core.pragma('dart2js:noInline')
+  static InviteNodeResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<InviteNodeResponse>(
+          InviteNodeResponse.$_createMessage);
+  static InviteNodeResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  NodeInfo get node => $_getN(0);
+  @$pb.TagNumber(1)
+  set node(NodeInfo value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasNode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearNode() => $_clearField(1);
+  @$pb.TagNumber(1)
+  NodeInfo ensureNode() => $_ensure(0);
+
+  /// control_url and key are for the manual path (`node install --control`).
+  @$pb.TagNumber(2)
+  $core.String get controlUrl => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set controlUrl($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasControlUrl() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearControlUrl() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get key => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set key($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasKey() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearKey() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $1.Timestamp get expiresAt => $_getN(3);
+  @$pb.TagNumber(4)
+  set expiresAt($1.Timestamp value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasExpiresAt() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearExpiresAt() => $_clearField(4);
+  @$pb.TagNumber(4)
+  $1.Timestamp ensureExpiresAt() => $_ensure(3);
+
+  @$pb.TagNumber(5)
+  $core.String get installUrl => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set installUrl($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasInstallUrl() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearInstallUrl() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $pb.PbList<InstallCommand> get commands => $_getList(5);
+}
+
+class WatchNodeSetupRequest extends $pb.GeneratedMessage {
+  factory WatchNodeSetupRequest({
+    $core.String? name,
+  }) {
+    final result = WatchNodeSetupRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  WatchNodeSetupRequest._();
+
+  factory WatchNodeSetupRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WatchNodeSetupRequest()..mergeFromBuffer(data, registry);
+  factory WatchNodeSetupRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WatchNodeSetupRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'WatchNodeSetupRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: WatchNodeSetupRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WatchNodeSetupRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WatchNodeSetupRequest copyWith(
+          void Function(WatchNodeSetupRequest) updates) =>
+      super.copyWith((message) => updates(message as WatchNodeSetupRequest))
+          as WatchNodeSetupRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use WatchNodeSetupRequest() / WatchNodeSetupRequest.new instead')
+  static WatchNodeSetupRequest create() => WatchNodeSetupRequest._();
+  static $pb.GeneratedMessage $_createMessage() => WatchNodeSetupRequest._();
+  @$core.override
+  WatchNodeSetupRequest createEmptyInstance() => WatchNodeSetupRequest._();
+  @$core.pragma('dart2js:noInline')
+  static WatchNodeSetupRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<WatchNodeSetupRequest>(
+          WatchNodeSetupRequest.$_createMessage);
+  static WatchNodeSetupRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class NodeSetupProgress extends $pb.GeneratedMessage {
+  factory NodeSetupProgress({
+    NodeSetupStage? stage,
+    $core.Iterable<$core.String>? problems,
+    $core.Iterable<$core.String>? notes,
+    $core.String? message,
+    NodeStatus? status,
+  }) {
+    final result = NodeSetupProgress._();
+    if (stage != null) result.stage = stage;
+    if (problems != null) result.problems.addAll(problems);
+    if (notes != null) result.notes.addAll(notes);
+    if (message != null) result.message = message;
+    if (status != null) result.status = status;
+    return result;
+  }
+
+  NodeSetupProgress._();
+
+  factory NodeSetupProgress.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeSetupProgress()..mergeFromBuffer(data, registry);
+  factory NodeSetupProgress.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeSetupProgress()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NodeSetupProgress',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: NodeSetupProgress.$_createMessage)
+    ..aE<NodeSetupStage>(1, _omitFieldNames ? '' : 'stage',
+        enumValues: NodeSetupStage.values)
+    ..pPS(2, _omitFieldNames ? '' : 'problems')
+    ..pPS(3, _omitFieldNames ? '' : 'notes')
+    ..aOS(4, _omitFieldNames ? '' : 'message')
+    ..aOM<NodeStatus>(5, _omitFieldNames ? '' : 'status',
+        subBuilder: NodeStatus.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeSetupProgress clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeSetupProgress copyWith(void Function(NodeSetupProgress) updates) =>
+      super.copyWith((message) => updates(message as NodeSetupProgress))
+          as NodeSetupProgress;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use NodeSetupProgress() / NodeSetupProgress.new instead')
+  static NodeSetupProgress create() => NodeSetupProgress._();
+  static $pb.GeneratedMessage $_createMessage() => NodeSetupProgress._();
+  @$core.override
+  NodeSetupProgress createEmptyInstance() => NodeSetupProgress._();
+  @$core.pragma('dart2js:noInline')
+  static NodeSetupProgress getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<NodeSetupProgress>(
+          NodeSetupProgress.$_createMessage);
+  static NodeSetupProgress? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  NodeSetupStage get stage => $_getN(0);
+  @$pb.TagNumber(1)
+  set stage(NodeSetupStage value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasStage() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearStage() => $_clearField(1);
+
+  /// problems are what keeps the node from READY, one sentence each.
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.String> get problems => $_getList(1);
+
+  /// notes are worth knowing but do not block READY.
+  @$pb.TagNumber(3)
+  $pb.PbList<$core.String> get notes => $_getList(2);
+
+  /// message is a human line about the stage.
+  @$pb.TagNumber(4)
+  $core.String get message => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set message($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasMessage() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearMessage() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  NodeStatus get status => $_getN(4);
+  @$pb.TagNumber(5)
+  set status(NodeStatus value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasStatus() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearStatus() => $_clearField(5);
+  @$pb.TagNumber(5)
+  NodeStatus ensureStatus() => $_ensure(4);
 }
 
 /// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
@@ -3875,6 +4564,14 @@ class NodeAgentServiceApi {
           $pb.ClientContext? ctx, GetDeskStateRequest request) =>
       _client.invoke<$0.DeskState>(
           ctx, 'NodeAgentService', 'GetDeskState', request, $0.DeskState());
+
+  /// Uninstall unregisters the agent's startup (the logon task, systemd user
+  /// unit or termux service `node install` registered) and stops the agent
+  /// once it has answered. It deletes nothing; the response names what is left.
+  $async.Future<UninstallResponse> uninstall(
+          $pb.ClientContext? ctx, UninstallRequest request) =>
+      _client.invoke<UninstallResponse>(
+          ctx, 'NodeAgentService', 'Uninstall', request, UninstallResponse());
 }
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -3907,12 +4604,36 @@ class NodeServiceApi {
       _client.invoke<NodeInfo>(
           ctx, 'NodeService', 'AddNode', request, NodeInfo());
 
-  /// RemoveNode removes a node from the hub inventory. It does not touch the
-  /// machine itself.
-  $async.Future<RemoveNodeResponse> removeNode(
+  /// RemoveNode takes a node out of service and forgets it. It drains the
+  /// node first (no new jobs or leases; running jobs are waited for or
+  /// cancelled as jobs says), optionally asks the agent to uninstall itself,
+  /// expires an unused invite key, revokes the node's tailnet enrollment,
+  /// releases its leases and removes the inventory entry. It streams the
+  /// steps and fails, leaving the node in service, if any step fails. A
+  /// revoked machine that comes back cannot rejoin without a new invite.
+  /// Cancelling a pending invite is the same call. Only the owner token may
+  /// call it.
+  $async.Future<RemoveNodeProgress> removeNode(
           $pb.ClientContext? ctx, RemoveNodeRequest request) =>
-      _client.invoke<RemoveNodeResponse>(
-          ctx, 'NodeService', 'RemoveNode', request, RemoveNodeResponse());
+      _client.invoke<RemoveNodeProgress>(
+          ctx, 'NodeService', 'RemoveNode', request, RemoveNodeProgress());
+
+  /// InviteNode creates a single-use tailnet enrollment key for a new node,
+  /// records the node in the inventory as invited and returns the one-line
+  /// installers that use it. Inviting a pending node again expires its
+  /// previous key. Only the owner token may call it.
+  $async.Future<InviteNodeResponse> inviteNode(
+          $pb.ClientContext? ctx, InviteNodeRequest request) =>
+      _client.invoke<InviteNodeResponse>(
+          ctx, 'NodeService', 'InviteNode', request, InviteNodeResponse());
+
+  /// WatchNodeSetup follows a node from its invite to ready. It sends the
+  /// current stage at once and again whenever the stage or its problems
+  /// change, and ends after READY.
+  $async.Future<NodeSetupProgress> watchNodeSetup(
+          $pb.ClientContext? ctx, WatchNodeSetupRequest request) =>
+      _client.invoke<NodeSetupProgress>(
+          ctx, 'NodeService', 'WatchNodeSetup', request, NodeSetupProgress());
 
   /// PutFile copies a file or directory to a node, one chunk per call so it
   /// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a

@@ -72,8 +72,9 @@ Services marked `(protectorate.v1.owner_only)` (TokenService) and RPCs marked
 `(protectorate.v1.owner_only_rpc)` accept only the owner token whatever the
 scopes. The RPC form covers anything that runs code as the hub's OS user or
 aims the hub's credentials: `CreateSession` and `RespawnSession` (the command
-is unsandboxed and could read `$PROTECTORATE_HOME/token`) and `AddNode` (the
-hub polls the address with the node token). Owner-only RPCs match no scope
+is unsandboxed and could read `$PROTECTORATE_HOME/token`), `AddNode` (the
+hub polls the address with the node token), `InviteNode` (it issues a tailnet
+enrollment key) and `RemoveNode` (it revokes a node and can make it uninstall). Owner-only RPCs match no scope
 glob, so granting them is rejected at token creation; `*` and `session_*` do
 not include them.
 
@@ -96,6 +97,7 @@ never follow redirects.
 | Entry point | Check |
 |-------------|-------|
 | Connect unary and server-streaming RPCs | interceptor: authenticate, then scope for the procedure |
+| `GET /install.sh`, `GET /install.ps1`, `GET /dl/protectorate-<os>-<arch>[.exe][.sha256]` | none: generated installers and the builds, no secrets; the enrollment key travels in the environment of the command the owner pastes |
 | `GET /ws/terminal/{name}` | bearer header, `token.<value>` subprotocol or `?token=`; needs `terminal` (or `terminal:readonly` with `?readonly=1`) |
 | Tailnet listener | WhoIs first (hub and `tag:client` only, never `tag:node`), then exactly the checks above |
 

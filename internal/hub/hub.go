@@ -90,6 +90,16 @@ type Hub struct {
 	// LocalModelHosts are model endpoint hostnames the hub treats as the
 	// user's own server even when they do not look private.
 	LocalModelHosts []string
+
+	// PublicURL is the URL new machines reach this hub at, baked into the
+	// install scripts and commands; empty means the URL each request came in
+	// on.
+	PublicURL string
+
+	tnAdmin TailnetAdmin
+	digests digestCache
+	// setupPoll is how often WatchNodeSetup looks again; 0 means 1s.
+	setupPoll time.Duration
 }
 
 func New(version, token string) *Hub {
@@ -208,7 +218,8 @@ func (b *eventBus) publish(e *pb.Event) {
 func (h *Hub) SetAuth(a *auth.Authorizer) { h.authz = a }
 
 // Handler serves every service. Every RPC and the terminal go through the
-// authorizer; the web client files are static and public.
+// authorizer; the web client files, the install scripts and the node builds
+// are static and public.
 func (h *Hub) Handler() http.Handler {
 	opts := connect.WithHandlerOptions(
 		connect.WithInterceptors(authInterceptor{a: h.authz}),
@@ -222,6 +233,9 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewTokenServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTailnetServiceHandler(tailnetService{h}, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
+	mux.HandleFunc("GET /install.sh", h.handleInstallScript("sh"))
+	mux.HandleFunc("GET /install.ps1", h.handleInstallScript("ps1"))
+	mux.HandleFunc("GET /dl/{file}", h.handleDownload)
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
 	if h.sleeves != nil {
 		mux.Handle(protectoratev1connect.NewSleeveServiceHandler(h, opts))
@@ -242,7 +256,7 @@ func (h *Hub) Handler() http.Handler {
 	if h.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
 	}
-	return mux
+	return withRequestBase(mux)
 }
 
 // tailnetHandler admits only callers identify accepts (tailnet WhoIs), then

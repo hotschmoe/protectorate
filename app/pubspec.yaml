@@ -32,6 +32,7 @@ dependencies:
   web_socket_channel: ^3.0.3
   app_links: ^7.2.2
   fixnum: ^1.1.1
+  qr: ^3.0.2
 
 dev_dependencies:
   flutter_test:

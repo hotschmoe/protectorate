@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -182,12 +183,19 @@ func TestPlanUninstallDeletesNothing(t *testing.T) {
 			[][]string{{"systemctl", "--user", "disable", "--now", "protectorate-node.service"}}, "/home/o/.config/systemd/user/protectorate-node.service"},
 		{"termux", installInput{GOOS: "android", UserHome: "/h", Prefix: "/p", Home: "/h/.protectorate", Name: "ph"},
 			[][]string{{"sv-disable", "protectorate-node"}}, "/p/var/service/protectorate-node"},
+		{"windows by the agent", installInput{GOOS: "windows", Exe: `C:\p.exe`, LocalAppData: `C:\L`, Home: `C:\h`, Name: "pc", Self: true},
+			[][]string{{"schtasks", "/Delete", "/TN", "protectorate-node", "/F"}}, `C:\h\protectorate-node.xml`},
+		{"linux by the agent", installInput{GOOS: "linux", UserHome: "/home/o", Home: "/home/o/.protectorate", Name: "box", Self: true},
+			[][]string{{"systemctl", "--user", "disable", "protectorate-node.service"}}, "/home/o/.local/bin/protectorate"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			steps, err := planUninstall(tt.in)
+			steps, left, err := planUninstall(tt.in)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !slices.Contains(left, tt.mention) {
+				t.Errorf("left %v lacks %q", left, tt.mention)
 			}
 			if got := argvs(steps); !reflect.DeepEqual(got, tt.wantRun) {
 				t.Errorf("commands = %v, want %v", got, tt.wantRun)
@@ -204,8 +212,8 @@ func TestPlanUninstallDeletesNothing(t *testing.T) {
 				}
 				notes += s.Desc + "\n"
 			}
-			if !strings.Contains(notes, tt.mention) || !strings.Contains(notes, "node revoke "+tt.in.Name) {
-				t.Errorf("notes lack %q or the revoke hint:\n%s", tt.mention, notes)
+			if !strings.Contains(notes, tt.mention) || tt.in.Self == strings.Contains(notes, "node rm "+tt.in.Name) {
+				t.Errorf("notes lack %q, or the hub hint is wrong for self=%t:\n%s", tt.mention, tt.in.Self, notes)
 			}
 		})
 	}

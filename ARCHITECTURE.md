@@ -120,14 +120,23 @@ protectorate hub tailnet install
 protectorate hub tailnet init --server-url https://hs.example.com [--pool build] [--key-expiry-days 180]
 protectorate hub serve                       # starts headscale + joins as tag:hub
 protectorate node invite <name> [--tier server|family] [--pool build] [--expires 1h]
-protectorate node join --control URL --key KEY [--name N]   # on the node, then `node serve`
+PROTECTORATE_ENROLL_KEY=KEY protectorate node join --control URL [--name N]   # on the node, then `node serve`
+protectorate node rm <name> [--jobs wait|cancel] [--uninstall]
 protectorate node revoke|renew <name>
 protectorate client invite --name phone      # stock Tailscale app, tag:client
 ```
 
-- `node invite` also upserts the node into `nodes.yaml` (address = name, tier,
-  `pool-X` tags) through the running hub, so `node ls` shows it as `invited, not
-  yet joined` (freshness INVITED: no unreachable alert or event). The first good
+- `node invite` and the app's ADD NODE call `NodeService.InviteNode` (owner
+  only): the hub issues the key, upserts the node into `nodes.yaml` (address =
+  name, tier, `pool-X` tags) and returns one-line installers that fetch the
+  hub-generated `/install.sh` or `/install.ps1` and the matching build from
+  `/dl/` (see docs/install.md). `node ls` shows it as `invited, not yet joined`
+  (freshness INVITED, PENDING in the app: no unreachable alert or event);
+  `WatchNodeSetup` streams INVITED, JOINED, METRICS, READY or ATTENTION.
+  Re-inviting a pending node expires its previous key. `RemoveNode` (owner
+  only, streamed) drains the node, optionally has the agent unregister itself
+  (`NodeAgentService.Uninstall`), expires a pending key, revokes the
+  enrollment, releases its leases and removes the entry. The first good
   poll clears the flag and emits `node.joined`. The hub matches headscale nodes
   to invites by pre-auth key id; one that enrolled under another name raises a
   `name-mismatch` alert and a `node.name_mismatch` event.
