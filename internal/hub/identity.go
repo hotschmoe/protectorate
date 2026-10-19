@@ -1,12 +1,15 @@
 package hub
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"connectrpc.com/connect"
 
 	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
@@ -51,6 +54,25 @@ func senderOf(p *auth.Principal) string {
 		return strings.TrimPrefix(p.Name, sleeveTokenPrefix)
 	}
 	return "token:" + p.Name
+}
+
+// callerSleeve returns the sleeve name when the authenticated caller is a
+// sleeve's own token.
+func callerSleeve(ctx context.Context) (string, bool) {
+	p := auth.PrincipalFrom(ctx)
+	if p == nil || p.Owner || !strings.HasPrefix(p.Name, sleeveTokenPrefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(p.Name, sleeveTokenPrefix), true
+}
+
+// ownSleeveOnly refuses a sleeve-identity caller that reaches for another
+// sleeve's chat or session. Other callers are left to their scopes.
+func ownSleeveOnly(ctx context.Context, target string) error {
+	if self, ok := callerSleeve(ctx); ok && self != target {
+		return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve %s may only read its own sleeve, not %q", self, target))
+	}
+	return nil
 }
 
 // issueIdentity mints the scoped token a new sleeve will carry. The secret is

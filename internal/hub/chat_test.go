@@ -412,3 +412,45 @@ func TestChatTerminalSleeveHasNoChat(t *testing.T) {
 		t.Fatalf("terminal sleeve ran headless: %q", args)
 	}
 }
+
+func TestSleeveTokenReadsOnlyItself(t *testing.T) {
+	r := newChatRig(t)
+	r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
+	mint := func(sleeveName string) (protectoratev1connect.ChatServiceClient, protectoratev1connect.SessionServiceClient) {
+		_, secret, err := r.h.authz.Store().Create(sleeveTokenName(sleeveName), sleeveScopes, 0, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		hc := &http.Client{Transport: bearer{secret}}
+		return protectoratev1connect.NewChatServiceClient(hc, r.srv.URL), protectoratev1connect.NewSessionServiceClient(hc, r.srv.URL)
+	}
+	otherChat, otherSess := mint("someoneelse")
+	ownChat, _ := mint(r.name)
+
+	watch := func(c protectoratev1connect.ChatServiceClient) error {
+		ctx, cancel := context.WithTimeout(r.ctx, 300*time.Millisecond)
+		defer cancel()
+		stream, err := c.Watch(ctx, connect.NewRequest(&pb.WatchRequest{Sleeve: r.name}))
+		if err != nil {
+			return err
+		}
+		stream.Receive()
+		return stream.Err()
+	}
+	if err := watch(otherChat); code(err) != connect.CodePermissionDenied {
+		t.Fatalf("another sleeve's token watched this chat: %v", err)
+	}
+	if err := watch(ownChat); code(err) == connect.CodePermissionDenied {
+		t.Fatalf("a sleeve was refused its own chat: %v", err)
+	}
+	if _, err := otherSess.CapturePane(r.ctx, connect.NewRequest(&pb.CapturePaneRequest{Name: sleeve.SessionName(r.name)})); code(err) != connect.CodePermissionDenied {
+		t.Fatalf("another sleeve's token captured this session: %v", err)
+	}
+	list, err := otherSess.ListSessions(r.ctx, connect.NewRequest(&pb.ListSessionsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Msg.Sessions) != 0 {
+		t.Fatalf("another sleeve's token listed sessions: %v", list.Msg.Sessions)
+	}
+}

@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -63,8 +64,12 @@ func (h *Hub) ListSessions(ctx context.Context, _ *connect.Request[pb.ListSessio
 	if err != nil {
 		return nil, sessionErr(err)
 	}
+	self, isSleeve := callerSleeve(ctx)
 	res := &pb.ListSessionsResponse{}
 	for _, s := range all {
+		if isSleeve && s.Name != sleeve.SessionName(self) {
+			continue
+		}
 		res.Sessions = append(res.Sessions, toProto(s))
 	}
 	return connect.NewResponse(res), nil
@@ -104,6 +109,11 @@ func (h *Hub) RespawnSession(ctx context.Context, req *connect.Request[pb.Respaw
 }
 
 func (h *Hub) CapturePane(ctx context.Context, req *connect.Request[pb.CapturePaneRequest]) (*connect.Response[pb.CapturePaneResponse], error) {
+	if self, ok := callerSleeve(ctx); ok {
+		if req.Msg.Name != sleeve.SessionName(self) {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve %s may only capture its own session", self))
+		}
+	}
 	text, err := h.Sessions.Capture(ctx, req.Msg.Name, int(req.Msg.Lines))
 	if err != nil {
 		return nil, sessionErr(err)

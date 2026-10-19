@@ -22,7 +22,8 @@ sleeve keeps its mode for life; a terminal sleeve has no chat.
 ## API
 
 `ChatService` (`proto/protectorate/v1/chat.proto`). `Watch` needs the `read`
-scope; every call is covered by `chat_*`.
+scope (a sleeve's own token may watch only its own sleeve); every call is
+covered by `chat_*`.
 
 - **Watch(sleeve, after_seq)** replays stored events with `seq > after_seq`,
   then streams live ones, with no gap or duplicate at the boundary.
