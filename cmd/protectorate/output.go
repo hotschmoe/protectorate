@@ -333,13 +333,21 @@ func writeMetrics(w io.Writer, m *pb.NodeMetrics) {
 			fmt.Fprintln(w, "engine disk\tnot measured yet")
 		}
 		if len(e.Containers) > 0 {
-			fmt.Fprintln(w, "\nCONTAINER\tIMAGE\tSTATE\tCPU\tMEM\tMEM%\tWRITABLE")
+			fmt.Fprintln(w, "\nCONTAINER\tIMAGE\tSTATE\tCPU\tMEM\tMEM%\tWRITABLE\tAGE")
 			for _, c := range e.Containers {
+				age := "-"
+				if c.CreatedAt != nil {
+					age = fmtDur(time.Since(c.CreatedAt.AsTime()))
+				}
+				if c.State != "running" {
+					fmt.Fprintf(w, "%s\t%s\t%s\t-\t-\t-\t%s\t%s\n", c.Name, c.Image, c.State, fmtBytes(c.WritableLayerBytes), age)
+					continue
+				}
 				if c.StatsError != "" {
 					fmt.Fprintf(w, "%s\t%s\t%s\tstats unavailable: %s\n", c.Name, c.Image, c.State, c.StatsError)
 					continue
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%.1f%%\t%s\t%.1f%%\t%s\n", c.Name, c.Image, c.State, c.CpuPercent, fmtBytes(c.MemoryUsedBytes), c.MemoryPercent, fmtBytes(c.WritableLayerBytes))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%.1f%%\t%s\t%.1f%%\t%s\t%s\n", c.Name, c.Image, c.State, c.CpuPercent, fmtBytes(c.MemoryUsedBytes), c.MemoryPercent, fmtBytes(c.WritableLayerBytes), age)
 			}
 		}
 	}

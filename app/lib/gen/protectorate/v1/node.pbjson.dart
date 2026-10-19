@@ -416,6 +416,14 @@ const ContainerMetrics$json = {
     },
     {'1': 'rootfs_bytes', '3': 10, '4': 1, '5': 3, '10': 'rootfsBytes'},
     {'1': 'stats_error', '3': 11, '4': 1, '5': 9, '10': 'statsError'},
+    {
+      '1': 'created_at',
+      '3': 12,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'createdAt'
+    },
   ],
 };
 
@@ -427,7 +435,8 @@ final $typed_data.Uint8List containerMetricsDescriptor = $convert.base64Decode(
     'VzZWRCeXRlcxIsChJtZW1vcnlfbGltaXRfYnl0ZXMYByABKARSEG1lbW9yeUxpbWl0Qnl0ZXMS'
     'JQoObWVtb3J5X3BlcmNlbnQYCCABKAFSDW1lbW9yeVBlcmNlbnQSMAoUd3JpdGFibGVfbGF5ZX'
     'JfYnl0ZXMYCSABKANSEndyaXRhYmxlTGF5ZXJCeXRlcxIhCgxyb290ZnNfYnl0ZXMYCiABKANS'
-    'C3Jvb3Rmc0J5dGVzEh8KC3N0YXRzX2Vycm9yGAsgASgJUgpzdGF0c0Vycm9y');
+    'C3Jvb3Rmc0J5dGVzEh8KC3N0YXRzX2Vycm9yGAsgASgJUgpzdGF0c0Vycm9yEjkKCmNyZWF0ZW'
+    'RfYXQYDCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wUgljcmVhdGVkQXQ=');
 
 @$core.Deprecated('Use dirSizeDescriptor instead')
 const DirSize$json = {

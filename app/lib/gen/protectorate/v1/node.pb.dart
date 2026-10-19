@@ -1172,6 +1172,7 @@ class ContainerMetrics extends $pb.GeneratedMessage {
     $fixnum.Int64? writableLayerBytes,
     $fixnum.Int64? rootfsBytes,
     $core.String? statsError,
+    $0.Timestamp? createdAt,
   }) {
     final result = ContainerMetrics._();
     if (id != null) result.id = id;
@@ -1186,6 +1187,7 @@ class ContainerMetrics extends $pb.GeneratedMessage {
       result.writableLayerBytes = writableLayerBytes;
     if (rootfsBytes != null) result.rootfsBytes = rootfsBytes;
     if (statsError != null) result.statsError = statsError;
+    if (createdAt != null) result.createdAt = createdAt;
     return result;
   }
 
@@ -1218,6 +1220,8 @@ class ContainerMetrics extends $pb.GeneratedMessage {
     ..aInt64(9, _omitFieldNames ? '' : 'writableLayerBytes')
     ..aInt64(10, _omitFieldNames ? '' : 'rootfsBytes')
     ..aOS(11, _omitFieldNames ? '' : 'statsError')
+    ..aOM<$0.Timestamp>(12, _omitFieldNames ? '' : 'createdAt',
+        subBuilder: $0.Timestamp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1343,6 +1347,19 @@ class ContainerMetrics extends $pb.GeneratedMessage {
   $core.bool hasStatsError() => $_has(10);
   @$pb.TagNumber(11)
   void clearStatsError() => $_clearField(11);
+
+  /// created_at is when the container was created; stopped containers are
+  /// listed too and carry no cpu or memory figures.
+  @$pb.TagNumber(12)
+  $0.Timestamp get createdAt => $_getN(11);
+  @$pb.TagNumber(12)
+  set createdAt($0.Timestamp value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasCreatedAt() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearCreatedAt() => $_clearField(12);
+  @$pb.TagNumber(12)
+  $0.Timestamp ensureCreatedAt() => $_ensure(11);
 }
 
 class DirSize extends $pb.GeneratedMessage {

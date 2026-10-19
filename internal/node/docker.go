@@ -283,13 +283,14 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 	}
 
 	var list []struct {
-		ID    string `json:"Id"`
-		Names []string
-		Image string
-		State string
+		ID      string `json:"Id"`
+		Names   []string
+		Image   string
+		State   string
+		Created int64
 	}
 	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	err = d.get(lctx, prefix+"/containers/json", &list)
+	err = d.get(lctx, prefix+"/containers/json?all=1", &list)
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("docker: list containers: %w", err)
@@ -308,6 +309,9 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 	var wg sync.WaitGroup
 	for i, ct := range list {
 		cm := &pb.ContainerMetrics{Id: shortID(ct.ID), Image: ct.Image, State: ct.State}
+		if ct.Created > 0 {
+			cm.CreatedAt = timestamppb.New(time.Unix(ct.Created, 0))
+		}
 		if len(ct.Names) > 0 {
 			cm.Name = strings.TrimPrefix(ct.Names[0], "/")
 		}
@@ -316,6 +320,9 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 			cm.WritableLayerBytes, cm.RootfsBytes = sz.rw, sz.rootfs
 		}
 		eng.Containers[i] = cm
+		if ct.State != "running" {
+			continue
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {

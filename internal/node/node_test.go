@@ -240,8 +240,12 @@ func fakeDocker(t *testing.T) string {
 	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"Version":"27.0.0","ApiVersion":"1.46","MinAPIVersion":"1.24"}`))
 	})
-	mux.HandleFunc("/v1.43/containers/json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`[{"Id":"aaaaaaaaaaaaaaaa","Names":["/web"],"Image":"nginx","State":"running"},{"Id":"bbbbbbbbbbbbbbbb","Names":["/broken"],"Image":"x","State":"running"}]`))
+	mux.HandleFunc("/v1.43/containers/json", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("all") != "1" {
+			http.Error(w, "stopped containers not requested", http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte(`[{"Id":"aaaaaaaaaaaaaaaa","Names":["/web"],"Image":"nginx","State":"running","Created":1700000000},{"Id":"bbbbbbbbbbbbbbbb","Names":["/broken"],"Image":"x","State":"running"},{"Id":"cccccccccccccccc","Names":["/dead"],"Image":"old","State":"exited","Created":1600000000}]`))
 	})
 	mux.HandleFunc("/v1.43/containers/aaaaaaaaaaaaaaaa/stats", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"cpu_stats":{"cpu_usage":{"total_usage":200},"system_cpu_usage":2000,"online_cpus":2},"precpu_stats":{"cpu_usage":{"total_usage":100},"system_cpu_usage":1000},"memory_stats":{"usage":500,"limit":1000}}`))
@@ -250,7 +254,7 @@ func fakeDocker(t *testing.T) string {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
 	mux.HandleFunc("/v1.43/system/df", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"LayersSize":900,"Images":[{"Size":900,"Containers":0}],"Containers":[{"Id":"aaaaaaaaaaaaaaaa","State":"running","SizeRw":7,"SizeRootFs":900}],"Volumes":[],"BuildCache":[]}`))
+		w.Write([]byte(`{"LayersSize":900,"Images":[{"Size":900,"Containers":0}],"Containers":[{"Id":"aaaaaaaaaaaaaaaa","State":"running","SizeRw":7,"SizeRootFs":900},{"Id":"cccccccccccccccc","State":"exited","SizeRw":5000,"SizeRootFs":5900}],"Volumes":[],"BuildCache":[]}`))
 	})
 	sock := filepath.Join(t.TempDir(), "d.sock")
 	l, err := net.Listen("unix", sock)
@@ -276,7 +280,7 @@ func TestEngineMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if eng.Kind != "docker" || eng.Version != "27.0.0" || len(eng.Containers) != 2 {
+	if eng.Kind != "docker" || eng.Version != "27.0.0" || len(eng.Containers) != 3 {
 		t.Fatalf("engine = %v", eng)
 	}
 	if eng.Disk == nil || eng.Disk.Images.SizeBytes != 900 || eng.DiskMeasuredAt == nil {
@@ -296,6 +300,15 @@ func TestEngineMetrics(t *testing.T) {
 	}
 	if broken == nil || broken.StatsError == "" {
 		t.Fatalf("broken = %v", broken)
+	}
+	var dead *pb.ContainerMetrics
+	for _, cm := range eng.Containers {
+		if cm.Name == "dead" {
+			dead = cm
+		}
+	}
+	if dead == nil || dead.State != "exited" || dead.Image != "old" || dead.WritableLayerBytes != 5000 || dead.CreatedAt.AsTime().Unix() != 1600000000 || dead.StatsError != "" || dead.CpuPercent != 0 || dead.MemoryUsedBytes != 0 {
+		t.Fatalf("dead = %v", dead)
 	}
 }
 

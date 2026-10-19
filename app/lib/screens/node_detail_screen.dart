@@ -517,6 +517,8 @@ class _EngineDisk extends StatelessWidget {
   }
 }
 
+bool _isRunning(ContainerMetrics c) => c.state.isEmpty || c.state == 'running';
+
 class _ContainerTable extends StatelessWidget {
   const _ContainerTable({required this.containers});
 
@@ -527,6 +529,7 @@ class _ContainerTable extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     if (containers.isEmpty) return const Text('No containers.');
+    final now = DateTime.now();
     final head = text.labelSmall!.copyWith(color: cs.onSurfaceVariant);
     Widget cell(String s, int flex, {TextStyle? style, bool end = true}) =>
         Expanded(
@@ -546,6 +549,7 @@ class _ContainerTable extends StatelessWidget {
             cell('CPU', 2, style: head),
             cell('Mem', 3, style: head),
             cell('Writable', 3, style: head),
+            cell('Age', 2, style: head),
           ],
         ),
         const Divider(height: 8),
@@ -556,24 +560,33 @@ class _ContainerTable extends StatelessWidget {
               key: ValueKey('container-${c.name}'),
               children: [
                 cell(
-                  c.state.isEmpty || c.state == 'running'
-                      ? c.name
-                      : '${c.name} (${c.state})',
+                  _isRunning(c) ? c.name : '${c.name} (${c.state})',
                   5,
                   end: false,
                 ),
                 cell(
-                  c.statsError.isNotEmpty
+                  !_isRunning(c)
+                      ? '-'
+                      : c.statsError.isNotEmpty
                       ? 'err'
                       : '${c.cpuPercent.toStringAsFixed(1)}%',
                   2,
                 ),
-                cell(formatBytes(c.memoryUsedBytes.toInt()), 3),
+                cell(
+                  _isRunning(c) ? formatBytes(c.memoryUsedBytes.toInt()) : '-',
+                  3,
+                ),
                 cell(
                   c.writableLayerBytes > 0
                       ? formatBytes(c.writableLayerBytes.toInt())
                       : '-',
                   3,
+                ),
+                cell(
+                  c.hasCreatedAt()
+                      ? formatAge(now.difference(c.createdAt.toDateTime()))
+                      : '-',
+                  2,
                 ),
               ],
             ),

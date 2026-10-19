@@ -178,6 +178,9 @@ message ContainerMetrics {
   int64 rootfs_bytes = 10;
   // stats_error is set when stats for this container could not be read.
   string stats_error = 11;
+  // created_at is when the container was created; stopped containers are
+  // listed too and carry no cpu or memory figures.
+  google.protobuf.Timestamp created_at = 12;
 }
 
 message DirSize {
