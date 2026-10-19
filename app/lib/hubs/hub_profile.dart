@@ -32,15 +32,19 @@ class HubProfile {
     );
   }
 
-  Map<String, Object?> toJson() =>
-      {'id': id, 'name': name, 'baseUrl': baseUrl, 'token': token};
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'baseUrl': baseUrl,
+    'token': token,
+  };
 
   factory HubProfile.fromJson(Map<String, Object?> json) => HubProfile(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        baseUrl: json['baseUrl'] as String,
-        token: (json['token'] as String?) ?? '',
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    baseUrl: json['baseUrl'] as String,
+    token: (json['token'] as String?) ?? '',
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -104,7 +108,10 @@ class HubStore extends ChangeNotifier {
   }
 
   Future<void> _save() async {
-    await _prefs.setString(_key, jsonEncode([for (final h in _hubs) h.toJson()]));
+    await _prefs.setString(
+      _key,
+      jsonEncode([for (final h in _hubs) h.toJson()]),
+    );
     notifyListeners();
   }
 }

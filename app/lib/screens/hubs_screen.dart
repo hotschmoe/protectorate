@@ -5,7 +5,11 @@ import '../hubs/hub_profile.dart';
 import 'hub_shell.dart';
 
 class HubsScreen extends StatelessWidget {
-  const HubsScreen({super.key, required this.store, required this.clientFactory});
+  const HubsScreen({
+    super.key,
+    required this.store,
+    required this.clientFactory,
+  });
 
   final HubStore store;
   final HubClient Function(HubProfile) clientFactory;
@@ -42,9 +46,12 @@ class HubsScreen extends StatelessWidget {
                   leading: const Icon(Icons.hub),
                   title: Text(hub.name),
                   subtitle: Text(hub.baseUrl),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => HubShell(hub: hub, clientFactory: clientFactory),
-                  )),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          HubShell(hub: hub, clientFactory: clientFactory),
+                    ),
+                  ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -100,12 +107,16 @@ class _HubDialogState extends State<_HubDialog> {
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
-    Navigator.of(context).pop(HubProfile(
-      id: widget.existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-      name: _name.text.trim(),
-      baseUrl: url,
-      token: _token.text.trim(),
-    ));
+    Navigator.of(context).pop(
+      HubProfile(
+        id:
+            widget.existing?.id ??
+            DateTime.now().microsecondsSinceEpoch.toString(),
+        name: _name.text.trim(),
+        baseUrl: url,
+        token: _token.text.trim(),
+      ),
+    );
   }
 
   @override

@@ -5,22 +5,31 @@ import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm/xterm.dart';
 
+import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../terminal/compose_box.dart';
 import '../terminal/extra_keys.dart';
 import '../terminal/terminal_protocol.dart';
+import 'history_screen.dart';
 
 class TerminalScreen extends StatefulWidget {
-  const TerminalScreen({super.key, required this.hub, required this.session});
+  const TerminalScreen({
+    super.key,
+    required this.hub,
+    required this.client,
+    required this.session,
+  });
 
   final HubProfile hub;
+  final HubClient client;
   final String session;
 
   @override
   State<TerminalScreen> createState() => _TerminalScreenState();
 }
 
-class _TerminalScreenState extends State<TerminalScreen> {
+class _TerminalScreenState extends State<TerminalScreen>
+    with WidgetsBindingObserver {
   final _terminal = Terminal(maxLines: 10000);
   final _modifiers = ModifierState();
   final _decoder = const Utf8Decoder(allowMalformed: true);
@@ -29,6 +38,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   String _status = 'connecting';
   int _cols = 80;
   int _rows = 24;
+  bool _focused = true;
 
   @override
   void initState() {
@@ -37,9 +47,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _terminal.onResize = (cols, rows, _, _) {
       _cols = cols;
       _rows = rows;
-      _sendFrame(encodeResize(cols, rows));
+      if (_focused) _sendFrame(encodeResize(cols, rows));
     };
+    WidgetsBinding.instance.addObserver(this);
     _connect();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final focused = state == AppLifecycleState.resumed;
+    if (focused && !_focused) _sendFrame(encodeResize(_cols, _rows));
+    _focused = focused;
   }
 
   void _connect() {
@@ -49,13 +67,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
       protocols: terminalSubprotocols(widget.hub.token),
     );
     _channel = channel;
-    channel.ready.then((_) {
-      if (!mounted) return;
-      setState(() => _status = 'connected');
-      _sendFrame(encodeResize(_cols, _rows));
-    }).catchError((Object e) {
-      if (mounted) setState(() => _status = 'failed: $e');
-    });
+    channel.ready
+        .then((_) {
+          if (!mounted) return;
+          setState(() => _status = 'connected');
+          _sendFrame(encodeResize(_cols, _rows));
+        })
+        .catchError((Object e) {
+          if (mounted) setState(() => _status = 'failed: $e');
+        });
     _sub = channel.stream.listen(
       (frame) {
         final data = decodeData(frame);
@@ -83,6 +103,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _channel?.sink.close();
     _modifiers.dispose();
@@ -95,6 +116,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
       appBar: AppBar(
         title: Text(widget.session),
         actions: [
+          IconButton(
+            tooltip: 'History',
+            icon: const Icon(Icons.history),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => HistoryScreen(
+                  client: widget.client,
+                  session: widget.session,
+                ),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Center(child: Text(_status)),
@@ -105,10 +138,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         child: Column(
           children: [
             Expanded(child: TerminalView(_terminal, autofocus: true)),
-            ExtraKeysBar(
-              modifiers: _modifiers,
-              onInput: _send,
-            ),
+            ExtraKeysBar(modifiers: _modifiers, onInput: _send),
             ComposeBox(onSend: _sendCompose),
           ],
         ),

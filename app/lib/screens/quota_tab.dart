@@ -26,7 +26,12 @@ String formatCountdown(Duration d) {
 }
 
 class QuotaTab extends StatefulWidget {
-  const QuotaTab({super.key, required this.client, required this.feed, this.now});
+  const QuotaTab({
+    super.key,
+    required this.client,
+    required this.feed,
+    this.now,
+  });
 
   final HubClient client;
   final EventFeed feed;
@@ -59,7 +64,9 @@ class _QuotaTabState extends State<QuotaTab> {
   Future<void> _load(bool refresh) async {
     setState(() => _loading = true);
     try {
-      final r = await widget.client.quota.getQuota(GetQuotaRequest(refresh: refresh));
+      final r = await widget.client.quota.getQuota(
+        GetQuotaRequest(refresh: refresh),
+      );
       if (!mounted) return;
       setState(() {
         for (final q in r.quotas) {
@@ -119,7 +126,8 @@ class ProviderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final unknown = quota.freshness != Freshness.FRESHNESS_FRESH &&
+    final unknown =
+        quota.freshness != Freshness.FRESHNESS_FRESH &&
         quota.freshness != Freshness.FRESHNESS_STALE;
     final stale = quota.freshness == Freshness.FRESHNESS_STALE;
     return Card(
@@ -133,7 +141,9 @@ class ProviderCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    quota.plan.isEmpty ? quota.provider : '${quota.provider} (${quota.plan})',
+                    quota.plan.isEmpty
+                        ? quota.provider
+                        : '${quota.provider} (${quota.plan})',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -143,8 +153,8 @@ class ProviderCard extends StatelessWidget {
                   backgroundColor: unknown
                       ? scheme.errorContainer
                       : stale
-                          ? scheme.tertiaryContainer
-                          : scheme.secondaryContainer,
+                      ? scheme.tertiaryContainer
+                      : scheme.secondaryContainer,
                 ),
               ],
             ),
@@ -157,8 +167,10 @@ class ProviderCard extends StatelessWidget {
                 const Text('Stale data; may not reflect current usage.'),
               for (final w in quota.windows) _window(context, w, stale),
               for (final r in quota.resets)
-                Text('${r.kind}: ${r.count} reset credit(s)'
-                    '${r.hasExpiresAt() ? ', expires in ${formatCountdown(r.expiresAt.toDateTime().difference(now))}' : ''}'),
+                Text(
+                  '${r.kind}: ${r.count} reset credit(s)'
+                  '${r.hasExpiresAt() ? ', expires in ${formatCountdown(r.expiresAt.toDateTime().difference(now))}' : ''}',
+                ),
             ],
           ],
         ),
@@ -172,7 +184,9 @@ class ProviderCard extends StatelessWidget {
         return 'fresh';
       case Freshness.FRESHNESS_STALE:
         final secs = quota.age.seconds.toInt();
-        return secs == 0 ? 'stale' : 'stale ${formatCountdown(Duration(seconds: secs))}';
+        return secs == 0
+            ? 'stale'
+            : 'stale ${formatCountdown(Duration(seconds: secs))}';
       default:
         return 'unknown';
     }
@@ -195,8 +209,14 @@ class ProviderCard extends StatelessWidget {
           children: [
             Text('${w.name}: ${w.usedPercent.toStringAsFixed(0)}% used'),
             const SizedBox(height: 4),
-            LinearProgressIndicator(key: ValueKey('bar-${w.name}'), value: used),
-            Text('$resets$projected', style: Theme.of(context).textTheme.bodySmall),
+            LinearProgressIndicator(
+              key: ValueKey('bar-${w.name}'),
+              value: used,
+            ),
+            Text(
+              '$resets$projected',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
       ),

@@ -76,9 +76,14 @@ class _OverviewTabState extends State<OverviewTab> {
                     dense: true,
                     title: Text(e.kind),
                     subtitle: Text(e.subject),
-                    trailing: Text(e.hasTime()
-                        ? e.time.toDateTime().toLocal().toString().substring(11, 19)
-                        : ''),
+                    trailing: Text(
+                      e.hasTime()
+                          ? e.time.toDateTime().toLocal().toString().substring(
+                              11,
+                              19,
+                            )
+                          : '',
+                    ),
                   );
                 },
               );

@@ -31,7 +31,10 @@ class ProtectorateApp extends StatelessWidget {
         brightness: Brightness.dark,
         useMaterial3: true,
       ),
-      home: HubsScreen(store: store, clientFactory: clientFactory ?? HubClient.new),
+      home: HubsScreen(
+        store: store,
+        clientFactory: clientFactory ?? HubClient.new,
+      ),
     );
   }
 }

@@ -4,10 +4,12 @@ import 'dart:typed_data';
 const msgData = 0x30;
 const msgResize = 0x31;
 
-const terminalSubprotocol = 'protectorate.terminal.v1';
+const terminalSubprotocol = 'protectorate.v1';
 
-List<String> terminalSubprotocols(String token) =>
-    [terminalSubprotocol, if (token.isNotEmpty) 'token.$token'];
+List<String> terminalSubprotocols(String token) => [
+  terminalSubprotocol,
+  if (token.isNotEmpty) 'token.$token',
+];
 
 Uint8List encodeData(String text) {
   final body = utf8.encode(text);

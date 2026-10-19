@@ -47,11 +47,11 @@ class _HubShellState extends State<HubShell> {
   }
 
   Widget _body() => switch (_index) {
-        0 => OverviewTab(client: _client, feed: _feed),
-        1 => QuotaTab(client: _client, feed: _feed),
-        2 => SessionsTab(hub: widget.hub),
-        _ => _Placeholder(title: _destinations[_index].label),
-      };
+    0 => OverviewTab(client: _client, feed: _feed),
+    1 => QuotaTab(client: _client, feed: _feed),
+    2 => SessionsTab(hub: widget.hub, client: _client),
+    _ => _Placeholder(title: _destinations[_index].label),
+  };
 
   @override
   Widget build(BuildContext context) {

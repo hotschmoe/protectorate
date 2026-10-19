@@ -10,6 +10,8 @@ import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/quota.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/quota.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/session.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/session.pb.dart';
 import 'package:protectorate/screens/quota_tab.dart';
 import 'package:protectorate/hubs/event_feed.dart';
 import 'package:protectorate/hubs/hub_client.dart';
@@ -30,16 +32,35 @@ HubClient _fakeClient(HubProfile p, {void Function(String?)? onAuth}) {
   final transport = FakeTransportBuilder()
       .unary(HubService.getStatus, (GetStatusRequest r, ctx) {
         onAuth?.call(ctx.requestHeaders.get('authorization')?.first);
-        return GetStatusResponse(hostname: 'box', os: 'linux', arch: 'arm64', version: 'v1');
+        return GetStatusResponse(
+          hostname: 'box',
+          os: 'linux',
+          arch: 'arm64',
+          version: 'v1',
+        );
       })
-      .unary(QuotaService.getQuota, (GetQuotaRequest r, ctx) => GetQuotaResponse(quotas: [
+      .unary(
+        QuotaService.getQuota,
+        (GetQuotaRequest r, ctx) => GetQuotaResponse(
+          quotas: [
             ProviderQuota(
               provider: 'claude',
               freshness: Freshness.FRESHNESS_FRESH,
               windows: [QuotaWindow(name: '5h', usedPercent: 40)],
             ),
-            ProviderQuota(provider: 'gemini', freshness: Freshness.FRESHNESS_UNKNOWN),
-          ]))
+            ProviderQuota(
+              provider: 'gemini',
+              freshness: Freshness.FRESHNESS_UNKNOWN,
+            ),
+          ],
+        ),
+      )
+      .unary(
+        SessionService.listSessions,
+        (ListSessionsRequest r, ctx) => ListSessionsResponse(
+          sessions: [Session(name: 'work', cwd: '/src')],
+        ),
+      )
       .server(EventService.subscribe, (SubscribeRequest r, ctx) async* {
         yield Event(kind: 'session.started', subject: 'alice');
         await Completer<void>().future;
@@ -55,8 +76,16 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       final store = HubStore(prefs);
       await store.upsert(_hub);
-      await store.upsert(const HubProfile(id: '2', name: 'office', baseUrl: 'http://10.0.0.2:7470'));
-      await store.upsert(const HubProfile(id: '1', name: 'home2', baseUrl: 'http://h'));
+      await store.upsert(
+        const HubProfile(
+          id: '2',
+          name: 'office',
+          baseUrl: 'http://10.0.0.2:7470',
+        ),
+      );
+      await store.upsert(
+        const HubProfile(id: '1', name: 'home2', baseUrl: 'http://h'),
+      );
 
       final reloaded = HubStore(prefs);
       expect(reloaded.hubs.map((h) => h.name), ['home2', 'office']);
@@ -66,7 +95,10 @@ void main() {
     });
 
     test('terminal uri maps scheme and path', () {
-      expect(_hub.terminalUri('alice').toString(), 'wss://hub.example:7470/ws/terminal/alice');
+      expect(
+        _hub.terminalUri('alice').toString(),
+        'wss://hub.example:7470/ws/terminal/alice',
+      );
     });
 
     test('url validation', () {
@@ -79,11 +111,16 @@ void main() {
     Future<void> openHub(WidgetTester tester) async {
       SharedPreferences.setMockInitialValues({});
       final store = HubStore(await SharedPreferences.getInstance());
-      await tester.pumpWidget(ProtectorateApp(store: store, clientFactory: _fakeClient));
+      await tester.pumpWidget(
+        ProtectorateApp(store: store, clientFactory: _fakeClient),
+      );
       await tester.tap(find.byKey(const ValueKey('add-hub')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('hub-name')), 'home');
-      await tester.enterText(find.byKey(const ValueKey('hub-url')), 'http://hub:7470');
+      await tester.enterText(
+        find.byKey(const ValueKey('hub-url')),
+        'http://hub:7470',
+      );
       await tester.tap(find.byKey(const ValueKey('hub-save')));
       await tester.pumpAndSettle();
       expect(store.hubs.single.name, 'home');
@@ -100,6 +137,9 @@ void main() {
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.text('Events: live'), findsOneWidget);
       expect(find.text('box (linux/arm64)'), findsOneWidget);
+      await tester.tap(find.text('Sessions'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('session-work')), findsOneWidget);
       await tester.tap(find.text('Quota'));
       await tester.pumpAndSettle();
       expect(find.text('5h: 40% used'), findsOneWidget);
@@ -130,13 +170,10 @@ void main() {
   group('event feed', () {
     test('reconnects with backoff after the stream ends', () async {
       var opens = 0;
-      final feed = EventFeed(
-        () {
-          opens++;
-          return Stream<Event>.fromIterable([Event(kind: 'k$opens')]);
-        },
-        initialDelay: const Duration(milliseconds: 10),
-      )..start();
+      final feed = EventFeed(() {
+        opens++;
+        return Stream<Event>.fromIterable([Event(kind: 'k$opens')]);
+      }, initialDelay: const Duration(milliseconds: 10))..start();
       await Future<void>.delayed(const Duration(milliseconds: 200));
       feed.dispose();
       expect(opens, greaterThan(1));
@@ -148,7 +185,11 @@ void main() {
   });
 
   test('quota event payload decodes', () {
-    final q = ProviderQuota(provider: 'claude', plan: 'max', freshness: Freshness.FRESHNESS_STALE);
+    final q = ProviderQuota(
+      provider: 'claude',
+      plan: 'max',
+      freshness: Freshness.FRESHNESS_STALE,
+    );
     final e = Event(kind: 'quota.updated', subject: 'claude');
     e.payload = Struct()..mergeFromProto3Json(q.toProto3Json());
     final back = quotaFromEvent(e)!;
@@ -177,9 +218,13 @@ void main() {
     testWidgets('bar buttons emit keys; Ctrl button is sticky', (tester) async {
       final m = ModifierState();
       final sent = <String>[];
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: ExtraKeysBar(modifiers: m, onInput: sent.add)),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ExtraKeysBar(modifiers: m, onInput: sent.add),
+          ),
+        ),
+      );
       await tester.tap(find.byKey(const ValueKey('key-Esc')));
       await tester.tap(find.byKey(const ValueKey('key-|')));
       await tester.tap(find.byKey(const ValueKey('key-Ctrl')));
@@ -196,6 +241,6 @@ void main() {
     expect(String.fromCharCodes(resize.sublist(1)), '{"cols":80,"rows":24}');
     expect(decodeData([0x30, 0x41])!.toList(), [0x41]);
     expect(decodeData([0x31, 0x41]), isNull);
-    expect(terminalSubprotocols('t'), ['protectorate.terminal.v1', 'token.t']);
+    expect(terminalSubprotocols('t'), ['protectorate.v1', 'token.t']);
   });
 }

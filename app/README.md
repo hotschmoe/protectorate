@@ -27,7 +27,7 @@ Do not pass the `grpc` option to `protoc-gen-dart`.
 ## Hub auth
 
 - RPC: `Authorization: Bearer <token>` (web needs the hub to answer CORS preflight allowing that header).
-- Terminal WebSocket `ws(s)://<hub>/ws/terminal/<name>`: offered `Sec-WebSocket-Protocol` entries are `protectorate.terminal.v1` and `token.<value>` (browsers cannot set headers). The server must echo `protectorate.terminal.v1`.
+- Terminal WebSocket `ws(s)://<hub>/ws/terminal/<name>`: offered `Sec-WebSocket-Protocol` entries are `protectorate.v1` and `token.<value>` (browsers cannot set headers). The server selects `protectorate.terminal.v1`.
 - Frames: binary; `0x30` + bytes for data, `0x31` + JSON `{"cols":N,"rows":M}` for resize.
 
 ## Known limitations
