@@ -423,3 +423,33 @@ func TestOwnersOpenDriver(t *testing.T) {
 		t.Fatal("expected open failure")
 	}
 }
+
+func TestCommandWrapsHarness(t *testing.T) {
+	var gotBin string
+	var gotArgs []string
+	s, err := Open(ctx5(t), Claude, t.TempDir(), "sess-9", Options{
+		Env: fakeEnv("claude"), StopTimeout: time.Second,
+		Command: func(bin string, args []string) ([]string, error) {
+			gotBin, gotArgs = bin, args
+			return append([]string{os.Args[0]}, args...), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if gotBin != "claude" || !strings.Contains(strings.Join(gotArgs, " "), "--resume sess-9") {
+		t.Fatalf("command saw bin=%q args=%v", gotBin, gotArgs)
+	}
+	if err := s.Send(ctx5(t), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if txt := joinText(until(t, s, KindSettled)); !strings.Contains(txt, "id=sess-9") {
+		t.Fatalf("wrapped harness did not run: %q", txt)
+	}
+	if _, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{
+		Command: func(string, []string) ([]string, error) { return nil, errors.New("no sandbox") },
+	}); err == nil || !strings.Contains(err.Error(), "no sandbox") {
+		t.Fatalf("command error not surfaced: %v", err)
+	}
+}

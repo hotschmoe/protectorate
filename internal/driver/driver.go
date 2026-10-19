@@ -136,6 +136,14 @@ type Options struct {
 	StopTimeout time.Duration
 	// StderrLimit bounds captured stderr bytes. Default 8 KiB.
 	StderrLimit int
+	// Command, when set, turns the harness executable and arguments the
+	// driver would run into the argv to start instead, so the sleeve layer can
+	// put the harness in its sandbox. stdio stays connected to the harness.
+	Command func(bin string, args []string) ([]string, error)
+	// Sandboxed says the caller isolates the harness, so the driver runs it
+	// in its own autonomous permission mode and raises native
+	// auto-compaction, using only the harness's official flags and commands.
+	Sandboxed bool
 
 	release func()
 }
