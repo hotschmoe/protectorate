@@ -29,6 +29,8 @@ import 'package:protectorate/gen/protectorate/v1/message.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/lease.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/lease.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/quota.connect.spec.dart';
@@ -961,6 +963,19 @@ Transport _hubTransport(StreamController<Event> events) {
         (ThreadRequest r, ctx) => ThreadResponse(messages: _schemaThread),
       )
       .unary(MessageService.inbox, (InboxRequest r, ctx) => InboxResponse())
+      .unary(
+        LeaseService.listLeases,
+        (ListLeasesRequest r, ctx) => ListLeasesResponse(
+          leases: [
+            Lease(
+              resource: 'forge:gpu0',
+              node: 'forge',
+              gpuIndex: 0,
+              holder: 'scratch',
+            ),
+          ],
+        ),
+      )
       .unary(
         AuditService.listAuditEntries,
         (ListAuditEntriesRequest r, ctx) => ListAuditEntriesResponse(

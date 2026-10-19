@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
@@ -46,6 +47,7 @@ class NodeDetailScreen extends StatefulWidget {
 
 class _NodeDetailScreenState extends State<NodeDetailScreen> {
   NodeStatus? _status;
+  List<Lease> _leases = const [];
   DateTime _receivedAt = DateTime.now();
   Object? _error;
   StreamSubscription<dynamic>? _sub;
@@ -62,6 +64,8 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
     _sub = widget.feed.incoming.listen((e) {
       if (nodeEventKinds.contains(e.kind) && e.subject == widget.name) {
         _refresh();
+      } else if (e.kind.startsWith('lease.')) {
+        _loadLeases();
       }
     });
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
@@ -79,7 +83,17 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
     super.dispose();
   }
 
+  Future<void> _loadLeases() async {
+    try {
+      final r = await widget.client.leases.listLeases(ListLeasesRequest());
+      if (mounted) setState(() => _leases = r.leases);
+    } on Object {
+      return;
+    }
+  }
+
   Future<void> _refresh() async {
+    unawaited(_loadLeases());
     try {
       final s = await widget.client.node.getNode(
         GetNodeRequest(name: widget.name),
@@ -135,6 +149,7 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
               cpuHistory: _history.cpu(widget.name),
               memHistory: _history.mem(widget.name),
               versions: widget.versions,
+              gpuHolders: gpuHolders(_leases, widget.name),
               onUpdate: s.node.local
                   ? null
                   : () => showNodeUpdate(
@@ -295,6 +310,7 @@ class NodeDetail extends StatelessWidget {
     this.onReissue,
     this.onUpdate,
     this.onOpenDesk,
+    this.gpuHolders = const {},
     this.versions = const Versions(),
     this.cpuHistory = const [],
     this.memHistory = const [],
@@ -305,6 +321,7 @@ class NodeDetail extends StatelessWidget {
   final VoidCallback? onReissue;
   final VoidCallback? onUpdate;
   final VoidCallback? onOpenDesk;
+  final Map<int, String> gpuHolders;
   final Versions versions;
   final NodeStatus status;
   final Duration age;
@@ -461,6 +478,7 @@ class NodeDetail extends StatelessWidget {
                         gpu: g,
                         dim: dim,
                         detail: true,
+                        holder: gpuHolders[g.index] ?? '',
                       ),
                   ],
                 ),
