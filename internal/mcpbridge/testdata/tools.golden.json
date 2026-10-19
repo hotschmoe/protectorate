@@ -131,11 +131,16 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "CancelJob stops a job and its whole process tree. Cancelling a finished job is a no-op that returns its record.",
+    "description": "CancelJob stops a job and its whole process tree, named by id or by the SubmitJob request_id. Cancelling a finished job is a no-op that returns its record.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "id": {
+          "description": "id names the job. Set exactly one of id and request_id.",
+          "type": "string"
+        },
+        "requestId": {
+          "description": "request_id names the job by the SubmitJob key, for a caller that never saw the response. A submit still in flight is awaited and then canceled. When no submit with the key has reached the hub, the key is remembered as canceled for 1h so a late submit is refused (aborted), and the call fails with not_found.",
           "type": "string"
         }
       },
@@ -223,6 +228,10 @@
             "type": "string"
           },
           "type": "object"
+        },
+        "requestId": {
+          "description": "request_id is a client-chosen idempotency key, 8 to 128 characters of [A-Za-z0-9._-]. The hub remembers it for 1h after the first submit with it: a repeat returns the same job instead of creating another, and waits if the first call is still in flight. Pick it with enough entropy to be unique among callers (a UUID or 16 random bytes in hex). With it, a caller that lost the response can still find or cancel the job (CancelJob request_id). Empty means no deduplication.",
+          "type": "string"
         },
         "source": {
           "additionalProperties": false,
