@@ -97,7 +97,7 @@ func TestDependencyNotices(t *testing.T) {
 			t.Errorf("notice lacks %q:\n%s", want, body)
 		}
 	}
-	if last := body[strings.LastIndex(body, "\n")+1:]; !strings.HasPrefix(last, "Reply: protectorate msg send project:") || !strings.HasSuffix(last, " --thread "+box[0].Thread+` "..."`) {
+	if last := body[strings.LastIndex(body, "\n")+1:]; !strings.HasPrefix(last, "Reply: protectorate msg send project:acme/lib --thread") || !strings.HasSuffix(last, " --thread "+box[0].Thread+` "..."`) {
 		t.Errorf("notice does not end with a reply line: %q", last)
 	}
 	if webBox, _ := c.mail.Inbox("webdev", false, true); len(webBox) != 0 {
