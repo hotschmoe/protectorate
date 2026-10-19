@@ -150,6 +150,20 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
 
 SSH stays as the bootstrap and break-glass path (`spikes/ssh-agentless/`).
 
+Verified end to end on 2026-10-19 with the real binaries:
+- `hub tailnet install/init` and `hub serve` (supervised Headscale with
+  embedded DERP on the LAN);
+- `node invite officewin`, then `node join` and `node serve` on Windows
+  AMD64 from a temp dir, with no installs and no firewall changes;
+- the hub's `node ls` and `node show` reported officewin's live CPU, memory and
+  NTFS/FAT32 disks over the tailnet;
+- `node revoke` removed it.
+
+Finding: on Windows, a process started over an SSH session **keeps running**
+after the session closes. A long-running `node serve` there should be a
+proper Windows service (or a scheduled task), and tests must stop it
+explicitly.
+
 - Every hub and node binary embeds `tailscale.com/tsnet`, a userspace
   WireGuard node. Joining needs no TUN device and no admin rights.
 - The hub runs **Headscale** (self-hosted, open-source coordination server) as
