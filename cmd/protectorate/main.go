@@ -168,6 +168,7 @@ func hubCmd() *cobra.Command {
 			defer audit.Close()
 			defer store.Flush()
 			h := hub.New(version, tok)
+			h.SelfURL = hub.LocalURL(l.Addr())
 			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
 			h.DeadRetention = deadRetention

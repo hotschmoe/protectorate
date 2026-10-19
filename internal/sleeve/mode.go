@@ -82,3 +82,11 @@ func (m *Manager) SetChat(name string, f func(*Chat)) (Info, error) {
 func (m *Manager) ChatLogPath(name string) string {
 	return filepath.Join(m.cfg.sleeveDir(name), "chat.jsonl")
 }
+
+// HomeDir is the host path of the sleeve's home directory, bound at UserHome
+// inside the sandbox. Files the hub leaves there are visible to the harness
+// but never land in the workspace.
+func (m *Manager) HomeDir(name string) string { return m.cfg.sleeveHome(name) }
+
+// UserHome is the path the sleeve's home has inside the sandbox.
+func (m *Manager) UserHome() string { return m.cfg.UserHome }

@@ -34,6 +34,9 @@ import (
 type Hub struct {
 	Version   string
 	Heartbeat time.Duration
+	// SelfURL is how sleeves on this machine reach the hub; it is exported to
+	// them as PROTECTORATE_HUB.
+	SelfURL string
 
 	authz   *auth.Authorizer
 	started time.Time

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -181,12 +182,46 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode),
 	}
+	// the orchestrator carries its own token, minted by `orchestrator spawn`
+	var identity auth.Token
+	var secret string
+	if m.Name != sleeve.OrchestratorName {
+		var err error
+		if identity, secret, err = h.issueIdentity(m.Name); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		r.Env = map[string]string{}
+		for k, v := range m.Env {
+			r.Env[k] = v
+		}
+		for k, v := range h.identityEnv() {
+			r.Env[k] = v
+		}
+	}
+	revokeNew := func() {
+		if identity.ID != "" {
+			if _, err := h.authz.Store().Revoke(identity.ID, time.Now()); err != nil {
+				log.Printf("sleeve %s: revoke unused token: %v", m.Name, err)
+			}
+		}
+	}
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
 	}
 	info, err := h.sleeves.Spawn(ctx, r)
 	if err != nil {
+		revokeNew()
 		return nil, sleeveErr(err)
+	}
+	if identity.ID != "" {
+		if err := h.installIdentity(info.Name, secret); err != nil {
+			revokeNew()
+			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
+				log.Printf("sleeve %s: kill after failed token install: %v", info.Name, kerr)
+			}
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		h.dropIdentity(info.Name, identity.ID)
 	}
 	if info.Mode == sleeve.ModeChat {
 		if err := h.chat.start(ctx, info.Name); err != nil {
@@ -194,6 +229,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
 				log.Printf("sleeve %s: kill after failed chat start: %v", info.Name, kerr)
 			}
+			h.dropIdentity(info.Name, "")
 			return nil, err
 		}
 		info, _ = h.sleeves.Get(info.Name)
@@ -223,6 +259,7 @@ func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeve
 	if err := h.sleeves.Kill(ctx, req.Msg.Name); err != nil {
 		return nil, sleeveErr(err)
 	}
+	h.dropIdentity(req.Msg.Name, "")
 	h.scanSessions(ctx)
 	return connect.NewResponse(&pb.KillSleeveResponse{}), nil
 }

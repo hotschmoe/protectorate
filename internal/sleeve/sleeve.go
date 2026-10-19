@@ -105,7 +105,9 @@ type Config struct {
 // workspace and holds its token file.
 const (
 	OrchestratorName = "poe"
-	OrchestratorDir  = "orchestrator"
+	// OrchestratorTokenName names the token minted for the orchestrator.
+	OrchestratorTokenName = "orchestrator-poe"
+	OrchestratorDir       = "orchestrator"
 )
 
 // defaultToolDirs are mounted read-only when they exist, relative to $HOME.

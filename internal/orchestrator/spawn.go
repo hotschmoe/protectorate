@@ -19,7 +19,7 @@ import (
 
 const (
 	SleeveName = sleeve.OrchestratorName
-	TokenName  = "orchestrator-poe"
+	TokenName  = sleeve.OrchestratorTokenName
 	TokenFile  = ".protectorate-token"
 	DirName    = sleeve.OrchestratorDir
 
