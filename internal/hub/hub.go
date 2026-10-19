@@ -145,6 +145,7 @@ func (h *Hub) EnableJobs(home string, local *node.Jobs) error {
 	}
 	leases.chooser, leases.onGrant = h.leaseChooserFromJSON, h.leaseGranted
 	h.leases, h.jobs = leases, jobs
+	jobs.Recover()
 	return nil
 }
 

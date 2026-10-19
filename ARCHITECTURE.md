@@ -342,8 +342,7 @@ node) executes.
   key instead of the job id, so an interrupted CLI cancels a job whose id it
   never saw. Cancel by key awaits an in-flight submit and then cancels the
   job it created; a key the hub has not seen yet is recorded as canceled, so a
-  submit still on its way is refused (aborted). Keys are lost on a hub restart,
-  which also fails every running job.
+  submit still on its way is refused (aborted). Keys are lost on a hub restart.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
   unreachable, never tier `family` unless `allow_family`, matching os, arch,
   free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`
@@ -382,11 +381,25 @@ node) executes.
 - **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)
   and `--job-dir`. Timeout and cancel signal the process group (SIGTERM, then
   SIGKILL after 3s); on Windows the command runs in a job object that kills the
-  whole tree. A job also dies when the hub's stream closes. Log output is capped
-  at 64 MiB per job.
-- **Records:** `jobs/<id>/job.json` holds state, exit code, timings, node,
-  bytes sent and artifacts (env values are never stored). A hub restart marks
-  jobs that were active as failed.
+  whole tree. A job does not depend on the hub's stream: the node writes its
+  output to a file and keeps the result (and collected artifacts) for an hour
+  after the job ends, so a hub that disconnects or restarts attaches again
+  (`NodeAgentService.AttachJob` from an output offset, `ListJobs`). The
+  timeout still bounds an orphaned job. Log output is capped at 64 MiB per job.
+- **Records and restarts:** `jobs/<id>/job.json` holds state, exit code,
+  timings, node, bytes sent and artifacts (env values are never stored).
+  On start the hub asks each active job's node what it holds
+  (`ListJobs`); a job the node has is followed again from the end of the
+  `job.log` the hub already stored, and `WatchJob` watchers (the CLI resumes
+  by itself) keep following the same record. A job is marked failed as lost
+  only when a reachable node says it never had it, when the node left the
+  inventory, or when the node stays unreachable past the job's timeout plus
+  10 minutes. A lost connection with the hub still running is resumed the
+  same way, for up to 5 minutes without progress. A graceful hub stop leaves
+  remote jobs running and active in their records; jobs on the hub's own node
+  die with the process and are marked failed ("hub stopped"). Leases keep
+  absolute expiry times in `leases.yaml`, so a lease that ran out while the
+  hub was down is gone on the first read and its holder's renew fails.
 - Source paths are resolved on the hub and are not confined to a directory:
   the scopes that admit `SubmitJob` are shell access to every node.
 
