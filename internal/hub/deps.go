@@ -81,6 +81,7 @@ func (c *coordinator) announce(ctx context.Context, v directory.View, ws string,
 		if len(liveOwners(d, "")) > 0 {
 			_, err := c.send(hubName, sendArgs{
 				To: projectPrefix + d.ID, Body: body, Kind: mailbox.Notice, RequestID: depRequestID(v.ID, key, d.ID),
+				ReplyVia: projectPrefix + v.ID,
 			})
 			if err != nil {
 				log.Printf("coordination: notify %s of %s: %v", d.ID, key, err)

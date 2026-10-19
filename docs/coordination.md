@@ -96,7 +96,11 @@ protectorate msg thread t7
   Reply: protectorate msg reply m42 "..."
   Ack: protectorate msg ack m42
   ```
-  Hub notices omit the Reply line.
+  Hub notices cannot be replied to, so they end with their own reply line in
+  the body: `Reply: protectorate msg send project:<upstream> --thread <id>
+  "..."` for a dependency notice, `... msg send <recipient> --thread <id>` for
+  an escalation, and the `lease renew` / `lease release` commands for a lease
+  grant.
 - A recipient in **terminal mode**, and the owner, get no injection; they read
   `msg inbox`.
 - A **project address** resolves to the sleeves working on the project now

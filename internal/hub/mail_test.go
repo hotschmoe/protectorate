@@ -426,6 +426,9 @@ func TestMailEscalation(t *testing.T) {
 				if len(box) != 1 || box[0].From != "hub" || box[0].Kind != mailbox.Notice || box[0].Thread != sent.Message.ThreadId || !strings.Contains(box[0].Body, id) {
 					t.Fatalf("poe's inbox = %+v", box)
 				}
+				if want := "\nReply: protectorate msg send " + r.name + " --thread " + sent.Message.ThreadId + ` "..."`; !strings.HasSuffix(box[0].Body, want) {
+					t.Fatalf("escalation does not end with a reply line:\n%s", box[0].Body)
+				}
 			} else if n := len(r.h.coord.mail.Thread(sent.Message.ThreadId)); n != 1 {
 				t.Fatalf("a notice was sent to an orchestrator that is not running: %d messages", n)
 			}
@@ -543,7 +546,7 @@ func TestLeaseGrantSendsNotice(t *testing.T) {
 	if len(granted) != 1 || granted[0].Holder != r.name {
 		t.Fatalf("leases = %v", granted)
 	}
-	for _, want := range []string{"[notice m1 from hub", "gpubox", "protectorate lease renew " + granted[0].Id, "45m0s"} {
+	for _, want := range []string{"[notice m1 from hub", "gpubox", "protectorate lease renew " + granted[0].Id, "45m0s", "\n\nReply: claim it"} {
 		if !strings.Contains(us[0].text, want) {
 			t.Errorf("notice lacks %q:\n%s", want, us[0].text)
 		}
