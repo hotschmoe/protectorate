@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -202,5 +203,39 @@ func TestToken(t *testing.T) {
 				t.Fatalf("%s mode %v err %v, want %v", path, fi.Mode().Perm(), err, want)
 			}
 		}
+	}
+}
+
+func TestWebDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>app</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := New("test", testToken)
+	h.WebDir = dir
+	srv := httptest.NewServer(h.Handler())
+	t.Cleanup(srv.Close)
+
+	tests := []struct {
+		name, method, path string
+		want               int
+	}{
+		{"index", http.MethodGet, "/", http.StatusOK},
+		{"missing file", http.MethodGet, "/nope.js", http.StatusNotFound},
+		{"api still authenticated", http.MethodPost, "/protectorate.v1.HubService/GetStatus", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(tt.method, srv.URL+tt.path, strings.NewReader("{}"))
+			req.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != tt.want {
+				t.Fatalf("status = %d, want %d", res.StatusCode, tt.want)
+			}
+		})
 	}
 }

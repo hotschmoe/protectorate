@@ -49,6 +49,10 @@ type Hub struct {
 	seeded bool
 
 	backlog *backlog.Store
+
+	// WebDir, when set, serves a built web client (app/build/web) from the
+	// hub's own origin so browsers need no CORS. The client still authenticates.
+	WebDir string
 }
 
 func New(version, token string) *Hub {
@@ -169,6 +173,9 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
+	if h.WebDir != "" {
+		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
+	}
 	return mux
 }
 

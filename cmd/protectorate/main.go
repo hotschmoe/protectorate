@@ -89,7 +89,7 @@ func envOr(key, def string) string {
 
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
-	var listen, tmuxSocket string
+	var listen, tmuxSocket, webDir string
 	var quotaInterval time.Duration
 	var localURLs []string
 	serve := &cobra.Command{
@@ -114,6 +114,7 @@ func hubCmd() *cobra.Command {
 			}
 			h := hub.New(version, tok)
 			h.Sessions = session.New(tmuxSocket)
+			h.WebDir = webDir
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
 			return h.Serve(ctx, l)
 		},
@@ -123,6 +124,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
+	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")
 	c.AddCommand(serve)
 	return c
 }
