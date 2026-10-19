@@ -116,9 +116,12 @@ func Tail(dir string, n int) ([]Entry, error) {
 		return nil, err
 	}
 	sort.Strings(files)
+	if n <= 0 {
+		return nil, nil
+	}
 	var out []Entry
 	for i := len(files) - 1; i >= 0 && len(out) < n; i-- {
-		es, err := readEntries(files[i])
+		es, err := readEntries(files[i], n)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +133,8 @@ func Tail(dir string, n int) ([]Entry, error) {
 	return out, nil
 }
 
-func readEntries(path string) ([]Entry, error) {
+// readEntries returns the last n entries of path, holding at most 2n at a time.
+func readEntries(path string, n int) ([]Entry, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -145,6 +149,12 @@ func readEntries(path string) ([]Entry, error) {
 			continue
 		}
 		out = append(out, e)
+		if len(out) >= 2*n {
+			out = append(out[:0], out[len(out)-n:]...)
+		}
+	}
+	if len(out) > n {
+		out = append(out[:0], out[len(out)-n:]...)
 	}
 	return out, sc.Err()
 }
