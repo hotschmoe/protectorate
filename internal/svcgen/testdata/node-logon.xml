@@ -13,7 +13,7 @@
     <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author"><Exec>
-    <Command>/usr/local/bin/protectorate</Command>
-    <Arguments>node serve --home /home/ops/.protectorate --watch /var/cache/build --hide-console</Arguments>
+    <Command>%SystemRoot%\System32\conhost.exe</Command>
+    <Arguments>--headless /usr/local/bin/protectorate node serve --home /home/ops/.protectorate --watch /var/cache/build</Arguments>
   </Exec></Actions>
 </Task>

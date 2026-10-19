@@ -192,7 +192,7 @@ func nodeRmCmd(o *opts) *cobra.Command {
 
 func nodeServeCmd() *cobra.Command {
 	var listen, tokenFile, jobDir, fileRoot, homeDir string
-	var fileUnconfined, hideConsole bool
+	var fileUnconfined bool
 	var watch []string
 	var slow time.Duration
 	var jobSlots int
@@ -201,9 +201,6 @@ func nodeServeCmd() *cobra.Command {
 		Short: "Run the node agent",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
-			if hideConsole {
-				hideOwnConsole()
-			}
 			if homeDir != "" {
 				if err := os.Setenv("PROTECTORATE_HOME", homeDir); err != nil {
 					return fmt.Errorf("set home: %w", err)
@@ -307,7 +304,6 @@ func nodeServeCmd() *cobra.Command {
 	}
 	f := c.Flags()
 	f.StringVar(&homeDir, "home", "", "PROTECTORATE_HOME for this agent (default: env, then ~/.protectorate)")
-	f.BoolVar(&hideConsole, "hide-console", false, "hide this process's own console window (Windows; set by the logon task)")
 	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
 	f.StringVar(&tokenFile, "node-token-file", "", "file holding the bearer token the hub must present when not enrolled in a tailnet (or the token itself in env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")

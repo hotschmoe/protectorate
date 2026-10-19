@@ -13,7 +13,7 @@
     <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author"><Exec>
-    <Command>C:\Program Files\protectorate\protectorate.exe</Command>
-    <Arguments>node serve --home C:\ProgramData\protectorate --watch &#34;D:\build cache&#34; --hide-console</Arguments>
+    <Command>%SystemRoot%\System32\conhost.exe</Command>
+    <Arguments>--headless &#34;C:\Program Files\protectorate\protectorate.exe&#34; node serve --home C:\ProgramData\protectorate --watch &#34;D:\build cache&#34;</Arguments>
   </Exec></Actions>
 </Task>

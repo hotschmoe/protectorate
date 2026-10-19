@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ func (s *guardDesk) Ready() error { return s.ready }
 func (s *guardDesk) Screenshot() (*image.RGBA, error) {
 	return image.NewRGBA(image.Rect(0, 0, 1, 1)), nil
 }
+func (s *guardDesk) Foreground() (desk.Foreground, error)    { return desk.Foreground{}, nil }
 func (s *guardDesk) Windows() ([]desk.Window, error)         { return nil, nil }
 func (s *guardDesk) Click(int, int, desk.Button, bool) error { return nil }
 func (s *guardDesk) Move(int, int) error                     { return nil }
@@ -275,5 +277,12 @@ func TestGuardPolicyPersistence(t *testing.T) {
 	}
 	if _, err := NewDeskGuard(&guardDesk{}, home); err == nil {
 		t.Error("corrupt policy file accepted")
+	}
+}
+
+func TestBlockedInputIsFailedPrecondition(t *testing.T) {
+	err := deskErr(fmt.Errorf("%w: prompt", desk.ErrBlocked))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("code = %v", connect.CodeOf(err))
 	}
 }

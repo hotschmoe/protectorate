@@ -59,7 +59,7 @@ WhoIs `tag:hub`, or the node token); the hub never serves `NodeAgentService`.
 
 File transfer and desktop control are separate grants, none part of `read`:
 `node_put_file`, `node_get_file` (`node_put_*`, `node_get_*`) and `desk_*`
-(`desk_screenshot`, `desk_list_windows`, `desk_click`, `desk_move`,
+(`desk_screenshot`, `desk_list_windows`, `desk_foreground`, `desk_click`, `desk_move`,
 `desk_type`, `desk_key`, `desk_run`). File calls are confined to the node's
 file root unless the agent runs with `--file-unconfined`, which makes them as
 broad as a job; the mutating desk calls also need a lease on `desk:<node>`.

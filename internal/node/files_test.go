@@ -165,6 +165,7 @@ func (s *stubDesk) Screenshot() (*image.RGBA, error) {
 	s.calls++
 	return image.NewRGBA(image.Rect(0, 0, 2, 2)), nil
 }
+func (s *stubDesk) Foreground() (desk.Foreground, error)    { s.calls++; return desk.Foreground{}, nil }
 func (s *stubDesk) Windows() ([]desk.Window, error)         { s.calls++; return nil, nil }
 func (s *stubDesk) Click(int, int, desk.Button, bool) error { s.calls++; return nil }
 func (s *stubDesk) Move(int, int) error                     { s.calls++; return nil }

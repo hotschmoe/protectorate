@@ -437,6 +437,141 @@ func (x *ListWindowsResponse) GetWindows() []*DeskWindow {
 	return nil
 }
 
+type ForegroundRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Target        *DeskTarget            `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForegroundRequest) Reset() {
+	*x = ForegroundRequest{}
+	mi := &file_protectorate_v1_desk_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForegroundRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForegroundRequest) ProtoMessage() {}
+
+func (x *ForegroundRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_desk_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForegroundRequest.ProtoReflect.Descriptor instead.
+func (*ForegroundRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ForegroundRequest) GetTarget() *DeskTarget {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+type ForegroundResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// title is empty when no window has the foreground.
+	Title string `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
+	Pid   uint32 `protobuf:"varint,2,opt,name=pid,proto3" json:"pid,omitempty"`
+	// process is the executable's base name, empty when it cannot be read.
+	Process string `protobuf:"bytes,3,opt,name=process,proto3" json:"process,omitempty"`
+	// integrity is "untrusted", "low", "medium", "high", "system" or
+	// "protected", or "unreadable" when the process token cannot be opened
+	// (which only a higher-integrity process does to this agent).
+	Integrity string `protobuf:"bytes,4,opt,name=integrity,proto3" json:"integrity,omitempty"`
+	// agent_integrity is the integrity level of the node agent itself.
+	AgentIntegrity string `protobuf:"bytes,5,opt,name=agent_integrity,json=agentIntegrity,proto3" json:"agent_integrity,omitempty"`
+	// blocks is true when injected input would not reach this window.
+	Blocks        bool `protobuf:"varint,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForegroundResponse) Reset() {
+	*x = ForegroundResponse{}
+	mi := &file_protectorate_v1_desk_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForegroundResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForegroundResponse) ProtoMessage() {}
+
+func (x *ForegroundResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_desk_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForegroundResponse.ProtoReflect.Descriptor instead.
+func (*ForegroundResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ForegroundResponse) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ForegroundResponse) GetPid() uint32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *ForegroundResponse) GetProcess() string {
+	if x != nil {
+		return x.Process
+	}
+	return ""
+}
+
+func (x *ForegroundResponse) GetIntegrity() string {
+	if x != nil {
+		return x.Integrity
+	}
+	return ""
+}
+
+func (x *ForegroundResponse) GetAgentIntegrity() string {
+	if x != nil {
+		return x.AgentIntegrity
+	}
+	return ""
+}
+
+func (x *ForegroundResponse) GetBlocks() bool {
+	if x != nil {
+		return x.Blocks
+	}
+	return false
+}
+
 type ClickRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Target *DeskTarget            `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
@@ -451,7 +586,7 @@ type ClickRequest struct {
 
 func (x *ClickRequest) Reset() {
 	*x = ClickRequest{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[6]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +598,7 @@ func (x *ClickRequest) String() string {
 func (*ClickRequest) ProtoMessage() {}
 
 func (x *ClickRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[6]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,7 +611,7 @@ func (x *ClickRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClickRequest.ProtoReflect.Descriptor instead.
 func (*ClickRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{6}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ClickRequest) GetTarget() *DeskTarget {
@@ -525,7 +660,7 @@ type MoveRequest struct {
 
 func (x *MoveRequest) Reset() {
 	*x = MoveRequest{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[7]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -537,7 +672,7 @@ func (x *MoveRequest) String() string {
 func (*MoveRequest) ProtoMessage() {}
 
 func (x *MoveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[7]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -550,7 +685,7 @@ func (x *MoveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveRequest.ProtoReflect.Descriptor instead.
 func (*MoveRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{7}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *MoveRequest) GetTarget() *DeskTarget {
@@ -584,7 +719,7 @@ type TypeRequest struct {
 
 func (x *TypeRequest) Reset() {
 	*x = TypeRequest{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[8]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -596,7 +731,7 @@ func (x *TypeRequest) String() string {
 func (*TypeRequest) ProtoMessage() {}
 
 func (x *TypeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[8]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -609,7 +744,7 @@ func (x *TypeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypeRequest.ProtoReflect.Descriptor instead.
 func (*TypeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{8}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TypeRequest) GetTarget() *DeskTarget {
@@ -636,7 +771,7 @@ type KeyRequest struct {
 
 func (x *KeyRequest) Reset() {
 	*x = KeyRequest{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[9]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -648,7 +783,7 @@ func (x *KeyRequest) String() string {
 func (*KeyRequest) ProtoMessage() {}
 
 func (x *KeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[9]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +796,7 @@ func (x *KeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyRequest.ProtoReflect.Descriptor instead.
 func (*KeyRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{9}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *KeyRequest) GetTarget() *DeskTarget {
@@ -689,7 +824,7 @@ type RunRequest struct {
 
 func (x *RunRequest) Reset() {
 	*x = RunRequest{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[10]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -701,7 +836,7 @@ func (x *RunRequest) String() string {
 func (*RunRequest) ProtoMessage() {}
 
 func (x *RunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[10]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -714,7 +849,7 @@ func (x *RunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRequest.ProtoReflect.Descriptor instead.
 func (*RunRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{10}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RunRequest) GetTarget() *DeskTarget {
@@ -746,7 +881,7 @@ type InputResponse struct {
 
 func (x *InputResponse) Reset() {
 	*x = InputResponse{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[11]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -758,7 +893,7 @@ func (x *InputResponse) String() string {
 func (*InputResponse) ProtoMessage() {}
 
 func (x *InputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[11]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -771,7 +906,7 @@ func (x *InputResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InputResponse.ProtoReflect.Descriptor instead.
 func (*InputResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{11}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{13}
 }
 
 type RunResponse struct {
@@ -783,7 +918,7 @@ type RunResponse struct {
 
 func (x *RunResponse) Reset() {
 	*x = RunResponse{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[12]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -795,7 +930,7 @@ func (x *RunResponse) String() string {
 func (*RunResponse) ProtoMessage() {}
 
 func (x *RunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[12]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -808,7 +943,7 @@ func (x *RunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunResponse.ProtoReflect.Descriptor instead.
 func (*RunResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{12}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RunResponse) GetPid() uint32 {
@@ -831,6 +966,7 @@ type DeskActionRequest struct {
 	//	*DeskActionRequest_Type
 	//	*DeskActionRequest_Key
 	//	*DeskActionRequest_Run
+	//	*DeskActionRequest_Foreground
 	Action        isDeskActionRequest_Action `protobuf_oneof:"action"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -838,7 +974,7 @@ type DeskActionRequest struct {
 
 func (x *DeskActionRequest) Reset() {
 	*x = DeskActionRequest{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[13]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -850,7 +986,7 @@ func (x *DeskActionRequest) String() string {
 func (*DeskActionRequest) ProtoMessage() {}
 
 func (x *DeskActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[13]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -863,7 +999,7 @@ func (x *DeskActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeskActionRequest.ProtoReflect.Descriptor instead.
 func (*DeskActionRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{13}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeskActionRequest) GetAction() isDeskActionRequest_Action {
@@ -936,6 +1072,15 @@ func (x *DeskActionRequest) GetRun() *RunRequest {
 	return nil
 }
 
+func (x *DeskActionRequest) GetForeground() *ForegroundRequest {
+	if x != nil {
+		if x, ok := x.Action.(*DeskActionRequest_Foreground); ok {
+			return x.Foreground
+		}
+	}
+	return nil
+}
+
 type isDeskActionRequest_Action interface {
 	isDeskActionRequest_Action()
 }
@@ -968,6 +1113,10 @@ type DeskActionRequest_Run struct {
 	Run *RunRequest `protobuf:"bytes,7,opt,name=run,proto3,oneof"`
 }
 
+type DeskActionRequest_Foreground struct {
+	Foreground *ForegroundRequest `protobuf:"bytes,8,opt,name=foreground,proto3,oneof"`
+}
+
 func (*DeskActionRequest_Screenshot) isDeskActionRequest_Action() {}
 
 func (*DeskActionRequest_ListWindows) isDeskActionRequest_Action() {}
@@ -982,6 +1131,8 @@ func (*DeskActionRequest_Key) isDeskActionRequest_Action() {}
 
 func (*DeskActionRequest_Run) isDeskActionRequest_Action() {}
 
+func (*DeskActionRequest_Foreground) isDeskActionRequest_Action() {}
+
 type DeskActionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Result:
@@ -990,6 +1141,7 @@ type DeskActionResponse struct {
 	//	*DeskActionResponse_ListWindows
 	//	*DeskActionResponse_Input
 	//	*DeskActionResponse_Run
+	//	*DeskActionResponse_Foreground
 	Result        isDeskActionResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -997,7 +1149,7 @@ type DeskActionResponse struct {
 
 func (x *DeskActionResponse) Reset() {
 	*x = DeskActionResponse{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[14]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1161,7 @@ func (x *DeskActionResponse) String() string {
 func (*DeskActionResponse) ProtoMessage() {}
 
 func (x *DeskActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[14]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1174,7 @@ func (x *DeskActionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeskActionResponse.ProtoReflect.Descriptor instead.
 func (*DeskActionResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{14}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DeskActionResponse) GetResult() isDeskActionResponse_Result {
@@ -1068,6 +1220,15 @@ func (x *DeskActionResponse) GetRun() *RunResponse {
 	return nil
 }
 
+func (x *DeskActionResponse) GetForeground() *ForegroundResponse {
+	if x != nil {
+		if x, ok := x.Result.(*DeskActionResponse_Foreground); ok {
+			return x.Foreground
+		}
+	}
+	return nil
+}
+
 type isDeskActionResponse_Result interface {
 	isDeskActionResponse_Result()
 }
@@ -1088,6 +1249,10 @@ type DeskActionResponse_Run struct {
 	Run *RunResponse `protobuf:"bytes,4,opt,name=run,proto3,oneof"`
 }
 
+type DeskActionResponse_Foreground struct {
+	Foreground *ForegroundResponse `protobuf:"bytes,5,opt,name=foreground,proto3,oneof"`
+}
+
 func (*DeskActionResponse_Screenshot) isDeskActionResponse_Result() {}
 
 func (*DeskActionResponse_ListWindows) isDeskActionResponse_Result() {}
@@ -1095,6 +1260,8 @@ func (*DeskActionResponse_ListWindows) isDeskActionResponse_Result() {}
 func (*DeskActionResponse_Input) isDeskActionResponse_Result() {}
 
 func (*DeskActionResponse_Run) isDeskActionResponse_Result() {}
+
+func (*DeskActionResponse_Foreground) isDeskActionResponse_Result() {}
 
 // DeskPolicy says when a node's desktop may be driven by agents. Without a
 // policy the desktop is always available. With one, it is available only
@@ -1118,7 +1285,7 @@ type DeskPolicy struct {
 
 func (x *DeskPolicy) Reset() {
 	*x = DeskPolicy{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[15]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1130,7 +1297,7 @@ func (x *DeskPolicy) String() string {
 func (*DeskPolicy) ProtoMessage() {}
 
 func (x *DeskPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[15]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1310,7 @@ func (x *DeskPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeskPolicy.ProtoReflect.Descriptor instead.
 func (*DeskPolicy) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{15}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DeskPolicy) GetWindow() string {
@@ -1194,7 +1361,7 @@ type DeskState struct {
 
 func (x *DeskState) Reset() {
 	*x = DeskState{}
-	mi := &file_protectorate_v1_desk_proto_msgTypes[16]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1206,7 +1373,7 @@ func (x *DeskState) String() string {
 func (*DeskState) ProtoMessage() {}
 
 func (x *DeskState) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_desk_proto_msgTypes[16]
+	mi := &file_protectorate_v1_desk_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1219,7 +1386,7 @@ func (x *DeskState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeskState.ProtoReflect.Descriptor instead.
 func (*DeskState) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{16}
+	return file_protectorate_v1_desk_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DeskState) GetAvailable() bool {
@@ -1292,7 +1459,16 @@ const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\x03pid\x18\x06 \x01(\rR\x03pid\x12\x1c\n" +
 	"\tminimized\x18\a \x01(\bR\tminimized\"L\n" +
 	"\x13ListWindowsResponse\x125\n" +
-	"\awindows\x18\x01 \x03(\v2\x1b.protectorate.v1.DeskWindowR\awindows\"\x8f\x01\n" +
+	"\awindows\x18\x01 \x03(\v2\x1b.protectorate.v1.DeskWindowR\awindows\"H\n" +
+	"\x11ForegroundRequest\x123\n" +
+	"\x06target\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskTargetR\x06target\"\xb5\x01\n" +
+	"\x12ForegroundResponse\x12\x14\n" +
+	"\x05title\x18\x01 \x01(\tR\x05title\x12\x10\n" +
+	"\x03pid\x18\x02 \x01(\rR\x03pid\x12\x18\n" +
+	"\aprocess\x18\x03 \x01(\tR\aprocess\x12\x1c\n" +
+	"\tintegrity\x18\x04 \x01(\tR\tintegrity\x12'\n" +
+	"\x0fagent_integrity\x18\x05 \x01(\tR\x0eagentIntegrity\x12\x16\n" +
+	"\x06blocks\x18\x06 \x01(\bR\x06blocks\"\x8f\x01\n" +
 	"\fClickRequest\x123\n" +
 	"\x06target\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskTargetR\x06target\x12\f\n" +
 	"\x01x\x18\x02 \x01(\x05R\x01x\x12\f\n" +
@@ -1317,7 +1493,7 @@ const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\x04args\x18\x03 \x03(\tR\x04args\"\x0f\n" +
 	"\rInputResponse\"\x1f\n" +
 	"\vRunResponse\x12\x10\n" +
-	"\x03pid\x18\x01 \x01(\rR\x03pid\"\xae\x03\n" +
+	"\x03pid\x18\x01 \x01(\rR\x03pid\"\xf4\x03\n" +
 	"\x11DeskActionRequest\x12D\n" +
 	"\n" +
 	"screenshot\x18\x01 \x01(\v2\".protectorate.v1.ScreenshotRequestH\x00R\n" +
@@ -1327,15 +1503,21 @@ const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\x04move\x18\x04 \x01(\v2\x1c.protectorate.v1.MoveRequestH\x00R\x04move\x122\n" +
 	"\x04type\x18\x05 \x01(\v2\x1c.protectorate.v1.TypeRequestH\x00R\x04type\x12/\n" +
 	"\x03key\x18\x06 \x01(\v2\x1b.protectorate.v1.KeyRequestH\x00R\x03key\x12/\n" +
-	"\x03run\x18\a \x01(\v2\x1b.protectorate.v1.RunRequestH\x00R\x03runB\b\n" +
-	"\x06action\"\x9a\x02\n" +
+	"\x03run\x18\a \x01(\v2\x1b.protectorate.v1.RunRequestH\x00R\x03run\x12D\n" +
+	"\n" +
+	"foreground\x18\b \x01(\v2\".protectorate.v1.ForegroundRequestH\x00R\n" +
+	"foregroundB\b\n" +
+	"\x06action\"\xe1\x02\n" +
 	"\x12DeskActionResponse\x12E\n" +
 	"\n" +
 	"screenshot\x18\x01 \x01(\v2#.protectorate.v1.ScreenshotResponseH\x00R\n" +
 	"screenshot\x12I\n" +
 	"\flist_windows\x18\x02 \x01(\v2$.protectorate.v1.ListWindowsResponseH\x00R\vlistWindows\x126\n" +
 	"\x05input\x18\x03 \x01(\v2\x1e.protectorate.v1.InputResponseH\x00R\x05input\x120\n" +
-	"\x03run\x18\x04 \x01(\v2\x1c.protectorate.v1.RunResponseH\x00R\x03runB\b\n" +
+	"\x03run\x18\x04 \x01(\v2\x1c.protectorate.v1.RunResponseH\x00R\x03run\x12E\n" +
+	"\n" +
+	"foreground\x18\x05 \x01(\v2#.protectorate.v1.ForegroundResponseH\x00R\n" +
+	"foregroundB\b\n" +
 	"\x06result\"\x8e\x01\n" +
 	"\n" +
 	"DeskPolicy\x12\x16\n" +
@@ -1361,11 +1543,13 @@ const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\x1bDESK_REASON_NOT_INTERACTIVE\x10\x04\x12\x16\n" +
 	"\x12DESK_REASON_LOCKED\x10\x05\x12\x1b\n" +
 	"\x17DESK_REASON_UNSUPPORTED\x10\x06\x12\x17\n" +
-	"\x13DESK_REASON_UNKNOWN\x10\a2\x98\x04\n" +
+	"\x13DESK_REASON_UNKNOWN\x10\a2\xef\x04\n" +
 	"\vDeskService\x12U\n" +
 	"\n" +
 	"Screenshot\x12\".protectorate.v1.ScreenshotRequest\x1a#.protectorate.v1.ScreenshotResponse\x12X\n" +
-	"\vListWindows\x12#.protectorate.v1.ListWindowsRequest\x1a$.protectorate.v1.ListWindowsResponse\x12F\n" +
+	"\vListWindows\x12#.protectorate.v1.ListWindowsRequest\x1a$.protectorate.v1.ListWindowsResponse\x12U\n" +
+	"\n" +
+	"Foreground\x12\".protectorate.v1.ForegroundRequest\x1a#.protectorate.v1.ForegroundResponse\x12F\n" +
 	"\x05Click\x12\x1d.protectorate.v1.ClickRequest\x1a\x1e.protectorate.v1.InputResponse\x12D\n" +
 	"\x04Move\x12\x1c.protectorate.v1.MoveRequest\x1a\x1e.protectorate.v1.InputResponse\x12D\n" +
 	"\x04Type\x12\x1c.protectorate.v1.TypeRequest\x1a\x1e.protectorate.v1.InputResponse\x12B\n" +
@@ -1385,7 +1569,7 @@ func file_protectorate_v1_desk_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_desk_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protectorate_v1_desk_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_protectorate_v1_desk_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_protectorate_v1_desk_proto_goTypes = []any{
 	(DeskReason)(0),               // 0: protectorate.v1.DeskReason
 	(*DeskTarget)(nil),            // 1: protectorate.v1.DeskTarget
@@ -1394,64 +1578,71 @@ var file_protectorate_v1_desk_proto_goTypes = []any{
 	(*ListWindowsRequest)(nil),    // 4: protectorate.v1.ListWindowsRequest
 	(*DeskWindow)(nil),            // 5: protectorate.v1.DeskWindow
 	(*ListWindowsResponse)(nil),   // 6: protectorate.v1.ListWindowsResponse
-	(*ClickRequest)(nil),          // 7: protectorate.v1.ClickRequest
-	(*MoveRequest)(nil),           // 8: protectorate.v1.MoveRequest
-	(*TypeRequest)(nil),           // 9: protectorate.v1.TypeRequest
-	(*KeyRequest)(nil),            // 10: protectorate.v1.KeyRequest
-	(*RunRequest)(nil),            // 11: protectorate.v1.RunRequest
-	(*InputResponse)(nil),         // 12: protectorate.v1.InputResponse
-	(*RunResponse)(nil),           // 13: protectorate.v1.RunResponse
-	(*DeskActionRequest)(nil),     // 14: protectorate.v1.DeskActionRequest
-	(*DeskActionResponse)(nil),    // 15: protectorate.v1.DeskActionResponse
-	(*DeskPolicy)(nil),            // 16: protectorate.v1.DeskPolicy
-	(*DeskState)(nil),             // 17: protectorate.v1.DeskState
-	(*durationpb.Duration)(nil),   // 18: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
+	(*ForegroundRequest)(nil),     // 7: protectorate.v1.ForegroundRequest
+	(*ForegroundResponse)(nil),    // 8: protectorate.v1.ForegroundResponse
+	(*ClickRequest)(nil),          // 9: protectorate.v1.ClickRequest
+	(*MoveRequest)(nil),           // 10: protectorate.v1.MoveRequest
+	(*TypeRequest)(nil),           // 11: protectorate.v1.TypeRequest
+	(*KeyRequest)(nil),            // 12: protectorate.v1.KeyRequest
+	(*RunRequest)(nil),            // 13: protectorate.v1.RunRequest
+	(*InputResponse)(nil),         // 14: protectorate.v1.InputResponse
+	(*RunResponse)(nil),           // 15: protectorate.v1.RunResponse
+	(*DeskActionRequest)(nil),     // 16: protectorate.v1.DeskActionRequest
+	(*DeskActionResponse)(nil),    // 17: protectorate.v1.DeskActionResponse
+	(*DeskPolicy)(nil),            // 18: protectorate.v1.DeskPolicy
+	(*DeskState)(nil),             // 19: protectorate.v1.DeskState
+	(*durationpb.Duration)(nil),   // 20: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
 }
 var file_protectorate_v1_desk_proto_depIdxs = []int32{
 	1,  // 0: protectorate.v1.ScreenshotRequest.target:type_name -> protectorate.v1.DeskTarget
 	1,  // 1: protectorate.v1.ListWindowsRequest.target:type_name -> protectorate.v1.DeskTarget
 	5,  // 2: protectorate.v1.ListWindowsResponse.windows:type_name -> protectorate.v1.DeskWindow
-	1,  // 3: protectorate.v1.ClickRequest.target:type_name -> protectorate.v1.DeskTarget
-	1,  // 4: protectorate.v1.MoveRequest.target:type_name -> protectorate.v1.DeskTarget
-	1,  // 5: protectorate.v1.TypeRequest.target:type_name -> protectorate.v1.DeskTarget
-	1,  // 6: protectorate.v1.KeyRequest.target:type_name -> protectorate.v1.DeskTarget
-	1,  // 7: protectorate.v1.RunRequest.target:type_name -> protectorate.v1.DeskTarget
-	2,  // 8: protectorate.v1.DeskActionRequest.screenshot:type_name -> protectorate.v1.ScreenshotRequest
-	4,  // 9: protectorate.v1.DeskActionRequest.list_windows:type_name -> protectorate.v1.ListWindowsRequest
-	7,  // 10: protectorate.v1.DeskActionRequest.click:type_name -> protectorate.v1.ClickRequest
-	8,  // 11: protectorate.v1.DeskActionRequest.move:type_name -> protectorate.v1.MoveRequest
-	9,  // 12: protectorate.v1.DeskActionRequest.type:type_name -> protectorate.v1.TypeRequest
-	10, // 13: protectorate.v1.DeskActionRequest.key:type_name -> protectorate.v1.KeyRequest
-	11, // 14: protectorate.v1.DeskActionRequest.run:type_name -> protectorate.v1.RunRequest
-	3,  // 15: protectorate.v1.DeskActionResponse.screenshot:type_name -> protectorate.v1.ScreenshotResponse
-	6,  // 16: protectorate.v1.DeskActionResponse.list_windows:type_name -> protectorate.v1.ListWindowsResponse
-	12, // 17: protectorate.v1.DeskActionResponse.input:type_name -> protectorate.v1.InputResponse
-	13, // 18: protectorate.v1.DeskActionResponse.run:type_name -> protectorate.v1.RunResponse
-	18, // 19: protectorate.v1.DeskPolicy.idle:type_name -> google.protobuf.Duration
-	0,  // 20: protectorate.v1.DeskState.reason:type_name -> protectorate.v1.DeskReason
-	19, // 21: protectorate.v1.DeskState.last_input:type_name -> google.protobuf.Timestamp
-	19, // 22: protectorate.v1.DeskState.evaluated_at:type_name -> google.protobuf.Timestamp
-	16, // 23: protectorate.v1.DeskState.policy:type_name -> protectorate.v1.DeskPolicy
-	2,  // 24: protectorate.v1.DeskService.Screenshot:input_type -> protectorate.v1.ScreenshotRequest
-	4,  // 25: protectorate.v1.DeskService.ListWindows:input_type -> protectorate.v1.ListWindowsRequest
-	7,  // 26: protectorate.v1.DeskService.Click:input_type -> protectorate.v1.ClickRequest
-	8,  // 27: protectorate.v1.DeskService.Move:input_type -> protectorate.v1.MoveRequest
-	9,  // 28: protectorate.v1.DeskService.Type:input_type -> protectorate.v1.TypeRequest
-	10, // 29: protectorate.v1.DeskService.Key:input_type -> protectorate.v1.KeyRequest
-	11, // 30: protectorate.v1.DeskService.Run:input_type -> protectorate.v1.RunRequest
-	3,  // 31: protectorate.v1.DeskService.Screenshot:output_type -> protectorate.v1.ScreenshotResponse
-	6,  // 32: protectorate.v1.DeskService.ListWindows:output_type -> protectorate.v1.ListWindowsResponse
-	12, // 33: protectorate.v1.DeskService.Click:output_type -> protectorate.v1.InputResponse
-	12, // 34: protectorate.v1.DeskService.Move:output_type -> protectorate.v1.InputResponse
-	12, // 35: protectorate.v1.DeskService.Type:output_type -> protectorate.v1.InputResponse
-	12, // 36: protectorate.v1.DeskService.Key:output_type -> protectorate.v1.InputResponse
-	13, // 37: protectorate.v1.DeskService.Run:output_type -> protectorate.v1.RunResponse
-	31, // [31:38] is the sub-list for method output_type
-	24, // [24:31] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	1,  // 3: protectorate.v1.ForegroundRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 4: protectorate.v1.ClickRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 5: protectorate.v1.MoveRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 6: protectorate.v1.TypeRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 7: protectorate.v1.KeyRequest.target:type_name -> protectorate.v1.DeskTarget
+	1,  // 8: protectorate.v1.RunRequest.target:type_name -> protectorate.v1.DeskTarget
+	2,  // 9: protectorate.v1.DeskActionRequest.screenshot:type_name -> protectorate.v1.ScreenshotRequest
+	4,  // 10: protectorate.v1.DeskActionRequest.list_windows:type_name -> protectorate.v1.ListWindowsRequest
+	9,  // 11: protectorate.v1.DeskActionRequest.click:type_name -> protectorate.v1.ClickRequest
+	10, // 12: protectorate.v1.DeskActionRequest.move:type_name -> protectorate.v1.MoveRequest
+	11, // 13: protectorate.v1.DeskActionRequest.type:type_name -> protectorate.v1.TypeRequest
+	12, // 14: protectorate.v1.DeskActionRequest.key:type_name -> protectorate.v1.KeyRequest
+	13, // 15: protectorate.v1.DeskActionRequest.run:type_name -> protectorate.v1.RunRequest
+	7,  // 16: protectorate.v1.DeskActionRequest.foreground:type_name -> protectorate.v1.ForegroundRequest
+	3,  // 17: protectorate.v1.DeskActionResponse.screenshot:type_name -> protectorate.v1.ScreenshotResponse
+	6,  // 18: protectorate.v1.DeskActionResponse.list_windows:type_name -> protectorate.v1.ListWindowsResponse
+	14, // 19: protectorate.v1.DeskActionResponse.input:type_name -> protectorate.v1.InputResponse
+	15, // 20: protectorate.v1.DeskActionResponse.run:type_name -> protectorate.v1.RunResponse
+	8,  // 21: protectorate.v1.DeskActionResponse.foreground:type_name -> protectorate.v1.ForegroundResponse
+	20, // 22: protectorate.v1.DeskPolicy.idle:type_name -> google.protobuf.Duration
+	0,  // 23: protectorate.v1.DeskState.reason:type_name -> protectorate.v1.DeskReason
+	21, // 24: protectorate.v1.DeskState.last_input:type_name -> google.protobuf.Timestamp
+	21, // 25: protectorate.v1.DeskState.evaluated_at:type_name -> google.protobuf.Timestamp
+	18, // 26: protectorate.v1.DeskState.policy:type_name -> protectorate.v1.DeskPolicy
+	2,  // 27: protectorate.v1.DeskService.Screenshot:input_type -> protectorate.v1.ScreenshotRequest
+	4,  // 28: protectorate.v1.DeskService.ListWindows:input_type -> protectorate.v1.ListWindowsRequest
+	7,  // 29: protectorate.v1.DeskService.Foreground:input_type -> protectorate.v1.ForegroundRequest
+	9,  // 30: protectorate.v1.DeskService.Click:input_type -> protectorate.v1.ClickRequest
+	10, // 31: protectorate.v1.DeskService.Move:input_type -> protectorate.v1.MoveRequest
+	11, // 32: protectorate.v1.DeskService.Type:input_type -> protectorate.v1.TypeRequest
+	12, // 33: protectorate.v1.DeskService.Key:input_type -> protectorate.v1.KeyRequest
+	13, // 34: protectorate.v1.DeskService.Run:input_type -> protectorate.v1.RunRequest
+	3,  // 35: protectorate.v1.DeskService.Screenshot:output_type -> protectorate.v1.ScreenshotResponse
+	6,  // 36: protectorate.v1.DeskService.ListWindows:output_type -> protectorate.v1.ListWindowsResponse
+	8,  // 37: protectorate.v1.DeskService.Foreground:output_type -> protectorate.v1.ForegroundResponse
+	14, // 38: protectorate.v1.DeskService.Click:output_type -> protectorate.v1.InputResponse
+	14, // 39: protectorate.v1.DeskService.Move:output_type -> protectorate.v1.InputResponse
+	14, // 40: protectorate.v1.DeskService.Type:output_type -> protectorate.v1.InputResponse
+	14, // 41: protectorate.v1.DeskService.Key:output_type -> protectorate.v1.InputResponse
+	15, // 42: protectorate.v1.DeskService.Run:output_type -> protectorate.v1.RunResponse
+	35, // [35:43] is the sub-list for method output_type
+	27, // [27:35] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_desk_proto_init() }
@@ -1459,7 +1650,7 @@ func file_protectorate_v1_desk_proto_init() {
 	if File_protectorate_v1_desk_proto != nil {
 		return
 	}
-	file_protectorate_v1_desk_proto_msgTypes[13].OneofWrappers = []any{
+	file_protectorate_v1_desk_proto_msgTypes[15].OneofWrappers = []any{
 		(*DeskActionRequest_Screenshot)(nil),
 		(*DeskActionRequest_ListWindows)(nil),
 		(*DeskActionRequest_Click)(nil),
@@ -1467,12 +1658,14 @@ func file_protectorate_v1_desk_proto_init() {
 		(*DeskActionRequest_Type)(nil),
 		(*DeskActionRequest_Key)(nil),
 		(*DeskActionRequest_Run)(nil),
+		(*DeskActionRequest_Foreground)(nil),
 	}
-	file_protectorate_v1_desk_proto_msgTypes[14].OneofWrappers = []any{
+	file_protectorate_v1_desk_proto_msgTypes[16].OneofWrappers = []any{
 		(*DeskActionResponse_Screenshot)(nil),
 		(*DeskActionResponse_ListWindows)(nil),
 		(*DeskActionResponse_Input)(nil),
 		(*DeskActionResponse_Run)(nil),
+		(*DeskActionResponse_Foreground)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1480,7 +1673,7 @@ func file_protectorate_v1_desk_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_desk_proto_rawDesc), len(file_protectorate_v1_desk_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

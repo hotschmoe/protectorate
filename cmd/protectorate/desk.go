@@ -35,7 +35,7 @@ type deskFlags struct {
 func deskCmd(o *opts) *cobra.Command {
 	var f deskFlags
 	c := &cobra.Command{
-		Use:   "desk <node> screenshot|windows|click X Y|move X Y|type TEXT|key CHORD|run PROGRAM [ARGS]",
+		Use:   "desk <node> screenshot|windows|foreground|click X Y|move X Y|type TEXT|key CHORD|run PROGRAM [ARGS]",
 		Short: "Drive the interactive desktop of a Windows node",
 		Long: `Screen and input commands for programs that only have a GUI. They work only
 when the node agent runs in the logged-in user's desktop session
@@ -98,12 +98,15 @@ func deskInts(verb string, args []string) (int32, int32, error) {
 // what can be checked without the node.
 func parseDeskArgs(verb string, args []string, f deskFlags) (*pb.DeskActionRequest, error) {
 	switch verb {
-	case "screenshot", "windows":
+	case "screenshot", "windows", "foreground":
 		if len(args) != 0 {
 			return nil, fmt.Errorf("desk %s takes no arguments", verb)
 		}
-		if verb == "windows" {
+		switch verb {
+		case "windows":
 			return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_ListWindows{ListWindows: &pb.ListWindowsRequest{}}}, nil
+		case "foreground":
+			return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Foreground{Foreground: &pb.ForegroundRequest{}}}, nil
 		}
 		return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Screenshot{Screenshot: &pb.ScreenshotRequest{}}}, nil
 	case "click":
@@ -140,7 +143,7 @@ func parseDeskArgs(verb string, args []string, f deskFlags) (*pb.DeskActionReque
 		}
 		return &pb.DeskActionRequest{Action: &pb.DeskActionRequest_Run{Run: &pb.RunRequest{Program: args[0], Args: args[1:]}}}, nil
 	}
-	return nil, fmt.Errorf("unknown desk command %q: want screenshot, windows, click, move, type, key or run", verb)
+	return nil, fmt.Errorf("unknown desk command %q: want screenshot, windows, foreground, click, move, type, key or run", verb)
 }
 
 func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceClient, node string, act *pb.DeskActionRequest, f deskFlags) error {
@@ -179,6 +182,20 @@ func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceCl
 				}
 				fmt.Fprintf(w, "%d\t%d\t%d\t%d\t%d\t%s\n", win.Pid, win.X, win.Y, win.Width, win.Height, title)
 			}
+		})
+	case *pb.DeskActionRequest_Foreground:
+		a.Foreground.Target = t
+		res, err := cl.Foreground(ctx, connect.NewRequest(a.Foreground))
+		if err != nil {
+			return err
+		}
+		return o.out(cmd).print(res.Msg, func(w io.Writer) {
+			m := res.Msg
+			if m.Pid == 0 {
+				fmt.Fprintln(w, "foreground\tnone")
+				return
+			}
+			fmt.Fprintf(w, "title\t%s\npid\t%d\nprocess\t%s\nintegrity\t%s\nagent\t%s\nblocks\t%t\n", m.Title, m.Pid, m.Process, m.Integrity, m.AgentIntegrity, m.Blocks)
 		})
 	case *pb.DeskActionRequest_Click:
 		a.Click.Target = t

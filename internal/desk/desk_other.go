@@ -19,6 +19,7 @@ func (unsupported) Ready() error {
 }
 func (u unsupported) Screenshot() (*image.RGBA, error)     { return nil, u.Ready() }
 func (u unsupported) Windows() ([]Window, error)           { return nil, u.Ready() }
+func (u unsupported) Foreground() (Foreground, error)      { return Foreground{}, u.Ready() }
 func (u unsupported) Click(int, int, Button, bool) error   { return u.Ready() }
 func (u unsupported) Move(int, int) error                  { return u.Ready() }
 func (u unsupported) Type(string) error                    { return u.Ready() }

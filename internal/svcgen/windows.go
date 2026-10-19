@@ -12,6 +12,14 @@ const (
 	TriggerBoot  = "boot"
 )
 
+// ConhostCommand runs a console program with a console host that has no
+// window (Windows 10 1809 and later). The logon task uses it so the agent
+// never has a visible console, whichever console host is the system default:
+// with Windows Terminal as the default, hiding the window from inside the
+// process does not reach the real host window. Task Scheduler expands the
+// variable.
+const ConhostCommand = `%SystemRoot%\System32\conhost.exe`
+
 func winQuote(w string) string {
 	if w != "" && !strings.ContainsAny(w, " \t\"") {
 		return w
@@ -37,7 +45,7 @@ func TaskXML(s Spec, trigger string) (string, error) {
 		return "", fmt.Errorf("only the node agent runs as a scheduled task")
 	}
 	var trig, principal string
-	hide := false
+	headless := false
 	switch trigger {
 	case TriggerLogon:
 		level := "LeastPrivilege"
@@ -50,7 +58,7 @@ func TaskXML(s Spec, trigger string) (string, error) {
 		}
 		trig = "<LogonTrigger><Enabled>true</Enabled>" + user + "</LogonTrigger>"
 		principal = user + "<LogonType>InteractiveToken</LogonType><RunLevel>" + level + "</RunLevel>"
-		hide = true
+		headless = true
 	case TriggerBoot:
 		trig = "<BootTrigger><Enabled>true</Enabled></BootTrigger>"
 		principal = "<UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel>"
@@ -63,10 +71,10 @@ func TaskXML(s Spec, trigger string) (string, error) {
 		words = append(words, "--home", s.Home)
 	}
 	words = append(words, s.Args...)
-	if hide {
-		words = append(words, "--hide-console")
-	}
 	command, args := s.Binary, winJoin(words)
+	if headless {
+		command, args = ConhostCommand, "--headless "+winQuote(s.Binary)+" "+args
+	}
 
 	var b strings.Builder
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n")
@@ -98,7 +106,7 @@ func TaskNotes(s Spec, trigger, xmlPath string) string {
 	fmt.Fprintf(&b, "  schtasks /Create /TN %s /XML %s /F\n", winQuote(s.Name()), winQuote(xmlPath))
 	fmt.Fprintf(&b, "  schtasks /Run /TN %s\n", winQuote(s.Name()))
 	if trigger == TriggerLogon {
-		b.WriteString("A logon task runs in the interactive session, which desk commands need; the agent hides its console window.\n")
+		b.WriteString("A logon task runs in the interactive session, which desk commands need; the agent runs under conhost.exe --headless, so it has no console window.\n")
 	}
 	return b.String()
 }

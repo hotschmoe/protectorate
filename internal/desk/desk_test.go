@@ -143,3 +143,29 @@ func TestClassifyInputDesktop(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckReach(t *testing.T) {
+	tests := []struct {
+		name    string
+		f       Foreground
+		blocked bool
+	}{
+		{"no window", Foreground{AgentIntegrity: IntegrityMedium}, false},
+		{"same level", Foreground{PID: 1, Integrity: IntegrityMedium, AgentIntegrity: IntegrityMedium}, false},
+		{"lower level", Foreground{PID: 1, Integrity: IntegrityLow, AgentIntegrity: IntegrityMedium}, false},
+		{"higher level", Foreground{PID: 1, Title: "Windows Security", Process: "consent.exe", Integrity: IntegrityHigh, AgentIntegrity: IntegrityMedium}, true},
+		{"unreadable", Foreground{PID: 1, Unreadable: true, AgentIntegrity: IntegrityMedium}, true},
+		{"elevated agent, high window", Foreground{PID: 1, Integrity: IntegrityHigh, AgentIntegrity: IntegrityHigh}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckReach(tt.f, "foreground window")
+			if (err != nil) != tt.blocked || (err != nil && !errors.Is(err, ErrBlocked)) {
+				t.Errorf("err = %v, want blocked %v", err, tt.blocked)
+			}
+			if err != nil && !strings.Contains(err.Error(), "--elevated") {
+				t.Errorf("error lacks the fix: %v", err)
+			}
+		})
+	}
+}

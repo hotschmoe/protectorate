@@ -56,6 +56,7 @@ Without `-f` an existing destination is an error.
 ```
 protectorate desk <node> screenshot [-o file.png]
 protectorate desk <node> windows
+protectorate desk <node> foreground
 protectorate desk <node> --lease ID click X Y [--button left|right|middle] [--double]
 protectorate desk <node> --lease ID move X Y
 protectorate desk <node> --lease ID type "text"
@@ -90,11 +91,57 @@ protectorate node install --control URL --key KEY
 ```
 
 An agent started by hand from an SSH session does not qualify, even though the
-same user owns it. The logon task needs no elevation. Input does not reach
+same user owns it. The logon task needs no elevation and runs the agent under `conhost.exe --headless`, so it has no console window. Input does not reach
 windows of higher-integrity programs (run as administrator) because of UIPI,
 unless the agent is elevated too: `node install --elevated`, from a terminal
 opened with Run as administrator, registers the task with the highest
 available privileges.
+
+### When input is silently dropped
+
+`SendInput` returns success in several cases where the event goes nowhere, so
+the agent checks first and refuses with `failed_precondition` naming the
+cause. Sources: Microsoft Learn, `SendInput` (it is subject to UIPI: input may be
+injected only into applications of equal or lower integrity, and a zero or short
+return means another thread blocked the input; UIPI blocking is not always
+reported), "User Interface Privilege Isolation" and Mandatory Integrity Control.
+
+- **UIPI.** A process cannot inject input into a window owned by a process
+  of a higher integrity level. Typical culprits: any program run as
+  administrator (high), Windows Security and firewall prompts, the UAC
+  consent dialog, Task Manager, services' windows (system). Keyboard input goes
+  to the foreground window, so a higher-integrity foreground window swallows
+  every key; mouse input goes to the window under the pointer.
+- **Secure desktop and lock screen.** UAC prompts (by default) run on the
+  secure desktop (`Winlogon`), as do the lock and logon screens. A normal
+  process cannot open that desktop and input does not reach the user's desktop.
+- **Foreground lock.** `SetForegroundWindow` is restricted
+  (`ForegroundLockTimeout`), so activating another window from a background
+  process can fail silently. Mouse clicks that activate windows are not
+  subject to it, but a higher-integrity foreground window still is the
+  problem above.
+- **Pointer.** `SetCursorPos` can leave the pointer elsewhere than asked
+  (clamped, or moved by another program).
+
+Before `click`, `type` and `key` the agent reads the foreground window's owner
+(`GetForegroundWindow`, `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION`,
+`OpenProcessToken`, `TokenIntegrityLevel`) and compares it with its own level;
+for `click` it also checks the window under the target point
+(`WindowFromPoint`). A token it cannot open (access denied) is treated as
+higher, since only a higher-integrity process refuses that. It also refuses on
+a locked or secure desktop. After placing the pointer it reads it back with
+`GetCursorPos` and refuses to click when it is elsewhere. `move` does not
+inject events, so it only does the read-back; coordinates outside the screen
+are `invalid_argument`. The error names the window, its process and integrity,
+and the fix: dismiss the prompt on the machine, or `node install --elevated`.
+`desk <node> foreground` shows what would receive keystrokes (title, pid,
+process, integrity, the agent's integrity, and whether it blocks) without
+changing anything. `run` injects nothing and is not checked.
+
+`type` sends each character as its own down/up pair a few milliseconds apart:
+Windows 11 Notepad reads the Unicode character of every event in a batch from
+the last one, so batched text came out as repeated characters. Characters
+outside the BMP go as UTF-16 surrogate pairs, newline is Enter.
 
 ### Locked screens and unattended machines
 
@@ -135,7 +182,7 @@ lease, so a build job on the machine is not blocked by someone driving its
 screen and the reverse.
 
 `click`, `move`, `type`, `key` and `run` run under a lease on exactly that
-desktop; `screenshot` and `windows` need none, so anyone can watch.
+desktop; `screenshot`, `windows` and `foreground` need none, so anyone can watch.
 
 **Automatic lease.** A simple sequence needs no lease call:
 
@@ -170,6 +217,27 @@ calls from anywhere else. Holding the id is the proof: leases do not identify
 a caller beyond that, so do not share the id with agents that should not
 drive. The env var `PROTECTORATE_DESK_LEASE` supplies `--lease`. A desktop
 lease cannot be used as a job target.
+
+### Windows Firewall prompt
+
+A prompt "allow public and private networks to access this app" comes from the
+agent's sockets, and while it is open it is a higher-integrity foreground
+window that blocks input (see above). The TCP side never causes it: enrolled in
+a tailnet the agent listens through tsnet's userspace stack (no host socket), and
+without a tailnet it listens on `127.0.0.1` (`--listen`). The cause is tsnet's
+WireGuard transport, which binds a UDP socket on all interfaces (`:0`, an
+ephemeral port) for direct peer connections; tsnet has no option to bind it to
+loopback, and `TS_DEBUG_ALWAYS_USE_DERP=1` (relay only, a debug knob) would
+disable it at the cost of direct paths. Answer the prompt once (Allow, private
+networks is enough for the hub on a LAN or tailnet) when installing, or add the
+rule beforehand from an elevated prompt:
+
+```
+netsh advfirewall firewall add rule name="protectorate" dir=in action=allow program="%LOCALAPPDATA%\Programs\protectorate\protectorate.exe" enable=yes
+```
+
+A rule keyed to the program path asks once per binary location; updates that
+keep the path keep the rule.
 
 ## Availability while away
 
@@ -252,7 +320,7 @@ counts as the user. The hub's own node takes no policy.
   hub (tailnet WhoIs `tag:hub`, or the shared node token).
 - Who may ask the hub: scopes. File calls are `node_put_file` and
   `node_get_file`; desktop calls are `desk_*` (or one of `desk_screenshot`,
-  `desk_list_windows`, `desk_click`, `desk_move`, `desk_type`, `desk_key`,
+  `desk_list_windows`, `desk_foreground`, `desk_click`, `desk_move`, `desk_type`, `desk_key`,
   `desk_run`). None is part of `read`. `desk_run` starts any program in the
   user's session, `desk_type` and `desk_key` can do anything the logged-in
   user can do on screen; treat these grants like shell access to the desktop,

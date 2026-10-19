@@ -4,34 +4,10 @@ package main
 
 import (
 	"context"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 )
-
-var (
-	pGetConsoleWindow      = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetConsoleWindow")
-	pGetConsoleProcessList = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetConsoleProcessList")
-	pShowWindow            = windows.NewLazySystemDLL("user32.dll").NewProc("ShowWindow")
-)
-
-const swHide = 0
-
-// hideOwnConsole hides the console window a scheduled task opened for this
-// process. A console shared with another process (a terminal the user typed
-// into) is left alone.
-func hideOwnConsole() {
-	hwnd, _, _ := pGetConsoleWindow.Call()
-	if hwnd == 0 {
-		return
-	}
-	var pids [2]uint32
-	if n, _, _ := pGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&pids[0])), uintptr(len(pids))); n != 1 {
-		return
-	}
-	pShowWindow.Call(hwnd, swHide)
-}
 
 func processElevated() bool { return windows.GetCurrentProcessToken().IsElevated() }
 

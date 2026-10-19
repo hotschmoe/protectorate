@@ -37,6 +37,8 @@ const (
 	DeskServiceScreenshotProcedure = "/protectorate.v1.DeskService/Screenshot"
 	// DeskServiceListWindowsProcedure is the fully-qualified name of the DeskService's ListWindows RPC.
 	DeskServiceListWindowsProcedure = "/protectorate.v1.DeskService/ListWindows"
+	// DeskServiceForegroundProcedure is the fully-qualified name of the DeskService's Foreground RPC.
+	DeskServiceForegroundProcedure = "/protectorate.v1.DeskService/Foreground"
 	// DeskServiceClickProcedure is the fully-qualified name of the DeskService's Click RPC.
 	DeskServiceClickProcedure = "/protectorate.v1.DeskService/Click"
 	// DeskServiceMoveProcedure is the fully-qualified name of the DeskService's Move RPC.
@@ -55,6 +57,13 @@ type DeskServiceClient interface {
 	Screenshot(context.Context, *connect.Request[v1.ScreenshotRequest]) (*connect.Response[v1.ScreenshotResponse], error)
 	// ListWindows lists visible top-level windows, topmost first.
 	ListWindows(context.Context, *connect.Request[v1.ListWindowsRequest]) (*connect.Response[v1.ListWindowsResponse], error)
+	// Foreground reports the window that receives keystrokes now, with its
+	// process and integrity level. Read-only. Windows drops input injected into
+	// a window of a higher integrity level than the agent's without any error,
+	// so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the
+	// foreground window (or, for the mouse, the window under the pointer) is
+	// higher; this shows what is in the way.
+	Foreground(context.Context, *connect.Request[v1.ForegroundRequest]) (*connect.Response[v1.ForegroundResponse], error)
 	// Click moves the pointer and clicks. Needs a desk lease.
 	Click(context.Context, *connect.Request[v1.ClickRequest]) (*connect.Response[v1.InputResponse], error)
 	// Move puts the pointer at a position. Needs a desk lease.
@@ -91,6 +100,12 @@ func NewDeskServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			httpClient,
 			baseURL+DeskServiceListWindowsProcedure,
 			connect.WithSchema(deskServiceMethods.ByName("ListWindows")),
+			connect.WithClientOptions(opts...),
+		),
+		foreground: connect.NewClient[v1.ForegroundRequest, v1.ForegroundResponse](
+			httpClient,
+			baseURL+DeskServiceForegroundProcedure,
+			connect.WithSchema(deskServiceMethods.ByName("Foreground")),
 			connect.WithClientOptions(opts...),
 		),
 		click: connect.NewClient[v1.ClickRequest, v1.InputResponse](
@@ -130,6 +145,7 @@ func NewDeskServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 type deskServiceClient struct {
 	screenshot  *connect.Client[v1.ScreenshotRequest, v1.ScreenshotResponse]
 	listWindows *connect.Client[v1.ListWindowsRequest, v1.ListWindowsResponse]
+	foreground  *connect.Client[v1.ForegroundRequest, v1.ForegroundResponse]
 	click       *connect.Client[v1.ClickRequest, v1.InputResponse]
 	move        *connect.Client[v1.MoveRequest, v1.InputResponse]
 	_type       *connect.Client[v1.TypeRequest, v1.InputResponse]
@@ -145,6 +161,11 @@ func (c *deskServiceClient) Screenshot(ctx context.Context, req *connect.Request
 // ListWindows calls protectorate.v1.DeskService.ListWindows.
 func (c *deskServiceClient) ListWindows(ctx context.Context, req *connect.Request[v1.ListWindowsRequest]) (*connect.Response[v1.ListWindowsResponse], error) {
 	return c.listWindows.CallUnary(ctx, req)
+}
+
+// Foreground calls protectorate.v1.DeskService.Foreground.
+func (c *deskServiceClient) Foreground(ctx context.Context, req *connect.Request[v1.ForegroundRequest]) (*connect.Response[v1.ForegroundResponse], error) {
+	return c.foreground.CallUnary(ctx, req)
 }
 
 // Click calls protectorate.v1.DeskService.Click.
@@ -178,6 +199,13 @@ type DeskServiceHandler interface {
 	Screenshot(context.Context, *connect.Request[v1.ScreenshotRequest]) (*connect.Response[v1.ScreenshotResponse], error)
 	// ListWindows lists visible top-level windows, topmost first.
 	ListWindows(context.Context, *connect.Request[v1.ListWindowsRequest]) (*connect.Response[v1.ListWindowsResponse], error)
+	// Foreground reports the window that receives keystrokes now, with its
+	// process and integrity level. Read-only. Windows drops input injected into
+	// a window of a higher integrity level than the agent's without any error,
+	// so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the
+	// foreground window (or, for the mouse, the window under the pointer) is
+	// higher; this shows what is in the way.
+	Foreground(context.Context, *connect.Request[v1.ForegroundRequest]) (*connect.Response[v1.ForegroundResponse], error)
 	// Click moves the pointer and clicks. Needs a desk lease.
 	Click(context.Context, *connect.Request[v1.ClickRequest]) (*connect.Response[v1.InputResponse], error)
 	// Move puts the pointer at a position. Needs a desk lease.
@@ -210,6 +238,12 @@ func NewDeskServiceHandler(svc DeskServiceHandler, opts ...connect.HandlerOption
 		DeskServiceListWindowsProcedure,
 		svc.ListWindows,
 		connect.WithSchema(deskServiceMethods.ByName("ListWindows")),
+		connect.WithHandlerOptions(opts...),
+	)
+	deskServiceForegroundHandler := connect.NewUnaryHandler(
+		DeskServiceForegroundProcedure,
+		svc.Foreground,
+		connect.WithSchema(deskServiceMethods.ByName("Foreground")),
 		connect.WithHandlerOptions(opts...),
 	)
 	deskServiceClickHandler := connect.NewUnaryHandler(
@@ -248,6 +282,8 @@ func NewDeskServiceHandler(svc DeskServiceHandler, opts ...connect.HandlerOption
 			deskServiceScreenshotHandler.ServeHTTP(w, r)
 		case DeskServiceListWindowsProcedure:
 			deskServiceListWindowsHandler.ServeHTTP(w, r)
+		case DeskServiceForegroundProcedure:
+			deskServiceForegroundHandler.ServeHTTP(w, r)
 		case DeskServiceClickProcedure:
 			deskServiceClickHandler.ServeHTTP(w, r)
 		case DeskServiceMoveProcedure:
@@ -273,6 +309,10 @@ func (UnimplementedDeskServiceHandler) Screenshot(context.Context, *connect.Requ
 
 func (UnimplementedDeskServiceHandler) ListWindows(context.Context, *connect.Request[v1.ListWindowsRequest]) (*connect.Response[v1.ListWindowsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.DeskService.ListWindows is not implemented"))
+}
+
+func (UnimplementedDeskServiceHandler) Foreground(context.Context, *connect.Request[v1.ForegroundRequest]) (*connect.Response[v1.ForegroundResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.DeskService.Foreground is not implemented"))
 }
 
 func (UnimplementedDeskServiceHandler) Click(context.Context, *connect.Request[v1.ClickRequest]) (*connect.Response[v1.InputResponse], error) {
