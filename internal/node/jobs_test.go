@@ -290,29 +290,97 @@ func TestRunStubbornProcessIsKilledAfterGrace(t *testing.T) {
 	}
 }
 
-func TestRunCallerDisconnectKillsJob(t *testing.T) {
+func waitOutput(t *testing.T, c *collector, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(c.output(), want) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(c.output(), want) {
+		t.Fatalf("output %q never contained %q", c.output(), want)
+	}
+}
+
+func TestRunSurvivesDisconnectAndAttachResumes(t *testing.T) {
 	j := newJobs(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &collector{}
 	done := make(chan error, 1)
 	go func() {
-		done <- j.Run(ctx, &pb.RunJobRequest{JobId: "d1", Command: jobtest.Script("say:up", "sleep:300")}, c.send)
+		done <- j.Run(ctx, &pb.RunJobRequest{JobId: "d1", Command: jobtest.Script("say:up", "sleep:1", "say:down", "exit:7")}, c.send)
 	}()
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(c.output(), "up") && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitOutput(t, c, "up")
 	cancel()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("a disconnected run must report the context error")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("run did not stop after the caller went away")
+	if err := <-done; err == nil {
+		t.Fatal("a disconnected run must report the context error")
+	}
+	listed := j.List()
+	if len(listed) != 1 || listed[0].JobId != "d1" || !listed[0].Started || listed[0].Finished != nil || listed[0].LogBytes < 3 {
+		t.Fatalf("List after disconnect = %v", listed)
+	}
+
+	seen := uint64(len(c.output()))
+	c2 := &collector{}
+	if err := j.Attach(context.Background(), "d1", seen, c2.send); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := c.output()+c2.output(), "up\ndown\n"; got != want {
+		t.Fatalf("output across attach = %q, want %q", got, want)
+	}
+	if f := c2.finished(); f == nil || f.ExitCode != 7 || f.End != pb.JobEnd_JOB_END_EXITED {
+		t.Fatalf("finished = %v", f)
+	}
+	again := &collector{}
+	if err := j.Attach(context.Background(), "d1", 0, again.send); err != nil || again.output() != "up\ndown\n" || again.finished() == nil {
+		t.Fatalf("finished job must stay attachable: %v %q", err, again.output())
 	}
 	if j.Cancel("d1") {
-		t.Fatal("job still registered")
+		t.Fatal("a finished job is not cancelable")
+	}
+}
+
+func TestAttachErrors(t *testing.T) {
+	j := newJobs(t, 1)
+	c := &collector{}
+	if err := j.Run(context.Background(), &pb.RunJobRequest{JobId: "a1", Command: jobtest.Script("say:x")}, c.send); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		id     string
+		offset uint64
+		want   connect.Code
+	}{
+		{"unknown job", "nope", 0, connect.CodeNotFound},
+		{"offset past the output", "a1", 99, connect.CodeFailedPrecondition},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := j.Attach(context.Background(), tt.id, tt.offset, (&collector{}).send)
+			if connect.CodeOf(err) != tt.want {
+				t.Fatalf("code = %v (%v), want %v", connect.CodeOf(err), err, tt.want)
+			}
+		})
+	}
+}
+
+func TestFinishedJobsAreSweptAfterRetention(t *testing.T) {
+	j := newJobs(t, 1)
+	now := time.Now()
+	j.now = func() time.Time { return now }
+	if err := j.Run(context.Background(), &pb.RunJobRequest{JobId: "r1", Command: jobtest.Script("say:x")}, (&collector{}).send); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(retention - time.Minute)
+	if len(j.List()) != 1 {
+		t.Fatal("job dropped before its retention ended")
+	}
+	now = now.Add(2 * time.Minute)
+	if got := j.List(); len(got) != 0 {
+		t.Fatalf("job kept past retention: %v", got)
+	}
+	if _, err := os.Stat(j.runDir("r1")); !os.IsNotExist(err) {
+		t.Fatalf("run directory kept: %v", err)
 	}
 }
 

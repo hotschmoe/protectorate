@@ -49,6 +49,12 @@ const (
 	NodeAgentServiceUploadJobDataProcedure = "/protectorate.v1.NodeAgentService/UploadJobData"
 	// NodeAgentServiceRunJobProcedure is the fully-qualified name of the NodeAgentService's RunJob RPC.
 	NodeAgentServiceRunJobProcedure = "/protectorate.v1.NodeAgentService/RunJob"
+	// NodeAgentServiceAttachJobProcedure is the fully-qualified name of the NodeAgentService's
+	// AttachJob RPC.
+	NodeAgentServiceAttachJobProcedure = "/protectorate.v1.NodeAgentService/AttachJob"
+	// NodeAgentServiceListJobsProcedure is the fully-qualified name of the NodeAgentService's ListJobs
+	// RPC.
+	NodeAgentServiceListJobsProcedure = "/protectorate.v1.NodeAgentService/ListJobs"
 	// NodeAgentServiceCancelJobProcedure is the fully-qualified name of the NodeAgentService's
 	// CancelJob RPC.
 	NodeAgentServiceCancelJobProcedure = "/protectorate.v1.NodeAgentService/CancelJob"
@@ -114,9 +120,16 @@ type NodeAgentServiceClient interface {
 	// SHA-256 of the whole upload.
 	UploadJobData(context.Context, *connect.Request[v1.UploadJobDataRequest]) (*connect.Response[v1.UploadJobDataResponse], error)
 	// RunJob checks the source out, runs the command and streams its output;
-	// matching artifacts follow the exit. The job dies with the stream: if the
-	// caller disconnects, the process tree is killed.
+	// matching artifacts follow the exit. The job does not depend on the
+	// stream: if the caller disconnects it keeps running (bounded by its
+	// timeout) and AttachJob picks the stream up again.
 	RunJob(context.Context, *connect.Request[v1.RunJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error)
+	// AttachJob streams a job again from an output offset: started, the output
+	// from from_offset, then artifacts and the result once it ended. A finished
+	// job is kept for an hour. NOT_FOUND when the node never had the job.
+	AttachJob(context.Context, *connect.Request[v1.AttachJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error)
+	// ListJobs lists the jobs the node is running or still holds the result of.
+	ListJobs(context.Context, *connect.Request[v1.NodeAgentServiceListJobsRequest]) (*connect.Response[v1.NodeAgentServiceListJobsResponse], error)
 	// CancelJob kills a running job's process tree.
 	CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error)
 	// PutFile receives one chunk of a file or directory transfer into the
@@ -183,6 +196,19 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(nodeAgentServiceMethods.ByName("RunJob")),
 			connect.WithClientOptions(opts...),
 		),
+		attachJob: connect.NewClient[v1.AttachJobRequest, v1.JobEvent](
+			httpClient,
+			baseURL+NodeAgentServiceAttachJobProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("AttachJob")),
+			connect.WithClientOptions(opts...),
+		),
+		listJobs: connect.NewClient[v1.NodeAgentServiceListJobsRequest, v1.NodeAgentServiceListJobsResponse](
+			httpClient,
+			baseURL+NodeAgentServiceListJobsProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("ListJobs")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		cancelJob: connect.NewClient[v1.NodeAgentServiceCancelJobRequest, v1.NodeAgentServiceCancelJobResponse](
 			httpClient,
 			baseURL+NodeAgentServiceCancelJobProcedure,
@@ -235,6 +261,8 @@ type nodeAgentServiceClient struct {
 	prepareJob    *connect.Client[v1.PrepareJobRequest, v1.PrepareJobResponse]
 	uploadJobData *connect.Client[v1.UploadJobDataRequest, v1.UploadJobDataResponse]
 	runJob        *connect.Client[v1.RunJobRequest, v1.JobEvent]
+	attachJob     *connect.Client[v1.AttachJobRequest, v1.JobEvent]
+	listJobs      *connect.Client[v1.NodeAgentServiceListJobsRequest, v1.NodeAgentServiceListJobsResponse]
 	cancelJob     *connect.Client[v1.NodeAgentServiceCancelJobRequest, v1.NodeAgentServiceCancelJobResponse]
 	putFile       *connect.Client[v1.PutFileRequest, v1.PutFileResponse]
 	getFile       *connect.Client[v1.GetFileRequest, v1.GetFileResponse]
@@ -267,6 +295,16 @@ func (c *nodeAgentServiceClient) UploadJobData(ctx context.Context, req *connect
 // RunJob calls protectorate.v1.NodeAgentService.RunJob.
 func (c *nodeAgentServiceClient) RunJob(ctx context.Context, req *connect.Request[v1.RunJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error) {
 	return c.runJob.CallServerStream(ctx, req)
+}
+
+// AttachJob calls protectorate.v1.NodeAgentService.AttachJob.
+func (c *nodeAgentServiceClient) AttachJob(ctx context.Context, req *connect.Request[v1.AttachJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error) {
+	return c.attachJob.CallServerStream(ctx, req)
+}
+
+// ListJobs calls protectorate.v1.NodeAgentService.ListJobs.
+func (c *nodeAgentServiceClient) ListJobs(ctx context.Context, req *connect.Request[v1.NodeAgentServiceListJobsRequest]) (*connect.Response[v1.NodeAgentServiceListJobsResponse], error) {
+	return c.listJobs.CallUnary(ctx, req)
 }
 
 // CancelJob calls protectorate.v1.NodeAgentService.CancelJob.
@@ -319,9 +357,16 @@ type NodeAgentServiceHandler interface {
 	// SHA-256 of the whole upload.
 	UploadJobData(context.Context, *connect.Request[v1.UploadJobDataRequest]) (*connect.Response[v1.UploadJobDataResponse], error)
 	// RunJob checks the source out, runs the command and streams its output;
-	// matching artifacts follow the exit. The job dies with the stream: if the
-	// caller disconnects, the process tree is killed.
+	// matching artifacts follow the exit. The job does not depend on the
+	// stream: if the caller disconnects it keeps running (bounded by its
+	// timeout) and AttachJob picks the stream up again.
 	RunJob(context.Context, *connect.Request[v1.RunJobRequest], *connect.ServerStream[v1.JobEvent]) error
+	// AttachJob streams a job again from an output offset: started, the output
+	// from from_offset, then artifacts and the result once it ended. A finished
+	// job is kept for an hour. NOT_FOUND when the node never had the job.
+	AttachJob(context.Context, *connect.Request[v1.AttachJobRequest], *connect.ServerStream[v1.JobEvent]) error
+	// ListJobs lists the jobs the node is running or still holds the result of.
+	ListJobs(context.Context, *connect.Request[v1.NodeAgentServiceListJobsRequest]) (*connect.Response[v1.NodeAgentServiceListJobsResponse], error)
 	// CancelJob kills a running job's process tree.
 	CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error)
 	// PutFile receives one chunk of a file or directory transfer into the
@@ -384,6 +429,19 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		connect.WithSchema(nodeAgentServiceMethods.ByName("RunJob")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeAgentServiceAttachJobHandler := connect.NewServerStreamHandler(
+		NodeAgentServiceAttachJobProcedure,
+		svc.AttachJob,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("AttachJob")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeAgentServiceListJobsHandler := connect.NewUnaryHandler(
+		NodeAgentServiceListJobsProcedure,
+		svc.ListJobs,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("ListJobs")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	nodeAgentServiceCancelJobHandler := connect.NewUnaryHandler(
 		NodeAgentServiceCancelJobProcedure,
 		svc.CancelJob,
@@ -438,6 +496,10 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 			nodeAgentServiceUploadJobDataHandler.ServeHTTP(w, r)
 		case NodeAgentServiceRunJobProcedure:
 			nodeAgentServiceRunJobHandler.ServeHTTP(w, r)
+		case NodeAgentServiceAttachJobProcedure:
+			nodeAgentServiceAttachJobHandler.ServeHTTP(w, r)
+		case NodeAgentServiceListJobsProcedure:
+			nodeAgentServiceListJobsHandler.ServeHTTP(w, r)
 		case NodeAgentServiceCancelJobProcedure:
 			nodeAgentServiceCancelJobHandler.ServeHTTP(w, r)
 		case NodeAgentServicePutFileProcedure:
@@ -479,6 +541,14 @@ func (UnimplementedNodeAgentServiceHandler) UploadJobData(context.Context, *conn
 
 func (UnimplementedNodeAgentServiceHandler) RunJob(context.Context, *connect.Request[v1.RunJobRequest], *connect.ServerStream[v1.JobEvent]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.RunJob is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) AttachJob(context.Context, *connect.Request[v1.AttachJobRequest], *connect.ServerStream[v1.JobEvent]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.AttachJob is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) ListJobs(context.Context, *connect.Request[v1.NodeAgentServiceListJobsRequest]) (*connect.Response[v1.NodeAgentServiceListJobsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.ListJobs is not implemented"))
 }
 
 func (UnimplementedNodeAgentServiceHandler) CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error) {

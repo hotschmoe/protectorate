@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
+	"github.com/hotschmoe/protectorate/internal/keylog"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
 
@@ -40,6 +42,12 @@ const (
 	cancelBackstop    = 10 * time.Second
 	cancelWait        = 8 * time.Second
 	logReadChunk      = 64 << 10
+	// reconnectWindow bounds how long a stream that lost its node is retried
+	// before the job is failed.
+	reconnectWindow = 5 * time.Minute
+	// recoverGrace is how long past a job's timeout the hub keeps asking an
+	// unreachable node about it after a restart.
+	recoverGrace = 10 * time.Minute
 )
 
 var jobIDRe = regexp.MustCompile(`^[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$`)
@@ -49,6 +57,8 @@ type nodeExec interface {
 	Prepare(ctx context.Context, req *pb.PrepareJobRequest) (*pb.PrepareJobResponse, error)
 	Upload(ctx context.Context, req *pb.UploadJobDataRequest) (*pb.UploadJobDataResponse, error)
 	Run(ctx context.Context, req *pb.RunJobRequest, fn func(*pb.JobEvent) error) error
+	Attach(ctx context.Context, jobID string, from uint64, fn func(*pb.JobEvent) error) error
+	List(ctx context.Context) ([]*pb.NodeJob, error)
 	Cancel(ctx context.Context, jobID string) error
 }
 
@@ -65,6 +75,12 @@ func (l localExec) Upload(_ context.Context, req *pb.UploadJobDataRequest) (*pb.
 func (l localExec) Run(ctx context.Context, req *pb.RunJobRequest, fn func(*pb.JobEvent) error) error {
 	return l.jobs.Run(ctx, req, fn)
 }
+
+func (l localExec) Attach(ctx context.Context, id string, from uint64, fn func(*pb.JobEvent) error) error {
+	return l.jobs.Attach(ctx, id, from, fn)
+}
+
+func (l localExec) List(context.Context) ([]*pb.NodeJob, error) { return l.jobs.List(), nil }
 
 func (l localExec) Cancel(_ context.Context, id string) error {
 	l.jobs.Cancel(id)
@@ -107,6 +123,30 @@ func (r remoteExec) Run(ctx context.Context, req *pb.RunJobRequest, fn func(*pb.
 		}
 	}
 	return stream.Err()
+}
+
+func (r remoteExec) Attach(ctx context.Context, id string, from uint64, fn func(*pb.JobEvent) error) error {
+	stream, err := r.c.AttachJob(ctx, connect.NewRequest(&pb.AttachJobRequest{JobId: id, FromOffset: from}))
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	for stream.Receive() {
+		if err := fn(stream.Msg()); err != nil {
+			return err
+		}
+	}
+	return stream.Err()
+}
+
+func (r remoteExec) List(ctx context.Context) ([]*pb.NodeJob, error) {
+	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	defer cancel()
+	res, err := r.c.ListJobs(ctx, connect.NewRequest(&pb.NodeAgentServiceListJobsRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg.Jobs, nil
 }
 
 func (r remoteExec) Cancel(ctx context.Context, id string) error {
@@ -166,6 +206,9 @@ type JobManager struct {
 
 	mu   sync.Mutex
 	jobs map[string]*jobEntry
+	// pending are jobs that were active when the previous hub stopped; Recover
+	// reconciles them with their nodes.
+	pending []*jobEntry
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -173,13 +216,19 @@ type JobManager struct {
 }
 
 // OpenJobs loads the job records under dir. Jobs that were still active when
-// the previous hub stopped are marked failed.
+// the previous hub stopped stay active until Recover has asked their nodes.
 func OpenJobs(dir string, nodes *NodeMonitor, leases *LeaseTable, local *node.Jobs, emit func(kind, subject string, payload *structpb.Struct)) (*JobManager, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create jobs dir: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &JobManager{dir: dir, nodes: nodes, leases: leases, local: local, emit: emit, jobs: map[string]*jobEntry{}, keys: newSubmitKeys(time.Now), ctx: ctx, cancel: cancel}
+	keys, saved, err := keylog.Open(filepath.Join(dir, "request-ids.jsonl"), maxRequestIDs, time.Now)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	m.keys.restore(keys, saved)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -194,6 +243,9 @@ func OpenJobs(dir string, nodes *NodeMonitor, leases *LeaseTable, local *node.Jo
 			continue
 		}
 		m.jobs[e.job.Id] = e
+		if !terminal(e.job.State) {
+			m.pending = append(m.pending, e)
+		}
 	}
 	return m, nil
 }
@@ -210,15 +262,7 @@ func (m *JobManager) load(dir string) (*jobEntry, error) {
 	if fi, err := os.Stat(filepath.Join(dir, "job.log")); err == nil {
 		j.LogBytes = uint64(fi.Size())
 	}
-	e := &jobEntry{dir: dir, node: j.Node, job: j, wake: make(chan struct{})}
-	if !terminal(j.State) {
-		j.State, j.Error = pb.JobState_JOB_STATE_FAILED, "hub restarted while the job was active"
-		j.FinishedAt = timestamppb.Now()
-		if err := writeJob(dir, j); err != nil {
-			return nil, err
-		}
-	}
-	return e, nil
+	return &jobEntry{dir: dir, node: j.Node, job: j, wake: make(chan struct{})}, nil
 }
 
 func writeJob(dir string, j *pb.Job) error {
@@ -534,16 +578,35 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 func (m *JobManager) run(ctx context.Context, e *jobEntry, ex nodeExec, plan *sourcePlan, run *pb.RunJobRequest) {
 	defer m.wg.Done()
 	defer e.cancel()
-	err := m.drive(ctx, e, ex, plan, run)
-	if err != nil {
-		cctx, cancel := context.WithTimeout(context.Background(), cancelBackstop)
-		_ = ex.Cancel(cctx, run.JobId)
-		cancel()
-	}
+	m.settle(e, ex, m.drive(ctx, e, ex, plan, run))
+}
+
+// errLost marks a job the node cannot account for.
+type errLost struct{ reason string }
+
+func (e errLost) Error() string { return e.reason }
+
+// settle records how a job ended. A hub that is stopping leaves a job on a
+// remote node alone, active, for the next hub to reattach; the hub's own
+// node dies with it, so those jobs are canceled.
+func (m *JobManager) settle(e *jobEntry, ex nodeExec, err error) {
+	_, local := ex.(localExec)
 	e.mu.Lock()
 	canceled := e.cancelRequested
+	logf := e.log
 	e.mu.Unlock()
-	e.log.Close()
+	if logf != nil {
+		defer logf.Close()
+	}
+	if m.ctx.Err() != nil && !local && !canceled && !terminal(e.state()) {
+		return
+	}
+	var lost errLost
+	if err != nil && ex != nil && !errors.As(err, &lost) {
+		cctx, cancel := context.WithTimeout(context.Background(), cancelBackstop)
+		_ = ex.Cancel(cctx, e.job.Id)
+		cancel()
+	}
 	m.update(e, func(j *pb.Job) {
 		if j.FinishedAt == nil {
 			j.FinishedAt = timestamppb.Now()
@@ -561,6 +624,76 @@ func (m *JobManager) run(ctx context.Context, e *jobEntry, ex nodeExec, plan *so
 		}
 		j.ExitCode = -1
 	})
+}
+
+// Recover reconciles the jobs that were active when the previous hub stopped
+// with their nodes, in the background.
+func (m *JobManager) Recover() {
+	m.mu.Lock()
+	pending := m.pending
+	m.pending = nil
+	m.mu.Unlock()
+	for _, e := range pending {
+		ctx, cancel := context.WithCancel(m.ctx)
+		e.mu.Lock()
+		e.cancel = cancel
+		e.mu.Unlock()
+		m.wg.Add(1)
+		go m.recoverJob(ctx, e)
+	}
+}
+
+func (m *JobManager) recoverJob(ctx context.Context, e *jobEntry) {
+	defer m.wg.Done()
+	defer e.cancel()
+	ex, err := m.reconcile(ctx, e)
+	m.settle(e, ex, err)
+}
+
+// reconcile asks the job's node what it has, then follows the job to its end
+// from the log offset the hub already holds. It answers errLost only when a
+// reachable node says it never had the job.
+func (m *JobManager) reconcile(ctx context.Context, e *jobEntry) (nodeExec, error) {
+	logf, err := os.OpenFile(filepath.Join(e.dir, "job.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, errLost{fmt.Sprintf("lost after hub restart: %v", err)}
+	}
+	e.mu.Lock()
+	e.log = logf
+	e.mu.Unlock()
+	j, _ := e.snapshot()
+	deadline := j.SubmittedAt.AsTime().Add(j.Timeout.AsDuration() + recoverGrace)
+	var ex nodeExec
+	for delay := time.Second; ; delay = min(2*delay, 30*time.Second) {
+		n, err := m.nodes.info(e.node)
+		if err != nil {
+			return ex, errLost{fmt.Sprintf("lost after hub restart: node %s is no longer known", e.node)}
+		}
+		if n.Local && m.local == nil {
+			return ex, errLost{"lost after hub restart: the hub's own node runs no jobs"}
+		}
+		ex = m.execFor(n)
+		held, err := ex.List(ctx)
+		if err == nil {
+			if !slices.ContainsFunc(held, func(nj *pb.NodeJob) bool { return nj.JobId == e.job.Id }) {
+				return ex, errLost{fmt.Sprintf("lost: node %s has no record of the job (it restarted, or the hub stopped before the job reached it)", e.node)}
+			}
+			return ex, m.stream(ctx, e, ex, nil)
+		}
+		switch {
+		case ctx.Err() != nil:
+			return ex, ctx.Err()
+		case connect.CodeOf(err) == connect.CodeUnimplemented:
+			return ex, errLost{fmt.Sprintf("lost: node %s cannot report its jobs", e.node)}
+		case time.Now().After(deadline):
+			return ex, errLost{fmt.Sprintf("lost: node %s stayed unreachable after the hub restarted: %v", e.node, err)}
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return ex, ctx.Err()
+		}
+	}
 }
 
 func (m *JobManager) drive(ctx context.Context, e *jobEntry, ex nodeExec, plan *sourcePlan, run *pb.RunJobRequest) error {
@@ -708,6 +841,26 @@ func upload(ctx context.Context, ex nodeExec, jobID string, r io.Reader, before 
 	}
 }
 
+// retryable reports whether a stream error is the connection's, not the
+// node's answer.
+func retryable(err error) bool {
+	switch connect.CodeOf(err) {
+	case connect.CodeUnknown, connect.CodeUnavailable, connect.CodeDeadlineExceeded, connect.CodeInternal, connect.CodeAborted, connect.CodeCanceled:
+		return true
+	}
+	return false
+}
+
+func (e *jobEntry) logBytes() uint64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.job.LogBytes
+}
+
+// stream follows a job on its node to the result. With run it starts the job
+// first; without, it attaches to one the node already has. A lost connection
+// is resumed with AttachJob from the last output byte stored, for up to
+// reconnectWindow without progress.
 func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *pb.RunJobRequest) error {
 	e.mu.Lock()
 	if e.cancelRequested {
@@ -720,11 +873,16 @@ func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *
 	art := &artifactSink{dir: filepath.Join(e.dir, "artifacts")}
 	defer art.close()
 	var fin *pb.JobFinished
-	err := ex.Run(ctx, run, func(ev *pb.JobEvent) error {
+	lastProgress := time.Now()
+	handle := func(ev *pb.JobEvent) error {
+		lastProgress = time.Now()
 		switch v := ev.Event.(type) {
 		case *pb.JobEvent_Started:
 			m.update(e, func(j *pb.Job) {
-				j.State, j.StartedAt, j.WorkspaceReused = pb.JobState_JOB_STATE_RUNNING, timestamppb.Now(), v.Started.WorkspaceReused
+				j.State, j.WorkspaceReused = pb.JobState_JOB_STATE_RUNNING, v.Started.WorkspaceReused
+				if j.StartedAt == nil {
+					j.StartedAt = timestamppb.Now()
+				}
 			})
 		case *pb.JobEvent_Output:
 			m.appendLog(e, v.Output.Data)
@@ -734,7 +892,33 @@ func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *
 			fin = v.Finished
 		}
 		return nil
-	})
+	}
+
+	var err error
+	attach := run == nil
+	for delay := time.Second; ; delay = min(2*delay, 10*time.Second) {
+		art.reset()
+		if attach {
+			err = ex.Attach(ctx, e.job.Id, e.logBytes(), handle)
+		} else {
+			err = ex.Run(ctx, run, handle)
+		}
+		if fin != nil || ctx.Err() != nil {
+			break
+		}
+		if attach && run != nil && connect.CodeOf(err) == connect.CodeNotFound {
+			attach = false
+			continue
+		}
+		if err != nil && !retryable(err) || time.Since(lastProgress) > reconnectWindow {
+			break
+		}
+		attach = true
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+		}
+	}
 	if err := art.close(); err != nil && fin != nil && fin.Error == "" {
 		fin.Error = "store artifacts: " + err.Error()
 	}
@@ -811,6 +995,13 @@ func (a *artifactSink) write(c *pb.JobArtifactChunk) error {
 	return nil
 }
 
+// reset forgets a partly received set of artifacts: a reattach resends them
+// all.
+func (a *artifactSink) reset() {
+	a.close()
+	a.files, a.total = nil, 0
+}
+
 func (a *artifactSink) close() error {
 	if a.f == nil {
 		return nil
@@ -834,6 +1025,7 @@ func (m *JobManager) Cancel(ctx context.Context, id string) (*pb.Job, error) {
 	}
 	e.cancelRequested = true
 	streaming := e.streaming
+	stop := e.cancel
 	e.mu.Unlock()
 
 	n, err := m.nodes.info(e.node)
@@ -847,10 +1039,12 @@ func (m *JobManager) Cancel(ctx context.Context, id string) (*pb.Job, error) {
 			}
 		}()
 	}
-	if streaming {
-		time.AfterFunc(cancelBackstop, e.cancel)
-	} else {
-		e.cancel()
+	switch {
+	case stop == nil:
+	case streaming:
+		time.AfterFunc(cancelBackstop, stop)
+	default:
+		stop()
 	}
 
 	deadline := time.After(cancelWait)
@@ -942,10 +1136,15 @@ func (m *JobManager) Watch(ctx context.Context, id string, from uint64, follow b
 	}
 }
 
-// Shutdown cancels every active job and waits for the records to settle.
+// Shutdown stops following jobs and waits for the records to settle. Jobs on
+// remote nodes keep running and stay active in their records; jobs on the
+// hub's own node are canceled and marked failed.
 func (m *JobManager) Shutdown() {
 	m.cancel()
 	m.wg.Wait()
+	if m.keys.log != nil {
+		m.keys.log.Close()
+	}
 }
 
 func (h *Hub) SubmitJob(ctx context.Context, req *connect.Request[pb.SubmitJobRequest]) (*connect.Response[pb.Job], error) {

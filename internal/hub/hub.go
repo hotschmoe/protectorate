@@ -139,12 +139,16 @@ func (h *Hub) EnableJobs(home string, local *node.Jobs) error {
 	if h.deskPol, err = openDeskPolicies(filepath.Join(home, "desk-policies.yaml")); err != nil {
 		return err
 	}
+	if err := h.deskUse.open(filepath.Join(home, "desk-use.json")); err != nil {
+		return err
+	}
 	jobs, err := OpenJobs(filepath.Join(home, "jobs"), h.nodes, leases, local, h.emit)
 	if err != nil {
 		return err
 	}
 	leases.chooser, leases.onGrant = h.leaseChooserFromJSON, h.leaseGranted
 	h.leases, h.jobs = leases, jobs
+	jobs.Recover()
 	return nil
 }
 

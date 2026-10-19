@@ -25,8 +25,8 @@ a locked screen. A shell command either works or fails with a message.
 
 Use is visible, not limited: the node's status (`node <name>`, `node ls`,
 `desk policy <node>`) shows today's desk input commands per caller, for example
-`42 by sleeve api, 3 by owner`. The hub keeps the count in memory per local
-day, so it also resets when the hub restarts.
+`42 by sleeve api, 3 by owner`. The hub keeps the count per local
+day in `desk-use.json` in its state directory, so a restart does not reset it.
 
 ## File transfer
 

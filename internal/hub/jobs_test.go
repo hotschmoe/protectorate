@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,6 +47,11 @@ type jobEnv struct {
 	// peer agent ran its uninstall.
 	tn          *recordingAdmin
 	uninstalled atomic.Bool
+
+	invDir, agentAddr string
+	local             *node.Jobs
+	hubF              *node.Files
+	stop              func()
 }
 
 // newJobEnv wires a hub (node "hubhost") to one remote node agent ("peer") on
@@ -88,35 +94,53 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	agentSrv := httptest.NewServer(agent.Handler())
 	t.Cleanup(agentSrv.Close)
 
-	inv, err := OpenInventory(t.TempDir(), testSelf)
+	e.invDir, e.agentAddr, e.local = t.TempDir(), strings.TrimPrefix(agentSrv.URL, "http://"), local
+	inv, err := OpenInventory(e.invDir, testSelf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inv.Add(&pb.NodeInfo{Name: "peer", Address: strings.TrimPrefix(agentSrv.URL, "http://")}); err != nil {
+	if _, err := inv.Add(&pb.NodeInfo{Name: "peer", Address: e.agentAddr}); err != nil {
+		t.Fatal(err)
+	}
+	e.hubF = hubFiles
+	e.bootHub(t)
+	t.Cleanup(func() { e.stop() })
+	return e
+}
+
+// bootHub starts a hub on e.home, wired to the peer agent, and waits until
+// both nodes are fresh. The previous hub, if any, must have been stopped.
+func (e *jobEnv) bootHub(t *testing.T) {
+	t.Helper()
+	inv, err := OpenInventory(e.invDir, testSelf)
+	if err != nil {
 		t.Fatal(err)
 	}
 	h := New("test", testToken)
 	h.SetNodes(NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
 		NodeOptions{Interval: 100 * time.Millisecond, Token: agentToken}))
-	h.EnableNodeOps(hubFiles, &node.Desk{D: hubDesk})
-	if err := h.EnableJobs(home, local); err != nil {
+	h.EnableNodeOps(e.hubF, &node.Desk{D: e.hubDesk})
+	if err := h.EnableJobs(e.home, e.local); err != nil {
 		t.Fatal(err)
 	}
 	h.SetTailnetAdmin(e.tn)
 	srv := httptest.NewServer(h.Handler())
-	t.Cleanup(srv.Close)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); h.nodes.Run(ctx) }()
 	leasesDone := make(chan struct{})
 	go func() { defer close(leasesDone); h.leases.Run(ctx) }()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-		<-leasesDone
-		h.jobs.Shutdown()
-	})
+	var once sync.Once
+	e.stop = func() {
+		once.Do(func() {
+			cancel()
+			<-done
+			<-leasesDone
+			h.jobs.Shutdown()
+			srv.Close()
+		})
+	}
 
 	hc := &http.Client{Transport: bearer{testToken}}
 	e.h, e.srv = h, srv
@@ -131,7 +155,6 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 		}
 		return true
 	})
-	return e
 }
 
 func waitUntil(t *testing.T, d time.Duration, what string, cond func() bool) {
@@ -549,46 +572,150 @@ func TestSubmitValidation(t *testing.T) {
 	}
 }
 
-func TestRestartMarksActiveJobsFailed(t *testing.T) {
-	dir := t.TempDir()
-	id := "20260101-000000-deadbeef"
-	jd := filepath.Join(dir, id)
-	if err := os.MkdirAll(jd, 0o700); err != nil {
-		t.Fatal(err)
+func (e *jobEnv) restart(t *testing.T) {
+	t.Helper()
+	e.stop()
+	e.bootHub(t)
+}
+
+func TestJobSurvivesHubRestart(t *testing.T) {
+	e := newJobEnv(t, 1)
+	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:up", "sleep:2", "say:down", "exit:3")})
+	waitUntil(t, 10*time.Second, "first output", func() bool { return strings.Contains(e.logOf(t, j.Id), "up") })
+
+	e.restart(t)
+	if got := e.get(t, j.Id); terminal(got.State) {
+		t.Fatalf("job ended with the hub: %v", got)
 	}
-	j := &pb.Job{Id: id, State: pb.JobState_JOB_STATE_RUNNING, Node: "peer"}
-	if err := writeJob(jd, j); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(jd, "job.log"), []byte("partial"), 0o600)
-	m, err := OpenJobs(dir, nil, nil, nil, nil)
+	var offsets []uint64
+	var watched strings.Builder
+	stream, err := e.jc.WatchJob(context.Background(), connect.NewRequest(&pb.WatchJobRequest{Id: j.Id, FromOffset: 3, Follow: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := m.List(pb.JobState_JOB_STATE_UNSPECIFIED, 0)
-	if len(got) != 1 || got[0].State != pb.JobState_JOB_STATE_FAILED || got[0].LogBytes != 7 || !strings.Contains(got[0].Error, "restarted") {
-		t.Fatalf("after restart = %v", got)
+	var last *pb.Job
+	for stream.Receive() {
+		if l := stream.Msg().GetLog(); l != nil {
+			offsets = append(offsets, l.Offset)
+			watched.Write(l.Data)
+		}
+		if jj := stream.Msg().GetJob(); jj != nil {
+			last = jj
+		}
 	}
-	reopened, err := OpenJobs(dir, nil, nil, nil, nil)
-	if err != nil || reopened.List(pb.JobState_JOB_STATE_FAILED, 0)[0].Id != id {
-		t.Fatalf("persisted failure lost: %v", err)
+	if err := stream.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if watched.String() != "up\ndown\n"[3:] || offsets[0] != 3 {
+		t.Fatalf("watch from offset 3 got %q at %v", watched.String(), offsets)
+	}
+	if last == nil || last.State != pb.JobState_JOB_STATE_FAILED || last.ExitCode != 3 || last.Error != "exit status 3" {
+		t.Fatalf("final record = %v", last)
+	}
+	if got := e.logOf(t, j.Id); got != "up\ndown\n" {
+		t.Fatalf("log across restart = %q", got)
+	}
+	if last.StartedAt == nil || last.StartedAt.AsTime().After(last.FinishedAt.AsTime()) {
+		t.Fatalf("timestamps = %v %v", last.StartedAt, last.FinishedAt)
 	}
 }
 
-func TestShutdownCancelsRunningJobs(t *testing.T) {
+func TestRecoveredJobCanBeCanceled(t *testing.T) {
 	e := newJobEnv(t, 1)
 	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:up", "sleep:300")})
-	waitUntil(t, 10*time.Second, "running", func() bool { return e.get(t, j.Id).State == pb.JobState_JOB_STATE_RUNNING })
-	e.h.jobs.Shutdown()
-	got := e.get(t, j.Id)
-	if got.State != pb.JobState_JOB_STATE_FAILED || got.Error != "hub stopped" {
-		t.Fatalf("after shutdown = %v", got)
-	}
-	waitUntil(t, 5*time.Second, "node to drop the job", func() bool {
-		e.remote.Cancel(j.Id)
-		_, err := os.Stat(filepath.Join(e.remote.Dir(), "jobs", j.Id))
-		return os.IsNotExist(err)
+	waitUntil(t, 10*time.Second, "first output", func() bool { return strings.Contains(e.logOf(t, j.Id), "up") })
+	e.restart(t)
+	waitUntil(t, 10*time.Second, "reattached", func() bool {
+		e.h.jobs.mu.Lock()
+		defer e.h.jobs.mu.Unlock()
+		je := e.h.jobs.jobs[j.Id]
+		je.mu.Lock()
+		defer je.mu.Unlock()
+		return je.streaming
 	})
+	res, err := e.jc.CancelJob(context.Background(), connect.NewRequest(&pb.CancelJobRequest{Id: j.Id}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Msg.State != pb.JobState_JOB_STATE_CANCELED {
+		t.Fatalf("after cancel = %v", res.Msg)
+	}
+	waitUntil(t, 10*time.Second, "process gone", func() bool { return !e.remote.Cancel(j.Id) })
+}
+
+func TestRestartReconcilesRecordsWithNodes(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name     string
+		node     string
+		state    pb.JobState
+		age      time.Duration
+		wantLost string
+	}{
+		{"node reachable and never had the job", "peer", pb.JobState_JOB_STATE_RUNNING, 0, "no record of the job"},
+		{"job still preparing, node never got it", "peer", pb.JobState_JOB_STATE_PREPARING, 0, "no record of the job"},
+		{"node no longer in the inventory", "gone", pb.JobState_JOB_STATE_RUNNING, 0, "no longer known"},
+		{"node unreachable past the job's deadline", "ghost", pb.JobState_JOB_STATE_RUNNING, 3 * time.Hour, "stayed unreachable"},
+		{"node unreachable within the deadline", "ghost", pb.JobState_JOB_STATE_RUNNING, time.Minute, ""},
+	}
+	e := newJobEnv(t, 1)
+	e.stop()
+	inv, err := OpenInventory(e.invDir, testSelf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Add(&pb.NodeInfo{Name: "ghost", Address: "127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, len(tests))
+	for i, tt := range tests {
+		ids[i] = "2026010" + strconv.Itoa(i+1) + "-000000-deadbeef"
+		jd := filepath.Join(e.home, "jobs", ids[i])
+		if err := os.MkdirAll(jd, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		j := &pb.Job{Id: ids[i], State: tt.state, Node: tt.node, Timeout: durationpb.New(time.Hour), SubmittedAt: timestamppb.New(now.Add(-tt.age))}
+		if err := writeJob(jd, j); err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, filepath.Join(jd, "job.log"), []byte("partial"), 0o600)
+	}
+	e.bootHub(t)
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantLost == "" {
+				time.Sleep(300 * time.Millisecond)
+				if got := e.get(t, ids[i]); terminal(got.State) {
+					t.Fatalf("job given up on too early: %v", got)
+				}
+				return
+			}
+			got := e.wait(t, ids[i])
+			if got.State != pb.JobState_JOB_STATE_FAILED || !strings.Contains(got.Error, tt.wantLost) || got.LogBytes != 7 {
+				t.Fatalf("record = %v, want failed containing %q", got, tt.wantLost)
+			}
+		})
+	}
+}
+
+func TestShutdownLeavesRemoteJobsRunningAndStopsLocalOnes(t *testing.T) {
+	e := newJobEnv(t, 1)
+	remote := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:up", "sleep:300")})
+	localJob := e.submit(t, &pb.SubmitJobRequest{Target: onNode("hubhost"), Command: jobtest.Script("say:up", "sleep:300")})
+	for _, id := range []string{remote.Id, localJob.Id} {
+		waitUntil(t, 10*time.Second, "running", func() bool { return e.get(t, id).State == pb.JobState_JOB_STATE_RUNNING })
+	}
+	e.h.jobs.Shutdown()
+	if got := e.get(t, remote.Id); got.State != pb.JobState_JOB_STATE_RUNNING {
+		t.Fatalf("remote job after shutdown = %v", got)
+	}
+	if got := e.get(t, localJob.Id); got.State != pb.JobState_JOB_STATE_FAILED || got.Error != "hub stopped" {
+		t.Fatalf("local job after shutdown = %v", got)
+	}
+	if listed := e.remote.List(); len(listed) != 1 || listed[0].Finished != nil {
+		t.Fatalf("node dropped the job with the hub: %v", listed)
+	}
+	e.remote.Cancel(remote.Id)
 }
 
 func TestJobEventsAndScopes(t *testing.T) {
@@ -775,5 +902,28 @@ func TestArtifactDirectoryRunsInWorkdirAndKeepsModes(t *testing.T) {
 		if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm()&0o111 != want&0o111) {
 			t.Fatalf("%s = %v, %v; want mode %v", name, fi, err, want)
 		}
+	}
+}
+
+func TestSubmitRequestIDsSurviveHubRestart(t *testing.T) {
+	e := newJobEnv(t, 1)
+	const kept, canceledFirst = "request-persist-0001", "request-persist-0002"
+	first := e.submit(t, &pb.SubmitJobRequest{RequestId: kept, Target: onNode("peer"), Command: jobtest.Script("say:once")})
+	e.wait(t, first.Id)
+	if _, err := e.jc.CancelJob(context.Background(), connect.NewRequest(&pb.CancelJobRequest{RequestId: canceledFirst})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("cancel before submit: %v", err)
+	}
+
+	e.restart(t)
+	again := e.submit(t, &pb.SubmitJobRequest{RequestId: kept, Target: onNode("peer"), Command: jobtest.Script("say:once")})
+	if again.Id != first.Id {
+		t.Fatalf("request id forgotten across the restart: %s then %s", first.Id, again.Id)
+	}
+	if n := len(e.h.jobs.List(pb.JobState_JOB_STATE_UNSPECIFIED, 0)); n != 1 {
+		t.Fatalf("%d jobs after a deduped resubmit", n)
+	}
+	_, err := e.jc.SubmitJob(context.Background(), connect.NewRequest(&pb.SubmitJobRequest{RequestId: canceledFirst, Target: onNode("peer"), Command: jobtest.Script("say:late")}))
+	if connect.CodeOf(err) != connect.CodeAborted {
+		t.Fatalf("a submit canceled by its key before it arrived must stay refused after a restart: %v", err)
 	}
 }

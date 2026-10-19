@@ -2046,6 +2046,221 @@ func (x *NodeAgentServiceCancelJobResponse) GetFound() bool {
 	return false
 }
 
+type NodeAgentServiceListJobsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeAgentServiceListJobsRequest) Reset() {
+	*x = NodeAgentServiceListJobsRequest{}
+	mi := &file_protectorate_v1_job_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeAgentServiceListJobsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeAgentServiceListJobsRequest) ProtoMessage() {}
+
+func (x *NodeAgentServiceListJobsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_job_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeAgentServiceListJobsRequest.ProtoReflect.Descriptor instead.
+func (*NodeAgentServiceListJobsRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{26}
+}
+
+type NodeAgentServiceListJobsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Jobs          []*NodeJob             `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeAgentServiceListJobsResponse) Reset() {
+	*x = NodeAgentServiceListJobsResponse{}
+	mi := &file_protectorate_v1_job_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeAgentServiceListJobsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeAgentServiceListJobsResponse) ProtoMessage() {}
+
+func (x *NodeAgentServiceListJobsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_job_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeAgentServiceListJobsResponse.ProtoReflect.Descriptor instead.
+func (*NodeAgentServiceListJobsResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *NodeAgentServiceListJobsResponse) GetJobs() []*NodeJob {
+	if x != nil {
+		return x.Jobs
+	}
+	return nil
+}
+
+// NodeJob is a job the node holds: running, or finished and kept until the
+// hub has had time to collect the result.
+type NodeJob struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// started is true once the command was launched.
+	Started bool `protobuf:"varint,2,opt,name=started,proto3" json:"started,omitempty"`
+	// finished is set once the job ended; its artifacts are still held.
+	Finished *JobFinished `protobuf:"bytes,3,opt,name=finished,proto3" json:"finished,omitempty"`
+	// log_bytes is the size of the output so far; a reattach can resume at any
+	// offset up to it.
+	LogBytes      uint64                 `protobuf:"varint,4,opt,name=log_bytes,json=logBytes,proto3" json:"log_bytes,omitempty"`
+	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeJob) Reset() {
+	*x = NodeJob{}
+	mi := &file_protectorate_v1_job_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeJob) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeJob) ProtoMessage() {}
+
+func (x *NodeJob) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_job_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeJob.ProtoReflect.Descriptor instead.
+func (*NodeJob) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *NodeJob) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *NodeJob) GetStarted() bool {
+	if x != nil {
+		return x.Started
+	}
+	return false
+}
+
+func (x *NodeJob) GetFinished() *JobFinished {
+	if x != nil {
+		return x.Finished
+	}
+	return nil
+}
+
+func (x *NodeJob) GetLogBytes() uint64 {
+	if x != nil {
+		return x.LogBytes
+	}
+	return 0
+}
+
+func (x *NodeJob) GetFinishedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishedAt
+	}
+	return nil
+}
+
+type AttachJobRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// from_offset is the first output byte to send.
+	FromOffset    uint64 `protobuf:"varint,2,opt,name=from_offset,json=fromOffset,proto3" json:"from_offset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttachJobRequest) Reset() {
+	*x = AttachJobRequest{}
+	mi := &file_protectorate_v1_job_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttachJobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttachJobRequest) ProtoMessage() {}
+
+func (x *AttachJobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_job_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttachJobRequest.ProtoReflect.Descriptor instead.
+func (*AttachJobRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *AttachJobRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *AttachJobRequest) GetFromOffset() uint64 {
+	if x != nil {
+		return x.FromOffset
+	}
+	return 0
+}
+
 var File_protectorate_v1_job_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_job_proto_rawDesc = "" +
@@ -2191,7 +2406,21 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	" NodeAgentServiceCancelJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"9\n" +
 	"!NodeAgentServiceCancelJobResponse\x12\x14\n" +
-	"\x05found\x18\x01 \x01(\bR\x05found*\xb5\x01\n" +
+	"\x05found\x18\x01 \x01(\bR\x05found\"!\n" +
+	"\x1fNodeAgentServiceListJobsRequest\"P\n" +
+	" NodeAgentServiceListJobsResponse\x12,\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x18.protectorate.v1.NodeJobR\x04jobs\"\xce\x01\n" +
+	"\aNodeJob\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x18\n" +
+	"\astarted\x18\x02 \x01(\bR\astarted\x128\n" +
+	"\bfinished\x18\x03 \x01(\v2\x1c.protectorate.v1.JobFinishedR\bfinished\x12\x1b\n" +
+	"\tlog_bytes\x18\x04 \x01(\x04R\blogBytes\x12;\n" +
+	"\vfinished_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"finishedAt\"J\n" +
+	"\x10AttachJobRequest\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1f\n" +
+	"\vfrom_offset\x18\x02 \x01(\x04R\n" +
+	"fromOffset*\xb5\x01\n" +
 	"\bJobState\x12\x19\n" +
 	"\x15JOB_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13JOB_STATE_PREPARING\x10\x01\x12\x15\n" +
@@ -2227,7 +2456,7 @@ func file_protectorate_v1_job_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_protectorate_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_protectorate_v1_job_proto_goTypes = []any{
 	(JobState)(0),                             // 0: protectorate.v1.JobState
 	(JobEnd)(0),                               // 1: protectorate.v1.JobEnd
@@ -2257,20 +2486,24 @@ var file_protectorate_v1_job_proto_goTypes = []any{
 	(*JobEvent)(nil),                          // 25: protectorate.v1.JobEvent
 	(*NodeAgentServiceCancelJobRequest)(nil),  // 26: protectorate.v1.NodeAgentServiceCancelJobRequest
 	(*NodeAgentServiceCancelJobResponse)(nil), // 27: protectorate.v1.NodeAgentServiceCancelJobResponse
-	nil,                           // 28: protectorate.v1.SubmitJobRequest.EnvEntry
-	nil,                           // 29: protectorate.v1.RunJobRequest.EnvEntry
-	(*NodeSelector)(nil),          // 30: protectorate.v1.NodeSelector
-	(*durationpb.Duration)(nil),   // 31: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 32: google.protobuf.Timestamp
+	(*NodeAgentServiceListJobsRequest)(nil),   // 28: protectorate.v1.NodeAgentServiceListJobsRequest
+	(*NodeAgentServiceListJobsResponse)(nil),  // 29: protectorate.v1.NodeAgentServiceListJobsResponse
+	(*NodeJob)(nil),                           // 30: protectorate.v1.NodeJob
+	(*AttachJobRequest)(nil),                  // 31: protectorate.v1.AttachJobRequest
+	nil,                                       // 32: protectorate.v1.SubmitJobRequest.EnvEntry
+	nil,                                       // 33: protectorate.v1.RunJobRequest.EnvEntry
+	(*NodeSelector)(nil),                      // 34: protectorate.v1.NodeSelector
+	(*durationpb.Duration)(nil),               // 35: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),             // 36: google.protobuf.Timestamp
 }
 var file_protectorate_v1_job_proto_depIdxs = []int32{
-	30, // 0: protectorate.v1.JobTarget.selector:type_name -> protectorate.v1.NodeSelector
+	34, // 0: protectorate.v1.JobTarget.selector:type_name -> protectorate.v1.NodeSelector
 	3,  // 1: protectorate.v1.JobSource.git:type_name -> protectorate.v1.GitSource
 	4,  // 2: protectorate.v1.JobSource.artifact:type_name -> protectorate.v1.ArtifactSource
 	2,  // 3: protectorate.v1.SubmitJobRequest.target:type_name -> protectorate.v1.JobTarget
 	5,  // 4: protectorate.v1.SubmitJobRequest.source:type_name -> protectorate.v1.JobSource
-	28, // 5: protectorate.v1.SubmitJobRequest.env:type_name -> protectorate.v1.SubmitJobRequest.EnvEntry
-	31, // 6: protectorate.v1.SubmitJobRequest.timeout:type_name -> google.protobuf.Duration
+	32, // 5: protectorate.v1.SubmitJobRequest.env:type_name -> protectorate.v1.SubmitJobRequest.EnvEntry
+	35, // 6: protectorate.v1.SubmitJobRequest.timeout:type_name -> google.protobuf.Duration
 	0,  // 7: protectorate.v1.ListJobsRequest.state:type_name -> protectorate.v1.JobState
 	15, // 8: protectorate.v1.ListJobsResponse.jobs:type_name -> protectorate.v1.Job
 	15, // 9: protectorate.v1.WatchJobResponse.job:type_name -> protectorate.v1.Job
@@ -2278,36 +2511,39 @@ var file_protectorate_v1_job_proto_depIdxs = []int32{
 	0,  // 11: protectorate.v1.Job.state:type_name -> protectorate.v1.JobState
 	2,  // 12: protectorate.v1.Job.target:type_name -> protectorate.v1.JobTarget
 	5,  // 13: protectorate.v1.Job.source:type_name -> protectorate.v1.JobSource
-	31, // 14: protectorate.v1.Job.timeout:type_name -> google.protobuf.Duration
-	32, // 15: protectorate.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
-	32, // 16: protectorate.v1.Job.started_at:type_name -> google.protobuf.Timestamp
-	32, // 17: protectorate.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	31, // 18: protectorate.v1.Job.transfer_time:type_name -> google.protobuf.Duration
-	31, // 19: protectorate.v1.Job.run_time:type_name -> google.protobuf.Duration
+	35, // 14: protectorate.v1.Job.timeout:type_name -> google.protobuf.Duration
+	36, // 15: protectorate.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
+	36, // 16: protectorate.v1.Job.started_at:type_name -> google.protobuf.Timestamp
+	36, // 17: protectorate.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
+	35, // 18: protectorate.v1.Job.transfer_time:type_name -> google.protobuf.Duration
+	35, // 19: protectorate.v1.Job.run_time:type_name -> google.protobuf.Duration
 	14, // 20: protectorate.v1.Job.artifacts:type_name -> protectorate.v1.JobArtifact
-	29, // 21: protectorate.v1.RunJobRequest.env:type_name -> protectorate.v1.RunJobRequest.EnvEntry
-	31, // 22: protectorate.v1.RunJobRequest.timeout:type_name -> google.protobuf.Duration
+	33, // 21: protectorate.v1.RunJobRequest.env:type_name -> protectorate.v1.RunJobRequest.EnvEntry
+	35, // 22: protectorate.v1.RunJobRequest.timeout:type_name -> google.protobuf.Duration
 	1,  // 23: protectorate.v1.JobFinished.end:type_name -> protectorate.v1.JobEnd
-	31, // 24: protectorate.v1.JobFinished.run_time:type_name -> google.protobuf.Duration
+	35, // 24: protectorate.v1.JobFinished.run_time:type_name -> google.protobuf.Duration
 	21, // 25: protectorate.v1.JobEvent.started:type_name -> protectorate.v1.JobStarted
 	22, // 26: protectorate.v1.JobEvent.output:type_name -> protectorate.v1.JobOutput
 	23, // 27: protectorate.v1.JobEvent.artifact:type_name -> protectorate.v1.JobArtifactChunk
 	24, // 28: protectorate.v1.JobEvent.finished:type_name -> protectorate.v1.JobFinished
-	6,  // 29: protectorate.v1.JobService.SubmitJob:input_type -> protectorate.v1.SubmitJobRequest
-	7,  // 30: protectorate.v1.JobService.GetJob:input_type -> protectorate.v1.GetJobRequest
-	8,  // 31: protectorate.v1.JobService.ListJobs:input_type -> protectorate.v1.ListJobsRequest
-	10, // 32: protectorate.v1.JobService.CancelJob:input_type -> protectorate.v1.CancelJobRequest
-	11, // 33: protectorate.v1.JobService.WatchJob:input_type -> protectorate.v1.WatchJobRequest
-	15, // 34: protectorate.v1.JobService.SubmitJob:output_type -> protectorate.v1.Job
-	15, // 35: protectorate.v1.JobService.GetJob:output_type -> protectorate.v1.Job
-	9,  // 36: protectorate.v1.JobService.ListJobs:output_type -> protectorate.v1.ListJobsResponse
-	15, // 37: protectorate.v1.JobService.CancelJob:output_type -> protectorate.v1.Job
-	12, // 38: protectorate.v1.JobService.WatchJob:output_type -> protectorate.v1.WatchJobResponse
-	34, // [34:39] is the sub-list for method output_type
-	29, // [29:34] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	30, // 29: protectorate.v1.NodeAgentServiceListJobsResponse.jobs:type_name -> protectorate.v1.NodeJob
+	24, // 30: protectorate.v1.NodeJob.finished:type_name -> protectorate.v1.JobFinished
+	36, // 31: protectorate.v1.NodeJob.finished_at:type_name -> google.protobuf.Timestamp
+	6,  // 32: protectorate.v1.JobService.SubmitJob:input_type -> protectorate.v1.SubmitJobRequest
+	7,  // 33: protectorate.v1.JobService.GetJob:input_type -> protectorate.v1.GetJobRequest
+	8,  // 34: protectorate.v1.JobService.ListJobs:input_type -> protectorate.v1.ListJobsRequest
+	10, // 35: protectorate.v1.JobService.CancelJob:input_type -> protectorate.v1.CancelJobRequest
+	11, // 36: protectorate.v1.JobService.WatchJob:input_type -> protectorate.v1.WatchJobRequest
+	15, // 37: protectorate.v1.JobService.SubmitJob:output_type -> protectorate.v1.Job
+	15, // 38: protectorate.v1.JobService.GetJob:output_type -> protectorate.v1.Job
+	9,  // 39: protectorate.v1.JobService.ListJobs:output_type -> protectorate.v1.ListJobsResponse
+	15, // 40: protectorate.v1.JobService.CancelJob:output_type -> protectorate.v1.Job
+	12, // 41: protectorate.v1.JobService.WatchJob:output_type -> protectorate.v1.WatchJobResponse
+	37, // [37:42] is the sub-list for method output_type
+	32, // [32:37] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_job_proto_init() }
@@ -2342,7 +2578,7 @@ func file_protectorate_v1_job_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_job_proto_rawDesc), len(file_protectorate_v1_job_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   28,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

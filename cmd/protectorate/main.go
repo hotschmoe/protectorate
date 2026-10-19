@@ -24,6 +24,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/backup"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/quota"
 	"github.com/hotschmoe/protectorate/internal/session"
@@ -155,13 +156,17 @@ func hubCmd() *cobra.Command {
 	var quotaInterval, deadRetention time.Duration
 	var localURLs, localModelHosts []string
 	var nodeInterval, ackTimeout time.Duration
-	var nodeTokenFile string
+	var nodeTokenFile, backupDir string
+	var backupEvery time.Duration
 	var watch, toolDirs []string
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the hub API",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if backupDir != "" && backupEvery <= 0 {
+				return errors.New("--backup-every must be positive")
+			}
 			tok, err := hub.EnsureToken()
 			if err != nil {
 				return err
@@ -219,9 +224,24 @@ func hubCmd() *cobra.Command {
 			if err := attachSleeves(ctx, h, toolDirs); err != nil {
 				return err
 			}
+			if backupDir != "" {
+				bctx, bstop := context.WithCancel(ctx)
+				backups := make(chan struct{})
+				go func() {
+					defer close(backups)
+					backup.Run(bctx, backup.Options{Home: home, Dir: backupDir, Version: version}, backupEvery,
+						func(format string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) })
+				}()
+				defer func() {
+					bstop()
+					<-backups
+				}()
+			}
 			return h.Serve(ctx, l, ts.Extra...)
 		},
 	}
+	serve.Flags().StringVar(&backupDir, "backup-dir", "", "write hub backups here (see hub backup); old ones are never deleted")
+	serve.Flags().DurationVar(&backupEvery, "backup-every", 6*time.Hour, "how often to back up when --backup-dir is set")
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
 	serve.Flags().DurationVar(&ackTimeout, "msg-ack-timeout", 30*time.Minute, "how long an ack-required message may stay unacked before it is re-delivered, and again before it is escalated to the orchestrator")
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
@@ -237,7 +257,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: ~/.local/share/protectorate/bin when it exists, else the directory of this executable)")
 	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
-	c.AddCommand(serve, hubTailnetCmd())
+	c.AddCommand(serve, hubTailnetCmd(), hubBackupCmd(), hubRestoreCmd())
 	return c
 }
 
