@@ -44,7 +44,7 @@ protectorate.exe service install-windows --home C:\ProgramData\protectorate > in
 REM review install.cmd, then run it from an elevated prompt
 ```
 
-A process started over SSH keeps running after the session closes, so do not use that for the long-running agent. Alternative without service rights: `protectorate.exe service windows-task --trigger logon --write .` then `schtasks /Create /TN protectorate-node /XML protectorate-node.xml`.
+Do not rely on an SSH session for the long-running agent: its lifetime depends on how it was started. A plain foreground run dies with the session, `Start-Process -WindowStyle Hidden` from an SSH PowerShell also died when the session ended, while a process created through WMI (`Invoke-CimMethod Win32_Process -MethodName Create`) or one left over from an interrupted session kept running unsupervised. Use a service or scheduled task. Alternative without service rights: `protectorate.exe service windows-task --trigger logon --write .` then `schtasks /Create /TN protectorate-node /XML protectorate-node.xml`.
 
 ### Android (Termux)
 
