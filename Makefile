@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 TARGETS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 android/arm64
 
-.PHONY: gen build test vet cross
+.PHONY: gen build test vet cross app-check
 
 gen:
 	buf lint
@@ -22,3 +22,6 @@ cross:
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/protectorate || exit 1; \
 		ls -l $$out; \
 	done
+
+app-check:
+	cd app && flutter analyze && flutter test

@@ -34,13 +34,15 @@ Forbidden unless I give the exact command and explicit approval in the same mess
 ```
 proto/protectorate/v1/   API schema (the only API definition)
 gen/                     generated Go, committed
+app/                     Flutter client (app/lib/gen is generated Dart, committed)
 cmd/protectorate/        cobra CLI (thin)
 internal/hub/            Connect service implementations
 ```
 
 ```
-make gen     # buf lint + generate (needs buf, protoc-gen-go, protoc-gen-connect-go via go install)
+make gen     # buf lint + generate (needs buf, protoc-gen-go, protoc-gen-connect-go via go install; protoc-gen-dart and protoc-gen-connect-dart via dart pub global activate protoc_plugin / connectrpc, on PATH from ~/.pub-cache/bin)
 make build   # bin/protectorate
+make app-check  # flutter analyze + test in app/
 make test    # go vet + go test -race
 make cross   # linux/windows amd64+arm64 and android/arm64 into bin/
 gofmt -l .   # must print nothing

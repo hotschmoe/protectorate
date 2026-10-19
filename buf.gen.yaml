@@ -6,9 +6,9 @@ plugins:
   - local: protoc-gen-connect-go
     out: gen
     opt: paths=source_relative
-  # Dart client, to be wired by the Flutter workstream. Requires
-  # `dart pub global activate protoc_plugin` and connectrpc's protoc-gen-connect-dart.
-  # - local: protoc-gen-dart
-  #   out: app/lib/gen
-  # - local: protoc-gen-connect-dart
-  #   out: app/lib/gen
+  # Needs `dart pub global activate protoc_plugin` and `dart pub global activate connectrpc`.
+  # Do not pass the grpc option to protoc-gen-dart.
+  - local: protoc-gen-dart
+    out: app/lib/gen
+  - local: protoc-gen-connect-dart
+    out: app/lib/gen

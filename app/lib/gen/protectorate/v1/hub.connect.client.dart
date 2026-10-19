@@ -1,0 +1,27 @@
+//
+//  Generated code. Do not modify.
+//  source: protectorate/v1/hub.proto
+//
+
+import "package:connectrpc/connect.dart" as connect;
+import "hub.pb.dart" as protectoratev1hub;
+import "hub.connect.spec.dart" as specs;
+
+extension type HubServiceClient (connect.Transport _transport) {
+  Future<protectoratev1hub.GetStatusResponse> getStatus(
+    protectoratev1hub.GetStatusRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.HubService.getStatus,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+}
