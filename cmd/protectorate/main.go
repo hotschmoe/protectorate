@@ -22,6 +22,7 @@ import (
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/quota"
+	"github.com/hotschmoe/protectorate/internal/session"
 )
 
 var version = "dev"
@@ -75,13 +76,20 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), eventsCmd(o), apiCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), statusCmd(o), quotaCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), versionCmd(o))
 	return root
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
-	var listen string
+	var listen, tmuxSocket string
 	var quotaInterval time.Duration
 	var localURLs []string
 	serve := &cobra.Command{
@@ -105,6 +113,7 @@ func hubCmd() *cobra.Command {
 				readers = append(readers, quota.NewLocal(u))
 			}
 			h := hub.New(version, tok)
+			h.Sessions = session.New(tmuxSocket)
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
 			return h.Serve(ctx, l)
 		},
@@ -112,6 +121,8 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")
 	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")
+	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
+		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
 	c.AddCommand(serve)
 	return c
 }

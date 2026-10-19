@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// SessionService manages tmux-backed harness sessions. Interactive access is
+// the WebSocket terminal at GET /ws/terminal/{name}, not an RPC.
+service SessionService {
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc KillSession(KillSessionRequest) returns (KillSessionResponse);
+  rpc CapturePane(CapturePaneRequest) returns (CapturePaneResponse);
+}
+
+message Session {
+  string name = 1;
+  // Current working directory of the session's active pane.
+  string cwd = 2;
+  // argv the session was started with; empty for the default shell.
+  repeated string command = 3;
+  google.protobuf.Timestamp created_at = 4;
+  int32 attached_clients = 5;
+  google.protobuf.Timestamp last_activity = 6;
+  int32 pane_cols = 7;
+  int32 pane_rows = 8;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
+
+message CreateSessionRequest {
+  string name = 1;
+  string cwd = 2;
+  repeated string command = 3;
+  map<string, string> env = 4;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+message KillSessionRequest {
+  string name = 1;
+}
+
+message KillSessionResponse {}
+
+message CapturePaneRequest {
+  string name = 1;
+  // Number of history lines above the visible screen to include.
+  int32 lines = 2;
+}
+
+message CapturePaneResponse {
+  // Pane text with ANSI SGR escapes preserved and wrapped lines joined.
+  string text = 1;
+}

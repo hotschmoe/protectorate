@@ -25,6 +25,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/session"
 )
 
 type Hub struct {
@@ -36,10 +37,26 @@ type Hub struct {
 	seq     atomic.Uint64
 	quota   *QuotaCache
 	events  eventBus
+
+	Sessions     *session.Manager
+	SessionPoll  time.Duration
+	PingInterval time.Duration
+
+	scanMu sync.Mutex
+	known  map[string]session.Session
+	seeded bool
 }
 
 func New(version, token string) *Hub {
-	h := &Hub{Version: version, Heartbeat: 5 * time.Second, token: token, started: time.Now()}
+	h := &Hub{
+		Version:      version,
+		Heartbeat:    5 * time.Second,
+		Sessions:     session.New(session.DefaultSocket),
+		SessionPoll:  time.Second,
+		PingInterval: 20 * time.Second,
+		token:        token,
+		started:      time.Now(),
+	}
 	h.SetQuota(NewQuotaCache(nil, QuotaOptions{}))
 	return h
 }
@@ -142,6 +159,8 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewHubServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewEventServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
+	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	return mux
 }
 
@@ -166,6 +185,10 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener) error {
 		defer close(pollDone)
 		h.quota.Run(pollCtx)
 	}()
+
+	watchDone := make(chan struct{})
+	go func() { defer close(watchDone); h.WatchSessions(ctx) }()
+	defer func() { <-watchDone }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
@@ -237,9 +260,13 @@ func (h *Hub) heartbeat() *pb.Event {
 
 type authInterceptor struct{ token string }
 
+func tokenMatches(want, got string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
 func (a authInterceptor) check(header http.Header) error {
 	got, ok := strings.CutPrefix(header.Get("Authorization"), "Bearer ")
-	if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(a.token)) != 1 {
+	if !ok || !tokenMatches(a.token, got) {
 		return connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("missing or invalid bearer token"))
 	}
 	return nil
