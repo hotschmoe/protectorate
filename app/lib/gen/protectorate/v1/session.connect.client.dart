@@ -36,7 +36,8 @@ extension type SessionServiceClient (connect.Transport _transport) {
   }
 
   /// CreateSession starts a detached tmux session running command, or the
-  /// default shell when command is empty.
+  /// default shell when command is empty. Names starting with "sleeve-" are
+  /// reserved for sleeves and fail with FAILED_PRECONDITION.
   Future<protectoratev1session.CreateSessionResponse> createSession(
     protectoratev1session.CreateSessionRequest input, {
     connect.Headers? headers,
@@ -75,9 +76,8 @@ extension type SessionServiceClient (connect.Transport _transport) {
 
   /// RespawnSession restarts an exited session with its original command and
   /// working directory. The previous output stays in scrollback. It fails with
-  /// FAILED_PRECONDITION while the session is still running. Respawning a sleeve
-  /// session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve
-  /// to restart a sleeve.
+  /// FAILED_PRECONDITION while the session is still running, and for sessions
+  /// named "sleeve-*", which only SleeveService.SpawnSleeve may restart.
   Future<protectoratev1session.RespawnSessionResponse> respawnSession(
     protectoratev1session.RespawnSessionRequest input, {
     connect.Headers? headers,

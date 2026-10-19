@@ -73,6 +73,11 @@ func TestSessionRPC(t *testing.T) {
 		{"create duplicate", func() error { return create("one") }, connect.CodeAlreadyExists},
 		{"create bad name", func() error { return create("a:b") }, connect.CodeInvalidArgument},
 		{"create empty name", func() error { return create("") }, connect.CodeInvalidArgument},
+		{"create reserved sleeve name", func() error { return create("sleeve-x") }, connect.CodeFailedPrecondition},
+		{"respawn reserved sleeve name", func() error {
+			_, err := c.RespawnSession(ctx, connect.NewRequest(&pb.RespawnSessionRequest{Name: "sleeve-x"}))
+			return err
+		}, connect.CodeFailedPrecondition},
 		{"kill missing", func() error {
 			_, err := c.KillSession(ctx, connect.NewRequest(&pb.KillSessionRequest{Name: "ghost"}))
 			return err

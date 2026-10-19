@@ -12,6 +12,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/session"
+	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
 const (
@@ -71,6 +72,9 @@ func (h *Hub) ListSessions(ctx context.Context, _ *connect.Request[pb.ListSessio
 
 func (h *Hub) CreateSession(ctx context.Context, req *connect.Request[pb.CreateSessionRequest]) (*connect.Response[pb.CreateSessionResponse], error) {
 	m := req.Msg
+	if err := refuseSleeveSession(m.Name); err != nil {
+		return nil, err
+	}
 	s, err := h.Sessions.Create(ctx, session.CreateOptions{Name: m.Name, Cwd: m.Cwd, Command: m.Command, Env: m.Env})
 	if err != nil {
 		return nil, sessionErr(err)
@@ -88,6 +92,9 @@ func (h *Hub) KillSession(ctx context.Context, req *connect.Request[pb.KillSessi
 }
 
 func (h *Hub) RespawnSession(ctx context.Context, req *connect.Request[pb.RespawnSessionRequest]) (*connect.Response[pb.RespawnSessionResponse], error) {
+	if err := refuseSleeveSession(req.Msg.Name); err != nil {
+		return nil, err
+	}
 	s, err := h.Sessions.Respawn(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, sessionErr(err)
@@ -176,4 +183,14 @@ func (h *Hub) publishSession(kind string, s session.Session) {
 		Subject: s.Name,
 		Payload: payload,
 	})
+}
+
+// refuseSleeveSession keeps plain session RPCs from creating or respawning a
+// session under a sleeve's reserved name, which would run it outside the
+// sandbox.
+func refuseSleeveSession(name string) error {
+	if sleeve.IsSleeveSession(name) {
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("session names starting with \"sleeve-\" are reserved for sleeves; use SpawnSleeve"))
+	}
+	return nil
 }

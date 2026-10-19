@@ -280,7 +280,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "CreateSession starts a detached tmux session running command, or the default shell when command is empty.",
+    "description": "CreateSession starts a detached tmux session running command, or the default shell when command is empty. Names starting with \"sleeve-\" are reserved for sleeves and fail with FAILED_PRECONDITION.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -352,7 +352,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "RespawnSession restarts an exited session with its original command and working directory. The previous output stays in scrollback. It fails with FAILED_PRECONDITION while the session is still running. Respawning a sleeve session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve to restart a sleeve.",
+    "description": "RespawnSession restarts an exited session with its original command and working directory. The previous output stays in scrollback. It fails with FAILED_PRECONDITION while the session is still running, and for sessions named \"sleeve-*\", which only SleeveService.SpawnSleeve may restart.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

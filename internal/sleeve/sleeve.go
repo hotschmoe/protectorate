@@ -73,6 +73,11 @@ func ValidName(name string) error {
 func UnitName(name string) string    { return unitPrefix + name }
 func SessionName(name string) string { return sessionPrefix + name }
 
+// IsSleeveSession reports whether a session name is reserved for sleeves.
+// Such sessions must only be started through the sleeve manager, which wraps
+// them in the sandbox; plain session RPCs must refuse them.
+func IsSleeveSession(name string) bool { return strings.HasPrefix(name, sessionPrefix) }
+
 func (l Limits) validate() error {
 	if l.MemoryBytes != 0 && l.MemoryBytes < minMemoryBytes {
 		return fmt.Errorf("%w: memory limit must be at least 64 MiB", ErrInvalid)

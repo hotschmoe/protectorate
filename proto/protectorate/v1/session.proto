@@ -24,7 +24,8 @@ service SessionService {
   }
 
   // CreateSession starts a detached tmux session running command, or the
-  // default shell when command is empty.
+  // default shell when command is empty. Names starting with "sleeve-" are
+  // reserved for sleeves and fail with FAILED_PRECONDITION.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
 
   // KillSession terminates a session and every process in it. It also removes
@@ -35,9 +36,8 @@ service SessionService {
 
   // RespawnSession restarts an exited session with its original command and
   // working directory. The previous output stays in scrollback. It fails with
-  // FAILED_PRECONDITION while the session is still running. Respawning a sleeve
-  // session directly bypasses the sleeve sandbox; use SleeveService.SpawnSleeve
-  // to restart a sleeve.
+  // FAILED_PRECONDITION while the session is still running, and for sessions
+  // named "sleeve-*", which only SleeveService.SpawnSleeve may restart.
   rpc RespawnSession(RespawnSessionRequest) returns (RespawnSessionResponse);
 
   // CapturePane returns the current text of a session's active pane. It also
