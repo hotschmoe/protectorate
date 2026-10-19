@@ -261,8 +261,12 @@ func writeNodeList(w io.Writer, r *pb.ListNodesResponse) {
 		if n.Local {
 			name += "*"
 		}
+		deskS := deskStatusLabel(s.Desk, s.DeskHolder, s.Desk.GetPolicy() != nil)
+		if n := deskInputsTotal(s.DeskInputs); n > 0 {
+			deskS += fmt.Sprintf(" (%d inputs today)", n)
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			name, plat, verS, cpuS, gpuS, memS, diskS, contS, deskStatusLabel(s.Desk, s.DeskHolder, s.Desk.GetPolicy() != nil), nodeFreshnessLabel(s), alertLabel(s.Alerts))
+			name, plat, verS, cpuS, gpuS, memS, diskS, contS, deskS, nodeFreshnessLabel(s), alertLabel(s.Alerts))
 	}
 	fmt.Fprintln(w, "\n* the hub's own node")
 	if skew {
@@ -288,6 +292,9 @@ func writeNodeStatus(w io.Writer, s *pb.NodeStatus) {
 	fmt.Fprintf(w, "freshness\t%s\n", nodeFreshnessLabel(s))
 	if s.Desk != nil || s.DeskHolder != "" {
 		fmt.Fprintf(w, "desk\t%s\n", deskStatusLabel(s.Desk, s.DeskHolder, s.Desk.GetPolicy() != nil))
+	}
+	if len(s.DeskInputs) > 0 {
+		fmt.Fprintf(w, "desk inputs today\t%s\n", deskInputsLabel(s.DeskInputs))
 	}
 	if s.Error != "" {
 		fmt.Fprintf(w, "last error\t%s\n", s.Error)

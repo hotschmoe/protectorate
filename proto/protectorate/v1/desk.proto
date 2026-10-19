@@ -20,6 +20,11 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // Protectorate-Desk-Lease-Expires response headers), renew the caller's own,
 // or refuse when another holder has it. Coordinates are pixels of the
 // screenshot, whose origin is the top-left of the virtual screen.
+//
+// The desktop is the last resort. Prefer, in this order: the program's own API
+// or batch/CLI mode; `protectorate job run` or ssh on the node; `protectorate
+// node put/get` for files; only then screen and input, which are slow, flaky
+// and can land in the wrong window.
 service DeskService {
   // Screenshot captures the whole virtual screen as a PNG.
   rpc Screenshot(ScreenshotRequest) returns (ScreenshotResponse);
@@ -35,22 +40,29 @@ service DeskService {
   // higher; this shows what is in the way.
   rpc Foreground(ForegroundRequest) returns (ForegroundResponse);
 
-  // Click moves the pointer and clicks. Needs a desk lease.
+  // Click moves the pointer and clicks.
+  // Last resort: prefer the shell (job run, ssh), node put/get, or the
+  // program's API. Needs a desk lease.
   rpc Click(ClickRequest) returns (InputResponse);
 
-  // Move puts the pointer at a position. Needs a desk lease.
+  // Move puts the pointer at a position.
+  // Last resort: prefer the shell (job run, ssh), node put/get, or the
+  // program's API. Needs a desk lease.
   rpc Move(MoveRequest) returns (InputResponse);
 
-  // Type enters text as Unicode key events into the focused window. Needs a desk
-  // lease.
+  // Type enters text as key presses into the focused window. Last resort:
+  // prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  // a desk lease.
   rpc Type(TypeRequest) returns (InputResponse);
 
-  // Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
-  // lease.
+  // Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Last resort:
+  // prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  // a desk lease.
   rpc Key(KeyRequest) returns (InputResponse);
 
-  // Run starts a program in the interactive session and returns at once. Needs
-  // a desk lease.
+  // Run starts a program in the interactive session and returns at once. Last
+  // resort: prefer the shell (job run, ssh), node put/get, or the program's
+  // API. Needs a desk lease.
   rpc Run(RunRequest) returns (RunResponse);
 }
 
@@ -171,6 +183,15 @@ message DeskActionResponse {
     RunResponse run = 4;
     ForegroundResponse foreground = 5;
   }
+}
+
+// DeskUse counts the desktop input commands (click, move, type, key, run) one
+// caller issued on a node today, in the hub's local time. The hub keeps it in
+// memory, so it also resets when the hub restarts. It only makes use visible;
+// nothing is limited.
+message DeskUse {
+  string caller = 1;
+  int32 count = 2;
 }
 
 // DeskPolicy says when a node's desktop may be driven by agents. Without a

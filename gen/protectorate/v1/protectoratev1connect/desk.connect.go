@@ -64,18 +64,25 @@ type DeskServiceClient interface {
 	// foreground window (or, for the mouse, the window under the pointer) is
 	// higher; this shows what is in the way.
 	Foreground(context.Context, *connect.Request[v1.ForegroundRequest]) (*connect.Response[v1.ForegroundResponse], error)
-	// Click moves the pointer and clicks. Needs a desk lease.
+	// Click moves the pointer and clicks.
+	// Last resort: prefer the shell (job run, ssh), node put/get, or the
+	// program's API. Needs a desk lease.
 	Click(context.Context, *connect.Request[v1.ClickRequest]) (*connect.Response[v1.InputResponse], error)
-	// Move puts the pointer at a position. Needs a desk lease.
+	// Move puts the pointer at a position.
+	// Last resort: prefer the shell (job run, ssh), node put/get, or the
+	// program's API. Needs a desk lease.
 	Move(context.Context, *connect.Request[v1.MoveRequest]) (*connect.Response[v1.InputResponse], error)
-	// Type enters text as Unicode key events into the focused window. Needs a desk
-	// lease.
-	Type(context.Context, *connect.Request[v1.TypeRequest]) (*connect.Response[v1.InputResponse], error)
-	// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
-	// lease.
-	Key(context.Context, *connect.Request[v1.KeyRequest]) (*connect.Response[v1.InputResponse], error)
-	// Run starts a program in the interactive session and returns at once. Needs
+	// Type enters text as key presses into the focused window. Last resort:
+	// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
 	// a desk lease.
+	Type(context.Context, *connect.Request[v1.TypeRequest]) (*connect.Response[v1.InputResponse], error)
+	// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Last resort:
+	// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+	// a desk lease.
+	Key(context.Context, *connect.Request[v1.KeyRequest]) (*connect.Response[v1.InputResponse], error)
+	// Run starts a program in the interactive session and returns at once. Last
+	// resort: prefer the shell (job run, ssh), node put/get, or the program's
+	// API. Needs a desk lease.
 	Run(context.Context, *connect.Request[v1.RunRequest]) (*connect.Response[v1.RunResponse], error)
 }
 
@@ -206,18 +213,25 @@ type DeskServiceHandler interface {
 	// foreground window (or, for the mouse, the window under the pointer) is
 	// higher; this shows what is in the way.
 	Foreground(context.Context, *connect.Request[v1.ForegroundRequest]) (*connect.Response[v1.ForegroundResponse], error)
-	// Click moves the pointer and clicks. Needs a desk lease.
+	// Click moves the pointer and clicks.
+	// Last resort: prefer the shell (job run, ssh), node put/get, or the
+	// program's API. Needs a desk lease.
 	Click(context.Context, *connect.Request[v1.ClickRequest]) (*connect.Response[v1.InputResponse], error)
-	// Move puts the pointer at a position. Needs a desk lease.
+	// Move puts the pointer at a position.
+	// Last resort: prefer the shell (job run, ssh), node put/get, or the
+	// program's API. Needs a desk lease.
 	Move(context.Context, *connect.Request[v1.MoveRequest]) (*connect.Response[v1.InputResponse], error)
-	// Type enters text as Unicode key events into the focused window. Needs a desk
-	// lease.
-	Type(context.Context, *connect.Request[v1.TypeRequest]) (*connect.Response[v1.InputResponse], error)
-	// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
-	// lease.
-	Key(context.Context, *connect.Request[v1.KeyRequest]) (*connect.Response[v1.InputResponse], error)
-	// Run starts a program in the interactive session and returns at once. Needs
+	// Type enters text as key presses into the focused window. Last resort:
+	// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
 	// a desk lease.
+	Type(context.Context, *connect.Request[v1.TypeRequest]) (*connect.Response[v1.InputResponse], error)
+	// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Last resort:
+	// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+	// a desk lease.
+	Key(context.Context, *connect.Request[v1.KeyRequest]) (*connect.Response[v1.InputResponse], error)
+	// Run starts a program in the interactive session and returns at once. Last
+	// resort: prefer the shell (job run, ssh), node put/get, or the program's
+	// API. Needs a desk lease.
 	Run(context.Context, *connect.Request[v1.RunRequest]) (*connect.Response[v1.RunResponse], error)
 }
 

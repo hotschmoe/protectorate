@@ -18,6 +18,10 @@ import "desk.pb.dart" as protectoratev1desk;
 /// Protectorate-Desk-Lease-Expires response headers), renew the caller's own,
 /// or refuse when another holder has it. Coordinates are pixels of the
 /// screenshot, whose origin is the top-left of the virtual screen.
+/// The desktop is the last resort. Prefer, in this order: the program's own API
+/// or batch/CLI mode; `protectorate job run` or ssh on the node; `protectorate
+/// node put/get` for files; only then screen and input, which are slow, flaky
+/// and can land in the wrong window.
 abstract final class DeskService {
   /// Fully-qualified name of the DeskService service.
   static const name = 'protectorate.v1.DeskService';
@@ -51,7 +55,9 @@ abstract final class DeskService {
     protectoratev1desk.ForegroundResponse.new,
   );
 
-  /// Click moves the pointer and clicks. Needs a desk lease.
+  /// Click moves the pointer and clicks.
+  /// Last resort: prefer the shell (job run, ssh), node put/get, or the
+  /// program's API. Needs a desk lease.
   static const click = connect.Spec(
     '/$name/Click',
     connect.StreamType.unary,
@@ -59,7 +65,9 @@ abstract final class DeskService {
     protectoratev1desk.InputResponse.new,
   );
 
-  /// Move puts the pointer at a position. Needs a desk lease.
+  /// Move puts the pointer at a position.
+  /// Last resort: prefer the shell (job run, ssh), node put/get, or the
+  /// program's API. Needs a desk lease.
   static const move = connect.Spec(
     '/$name/Move',
     connect.StreamType.unary,
@@ -67,8 +75,9 @@ abstract final class DeskService {
     protectoratev1desk.InputResponse.new,
   );
 
-  /// Type enters text as Unicode key events into the focused window. Needs a desk
-  /// lease.
+  /// Type enters text as key presses into the focused window. Last resort:
+  /// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  /// a desk lease.
   static const type = connect.Spec(
     '/$name/Type',
     connect.StreamType.unary,
@@ -76,8 +85,9 @@ abstract final class DeskService {
     protectoratev1desk.InputResponse.new,
   );
 
-  /// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
-  /// lease.
+  /// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Last resort:
+  /// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  /// a desk lease.
   static const key = connect.Spec(
     '/$name/Key',
     connect.StreamType.unary,
@@ -85,8 +95,9 @@ abstract final class DeskService {
     protectoratev1desk.InputResponse.new,
   );
 
-  /// Run starts a program in the interactive session and returns at once. Needs
-  /// a desk lease.
+  /// Run starts a program in the interactive session and returns at once. Last
+  /// resort: prefer the shell (job run, ssh), node put/get, or the program's
+  /// API. Needs a desk lease.
   static const run = connect.Spec(
     '/$name/Run',
     connect.StreamType.unary,

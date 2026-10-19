@@ -7,6 +7,27 @@ Layering for programs such as ArchiCAD or ENERCALC (PROBLEMS.md P11): use the
 program's own API first, then files in and files out around a batch run, and
 screen and input only as the last resort.
 
+## When to use the desktop
+
+Use the shell and files wherever you can, and the desktop only when nothing
+else reaches the program. In this order:
+
+1. The program's own API, or its batch/CLI mode.
+2. `protectorate job run`, or plain `ssh`, on the node.
+3. `protectorate node put/get` for moving files in and out.
+4. Screen and input (`desk`), rarely.
+
+Why the last place: every step costs a screenshot round trip and tokens;
+results are flaky (timing, window positions, DPI, popups); the keyboard goes to
+whatever has the focus, so a stray prompt can receive text meant for another
+window; and Windows drops input into higher-integrity windows (UIPI) and onto
+a locked screen. A shell command either works or fails with a message.
+
+Use is visible, not limited: the node's status (`node <name>`, `node ls`,
+`desk policy <node>`) shows today's desk input commands per caller, for example
+`42 by sleeve api, 3 by owner`. The hub keeps the count in memory per local
+day, so it also resets when the hub restarts.
+
 ## File transfer
 
 ```
@@ -138,10 +159,19 @@ and the fix: dismiss the prompt on the machine, or `node install --elevated`.
 process, integrity, the agent's integrity, and whether it blocks) without
 changing anything. `run` injects nothing and is not checked.
 
-`type` sends each character as its own down/up pair a few milliseconds apart:
-Windows 11 Notepad reads the Unicode character of every event in a batch from
-the last one, so batched text came out as repeated characters. Characters
-outside the BMP go as UTF-16 surrogate pairs, newline is Enter.
+`type` presses real keys, as a keyboard would: each character the foreground
+window's keyboard layout can produce (`VkKeyScanExW`) goes as virtual-key
+events with scan codes (`MapVirtualKeyExW`) and Shift where the layout needs it
+(Caps Lock is taken into account), one `SendInput` call per character, 5 ms
+apart. Windows 11 Notepad mangles runs of `KEYEVENTF_UNICODE` packets into
+repeated characters, so those are used only for characters the layout cannot
+produce (UTF-16 surrogate pairs for characters outside the BMP). Newline is
+Enter, tab is Tab. Characters that need AltGr or Ctrl on the layout also go as
+Unicode packets.
+
+`run` starts the program with `CreateProcess`, inheriting no handles and with
+`CREATE_NEW_CONSOLE`, so a console program (`cmd.exe /k ...`) gets its own
+visible console window instead of attaching to the agent's windowless one.
 
 ### Locked screens and unattended machines
 

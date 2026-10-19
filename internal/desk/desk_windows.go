@@ -318,16 +318,14 @@ func (d winDesk) Key(c Chord) error {
 	return keyEvents(ev)
 }
 
-// typePacing separates the key presses of Type: applications that translate
-// the Unicode packets lazily (Windows 11 Notepad) read the last character of a
-// batch for every event in it.
-const typePacing = 3 * time.Millisecond
+// typePacing separates the characters of Type so the target keeps up.
+const typePacing = 5 * time.Millisecond
 
 func (d winDesk) Type(text string) error {
 	if err := d.reach(false, 0, 0); err != nil {
 		return err
 	}
-	for i, g := range typeGroups(text) {
+	for i, g := range typeGroups(text, foregroundLayout()) {
 		if i > 0 {
 			time.Sleep(typePacing)
 		}
@@ -338,18 +336,29 @@ func (d winDesk) Type(text string) error {
 	return nil
 }
 
+// Run starts program as if the user had launched it: no inherited handles, and
+// console programs get a console window of their own rather than the agent's
+// windowless one.
 func (winDesk) Run(program string, args []string) (uint32, error) {
 	if program == "" {
 		return 0, fmt.Errorf("%w: program is empty", ErrInvalid)
 	}
-	cmd := exec.Command(program, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
-	if err := cmd.Start(); err != nil {
+	path := program
+	if p, err := exec.LookPath(program); err == nil {
+		path = p
+	}
+	cmdline, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{path}, args...)))
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	si := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{}))}
+	var pi windows.ProcessInformation
+	if err := windows.CreateProcess(nil, cmdline, nil, nil, false, windows.CREATE_NEW_CONSOLE|windows.CREATE_NEW_PROCESS_GROUP, nil, nil, &si, &pi); err != nil {
 		return 0, fmt.Errorf("start %s: %w", program, err)
 	}
-	pid := uint32(cmd.Process.Pid)
-	go func() { _ = cmd.Wait() }()
-	return pid, nil
+	windows.CloseHandle(pi.Thread)
+	windows.CloseHandle(pi.Process)
+	return pi.ProcessId, nil
 }
 
 const desktopReadObjects = 0x0001
@@ -464,4 +473,53 @@ func (d winDesk) reach(mouse bool, x, y int) error {
 		}
 	}
 	return CheckReach(windowInfo(hwnd), "window under the pointer")
+}
+
+var (
+	pGetKeyboardLayout = user32.NewProc("GetKeyboardLayout")
+	pVkKeyScanEx       = user32.NewProc("VkKeyScanExW")
+	pMapVirtualKeyEx   = user32.NewProc("MapVirtualKeyExW")
+	pGetKeyState       = user32.NewProc("GetKeyState")
+)
+
+const (
+	vkCapital = 0x14
+	shiftBit  = 1
+)
+
+// foregroundLayout is the keyboard layout of the foreground window's thread,
+// which decides what the keys we press produce.
+func foregroundLayout() layout {
+	var tid uintptr
+	if hwnd, _, _ := pGetForegroundWindow.Call(); hwnd != 0 {
+		tid, _, _ = pGetWindowThreadProcessID.Call(hwnd, 0)
+	}
+	hkl, _, _ := pGetKeyboardLayout.Call(tid)
+	caps, _, _ := pGetKeyState.Call(vkCapital)
+	capsOn := caps&1 != 0
+	return layout{
+		key: func(r rune) (uint16, bool, bool) {
+			if r > 0xFFFF {
+				return 0, false, false
+			}
+			v, _, _ := pVkKeyScanEx.Call(uintptr(r), hkl)
+			res := int16(v)
+			if res == -1 {
+				return 0, false, false
+			}
+			vk, state := uint16(res&0xFF), uint8(res>>8)
+			if state&^shiftBit != 0 {
+				return 0, false, false
+			}
+			shift := state&shiftBit != 0
+			if capsOn && vk >= 'A' && vk <= 'Z' {
+				shift = !shift
+			}
+			return vk, shift, true
+		},
+		scan: func(vk uint16) uint16 {
+			s, _, _ := pMapVirtualKeyEx.Call(uintptr(vk), 0, hkl)
+			return uint16(s)
+		},
+	}
 }

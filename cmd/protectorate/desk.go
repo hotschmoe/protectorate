@@ -37,12 +37,17 @@ func deskCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "desk <node> screenshot|windows|foreground|click X Y|move X Y|type TEXT|key CHORD|run PROGRAM [ARGS]",
 		Short: "Drive the interactive desktop of a Windows node",
-		Long: `Screen and input commands for programs that only have a GUI. They work only
+		Long: `The desktop is the last resort. Prefer, in this order: the program's own API
+or batch/CLI mode; protectorate job run or ssh on the node; protectorate node
+put/get for files; only then screen and input, which are slow, flaky and can
+land in the wrong window.
+
+Screen and input commands for programs that only have a GUI. They work only
 when the node agent runs in the logged-in user's desktop session
 (protectorate node install, a logon task); in a service or SSH
 session they fail with a message saying so.
 
-screenshot and windows need no lease. click, move, type, key and run need the
+screenshot, windows and foreground need no lease. click, move, type, key and run need the
 node's desktop to be yours. Without --lease the hub takes a 2 minute lease for
 you when the desktop is free, renews it on each further command from the same
 token, and prints its id on stderr; when someone else holds it the command

@@ -155,6 +155,14 @@ const DeskPolicyStatus$json = {
       '10': 'state'
     },
     {'1': 'holder', '3': 3, '4': 1, '5': 9, '10': 'holder'},
+    {
+      '1': 'inputs',
+      '3': 4,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.DeskUse',
+      '10': 'inputs'
+    },
   ],
 };
 
@@ -162,7 +170,8 @@ const DeskPolicyStatus$json = {
 final $typed_data.Uint8List deskPolicyStatusDescriptor = $convert.base64Decode(
     'ChBEZXNrUG9saWN5U3RhdHVzEjMKBnBvbGljeRgBIAEoCzIbLnByb3RlY3RvcmF0ZS52MS5EZX'
     'NrUG9saWN5UgZwb2xpY3kSMAoFc3RhdGUYAiABKAsyGi5wcm90ZWN0b3JhdGUudjEuRGVza1N0'
-    'YXRlUgVzdGF0ZRIWCgZob2xkZXIYAyABKAlSBmhvbGRlcg==');
+    'YXRlUgVzdGF0ZRIWCgZob2xkZXIYAyABKAlSBmhvbGRlchIwCgZpbnB1dHMYBCADKAsyGC5wcm'
+    '90ZWN0b3JhdGUudjEuRGVza1VzZVIGaW5wdXRz');
 
 @$core.Deprecated('Use applyUpdateRequestDescriptor instead')
 const ApplyUpdateRequest$json = {
@@ -905,6 +914,14 @@ const NodeStatus$json = {
       '10': 'desk'
     },
     {'1': 'desk_holder', '3': 9, '4': 1, '5': 9, '10': 'deskHolder'},
+    {
+      '1': 'desk_inputs',
+      '3': 10,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.DeskUse',
+      '10': 'deskInputs'
+    },
   ],
 };
 
@@ -917,7 +934,8 @@ final $typed_data.Uint8List nodeStatusDescriptor = $convert.base64Decode(
     'YW1wUglmZXRjaGVkQXQSKwoDYWdlGAUgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uUg'
     'NhZ2USFAoFZXJyb3IYBiABKAlSBWVycm9yEjIKBmFsZXJ0cxgHIAMoCzIaLnByb3RlY3RvcmF0'
     'ZS52MS5Ob2RlQWxlcnRSBmFsZXJ0cxIuCgRkZXNrGAggASgLMhoucHJvdGVjdG9yYXRlLnYxLk'
-    'Rlc2tTdGF0ZVIEZGVzaxIfCgtkZXNrX2hvbGRlchgJIAEoCVIKZGVza0hvbGRlcg==');
+    'Rlc2tTdGF0ZVIEZGVzaxIfCgtkZXNrX2hvbGRlchgJIAEoCVIKZGVza0hvbGRlchI5CgtkZXNr'
+    'X2lucHV0cxgKIAMoCzIYLnByb3RlY3RvcmF0ZS52MS5EZXNrVXNlUgpkZXNrSW5wdXRz');
 
 @$core.Deprecated('Use listNodesRequestDescriptor instead')
 const ListNodesRequest$json = {
@@ -1240,6 +1258,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,
+  '.protectorate.v1.DeskUse': $0.DeskUse$json,
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,
   '.protectorate.v1.RemoveNodeRequest': RemoveNodeRequest$json,

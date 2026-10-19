@@ -1564,6 +1564,78 @@ class DeskActionResponse extends $pb.GeneratedMessage {
   ForegroundResponse ensureForeground() => $_ensure(4);
 }
 
+/// DeskUse counts the desktop input commands (click, move, type, key, run) one
+/// caller issued on a node today, in the hub's local time. The hub keeps it in
+/// memory, so it also resets when the hub restarts. It only makes use visible;
+/// nothing is limited.
+class DeskUse extends $pb.GeneratedMessage {
+  factory DeskUse({
+    $core.String? caller,
+    $core.int? count,
+  }) {
+    final result = DeskUse._();
+    if (caller != null) result.caller = caller;
+    if (count != null) result.count = count;
+    return result;
+  }
+
+  DeskUse._();
+
+  factory DeskUse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskUse()..mergeFromBuffer(data, registry);
+  factory DeskUse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeskUse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DeskUse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DeskUse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'caller')
+    ..aI(2, _omitFieldNames ? '' : 'count')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskUse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeskUse copyWith(void Function(DeskUse) updates) =>
+      super.copyWith((message) => updates(message as DeskUse)) as DeskUse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DeskUse() / DeskUse.new instead')
+  static DeskUse create() => DeskUse._();
+  static $pb.GeneratedMessage $_createMessage() => DeskUse._();
+  @$core.override
+  DeskUse createEmptyInstance() => DeskUse._();
+  @$core.pragma('dart2js:noInline')
+  static DeskUse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DeskUse>(DeskUse.$_createMessage);
+  static DeskUse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get caller => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set caller($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCaller() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCaller() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get count => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set count($core.int value) => $_setSignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCount() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCount() => $_clearField(2);
+}
+
 /// DeskPolicy says when a node's desktop may be driven by agents. Without a
 /// policy the desktop is always available. With one, it is available only
 /// inside the window and after the user has had no physical input (injected
@@ -1814,6 +1886,11 @@ class DeskState extends $pb.GeneratedMessage {
 /// Protectorate-Desk-Lease-Expires response headers), renew the caller's own,
 /// or refuse when another holder has it. Coordinates are pixels of the
 /// screenshot, whose origin is the top-left of the virtual screen.
+///
+/// The desktop is the last resort. Prefer, in this order: the program's own API
+/// or batch/CLI mode; `protectorate job run` or ssh on the node; `protectorate
+/// node put/get` for files; only then screen and input, which are slow, flaky
+/// and can land in the wrong window.
 class DeskServiceApi {
   final $pb.RpcClient _client;
 
@@ -1842,34 +1919,41 @@ class DeskServiceApi {
       _client.invoke<ForegroundResponse>(
           ctx, 'DeskService', 'Foreground', request, ForegroundResponse());
 
-  /// Click moves the pointer and clicks. Needs a desk lease.
+  /// Click moves the pointer and clicks.
+  /// Last resort: prefer the shell (job run, ssh), node put/get, or the
+  /// program's API. Needs a desk lease.
   $async.Future<InputResponse> click(
           $pb.ClientContext? ctx, ClickRequest request) =>
       _client.invoke<InputResponse>(
           ctx, 'DeskService', 'Click', request, InputResponse());
 
-  /// Move puts the pointer at a position. Needs a desk lease.
+  /// Move puts the pointer at a position.
+  /// Last resort: prefer the shell (job run, ssh), node put/get, or the
+  /// program's API. Needs a desk lease.
   $async.Future<InputResponse> move(
           $pb.ClientContext? ctx, MoveRequest request) =>
       _client.invoke<InputResponse>(
           ctx, 'DeskService', 'Move', request, InputResponse());
 
-  /// Type enters text as Unicode key events into the focused window. Needs a desk
-  /// lease.
+  /// Type enters text as key presses into the focused window. Last resort:
+  /// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  /// a desk lease.
   $async.Future<InputResponse> type(
           $pb.ClientContext? ctx, TypeRequest request) =>
       _client.invoke<InputResponse>(
           ctx, 'DeskService', 'Type', request, InputResponse());
 
-  /// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
-  /// lease.
+  /// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Last resort:
+  /// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  /// a desk lease.
   $async.Future<InputResponse> key(
           $pb.ClientContext? ctx, KeyRequest request) =>
       _client.invoke<InputResponse>(
           ctx, 'DeskService', 'Key', request, InputResponse());
 
-  /// Run starts a program in the interactive session and returns at once. Needs
-  /// a desk lease.
+  /// Run starts a program in the interactive session and returns at once. Last
+  /// resort: prefer the shell (job run, ssh), node put/get, or the program's
+  /// API. Needs a desk lease.
   $async.Future<RunResponse> run($pb.ClientContext? ctx, RunRequest request) =>
       _client.invoke<RunResponse>(
           ctx, 'DeskService', 'Run', request, RunResponse());
