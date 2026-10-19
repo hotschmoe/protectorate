@@ -66,9 +66,12 @@ func sessionCheck(ready error, goos string) check {
 	return check{"session", levelOK, "interactive desktop session (desk commands can run)"}
 }
 
-func screenCheck(goos string, name string, err error) check {
+func screenCheck(goos string, ready error, name string, err error) check {
 	if goos != "windows" {
 		return check{"screen", levelInfo, "not applicable"}
+	}
+	if ready != nil {
+		return check{"screen", levelInfo, "not checked: this process is not in an interactive session"}
 	}
 	switch desk.ClassifyInputDesktop(name, err) {
 	case desk.ScreenUnlocked:
@@ -200,7 +203,7 @@ It changes nothing.`,
 			checks := []check{
 				{"platform", levelInfo, runtime.GOOS + "/" + runtime.GOARCH + ", protectorate " + version},
 				sessionCheck(ready, in.GOOS),
-				screenCheck(in.GOOS, screenName, screenErr),
+				screenCheck(in.GOOS, ready, screenName, screenErr),
 				startupCheck(ctx, in),
 				enrollCheck(in.Home),
 				hubCheck(ctx, o.hubURL, explicit),

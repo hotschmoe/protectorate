@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -271,7 +272,7 @@ func TestDoctor(t *testing.T) {
 	var b bytes.Buffer
 	n := writeDoctor(&b, "windows", []check{
 		sessionCheck(nil, "windows"),
-		screenCheck("windows", "Winlogon", nil),
+		screenCheck("windows", nil, "Winlogon", nil),
 		windowsStartupCheck(true, []int{12}),
 	})
 	if n != 1 {
@@ -282,8 +283,11 @@ func TestDoctor(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, b.String())
 		}
 	}
+	if c := screenCheck("windows", errors.New("session 0"), "", errors.New("x")); c.Level != levelInfo {
+		t.Errorf("screen in a non-interactive session = %v", c)
+	}
 	b.Reset()
-	if n := writeDoctor(&b, "linux", []check{sessionCheck(nil, "linux"), screenCheck("linux", "", nil)}); n != 0 || strings.Contains(b.String(), "Unattended") {
+	if n := writeDoctor(&b, "linux", []check{sessionCheck(nil, "linux"), screenCheck("linux", nil, "", nil)}); n != 0 || strings.Contains(b.String(), "Unattended") {
 		t.Errorf("linux output:\n%s", b.String())
 	}
 }
