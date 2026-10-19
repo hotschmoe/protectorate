@@ -19,6 +19,10 @@ import "desk.connect.spec.dart" as specs;
 /// Protectorate-Desk-Lease-Expires response headers), renew the caller's own,
 /// or refuse when another holder has it. Coordinates are pixels of the
 /// screenshot, whose origin is the top-left of the virtual screen.
+/// The desktop is the last resort. Prefer, in this order: the program's own API
+/// or batch/CLI mode; `protectorate job run` or ssh on the node; `protectorate
+/// node put/get` for files; only then screen and input, which are slow, flaky
+/// and can land in the wrong window.
 extension type DeskServiceClient (connect.Transport _transport) {
   /// Screenshot captures the whole virtual screen as a PNG.
   Future<protectoratev1desk.ScreenshotResponse> screenshot(
@@ -79,7 +83,9 @@ extension type DeskServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// Click moves the pointer and clicks. Needs a desk lease.
+  /// Click moves the pointer and clicks.
+  /// Last resort: prefer the shell (job run, ssh), node put/get, or the
+  /// program's API. Needs a desk lease.
   Future<protectoratev1desk.InputResponse> click(
     protectoratev1desk.ClickRequest input, {
     connect.Headers? headers,
@@ -97,7 +103,9 @@ extension type DeskServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// Move puts the pointer at a position. Needs a desk lease.
+  /// Move puts the pointer at a position.
+  /// Last resort: prefer the shell (job run, ssh), node put/get, or the
+  /// program's API. Needs a desk lease.
   Future<protectoratev1desk.InputResponse> move(
     protectoratev1desk.MoveRequest input, {
     connect.Headers? headers,
@@ -115,8 +123,9 @@ extension type DeskServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// Type enters text as Unicode key events into the focused window. Needs a desk
-  /// lease.
+  /// Type enters text as key presses into the focused window. Last resort:
+  /// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  /// a desk lease.
   Future<protectoratev1desk.InputResponse> type(
     protectoratev1desk.TypeRequest input, {
     connect.Headers? headers,
@@ -134,8 +143,9 @@ extension type DeskServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Needs a desk
-  /// lease.
+  /// Key presses a chord such as "ctrl+s", "alt+f4" or "enter". Last resort:
+  /// prefer the shell (job run, ssh), node put/get, or the program's API. Needs
+  /// a desk lease.
   Future<protectoratev1desk.InputResponse> key(
     protectoratev1desk.KeyRequest input, {
     connect.Headers? headers,
@@ -153,8 +163,9 @@ extension type DeskServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// Run starts a program in the interactive session and returns at once. Needs
-  /// a desk lease.
+  /// Run starts a program in the interactive session and returns at once. Last
+  /// resort: prefer the shell (job run, ssh), node put/get, or the program's
+  /// API. Needs a desk lease.
   Future<protectoratev1desk.RunResponse> run(
     protectoratev1desk.RunRequest input, {
     connect.Headers? headers,

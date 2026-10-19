@@ -480,6 +480,20 @@ final $typed_data.Uint8List deskActionResponseDescriptor = $convert.base64Decode
     '9yZWdyb3VuZBgFIAEoCzIjLnByb3RlY3RvcmF0ZS52MS5Gb3JlZ3JvdW5kUmVzcG9uc2VIAFIK'
     'Zm9yZWdyb3VuZEIICgZyZXN1bHQ=');
 
+@$core.Deprecated('Use deskUseDescriptor instead')
+const DeskUse$json = {
+  '1': 'DeskUse',
+  '2': [
+    {'1': 'caller', '3': 1, '4': 1, '5': 9, '10': 'caller'},
+    {'1': 'count', '3': 2, '4': 1, '5': 5, '10': 'count'},
+  ],
+};
+
+/// Descriptor for `DeskUse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List deskUseDescriptor = $convert.base64Decode(
+    'CgdEZXNrVXNlEhYKBmNhbGxlchgBIAEoCVIGY2FsbGVyEhQKBWNvdW50GAIgASgFUgVjb3VudA'
+    '==');
+
 @$core.Deprecated('Use deskPolicyDescriptor instead')
 const DeskPolicy$json = {
   '1': 'DeskPolicy',

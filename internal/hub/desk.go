@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -27,6 +29,49 @@ const (
 	DeskLeaseHeader        = "Protectorate-Desk-Lease"
 	DeskLeaseExpiresHeader = "Protectorate-Desk-Lease-Expires"
 )
+
+// deskUse counts desk input commands per node and caller for the current day.
+type deskUse struct {
+	mu     sync.Mutex
+	day    string
+	counts map[string]map[string]int32
+}
+
+func (u *deskUse) add(node, caller string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.rollLocked()
+	if u.counts[node] == nil {
+		u.counts[node] = map[string]int32{}
+	}
+	u.counts[node][caller]++
+}
+
+func (u *deskUse) rollLocked() {
+	if day := time.Now().Format(time.DateOnly); day != u.day || u.counts == nil {
+		u.day, u.counts = day, map[string]map[string]int32{}
+	}
+}
+
+func (u *deskUse) get(node string) []*pb.DeskUse {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.rollLocked()
+	var out []*pb.DeskUse
+	for c, n := range u.counts[node] {
+		out = append(out, &pb.DeskUse{Caller: c, Count: n})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Caller < out[j].Caller })
+	return out
+}
+
+// deskActor names the caller for the usage count.
+func deskActor(ctx context.Context) string {
+	if p := auth.PrincipalFrom(ctx); p != nil {
+		return p.Actor()
+	}
+	return "anonymous"
+}
 
 // deskCaller names the authenticated caller for auto leases.
 func deskCaller(ctx context.Context) string {
@@ -123,6 +168,9 @@ func (h *Hub) deskDo(ctx context.Context, t *pb.DeskTarget, mutating bool, act *
 	res, err := ops.Desk(ctx, act)
 	if err != nil && deskRefusal(err) {
 		h.endDeskLeases(strings.ToLower(t.Name), err.Error())
+	}
+	if err == nil && mutating {
+		h.deskUse.add(strings.ToLower(t.Name), deskActor(ctx))
 	}
 	if err != nil && dl != nil && dl.fresh {
 		_ = h.leases.Release(dl.lease.Id)

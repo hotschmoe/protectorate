@@ -157,6 +157,8 @@ message DeskPolicyStatus {
   DeskState state = 2;
   // holder is who holds the desktop lease now, empty if nobody.
   string holder = 3;
+  // inputs is today's desktop input commands per caller.
+  repeated DeskUse inputs = 4;
 }
 
 message ApplyUpdateRequest {
@@ -458,6 +460,8 @@ message NodeStatus {
   // reported it. desk_holder is who holds the desktop lease, if anyone.
   DeskState desk = 8;
   string desk_holder = 9;
+  // desk_inputs is today's desktop input commands per caller.
+  repeated DeskUse desk_inputs = 10;
 }
 
 message ListNodesRequest {}

@@ -32,6 +32,7 @@ import (
 )
 
 type Hub struct {
+	deskUse   deskUse
 	Version   string
 	Heartbeat time.Duration
 	// SelfURL is how sleeves on this machine reach the hub; it is exported to

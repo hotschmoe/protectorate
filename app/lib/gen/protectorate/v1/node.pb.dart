@@ -269,11 +269,13 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
     $0.DeskPolicy? policy,
     $0.DeskState? state,
     $core.String? holder,
+    $core.Iterable<$0.DeskUse>? inputs,
   }) {
     final result = DeskPolicyStatus._();
     if (policy != null) result.policy = policy;
     if (state != null) result.state = state;
     if (holder != null) result.holder = holder;
+    if (inputs != null) result.inputs.addAll(inputs);
     return result;
   }
 
@@ -296,6 +298,8 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
     ..aOM<$0.DeskState>(2, _omitFieldNames ? '' : 'state',
         subBuilder: $0.DeskState.$_createMessage)
     ..aOS(3, _omitFieldNames ? '' : 'holder')
+    ..pPM<$0.DeskUse>(4, _omitFieldNames ? '' : 'inputs',
+        subBuilder: $0.DeskUse.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -353,6 +357,10 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
   $core.bool hasHolder() => $_has(2);
   @$pb.TagNumber(3)
   void clearHolder() => $_clearField(3);
+
+  /// inputs is today's desktop input commands per caller.
+  @$pb.TagNumber(4)
+  $pb.PbList<$0.DeskUse> get inputs => $_getList(3);
 }
 
 class ApplyUpdateRequest extends $pb.GeneratedMessage {
@@ -3061,6 +3069,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     $core.Iterable<NodeAlert>? alerts,
     $0.DeskState? desk,
     $core.String? deskHolder,
+    $core.Iterable<$0.DeskUse>? deskInputs,
   }) {
     final result = NodeStatus._();
     if (node != null) result.node = node;
@@ -3072,6 +3081,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     if (alerts != null) result.alerts.addAll(alerts);
     if (desk != null) result.desk = desk;
     if (deskHolder != null) result.deskHolder = deskHolder;
+    if (deskInputs != null) result.deskInputs.addAll(deskInputs);
     return result;
   }
 
@@ -3105,6 +3115,8 @@ class NodeStatus extends $pb.GeneratedMessage {
     ..aOM<$0.DeskState>(8, _omitFieldNames ? '' : 'desk',
         subBuilder: $0.DeskState.$_createMessage)
     ..aOS(9, _omitFieldNames ? '' : 'deskHolder')
+    ..pPM<$0.DeskUse>(10, _omitFieldNames ? '' : 'deskInputs',
+        subBuilder: $0.DeskUse.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3215,6 +3227,10 @@ class NodeStatus extends $pb.GeneratedMessage {
   $core.bool hasDeskHolder() => $_has(8);
   @$pb.TagNumber(9)
   void clearDeskHolder() => $_clearField(9);
+
+  /// desk_inputs is today's desktop input commands per caller.
+  @$pb.TagNumber(10)
+  $pb.PbList<$0.DeskUse> get deskInputs => $_getList(9);
 }
 
 class ListNodesRequest extends $pb.GeneratedMessage {

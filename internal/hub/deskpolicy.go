@@ -329,11 +329,12 @@ func (h *Hub) deskView(name string) (*pb.DeskState, string) {
 
 func (h *Hub) withDesk(s *pb.NodeStatus) *pb.NodeStatus {
 	d, holder := h.deskView(s.Node.Name)
-	if d == nil && holder == "" {
+	inputs := h.deskUse.get(strings.ToLower(s.Node.Name))
+	if d == nil && holder == "" && len(inputs) == 0 {
 		return s
 	}
 	s = proto.Clone(s).(*pb.NodeStatus)
-	s.Desk, s.DeskHolder = d, holder
+	s.Desk, s.DeskHolder, s.DeskInputs = d, holder, inputs
 	return s
 }
 
@@ -359,7 +360,7 @@ func (h *Hub) deskNode(name string, allowFamily bool) (string, error) {
 func (h *Hub) deskStatus(ctx context.Context, name string) *pb.DeskPolicyStatus {
 	s := h.refreshDesk(ctx, name, false)
 	_, holder := h.deskView(name)
-	return &pb.DeskPolicyStatus{Policy: h.deskPol.get(name), State: s, Holder: holder}
+	return &pb.DeskPolicyStatus{Policy: h.deskPol.get(name), State: s, Holder: holder, Inputs: h.deskUse.get(name)}
 }
 
 func (h *Hub) SetDeskPolicy(ctx context.Context, req *connect.Request[pb.SetDeskPolicyRequest]) (*connect.Response[pb.DeskPolicyStatus], error) {

@@ -7,6 +7,27 @@ Layering for programs such as ArchiCAD or ENERCALC (PROBLEMS.md P11): use the
 program's own API first, then files in and files out around a batch run, and
 screen and input only as the last resort.
 
+## When to use the desktop
+
+Use the shell and files wherever you can, and the desktop only when nothing
+else reaches the program. In this order:
+
+1. The program's own API, or its batch/CLI mode.
+2. `protectorate job run`, or plain `ssh`, on the node.
+3. `protectorate node put/get` for moving files in and out.
+4. Screen and input (`desk`), rarely.
+
+Why the last place: every step costs a screenshot round trip and tokens;
+results are flaky (timing, window positions, DPI, popups); the keyboard goes to
+whatever has the focus, so a stray prompt can receive text meant for another
+window; and Windows drops input into higher-integrity windows (UIPI) and onto
+a locked screen. A shell command either works or fails with a message.
+
+Use is visible, not limited: the node's status (`node <name>`, `node ls`,
+`desk policy <node>`) shows today's desk input commands per caller, for example
+`42 by sleeve api, 3 by owner`. The hub keeps the count in memory per local
+day, so it also resets when the hub restarts.
+
 ## File transfer
 
 ```

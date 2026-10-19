@@ -41,6 +41,23 @@ func deskStatusLabel(s *pb.DeskState, holder string, hasPolicy bool) string {
 	return "unknown"
 }
 
+// deskInputsLabel is "42 by sleeve api, 3 by owner" for today's desk inputs.
+func deskInputsLabel(u []*pb.DeskUse) string {
+	parts := make([]string, 0, len(u))
+	for _, e := range u {
+		parts = append(parts, fmt.Sprintf("%d by %s", e.Count, e.Caller))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func deskInputsTotal(u []*pb.DeskUse) int32 {
+	var n int32
+	for _, e := range u {
+		n += e.Count
+	}
+	return n
+}
+
 func writeDeskPolicy(w io.Writer, name string, r *pb.DeskPolicyStatus) {
 	fmt.Fprintf(w, "node\t%s\n", name)
 	if p := r.Policy; p != nil {
@@ -55,6 +72,9 @@ func writeDeskPolicy(w io.Writer, name string, r *pb.DeskPolicyStatus) {
 	fmt.Fprintf(w, "status\t%s\n", deskStatusLabel(r.State, r.Holder, r.Policy != nil))
 	if r.State != nil && r.State.Detail != "" {
 		fmt.Fprintf(w, "detail\t%s\n", r.State.Detail)
+	}
+	if len(r.Inputs) > 0 {
+		fmt.Fprintf(w, "desk inputs today\t%s\n", deskInputsLabel(r.Inputs))
 	}
 	if t := r.State.GetLastInput(); t != nil {
 		fmt.Fprintf(w, "last input\t%s ago\n", time.Since(t.AsTime()).Round(time.Second))
