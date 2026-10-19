@@ -231,6 +231,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTokenServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewAuditServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTailnetServiceHandler(tailnetService{h}, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	mux.HandleFunc("GET /install.sh", h.handleInstallScript("sh"))

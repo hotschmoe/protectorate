@@ -13,6 +13,7 @@ import '../version.dart' as ver;
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
+import 'audit_screen.dart';
 import 'backlog_tab.dart';
 import 'messages_tab.dart';
 import 'node_detail_screen.dart';
@@ -175,6 +176,17 @@ class _HubShellState extends State<HubShell> {
       appBar: AppBar(
         title: Text(widget.hub.name),
         actions: [
+          IconButton(
+            key: const ValueKey('open-audit'),
+            tooltip: 'Audit log',
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => AuditScreen(client: _client),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
           ListenableBuilder(
             listenable: _feed,
             builder: (context, _) => Tooltip(

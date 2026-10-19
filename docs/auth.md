@@ -68,7 +68,7 @@ first and last chunk (and any failing chunk), gets and every desk call once,
 with the node name as subject and never the path, text or image. See
 docs/desk.md.
 
-Services marked `(protectorate.v1.owner_only)` (TokenService) and RPCs marked
+Services marked `(protectorate.v1.owner_only)` (TokenService, AuditService) and RPCs marked
 `(protectorate.v1.owner_only_rpc)` accept only the owner token whatever the
 scopes. The RPC form covers anything that runs code as the hub's OS user or
 aims the hub's credentials: `CreateSession` and `RespawnSession` (the command
@@ -116,7 +116,11 @@ terminal attach. Not logged: reads and event streams. Fields: `time`, `actor`
 `procedure`, `subject` (the request's `name` or `id`, nothing else from the
 body), `outcome` (`ok`, `denied`, `error`) and `code` (Connect code).
 Secrets and request bodies are never written. `protectorate audit tail [-n 50]`
-reads it on the hub machine.
+reads it on the hub machine. `AuditService.ListAuditEntries` (owner only,
+like `TokenService`) serves it to the app's AUDIT view: newest first, pages of
+at most 500 with a cursor to older entries, filtered by actor, procedure and
+subject (substring, any case) and outcome. One page reads at most about
+200,000 lines, so a rare filter can return a short page and a cursor.
 
 Limits to keep in mind:
 

@@ -698,12 +698,12 @@ func TestJobAndLeaseScopesAndAudit(t *testing.T) {
 		})
 	}
 
-	entries, err := auth.Tail(auditDir, 1000)
+	page, err := auth.ReadPage(auditDir, auth.Query{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
-	for _, en := range entries {
+	for _, en := range page.Entries {
 		seen[en.Procedure[strings.LastIndex(en.Procedure, "/")+1:]] = true
 	}
 	for _, m := range []string{"SubmitJob", "CancelJob", "AcquireLease", "RenewLease", "ReleaseLease"} {

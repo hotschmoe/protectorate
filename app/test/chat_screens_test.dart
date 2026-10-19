@@ -16,6 +16,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
     as pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/audit.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/audit.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/desk.connect.spec.dart';
@@ -49,6 +51,7 @@ import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
 import 'package:protectorate/nodes/add_node.dart';
 import 'package:protectorate/nodes/remove_node.dart';
 import 'package:protectorate/nodes/version_skew.dart';
+import 'package:protectorate/screens/audit_screen.dart';
 import 'package:protectorate/screens/chat_screen.dart';
 import 'package:protectorate/screens/desk_screen.dart';
 import 'package:protectorate/screens/sleeves_screen.dart';
@@ -826,6 +829,74 @@ List<ThreadSummary> _threads() => [
   ),
 ];
 
+final _auditLog = [
+  ('owner', '', 'NodeService/SetDeskPolicy', 'win-desk', 'ok', '', 1),
+  ('token:sleeve:cad', '', 'DeskService/Click', 'win-desk', 'ok', '', 3),
+  ('token:sleeve:cad', '', 'DeskService/Type', 'win-desk', 'ok', '', 3),
+  (
+    'token:pixel',
+    'pixel.tail0b1c.ts.net',
+    'SessionService/CreateSession',
+    'scratch',
+    'denied',
+    'permission_denied',
+    9,
+  ),
+  ('token:sleeve:auth-fix', '', 'MessageService/Send', '', 'ok', '', 26),
+  (
+    'owner',
+    'laptop.tail0b1c.ts.net',
+    'SleeveService/SpawnSleeve',
+    'research',
+    'ok',
+    '',
+    48,
+  ),
+  (
+    'token:sleeve:refactor',
+    '',
+    'LeaseService/AcquireLease',
+    '',
+    'error',
+    'failed_precondition',
+    61,
+  ),
+  (
+    'unauthenticated',
+    '',
+    'SessionService/KillSession',
+    'work',
+    'denied',
+    'unauthenticated',
+    95,
+  ),
+  ('owner', '', 'NodeService/UpdateNode', 'arc', 'ok', '', 130),
+  (
+    'token:pixel',
+    'pixel.tail0b1c.ts.net',
+    '/ws/terminal/work',
+    'work',
+    'ok',
+    '',
+    200,
+  ),
+  ('owner', '', 'TokenService/CreateToken', 'pixel', 'ok', '', 1500),
+];
+
+List<AuditEntry> _audit() => [
+  for (final (actor, tailnet, proc, subject, outcome, code, minutes)
+      in _auditLog)
+    AuditEntry(
+      time: _ago(Duration(minutes: minutes)),
+      actor: actor,
+      tailnet: tailnet,
+      procedure: proc.startsWith('/') ? proc : '/protectorate.v1.$proc',
+      subject: subject,
+      outcome: outcome,
+      code: code,
+    ),
+];
+
 // A hub with every service the shell reads; each node poll moves the
 // readings so the history graphs fill.
 Transport _hubTransport(StreamController<Event> events) {
@@ -890,6 +961,13 @@ Transport _hubTransport(StreamController<Event> events) {
         (ThreadRequest r, ctx) => ThreadResponse(messages: _schemaThread),
       )
       .unary(MessageService.inbox, (InboxRequest r, ctx) => InboxResponse())
+      .unary(
+        AuditService.listAuditEntries,
+        (ListAuditEntriesRequest r, ctx) => ListAuditEntriesResponse(
+          entries: _audit(),
+          nextPageToken: 'audit-2026-10.jsonl:120',
+        ),
+      )
       .unary(
         DeskService.screenshot,
         (ScreenshotRequest r, ctx) =>
@@ -1256,6 +1334,31 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 300));
         await _shoot(tester, key, 'desk-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('audit $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 1700 : 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: AuditScreen(
+                client: HubClient.withTransport(_hubTransport(events)),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'audit-$tag');
         await tester.pumpWidget(const SizedBox());
       });
 

@@ -2,6 +2,7 @@ import 'package:connectrpc/connect.dart';
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
 
+import '../gen/protectorate/v1/audit.connect.client.dart';
 import '../gen/protectorate/v1/backlog.connect.client.dart';
 import '../gen/protectorate/v1/chat.connect.client.dart';
 import '../gen/protectorate/v1/desk.connect.client.dart';
@@ -49,7 +50,8 @@ class HubClient {
       chat = ChatServiceClient(transport),
       messages = MessageServiceClient(transport),
       directory = DirectoryServiceClient(transport),
-      desk = DeskServiceClient(transport);
+      desk = DeskServiceClient(transport),
+      audit = AuditServiceClient(transport);
 
   final HubServiceClient hub;
   final EventServiceClient events;
@@ -62,4 +64,5 @@ class HubClient {
   final MessageServiceClient messages;
   final DirectoryServiceClient directory;
   final DeskServiceClient desk;
+  final AuditServiceClient audit;
 }

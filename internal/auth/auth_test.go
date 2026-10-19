@@ -30,11 +30,12 @@ func TestCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]struct{ read, owner, streaming bool }{
-		"/protectorate.v1.HubService/GetStatus":       {read: true},
-		"/protectorate.v1.SessionService/KillSession": {},
-		"/protectorate.v1.EventService/Subscribe":     {streaming: true},
-		"/protectorate.v1.TokenService/CreateToken":   {owner: true},
-		"/protectorate.v1.TokenService/ListTokens":    {read: true, owner: true},
+		"/protectorate.v1.HubService/GetStatus":          {read: true},
+		"/protectorate.v1.SessionService/KillSession":    {},
+		"/protectorate.v1.EventService/Subscribe":        {streaming: true},
+		"/protectorate.v1.TokenService/CreateToken":      {owner: true},
+		"/protectorate.v1.TokenService/ListTokens":       {read: true, owner: true},
+		"/protectorate.v1.AuditService/ListAuditEntries": {read: true, owner: true},
 		pCreate:  {owner: true},
 		pRespawn: {owner: true},
 		pAddNode: {owner: true},
@@ -408,11 +409,11 @@ func TestAuditAppendAndTail(t *testing.T) {
 			}
 		}
 	}
-	got, err := Tail(dir, 2)
-	if err != nil || len(got) != 2 || got[0].Subject != "s1" || got[1].Subject != "s2" || got[0].Tailnet != "phone.ts.net" {
-		t.Fatalf("tail 2: %+v %v", got, err)
+	got := oldestFirst(t, dir, 2)
+	if len(got) != 2 || got[0].Subject != "s1" || got[1].Subject != "s2" || got[0].Tailnet != "phone.ts.net" {
+		t.Fatalf("tail 2: %+v", got)
 	}
-	if got, _ := Tail(dir, 50); len(got) != 3 || got[0].Subject != "old" {
+	if got := oldestFirst(t, dir, 50); len(got) != 3 || got[0].Subject != "old" {
 		t.Fatalf("tail 50: %+v", got)
 	}
 
@@ -425,7 +426,7 @@ func TestAuditAppendAndTail(t *testing.T) {
 	a2 := NewAudit(dir)
 	a2.Write(Entry{Time: time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), Actor: "owner", Procedure: pKill, Outcome: OutcomeOK})
 	a2.Close()
-	if got, _ := Tail(dir, 50); len(got) != 4 || got[3].Time.Day() != 3 {
+	if got := oldestFirst(t, dir, 50); len(got) != 4 || got[3].Time.Day() != 3 {
 		t.Fatalf("reopen did not append: %+v", got)
 	}
 }
@@ -457,7 +458,7 @@ func TestRecordOutcomes(t *testing.T) {
 	a.Record(ctx, p, pKill, "s", &DeniedError{Name: "bridge", Need: "x"}, "permission_denied")
 	a.Record(ctx, nil, pKill, "s", ErrUnauthenticated, "unauthenticated")
 	a.Record(ctx, p, pKill, "s", errors.New("boom"), "internal")
-	got, _ := Tail(dir, 10)
+	got := oldestFirst(t, dir, 10)
 	var outcomes []string
 	for _, e := range got {
 		outcomes = append(outcomes, e.Actor+":"+e.Outcome)
