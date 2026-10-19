@@ -195,7 +195,7 @@ model behaviours. Never bust a harness's native prompt cache without reason.
    the shape of mcp_agent_mail, or a separate coordinator (deterministic
    server, light model or a decision model on the local LLM server) so the
    orchestrator stays clear of routing.
-   Proposal (2026-10-20, not yet agreed): the coordinator is hub code, not a
+   Agreed 2026-10-20 and built (`docs/coordination.md`): the coordinator is hub code, not a
    sleeve. A directory of sleeves and projects (git remote and package names
    read from go.mod, package.json, Cargo.toml, pyproject); a hub mailbox
    (`protectorate msg send|reply|ack|inbox`) delivered into the target's chat

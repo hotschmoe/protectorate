@@ -440,6 +440,25 @@ Setup, scoping and widening: `docs/orchestrator.md`.
   "AI as orchestrator" and "AI talking to the orchestrator"
   are the same path.
 
+## Coordination (`internal/directory`, `internal/mailbox`, `internal/hub/{coord,mail,deps}.go`, `docs/coordination.md`)
+
+The coordinator is hub code, not a sleeve, and decides nothing with a model.
+
+- **Identity:** each sleeve has a scoped token (`sleeve:<name>`) in its home;
+  the hub maps it to the sleeve, so message senders and lease holders are
+  authenticated, not claimed.
+- **Directory:** per sleeve workspace, the git remote, branch/HEAD and package
+  names from go.mod, package.json, Cargo.toml and pyproject.toml; projects and
+  their dependency edges are derived, refreshed on spawn and every minute.
+- **Mailbox:** an append-only JSONL log. Delivery into a chat-mode sleeve is
+  an ordinary user message at its next IDLE through the ChatService send path,
+  carrying the commands to reply and ack, so the harness's prompt cache and
+  AGENTS.md are untouched. Unacked messages are re-delivered once, then
+  escalated to the orchestrator.
+- **Leases:** an opt-in FIFO queue with a claim window and a grant notice.
+- **Notices:** new tags and default-branch advances are read with local git and
+  sent to dependent projects as facts, or filed as backlog items.
+
 ## Credentials (spike 3 done: `spikes/credentials/`)
 
 - Log in once on the hub. Each provider has one canonical credential dir on
@@ -483,7 +502,9 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
 ~/.protectorate/
   hub.yaml            # config
   nodes.yaml          # inventory (P2)
-  leases.yaml         # live leases (P9)
+  leases.yaml         # live leases and the lease queue (P9)
+  directory.json      # projects, packages, last seen refs
+  mailbox.jsonl       # messages and their delivery state
   jobs/<id>/          # job.json, job.log, artifacts/ (P3)
   backlog.md          # low-priority work; items may link to GitHub issues (P6)
   ca/                 # SSH CA for short-lived certs to nodes

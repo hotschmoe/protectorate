@@ -21,6 +21,7 @@ clients (desktop, Android, web) talk to the same API.
 | Sessions (P4) | `session ls/new/attach/capture/kill` | tmux on a dedicated socket; WebSocket terminal at `/ws/terminal/{name}` |
 | Sleeves (P7, P8) | `sleeve spawn/ls/show/attach/kill` | bwrap + systemd user scope: PID isolation, CPU/memory caps, shared live credentials |
 | Chat (`docs/chat.md`) | `chat watch/send/interrupt/respond/compact`, `sleeve spawn --mode` | a sleeve's harness driven through its headless protocol inside the sandbox, with a replayable event log any number of clients can watch |
+| Coordination (`docs/coordination.md`) | `who`, `msg send/reply/ack/inbox/thread`, `lease acquire --wait` | per-sleeve identity, a project directory from git remotes and manifests, a mailbox delivered into idle chats, a lease queue, dependency notices; all deterministic hub code |
 | Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, GPU, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
 | Tailnet | `hub tailnet install/init`, `tailnet status`, `node invite/join/revoke`, `client invite` | embedded tsnet + supervised Headscale; in-process DERP relay over TLS with a pinned self-signed cert; WhoIs gating; verified direct and relay-only with a Windows node |
 | Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
@@ -56,5 +57,5 @@ protectorate pair                               # QR code for the phone app
 - [PROBLEMS.md](PROBLEMS.md): what hurts and why
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system and the decisions behind it
 - [docs/install.md](docs/install.md): hub, node and phone setup
-- [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md)
+- [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md), [docs/coordination.md](docs/coordination.md)
 - `spikes/`: the experiments behind each decision, with measurements

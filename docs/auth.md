@@ -14,6 +14,12 @@ terminal, and the tailnet listener. Nothing else reads a token.
   recovered. Each token has id, name, scopes, created, expires (optional),
   last_used (persisted at most about once a minute) and revoked.
 
+- **Sleeve tokens**: minted by the hub itself for every sleeve at spawn (name
+  `sleeve:<name>`, scopes `read`, `backlog_*`, `directory_*`, `lease_*`,
+  `message_*`), written into the sleeve's home, revoked on kill and replaced on
+  respawn. They are how the hub knows who sent a message. See
+  `docs/coordination.md`.
+
 Unknown, expired, revoked and malformed credentials all fail as
 `unauthenticated` (HTTP 401). A valid token without the needed scope fails as
 `permission_denied` (HTTP 403 on the terminal), and the message names the
