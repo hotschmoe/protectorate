@@ -8,6 +8,7 @@ import '../gen/protectorate/v1/hub.connect.client.dart';
 import '../gen/protectorate/v1/node.connect.client.dart';
 import '../gen/protectorate/v1/quota.connect.client.dart';
 import '../gen/protectorate/v1/session.connect.client.dart';
+import '../gen/protectorate/v1/sleeve.connect.client.dart';
 import 'hub_profile.dart';
 import 'http_client_io.dart'
     if (dart.library.js_interop) 'http_client_web.dart';
@@ -39,6 +40,7 @@ class HubClient {
       node = NodeServiceClient(transport),
       quota = QuotaServiceClient(transport),
       sessions = SessionServiceClient(transport),
+      sleeves = SleeveServiceClient(transport),
       backlog = BacklogServiceClient(transport);
 
   final HubServiceClient hub;
@@ -46,5 +48,6 @@ class HubClient {
   final NodeServiceClient node;
   final QuotaServiceClient quota;
   final SessionServiceClient sessions;
+  final SleeveServiceClient sleeves;
   final BacklogServiceClient backlog;
 }

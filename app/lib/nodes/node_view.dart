@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/node.pb.dart';
+import '../gen/protectorate/v1/sleeve.pb.dart';
 
 const warnPercent = 75.0;
 const critPercent = 90.0;
@@ -90,7 +91,7 @@ GpuSummary? summarizeGpus(NodeMetrics m) {
   );
 }
 
-enum OffenderKind { container, engine, watchedDir }
+enum OffenderKind { container, engine, watchedDir, sleeve }
 
 class Offender {
   const Offender(this.kind, this.label, this.bytes, [this.detail = '']);
@@ -132,6 +133,12 @@ List<Offender> topOffenders(NodeMetrics m, {int limit = 8}) {
     bucket('volumes', d.volumes);
     if (!perContainer) bucket('containers', d.containers);
   }
+  for (final s in m.sleeves) {
+    final b = s.usage.workspaceDiskBytes.toInt();
+    if (b > 0) {
+      out.add(Offender(OffenderKind.sleeve, s.name, b, 'workspace'));
+    }
+  }
   for (final w in m.watchDirs) {
     final size = w.sizeBytes.toInt();
     if (size > 0) {
@@ -155,6 +162,14 @@ List<ContainerMetrics> containersBySize(NodeMetrics m) {
     final c = b.writableLayerBytes.compareTo(a.writableLayerBytes);
     return c != 0 ? c : b.memoryUsedBytes.compareTo(a.memoryUsedBytes);
   });
+  return list;
+}
+
+List<Sleeve> sleevesBySize(NodeMetrics m) {
+  final list = [...m.sleeves];
+  list.sort(
+    (a, b) => b.usage.workspaceDiskBytes.compareTo(a.usage.workspaceDiskBytes),
+  );
   return list;
 }
 
@@ -309,6 +324,75 @@ class StatusBadge extends StatelessWidget {
           color: sev.onContainer,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+}
+
+String harnessLabel(Harness h) =>
+    h.name.replaceFirst('HARNESS_', '').toLowerCase();
+
+class SleeveRow extends StatelessWidget {
+  const SleeveRow({super.key, required this.sleeve, this.dim = false});
+
+  final Sleeve sleeve;
+  final bool dim;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final u = sleeve.usage;
+    final exited = sleeve.state == SleeveState.SLEEVE_STATE_EXITED;
+    final limit = sleeve.limits.memoryBytes.toInt();
+    final memPct = limit > 0
+        ? u.memoryCurrentBytes.toInt() * 100 / limit
+        : null;
+    return Padding(
+      key: ValueKey('sleeve-${sleeve.name}'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${sleeve.name}  ${harnessLabel(sleeve.harness)}${exited ? '  (exited)' : ''}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                'ws ${u.workspaceDiskBytes > 0 ? formatBytes(u.workspaceDiskBytes.toInt()) : '-'}',
+                style: text.bodySmall,
+              ),
+            ],
+          ),
+          if (!exited) ...[
+            PercentBar(
+              label: 'CPU',
+              percent: sleeve.limits.cpuPercent > 0
+                  ? u.cpuPercent * 100 / sleeve.limits.cpuPercent
+                  : null,
+              trailing:
+                  '${u.cpuPercent.toStringAsFixed(0)}%${sleeve.limits.cpuPercent > 0 ? ' / ${sleeve.limits.cpuPercent}%' : ''}',
+              dim: dim,
+            ),
+            PercentBar(
+              label: 'MEM',
+              percent: memPct,
+              trailing:
+                  '${formatBytes(u.memoryCurrentBytes.toInt())}${limit > 0 ? ' / ${formatBytes(limit)}' : ''}',
+              dim: dim,
+            ),
+            Text(
+              'peak ${formatBytes(u.memoryPeakBytes.toInt())}  ${u.pids} pids${u.oomKills > 0 ? '  ${u.oomKills} OOM kills' : ''}',
+              style: text.bodySmall?.copyWith(
+                color: u.oomKills > 0 ? cs.error : cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

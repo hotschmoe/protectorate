@@ -6,6 +6,7 @@ import '../gen/protectorate/v1/events.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
+import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
 import 'node_detail_screen.dart';
 
@@ -14,12 +15,14 @@ const nodeEventKinds = {'node.metrics', 'node.unreachable'};
 class NodesTab extends StatefulWidget {
   const NodesTab({
     super.key,
+    required this.hub,
     required this.client,
     required this.feed,
     this.now,
     this.pollInterval = const Duration(seconds: 30),
   });
 
+  final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
   final DateTime Function()? now;
@@ -86,6 +89,7 @@ class _NodesTabState extends State<NodesTab> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => NodeDetailScreen(
+          hub: widget.hub,
           client: widget.client,
           feed: widget.feed,
           name: s.node.name,

@@ -69,8 +69,12 @@ class _HubShellState extends State<HubShell> {
         if (!mounted) return;
         Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) =>
-                NodeDetailScreen(client: _client, feed: _feed, name: node),
+            builder: (_) => NodeDetailScreen(
+              hub: widget.hub,
+              client: _client,
+              feed: _feed,
+              name: node,
+            ),
           ),
         );
       });
@@ -85,7 +89,7 @@ class _HubShellState extends State<HubShell> {
 
   Widget _body() => switch (_index) {
     0 => OverviewTab(client: _client, feed: _feed),
-    1 => NodesTab(client: _client, feed: _feed),
+    1 => NodesTab(hub: widget.hub, client: _client, feed: _feed),
     2 => QuotaTab(client: _client, feed: _feed),
     3 => SessionsTab(
       hub: widget.hub,

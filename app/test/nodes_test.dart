@@ -9,10 +9,16 @@ import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
 import 'package:protectorate/hubs/event_feed.dart';
+import 'package:protectorate/gen/protectorate/v1/sleeve.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/sleeve.pb.dart';
 import 'package:protectorate/hubs/hub_client.dart';
+import 'package:protectorate/hubs/hub_profile.dart';
+import 'package:protectorate/screens/sleeves_screen.dart';
 import 'package:protectorate/nodes/node_view.dart';
 import 'package:protectorate/screens/node_detail_screen.dart';
 import 'package:protectorate/screens/nodes_tab.dart';
+
+const _hub = HubProfile(id: '1', name: 'home', baseUrl: 'http://h');
 
 NodeMetrics _metrics({double disk = 40, double mem = 30, bool gpu = false}) =>
     NodeMetrics(
@@ -209,7 +215,7 @@ void main() {
       await t.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: NodesTab(client: client, feed: feed),
+            body: NodesTab(hub: _hub, client: client, feed: feed),
           ),
         ),
       );
@@ -307,5 +313,79 @@ void main() {
       t.getTopLeft(find.byKey(ValueKey(rows[0]))).dy,
       lessThan(t.getTopLeft(find.byKey(ValueKey(rows[1]))).dy),
     );
+  });
+
+  test('sleeve workspaces count as offenders', () {
+    final m = NodeMetrics(
+      sleeves: [
+        Sleeve(
+          name: 'alice',
+          usage: SleeveUsage(workspaceDiskBytes: Int64(40 << 30)),
+        ),
+        Sleeve(name: 'idle'),
+      ],
+      watchDirs: [DirSize(path: '/c', sizeBytes: Int64(1 << 30))],
+    );
+    final top = topOffenders(m);
+    expect(top.first.kind, OffenderKind.sleeve);
+    expect(top.first.label, 'alice');
+    expect(top.length, 2);
+  });
+
+  testWidgets('sleeves screen lists and kills only after confirm', (t) async {
+    final killed = <String>[];
+    final transport = FakeTransportBuilder()
+        .unary(
+          SleeveService.listSleeves,
+          (ListSleevesRequest r, ctx) => ListSleevesResponse(
+            sleeves: [
+              Sleeve(
+                name: 'alice',
+                harness: Harness.HARNESS_CLAUDE,
+                workspace: '/w/a',
+                session: 'sleeve-alice',
+                state: SleeveState.SLEEVE_STATE_RUNNING,
+                limits: SleeveLimits(
+                  cpuPercent: 200,
+                  memoryBytes: Int64(4 << 30),
+                ),
+                usage: SleeveUsage(
+                  cpuPercent: 50,
+                  memoryCurrentBytes: Int64(1 << 30),
+                  workspaceDiskBytes: Int64(3 << 30),
+                ),
+              ),
+            ],
+          ),
+        )
+        .unary(SleeveService.killSleeve, (KillSleeveRequest r, ctx) {
+          killed.add(r.name);
+          return KillSleeveResponse();
+        })
+        .build();
+    final feed = EventFeed(() => const Stream<Event>.empty());
+    addTearDown(feed.dispose);
+    await t.pumpWidget(
+      MaterialApp(
+        home: SleevesScreen(
+          hub: _hub,
+          client: HubClient.withTransport(transport),
+          feed: feed,
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(find.byKey(const ValueKey('sleeve-alice')), findsOneWidget);
+    expect(find.text('1.00 GB / 4.00 GB'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('kill-alice')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Cancel'));
+    await t.pumpAndSettle();
+    expect(killed, isEmpty);
+    await t.tap(find.byKey(const ValueKey('kill-alice')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const ValueKey('confirm-kill')));
+    await t.pumpAndSettle();
+    expect(killed, ['alice']);
   });
 }

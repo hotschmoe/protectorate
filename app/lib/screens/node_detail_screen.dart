@@ -5,18 +5,22 @@ import 'package:flutter/material.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
+import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
 import 'nodes_tab.dart';
+import 'sleeves_screen.dart';
 
 class NodeDetailScreen extends StatefulWidget {
   const NodeDetailScreen({
     super.key,
+    required this.hub,
     required this.client,
     required this.feed,
     required this.name,
     this.now,
   });
 
+  final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
   final String name;
@@ -99,6 +103,17 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
               age: statusAge(s, _receivedAt, _now()),
               now: _now(),
               error: _error,
+              onManageSleeves: s.node.local
+                  ? () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => SleevesScreen(
+                          hub: widget.hub,
+                          client: widget.client,
+                          feed: widget.feed,
+                        ),
+                      ),
+                    )
+                  : null,
             ),
     );
   }
@@ -111,8 +126,10 @@ class NodeDetail extends StatelessWidget {
     required this.age,
     required this.now,
     this.error,
+    this.onManageSleeves,
   });
 
+  final VoidCallback? onManageSleeves;
   final NodeStatus status;
   final Duration age;
   final DateTime now;
@@ -322,6 +339,28 @@ class NodeDetail extends StatelessWidget {
           _Section(
             'Containers (${m.engine.containers.length}), by writable layer',
             _ContainerTable(containers: containersBySize(m)),
+          ),
+        if (m.sleeves.isNotEmpty || onManageSleeves != null)
+          _Section(
+            'Sleeves (${m.sleeves.length}), by workspace size',
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (m.sleeves.isEmpty) const Text('No sleeves.'),
+                for (final s in sleevesBySize(m))
+                  SleeveRow(sleeve: s, dim: dim),
+                if (onManageSleeves != null)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const ValueKey('manage-sleeves'),
+                      onPressed: onManageSleeves,
+                      icon: const Icon(Icons.settings_ethernet),
+                      label: const Text('Manage sleeves'),
+                    ),
+                  ),
+              ],
+            ),
           ),
         _Section(
           'Watched directories',
@@ -597,6 +636,7 @@ class _Offenders extends StatelessWidget {
     OffenderKind.container: 'container',
     OffenderKind.engine: 'engine',
     OffenderKind.watchedDir: 'dir',
+    OffenderKind.sleeve: 'sleeve',
   };
 
   @override
