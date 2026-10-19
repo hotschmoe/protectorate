@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -210,13 +211,32 @@ func parseList(out string) ([]Session, error) {
 	return res, nil
 }
 
+var signalNames = map[string]syscall.Signal{
+	"HUP": syscall.SIGHUP, "INT": syscall.SIGINT, "QUIT": syscall.SIGQUIT, "ILL": syscall.SIGILL,
+	"TRAP": syscall.SIGTRAP, "ABRT": syscall.SIGABRT, "BUS": syscall.SIGBUS, "FPE": syscall.SIGFPE,
+	"KILL": syscall.SIGKILL, "SEGV": syscall.SIGSEGV, "PIPE": syscall.SIGPIPE, "ALRM": syscall.SIGALRM,
+	"TERM": syscall.SIGTERM,
+}
+
+// parseSignal reads #{pane_dead_signal}, which is a number on glibc builds of
+// tmux but a name such as KILL on Android's bionic.
+func parseSignal(s string) (int, error) {
+	if n, err := strconv.Atoi(s); err == nil {
+		return n, nil
+	}
+	if sig, ok := signalNames[strings.TrimPrefix(strings.ToUpper(s), "SIG")]; ok {
+		return int(sig), nil
+	}
+	return 0, fmt.Errorf("unknown signal %q", s)
+}
+
 // parseExit fills the exit fields. tmux reports a pane dead the moment its pty
 // closes, a little before it reaps the process; until then the session still
 // counts as running.
 func (s *Session) parseExit(status, signal, at string) error {
 	s.State = Exited
 	if signal != "" {
-		n, err := strconv.Atoi(signal)
+		n, err := parseSignal(signal)
 		if err != nil {
 			return err
 		}

@@ -162,6 +162,9 @@ func TestMain(m *testing.M) {
 
 func gitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
 	cmd := exec.Command("git", append([]string{"-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.autocrlf=false"}, args...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()

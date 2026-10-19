@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 	"sort"
 	"strings"
@@ -128,7 +129,7 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 		return c.last, nil
 	}
 	m := &pb.NodeMetrics{Os: runtime.GOOS, Arch: runtime.GOARCH, AgentVersion: c.opts.Version, CollectedAt: timestamppb.Now()}
-	m.Hostname, _ = os.Hostname()
+	m.Hostname = Hostname()
 
 	var (
 		mu sync.Mutex
@@ -215,17 +216,31 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 
 func (c *Collector) cpuMetrics(ctx context.Context) (*pb.CpuMetrics, error) {
 	cm := &pb.CpuMetrics{LogicalCores: int32(runtime.NumCPU())}
-	usage, err := c.cpuUsage(ctx)
-	if err != nil {
-		return cm, err
-	}
-	cm.UsagePercent = usage
 	if runtime.GOOS != "windows" {
 		if avg, err := load.AvgWithContext(ctx); err == nil {
 			cm.Load1, cm.Load5, cm.Load15 = &avg.Load1, &avg.Load5, &avg.Load15
 		}
 	}
+	usage, err := c.cpuUsage(ctx)
+	if err != nil {
+		return cm, err
+	}
+	cm.UsagePercent = usage
 	return cm, nil
+}
+
+// Hostname is the machine's name. Android reports "localhost", so the device
+// model stands in for it there.
+func Hostname() string {
+	h, _ := os.Hostname()
+	if runtime.GOOS == "android" && (h == "" || h == "localhost") {
+		if out, err := exec.Command("/system/bin/getprop", "ro.product.model").Output(); err == nil {
+			if model := strings.TrimSpace(string(out)); model != "" {
+				return model
+			}
+		}
+	}
+	return h
 }
 
 // cpuUsage is the busy share since the previous call; the first call samples
@@ -311,12 +326,31 @@ func keepPartition(p disk.PartitionStat) bool {
 	if p.Fstype == "" || (pseudoFS[strings.ToLower(p.Fstype)] && !(p.Fstype == "overlay" && p.Mountpoint == "/")) {
 		return false
 	}
+	if runtime.GOOS == "android" && androidSystemMount(p.Mountpoint) {
+		return false
+	}
 	for _, skip := range []string{"/etc/", "/snap/", "/var/lib/docker/", "/var/lib/containers/", "/run/", "/proc", "/sys"} {
 		if strings.HasPrefix(p.Mountpoint, skip) {
 			return false
 		}
 	}
 	return true
+}
+
+var androidSystemDirs = []string{
+	"/apex", "/system", "/system_ext", "/vendor", "/vendor_dlkm", "/product", "/odm", "/metadata",
+	"/mnt", "/data_mirror", "/linkerconfig", "/debug_ramdisk", "/cache",
+}
+
+// androidSystemMount reports mounts of the read-only system image and the
+// per-app views Android layers over /data and /storage.
+func androidSystemMount(mount string) bool {
+	for _, d := range androidSystemDirs {
+		if mount == d || strings.HasPrefix(mount, d+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 type fsKey struct {

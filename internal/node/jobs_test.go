@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -369,6 +370,9 @@ func TestRunDuplicateJobID(t *testing.T) {
 }
 
 func TestRunGitWithoutBundleOrCommitFails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
 	j := newJobs(t, 1)
 	c := &collector{}
 	req := &pb.RunJobRequest{JobId: "g1", Command: []string{"true"}, RepoKey: "repo", Commit: strings.Repeat("a", 40)}

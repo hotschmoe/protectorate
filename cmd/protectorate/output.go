@@ -294,7 +294,7 @@ func writeNodeStatus(w io.Writer, s *pb.NodeStatus) {
 
 func writeMetrics(w io.Writer, m *pb.NodeMetrics) {
 	fmt.Fprintf(w, "hostname\t%s\n", m.Hostname)
-	fmt.Fprintf(w, "platform\t%s/%s %s\n", m.Os, m.Arch, m.Platform)
+	fmt.Fprintf(w, "platform\t%s\n", strings.TrimSpace(m.Os+"/"+m.Arch+" "+m.Platform))
 	fmt.Fprintf(w, "agent\t%s\n", orDash(m.AgentVersion))
 	fmt.Fprintf(w, "uptime\t%s\n", fmtDur(time.Duration(m.UptimeSeconds)*time.Second))
 	if c := m.Cpu; c != nil {

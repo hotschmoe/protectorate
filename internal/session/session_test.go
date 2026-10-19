@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -65,6 +66,12 @@ func TestParseList(t *testing.T) {
 				t.Fatalf("%+v", s[0])
 			}
 		}},
+		{"exited by named signal", "a\t100\t0\t200\t80\t24\t/tmp\t1\t\tKILL\t1700000000\t\n", 1, false, func(t *testing.T, s []Session) {
+			if s[0].State != Exited || s[0].ExitSignal != int(syscall.SIGKILL) || s[0].ExitCode != 128+int(syscall.SIGKILL) {
+				t.Fatalf("%+v", s[0])
+			}
+		}},
+		{"unknown signal name", "a\t100\t0\t200\t80\t24\t/tmp\t1\t\tBOGUS\t1700000000\t\n", 0, true, nil},
 		{"pty closed, status not yet known", "a\t100\t0\t200\t80\t24\t/tmp\t1\t\t\t\t\n", 1, false, func(t *testing.T, s []Session) {
 			if s[0].State != Running {
 				t.Fatalf("%+v", s[0])

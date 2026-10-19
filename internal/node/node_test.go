@@ -418,3 +418,20 @@ func TestAgent(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestAndroidSystemMount(t *testing.T) {
+	for mount, want := range map[string]bool{
+		"/apex/com.android.art@340":        true,
+		"/system":                          true,
+		"/system_ext":                      true,
+		"/mnt/pass_through/0/emulated":     true,
+		"/data":                            false,
+		"/data/data/com.termux/files/home": false,
+		"/storage/emulated":                false,
+		"/systemx":                         false,
+	} {
+		if got := androidSystemMount(mount); got != want {
+			t.Errorf("androidSystemMount(%q) = %v, want %v", mount, got, want)
+		}
+	}
+}

@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -123,8 +125,12 @@ func TestCodexAppServer(t *testing.T) {
 	}
 	home := t.TempDir()
 	writeHomeFile(t, home, ".codex/auth.json", fmt.Sprintf(`{"tokens":{"access_token":%q,"account_id":"acct"}}`, fakeJWT(testNow.Add(time.Hour))))
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh to run the fake codex")
+	}
 	bin := filepath.Join(t.TempDir(), "codex")
-	if err := os.WriteFile(bin, []byte(rpcScript), 0o700); err != nil {
+	if err := os.WriteFile(bin, []byte(strings.Replace(rpcScript, "#!/bin/sh", "#!"+sh, 1)), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

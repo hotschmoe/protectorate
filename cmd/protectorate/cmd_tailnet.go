@@ -17,6 +17,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/hub"
+	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
 )
 
@@ -161,11 +162,7 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 				return err
 			}
 			if name == "" {
-				host, err := os.Hostname()
-				if err != nil {
-					return err
-				}
-				name = tailnet.SanitizeLabel(host)
+				name = tailnet.SanitizeLabel(node.Hostname())
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 90*time.Second)
 			defer cancel()
