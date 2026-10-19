@@ -534,6 +534,7 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
   backlog.md          # low-priority work; items may link to GitHub issues (P6)
   ca/                 # SSH CA for short-lived certs to nodes
   tailnet/            # tsnet + headscale state
+  backups/            # default target of `hub backup` (docs/install.md)
 ```
 
 Per-workspace memory stays in `.cstack/` (cortical-stack format).

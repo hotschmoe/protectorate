@@ -180,6 +180,32 @@ Nothing updates by itself. `node update` asks the hub (`NodeService.UpdateNode`,
 
 The hub streams the progress (sending, verifying, swapping, restarting) and waits up to 3 minutes until the node reports the new version, or reports that it came back on the old one. The new binary is on trial, recorded in `protectorate.exe.update` next to the binary (a marker file that is rewritten, never deleted): the first hub poll that reaches it confirms the update. If the new binary is started twice without the hub reaching it, or four minutes pass without contact, it puts the `.old` binary back (on Windows the failed one stays as `.failed`) and restarts. A node that has no supervisor and whose new binary dies before running any code stays down; that is why `version --json` is run first. The hub's own node is updated by replacing the hub binary and restarting the hub. Updating is owner-only (the `NodeService.ApplyUpdate` and `UpdateNode` RPCs are not offered to scoped tokens or the MCP bridge).
 
+## Back up and restore the hub
+
+```
+protectorate hub backup [--to DIR]                        # default DIR: $PROTECTORATE_HOME/backups
+protectorate hub serve --backup-dir DIR --backup-every 6h # the same, on a schedule (6h is the default interval)
+protectorate hub restore FILE --home DIR                  # into an empty or missing DIR only
+```
+
+A backup is one `protectorate-hub-<UTC time>.tar.zst` plus `<name>.sha256` (`sha256sum -c` works on it). It is taken while the hub and headscale keep running; nothing is stopped. Each file is copied on its own, which is consistent because the hub replaces its files atomically or only appends to them (a torn last line is cut off on load). Headscale's SQLite database is copied with SQLite's `VACUUM INTO`, a consistent read snapshot that does not block headscale's writers. The archive ends with `MANIFEST.json`: the size and SHA-256 of every file, the hub version and the home it came from.
+
+In the backup: `token`, `tokens.yaml`, `nodes.yaml`, `sleeves.yaml`, `leases.yaml`, `desk-policies.yaml`, `desk-use.json`, `directory.json`, `mailbox.jsonl`, `backlog.md`, `audit/`, `ca/`, `jobs/<id>/job.json` and `job.log` with `jobs/request-ids.jsonl`, each sleeve's chat log and its request ids, and `tailnet/` (database, `config.json`, the DERP certificate and key that nodes pin, the noise key, the hub's tsnet state). Not in it: `bin/` (run `hub tailnet install`), `auth/` and `login/` (harness logins; run `protectorate login` again), `node-files/`, job artifacts, and sleeve workspaces and homes. It holds secrets (the owner token, the tailnet keys): keep the backup directory as private as the home.
+
+With `--backup-dir`, `hub serve` makes a backup at start unless the newest one in the directory is younger than `--backup-every`, then one every interval. A failed backup is logged and tried again. **Old backups are never deleted, not by the hub and not by `hub backup`; pruning is manual** (for example `find DIR -name 'protectorate-hub-*.tar.zst*' -mtime +30`, review, then remove).
+
+Restore on the same or a new machine:
+
+```
+protectorate hub restore protectorate-hub-20261020T093000Z.tar.zst --home ~/.protectorate
+protectorate hub tailnet install          # the headscale binary is not in the backup
+protectorate hub serve ...                # the same flags as before, PROTECTORATE_HOME unchanged
+```
+
+`restore` refuses a home that has any file in it. Before it writes anything it checks the sidecar digest (when present) and the manifest (every file's size and SHA-256, no entry the manifest does not list, no path outside the home); afterwards it runs SQLite's integrity check on the restored headscale database. The enrolled nodes are in the restored database and the DERP certificate that nodes pin is unchanged, so with the hub back at the same address they reconnect without enrolling again. A hub restored at a different address is not covered: nodes still hold the old control URL.
+
+Targets: any directory, including a share mounted on the hub box (NFS, SMB). The NAS (`/mnt/storage/...` on b70-nas-server) is the intended off-box copy; pushing a backup to a node with the `node put` transfer is a later option, so for now mount it on the hub or copy the finished archive there with `scp`. The backup is a plain file, so any copy tool works.
+
 ## Phone client
 
 ```
