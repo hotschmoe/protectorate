@@ -8,6 +8,8 @@ Branch and release rules.
 - `dev-hotschmoe` is the working branch.
 - Feature branches (`feat/*`, `fix/*`) start from `dev-hotschmoe` and merge back into it with `git merge --no-ff` after all checks pass.
 
+Generated code must be byte-identical everywhere, so the generators are pinned, and CI and the release workflow install exactly these: buf 1.74.0, protoc-gen-go v1.36.12, protoc-gen-connect-go v1.21.1, Dart protoc_plugin 25.1.0 and connectrpc 2.0.0, Flutter 3.44.1. Upgrade them together, locally and in `.github/workflows/`, in one commit with the regenerated output.
+
 Checks before every commit and before every merge: `go vet ./...`, `go test -race ./...`, `gofmt -l cmd internal` printing nothing, `make check-gen`, `make cross`, `make app-check`, `make check-version`. `make check` runs them all. CI runs the same on pushes to `master` and `dev-hotschmoe` and on pull requests.
 
 ## Release

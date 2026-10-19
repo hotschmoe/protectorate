@@ -22,14 +22,17 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.44.1
           cache: true
       - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: 1.74.0
       - name: Generator plugins
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-          dart pub global activate protoc_plugin
-          dart pub global activate connectrpc
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.1
+          dart pub global activate protoc_plugin 25.1.0
+          dart pub global activate connectrpc 2.0.0
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
           echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
       - name: Version
