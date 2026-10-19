@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -24,7 +25,17 @@ func testConfig() Config {
 	}
 }
 
+// linuxHost skips tests of host paths and permissions that the Linux-only
+// sleeve runtime defines in POSIX terms.
+func linuxHost(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("sleeves run on Linux hosts only")
+	}
+}
+
 func TestPlanGolden(t *testing.T) {
+	linuxHost(t)
 	tests := []struct {
 		name string
 		spec Spec
@@ -69,6 +80,7 @@ func TestPlanGolden(t *testing.T) {
 }
 
 func TestPlanRejects(t *testing.T) {
+	linuxHost(t)
 	ok := Spec{Name: "a", Harness: Shell, Workspace: "/work/x"}
 	tests := []struct {
 		name string
@@ -135,6 +147,7 @@ func TestParseHarness(t *testing.T) {
 }
 
 func TestLocateFollowsSymlinkChain(t *testing.T) {
+	linuxHost(t)
 	root := t.TempDir()
 	for _, d := range []string{"tools/bin", "other/bin", "other/dl"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
@@ -168,6 +181,7 @@ func TestLocateFollowsSymlinkChain(t *testing.T) {
 }
 
 func TestAddBinaryDir(t *testing.T) {
+	linuxHost(t)
 	t.Run("unmounted dir is mounted and on PATH last", func(t *testing.T) {
 		c := testConfig()
 		if err := c.AddBinaryDir("/opt/prot/bin/protectorate"); err != nil {
@@ -215,6 +229,7 @@ func TestAddBinaryDir(t *testing.T) {
 }
 
 func TestOrchestratorWorkspace(t *testing.T) {
+	linuxHost(t)
 	c := testConfig()
 	for ws, ok := range map[string]bool{
 		"/state/orchestrator": true, "/state/sleeves/poe": false, "/state/auth/claude": false, "/state": false,

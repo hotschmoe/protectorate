@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -350,7 +352,7 @@ func TestInstall(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o755 {
+			if fi, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o755) {
 				t.Fatalf("stat %s: %v %v", path, fi, err)
 			}
 		})
@@ -389,7 +391,7 @@ func TestConfigSaveLoad(t *testing.T) {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	fi, err := os.Stat(configPath(home))
-	if err != nil || fi.Mode().Perm() != 0o600 {
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("config mode: %v %v", fi, err)
 	}
 	if _, err := LoadConfig(t.TempDir()); !errors.Is(err, os.ErrNotExist) {
@@ -402,7 +404,7 @@ func TestSocketPathShort(t *testing.T) {
 	if p := socketPath(long); len(p) >= 108 {
 		t.Fatalf("socket path too long: %d", len(p))
 	}
-	if p := socketPath("/h"); p != "/h/tailnet/headscale.sock" {
+	if p := socketPath("/h"); p != filepath.Join("/h", "tailnet", "headscale.sock") {
 		t.Fatalf("p = %s", p)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -231,7 +232,7 @@ func TestSpawnMintsAndRevokesOnRespawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("token file mode = %v", fi.Mode().Perm())
 	}
 	secret1, _ := os.ReadFile(tokenPath)

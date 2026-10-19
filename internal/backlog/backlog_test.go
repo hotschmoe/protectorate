@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -294,6 +295,9 @@ func TestStoreListAssignsIDs(t *testing.T) {
 }
 
 func TestStorePreservesFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no unix permission bits")
+	}
 	s := newTestStore(t, "## p\n- [ ] a id:1\n")
 	if _, _, err := s.Update("1", StateDone, ""); err != nil {
 		t.Fatal(err)

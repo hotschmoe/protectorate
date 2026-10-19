@@ -36,14 +36,15 @@ func TestParseTarget(t *testing.T) {
 
 func TestParseGitSource(t *testing.T) {
 	abs, _ := filepath.Abs("repo")
+	absOf := func(p string) string { a, _ := filepath.Abs(p); return a }
 	tests := []struct {
 		in           string
 		repo, commit string
 	}{
 		{"repo@abc123", abs, "abc123"},
 		{"repo", abs, ""},
-		{"/srv/x@feature/a@b", "/srv/x@feature/a", "b"},
-		{"/srv/x@HEAD~2", "/srv/x", "HEAD~2"},
+		{"/srv/x@feature/a@b", absOf("/srv/x@feature/a"), "b"},
+		{"/srv/x@HEAD~2", absOf("/srv/x"), "HEAD~2"},
 	}
 	for _, tt := range tests {
 		s, err := parseGitSource(tt.in)

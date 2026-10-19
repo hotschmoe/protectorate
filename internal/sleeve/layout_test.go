@@ -103,6 +103,7 @@ func TestSharedAuthVisibleAcrossSleeves(t *testing.T) {
 }
 
 func TestLayoutApply(t *testing.T) {
+	linuxHost(t)
 	c := layoutConfig(t)
 	l := c.layout("s", Claude)
 	if err := l.Apply(); err != nil {
@@ -148,6 +149,7 @@ func TestLayoutApply(t *testing.T) {
 }
 
 func TestLayoutEnv(t *testing.T) {
+	linuxHost(t)
 	c := testConfig()
 	tests := []struct {
 		h    Harness

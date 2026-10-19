@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/jobtest"
 )
 
 type recorded struct{ kind, subject string }
@@ -173,7 +175,7 @@ func TestLeasePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("leases.yaml = %v, %v", fi, err)
 	}
 	entries, _ := os.ReadDir(filepath.Dir(path))
@@ -390,7 +392,7 @@ func TestLeaseServiceEndToEnd(t *testing.T) {
 		return res.Msg, nil
 	}
 	ttl := durationpb.New(time.Minute)
-	l, err := acquire(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{Os: "linux"}}, Holder: "alice", Ttl: ttl})
+	l, err := acquire(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{Os: runtime.GOOS}}, Holder: "alice", Ttl: ttl})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,11 +410,11 @@ func TestLeaseServiceEndToEnd(t *testing.T) {
 	if _, err := e.jc.SubmitJob(ctx, connect.NewRequest(&pb.SubmitJobRequest{Target: onNode(l.Node), Command: []string{"true"}})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("job on a leased node without the lease: %v", err)
 	}
-	picked := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: &pb.JobTarget{Target: &pb.JobTarget_Selector{Selector: &pb.NodeSelector{Os: "linux"}}}, Command: sh("true")}).Id)
+	picked := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: &pb.JobTarget{Target: &pb.JobTarget_Selector{Selector: &pb.NodeSelector{Os: runtime.GOOS}}}, Command: jobtest.Script()}).Id)
 	if picked.Node != other {
 		t.Fatalf("selector job ran on %s, want the unleased %s", picked.Node, other)
 	}
-	held := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: &pb.JobTarget{Target: &pb.JobTarget_LeaseId{LeaseId: l.Id}}, Command: sh("echo on lease")}).Id)
+	held := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: &pb.JobTarget{Target: &pb.JobTarget_LeaseId{LeaseId: l.Id}}, Command: jobtest.Script("say:on lease")}).Id)
 	if held.State != pb.JobState_JOB_STATE_SUCCEEDED || held.Node != l.Node {
 		t.Fatalf("lease job = %v", held)
 	}

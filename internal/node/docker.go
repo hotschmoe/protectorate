@@ -59,6 +59,9 @@ func newDockerClient(host string) *dockerClient {
 	switch u.Scheme {
 	case "unix":
 		sock := u.Path
+		if runtime.GOOS == "windows" && len(sock) >= 3 && sock[0] == '/' && sock[2] == ':' {
+			sock = sock[1:]
+		}
 		return &dockerClient{
 			base:   "http://docker",
 			socket: sock,

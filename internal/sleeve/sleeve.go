@@ -257,7 +257,7 @@ func within(p, root string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, "../"))
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func (c Config) sleeveDir(name string) string  { return filepath.Join(c.Home, "sleeves", name) }

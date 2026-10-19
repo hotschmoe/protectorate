@@ -21,6 +21,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/jobtest"
 )
 
 type collector struct {
@@ -66,9 +67,6 @@ func (c *collector) finished() *pb.JobFinished {
 
 func newJobs(t *testing.T, slots int) *Jobs {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("job tests use sh")
-	}
 	j, err := NewJobs(t.TempDir(), slots)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +74,10 @@ func newJobs(t *testing.T, slots int) *Jobs {
 	return j
 }
 
-func shArgs(script string) []string { return []string{"sh", "-c", script} }
+func TestMain(m *testing.M) {
+	jobtest.Run()
+	os.Exit(m.Run())
+}
 
 func TestNewJobsClearsStaleScratchButKeepsRepos(t *testing.T) {
 	dir := t.TempDir()
@@ -232,7 +233,7 @@ func TestMatchArtifacts(t *testing.T) {
 func TestRunOutputExitAndEnv(t *testing.T) {
 	j := newJobs(t, 1)
 	c := &collector{}
-	req := &pb.RunJobRequest{JobId: "r1", Command: shArgs("echo out; echo err >&2; echo $A $PROTECTORATE_JOB_ID; exit 3"), Env: map[string]string{"A": "val"}}
+	req := &pb.RunJobRequest{JobId: "r1", Command: jobtest.Script("say:out", "err:err", "env:A,PROTECTORATE_JOB_ID", "exit:3"), Env: map[string]string{"A": "val"}}
 	if err := j.Run(context.Background(), req, c.send); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +256,7 @@ func TestRunTimeoutKillsTree(t *testing.T) {
 	j := newJobs(t, 1)
 	c := &collector{}
 	start := time.Now()
-	req := &pb.RunJobRequest{JobId: "t1", Command: shArgs("sleep 300 & wait"), Timeout: durationpb.New(300 * time.Millisecond)}
+	req := &pb.RunJobRequest{JobId: "t1", Command: jobtest.Script("spawn:300", "wait"), Timeout: durationpb.New(300 * time.Millisecond)}
 	if err := j.Run(context.Background(), req, c.send); err != nil {
 		t.Fatal(err)
 	}
@@ -271,15 +272,19 @@ func TestRunStubbornProcessIsKilledAfterGrace(t *testing.T) {
 	j := newJobs(t, 1)
 	c := &collector{}
 	start := time.Now()
-	req := &pb.RunJobRequest{JobId: "s1", Command: shArgs("trap '' TERM; echo ready; while :; do sleep 1; done"), Timeout: durationpb.New(500 * time.Millisecond)}
+	req := &pb.RunJobRequest{JobId: "s1", Command: jobtest.Script("ignoreterm", "say:ready", "sleep:300"), Timeout: durationpb.New(500 * time.Millisecond)}
 	if err := j.Run(context.Background(), req, c.send); err != nil {
 		t.Fatal(err)
 	}
 	if f := c.finished(); f == nil || f.End != pb.JobEnd_JOB_END_TIMED_OUT {
 		t.Fatalf("finished = %v", f)
 	}
-	if d := time.Since(start); d < killGrace || d > killGrace+5*time.Second {
-		t.Fatalf("SIGTERM-immune process died after %s, want about %s", d, killGrace)
+	want := killGrace
+	if runtime.GOOS == "windows" {
+		want = 0
+	}
+	if d := time.Since(start); d < want || d > want+5*time.Second {
+		t.Fatalf("SIGTERM-immune process died after %s, want about %s", d, want)
 	}
 }
 
@@ -289,7 +294,7 @@ func TestRunCallerDisconnectKillsJob(t *testing.T) {
 	c := &collector{}
 	done := make(chan error, 1)
 	go func() {
-		done <- j.Run(ctx, &pb.RunJobRequest{JobId: "d1", Command: shArgs("echo up; sleep 300")}, c.send)
+		done <- j.Run(ctx, &pb.RunJobRequest{JobId: "d1", Command: jobtest.Script("say:up", "sleep:300")}, c.send)
 	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(c.output(), "up") && time.Now().Before(deadline) {
@@ -314,7 +319,7 @@ func TestRunWaitsForSlotAndCancelWhileQueued(t *testing.T) {
 	c1 := &collector{}
 	first := make(chan error, 1)
 	go func() {
-		first <- j.Run(context.Background(), &pb.RunJobRequest{JobId: "q1", Command: shArgs("sleep 1")}, c1.send)
+		first <- j.Run(context.Background(), &pb.RunJobRequest{JobId: "q1", Command: jobtest.Script("sleep:1")}, c1.send)
 	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for c1.count() == 0 && time.Now().Before(deadline) {
@@ -323,7 +328,7 @@ func TestRunWaitsForSlotAndCancelWhileQueued(t *testing.T) {
 	c2 := &collector{}
 	second := make(chan error, 1)
 	go func() {
-		second <- j.Run(context.Background(), &pb.RunJobRequest{JobId: "q2", Command: shArgs("echo two")}, c2.send)
+		second <- j.Run(context.Background(), &pb.RunJobRequest{JobId: "q2", Command: jobtest.Script("say:two")}, c2.send)
 	}()
 	time.Sleep(300 * time.Millisecond)
 	if c2.count() != 0 {
@@ -349,13 +354,13 @@ func TestRunDuplicateJobID(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = j.Run(context.Background(), &pb.RunJobRequest{JobId: "dup", Command: shArgs("sleep 30")}, c.send)
+		_ = j.Run(context.Background(), &pb.RunJobRequest{JobId: "dup", Command: jobtest.Script("sleep:30")}, c.send)
 	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for c.count() == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	err := j.Run(context.Background(), &pb.RunJobRequest{JobId: "dup", Command: shArgs("true")}, (&collector{}).send)
+	err := j.Run(context.Background(), &pb.RunJobRequest{JobId: "dup", Command: jobtest.Script()}, (&collector{}).send)
 	if connect.CodeOf(err) != connect.CodeAlreadyExists {
 		t.Fatalf("duplicate run: %v", err)
 	}
@@ -385,7 +390,7 @@ func TestRunGitWithoutBundleOrCommitFails(t *testing.T) {
 func TestRunLogIsCapped(t *testing.T) {
 	j := newJobs(t, 1)
 	c := &collector{}
-	req := &pb.RunJobRequest{JobId: "l1", Command: shArgs("head -c 70000000 /dev/zero | tr '\\0' x; echo done")}
+	req := &pb.RunJobRequest{JobId: "l1", Command: jobtest.Script("flood:70000000", "say:done")}
 	if err := j.Run(context.Background(), req, c.send); err != nil {
 		t.Fatal(err)
 	}

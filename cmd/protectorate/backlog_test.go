@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"os"
 	"os/exec"
@@ -69,7 +70,7 @@ func TestBacklogCLI(t *testing.T) {
 		{"ls claimed json", []string{"backlog", "ls", "--state", "claimed", "--json"}, []string{`"state":"ITEM_STATE_CLAIMED"`, `"by":"alice/claude"`}, false},
 		{"done", []string{"backlog", "done", id}, []string{"done"}, false},
 		{"done unknown", []string{"backlog", "done", "ffff"}, nil, true},
-		{"edit json", []string{"backlog", "edit", "--json"}, []string{filepath.Join(home, "backlog.md")}, false},
+		{"edit json", []string{"backlog", "edit", "--json"}, []string{jsonEscape(filepath.Join(home, "backlog.md"))}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,4 +105,9 @@ func between(s, a, b string) string {
 	_, rest, _ := strings.Cut(s, a)
 	v, _, _ := strings.Cut(rest, b)
 	return v
+}
+
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
 }

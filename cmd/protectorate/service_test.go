@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,7 +55,7 @@ func TestServicePrintAndErrors(t *testing.T) {
 	}
 	for _, f := range []string{"protectorate-node/run", "boot/protectorate-node"} {
 		st, err := os.Stat(filepath.Join(dir, f))
-		if err != nil || st.Mode()&0o100 == 0 {
+		if err != nil || (runtime.GOOS != "windows" && st.Mode()&0o100 == 0) {
 			t.Errorf("%s missing or not executable: %v", f, err)
 		}
 	}

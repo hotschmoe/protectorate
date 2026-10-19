@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -260,7 +261,11 @@ func fakeDocker(t *testing.T) string {
 	srv.Listener = l
 	srv.Start()
 	t.Cleanup(srv.Close)
-	return "unix://" + sock
+	p := filepath.ToSlash(sock)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return "unix://" + p
 }
 
 func TestEngineMetrics(t *testing.T) {

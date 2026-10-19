@@ -123,12 +123,12 @@ func parseEnv(pairs []string) (map[string]string, error) {
 }
 
 func jobRunCmd(o *opts) *cobra.Command {
-	var on, gitSrc, artifact string
+	var on, gitSrc, artifact, workdir string
 	var globs, envPairs []string
 	var timeout time.Duration
 	var allowFamily bool
 	c := &cobra.Command{
-		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file>] [--artifact-glob 'dist/*'] -- <cmd...>",
+		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
 		Long: `Run a command on a node chosen by --on: a node name, a lease id, or a selector
 such as os=windows,arch=amd64,mem=8G (least-loaded fresh match, never a leased
@@ -137,6 +137,9 @@ node). The command runs in:
   --git repo@commit   a per-repo worktree on the node, reused by later jobs so
                       build caches (target/, node_modules) stay warm
   --artifact file     a fresh job directory holding the file, marked executable
+  --artifact dir      a fresh job directory holding the directory's contents
+                      (zipped, permission bits kept); --workdir picks the
+                      subdirectory the command runs in
   neither             an empty job directory
 
 Output streams live; the exit status of the command is this command's exit
@@ -167,7 +170,9 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 				if err != nil {
 					return err
 				}
-				req.Source = &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: abs}}}
+				req.Source = &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: abs, Workdir: workdir}}}
+			case workdir != "":
+				return errors.New("--workdir needs --artifact <dir>")
 			}
 			jc, err := o.jobClient()
 			if err != nil {
@@ -183,7 +188,8 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 	f := c.Flags()
 	f.StringVar(&on, "on", "", "node name, lease id or selector (os=,arch=,mem=,gpu-vram=)")
 	f.StringVar(&gitSrc, "git", "", "run a commit of a git repository on the hub: <repo>[@<commit>]")
-	f.StringVar(&artifact, "artifact", "", "run in a job directory holding this file from the hub")
+	f.StringVar(&artifact, "artifact", "", "run in a job directory holding this file or directory from the hub")
+	f.StringVar(&workdir, "workdir", "", "with --artifact <dir>: run in this subdirectory of it")
 	f.StringArrayVar(&globs, "artifact-glob", nil, "fetch files matching this glob back to the hub (repeatable)")
 	f.StringArrayVarP(&envPairs, "env", "e", nil, "environment variable KEY=VALUE (repeatable)")
 	f.DurationVar(&timeout, "timeout", time.Hour, "kill the command after this long (at most 24h)")

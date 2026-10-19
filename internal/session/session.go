@@ -97,6 +97,12 @@ type noServerError struct{}
 
 func (noServerError) Error() string { return "no tmux server running" }
 
+// noSessions reports that no session can exist: no tmux server is running, or
+// tmux is not installed on this host.
+func noSessions(err error) bool {
+	return errors.As(err, new(noServerError)) || errors.Is(err, exec.ErrNotFound)
+}
+
 func classify(stderr string, err error) error {
 	switch {
 	case strings.Contains(stderr, "no server running"),
@@ -123,7 +129,7 @@ const listFields = 12
 
 func (m *Manager) List(ctx context.Context) ([]Session, error) {
 	out, err := m.run(ctx, "list-sessions", "-F", listFormat)
-	if errors.As(err, new(noServerError)) {
+	if noSessions(err) {
 		return nil, nil
 	}
 	if err != nil {
@@ -319,7 +325,7 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 		return err
 	}
 	_, err := m.run(ctx, "kill-session", "-t", "="+name)
-	if errors.As(err, new(noServerError)) {
+	if noSessions(err) {
 		return ErrNotFound
 	}
 	if err != nil {
@@ -341,7 +347,7 @@ func (m *Manager) Capture(ctx context.Context, name string, lines int) (string, 
 		lines = 0
 	}
 	out, err := m.run(ctx, "capture-pane", "-p", "-e", "-J", "-S", strconv.Itoa(-lines), "-t", target(name))
-	if errors.As(err, new(noServerError)) {
+	if noSessions(err) {
 		return "", ErrNotFound
 	}
 	if err != nil {

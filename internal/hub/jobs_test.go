@@ -21,6 +21,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/jobtest"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
 
@@ -39,9 +40,6 @@ type jobEnv struct {
 // loopback and waits until both are fresh.
 func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("job tests use sh")
-	}
 	home := t.TempDir()
 	t.Setenv("PROTECTORATE_HOME", home)
 	remote, err := node.NewJobs(filepath.Join(t.TempDir(), "peer-jobs"), peerSlots)
@@ -157,11 +155,14 @@ func onNode(name string) *pb.JobTarget {
 	return &pb.JobTarget{Target: &pb.JobTarget_Node{Node: name}}
 }
 
-func sh(script string) []string { return []string{"sh", "-c", script} }
+func TestMain(m *testing.M) {
+	jobtest.Run()
+	os.Exit(m.Run())
+}
 
 func gitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-c", "user.email=t@t", "-c", "user.name=t"}, args...)...)
+	cmd := exec.Command("git", append([]string{"-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.autocrlf=false"}, args...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -203,9 +204,8 @@ func TestGitJobWarmCacheAndIncrementalBundle(t *testing.T) {
 	gitIn(t, repo, "commit", "-qm", "c1")
 	c1 := gitIn(t, repo, "rev-parse", "HEAD")
 
-	script := "cat hello.txt; echo built >> cache.txt; wc -l < cache.txt"
 	run := func(commit string) *pb.Job {
-		j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Source: gitSource(repo, commit), Command: sh(script)})
+		j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Source: gitSource(repo, commit), Command: jobtest.Script("cat:hello.txt", "append:cache.txt:built", "lines:cache.txt")})
 		return e.wait(t, j.Id)
 	}
 
@@ -253,18 +253,36 @@ func TestGitJobWarmCacheAndIncrementalBundle(t *testing.T) {
 	}
 }
 
+func toolExe(t *testing.T, dir string) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "tool"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	dst := filepath.Join(dir, name)
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dst, data, 0o755)
+	return dst
+}
+
 func TestArtifactJobAndArtifactUpload(t *testing.T) {
 	e := newJobEnv(t, 1)
-	bin := filepath.Join(t.TempDir(), "tool.sh")
-	pad := strings.Repeat("# padding to span several upload frames\n", 60000)
-	writeFile(t, bin, []byte("#!/bin/sh\necho artifact ran with $1\nmkdir -p out/sub\nhead -c 3000000 /dev/zero > out/big.bin\necho hi > out/sub/small.txt\necho skip > other.txt\n"+pad), 0o644)
+	bin := toolExe(t, t.TempDir())
 	if fi, _ := os.Stat(bin); fi.Size() < 2<<20 {
-		t.Fatalf("test file too small: %d", fi.Size())
+		t.Fatalf("test binary too small to span several upload frames: %d", fi.Size())
 	}
 
 	j := e.submit(t, &pb.SubmitJobRequest{
 		Target: onNode("peer"), Source: &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: bin}}},
-		Command: []string{"./tool.sh", "arg1"}, ArtifactGlobs: []string{"out"},
+		Command:       append([]string{"./" + filepath.Base(bin)}, jobtest.Args("say:artifact ran with arg1", "floodfile:out/big.bin:3000000", "write:out/sub/small.txt:hi", "write:other.txt:skip")...),
+		ArtifactGlobs: []string{"out"},
 	})
 	j = e.wait(t, j.Id)
 	if j.State != pb.JobState_JOB_STATE_SUCCEEDED {
@@ -294,7 +312,7 @@ func TestArtifactJobAndArtifactUpload(t *testing.T) {
 
 func TestJobOnHubsOwnNode(t *testing.T) {
 	e := newJobEnv(t, 1)
-	j := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: onNode("hubhost"), Command: sh("echo local; echo $PROTECTORATE_JOB_ID")}).Id)
+	j := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: onNode("hubhost"), Command: jobtest.Script("say:local", "env:PROTECTORATE_JOB_ID")}).Id)
 	if j.State != pb.JobState_JOB_STATE_SUCCEEDED || j.Node != "hubhost" {
 		t.Fatalf("job = %v", j)
 	}
@@ -306,7 +324,7 @@ func TestJobOnHubsOwnNode(t *testing.T) {
 func TestJobFailureAndEnv(t *testing.T) {
 	e := newJobEnv(t, 1)
 	j := e.wait(t, e.submit(t, &pb.SubmitJobRequest{
-		Target: onNode("peer"), Command: sh("echo $SECRET_VALUE; exit 7"), Env: map[string]string{"SECRET_VALUE": "s3cret"},
+		Target: onNode("peer"), Command: jobtest.Script("env:SECRET_VALUE", "exit:7"), Env: map[string]string{"SECRET_VALUE": "s3cret"},
 	}).Id)
 	if j.State != pb.JobState_JOB_STATE_FAILED || j.ExitCode != 7 || j.Error != "exit status 7" {
 		t.Fatalf("job = %v", j)
@@ -327,7 +345,7 @@ func TestJobFailureAndEnv(t *testing.T) {
 
 func TestJobCancelKillsProcessTree(t *testing.T) {
 	e := newJobEnv(t, 1)
-	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("sleep 300 & echo child=$!; wait")})
+	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("spawn:300", "wait")})
 	var childPID int
 	waitUntil(t, 10*time.Second, "child pid in log", func() bool {
 		line := strings.TrimSpace(e.logOf(t, j.Id))
@@ -338,7 +356,7 @@ func TestJobCancelKillsProcessTree(t *testing.T) {
 	if e.get(t, j.Id).State != pb.JobState_JOB_STATE_RUNNING {
 		t.Fatalf("state = %v", e.get(t, j.Id).State)
 	}
-	if !processAlive(childPID) {
+	if !jobtest.Alive(childPID) {
 		t.Fatal("grandchild is not running before cancel")
 	}
 
@@ -353,7 +371,7 @@ func TestJobCancelKillsProcessTree(t *testing.T) {
 	if time.Since(start) > 8*time.Second {
 		t.Fatalf("cancel took %s", time.Since(start))
 	}
-	waitUntil(t, 5*time.Second, "grandchild to die", func() bool { return !processAlive(childPID) })
+	waitUntil(t, 5*time.Second, "grandchild to die", func() bool { return !jobtest.Alive(childPID) })
 
 	again, err := e.jc.CancelJob(context.Background(), connect.NewRequest(&pb.CancelJobRequest{Id: j.Id}))
 	if err != nil || again.Msg.State != pb.JobState_JOB_STATE_CANCELED {
@@ -361,21 +379,11 @@ func TestJobCancelKillsProcessTree(t *testing.T) {
 	}
 }
 
-func processAlive(pid int) bool {
-	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if err != nil {
-		p, perr := os.FindProcess(pid)
-		return perr == nil && p.Signal(nil) == nil
-	}
-	s := string(raw)
-	return s[strings.LastIndex(s, ")")+2] != 'Z'
-}
-
 func TestJobTimeout(t *testing.T) {
 	e := newJobEnv(t, 1)
 	start := time.Now()
 	j := e.wait(t, e.submit(t, &pb.SubmitJobRequest{
-		Target: onNode("peer"), Command: sh("echo started; sleep 300"), Timeout: durationpb.New(700 * time.Millisecond),
+		Target: onNode("peer"), Command: jobtest.Script("say:started", "sleep:300"), Timeout: durationpb.New(700 * time.Millisecond),
 	}).Id)
 	if j.State != pb.JobState_JOB_STATE_TIMED_OUT || !strings.Contains(j.Error, "timed out") {
 		t.Fatalf("job = %v", j)
@@ -390,9 +398,9 @@ func TestJobTimeout(t *testing.T) {
 
 func TestNodeConcurrencyLimit(t *testing.T) {
 	e := newJobEnv(t, 1)
-	first := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("echo a; sleep 1.5")})
+	first := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:a", "sleep:1.5")})
 	waitUntil(t, 10*time.Second, "first running", func() bool { return e.get(t, first.Id).State == pb.JobState_JOB_STATE_RUNNING })
-	second := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("echo b")})
+	second := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:b")})
 	time.Sleep(500 * time.Millisecond)
 	if st := e.get(t, second.Id).State; st != pb.JobState_JOB_STATE_PREPARING {
 		t.Fatalf("second must wait for the slot, state = %v", st)
@@ -405,8 +413,8 @@ func TestNodeConcurrencyLimit(t *testing.T) {
 
 func TestConcurrencyTwoSlots(t *testing.T) {
 	e := newJobEnv(t, 2)
-	a := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("sleep 1.5")})
-	b := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("sleep 1.5")})
+	a := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("sleep:1.5")})
+	b := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("sleep:1.5")})
 	waitUntil(t, 10*time.Second, "both running", func() bool {
 		return e.get(t, a.Id).State == pb.JobState_JOB_STATE_RUNNING && e.get(t, b.Id).State == pb.JobState_JOB_STATE_RUNNING
 	})
@@ -422,7 +430,7 @@ func TestSamRepoJobsSerialize(t *testing.T) {
 	gitIn(t, repo, "add", ".")
 	gitIn(t, repo, "commit", "-qm", "c1")
 	req := func() *pb.SubmitJobRequest {
-		return &pb.SubmitJobRequest{Target: onNode("peer"), Source: gitSource(repo, ""), Command: sh("echo $$ >> pids; sleep 0.5; echo $$ >> pids; cat pids | wc -l")}
+		return &pb.SubmitJobRequest{Target: onNode("peer"), Source: gitSource(repo, ""), Command: jobtest.Script("appendpid:pids", "sleep:0.5", "appendpid:pids", "lines:pids")}
 	}
 	a, b := e.submit(t, req()), e.submit(t, req())
 	ja, jb := e.wait(t, a.Id), e.wait(t, b.Id)
@@ -434,7 +442,7 @@ func TestSamRepoJobsSerialize(t *testing.T) {
 
 func TestWatchJobReplayAndFollow(t *testing.T) {
 	e := newJobEnv(t, 1)
-	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("echo one; sleep 0.5; echo two")})
+	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:one", "sleep:0.5", "say:two")})
 	stream, err := e.jc.WatchJob(context.Background(), connect.NewRequest(&pb.WatchJobRequest{Id: j.Id, Follow: true}))
 	if err != nil {
 		t.Fatal(err)
@@ -533,7 +541,7 @@ func TestRestartMarksActiveJobsFailed(t *testing.T) {
 
 func TestShutdownCancelsRunningJobs(t *testing.T) {
 	e := newJobEnv(t, 1)
-	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("echo up; sleep 300")})
+	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:up", "sleep:300")})
 	waitUntil(t, 10*time.Second, "running", func() bool { return e.get(t, j.Id).State == pb.JobState_JOB_STATE_RUNNING })
 	e.h.jobs.Shutdown()
 	got := e.get(t, j.Id)
@@ -555,7 +563,7 @@ func TestJobEventsAndScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	j := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("true")}).Id)
+	j := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script()}).Id)
 	seen := map[string]bool{}
 	for sub.Receive() {
 		ev := sub.Msg()
@@ -621,7 +629,7 @@ func TestJobAndLeaseScopesAndAudit(t *testing.T) {
 		_, r.listLeases = lc.ListLeases(ctx, connect.NewRequest(&pb.ListLeasesRequest{}))
 		return r
 	}
-	seed := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: sh("true")}).Id)
+	seed := e.wait(t, e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script()}).Id)
 	l, err := e.lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "hubhost"}, Holder: "seed", Ttl: durationpb.New(time.Hour)}))
 	if err != nil {
 		t.Fatal(err)
@@ -711,25 +719,25 @@ func TestArtifactDirectoryRunsInWorkdirAndKeepsModes(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), []byte("module x\n"), 0o644)
 	writeFile(t, filepath.Join(root, "pkg", "testdata", "in.txt"), []byte("data\n"), 0o644)
-	writeFile(t, filepath.Join(root, "pkg", "run.sh"), []byte("#!/bin/sh\ncat testdata/in.txt\npwd\nmkdir out\ncp testdata/in.txt out/tool\nchmod 755 out/tool\ncp testdata/in.txt out/plain\n"), 0o755)
+	tool := toolExe(t, filepath.Join(root, "pkg"))
 
 	j := e.submit(t, &pb.SubmitJobRequest{
 		Target: onNode("peer"), Source: &pb.JobSource{Kind: &pb.JobSource_Artifact{Artifact: &pb.ArtifactSource{Path: root, Workdir: "pkg"}}},
-		Command: []string{"./run.sh"}, ArtifactGlobs: []string{"out"},
+		Command:       append([]string{"./" + filepath.Base(tool)}, jobtest.Args("cat:testdata/in.txt", "pwd", "write:out/tool:x", "chmod:out/tool:755", "write:out/plain:x")...),
+		ArtifactGlobs: []string{"out"},
 	})
 	j = e.wait(t, j.Id)
 	if j.State != pb.JobState_JOB_STATE_SUCCEEDED {
 		t.Fatalf("job = %v\n%s", j, e.logOf(t, j.Id))
 	}
 	log := e.logOf(t, j.Id)
-	if !strings.HasPrefix(log, "data\n") || !strings.HasSuffix(log, "/work/pkg\n") {
+	if !strings.HasPrefix(log, "data\n") || !strings.HasSuffix(filepath.ToSlash(log), "/work/pkg\n") {
 		t.Fatalf("log = %q", log)
 	}
 	for name, want := range map[string]os.FileMode{"tool": 0o755, "plain": 0o644} {
 		fi, err := os.Stat(filepath.Join(e.home, "jobs", j.Id, "artifacts", "out", name))
-		if err != nil || fi.Mode().Perm()&0o111 != want&0o111 {
+		if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm()&0o111 != want&0o111) {
 			t.Fatalf("%s = %v, %v; want mode %v", name, fi, err, want)
 		}
 	}
-
 }

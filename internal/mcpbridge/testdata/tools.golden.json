@@ -232,7 +232,11 @@
               "description": "artifact runs in a fresh job directory holding the file.",
               "properties": {
                 "path": {
-                  "description": "path is a file on the hub.",
+                  "description": "path is a file or directory on the hub.",
+                  "type": "string"
+                },
+                "workdir": {
+                  "description": "workdir is the directory, relative to the job directory, the command runs in; empty means the job directory itself. Directories only.",
                   "type": "string"
                 }
               },
