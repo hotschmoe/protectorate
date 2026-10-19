@@ -310,8 +310,10 @@ func TestStorePreservesFileMode(t *testing.T) {
 		t.Errorf("mode = %v", fi.Mode().Perm())
 	}
 	ents, _ := os.ReadDir(filepath.Dir(s.Path()))
-	if len(ents) != 1 {
-		t.Errorf("leftover files: %v", ents)
+	for _, e := range ents {
+		if n := e.Name(); n != filepath.Base(s.Path()) && n != "."+filepath.Base(s.Path())+".lock" {
+			t.Errorf("leftover file: %s", n)
+		}
 	}
 }
 
@@ -416,6 +418,63 @@ func TestConcurrentAddsKeepAll(t *testing.T) {
 	items, err := s.List(Filter{})
 	if err != nil || len(items) != 20 {
 		t.Fatalf("got %d items, err=%v", len(items), err)
+	}
+}
+
+func TestManyWritersLoseNothing(t *testing.T) {
+	s := newTestStore(t, "## p\n")
+	const writers, each = 8, 10
+	var wg sync.WaitGroup
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st := NewStore(s.Path())
+			for i := range each {
+				if _, err := st.Add(NewItem{Project: "p", Title: fmt.Sprintf("w%d item %d", w, i)}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	items, err := s.List(Filter{})
+	if err != nil || len(items) != writers*each {
+		t.Fatalf("got %d items, want %d, err=%v", len(items), writers*each, err)
+	}
+}
+
+func TestLockIgnoresAgeAndExcludes(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "BACKLOG.md")
+	unlock, err := lock(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	name := filepath.Join(filepath.Dir(target), ".BACKLOG.md.lock")
+	if err := os.Chtimes(name, old, old); err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan func(), 1)
+	go func() {
+		u, err := lock(target)
+		if err != nil {
+			t.Error(err)
+		}
+		got <- u
+	}()
+	select {
+	case <-got:
+		t.Fatal("second writer acquired a held lock")
+	case <-time.After(150 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case u := <-got:
+		u()
+	case <-time.After(5 * time.Second):
+		t.Fatal("second writer never acquired the released lock")
 	}
 }
 

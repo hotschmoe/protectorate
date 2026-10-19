@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -138,36 +136,35 @@ func (s *Store) modify(fn func(*Doc) (bool, error)) error {
 	return fmt.Errorf("backlog %s kept changing during update", s.path)
 }
 
-const (
-	lockWait  = 10 * time.Second
-	lockStale = 30 * time.Second
-)
+const lockWait = 10 * time.Second
 
-// lock serializes writers across processes with an exclusive lock file next
-// to the backlog. A lock older than lockStale is taken to belong to a dead
-// process and is broken.
+// lock serializes writers across processes with an OS file lock on a sidecar
+// file next to the backlog. The kernel drops the lock when its holder exits,
+// so a crashed writer never leaves a stale lock and a live writer is never
+// overlapped. The sidecar is left in place: removing it would let a waiter
+// lock an unlinked inode while a newcomer locks a fresh file.
 func lock(path string) (func(), error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", dir, err)
 	}
 	name := filepath.Join(dir, "."+filepath.Base(path)+".lock")
+	f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("lock backlog: %w", err)
+	}
 	deadline := time.Now().Add(lockWait)
 	for {
-		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
+		ok, err := tryLockFile(f)
+		if err != nil {
 			_ = f.Close()
-			return func() { _ = fsutil.Retry(func() error { return os.Remove(name) }) }, nil
-		}
-		held := errors.Is(err, os.ErrExist) || (runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission))
-		if !held {
 			return nil, fmt.Errorf("lock backlog: %w", err)
 		}
-		if fi, serr := os.Stat(name); serr == nil && time.Since(fi.ModTime()) > lockStale {
-			_ = os.Remove(name)
-			continue
+		if ok {
+			return func() { unlockFile(f); _ = f.Close() }, nil
 		}
 		if time.Now().After(deadline) {
+			_ = f.Close()
 			return nil, fmt.Errorf("lock backlog: timed out waiting for %s", name)
 		}
 		time.Sleep(2 * time.Millisecond)
