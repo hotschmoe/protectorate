@@ -22,7 +22,8 @@ Forbidden unless I give the exact command and explicit approval in the same mess
 ## Code discipline
 
 - NO EMOJIS anywhere.
-- Lightweight is everything: fewest dependencies, fewest files, simplest code that works. No speculative abstractions. The bar for a new file or dependency is high.
+- Hands-off toward harnesses: never wrap, patch, proxy or re-prompt an AI CLI. Use only its own interfaces (TUI or official headless protocol) and its own config/auth.
+- The orchestration layer must be correct, robust and fast; spend complexity there when correctness needs it, never for speculation. No abstractions without a second real implementation. The bar for a new file or dependency is still high.
 - Minimal comments, only where they add what the code cannot say.
 - No bulk-modifying scripts (codemods, giant sed/regex refactors). Make mechanical changes in small explicit edits.
 - Full migrations only: no compat shims, `_legacy`/`_old` names, v2 clones or "remove later" code. Change behavior and migrate every caller in the same commit.
