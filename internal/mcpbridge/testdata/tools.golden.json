@@ -599,7 +599,7 @@
       "additionalProperties": false,
       "properties": {
         "lines": {
-          "description": "Number of history lines above the visible screen to include.",
+          "description": "Number of history lines above the visible screen to include. Values above 10000 are clamped to 10000.",
           "type": "integer"
         },
         "name": {
