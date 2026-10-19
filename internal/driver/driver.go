@@ -111,6 +111,11 @@ type Usage struct {
 	CacheWriteTokens int64     `json:"cache_write_tokens,omitempty"`
 	CacheExpires     time.Time `json:"cache_expires,omitempty"`
 	Model            string    `json:"model,omitempty"`
+	// Provider is who serves the model; BaseURL is its endpoint when the
+	// harness reports one (pi does). The hub decides from BaseURL whether
+	// the model is served locally.
+	Provider string `json:"provider,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
 }
 
 // Compaction records a context compaction the harness confirmed. Native is

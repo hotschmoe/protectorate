@@ -56,13 +56,20 @@ class StatusPill extends StatelessWidget {
 }
 
 class HarnessBadge extends StatelessWidget {
-  const HarnessBadge({super.key, required this.harness});
+  const HarnessBadge({
+    super.key,
+    required this.harness,
+    this.provider = '',
+    this.local = false,
+  });
 
   final Harness harness;
+  final String provider;
+  final bool local;
 
   @override
   Widget build(BuildContext context) {
-    final a = Tokens.of(context).harness(harness);
+    final a = Tokens.of(context).model(harness, provider, local: local);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -88,8 +95,8 @@ class LocalModelBadge extends StatelessWidget {
     final a = Tokens.of(context).warning;
     return Tooltip(
       message:
-          'A local model is active. Expect weaker results than a '
-          'frontier model.',
+          'This model is served from your own machine or network. Expect '
+          'weaker results than a frontier model.',
       child: Container(
         key: const ValueKey('local-model-badge'),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

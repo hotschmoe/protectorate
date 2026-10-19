@@ -93,6 +93,8 @@ const ChatStatus$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'lastActivityAt'
     },
+    {'1': 'provider', '3': 9, '4': 1, '5': 9, '10': 'provider'},
+    {'1': 'local_model', '3': 10, '4': 1, '5': 8, '10': 'localModel'},
   ],
 };
 
@@ -104,7 +106,8 @@ final $typed_data.Uint8List chatStatusDescriptor = $convert.base64Decode(
     'VucxIlCg5jb250ZXh0X3dpbmRvdxgFIAEoBFINY29udGV4dFdpbmRvdxJEChBjYWNoZV9leHBp'
     'cmVzX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIOY2FjaGVFeHBpcmVzQX'
     'QSGQoIbGFzdF9zZXEYByABKARSB2xhc3RTZXESRAoQbGFzdF9hY3Rpdml0eV9hdBgIIAEoCzIa'
-    'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSDmxhc3RBY3Rpdml0eUF0');
+    'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSDmxhc3RBY3Rpdml0eUF0EhoKCHByb3ZpZGVyGA'
+    'kgASgJUghwcm92aWRlchIfCgtsb2NhbF9tb2RlbBgKIAEoCFIKbG9jYWxNb2RlbA==');
 
 @$core.Deprecated('Use chatEventDescriptor instead')
 const ChatEvent$json = {

@@ -25,6 +25,9 @@ type piSession struct {
 	msgSeq int
 	model  string
 	window int64
+	// provider and baseURL come from the model object in get_state
+	provider string
+	baseURL  string
 }
 
 func openPi(ctx context.Context, cwd, sessionID string, opts Options) (Session, error) {
@@ -50,6 +53,8 @@ func openPi(ctx context.Context, cwd, sessionID string, opts Options) (Session, 
 		SessionID string `json:"sessionId"`
 		Model     struct {
 			ID            string `json:"id"`
+			Provider      string `json:"provider"`
+			BaseURL       string `json:"baseUrl"`
 			ContextWindow int64  `json:"contextWindow"`
 		} `json:"model"`
 	}
@@ -60,7 +65,7 @@ func openPi(ctx context.Context, cwd, sessionID string, opts Options) (Session, 
 		return nil, fmt.Errorf("open pi: no session id in get_state")
 	}
 	s.setID(st.SessionID)
-	s.model, s.window = st.Model.ID, st.Model.ContextWindow
+	s.model, s.window, s.provider, s.baseURL = st.Model.ID, st.Model.ContextWindow, st.Model.Provider, st.Model.BaseURL
 	return s, nil
 }
 
@@ -188,9 +193,10 @@ func (s *piSession) handle(raw []byte) {
 		IsError bool            `json:"isError"`
 		Result  json.RawMessage `json:"result"`
 		Message struct {
-			Role  string `json:"role"`
-			Model string `json:"model"`
-			Usage *struct {
+			Role     string `json:"role"`
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+			Usage    *struct {
 				Input      int64 `json:"input"`
 				Output     int64 `json:"output"`
 				CacheRead  int64 `json:"cacheRead"`
@@ -243,10 +249,14 @@ func (s *piSession) handle(raw []byte) {
 		if m.Message.Model != "" {
 			s.model = m.Message.Model
 		}
+		if m.Message.Provider != "" && m.Message.Provider != s.provider {
+			s.provider, s.baseURL = m.Message.Provider, ""
+		}
 		if u := m.Message.Usage; u != nil && u.TotalToken > 0 {
 			s.emit(Event{Kind: KindUsage, Usage: &Usage{
 				ContextTokens: u.TotalToken, ContextWindow: s.window, InputTokens: u.Input, OutputTokens: u.Output,
 				CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite, Model: s.model,
+				Provider: s.provider, BaseURL: s.baseURL,
 			}})
 		}
 	case "tool_execution_start":

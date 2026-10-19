@@ -34,7 +34,11 @@ class SleeveCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    final accent = Tokens.of(context).harness(sleeve.harness);
+    final accent = Tokens.of(context).model(
+      sleeve.harness,
+      sleeveProvider(sleeve),
+      local: isLocalModel(sleeve),
+    );
     final running = sleeve.state == SleeveState.SLEEVE_STATE_RUNNING;
     final chatMode = effectiveMode(sleeve) == SleeveMode.SLEEVE_MODE_CHAT;
     final model = sleeve.hasChat() ? sleeve.chat.model : '';
@@ -99,11 +103,14 @@ class SleeveCard extends StatelessWidget {
                         runSpacing: 6,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          HarnessBadge(harness: sleeve.harness),
+                          HarnessBadge(
+                            harness: sleeve.harness,
+                            provider: sleeveProvider(sleeve),
+                            local: isLocalModel(sleeve),
+                          ),
                           if (model.isNotEmpty)
                             Text(model, style: text.labelMedium),
-                          if (isLocalModel(sleeve.harness, model))
-                            const LocalModelBadge(),
+                          if (isLocalModel(sleeve)) const LocalModelBadge(),
                           Text(
                             chatMode ? 'chat' : 'terminal',
                             style: text.labelSmall?.copyWith(

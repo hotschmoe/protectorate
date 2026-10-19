@@ -74,6 +74,14 @@ message ChatStatus {
   google.protobuf.Timestamp cache_expires_at = 6;
   uint64 last_seq = 7;
   google.protobuf.Timestamp last_activity_at = 8;
+  // provider is who serves the model: anthropic, openai, xai, or the provider
+  // id pi reports (deepseek, zai, openrouter, a custom name, ...). Empty until
+  // the first model call.
+  string provider = 9;
+  // local_model is true when the model is served from this machine, the LAN
+  // or the tailnet (a user-run LLM server) rather than a hosted API. The hub
+  // decides it from the provider's base URL.
+  bool local_model = 10;
 }
 
 message ChatEvent {

@@ -64,6 +64,10 @@ type Hub struct {
 	// WebDir, when set, serves a built web client (app/build/web) from the
 	// hub's own origin so browsers need no CORS. The client still authenticates.
 	WebDir string
+
+	// LocalModelHosts are model endpoint hostnames the hub treats as the
+	// user's own server even when they do not look private.
+	LocalModelHosts []string
 }
 
 func New(version, token string) *Hub {

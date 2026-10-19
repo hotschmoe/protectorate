@@ -169,7 +169,7 @@ func fakePi(f fakeIO) {
 		id := m["id"]
 		switch m["type"] {
 		case "get_state":
-			f.send(map[string]any{"id": id, "type": "response", "command": "get_state", "success": true, "data": map[string]any{"sessionId": sid, "model": map[string]any{"id": "pi-fake", "contextWindow": 200000}}})
+			f.send(map[string]any{"id": id, "type": "response", "command": "get_state", "success": true, "data": map[string]any{"sessionId": sid, "model": map[string]any{"id": "pi-fake", "provider": "vllm", "baseUrl": "http://127.0.0.1:8000/v1", "contextWindow": 200000}}})
 		case "compact":
 			compacts++
 			if compacts == 1 {
@@ -207,7 +207,7 @@ func fakePi(f fakeIO) {
 				f.send(map[string]any{"type": "tool_execution_end", "toolCallId": "c1", "toolName": "write", "isError": true,
 					"result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "denied"}}}})
 				delta("ok id=" + sid)
-				f.send(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "model": "pi-fake",
+				f.send(map[string]any{"type": "message_end", "message": map[string]any{"role": "assistant", "provider": "vllm", "model": "pi-fake",
 					"usage": map[string]any{"input": 3, "output": 4, "cacheRead": 10, "cacheWrite": 2, "totalTokens": 19}}})
 				f.send(map[string]any{"type": "agent_end"})
 				f.send(map[string]any{"type": "agent_settled", "aborted": false})

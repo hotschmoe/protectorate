@@ -409,9 +409,13 @@ audited, and the key is never written into the sleeve.
 - Quota (P1): API keys are spend, not windows. Readers report balance or spend
   where the provider has an endpoint (DeepSeek has a balance API), otherwise
   UNKNOWN.
-- The app's "local model" warning must key on the provider (our local server
-  vs a remote API), not on "pi plus a non-frontier model name": DeepSeek via
-  API is remote and strong. Cards are coloured by provider as well as harness.
+- `[decided]` The app's "local model" warning keys on local serving, not on
+  pi or the model name: DeepSeek via API is remote and strong. The hub sets
+  `ChatStatus.local_model` from the provider's base URL (loopback, private,
+  tailnet or inventory host); the app only reads that flag. Cards and badges
+  are coloured by `ChatStatus.provider` as well as harness.
+- `[decided]` Quota for API-key providers waits until more models are added;
+  until then they report UNKNOWN.
 - `[open]` Some of these vendors also document their models behind Claude Code
   through an Anthropic-compatible base URL. That is official config, but it
   mixes vendors inside the Claude harness and its config dir. Default: pi.

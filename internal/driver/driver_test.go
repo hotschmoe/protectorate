@@ -448,19 +448,21 @@ func TestCommandWrapsHarness(t *testing.T) {
 
 func TestUsageAndToolResults(t *testing.T) {
 	tests := []struct {
-		h       Harness
-		context int64
-		window  int64
-		read    int64
-		write   int64
-		output  string
-		isErr   bool
-		model   string
+		h        Harness
+		context  int64
+		window   int64
+		read     int64
+		write    int64
+		output   string
+		isErr    bool
+		model    string
+		provider string
+		baseURL  string
 	}{
-		{Claude, 1002, 1000000, 900, 100, "a.txt", false, "claude-fake"},
-		{Codex, 5, 258400, 2, 0, "", true, ""},
-		{Grok, 128, 0, 28, 0, "a.txt", false, ""},
-		{Pi, 19, 200000, 10, 2, "denied", true, "pi-fake"},
+		{Claude, 1002, 1000000, 900, 100, "a.txt", false, "claude-fake", "anthropic", ""},
+		{Codex, 5, 258400, 2, 0, "", true, "", "openai", ""},
+		{Grok, 128, 0, 28, 0, "a.txt", false, "", "xai", ""},
+		{Pi, 19, 200000, 10, 2, "denied", true, "pi-fake", "vllm", "http://127.0.0.1:8000/v1"},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.h), func(t *testing.T) {
@@ -488,8 +490,9 @@ func TestUsageAndToolResults(t *testing.T) {
 				}
 			}
 			if last == nil || last.ContextTokens != tc.context || last.ContextWindow != tc.window ||
-				last.CacheReadTokens != tc.read || last.CacheWriteTokens != tc.write || last.Model != tc.model {
-				t.Fatalf("usage = %+v, want context %d window %d read %d write %d model %q", last, tc.context, tc.window, tc.read, tc.write, tc.model)
+				last.CacheReadTokens != tc.read || last.CacheWriteTokens != tc.write || last.Model != tc.model ||
+				last.Provider != tc.provider || last.BaseURL != tc.baseURL {
+				t.Fatalf("usage = %+v, want context %d window %d read %d write %d model %q provider %q base %q", last, tc.context, tc.window, tc.read, tc.write, tc.model, tc.provider, tc.baseURL)
 			}
 			if tc.h == Claude {
 				if usages != 2 {

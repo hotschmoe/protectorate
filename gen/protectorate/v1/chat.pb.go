@@ -153,8 +153,16 @@ type ChatStatus struct {
 	CacheExpiresAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=cache_expires_at,json=cacheExpiresAt,proto3" json:"cache_expires_at,omitempty"`
 	LastSeq        uint64                 `protobuf:"varint,7,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
 	LastActivityAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_activity_at,json=lastActivityAt,proto3" json:"last_activity_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// provider is who serves the model: anthropic, openai, xai, or the provider
+	// id pi reports (deepseek, zai, openrouter, a custom name, ...). Empty until
+	// the first model call.
+	Provider string `protobuf:"bytes,9,opt,name=provider,proto3" json:"provider,omitempty"`
+	// local_model is true when the model is served from this machine, the LAN
+	// or the tailnet (a user-run LLM server) rather than a hosted API. The hub
+	// decides it from the provider's base URL.
+	LocalModel    bool `protobuf:"varint,10,opt,name=local_model,json=localModel,proto3" json:"local_model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChatStatus) Reset() {
@@ -241,6 +249,20 @@ func (x *ChatStatus) GetLastActivityAt() *timestamppb.Timestamp {
 		return x.LastActivityAt
 	}
 	return nil
+}
+
+func (x *ChatStatus) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *ChatStatus) GetLocalModel() bool {
+	if x != nil {
+		return x.LocalModel
+	}
+	return false
 }
 
 type ChatEvent struct {
@@ -1574,7 +1596,7 @@ var File_protectorate_v1_chat_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/chat.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf7\x02\n" +
+	"\x1aprotectorate/v1/chat.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb4\x03\n" +
 	"\n" +
 	"ChatStatus\x120\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x1a.protectorate.v1.ChatStateR\x05state\x12,\n" +
@@ -1584,7 +1606,11 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x0econtext_window\x18\x05 \x01(\x04R\rcontextWindow\x12D\n" +
 	"\x10cache_expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x0ecacheExpiresAt\x12\x19\n" +
 	"\blast_seq\x18\a \x01(\x04R\alastSeq\x12D\n" +
-	"\x10last_activity_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x0elastActivityAt\"\xe4\x05\n" +
+	"\x10last_activity_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x0elastActivityAt\x12\x1a\n" +
+	"\bprovider\x18\t \x01(\tR\bprovider\x12\x1f\n" +
+	"\vlocal_model\x18\n" +
+	" \x01(\bR\n" +
+	"localModel\"\xe4\x05\n" +
 	"\tChatEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x122\n" +

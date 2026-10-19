@@ -1,15 +1,11 @@
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 
-final _frontier = RegExp(r'^(claude|gpt|chatgpt|codex|o\d|grok|gemini)');
+// The hub decides from the provider's endpoint whether the model runs on the
+// user's own server.
+bool isLocalModel(Sleeve s) => s.hasChat() && s.chat.localModel;
 
-// Only pi can run arbitrary local models; an empty model name is unknown and
-// not flagged.
-bool isLocalModel(Harness harness, String model) {
-  if (harness != Harness.HARNESS_PI) return false;
-  final name = model.trim().toLowerCase().split('/').last;
-  return name.isNotEmpty && !_frontier.hasMatch(name);
-}
+String sleeveProvider(Sleeve s) => s.hasChat() ? s.chat.provider : '';
 
 // A spawn without a mode means chat for agent harnesses and terminal for
 // shell; older sleeves report unspecified.
