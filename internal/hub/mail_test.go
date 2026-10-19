@@ -160,6 +160,13 @@ func TestRenderMessage(t *testing.T) {
 			want: "[notice m9 from hub, thread t4, ack required]\nx\n\nAck: protectorate msg ack m9",
 		},
 		{
+			name: "request already filed as a backlog item",
+			m:    mailbox.Message{ID: "m5", Thread: "t2", From: "api", Kind: mailbox.Request, AckRequired: true, Body: "export Foo", BacklogItem: "b7"},
+			want: "[request m5 from sleeve api, thread t2, ack required]\nexport Foo\n\n" +
+				"This request is already filed as backlog item b7 for the project. Work it from the backlog; do not add another item for it.\n" +
+				"Reply: protectorate msg reply m5 \"...\"\nAck: protectorate msg ack m5",
+		},
+		{
 			name:     "reminder",
 			m:        mailbox.Message{ID: "m1", Thread: "t1", From: "api", Kind: mailbox.Note, AckRequired: true, Body: "b"},
 			reminder: true,
@@ -485,6 +492,12 @@ func TestMailProjectAddressing(t *testing.T) {
 	us = r.users("libdev2")
 	if len(us) != 1 || !strings.Contains(us[0].text, "and also Bar") || !strings.Contains(us[0].text, "fyi") || us[0].from != "mailbox" {
 		t.Fatalf("libdev2 got %v", us)
+	}
+	if n := strings.Count(us[0].text, "backlog item "+waiting.BacklogItem); n != 1 {
+		t.Fatalf("delivery names backlog item %s %d times: %s", waiting.BacklogItem, n, us[0].text)
+	}
+	if items, err := r.h.backlog.List(backlog.Filter{Project: "acme/lib"}); err != nil || len(items) != 1 {
+		t.Fatalf("more than one actionable copy of the request: %v %v", items, err)
 	}
 	if m, _ := r.h.coord.mail.Get(waiting.Message.Id); len(m.Recipients) != 1 || m.Recipients[0] != "libdev2" {
 		t.Fatalf("recipients = %v", m.Recipients)

@@ -416,6 +416,9 @@ func renderMessage(m mailbox.Message, project string, reminder bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%s]\n%s\n", head, strings.TrimRight(m.Body, "\n"))
 	b.WriteByte('\n')
+	if m.BacklogItem != "" {
+		fmt.Fprintf(&b, "This request is already filed as backlog item %s for the project. Work it from the backlog; do not add another item for it.\n", m.BacklogItem)
+	}
 	if m.From != hubName {
 		fmt.Fprintf(&b, "Reply: protectorate msg reply %s \"...\"\n", m.ID)
 	}

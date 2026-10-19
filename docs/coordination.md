@@ -101,8 +101,11 @@ protectorate msg thread t7
   `msg inbox`.
 - A **project address** resolves to the sleeves working on the project now
   (excluding the sender). With none live the message waits, and a `request`
-  also becomes a backlog item for the project (`<sender> asks: ...`). When a
-  sleeve for the project appears the waiting messages are delivered to it.
+  also becomes a backlog item for the project (`<sender> asks: ...`), and the
+  message is stored pending with a reference to that item. When a sleeve for
+  the project appears the message is delivered once, and says the request is
+  already backlog item `<id>` to work from the backlog; the item is the only
+  actionable copy.
 - **Ack timers:** an `ack_required` message that stays unacked for the timeout
   (`hub serve --msg-ack-timeout`, default 30m, counted from delivery, or from
   addressing for terminal recipients) is delivered again once. Unacked for
