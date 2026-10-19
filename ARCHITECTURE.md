@@ -220,6 +220,56 @@ Design:
   requirement.
 - Windows and Android nodes run no sleeves. They're build/test targets only.
 
+## Leases and jobs (P3, P9)
+
+`LeaseService` reserves hardware, `JobService` runs commands on it. Both live
+on the hub; `NodeAgentService` on each node (and in-process for the hub's own
+node) executes.
+
+```
+ CLI/agent --SubmitJob--> hub                         node agent
+                          | place (lease | node | selector)
+                          | PrepareJob  ----------->  has commit? known commits?
+                          | UploadJobData x N ------>  1 MiB chunks, sha256 checked
+                          | RunJob (server stream) ->  git fetch bundle, checkout,
+                          |   <-- output / artifact frames / finished   exec in a
+                          v                                              process group
+              jobs/<id>/{job.json, job.log, artifacts/}
+```
+
+- **Leases** are `(resource, holder, ttl)` kept in `leases.yaml` (atomic
+  rewrite, 0600) and swept every second; an unrenewed lease frees itself and
+  publishes `lease.expired`. A resource is a node or `node:gpu<N>`; a node
+  lease overlaps all of its GPUs. Exclusive only. TTL is at most 24h.
+- **Selection** (leases and selector-targeted jobs): fresh nodes only, never
+  unreachable, never tier `family` unless `allow_family`, matching os, arch,
+  free memory and (for GPUs) free VRAM, and not under a conflicting lease.
+  Load is `(cpu% + mem%)/2` plus one core's worth per job already placed, so a
+  burst of submits spreads out; a node that already ran a job from the same
+  repo counts 20 points lighter, because its `target/` is warm.
+- **Git sources** are not cloned. The hub asks the node (`PrepareJob`) whether
+  it has the commit and which recent commits it knows, then streams a bundle
+  of the commit minus those (`git pack-objects --thin` behind a hand-written
+  v2 bundle header, since `git bundle create` refuses a bare commit id).
+  Nothing is sent when the node already has the commit.
+- **Warm worktree:** the node keeps `repos/<key>/` as an ordinary git
+  worktree, one per hub repository, and checks the commit out with
+  `--force --detach` but never cleans, so `target/` and `node_modules` survive
+  between jobs. Jobs on one repo run one at a time.
+- **Artifact sources** copy one hub file into a fresh job directory, executable:
+  `GOOS=windows go test -c` on the hub, run the binary on a Windows node with no
+  toolchain there (`protectorate job test-cross`).
+- **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)
+  and `--job-dir`. Timeout and cancel signal the process group (SIGTERM, then
+  SIGKILL after 3s); on Windows the command runs in a job object that kills the
+  whole tree. A job also dies when the hub's stream closes. Log output is capped
+  at 64 MiB per job.
+- **Records:** `jobs/<id>/job.json` holds state, exit code, timings, node,
+  bytes sent and artifacts (env values are never stored). A hub restart marks
+  jobs that were active as failed.
+- Source paths are resolved on the hub and are not confined to a directory:
+  the scopes that admit `SubmitJob` are shell access to every node.
+
 ## Harness sessions: attached and dispatched (spike: `spikes/drivers/`)
 
 Pending the user's confirmation that a harness's official headless mode
@@ -310,6 +360,8 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
 ~/.protectorate/
   hub.yaml            # config
   nodes.yaml          # inventory (P2)
+  leases.yaml         # live leases (P9)
+  jobs/<id>/          # job.json, job.log, artifacts/ (P3)
   backlog.md          # low-priority work; items may link to GitHub issues (P6)
   ca/                 # SSH CA for short-lived certs to nodes
   tailnet/            # tsnet + headscale state

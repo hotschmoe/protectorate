@@ -55,7 +55,11 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 	}
 	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch})
 	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client}))
-	return nil
+	local, err := node.NewJobs(filepath.Join(home, "local-jobs"), 1)
+	if err != nil {
+		return err
+	}
+	return h.EnableJobs(home, local)
 }
 
 func nodeCmd(o *opts) *cobra.Command {
@@ -162,9 +166,10 @@ func nodeRmCmd(o *opts) *cobra.Command {
 }
 
 func nodeServeCmd() *cobra.Command {
-	var listen, token string
+	var listen, token, jobDir string
 	var watch []string
 	var slow time.Duration
+	var jobSlots int
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the node agent",
@@ -172,14 +177,22 @@ func nodeServeCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			a := &node.Agent{
-				Collector: node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow}),
-			}
 			var l net.Listener
 			home, err := hub.Home()
 			if err != nil {
 				return err
 			}
+			a := &node.Agent{}
+			if jobSlots > 0 {
+				if jobDir == "" {
+					jobDir = filepath.Join(home, "node-jobs")
+				}
+				if a.Jobs, err = node.NewJobs(jobDir, jobSlots); err != nil {
+					return err
+				}
+				watch = append(watch, a.Jobs.Dir())
+			}
+			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow})
 			tsDir := filepath.Join(home, "tsnet")
 			if tailnet.Joined(tsDir) {
 				n, err := tailnet.OpenNode(ctx, tsDir)
@@ -212,6 +225,8 @@ func nodeServeCmd() *cobra.Command {
 	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
 	f.StringVar(&token, "token", "", "bearer token the hub must present when not enrolled in a tailnet (env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")
+	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs)")
+	f.IntVar(&jobSlots, "job-concurrency", 1, "jobs that may run at once; 0 refuses jobs")
 	f.DurationVar(&slow, "watch-interval", 15*time.Minute, "how often to measure watched directories and engine disk usage")
 	return c
 }

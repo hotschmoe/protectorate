@@ -148,6 +148,9 @@ across real architectures.
 - Android as a target: Termux (native ARM64 Linux userland) or `adb` from a
   Linux node. Its role is probably "run tests", not "build host".
 
+`[done]` Job dispatch and leases are implemented: see "Leases and jobs" in
+ARCHITECTURE.md (`protectorate lease ...`, `protectorate job run|test-cross`).
+
 `[decided]` The main goal is **using idle resources** (offloading build
 throughput). Cross-arch testing is a bonus.
 

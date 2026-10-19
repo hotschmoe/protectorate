@@ -39,6 +39,14 @@ names. Globs must match at least one tool when the token is created, so typos
 are rejected rather than silently granting nothing. Procedure paths are not
 scopes. `*` covers every hub RPC except owner-only ones, but not the terminal.
 
+Leases and jobs follow the same rules: `lease_*` and `job_*` are globs like any
+other, `read` admits `GetJob`, `ListJobs`, `WatchJob` and `ListLeases`, and
+`SubmitJob`, `CancelJob`, `AcquireLease`, `RenewLease` and `ReleaseLease` are
+audited. Treat `job_submit_job` as shell access: the command runs as the node
+agent's user on any node the caller can target, and source paths are read from
+the hub's disk. Node agents accept the job RPCs only from the hub (tailnet
+WhoIs `tag:hub`, or the node token); the hub never serves `NodeAgentService`.
+
 Services marked `(protectorate.v1.owner_only)` (TokenService) accept only the
 owner token whatever the scopes.
 

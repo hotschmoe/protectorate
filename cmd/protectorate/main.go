@@ -34,6 +34,10 @@ var version = "dev"
 func main() {
 	if err := runMain(context.Background(), func(ctx context.Context) error { return newRoot().ExecuteContext(ctx) }); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		var ee *exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
 		os.Exit(1)
 	}
 }
@@ -112,7 +116,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), leaseCmd(o), jobCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 
