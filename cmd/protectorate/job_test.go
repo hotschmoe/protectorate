@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,13 +106,44 @@ type fakeLeaseHub struct {
 	protectoratev1connect.UnimplementedLeaseServiceHandler
 	protectoratev1connect.UnimplementedJobServiceHandler
 	submitErr error
-	watching  chan struct{}
-	canceled  chan struct{}
-	released  chan string
+	// holdSubmit blocks SubmitJob until the call is canceled or the channel closes.
+	holdSubmit chan struct{}
+	// holdJob makes WatchJob report success after this long instead of waiting for a cancel.
+	holdJob  time.Duration
+	renewErr error
+	watching chan struct{}
+	canceled chan struct{}
+	released chan string
+
+	mu         sync.Mutex
+	ttl        time.Duration
+	expires    time.Time
+	renews     int
+	submitKey  string
+	cancelKeys []string
+	cancelOnce sync.Once
 }
 
-func (f *fakeLeaseHub) AcquireLease(context.Context, *connect.Request[pb.AcquireLeaseRequest]) (*connect.Response[pb.Lease], error) {
+func (f *fakeLeaseHub) AcquireLease(_ context.Context, r *connect.Request[pb.AcquireLeaseRequest]) (*connect.Response[pb.Lease], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ttl = r.Msg.Ttl.AsDuration()
+	f.expires = time.Now().Add(f.ttl)
 	return connect.NewResponse(&pb.Lease{Id: "lease-00000001", Resource: "box"}), nil
+}
+
+func (f *fakeLeaseHub) RenewLease(context.Context, *connect.Request[pb.RenewLeaseRequest]) (*connect.Response[pb.Lease], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.renewErr != nil {
+		return nil, f.renewErr
+	}
+	if time.Now().After(f.expires) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("lease expired"))
+	}
+	f.renews++
+	f.expires = time.Now().Add(f.ttl)
+	return connect.NewResponse(&pb.Lease{Id: "lease-00000001"}), nil
 }
 
 func (f *fakeLeaseHub) ReleaseLease(_ context.Context, r *connect.Request[pb.ReleaseLeaseRequest]) (*connect.Response[pb.ReleaseLeaseResponse], error) {
@@ -118,26 +151,105 @@ func (f *fakeLeaseHub) ReleaseLease(_ context.Context, r *connect.Request[pb.Rel
 	return connect.NewResponse(&pb.ReleaseLeaseResponse{}), nil
 }
 
-func (f *fakeLeaseHub) SubmitJob(context.Context, *connect.Request[pb.SubmitJobRequest]) (*connect.Response[pb.Job], error) {
+func (f *fakeLeaseHub) SubmitJob(ctx context.Context, r *connect.Request[pb.SubmitJobRequest]) (*connect.Response[pb.Job], error) {
+	f.mu.Lock()
+	f.submitKey = r.Msg.RequestId
+	f.mu.Unlock()
 	if f.submitErr != nil {
 		return nil, f.submitErr
+	}
+	if f.holdSubmit != nil {
+		select {
+		case <-f.holdSubmit:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	return connect.NewResponse(&pb.Job{Id: "job-1", Node: "box"}), nil
 }
 
-func (f *fakeLeaseHub) CancelJob(context.Context, *connect.Request[pb.CancelJobRequest]) (*connect.Response[pb.Job], error) {
-	close(f.canceled)
+func (f *fakeLeaseHub) CancelJob(_ context.Context, r *connect.Request[pb.CancelJobRequest]) (*connect.Response[pb.Job], error) {
+	f.mu.Lock()
+	f.cancelKeys = append(f.cancelKeys, r.Msg.RequestId)
+	f.mu.Unlock()
+	f.cancelOnce.Do(func() { close(f.canceled) })
 	return connect.NewResponse(&pb.Job{Id: "job-1"}), nil
 }
 
 func (f *fakeLeaseHub) WatchJob(ctx context.Context, _ *connect.Request[pb.WatchJobRequest], s *connect.ServerStream[pb.WatchJobResponse]) error {
-	close(f.watching)
+	select {
+	case <-f.watching:
+	default:
+		close(f.watching)
+	}
+	state := pb.JobState_JOB_STATE_CANCELED
+	var hold <-chan time.Time
+	if f.holdJob > 0 {
+		hold = time.After(f.holdJob)
+	}
 	select {
 	case <-f.canceled:
+	case <-hold:
+		state = pb.JobState_JOB_STATE_SUCCEEDED
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return s.Send(&pb.WatchJobResponse{Event: &pb.WatchJobResponse_Job{Job: &pb.Job{Id: "job-1", State: pb.JobState_JOB_STATE_CANCELED}}})
+	return s.Send(&pb.WatchJobResponse{Event: &pb.WatchJobResponse_Job{Job: &pb.Job{Id: "job-1", State: state}}})
+}
+
+func TestKeepLease(t *testing.T) {
+	notFound := connect.NewError(connect.CodeNotFound, errors.New("gone"))
+	unavailable := connect.NewError(connect.CodeUnavailable, errors.New("hub down"))
+	tests := []struct {
+		name    string
+		results []error
+		wantErr bool
+		wantN   int
+	}{
+		{"renews on every tick", []error{nil, nil, nil, nil, nil, nil, nil, nil, nil, nil}, false, 10},
+		{"lease gone is fatal at once", []error{nil, notFound}, true, 2},
+		{"one transient failure is tolerated", []error{unavailable, nil, unavailable, nil}, false, 4},
+		{"consecutive transient failures lose the lease", []error{nil, unavailable, unavailable}, true, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ticks := make(chan time.Time)
+			var n int
+			done := make(chan error, 1)
+			go func() {
+				done <- keepLease(ctx, ticks, func(context.Context) error {
+					n++
+					return tt.results[n-1]
+				})
+			}()
+			for range tt.results {
+				select {
+				case ticks <- time.Time{}:
+				case err := <-done:
+					if !tt.wantErr {
+						t.Fatalf("stopped early: %v", err)
+					}
+					done <- err
+				}
+			}
+			if !tt.wantErr {
+				cancel()
+			}
+			select {
+			case err := <-done:
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("err = %v, want error %v", err, tt.wantErr)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("keepLease did not return")
+			}
+			if n != tt.wantN {
+				t.Fatalf("renewed %d times, want %d", n, tt.wantN)
+			}
+		})
+	}
 }
 
 func TestTestCrossReleasesLease(t *testing.T) {
@@ -207,5 +319,114 @@ func TestTestCrossReleasesLease(t *testing.T) {
 				t.Fatalf("lease not released: %s", out.String())
 			}
 		})
+	}
+}
+
+func TestTestCrossLeaseLifecycle(t *testing.T) {
+	const pkg = "github.com/hotschmoe/protectorate/internal/fsutil"
+	const ttl = 300 * time.Millisecond
+	tests := []struct {
+		name       string
+		hub        func() *fakeLeaseHub
+		interrupt  bool
+		wantErr    string
+		wantRenews int
+		wantCancel bool
+		wantKeyCut bool
+	}{
+		{
+			name:       "renewal keeps the lease across several ttls",
+			hub:        func() *fakeLeaseHub { return &fakeLeaseHub{holdJob: 4 * ttl} },
+			wantRenews: 6,
+		},
+		{
+			name: "renewal failure stops the job",
+			hub: func() *fakeLeaseHub {
+				return &fakeLeaseHub{renewErr: connect.NewError(connect.CodeNotFound, errors.New("lease expired"))}
+			},
+			wantErr:    "lease lease-00000001 lost",
+			wantCancel: true,
+		},
+		{
+			name:       "interrupt while the submit is in flight cancels by request id",
+			hub:        func() *fakeLeaseHub { return &fakeLeaseHub{holdSubmit: make(chan struct{})} },
+			interrupt:  true,
+			wantErr:    "interrupted",
+			wantCancel: true,
+			wantKeyCut: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := testCrossLeaseTTL
+			testCrossLeaseTTL = ttl
+			defer func() { testCrossLeaseTTL = old }()
+			t.Setenv(tokenEnv, "tok")
+			f := tt.hub()
+			f.watching, f.canceled, f.released = make(chan struct{}), make(chan struct{}), make(chan string, 1)
+			mux := http.NewServeMux()
+			mux.Handle(protectoratev1connect.NewLeaseServiceHandler(f))
+			mux.Handle(protectoratev1connect.NewJobServiceHandler(f))
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c := jobTestCrossCmd(&opts{hubURL: srv.URL})
+			var out bytes.Buffer
+			c.SetOut(&out)
+			c.SetErr(&out)
+			c.SetArgs([]string{"--goos", "linux", "--goarch", "amd64", pkg})
+			done := make(chan error, 1)
+			go func() { done <- c.ExecuteContext(ctx) }()
+
+			if tt.interrupt {
+				waitFor(t, "submit", func() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.submitKey != "" })
+				cancel()
+			}
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(time.Minute):
+				t.Fatalf("test-cross did not return: %s", out.String())
+			}
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("err = %v, want %q: %s", err, tt.wantErr, out.String())
+			}
+			select {
+			case <-f.canceled:
+				if !tt.wantCancel {
+					t.Fatal("job was canceled")
+				}
+			default:
+				if tt.wantCancel {
+					t.Fatalf("job was not canceled: %s", out.String())
+				}
+			}
+			select {
+			case <-f.released:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("lease not released: %s", out.String())
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.renews < tt.wantRenews {
+				t.Fatalf("renewed %d times, want at least %d", f.renews, tt.wantRenews)
+			}
+			if tt.wantKeyCut && (len(f.cancelKeys) == 0 || f.cancelKeys[0] != f.submitKey || f.submitKey == "") {
+				t.Fatalf("cancel keys %v, submit key %q", f.cancelKeys, f.submitKey)
+			}
+		})
+	}
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

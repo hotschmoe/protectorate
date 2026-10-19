@@ -322,7 +322,19 @@ node) executes.
 - **Leases** are `(resource, holder, ttl)` kept in `leases.yaml` (atomic
   rewrite, 0600) and swept every second; an unrenewed lease frees itself and
   publishes `lease.expired`. A resource is a node or `node:gpu<N>`; a node
-  lease overlaps all of its GPUs. Exclusive only. TTL is at most 24h.
+  lease overlaps all of its GPUs. Exclusive only. TTL is at most 24h. Expiry
+  is checked on every lease read and write as well as by the sweep, so a node
+  is selectable the instant its lease runs out. Holders that can crash should
+  take a short TTL and renew it.
+- **Idempotent submit:** `SubmitJob` takes an optional `request_id` (the CLI
+  always sends a fresh 128-bit one). The hub remembers it for 1h in memory: a
+  repeat returns the same job, and waits if the first call is still in flight.
+  A failed submit is forgotten so it can be retried. `CancelJob` accepts the
+  key instead of the job id, so an interrupted CLI cancels a job whose id it
+  never saw. Cancel by key awaits an in-flight submit and then cancels the
+  job it created; a key the hub has not seen yet is recorded as canceled, so a
+  submit still on its way is refused (aborted). Keys are lost on a hub restart,
+  which also fails every running job.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
   unreachable, never tier `family` unless `allow_family`, matching os, arch,
   free memory and (for GPUs) free VRAM, and not under a conflicting lease.
@@ -347,10 +359,14 @@ node) executes.
   as working directory on a node with no toolchain. Unlike a git source this
   carries uncommitted edits and needs no git on the node. Artifacts that
   come back keep their permission bits.
-  `test-cross` holds one lease for the whole run. Ctrl-C or SIGTERM cancels the
-  running job, skips the remaining packages (exit 130) and releases the lease,
-  as does every error path; the release has its own 15s timeout. Only SIGKILL or
-  a second Ctrl-C leaves the lease to expire after `--ttl`. The hub creates no
+  `test-cross` holds one lease for the whole run, with a 60s TTL that the CLI
+  renews every 20s. Ctrl-C or SIGTERM cancels the running job (by request id,
+  even mid-submit), skips the remaining packages (exit 130) and releases the
+  lease, as does every error path; the release has its own 15s timeout.
+  SIGKILL, a crash or a second Ctrl-C leaves the lease to expire within 60s.
+  A renewal that finds the lease gone, or fails twice in a row, cancels the
+  running job and ends the run with an error. There is no `--ttl`; the
+  per-package `--timeout` bounds how long a run can hold the node. The hub creates no
   leases of its own for jobs (a selector or node target pins nothing), so
   there is no job-scoped lease to release server-side.
 - **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)

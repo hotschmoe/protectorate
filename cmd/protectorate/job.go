@@ -658,8 +658,9 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout tim
 }
 
 // testCrossLeaseTTL is how long the test-cross lease outlives its last
-// renewal, and so how long a crashed run keeps the node.
-const testCrossLeaseTTL = 60 * time.Second
+// renewal, and so how long a crashed run keeps the node. A variable only so
+// tests can shorten it.
+var testCrossLeaseTTL = 60 * time.Second
 
 // maxRenewFailures is how many renewals in a row may fail before the lease is
 // given up; with a TTL/3 tick the lease is still live after the first miss.
