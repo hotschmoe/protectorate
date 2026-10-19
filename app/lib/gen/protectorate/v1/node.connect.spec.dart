@@ -5,9 +5,11 @@
 
 import "package:connectrpc/connect.dart" as connect;
 import "node.pb.dart" as protectoratev1node;
+import "job.pb.dart" as protectoratev1job;
 
-/// NodeAgentService runs on every node (and in-process for the hub's own
-/// node). The hub polls GetMetrics; WatchMetrics is for live views.
+/// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
+/// is for live views. The job RPCs are called by the hub only and are unary
+/// except RunJob, so they work over plain HTTP/1.1.
 abstract final class NodeAgentService {
   /// Fully-qualified name of the NodeAgentService service.
   static const name = 'protectorate.v1.NodeAgentService';
@@ -28,6 +30,44 @@ abstract final class NodeAgentService {
     protectoratev1node.WatchMetricsRequest.new,
     protectoratev1node.NodeMetrics.new,
     idempotency: connect.Idempotency.noSideEffects,
+  );
+
+  /// PrepareJob tells the hub what the node already holds for a git job: whether
+  /// it has the commit and which commits it knows, so the hub can send a
+  /// smaller bundle.
+  static const prepareJob = connect.Spec(
+    '/$name/PrepareJob',
+    connect.StreamType.unary,
+    protectoratev1job.PrepareJobRequest.new,
+    protectoratev1job.PrepareJobResponse.new,
+  );
+
+  /// UploadJobData appends one chunk of a job's source (a git bundle or an
+  /// artifact file). Chunks must arrive in order; the last one carries the
+  /// SHA-256 of the whole upload.
+  static const uploadJobData = connect.Spec(
+    '/$name/UploadJobData',
+    connect.StreamType.unary,
+    protectoratev1job.UploadJobDataRequest.new,
+    protectoratev1job.UploadJobDataResponse.new,
+  );
+
+  /// RunJob checks the source out, runs the command and streams its output;
+  /// matching artifacts follow the exit. The job dies with the stream: if the
+  /// caller disconnects, the process tree is killed.
+  static const runJob = connect.Spec(
+    '/$name/RunJob',
+    connect.StreamType.server,
+    protectoratev1job.RunJobRequest.new,
+    protectoratev1job.JobEvent.new,
+  );
+
+  /// CancelJob kills a running job's process tree.
+  static const cancelJob = connect.Spec(
+    '/$name/CancelJob',
+    connect.StreamType.unary,
+    protectoratev1job.NodeAgentServiceCancelJobRequest.new,
+    protectoratev1job.NodeAgentServiceCancelJobResponse.new,
   );
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each

@@ -20,6 +20,7 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
+import 'job.pb.dart' as $3;
 import 'node.pbenum.dart';
 import 'sleeve.pb.dart' as $1;
 
@@ -2178,8 +2179,9 @@ class RemoveNodeResponse extends $pb.GeneratedMessage {
   static RemoveNodeResponse? _defaultInstance;
 }
 
-/// NodeAgentService runs on every node (and in-process for the hub's own
-/// node). The hub polls GetMetrics; WatchMetrics is for live views.
+/// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
+/// is for live views. The job RPCs are called by the hub only and are unary
+/// except RunJob, so they work over plain HTTP/1.1.
 class NodeAgentServiceApi {
   final $pb.RpcClient _client;
 
@@ -2196,6 +2198,41 @@ class NodeAgentServiceApi {
           $pb.ClientContext? ctx, WatchMetricsRequest request) =>
       _client.invoke<NodeMetrics>(
           ctx, 'NodeAgentService', 'WatchMetrics', request, NodeMetrics());
+
+  /// PrepareJob tells the hub what the node already holds for a git job: whether
+  /// it has the commit and which commits it knows, so the hub can send a
+  /// smaller bundle.
+  $async.Future<$3.PrepareJobResponse> prepareJob(
+          $pb.ClientContext? ctx, $3.PrepareJobRequest request) =>
+      _client.invoke<$3.PrepareJobResponse>(ctx, 'NodeAgentService',
+          'PrepareJob', request, $3.PrepareJobResponse());
+
+  /// UploadJobData appends one chunk of a job's source (a git bundle or an
+  /// artifact file). Chunks must arrive in order; the last one carries the
+  /// SHA-256 of the whole upload.
+  $async.Future<$3.UploadJobDataResponse> uploadJobData(
+          $pb.ClientContext? ctx, $3.UploadJobDataRequest request) =>
+      _client.invoke<$3.UploadJobDataResponse>(ctx, 'NodeAgentService',
+          'UploadJobData', request, $3.UploadJobDataResponse());
+
+  /// RunJob checks the source out, runs the command and streams its output;
+  /// matching artifacts follow the exit. The job dies with the stream: if the
+  /// caller disconnects, the process tree is killed.
+  $async.Future<$3.JobEvent> runJob(
+          $pb.ClientContext? ctx, $3.RunJobRequest request) =>
+      _client.invoke<$3.JobEvent>(
+          ctx, 'NodeAgentService', 'RunJob', request, $3.JobEvent());
+
+  /// CancelJob kills a running job's process tree.
+  $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
+          $pb.ClientContext? ctx,
+          $3.NodeAgentServiceCancelJobRequest request) =>
+      _client.invoke<$3.NodeAgentServiceCancelJobResponse>(
+          ctx,
+          'NodeAgentService',
+          'CancelJob',
+          request,
+          $3.NodeAgentServiceCancelJobResponse());
 }
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each

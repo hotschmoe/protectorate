@@ -1,0 +1,295 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "protectorate/v1/lease.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// JobService runs commands on nodes. The hub picks the node, ships the source
+// and streams the logs; the node executes. Jobs are kept under
+// $PROTECTORATE_HOME/jobs/<id>/ (job.json, job.log, artifacts/) and announced
+// on EventService as "job.updated" (subject = job id). A running job is lost
+// when the hub restarts and is then marked failed.
+//
+// A job executes arbitrary commands as the node agent's user, so the scopes
+// that admit SubmitJob are as powerful as shell access to every node.
+service JobService {
+  // SubmitJob queues a job and returns at once with its id. Follow it with
+  // WatchJob.
+  rpc SubmitJob(SubmitJobRequest) returns (Job);
+
+  // GetJob returns one job record.
+  rpc GetJob(GetJobRequest) returns (Job) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListJobs returns job records, newest first.
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // CancelJob stops a job and its whole process tree. Cancelling a finished
+  // job is a no-op that returns its record.
+  rpc CancelJob(CancelJobRequest) returns (Job);
+
+  // WatchJob replays a job's log from an offset and, when follow is set,
+  // streams new output and state changes until the job ends.
+  rpc WatchJob(WatchJobRequest) returns (stream WatchJobResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  // JOB_STATE_PREPARING: choosing a node, shipping the source, waiting for a
+  // free slot on the node, checking out.
+  JOB_STATE_PREPARING = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_SUCCEEDED = 3;
+  // JOB_STATE_FAILED: non-zero exit, or the job could not be set up.
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELED = 5;
+  JOB_STATE_TIMED_OUT = 6;
+}
+
+// JobTarget says where a job runs.
+message JobTarget {
+  oneof target {
+    // lease_id runs on the node of a live lease (and on its GPU, if any).
+    string lease_id = 1;
+    // node is a node name.
+    string node = 2;
+    // selector picks the least-loaded fresh matching node that is not leased.
+    NodeSelector selector = 3;
+  }
+  // allow_family admits nodes of tier "family".
+  bool allow_family = 4;
+}
+
+// GitSource ships one commit of a repository on the hub.
+message GitSource {
+  // repo is a path to a git repository on the hub.
+  string repo = 1;
+  // commit is any revision the repository resolves; empty means HEAD. The job
+  // record holds the full id.
+  string commit = 2;
+}
+
+// ArtifactSource copies one file from the hub into the job directory and
+// marks it executable.
+message ArtifactSource {
+  // path is a file on the hub.
+  string path = 1;
+}
+
+// JobSource is what the command runs against. Without a source the command
+// runs in an empty job directory.
+message JobSource {
+  oneof kind {
+    // git checks the commit out in a per-repo worktree on the node that is
+    // reused by later jobs, so build caches stay warm.
+    GitSource git = 1;
+    // artifact runs in a fresh job directory holding the file.
+    ArtifactSource artifact = 2;
+  }
+}
+
+message SubmitJobRequest {
+  JobTarget target = 1;
+  JobSource source = 2;
+  // command is the argv to execute; argv[0] is resolved on the node, relative
+  // to the working directory when it contains a path separator.
+  repeated string command = 3;
+  map<string, string> env = 4;
+  // timeout bounds the command's run time; zero means 1h, at most 24h.
+  google.protobuf.Duration timeout = 5;
+  // artifact_globs select files, relative to the working directory, that are
+  // sent back to $PROTECTORATE_HOME/jobs/<id>/artifacts/. A glob that matches
+  // a directory takes the files below it.
+  repeated string artifact_globs = 6;
+}
+
+message GetJobRequest {
+  string id = 1;
+}
+
+message ListJobsRequest {
+  // state, when set, keeps only jobs in that state.
+  JobState state = 1;
+  // limit caps the result; zero means 50.
+  int32 limit = 2;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+}
+
+message CancelJobRequest {
+  string id = 1;
+}
+
+message WatchJobRequest {
+  string id = 1;
+  // from_offset is the byte offset in the log to start from.
+  uint64 from_offset = 2;
+  // follow keeps the stream open until the job ends; otherwise it ends after
+  // the log written so far.
+  bool follow = 3;
+}
+
+message WatchJobResponse {
+  oneof event {
+    // job is sent first and again on every state change.
+    Job job = 1;
+    JobLog log = 2;
+  }
+}
+
+// JobLog is a slice of the merged stdout and stderr of a job.
+message JobLog {
+  uint64 offset = 1;
+  bytes data = 2;
+}
+
+// JobArtifact is a file that came back from the node.
+message JobArtifact {
+  // path is relative to the job's artifacts directory.
+  string path = 1;
+  uint64 size_bytes = 2;
+}
+
+// Job is the persisted record of one job.
+message Job {
+  string id = 1;
+  JobState state = 2;
+  JobTarget target = 3;
+  // node is the node chosen to run the job.
+  string node = 4;
+  // gpu_index is set when the target was a GPU lease.
+  optional int32 gpu_index = 5;
+  JobSource source = 6;
+  repeated string command = 7;
+  // env_keys lists the names of the environment variables set; values are
+  // never stored.
+  repeated string env_keys = 8;
+  google.protobuf.Duration timeout = 9;
+  repeated string artifact_globs = 10;
+  // exit_code is meaningful once the command ran; -1 when it was killed.
+  int32 exit_code = 11;
+  // error describes why a job failed, timed out or was cancelled early.
+  string error = 12;
+  google.protobuf.Timestamp submitted_at = 13;
+  google.protobuf.Timestamp started_at = 14;
+  google.protobuf.Timestamp finished_at = 15;
+  // source_bytes is what the hub sent to the node; zero when the node already
+  // had the commit.
+  uint64 source_bytes = 16;
+  // transfer_time is the time spent preparing and shipping the source.
+  google.protobuf.Duration transfer_time = 17;
+  // run_time is the command's wall time on the node.
+  google.protobuf.Duration run_time = 18;
+  // workspace_reused is true when a git job found the node's worktree from an
+  // earlier job.
+  bool workspace_reused = 19;
+  repeated JobArtifact artifacts = 20;
+  uint64 artifact_bytes = 21;
+  uint64 log_bytes = 22;
+}
+
+message PrepareJobRequest {
+  string job_id = 1;
+  // repo_key names the node's cache directory for one hub repository.
+  string repo_key = 2;
+  string commit = 3;
+}
+
+message PrepareJobResponse {
+  // has_commit is true when the node's cache already holds the commit.
+  bool has_commit = 1;
+  // known_commits are recent commits in the node's cache, usable as bundle
+  // prerequisites.
+  repeated string known_commits = 2;
+}
+
+message UploadJobDataRequest {
+  string job_id = 1;
+  // offset must equal the bytes received so far.
+  uint64 offset = 2;
+  bytes data = 3;
+  bool last = 4;
+  // sha256 is the hex digest of the whole upload; required on the last chunk.
+  string sha256 = 5;
+}
+
+message UploadJobDataResponse {
+  uint64 received = 1;
+}
+
+message RunJobRequest {
+  string job_id = 1;
+  // repo_key and commit select a git job; bundle_uploaded says a bundle for
+  // the commit was uploaded and must be fetched first.
+  string repo_key = 2;
+  string commit = 3;
+  bool bundle_uploaded = 4;
+  // artifact_name is the file name an uploaded artifact gets in the job
+  // directory.
+  string artifact_name = 5;
+  repeated string command = 6;
+  map<string, string> env = 7;
+  google.protobuf.Duration timeout = 8;
+  repeated string artifact_globs = 9;
+}
+
+message JobStarted {
+  bool workspace_reused = 1;
+}
+
+message JobOutput {
+  bytes data = 1;
+}
+
+// JobArtifactChunk is one frame of an artifact file; the last frame of a file
+// has last set.
+message JobArtifactChunk {
+  string path = 1;
+  bytes data = 2;
+  bool last = 3;
+}
+
+enum JobEnd {
+  JOB_END_UNSPECIFIED = 0;
+  JOB_END_EXITED = 1;
+  JOB_END_TIMED_OUT = 2;
+  JOB_END_CANCELED = 3;
+  // JOB_END_ERROR: the job could not be set up or started.
+  JOB_END_ERROR = 4;
+}
+
+message JobFinished {
+  JobEnd end = 1;
+  int32 exit_code = 2;
+  string error = 3;
+  google.protobuf.Duration run_time = 4;
+}
+
+message JobEvent {
+  oneof event {
+    JobStarted started = 1;
+    JobOutput output = 2;
+    JobArtifactChunk artifact = 3;
+    JobFinished finished = 4;
+  }
+}
+
+message NodeAgentServiceCancelJobRequest {
+  string job_id = 1;
+}
+
+message NodeAgentServiceCancelJobResponse {
+  // found is false when no such job is running.
+  bool found = 1;
+}

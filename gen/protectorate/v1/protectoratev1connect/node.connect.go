@@ -41,6 +41,17 @@ const (
 	// NodeAgentServiceWatchMetricsProcedure is the fully-qualified name of the NodeAgentService's
 	// WatchMetrics RPC.
 	NodeAgentServiceWatchMetricsProcedure = "/protectorate.v1.NodeAgentService/WatchMetrics"
+	// NodeAgentServicePrepareJobProcedure is the fully-qualified name of the NodeAgentService's
+	// PrepareJob RPC.
+	NodeAgentServicePrepareJobProcedure = "/protectorate.v1.NodeAgentService/PrepareJob"
+	// NodeAgentServiceUploadJobDataProcedure is the fully-qualified name of the NodeAgentService's
+	// UploadJobData RPC.
+	NodeAgentServiceUploadJobDataProcedure = "/protectorate.v1.NodeAgentService/UploadJobData"
+	// NodeAgentServiceRunJobProcedure is the fully-qualified name of the NodeAgentService's RunJob RPC.
+	NodeAgentServiceRunJobProcedure = "/protectorate.v1.NodeAgentService/RunJob"
+	// NodeAgentServiceCancelJobProcedure is the fully-qualified name of the NodeAgentService's
+	// CancelJob RPC.
+	NodeAgentServiceCancelJobProcedure = "/protectorate.v1.NodeAgentService/CancelJob"
 	// NodeServiceListNodesProcedure is the fully-qualified name of the NodeService's ListNodes RPC.
 	NodeServiceListNodesProcedure = "/protectorate.v1.NodeService/ListNodes"
 	// NodeServiceGetNodeProcedure is the fully-qualified name of the NodeService's GetNode RPC.
@@ -57,6 +68,20 @@ type NodeAgentServiceClient interface {
 	GetMetrics(context.Context, *connect.Request[v1.GetMetricsRequest]) (*connect.Response[v1.NodeMetrics], error)
 	// WatchMetrics streams this node's metrics at an interval.
 	WatchMetrics(context.Context, *connect.Request[v1.WatchMetricsRequest]) (*connect.ServerStreamForClient[v1.NodeMetrics], error)
+	// PrepareJob tells the hub what the node already holds for a git job: whether
+	// it has the commit and which commits it knows, so the hub can send a
+	// smaller bundle.
+	PrepareJob(context.Context, *connect.Request[v1.PrepareJobRequest]) (*connect.Response[v1.PrepareJobResponse], error)
+	// UploadJobData appends one chunk of a job's source (a git bundle or an
+	// artifact file). Chunks must arrive in order; the last one carries the
+	// SHA-256 of the whole upload.
+	UploadJobData(context.Context, *connect.Request[v1.UploadJobDataRequest]) (*connect.Response[v1.UploadJobDataResponse], error)
+	// RunJob checks the source out, runs the command and streams its output;
+	// matching artifacts follow the exit. The job dies with the stream: if the
+	// caller disconnects, the process tree is killed.
+	RunJob(context.Context, *connect.Request[v1.RunJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error)
+	// CancelJob kills a running job's process tree.
+	CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error)
 }
 
 // NewNodeAgentServiceClient constructs a client for the protectorate.v1.NodeAgentService service.
@@ -84,13 +109,41 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		prepareJob: connect.NewClient[v1.PrepareJobRequest, v1.PrepareJobResponse](
+			httpClient,
+			baseURL+NodeAgentServicePrepareJobProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("PrepareJob")),
+			connect.WithClientOptions(opts...),
+		),
+		uploadJobData: connect.NewClient[v1.UploadJobDataRequest, v1.UploadJobDataResponse](
+			httpClient,
+			baseURL+NodeAgentServiceUploadJobDataProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("UploadJobData")),
+			connect.WithClientOptions(opts...),
+		),
+		runJob: connect.NewClient[v1.RunJobRequest, v1.JobEvent](
+			httpClient,
+			baseURL+NodeAgentServiceRunJobProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("RunJob")),
+			connect.WithClientOptions(opts...),
+		),
+		cancelJob: connect.NewClient[v1.NodeAgentServiceCancelJobRequest, v1.NodeAgentServiceCancelJobResponse](
+			httpClient,
+			baseURL+NodeAgentServiceCancelJobProcedure,
+			connect.WithSchema(nodeAgentServiceMethods.ByName("CancelJob")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // nodeAgentServiceClient implements NodeAgentServiceClient.
 type nodeAgentServiceClient struct {
-	getMetrics   *connect.Client[v1.GetMetricsRequest, v1.NodeMetrics]
-	watchMetrics *connect.Client[v1.WatchMetricsRequest, v1.NodeMetrics]
+	getMetrics    *connect.Client[v1.GetMetricsRequest, v1.NodeMetrics]
+	watchMetrics  *connect.Client[v1.WatchMetricsRequest, v1.NodeMetrics]
+	prepareJob    *connect.Client[v1.PrepareJobRequest, v1.PrepareJobResponse]
+	uploadJobData *connect.Client[v1.UploadJobDataRequest, v1.UploadJobDataResponse]
+	runJob        *connect.Client[v1.RunJobRequest, v1.JobEvent]
+	cancelJob     *connect.Client[v1.NodeAgentServiceCancelJobRequest, v1.NodeAgentServiceCancelJobResponse]
 }
 
 // GetMetrics calls protectorate.v1.NodeAgentService.GetMetrics.
@@ -103,12 +156,46 @@ func (c *nodeAgentServiceClient) WatchMetrics(ctx context.Context, req *connect.
 	return c.watchMetrics.CallServerStream(ctx, req)
 }
 
+// PrepareJob calls protectorate.v1.NodeAgentService.PrepareJob.
+func (c *nodeAgentServiceClient) PrepareJob(ctx context.Context, req *connect.Request[v1.PrepareJobRequest]) (*connect.Response[v1.PrepareJobResponse], error) {
+	return c.prepareJob.CallUnary(ctx, req)
+}
+
+// UploadJobData calls protectorate.v1.NodeAgentService.UploadJobData.
+func (c *nodeAgentServiceClient) UploadJobData(ctx context.Context, req *connect.Request[v1.UploadJobDataRequest]) (*connect.Response[v1.UploadJobDataResponse], error) {
+	return c.uploadJobData.CallUnary(ctx, req)
+}
+
+// RunJob calls protectorate.v1.NodeAgentService.RunJob.
+func (c *nodeAgentServiceClient) RunJob(ctx context.Context, req *connect.Request[v1.RunJobRequest]) (*connect.ServerStreamForClient[v1.JobEvent], error) {
+	return c.runJob.CallServerStream(ctx, req)
+}
+
+// CancelJob calls protectorate.v1.NodeAgentService.CancelJob.
+func (c *nodeAgentServiceClient) CancelJob(ctx context.Context, req *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error) {
+	return c.cancelJob.CallUnary(ctx, req)
+}
+
 // NodeAgentServiceHandler is an implementation of the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceHandler interface {
 	// GetMetrics collects this node's current metrics.
 	GetMetrics(context.Context, *connect.Request[v1.GetMetricsRequest]) (*connect.Response[v1.NodeMetrics], error)
 	// WatchMetrics streams this node's metrics at an interval.
 	WatchMetrics(context.Context, *connect.Request[v1.WatchMetricsRequest], *connect.ServerStream[v1.NodeMetrics]) error
+	// PrepareJob tells the hub what the node already holds for a git job: whether
+	// it has the commit and which commits it knows, so the hub can send a
+	// smaller bundle.
+	PrepareJob(context.Context, *connect.Request[v1.PrepareJobRequest]) (*connect.Response[v1.PrepareJobResponse], error)
+	// UploadJobData appends one chunk of a job's source (a git bundle or an
+	// artifact file). Chunks must arrive in order; the last one carries the
+	// SHA-256 of the whole upload.
+	UploadJobData(context.Context, *connect.Request[v1.UploadJobDataRequest]) (*connect.Response[v1.UploadJobDataResponse], error)
+	// RunJob checks the source out, runs the command and streams its output;
+	// matching artifacts follow the exit. The job dies with the stream: if the
+	// caller disconnects, the process tree is killed.
+	RunJob(context.Context, *connect.Request[v1.RunJobRequest], *connect.ServerStream[v1.JobEvent]) error
+	// CancelJob kills a running job's process tree.
+	CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error)
 }
 
 // NewNodeAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -132,12 +219,44 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeAgentServicePrepareJobHandler := connect.NewUnaryHandler(
+		NodeAgentServicePrepareJobProcedure,
+		svc.PrepareJob,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("PrepareJob")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeAgentServiceUploadJobDataHandler := connect.NewUnaryHandler(
+		NodeAgentServiceUploadJobDataProcedure,
+		svc.UploadJobData,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("UploadJobData")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeAgentServiceRunJobHandler := connect.NewServerStreamHandler(
+		NodeAgentServiceRunJobProcedure,
+		svc.RunJob,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("RunJob")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeAgentServiceCancelJobHandler := connect.NewUnaryHandler(
+		NodeAgentServiceCancelJobProcedure,
+		svc.CancelJob,
+		connect.WithSchema(nodeAgentServiceMethods.ByName("CancelJob")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.NodeAgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeAgentServiceGetMetricsProcedure:
 			nodeAgentServiceGetMetricsHandler.ServeHTTP(w, r)
 		case NodeAgentServiceWatchMetricsProcedure:
 			nodeAgentServiceWatchMetricsHandler.ServeHTTP(w, r)
+		case NodeAgentServicePrepareJobProcedure:
+			nodeAgentServicePrepareJobHandler.ServeHTTP(w, r)
+		case NodeAgentServiceUploadJobDataProcedure:
+			nodeAgentServiceUploadJobDataHandler.ServeHTTP(w, r)
+		case NodeAgentServiceRunJobProcedure:
+			nodeAgentServiceRunJobHandler.ServeHTTP(w, r)
+		case NodeAgentServiceCancelJobProcedure:
+			nodeAgentServiceCancelJobHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -153,6 +272,22 @@ func (UnimplementedNodeAgentServiceHandler) GetMetrics(context.Context, *connect
 
 func (UnimplementedNodeAgentServiceHandler) WatchMetrics(context.Context, *connect.Request[v1.WatchMetricsRequest], *connect.ServerStream[v1.NodeMetrics]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.WatchMetrics is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) PrepareJob(context.Context, *connect.Request[v1.PrepareJobRequest]) (*connect.Response[v1.PrepareJobResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.PrepareJob is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) UploadJobData(context.Context, *connect.Request[v1.UploadJobDataRequest]) (*connect.Response[v1.UploadJobDataResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.UploadJobData is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) RunJob(context.Context, *connect.Request[v1.RunJobRequest], *connect.ServerStream[v1.JobEvent]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.RunJob is not implemented"))
+}
+
+func (UnimplementedNodeAgentServiceHandler) CancelJob(context.Context, *connect.Request[v1.NodeAgentServiceCancelJobRequest]) (*connect.Response[v1.NodeAgentServiceCancelJobResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.NodeAgentService.CancelJob is not implemented"))
 }
 
 // NodeServiceClient is a client for the protectorate.v1.NodeService service.

@@ -30,6 +30,8 @@ const (
 type Agent struct {
 	Collector *Collector
 	Authorize func(*http.Request) error
+	// Jobs executes hub jobs; nil refuses them.
+	Jobs *Jobs
 }
 
 // TokenAuthorizer accepts requests carrying the given bearer token.
@@ -133,4 +135,42 @@ func (a *Agent) WatchMetrics(ctx context.Context, req *connect.Request[pb.WatchM
 		case <-tick.C:
 		}
 	}
+}
+
+var errNoJobs = connect.NewError(connect.CodeUnimplemented, errors.New("this node does not run jobs"))
+
+func (a *Agent) PrepareJob(ctx context.Context, req *connect.Request[pb.PrepareJobRequest]) (*connect.Response[pb.PrepareJobResponse], error) {
+	if a.Jobs == nil {
+		return nil, errNoJobs
+	}
+	res, err := a.Jobs.Prepare(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (a *Agent) UploadJobData(_ context.Context, req *connect.Request[pb.UploadJobDataRequest]) (*connect.Response[pb.UploadJobDataResponse], error) {
+	if a.Jobs == nil {
+		return nil, errNoJobs
+	}
+	res, err := a.Jobs.Upload(req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (a *Agent) RunJob(ctx context.Context, req *connect.Request[pb.RunJobRequest], stream *connect.ServerStream[pb.JobEvent]) error {
+	if a.Jobs == nil {
+		return errNoJobs
+	}
+	return a.Jobs.Run(ctx, req.Msg, stream.Send)
+}
+
+func (a *Agent) CancelJob(_ context.Context, req *connect.Request[pb.NodeAgentServiceCancelJobRequest]) (*connect.Response[pb.NodeAgentServiceCancelJobResponse], error) {
+	if a.Jobs == nil {
+		return nil, errNoJobs
+	}
+	return connect.NewResponse(&pb.NodeAgentServiceCancelJobResponse{Found: a.Jobs.Cancel(req.Msg.JobId)}), nil
 }

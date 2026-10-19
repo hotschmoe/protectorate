@@ -1685,7 +1685,7 @@ var File_protectorate_v1_node_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\x1a\x1cprotectorate/v1/sleeve.proto\"\x13\n" +
+	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19protectorate/v1/job.proto\x1a\x1dprotectorate/v1/options.proto\x1a\x1cprotectorate/v1/sleeve.proto\"\x13\n" +
 	"\x11GetMetricsRequest\"@\n" +
 	"\x13WatchMetricsRequest\x12)\n" +
 	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\x94\x05\n" +
@@ -1838,11 +1838,16 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x16ALERT_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ALERT_KIND_DISK_PERCENT\x10\x01\x12\x1b\n" +
 	"\x17ALERT_KIND_MEM_PRESSURE\x10\x02\x12\x1a\n" +
-	"\x16ALERT_KIND_UNREACHABLE\x10\x032\xc8\x01\n" +
+	"\x16ALERT_KIND_UNREACHABLE\x10\x032\xba\x04\n" +
 	"\x10NodeAgentService\x12S\n" +
 	"\n" +
 	"GetMetrics\x12\".protectorate.v1.GetMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x01\x12Y\n" +
-	"\fWatchMetrics\x12$.protectorate.v1.WatchMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x010\x01\x1a\x04\x90\xb5\x18\x012\xd2\x02\n" +
+	"\fWatchMetrics\x12$.protectorate.v1.WatchMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x010\x01\x12U\n" +
+	"\n" +
+	"PrepareJob\x12\".protectorate.v1.PrepareJobRequest\x1a#.protectorate.v1.PrepareJobResponse\x12^\n" +
+	"\rUploadJobData\x12%.protectorate.v1.UploadJobDataRequest\x1a&.protectorate.v1.UploadJobDataResponse\x12E\n" +
+	"\x06RunJob\x12\x1e.protectorate.v1.RunJobRequest\x1a\x19.protectorate.v1.JobEvent0\x01\x12r\n" +
+	"\tCancelJob\x121.protectorate.v1.NodeAgentServiceCancelJobRequest\x1a2.protectorate.v1.NodeAgentServiceCancelJobResponse\x1a\x04\x90\xb5\x18\x012\xd2\x02\n" +
 	"\vNodeService\x12W\n" +
 	"\tListNodes\x12!.protectorate.v1.ListNodesRequest\x1a\".protectorate.v1.ListNodesResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\"\x03\x90\x02\x01\x12E\n" +
@@ -1865,32 +1870,40 @@ func file_protectorate_v1_node_proto_rawDescGZIP() []byte {
 var file_protectorate_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_protectorate_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_protectorate_v1_node_proto_goTypes = []any{
-	(NodeFreshness)(0),            // 0: protectorate.v1.NodeFreshness
-	(AlertKind)(0),                // 1: protectorate.v1.AlertKind
-	(*GetMetricsRequest)(nil),     // 2: protectorate.v1.GetMetricsRequest
-	(*WatchMetricsRequest)(nil),   // 3: protectorate.v1.WatchMetricsRequest
-	(*NodeMetrics)(nil),           // 4: protectorate.v1.NodeMetrics
-	(*CpuMetrics)(nil),            // 5: protectorate.v1.CpuMetrics
-	(*MemoryMetrics)(nil),         // 6: protectorate.v1.MemoryMetrics
-	(*FilesystemMetrics)(nil),     // 7: protectorate.v1.FilesystemMetrics
-	(*GpuMetrics)(nil),            // 8: protectorate.v1.GpuMetrics
-	(*ContainerEngine)(nil),       // 9: protectorate.v1.ContainerEngine
-	(*EngineDiskUsage)(nil),       // 10: protectorate.v1.EngineDiskUsage
-	(*DiskBucket)(nil),            // 11: protectorate.v1.DiskBucket
-	(*ContainerMetrics)(nil),      // 12: protectorate.v1.ContainerMetrics
-	(*DirSize)(nil),               // 13: protectorate.v1.DirSize
-	(*NodeAlert)(nil),             // 14: protectorate.v1.NodeAlert
-	(*NodeInfo)(nil),              // 15: protectorate.v1.NodeInfo
-	(*NodeStatus)(nil),            // 16: protectorate.v1.NodeStatus
-	(*ListNodesRequest)(nil),      // 17: protectorate.v1.ListNodesRequest
-	(*ListNodesResponse)(nil),     // 18: protectorate.v1.ListNodesResponse
-	(*GetNodeRequest)(nil),        // 19: protectorate.v1.GetNodeRequest
-	(*AddNodeRequest)(nil),        // 20: protectorate.v1.AddNodeRequest
-	(*RemoveNodeRequest)(nil),     // 21: protectorate.v1.RemoveNodeRequest
-	(*RemoveNodeResponse)(nil),    // 22: protectorate.v1.RemoveNodeResponse
-	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
-	(*Sleeve)(nil),                // 24: protectorate.v1.Sleeve
-	(*durationpb.Duration)(nil),   // 25: google.protobuf.Duration
+	(NodeFreshness)(0),                        // 0: protectorate.v1.NodeFreshness
+	(AlertKind)(0),                            // 1: protectorate.v1.AlertKind
+	(*GetMetricsRequest)(nil),                 // 2: protectorate.v1.GetMetricsRequest
+	(*WatchMetricsRequest)(nil),               // 3: protectorate.v1.WatchMetricsRequest
+	(*NodeMetrics)(nil),                       // 4: protectorate.v1.NodeMetrics
+	(*CpuMetrics)(nil),                        // 5: protectorate.v1.CpuMetrics
+	(*MemoryMetrics)(nil),                     // 6: protectorate.v1.MemoryMetrics
+	(*FilesystemMetrics)(nil),                 // 7: protectorate.v1.FilesystemMetrics
+	(*GpuMetrics)(nil),                        // 8: protectorate.v1.GpuMetrics
+	(*ContainerEngine)(nil),                   // 9: protectorate.v1.ContainerEngine
+	(*EngineDiskUsage)(nil),                   // 10: protectorate.v1.EngineDiskUsage
+	(*DiskBucket)(nil),                        // 11: protectorate.v1.DiskBucket
+	(*ContainerMetrics)(nil),                  // 12: protectorate.v1.ContainerMetrics
+	(*DirSize)(nil),                           // 13: protectorate.v1.DirSize
+	(*NodeAlert)(nil),                         // 14: protectorate.v1.NodeAlert
+	(*NodeInfo)(nil),                          // 15: protectorate.v1.NodeInfo
+	(*NodeStatus)(nil),                        // 16: protectorate.v1.NodeStatus
+	(*ListNodesRequest)(nil),                  // 17: protectorate.v1.ListNodesRequest
+	(*ListNodesResponse)(nil),                 // 18: protectorate.v1.ListNodesResponse
+	(*GetNodeRequest)(nil),                    // 19: protectorate.v1.GetNodeRequest
+	(*AddNodeRequest)(nil),                    // 20: protectorate.v1.AddNodeRequest
+	(*RemoveNodeRequest)(nil),                 // 21: protectorate.v1.RemoveNodeRequest
+	(*RemoveNodeResponse)(nil),                // 22: protectorate.v1.RemoveNodeResponse
+	(*timestamppb.Timestamp)(nil),             // 23: google.protobuf.Timestamp
+	(*Sleeve)(nil),                            // 24: protectorate.v1.Sleeve
+	(*durationpb.Duration)(nil),               // 25: google.protobuf.Duration
+	(*PrepareJobRequest)(nil),                 // 26: protectorate.v1.PrepareJobRequest
+	(*UploadJobDataRequest)(nil),              // 27: protectorate.v1.UploadJobDataRequest
+	(*RunJobRequest)(nil),                     // 28: protectorate.v1.RunJobRequest
+	(*NodeAgentServiceCancelJobRequest)(nil),  // 29: protectorate.v1.NodeAgentServiceCancelJobRequest
+	(*PrepareJobResponse)(nil),                // 30: protectorate.v1.PrepareJobResponse
+	(*UploadJobDataResponse)(nil),             // 31: protectorate.v1.UploadJobDataResponse
+	(*JobEvent)(nil),                          // 32: protectorate.v1.JobEvent
+	(*NodeAgentServiceCancelJobResponse)(nil), // 33: protectorate.v1.NodeAgentServiceCancelJobResponse
 }
 var file_protectorate_v1_node_proto_depIdxs = []int32{
 	23, // 0: protectorate.v1.NodeMetrics.collected_at:type_name -> google.protobuf.Timestamp
@@ -1921,18 +1934,26 @@ var file_protectorate_v1_node_proto_depIdxs = []int32{
 	15, // 25: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
 	2,  // 26: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
 	3,  // 27: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
-	17, // 28: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
-	19, // 29: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
-	20, // 30: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
-	21, // 31: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
-	4,  // 32: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
-	4,  // 33: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
-	18, // 34: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
-	16, // 35: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
-	15, // 36: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
-	22, // 37: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeResponse
-	32, // [32:38] is the sub-list for method output_type
-	26, // [26:32] is the sub-list for method input_type
+	26, // 28: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
+	27, // 29: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
+	28, // 30: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
+	29, // 31: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
+	17, // 32: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
+	19, // 33: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
+	20, // 34: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
+	21, // 35: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
+	4,  // 36: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
+	4,  // 37: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
+	30, // 38: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
+	31, // 39: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
+	32, // 40: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
+	33, // 41: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
+	18, // 42: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
+	16, // 43: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
+	15, // 44: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
+	22, // 45: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeResponse
+	36, // [36:46] is the sub-list for method output_type
+	26, // [26:36] is the sub-list for method input_type
 	26, // [26:26] is the sub-list for extension type_name
 	26, // [26:26] is the sub-list for extension extendee
 	0,  // [0:26] is the sub-list for field type_name
@@ -1943,6 +1964,7 @@ func file_protectorate_v1_node_proto_init() {
 	if File_protectorate_v1_node_proto != nil {
 		return
 	}
+	file_protectorate_v1_job_proto_init()
 	file_protectorate_v1_options_proto_init()
 	file_protectorate_v1_sleeve_proto_init()
 	file_protectorate_v1_node_proto_msgTypes[3].OneofWrappers = []any{}

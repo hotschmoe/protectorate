@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// LeaseService reserves nodes and GPUs for a holder. A lease that is not
+// renewed expires on its own, so a dead agent cannot hold hardware forever.
+// Leases are kept across hub restarts and announced on EventService as
+// "lease.acquired", "lease.renewed", "lease.released" and "lease.expired"
+// (subject = lease id).
+service LeaseService {
+  // AcquireLease reserves one resource exclusively: a node name ("win1"), one
+  // GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
+  // least-loaded fresh matching node that is not already leased.
+  rpc AcquireLease(AcquireLeaseRequest) returns (Lease);
+
+  // RenewLease pushes the expiry of a live lease to now plus a TTL.
+  rpc RenewLease(RenewLeaseRequest) returns (Lease);
+
+  // ReleaseLease frees a lease at once. Releasing an unknown or expired lease
+  // is an error.
+  rpc ReleaseLease(ReleaseLeaseRequest) returns (ReleaseLeaseResponse);
+
+  // ListLeases returns every live lease.
+  rpc ListLeases(ListLeasesRequest) returns (ListLeasesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// NodeSelector describes the nodes a lease or job may land on. Zero fields
+// match anything.
+message NodeSelector {
+  // os and arch are Go GOOS/GOARCH values such as "windows" and "arm64".
+  string os = 1;
+  string arch = 2;
+  // min_free_memory_bytes is the least available memory the node must report.
+  uint64 min_free_memory_bytes = 3;
+  // gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease
+  // then reserves that GPU instead of the whole node.
+  uint64 gpu_vram_bytes = 4;
+}
+
+message AcquireLeaseRequest {
+  oneof target {
+    // resource is a node name or "<node>:gpu<index>".
+    string resource = 1;
+    NodeSelector selector = 2;
+  }
+  // holder labels who holds the lease, e.g. a sleeve or agent name.
+  string holder = 3;
+  // ttl is how long the lease lives without a renewal; at most 24h.
+  google.protobuf.Duration ttl = 4;
+  // allow_family admits nodes of tier "family", which are skipped otherwise.
+  bool allow_family = 5;
+}
+
+message RenewLeaseRequest {
+  string id = 1;
+  // ttl replaces the lease's TTL; zero keeps the current one.
+  google.protobuf.Duration ttl = 2;
+}
+
+message ReleaseLeaseRequest {
+  string id = 1;
+}
+
+message ReleaseLeaseResponse {}
+
+message ListLeasesRequest {}
+
+message ListLeasesResponse {
+  repeated Lease leases = 1;
+}
+
+// Lease is one reservation.
+message Lease {
+  string id = 1;
+  // resource is the chosen resource: a node name or "<node>:gpu<index>".
+  string resource = 2;
+  string node = 3;
+  // gpu_index is set when the lease covers a single GPU.
+  optional int32 gpu_index = 4;
+  string holder = 5;
+  google.protobuf.Duration ttl = 6;
+  google.protobuf.Timestamp acquired_at = 7;
+  google.protobuf.Timestamp expires_at = 8;
+}

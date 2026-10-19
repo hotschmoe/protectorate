@@ -20,6 +20,7 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
+import 'job.pbjson.dart' as $3;
 import 'sleeve.pbjson.dart' as $1;
 
 @$core.Deprecated('Use nodeFreshnessDescriptor instead')
@@ -674,6 +675,27 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '4': {'34': 1},
       '6': true,
     },
+    {
+      '1': 'PrepareJob',
+      '2': '.protectorate.v1.PrepareJobRequest',
+      '3': '.protectorate.v1.PrepareJobResponse'
+    },
+    {
+      '1': 'UploadJobData',
+      '2': '.protectorate.v1.UploadJobDataRequest',
+      '3': '.protectorate.v1.UploadJobDataResponse'
+    },
+    {
+      '1': 'RunJob',
+      '2': '.protectorate.v1.RunJobRequest',
+      '3': '.protectorate.v1.JobEvent',
+      '6': true
+    },
+    {
+      '1': 'CancelJob',
+      '2': '.protectorate.v1.NodeAgentServiceCancelJobRequest',
+      '3': '.protectorate.v1.NodeAgentServiceCancelJobResponse'
+    },
   ],
   '3': {},
 };
@@ -698,6 +720,21 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
+  '.protectorate.v1.PrepareJobRequest': $3.PrepareJobRequest$json,
+  '.protectorate.v1.PrepareJobResponse': $3.PrepareJobResponse$json,
+  '.protectorate.v1.UploadJobDataRequest': $3.UploadJobDataRequest$json,
+  '.protectorate.v1.UploadJobDataResponse': $3.UploadJobDataResponse$json,
+  '.protectorate.v1.RunJobRequest': $3.RunJobRequest$json,
+  '.protectorate.v1.RunJobRequest.EnvEntry': $3.RunJobRequest_EnvEntry$json,
+  '.protectorate.v1.JobEvent': $3.JobEvent$json,
+  '.protectorate.v1.JobStarted': $3.JobStarted$json,
+  '.protectorate.v1.JobOutput': $3.JobOutput$json,
+  '.protectorate.v1.JobArtifactChunk': $3.JobArtifactChunk$json,
+  '.protectorate.v1.JobFinished': $3.JobFinished$json,
+  '.protectorate.v1.NodeAgentServiceCancelJobRequest':
+      $3.NodeAgentServiceCancelJobRequest$json,
+  '.protectorate.v1.NodeAgentServiceCancelJobResponse':
+      $3.NodeAgentServiceCancelJobResponse$json,
 };
 
 /// Descriptor for `NodeAgentService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -705,7 +742,14 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     'ChBOb2RlQWdlbnRTZXJ2aWNlElMKCkdldE1ldHJpY3MSIi5wcm90ZWN0b3JhdGUudjEuR2V0TW'
     'V0cmljc1JlcXVlc3QaHC5wcm90ZWN0b3JhdGUudjEuTm9kZU1ldHJpY3MiA5ACARJZCgxXYXRj'
     'aE1ldHJpY3MSJC5wcm90ZWN0b3JhdGUudjEuV2F0Y2hNZXRyaWNzUmVxdWVzdBocLnByb3RlY3'
-    'RvcmF0ZS52MS5Ob2RlTWV0cmljcyIDkAIBMAEaBJC1GAE=');
+    'RvcmF0ZS52MS5Ob2RlTWV0cmljcyIDkAIBMAESVQoKUHJlcGFyZUpvYhIiLnByb3RlY3RvcmF0'
+    'ZS52MS5QcmVwYXJlSm9iUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5QcmVwYXJlSm9iUmVzcG'
+    '9uc2USXgoNVXBsb2FkSm9iRGF0YRIlLnByb3RlY3RvcmF0ZS52MS5VcGxvYWRKb2JEYXRhUmVx'
+    'dWVzdBomLnByb3RlY3RvcmF0ZS52MS5VcGxvYWRKb2JEYXRhUmVzcG9uc2USRQoGUnVuSm9iEh'
+    '4ucHJvdGVjdG9yYXRlLnYxLlJ1bkpvYlJlcXVlc3QaGS5wcm90ZWN0b3JhdGUudjEuSm9iRXZl'
+    'bnQwARJyCglDYW5jZWxKb2ISMS5wcm90ZWN0b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbm'
+    'NlbEpvYlJlcXVlc3QaMi5wcm90ZWN0b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbmNlbEpv'
+    'YlJlc3BvbnNlGgSQtRgB');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',
