@@ -39,6 +39,7 @@ is implied (`read` does not include `events`; no glob includes the terminal).
 | `terminal` | the WebSocket terminal, read-write or read-only |
 | `terminal:readonly` | the terminal only with `readonly=1` |
 | `terminal:host` | the terminal, also read-write on sessions outside a sleeve sandbox (shell as the hub user) |
+| `node_admin:<glob>` | work on `care` nodes whose name the glob matches (jobs, files, desktop), never an RPC by itself; see [node-work.md](node-work.md) |
 | `<glob>` | `path.Match` glob over tool names |
 
 The canonical glob form is the MCP tool name: the snake_case service name

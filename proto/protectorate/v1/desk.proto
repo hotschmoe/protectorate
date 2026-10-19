@@ -72,8 +72,7 @@ message DeskTarget {
   // lease_id names a live lease on "desk:<name>". Optional for mutating
   // commands: when empty the hub leases the desktop for the caller.
   string lease_id = 2;
-  // allow_care admits nodes of tier "care".
-  bool allow_care = 3;
+  reserved 3;
 }
 
 message ScreenshotRequest {

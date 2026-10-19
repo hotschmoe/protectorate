@@ -84,7 +84,7 @@ func writeDeskPolicy(w io.Writer, name string, r *pb.DeskPolicyStatus) {
 func deskPolicyCmd(o *opts) *cobra.Command {
 	var window, tz string
 	var idle time.Duration
-	var lockAfter, off, allowCare bool
+	var lockAfter, off bool
 	c := &cobra.Command{
 		Use:   "policy <node> [--window HH:MM-HH:MM --idle DUR [--tz ZONE] [--lock-after] | --off]",
 		Short: "Set or show when agents may drive a node's desktop",
@@ -114,7 +114,7 @@ and never while the user is active.`,
 			case off && setting:
 				return fmt.Errorf("--off cannot be combined with policy flags")
 			case off:
-				r, err := cl.SetDeskPolicy(cmd.Context(), connect.NewRequest(&pb.SetDeskPolicyRequest{Name: args[0], AllowCare: allowCare}))
+				r, err := cl.SetDeskPolicy(cmd.Context(), connect.NewRequest(&pb.SetDeskPolicyRequest{Name: args[0]}))
 				if err != nil {
 					return err
 				}
@@ -124,13 +124,13 @@ and never while the user is active.`,
 					return fmt.Errorf("setting a policy needs both --window HH:MM-HH:MM and --idle DURATION (for example 15m)")
 				}
 				p := &pb.DeskPolicy{Window: window, Idle: durationpb.New(idle), Timezone: tz, LockAfter: lockAfter}
-				r, err := cl.SetDeskPolicy(cmd.Context(), connect.NewRequest(&pb.SetDeskPolicyRequest{Name: args[0], AllowCare: allowCare, Policy: p}))
+				r, err := cl.SetDeskPolicy(cmd.Context(), connect.NewRequest(&pb.SetDeskPolicyRequest{Name: args[0], Policy: p}))
 				if err != nil {
 					return err
 				}
 				res = r.Msg
 			default:
-				r, err := cl.GetDeskPolicy(cmd.Context(), connect.NewRequest(&pb.GetDeskPolicyRequest{Name: args[0], AllowCare: allowCare}))
+				r, err := cl.GetDeskPolicy(cmd.Context(), connect.NewRequest(&pb.GetDeskPolicyRequest{Name: args[0]}))
 				if err != nil {
 					return err
 				}
@@ -145,6 +145,5 @@ and never while the user is active.`,
 	f.StringVar(&tz, "tz", "", "IANA time zone of the window (default: the node's local time)")
 	f.BoolVar(&lockAfter, "lock-after", false, "lock the workstation when the window or an agent lease ends")
 	f.BoolVar(&off, "off", false, "remove the policy: the desktop is always available")
-	f.BoolVar(&allowCare, "allow-care", false, "allow nodes of tier care")
 	return c
 }

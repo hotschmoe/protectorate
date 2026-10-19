@@ -47,15 +47,15 @@ func defaultHolder() string {
 func leaseAcquireCmd(o *opts) *cobra.Command {
 	var resource, osName, arch, mem, vram, gpu, npu, holder string
 	var ttl time.Duration
-	var allowCare, wait bool
+	var wait bool
 	var priority int32
 	c := &cobra.Command{
 		Use:   "acquire [--node <name[:gpuN]> | --os <os> --arch <arch> --min-free-mem 8G --gpu-vram 24G --gpu <text> --npu <text>] --ttl 30m",
 		Short: "Reserve a node, a GPU, or the least-loaded node matching a selector",
 		Long: `Print the lease id and the chosen resource. The lease expires unless renewed
 before the TTL runs out (lease renew), so a crashed holder frees the hardware.
-Selectors pick the least-loaded fresh node; nodes of tier care are skipped
-unless --allow-care is set.
+Selectors pick the least-loaded fresh node of tier shared; care nodes are
+never leased.
 
 With --wait, a resource that is held queues you (first in first out, larger
 --priority first) and prints a ticket. When your turn comes the hub holds the
@@ -63,7 +63,7 @@ lease for you for a short claim window and sends you a notice message; claim it
 with 'lease renew <id>'. Without --wait a held resource is an error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			req := &pb.AcquireLeaseRequest{Holder: holder, Ttl: durationpb.New(ttl), AllowCare: allowCare, Wait: wait, Priority: priority}
+			req := &pb.AcquireLeaseRequest{Holder: holder, Ttl: durationpb.New(ttl), Wait: wait, Priority: priority}
 			sel := &pb.NodeSelector{Os: osName, Arch: arch, Gpu: gpu, Npu: npu}
 			var err error
 			if sel.MinFreeMemoryBytes, err = parseOptSize(mem); err != nil {
@@ -101,7 +101,6 @@ with 'lease renew <id>'. Without --wait a held resource is an error.`,
 	f.StringVar(&npu, "npu", "", "require an NPU whose vendor or name contains this, e.g. hexagon")
 	f.StringVar(&holder, "holder", defaultHolder(), "who holds the lease")
 	f.DurationVar(&ttl, "ttl", 30*time.Minute, "lease lifetime without a renewal (at most 24h)")
-	f.BoolVar(&allowCare, "allow-care", false, "allow nodes of tier care")
 	f.BoolVar(&wait, "wait", false, "queue when the resource is held instead of failing")
 	f.Int32Var(&priority, "priority", 0, "with --wait, larger goes first; ties are first come first served")
 	return c

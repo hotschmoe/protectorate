@@ -143,7 +143,9 @@ func (JobEnd) EnumDescriptor() ([]byte, []int) {
 	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{1}
 }
 
-// JobTarget says where a job runs.
+// JobTarget says where a job runs. Nodes of tier "care" are never picked
+// by a selector or leased; naming one needs the owner token or a token with
+// the scope node_admin:<node>.
 type JobTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Target:
@@ -151,9 +153,7 @@ type JobTarget struct {
 	//	*JobTarget_LeaseId
 	//	*JobTarget_Node
 	//	*JobTarget_Selector
-	Target isJobTarget_Target `protobuf_oneof:"target"`
-	// allow_care admits nodes of tier "care".
-	AllowCare     bool `protobuf:"varint,4,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
+	Target        isJobTarget_Target `protobuf_oneof:"target"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -222,13 +222,6 @@ func (x *JobTarget) GetSelector() *NodeSelector {
 	return nil
 }
 
-func (x *JobTarget) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
-}
-
 type isJobTarget_Target interface {
 	isJobTarget_Target()
 }
@@ -244,7 +237,8 @@ type JobTarget_Node struct {
 }
 
 type JobTarget_Selector struct {
-	// selector picks the least-loaded fresh matching node that is not leased.
+	// selector picks the least-loaded fresh matching node of tier "shared"
+	// that is not leased.
 	Selector *NodeSelector `protobuf:"bytes,3,opt,name=selector,proto3,oneof"`
 }
 
@@ -2050,14 +2044,12 @@ var File_protectorate_v1_job_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\n" +
-	"\x19protectorate/v1/job.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bprotectorate/v1/lease.proto\"\xa4\x01\n" +
+	"\x19protectorate/v1/job.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bprotectorate/v1/lease.proto\"\x8b\x01\n" +
 	"\tJobTarget\x12\x1b\n" +
 	"\blease_id\x18\x01 \x01(\tH\x00R\aleaseId\x12\x14\n" +
 	"\x04node\x18\x02 \x01(\tH\x00R\x04node\x12;\n" +
-	"\bselector\x18\x03 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x04 \x01(\bR\tallowCareB\b\n" +
-	"\x06target\"7\n" +
+	"\bselector\x18\x03 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselectorB\b\n" +
+	"\x06targetJ\x04\b\x04\x10\x05\"7\n" +
 	"\tGitSource\x12\x12\n" +
 	"\x04repo\x18\x01 \x01(\tR\x04repo\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\">\n" +

@@ -196,14 +196,14 @@ message GetDeskStateRequest {
 
 message SetDeskPolicyRequest {
   string name = 1;
-  bool allow_care = 2;
+  reserved 2;
   // policy unset clears the policy: the desktop is always available again.
   DeskPolicy policy = 3;
 }
 
 message GetDeskPolicyRequest {
   string name = 1;
-  bool allow_care = 2;
+  reserved 2;
 }
 
 message DeskPolicyStatus {
@@ -239,7 +239,7 @@ enum UpdatePhase {
 
 message UpdateNodeRequest {
   string name = 1;
-  bool allow_care = 2;
+  reserved 2;
   // force sends the binary even when the node reports the hub's version.
   bool force = 3;
 }
@@ -264,7 +264,7 @@ message UpdateNodeProgress {
 message ApplyUpdateRequest {
   // name is the node name; the agent ignores it.
   string name = 1;
-  bool allow_care = 2;
+  reserved 2;
   // path is where PutFile put the new binary, as PutFile reported it.
   string path = 3;
   // size and sha256 (hex) are what the node must find at path.
@@ -311,7 +311,7 @@ message FileTrailer {
 message PutFileRequest {
   // name is the node name.
   string name = 1;
-  bool allow_care = 2;
+  reserved 2;
   // transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
   string transfer_id = 3;
   // path, kind, mode and overwrite are read on the first call (offset 0).
@@ -341,7 +341,7 @@ message PutFileResponse {
 
 message GetFileRequest {
   string name = 1;
-  bool allow_care = 2;
+  reserved 2;
   string path = 3;
   // no_compress sends every chunk as is.
   bool no_compress = 4;

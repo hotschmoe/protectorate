@@ -76,6 +76,12 @@ func TestValidateScopes(t *testing.T) {
 		{"bad glob", []string{"["}, nil, true},
 		{"empty scope", []string{""}, nil, true},
 		{"procedure form rejected", []string{"/protectorate.v1.HubService/GetStatus"}, nil, true},
+		{"node admin", []string{"node_admin:kidsbox", "job_*"}, []string{"job_*", "node_admin:kidsbox"}, false},
+		{"node admin glob", []string{"node_admin:kids*"}, []string{"node_admin:kids*"}, false},
+		{"node admin empty", []string{"node_admin:"}, nil, true},
+		{"node admin upper case", []string{"node_admin:Kidsbox"}, nil, true},
+		{"node admin path", []string{"node_admin:a/b"}, nil, true},
+		{"node admin bad glob", []string{"node_admin:[a"}, nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,6 +93,32 @@ func TestValidateScopes(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAdminOn(t *testing.T) {
+	tests := []struct {
+		name   string
+		p      *Principal
+		node   string
+		wanted bool
+	}{
+		{"owner", &Principal{Owner: true}, "kidsbox", true},
+		{"exact grant", &Principal{Scopes: []string{"job_*", "node_admin:kidsbox"}}, "kidsbox", true},
+		{"glob grant", &Principal{Scopes: []string{"node_admin:kids*"}}, "kidsbox", true},
+		{"other node", &Principal{Scopes: []string{"node_admin:kidsbox"}}, "officepc", false},
+		{"star is no grant", &Principal{Scopes: []string{"*"}}, "kidsbox", false},
+		{"no principal", nil, "kidsbox", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.p.AdminOn(tt.node); got != tt.wanted {
+				t.Fatalf("AdminOn(%s) = %v", tt.node, got)
+			}
+		})
+	}
+	if !scopesAllow([]string{"node_admin:kidsbox", "job_*"}, Method{Tool: "job_submit_job"}) || scopesAllow([]string{"node_admin:*"}, Method{Tool: "job_submit_job"}) {
+		t.Fatal("node_admin must grant no RPC by itself")
 	}
 }
 

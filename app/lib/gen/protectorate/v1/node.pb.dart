@@ -180,12 +180,10 @@ class GetDeskStateRequest extends $pb.GeneratedMessage {
 class SetDeskPolicyRequest extends $pb.GeneratedMessage {
   factory SetDeskPolicyRequest({
     $core.String? name,
-    $core.bool? allowCare,
     $0.DeskPolicy? policy,
   }) {
     final result = SetDeskPolicyRequest._();
     if (name != null) result.name = name;
-    if (allowCare != null) result.allowCare = allowCare;
     if (policy != null) result.policy = policy;
     return result;
   }
@@ -205,7 +203,6 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: SetDeskPolicyRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOM<$0.DeskPolicy>(3, _omitFieldNames ? '' : 'policy',
         subBuilder: $0.DeskPolicy.$_createMessage)
     ..hasRequiredFields = false;
@@ -242,36 +239,25 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowCare => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowCare($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowCare() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowCare() => $_clearField(2);
-
   /// policy unset clears the policy: the desktop is always available again.
   @$pb.TagNumber(3)
-  $0.DeskPolicy get policy => $_getN(2);
+  $0.DeskPolicy get policy => $_getN(1);
   @$pb.TagNumber(3)
   set policy($0.DeskPolicy value) => $_setField(3, value);
   @$pb.TagNumber(3)
-  $core.bool hasPolicy() => $_has(2);
+  $core.bool hasPolicy() => $_has(1);
   @$pb.TagNumber(3)
   void clearPolicy() => $_clearField(3);
   @$pb.TagNumber(3)
-  $0.DeskPolicy ensurePolicy() => $_ensure(2);
+  $0.DeskPolicy ensurePolicy() => $_ensure(1);
 }
 
 class GetDeskPolicyRequest extends $pb.GeneratedMessage {
   factory GetDeskPolicyRequest({
     $core.String? name,
-    $core.bool? allowCare,
   }) {
     final result = GetDeskPolicyRequest._();
     if (name != null) result.name = name;
-    if (allowCare != null) result.allowCare = allowCare;
     return result;
   }
 
@@ -290,7 +276,6 @@ class GetDeskPolicyRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetDeskPolicyRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -324,15 +309,6 @@ class GetDeskPolicyRequest extends $pb.GeneratedMessage {
   $core.bool hasName() => $_has(0);
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  $core.bool get allowCare => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowCare($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowCare() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowCare() => $_clearField(2);
 }
 
 class DeskPolicyStatus extends $pb.GeneratedMessage {
@@ -437,12 +413,10 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
 class UpdateNodeRequest extends $pb.GeneratedMessage {
   factory UpdateNodeRequest({
     $core.String? name,
-    $core.bool? allowCare,
     $core.bool? force,
   }) {
     final result = UpdateNodeRequest._();
     if (name != null) result.name = name;
-    if (allowCare != null) result.allowCare = allowCare;
     if (force != null) result.force = force;
     return result;
   }
@@ -462,7 +436,6 @@ class UpdateNodeRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: UpdateNodeRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOB(3, _omitFieldNames ? '' : 'force')
     ..hasRequiredFields = false;
 
@@ -497,22 +470,13 @@ class UpdateNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowCare => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowCare($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowCare() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowCare() => $_clearField(2);
-
   /// force sends the binary even when the node reports the hub's version.
   @$pb.TagNumber(3)
-  $core.bool get force => $_getBF(2);
+  $core.bool get force => $_getBF(1);
   @$pb.TagNumber(3)
-  set force($core.bool value) => $_setBool(2, value);
+  set force($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasForce() => $_has(2);
+  $core.bool hasForce() => $_has(1);
   @$pb.TagNumber(3)
   void clearForce() => $_clearField(3);
 }
@@ -662,14 +626,12 @@ class UpdateNodeProgress extends $pb.GeneratedMessage {
 class ApplyUpdateRequest extends $pb.GeneratedMessage {
   factory ApplyUpdateRequest({
     $core.String? name,
-    $core.bool? allowCare,
     $core.String? path,
     $fixnum.Int64? size,
     $core.String? sha256,
   }) {
     final result = ApplyUpdateRequest._();
     if (name != null) result.name = name;
-    if (allowCare != null) result.allowCare = allowCare;
     if (path != null) result.path = path;
     if (size != null) result.size = size;
     if (sha256 != null) result.sha256 = sha256;
@@ -691,7 +653,6 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ApplyUpdateRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOS(3, _omitFieldNames ? '' : 'path')
     ..a<$fixnum.Int64>(4, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
@@ -730,41 +691,32 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowCare => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowCare($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowCare() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowCare() => $_clearField(2);
-
   /// path is where PutFile put the new binary, as PutFile reported it.
   @$pb.TagNumber(3)
-  $core.String get path => $_getSZ(2);
+  $core.String get path => $_getSZ(1);
   @$pb.TagNumber(3)
-  set path($core.String value) => $_setString(2, value);
+  set path($core.String value) => $_setString(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasPath() => $_has(2);
+  $core.bool hasPath() => $_has(1);
   @$pb.TagNumber(3)
   void clearPath() => $_clearField(3);
 
   /// size and sha256 (hex) are what the node must find at path.
   @$pb.TagNumber(4)
-  $fixnum.Int64 get size => $_getI64(3);
+  $fixnum.Int64 get size => $_getI64(2);
   @$pb.TagNumber(4)
-  set size($fixnum.Int64 value) => $_setInt64(3, value);
+  set size($fixnum.Int64 value) => $_setInt64(2, value);
   @$pb.TagNumber(4)
-  $core.bool hasSize() => $_has(3);
+  $core.bool hasSize() => $_has(2);
   @$pb.TagNumber(4)
   void clearSize() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  $core.String get sha256 => $_getSZ(4);
+  $core.String get sha256 => $_getSZ(3);
   @$pb.TagNumber(5)
-  set sha256($core.String value) => $_setString(4, value);
+  set sha256($core.String value) => $_setString(3, value);
   @$pb.TagNumber(5)
-  $core.bool hasSha256() => $_has(4);
+  $core.bool hasSha256() => $_has(3);
   @$pb.TagNumber(5)
   void clearSha256() => $_clearField(5);
 }
@@ -1029,7 +981,6 @@ class FileTrailer extends $pb.GeneratedMessage {
 class PutFileRequest extends $pb.GeneratedMessage {
   factory PutFileRequest({
     $core.String? name,
-    $core.bool? allowCare,
     $core.String? transferId,
     $core.String? path,
     FileKind? kind,
@@ -1042,7 +993,6 @@ class PutFileRequest extends $pb.GeneratedMessage {
   }) {
     final result = PutFileRequest._();
     if (name != null) result.name = name;
-    if (allowCare != null) result.allowCare = allowCare;
     if (transferId != null) result.transferId = transferId;
     if (path != null) result.path = path;
     if (kind != null) result.kind = kind;
@@ -1070,7 +1020,6 @@ class PutFileRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: PutFileRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOS(3, _omitFieldNames ? '' : 'transferId')
     ..aOS(4, _omitFieldNames ? '' : 'path')
     ..aE<FileKind>(5, _omitFieldNames ? '' : 'kind',
@@ -1118,22 +1067,13 @@ class PutFileRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowCare => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowCare($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowCare() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowCare() => $_clearField(2);
-
   /// transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
   @$pb.TagNumber(3)
-  $core.String get transferId => $_getSZ(2);
+  $core.String get transferId => $_getSZ(1);
   @$pb.TagNumber(3)
-  set transferId($core.String value) => $_setString(2, value);
+  set transferId($core.String value) => $_setString(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasTransferId() => $_has(2);
+  $core.bool hasTransferId() => $_has(1);
   @$pb.TagNumber(3)
   void clearTransferId() => $_clearField(3);
 
@@ -1141,85 +1081,85 @@ class PutFileRequest extends $pb.GeneratedMessage {
   /// A relative path is under the node's file root; the path names the
   /// destination itself, not a directory to put it in.
   @$pb.TagNumber(4)
-  $core.String get path => $_getSZ(3);
+  $core.String get path => $_getSZ(2);
   @$pb.TagNumber(4)
-  set path($core.String value) => $_setString(3, value);
+  set path($core.String value) => $_setString(2, value);
   @$pb.TagNumber(4)
-  $core.bool hasPath() => $_has(3);
+  $core.bool hasPath() => $_has(2);
   @$pb.TagNumber(4)
   void clearPath() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  FileKind get kind => $_getN(4);
+  FileKind get kind => $_getN(3);
   @$pb.TagNumber(5)
   set kind(FileKind value) => $_setField(5, value);
   @$pb.TagNumber(5)
-  $core.bool hasKind() => $_has(4);
+  $core.bool hasKind() => $_has(3);
   @$pb.TagNumber(5)
   void clearKind() => $_clearField(5);
 
   /// mode holds the permission bits of a file; ignored for directories.
   @$pb.TagNumber(6)
-  $core.int get mode => $_getIZ(5);
+  $core.int get mode => $_getIZ(4);
   @$pb.TagNumber(6)
-  set mode($core.int value) => $_setUnsignedInt32(5, value);
+  set mode($core.int value) => $_setUnsignedInt32(4, value);
   @$pb.TagNumber(6)
-  $core.bool hasMode() => $_has(5);
+  $core.bool hasMode() => $_has(4);
   @$pb.TagNumber(6)
   void clearMode() => $_clearField(6);
 
   /// overwrite replaces an existing destination instead of failing with
   /// ALREADY_EXISTS.
   @$pb.TagNumber(7)
-  $core.bool get overwrite => $_getBF(6);
+  $core.bool get overwrite => $_getBF(5);
   @$pb.TagNumber(7)
-  set overwrite($core.bool value) => $_setBool(6, value);
+  set overwrite($core.bool value) => $_setBool(5, value);
   @$pb.TagNumber(7)
-  $core.bool hasOverwrite() => $_has(6);
+  $core.bool hasOverwrite() => $_has(5);
   @$pb.TagNumber(7)
   void clearOverwrite() => $_clearField(7);
 
   /// offset is the number of uncompressed bytes sent in earlier calls.
   @$pb.TagNumber(8)
-  $fixnum.Int64 get offset => $_getI64(7);
+  $fixnum.Int64 get offset => $_getI64(6);
   @$pb.TagNumber(8)
-  set offset($fixnum.Int64 value) => $_setInt64(7, value);
+  set offset($fixnum.Int64 value) => $_setInt64(6, value);
   @$pb.TagNumber(8)
-  $core.bool hasOffset() => $_has(7);
+  $core.bool hasOffset() => $_has(6);
   @$pb.TagNumber(8)
   void clearOffset() => $_clearField(8);
 
   @$pb.TagNumber(9)
-  FileChunk get chunk => $_getN(8);
+  FileChunk get chunk => $_getN(7);
   @$pb.TagNumber(9)
   set chunk(FileChunk value) => $_setField(9, value);
   @$pb.TagNumber(9)
-  $core.bool hasChunk() => $_has(8);
+  $core.bool hasChunk() => $_has(7);
   @$pb.TagNumber(9)
   void clearChunk() => $_clearField(9);
   @$pb.TagNumber(9)
-  FileChunk ensureChunk() => $_ensure(8);
+  FileChunk ensureChunk() => $_ensure(7);
 
   /// last ends the transfer; trailer is then required.
   @$pb.TagNumber(10)
-  $core.bool get last => $_getBF(9);
+  $core.bool get last => $_getBF(8);
   @$pb.TagNumber(10)
-  set last($core.bool value) => $_setBool(9, value);
+  set last($core.bool value) => $_setBool(8, value);
   @$pb.TagNumber(10)
-  $core.bool hasLast() => $_has(9);
+  $core.bool hasLast() => $_has(8);
   @$pb.TagNumber(10)
   void clearLast() => $_clearField(10);
 
   @$pb.TagNumber(11)
-  FileTrailer get trailer => $_getN(10);
+  FileTrailer get trailer => $_getN(9);
   @$pb.TagNumber(11)
   set trailer(FileTrailer value) => $_setField(11, value);
   @$pb.TagNumber(11)
-  $core.bool hasTrailer() => $_has(10);
+  $core.bool hasTrailer() => $_has(9);
   @$pb.TagNumber(11)
   void clearTrailer() => $_clearField(11);
   @$pb.TagNumber(11)
-  FileTrailer ensureTrailer() => $_ensure(10);
+  FileTrailer ensureTrailer() => $_ensure(9);
 }
 
 class PutFileResponse extends $pb.GeneratedMessage {
@@ -1310,13 +1250,11 @@ class PutFileResponse extends $pb.GeneratedMessage {
 class GetFileRequest extends $pb.GeneratedMessage {
   factory GetFileRequest({
     $core.String? name,
-    $core.bool? allowCare,
     $core.String? path,
     $core.bool? noCompress,
   }) {
     final result = GetFileRequest._();
     if (name != null) result.name = name;
-    if (allowCare != null) result.allowCare = allowCare;
     if (path != null) result.path = path;
     if (noCompress != null) result.noCompress = noCompress;
     return result;
@@ -1337,7 +1275,6 @@ class GetFileRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetFileRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowCare')
     ..aOS(3, _omitFieldNames ? '' : 'path')
     ..aOB(4, _omitFieldNames ? '' : 'noCompress')
     ..hasRequiredFields = false;
@@ -1373,31 +1310,22 @@ class GetFileRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowCare => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowCare($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowCare() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowCare() => $_clearField(2);
-
   @$pb.TagNumber(3)
-  $core.String get path => $_getSZ(2);
+  $core.String get path => $_getSZ(1);
   @$pb.TagNumber(3)
-  set path($core.String value) => $_setString(2, value);
+  set path($core.String value) => $_setString(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasPath() => $_has(2);
+  $core.bool hasPath() => $_has(1);
   @$pb.TagNumber(3)
   void clearPath() => $_clearField(3);
 
   /// no_compress sends every chunk as is.
   @$pb.TagNumber(4)
-  $core.bool get noCompress => $_getBF(3);
+  $core.bool get noCompress => $_getBF(2);
   @$pb.TagNumber(4)
-  set noCompress($core.bool value) => $_setBool(3, value);
+  set noCompress($core.bool value) => $_setBool(2, value);
   @$pb.TagNumber(4)
-  $core.bool hasNoCompress() => $_has(3);
+  $core.bool hasNoCompress() => $_has(2);
   @$pb.TagNumber(4)
   void clearNoCompress() => $_clearField(4);
 }

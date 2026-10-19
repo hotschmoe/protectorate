@@ -573,11 +573,11 @@ func (t *LeaseTable) NodeLease(node string) *pb.Lease {
 const warmBonus = 20
 
 // pickNode returns the node (and GPU) for a selector among statuses: fresh,
-// matching, not leased, not care unless allowed, least loaded first. The
+// matching, not leased, never tier care, least loaded first. The
 // error lists why each node was rejected. busy counts jobs already placed on
 // a node; blocked reports an overlapping lease; warm marks nodes that hold a
 // cache for the job's repository.
-func pickNode(statuses []*pb.NodeStatus, sel *pb.NodeSelector, allowCare bool, busy func(string) int, blocked func(string, *int) *pb.Lease, warm map[string]bool) (string, *int, error) {
+func pickNode(statuses []*pb.NodeStatus, sel *pb.NodeSelector, busy func(string) int, blocked func(string, *int) *pb.Lease, warm map[string]bool) (string, *int, error) {
 	type choice struct {
 		node  string
 		gpu   *int
@@ -593,7 +593,7 @@ func pickNode(statuses []*pb.NodeStatus, sel *pb.NodeSelector, allowCare bool, b
 	}
 	for _, st := range statuses {
 		name := st.Node.Name
-		gpu, reason := nodeFits(st, sel, allowCare, seen)
+		gpu, reason := nodeFits(st, sel, seen)
 		if reason != "" {
 			why = append(why, name+": "+reason)
 			continue
@@ -621,14 +621,14 @@ func pickNode(statuses []*pb.NodeStatus, sel *pb.NodeSelector, allowCare bool, b
 
 // nodeFits returns the GPU to reserve (nil for the whole node) or the reason
 // the node does not fit.
-func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, allowCare bool, blocked func(string, *int) *pb.Lease) (*int, string) {
+func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int) *pb.Lease) (*int, string) {
 	name := st.Node.Name
 	switch {
 	case st.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH || st.Metrics == nil:
 		return nil, "not fresh"
 	case st.Draining:
 		return nil, "being removed"
-	case st.Node.Tier == TierCare && !allowCare:
+	case st.Node.Tier == TierCare:
 		return nil, "tier care"
 	case sel.GetOs() != "" && !strings.EqualFold(st.Metrics.Os, sel.Os):
 		return nil, "os " + st.Metrics.Os
@@ -705,7 +705,8 @@ func parseResource(s string) (node string, gpu *int, err error) {
 }
 
 // namedNode checks that an explicitly named node (and GPU) can be used now.
-func (m *NodeMonitor) namedNode(name string, gpu *int, allowCare bool) error {
+// Its tier is the caller's to check.
+func (m *NodeMonitor) namedNode(name string, gpu *int) error {
 	st, err := m.Status(name)
 	if err != nil {
 		return nodeErr(err)
@@ -717,8 +718,6 @@ func (m *NodeMonitor) namedNode(name string, gpu *int, allowCare bool) error {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is invited but has not joined yet", name))
 	case st.Draining:
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is being removed", name))
-	case st.Node.Tier == TierCare && !allowCare:
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is tier care: set allow_care to use it", name))
 	}
 	if gpu != nil {
 		found := false
@@ -732,21 +731,42 @@ func (m *NodeMonitor) namedNode(name string, gpu *int, allowCare bool) error {
 	return nil
 }
 
+// careGate admits work on a named node: any node of tier shared, a care node
+// only for the owner or a token holding node_admin:<glob> matching it.
+func (m *NodeMonitor) careGate(ctx context.Context, name string) error {
+	info, err := m.info(name)
+	if err != nil || info.Tier != TierCare {
+		return nil
+	}
+	p := auth.PrincipalFrom(ctx)
+	if p.AdminOn(info.Name) {
+		return nil
+	}
+	who := "this caller"
+	if p != nil {
+		who = "token " + p.Name
+	}
+	return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("node %s is tier care: it takes work only under an admin grant for it, and %s has none (the owner mints one per task: protectorate grant admin --node %s --task \"...\")", info.Name, who, info.Name))
+}
+
 // leaseChooser builds the function that picks what a request leases.
 func (h *Hub) leaseChooser(m *pb.AcquireLeaseRequest) chooseFunc {
 	return func(blocked func(string, *int) *pb.Lease) (string, *int, error) {
 		if sel := m.GetSelector(); sel != nil {
-			return pickNode(h.nodes.Statuses(), sel, m.AllowCare, h.jobs.busy, blocked, nil)
+			return pickNode(h.nodes.Statuses(), sel, h.jobs.busy, blocked, nil)
 		}
 		if desk, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(m.GetResource())), "desk:"); ok {
-			return h.acquireDesk(desk, m.AllowCare, blocked)
+			return h.acquireDesk(desk, blocked)
 		}
 		node, gpu, err := parseResource(m.GetResource())
 		if err != nil {
 			return "", nil, err
 		}
-		if err := h.nodes.namedNode(node, gpu, m.AllowCare); err != nil {
+		if err := h.nodes.namedNode(node, gpu); err != nil {
 			return "", nil, err
+		}
+		if info, err := h.nodes.info(node); err == nil && info.Tier == TierCare {
+			return "", nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is tier care, which is never leased: name it in a job with an admin grant for it instead", node))
 		}
 		if l := blocked(node, gpu); l != nil {
 			return "", nil, busyErr("%s is leased by %s until %s", l.Resource, l.Holder, l.ExpiresAt.AsTime().Local().Format(time.RFC3339))
@@ -777,6 +797,9 @@ func (h *Hub) AcquireLease(ctx context.Context, req *connect.Request[pb.AcquireL
 	}
 	holder, notify := leaseCaller(ctx, m.Holder)
 	if desk, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(m.GetResource())), "desk:"); ok && m.GetSelector() == nil {
+		if err := h.nodes.careGate(ctx, desk); err != nil {
+			return nil, err
+		}
 		if err := h.gateDesk(ctx, desk, true); err != nil {
 			return nil, err
 		}
@@ -808,7 +831,7 @@ func (h *Hub) AcquireLease(ctx context.Context, req *connect.Request[pb.AcquireL
 // leaseChooserFromJSON rebuilds the chooser of a ticket kept across a restart.
 func (h *Hub) leaseChooserFromJSON(raw string) (chooseFunc, error) {
 	var m pb.AcquireLeaseRequest
-	if err := protojson.Unmarshal([]byte(raw), &m); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(raw), &m); err != nil {
 		return nil, fmt.Errorf("read queued request: %w", err)
 	}
 	return h.leaseChooser(&m), nil
@@ -851,11 +874,12 @@ func (h *Hub) ListLeases(context.Context, *connect.Request[pb.ListLeasesRequest]
 // acquireDesk picks the "desk:<node>" resource. The lease record keeps the
 // whole resource name as its node, so it overlaps only other leases on the
 // same desktop and never blocks jobs or GPU leases on that node.
-func (h *Hub) acquireDesk(node string, allowCare bool, blocked func(string, *int) *pb.Lease) (string, *int, error) {
+// The caller has passed careGate for the node.
+func (h *Hub) acquireDesk(node string, blocked func(string, *int) *pb.Lease) (string, *int, error) {
 	if !nodeNameRe.MatchString(node) {
 		return "", nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid resource desk:%s", node))
 	}
-	if err := h.nodes.namedNode(node, nil, allowCare); err != nil {
+	if err := h.nodes.namedNode(node, nil); err != nil {
 		return "", nil, err
 	}
 	if err := h.gateDesk(context.Background(), node, false); err != nil {

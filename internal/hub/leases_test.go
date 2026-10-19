@@ -266,7 +266,6 @@ func TestPickNode(t *testing.T) {
 	tests := []struct {
 		name    string
 		sel     *pb.NodeSelector
-		care    bool
 		busy    func(string) int
 		blocked func(string, *int) *pb.Lease
 		warm    map[string]bool
@@ -276,7 +275,7 @@ func TestPickNode(t *testing.T) {
 	}{
 		{name: "least loaded matching os", sel: &pb.NodeSelector{Os: "windows"}, want: "idle-win", wantGPU: -1},
 		{name: "case insensitive", sel: &pb.NodeSelector{Os: "Windows", Arch: "AMD64"}, want: "idle-win", wantGPU: -1},
-		{name: "care allowed", sel: &pb.NodeSelector{Os: "windows"}, care: true, want: "care-win", wantGPU: -1},
+		{name: "care never picked", sel: &pb.NodeSelector{Os: "windows", MinFreeMemoryBytes: 24 * gib}, wantErr: "care-win: tier care"},
 		{name: "arch filter", sel: &pb.NodeSelector{Arch: "arm64"}, want: "arm-linux", wantGPU: -1},
 		{name: "min free memory", sel: &pb.NodeSelector{Os: "windows", MinFreeMemoryBytes: 12 * gib}, want: "idle-win", wantGPU: -1},
 		{name: "memory too high", sel: &pb.NodeSelector{MinFreeMemoryBytes: 128 * gib}, wantErr: "no node matches"},
@@ -328,7 +327,7 @@ func TestPickNode(t *testing.T) {
 			if blocked == nil {
 				blocked = none
 			}
-			node, g, err := pickNode(fleet, tt.sel, tt.care, busy, blocked, tt.warm)
+			node, g, err := pickNode(fleet, tt.sel, busy, blocked, tt.warm)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || connect.CodeOf(err) != connect.CodeFailedPrecondition {
 					t.Fatalf("err = %v, want %q", err, tt.wantErr)
@@ -380,7 +379,7 @@ func TestNodeFitsAccelerators(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g, why := nodeFits(tt.st, tt.sel, false, none)
+			g, why := nodeFits(tt.st, tt.sel, none)
 			got := -1
 			if g != nil {
 				got = *g

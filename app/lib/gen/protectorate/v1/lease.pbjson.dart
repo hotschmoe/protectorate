@@ -83,12 +83,14 @@ const AcquireLeaseRequest$json = {
       '6': '.google.protobuf.Duration',
       '10': 'ttl'
     },
-    {'1': 'allow_care', '3': 5, '4': 1, '5': 8, '10': 'allowCare'},
     {'1': 'wait', '3': 6, '4': 1, '5': 8, '10': 'wait'},
     {'1': 'priority', '3': 7, '4': 1, '5': 5, '10': 'priority'},
   ],
   '8': [
     {'1': 'target'},
+  ],
+  '9': [
+    {'1': 5, '2': 6},
   ],
 };
 
@@ -97,8 +99,8 @@ final $typed_data.Uint8List acquireLeaseRequestDescriptor = $convert.base64Decod
     'ChNBY3F1aXJlTGVhc2VSZXF1ZXN0EhwKCHJlc291cmNlGAEgASgJSABSCHJlc291cmNlEjsKCH'
     'NlbGVjdG9yGAIgASgLMh0ucHJvdGVjdG9yYXRlLnYxLk5vZGVTZWxlY3RvckgAUghzZWxlY3Rv'
     'chIWCgZob2xkZXIYAyABKAlSBmhvbGRlchIrCgN0dGwYBCABKAsyGS5nb29nbGUucHJvdG9idW'
-    'YuRHVyYXRpb25SA3R0bBIdCgphbGxvd19jYXJlGAUgASgIUglhbGxvd0NhcmUSEgoEd2FpdBgG'
-    'IAEoCFIEd2FpdBIaCghwcmlvcml0eRgHIAEoBVIIcHJpb3JpdHlCCAoGdGFyZ2V0');
+    'YuRHVyYXRpb25SA3R0bBISCgR3YWl0GAYgASgIUgR3YWl0EhoKCHByaW9yaXR5GAcgASgFUghw'
+    'cmlvcml0eUIICgZ0YXJnZXRKBAgFEAY=');
 
 @$core.Deprecated('Use renewLeaseRequestDescriptor instead')
 const RenewLeaseRequest$json = {

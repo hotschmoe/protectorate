@@ -168,7 +168,6 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     NodeSelector? selector,
     $core.String? holder,
     $0.Duration? ttl,
-    $core.bool? allowCare,
     $core.bool? wait,
     $core.int? priority,
   }) {
@@ -177,7 +176,6 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     if (selector != null) result.selector = selector;
     if (holder != null) result.holder = holder;
     if (ttl != null) result.ttl = ttl;
-    if (allowCare != null) result.allowCare = allowCare;
     if (wait != null) result.wait = wait;
     if (priority != null) result.priority = priority;
     return result;
@@ -210,7 +208,6 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     ..aOS(3, _omitFieldNames ? '' : 'holder')
     ..aOM<$0.Duration>(4, _omitFieldNames ? '' : 'ttl',
         subBuilder: $0.Duration.$_createMessage)
-    ..aOB(5, _omitFieldNames ? '' : 'allowCare')
     ..aOB(6, _omitFieldNames ? '' : 'wait')
     ..aI(7, _omitFieldNames ? '' : 'priority')
     ..hasRequiredFields = false;
@@ -289,33 +286,23 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $0.Duration ensureTtl() => $_ensure(3);
 
-  /// allow_care admits nodes of tier "care", which are skipped otherwise.
-  @$pb.TagNumber(5)
-  $core.bool get allowCare => $_getBF(4);
-  @$pb.TagNumber(5)
-  set allowCare($core.bool value) => $_setBool(4, value);
-  @$pb.TagNumber(5)
-  $core.bool hasAllowCare() => $_has(4);
-  @$pb.TagNumber(5)
-  void clearAllowCare() => $_clearField(5);
-
   /// wait queues the caller when the resource is held instead of failing.
   @$pb.TagNumber(6)
-  $core.bool get wait => $_getBF(5);
+  $core.bool get wait => $_getBF(4);
   @$pb.TagNumber(6)
-  set wait($core.bool value) => $_setBool(5, value);
+  set wait($core.bool value) => $_setBool(4, value);
   @$pb.TagNumber(6)
-  $core.bool hasWait() => $_has(5);
+  $core.bool hasWait() => $_has(4);
   @$pb.TagNumber(6)
   void clearWait() => $_clearField(6);
 
   /// priority orders the queue: larger first, then first come first served.
   @$pb.TagNumber(7)
-  $core.int get priority => $_getIZ(6);
+  $core.int get priority => $_getIZ(5);
   @$pb.TagNumber(7)
-  set priority($core.int value) => $_setSignedInt32(6, value);
+  set priority($core.int value) => $_setSignedInt32(5, value);
   @$pb.TagNumber(7)
-  $core.bool hasPriority() => $_has(6);
+  $core.bool hasPriority() => $_has(5);
   @$pb.TagNumber(7)
   void clearPriority() => $_clearField(7);
 }
@@ -782,7 +769,9 @@ class LeaseServiceApi {
 
   /// AcquireLease reserves one resource exclusively: a node name ("win1"), one
   /// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-  /// least-loaded fresh matching node that is not already leased. When the
+  /// least-loaded fresh matching node of tier "shared" that is not already
+  /// leased; nodes of tier "care" are never leased, except their desktop
+  /// ("desk:<node>") under the owner token or a node_admin grant. When the
   /// resource is held, the call fails with failed_precondition, unless the
   /// request sets wait: then the caller is queued first in first out (highest
   /// priority first) and gets a ticket, a Lease in state QUEUED. When the hub

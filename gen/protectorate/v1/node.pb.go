@@ -607,9 +607,8 @@ func (x *GetDeskStateRequest) GetLeaseEnded() bool {
 }
 
 type SetDeskPolicyRequest struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowCare bool                   `protobuf:"varint,2,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// policy unset clears the policy: the desktop is always available again.
 	Policy        *DeskPolicy `protobuf:"bytes,3,opt,name=policy,proto3" json:"policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -653,13 +652,6 @@ func (x *SetDeskPolicyRequest) GetName() string {
 	return ""
 }
 
-func (x *SetDeskPolicyRequest) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
-}
-
 func (x *SetDeskPolicyRequest) GetPolicy() *DeskPolicy {
 	if x != nil {
 		return x.Policy
@@ -670,7 +662,6 @@ func (x *SetDeskPolicyRequest) GetPolicy() *DeskPolicy {
 type GetDeskPolicyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowCare     bool                   `protobuf:"varint,2,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -710,13 +701,6 @@ func (x *GetDeskPolicyRequest) GetName() string {
 		return x.Name
 	}
 	return ""
-}
-
-func (x *GetDeskPolicyRequest) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
 }
 
 type DeskPolicyStatus struct {
@@ -792,9 +776,8 @@ func (x *DeskPolicyStatus) GetInputs() []*DeskUse {
 }
 
 type UpdateNodeRequest struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowCare bool                   `protobuf:"varint,2,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// force sends the binary even when the node reports the hub's version.
 	Force         bool `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -836,13 +819,6 @@ func (x *UpdateNodeRequest) GetName() string {
 		return x.Name
 	}
 	return ""
-}
-
-func (x *UpdateNodeRequest) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
 }
 
 func (x *UpdateNodeRequest) GetForce() bool {
@@ -954,8 +930,7 @@ func (x *UpdateNodeProgress) GetMessage() string {
 type ApplyUpdateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name is the node name; the agent ignores it.
-	Name      string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowCare bool   `protobuf:"varint,2,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// path is where PutFile put the new binary, as PutFile reported it.
 	Path string `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
 	// size and sha256 (hex) are what the node must find at path.
@@ -1000,13 +975,6 @@ func (x *ApplyUpdateRequest) GetName() string {
 		return x.Name
 	}
 	return ""
-}
-
-func (x *ApplyUpdateRequest) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
 }
 
 func (x *ApplyUpdateRequest) GetPath() string {
@@ -1223,8 +1191,7 @@ func (x *FileTrailer) GetSkipped() uint32 {
 type PutFileRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name is the node name.
-	Name      string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowCare bool   `protobuf:"varint,2,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
 	TransferId string `protobuf:"bytes,3,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"`
 	// path, kind, mode and overwrite are read on the first call (offset 0).
@@ -1282,13 +1249,6 @@ func (x *PutFileRequest) GetName() string {
 		return x.Name
 	}
 	return ""
-}
-
-func (x *PutFileRequest) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
 }
 
 func (x *PutFileRequest) GetTransferId() string {
@@ -1416,10 +1376,9 @@ func (x *PutFileResponse) GetDone() bool {
 }
 
 type GetFileRequest struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowCare bool                   `protobuf:"varint,2,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
-	Path      string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path  string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
 	// no_compress sends every chunk as is.
 	NoCompress    bool `protobuf:"varint,4,opt,name=no_compress,json=noCompress,proto3" json:"no_compress,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1461,13 +1420,6 @@ func (x *GetFileRequest) GetName() string {
 		return x.Name
 	}
 	return ""
-}
-
-func (x *GetFileRequest) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
 }
 
 func (x *GetFileRequest) GetPath() string {
@@ -3945,26 +3897,20 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x13GetDeskStateRequest\x123\n" +
 	"\x06policy\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskPolicyR\x06policy\x12\x1f\n" +
 	"\vlease_ended\x18\x02 \x01(\bR\n" +
-	"leaseEnded\"~\n" +
+	"leaseEnded\"e\n" +
 	"\x14SetDeskPolicyRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x02 \x01(\bR\tallowCare\x123\n" +
-	"\x06policy\x18\x03 \x01(\v2\x1b.protectorate.v1.DeskPolicyR\x06policy\"I\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x123\n" +
+	"\x06policy\x18\x03 \x01(\v2\x1b.protectorate.v1.DeskPolicyR\x06policyJ\x04\b\x02\x10\x03\"0\n" +
 	"\x14GetDeskPolicyRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x02 \x01(\bR\tallowCare\"\xc3\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04nameJ\x04\b\x02\x10\x03\"\xc3\x01\n" +
 	"\x10DeskPolicyStatus\x123\n" +
 	"\x06policy\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskPolicyR\x06policy\x120\n" +
 	"\x05state\x18\x02 \x01(\v2\x1a.protectorate.v1.DeskStateR\x05state\x12\x16\n" +
 	"\x06holder\x18\x03 \x01(\tR\x06holder\x120\n" +
-	"\x06inputs\x18\x04 \x03(\v2\x18.protectorate.v1.DeskUseR\x06inputs\"\\\n" +
+	"\x06inputs\x18\x04 \x03(\v2\x18.protectorate.v1.DeskUseR\x06inputs\"C\n" +
 	"\x11UpdateNodeRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x02 \x01(\bR\tallowCare\x12\x14\n" +
-	"\x05force\x18\x03 \x01(\bR\x05force\"\x81\x02\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05forceJ\x04\b\x02\x10\x03\"\x81\x02\n" +
 	"\x12UpdateNodeProgress\x122\n" +
 	"\x05phase\x18\x01 \x01(\x0e2\x1c.protectorate.v1.UpdatePhaseR\x05phase\x12\x1d\n" +
 	"\n" +
@@ -3974,14 +3920,12 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12)\n" +
 	"\x10previous_version\x18\x05 \x01(\tR\x0fpreviousVersion\x12\x18\n" +
 	"\arestart\x18\x06 \x01(\tR\arestart\x12\x18\n" +
-	"\amessage\x18\a \x01(\tR\amessage\"\x87\x01\n" +
+	"\amessage\x18\a \x01(\tR\amessage\"n\n" +
 	"\x12ApplyUpdateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x02 \x01(\bR\tallowCare\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x04R\x04size\x12\x16\n" +
-	"\x06sha256\x18\x05 \x01(\tR\x06sha256\"t\n" +
+	"\x06sha256\x18\x05 \x01(\tR\x06sha256J\x04\b\x02\x10\x03\"t\n" +
 	"\x13ApplyUpdateResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12)\n" +
 	"\x10previous_version\x18\x02 \x01(\tR\x0fpreviousVersion\x12\x18\n" +
@@ -3995,11 +3939,9 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\vFileTrailer\x12\x12\n" +
 	"\x04size\x18\x01 \x01(\x04R\x04size\x12\x16\n" +
 	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12\x18\n" +
-	"\askipped\x18\x03 \x01(\rR\askipped\"\xef\x02\n" +
+	"\askipped\x18\x03 \x01(\rR\askipped\"\xd6\x02\n" +
 	"\x0ePutFileRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x02 \x01(\bR\tallowCare\x12\x1f\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vtransfer_id\x18\x03 \x01(\tR\n" +
 	"transferId\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12-\n" +
@@ -4010,18 +3952,16 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x05chunk\x18\t \x01(\v2\x1a.protectorate.v1.FileChunkR\x05chunk\x12\x12\n" +
 	"\x04last\x18\n" +
 	" \x01(\bR\x04last\x126\n" +
-	"\atrailer\x18\v \x01(\v2\x1c.protectorate.v1.FileTrailerR\atrailer\"U\n" +
+	"\atrailer\x18\v \x01(\v2\x1c.protectorate.v1.FileTrailerR\atrailerJ\x04\b\x02\x10\x03\"U\n" +
 	"\x0fPutFileResponse\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
 	"\breceived\x18\x02 \x01(\x04R\breceived\x12\x12\n" +
-	"\x04done\x18\x03 \x01(\bR\x04done\"x\n" +
+	"\x04done\x18\x03 \x01(\bR\x04done\"_\n" +
 	"\x0eGetFileRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x02 \x01(\bR\tallowCare\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x12\x1f\n" +
 	"\vno_compress\x18\x04 \x01(\bR\n" +
-	"noCompress\"w\n" +
+	"noCompressJ\x04\b\x02\x10\x03\"w\n" +
 	"\n" +
 	"FileHeader\x12-\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x19.protectorate.v1.FileKindR\x04kind\x12\x12\n" +

@@ -29,19 +29,19 @@ export 'job.pbenum.dart';
 
 enum JobTarget_Target { leaseId, node, selector, notSet }
 
-/// JobTarget says where a job runs.
+/// JobTarget says where a job runs. Nodes of tier "care" are never picked
+/// by a selector or leased; naming one needs the owner token or a token with
+/// the scope node_admin:<node>.
 class JobTarget extends $pb.GeneratedMessage {
   factory JobTarget({
     $core.String? leaseId,
     $core.String? node,
     $0.NodeSelector? selector,
-    $core.bool? allowCare,
   }) {
     final result = JobTarget._();
     if (leaseId != null) result.leaseId = leaseId;
     if (node != null) result.node = node;
     if (selector != null) result.selector = selector;
-    if (allowCare != null) result.allowCare = allowCare;
     return result;
   }
 
@@ -70,7 +70,6 @@ class JobTarget extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'node')
     ..aOM<$0.NodeSelector>(3, _omitFieldNames ? '' : 'selector',
         subBuilder: $0.NodeSelector.$_createMessage)
-    ..aOB(4, _omitFieldNames ? '' : 'allowCare')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -122,7 +121,8 @@ class JobTarget extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearNode() => $_clearField(2);
 
-  /// selector picks the least-loaded fresh matching node that is not leased.
+  /// selector picks the least-loaded fresh matching node of tier "shared"
+  /// that is not leased.
   @$pb.TagNumber(3)
   $0.NodeSelector get selector => $_getN(2);
   @$pb.TagNumber(3)
@@ -133,16 +133,6 @@ class JobTarget extends $pb.GeneratedMessage {
   void clearSelector() => $_clearField(3);
   @$pb.TagNumber(3)
   $0.NodeSelector ensureSelector() => $_ensure(2);
-
-  /// allow_care admits nodes of tier "care".
-  @$pb.TagNumber(4)
-  $core.bool get allowCare => $_getBF(3);
-  @$pb.TagNumber(4)
-  set allowCare($core.bool value) => $_setBool(3, value);
-  @$pb.TagNumber(4)
-  $core.bool hasAllowCare() => $_has(3);
-  @$pb.TagNumber(4)
-  void clearAllowCare() => $_clearField(4);
 }
 
 /// GitSource ships one commit of a repository on the hub.

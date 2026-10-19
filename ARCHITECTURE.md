@@ -347,7 +347,8 @@ node) executes.
   submit still on its way is refused (aborted). Keys are lost on a hub restart,
   which also fails every running job.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
-  unreachable, never tier `care` unless `allow_care`, matching os, arch,
+  unreachable, never tier `care` (a care node is never leased, and a job naming one needs the
+  owner token or a `node_admin:<node>` grant), matching os, arch,
   free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`
   text, (for GPUs) free VRAM, and not under a conflicting lease.
   Load is `(cpu% + mem%)/2` plus one core's worth per job already placed, so a

@@ -776,3 +776,91 @@ func TestArtifactDirectoryRunsInWorkdirAndKeepsModes(t *testing.T) {
 		}
 	}
 }
+
+func TestCareTierEnforcement(t *testing.T) {
+	e := newJobEnv(t, 1)
+	if _, err := e.h.nodes.inv.SetTier("peer", TierCare); err != nil {
+		t.Fatal(err)
+	}
+	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.h.SetAuth(auth.New(testToken, store, nil))
+	srv := httptest.NewServer(e.h.Handler())
+	t.Cleanup(srv.Close)
+	work := []string{"job_*", "lease_*", "desk_*", "node_put_*"}
+	mint := func(scopes ...string) *http.Client {
+		_, secret, err := store.Create("t", append(scopes, work...), time.Hour, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Client{Transport: bearer{secret}}
+	}
+	clients := map[string]*http.Client{
+		"owner": {Transport: bearer{testToken}}, "plain": mint(), "grant": mint("node_admin:pe*"), "other grant": mint("node_admin:kidsbox"),
+	}
+	ctx := context.Background()
+	ttl := durationpb.New(time.Minute)
+	src := filepath.Join(t.TempDir(), "f.txt")
+	writeFile(t, src, []byte("x"), 0o644)
+	actions := map[string]func(c *http.Client) error{
+		"job on care": func(c *http.Client) error {
+			res, err := protectoratev1connect.NewJobServiceClient(c, srv.URL).SubmitJob(ctx, connect.NewRequest(&pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}}))
+			if err == nil {
+				e.wait(t, res.Msg.Id)
+			}
+			return err
+		},
+		"selector job": func(c *http.Client) error {
+			res, err := protectoratev1connect.NewJobServiceClient(c, srv.URL).SubmitJob(ctx, connect.NewRequest(&pb.SubmitJobRequest{Target: &pb.JobTarget{Target: &pb.JobTarget_Selector{Selector: &pb.NodeSelector{}}}, Command: []string{"true"}}))
+			if err == nil {
+				if res.Msg.Node != "hubhost" {
+					t.Errorf("selector placed a job on %s", res.Msg.Node)
+				}
+				e.wait(t, res.Msg.Id)
+			}
+			return err
+		},
+		"lease care node": func(c *http.Client) error {
+			_, err := protectoratev1connect.NewLeaseServiceClient(c, srv.URL).AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "peer"}, Holder: "h", Ttl: ttl}))
+			return err
+		},
+		"lease care desktop": func(c *http.Client) error {
+			lc := protectoratev1connect.NewLeaseServiceClient(c, srv.URL)
+			res, err := lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "desk:peer"}, Holder: "h", Ttl: ttl}))
+			if err == nil {
+				_, err = lc.ReleaseLease(ctx, connect.NewRequest(&pb.ReleaseLeaseRequest{Id: res.Msg.Id}))
+			}
+			return err
+		},
+		"put file on care": func(c *http.Client) error {
+			_, err := putPath(t, protectoratev1connect.NewNodeServiceClient(c, srv.URL), "peer", src, "care/f.txt", true)
+			return err
+		},
+	}
+	ok, denied, refused := connect.Code(0), connect.CodePermissionDenied, connect.CodeFailedPrecondition
+	tests := []struct {
+		action string
+		want   map[string]connect.Code
+	}{
+		{"job on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied}},
+		{"selector job", map[string]connect.Code{"owner": ok, "plain": ok, "grant": ok, "other grant": ok}},
+		{"lease care node", map[string]connect.Code{"owner": refused, "plain": refused, "grant": refused, "other grant": refused}},
+		{"lease care desktop", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied}},
+		{"put file on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied}},
+	}
+	for _, tt := range tests {
+		for who, want := range tt.want {
+			t.Run(tt.action+"/"+who, func(t *testing.T) {
+				if err := actions[tt.action](clients[who]); code(err) != want {
+					t.Fatalf("err = %v, want %v", err, want)
+				}
+			})
+		}
+	}
+	sel, err := e.lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{}}, Holder: "h", Ttl: ttl}))
+	if err != nil || sel.Msg.Node != "hubhost" {
+		t.Fatalf("selector lease: %v %v", sel, err)
+	}
+}

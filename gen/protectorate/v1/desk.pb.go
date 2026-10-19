@@ -96,9 +96,7 @@ type DeskTarget struct {
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// lease_id names a live lease on "desk:<name>". Optional for mutating
 	// commands: when empty the hub leases the desktop for the caller.
-	LeaseId string `protobuf:"bytes,2,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
-	// allow_care admits nodes of tier "care".
-	AllowCare     bool `protobuf:"varint,3,opt,name=allow_care,json=allowCare,proto3" json:"allow_care,omitempty"`
+	LeaseId       string `protobuf:"bytes,2,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -145,13 +143,6 @@ func (x *DeskTarget) GetLeaseId() string {
 		return x.LeaseId
 	}
 	return ""
-}
-
-func (x *DeskTarget) GetAllowCare() bool {
-	if x != nil {
-		return x.AllowCare
-	}
-	return false
 }
 
 type ScreenshotRequest struct {
@@ -1492,13 +1483,11 @@ var File_protectorate_v1_desk_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/desk.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"Z\n" +
+	"\x1aprotectorate/v1/desk.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"A\n" +
 	"\n" +
 	"DeskTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
-	"\blease_id\x18\x02 \x01(\tR\aleaseId\x12\x1d\n" +
-	"\n" +
-	"allow_care\x18\x03 \x01(\bR\tallowCare\"H\n" +
+	"\blease_id\x18\x02 \x01(\tR\aleaseIdJ\x04\b\x03\x10\x04\"H\n" +
 	"\x11ScreenshotRequest\x123\n" +
 	"\x06target\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskTargetR\x06target\"T\n" +
 	"\x12ScreenshotResponse\x12\x10\n" +

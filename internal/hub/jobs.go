@@ -204,7 +204,7 @@ func (m *JobManager) load(dir string) (*jobEntry, error) {
 		return nil, err
 	}
 	j := &pb.Job{}
-	if err := protojson.Unmarshal(raw, j); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, j); err != nil {
 		return nil, err
 	}
 	if fi, err := os.Stat(filepath.Join(dir, "job.log")); err == nil {
@@ -386,8 +386,10 @@ func (m *JobManager) planSource(ctx context.Context, src *pb.JobSource) (*source
 	return nil, nil, invalid("unknown source kind")
 }
 
-// place picks the node for a target. The caller holds submitMu.
-func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, gpu *int, err error) {
+// place picks the node for a target. The caller holds submitMu. A named
+// node or a lease's node of tier care needs the caller in ctx to be admitted
+// by careGate; a selector never picks one.
+func (m *JobManager) place(ctx context.Context, target *pb.JobTarget, repo string) (n *pb.NodeInfo, gpu *int, err error) {
 	var name string
 	switch t := target.GetTarget().(type) {
 	case *pb.JobTarget_LeaseId:
@@ -403,12 +405,18 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 			g := int(*l.GpuIndex)
 			gpu = &g
 		}
-		if err := m.nodes.namedNode(name, gpu, true); err != nil {
+		if err := m.nodes.namedNode(name, gpu); err != nil {
+			return nil, nil, err
+		}
+		if err := m.nodes.careGate(ctx, name); err != nil {
 			return nil, nil, err
 		}
 	case *pb.JobTarget_Node:
 		name = strings.ToLower(t.Node)
-		if err := m.nodes.namedNode(name, nil, target.AllowCare); err != nil {
+		if err := m.nodes.namedNode(name, nil); err != nil {
+			return nil, nil, err
+		}
+		if err := m.nodes.careGate(ctx, name); err != nil {
 			return nil, nil, err
 		}
 		if l := m.leases.NodeLease(name); l != nil {
@@ -421,7 +429,7 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 			}
 			return m.leases.Blocked(node, gpu)
 		}
-		name, gpu, err = pickNode(m.nodes.Statuses(), t.Selector, target.AllowCare, m.busy, blocked, m.warmNodes(repo))
+		name, gpu, err = pickNode(m.nodes.Statuses(), t.Selector, m.busy, blocked, m.warmNodes(repo))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -467,7 +475,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 
 	m.submitMu.Lock()
 	defer m.submitMu.Unlock()
-	n, gpu, err := m.place(req.Target, plan.repo)
+	n, gpu, err := m.place(ctx, req.Target, plan.repo)
 	if err != nil {
 		return nil, err
 	}

@@ -76,10 +76,12 @@ const JobTarget$json = {
       '9': 0,
       '10': 'selector'
     },
-    {'1': 'allow_care', '3': 4, '4': 1, '5': 8, '10': 'allowCare'},
   ],
   '8': [
     {'1': 'target'},
+  ],
+  '9': [
+    {'1': 4, '2': 5},
   ],
 };
 
@@ -87,7 +89,7 @@ const JobTarget$json = {
 final $typed_data.Uint8List jobTargetDescriptor = $convert.base64Decode(
     'CglKb2JUYXJnZXQSGwoIbGVhc2VfaWQYASABKAlIAFIHbGVhc2VJZBIUCgRub2RlGAIgASgJSA'
     'BSBG5vZGUSOwoIc2VsZWN0b3IYAyABKAsyHS5wcm90ZWN0b3JhdGUudjEuTm9kZVNlbGVjdG9y'
-    'SABSCHNlbGVjdG9yEh0KCmFsbG93X2NhcmUYBCABKAhSCWFsbG93Q2FyZUIICgZ0YXJnZXQ=');
+    'SABSCHNlbGVjdG9yQggKBnRhcmdldEoECAQQBQ==');
 
 @$core.Deprecated('Use gitSourceDescriptor instead')
 const GitSource$json = {

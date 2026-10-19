@@ -29,12 +29,10 @@ class DeskTarget extends $pb.GeneratedMessage {
   factory DeskTarget({
     $core.String? name,
     $core.String? leaseId,
-    $core.bool? allowCare,
   }) {
     final result = DeskTarget._();
     if (name != null) result.name = name;
     if (leaseId != null) result.leaseId = leaseId;
-    if (allowCare != null) result.allowCare = allowCare;
     return result;
   }
 
@@ -54,7 +52,6 @@ class DeskTarget extends $pb.GeneratedMessage {
       createEmptyInstance: DeskTarget.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aOS(2, _omitFieldNames ? '' : 'leaseId')
-    ..aOB(3, _omitFieldNames ? '' : 'allowCare')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -97,16 +94,6 @@ class DeskTarget extends $pb.GeneratedMessage {
   $core.bool hasLeaseId() => $_has(1);
   @$pb.TagNumber(2)
   void clearLeaseId() => $_clearField(2);
-
-  /// allow_care admits nodes of tier "care".
-  @$pb.TagNumber(3)
-  $core.bool get allowCare => $_getBF(2);
-  @$pb.TagNumber(3)
-  set allowCare($core.bool value) => $_setBool(2, value);
-  @$pb.TagNumber(3)
-  $core.bool hasAllowCare() => $_has(2);
-  @$pb.TagNumber(3)
-  void clearAllowCare() => $_clearField(3);
 }
 
 class ScreenshotRequest extends $pb.GeneratedMessage {

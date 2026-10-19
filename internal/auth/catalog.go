@@ -7,6 +7,8 @@
 //	events             the EventService stream
 //	terminal           the WebSocket terminal, read-write or read-only
 //	terminal:readonly  the WebSocket terminal with readonly=1 only
+//	node_admin:<glob>  care nodes whose name the glob matches, and admin jobs
+//	                   there (granted per task, see the grant RPC)
 //	<glob>             path.Match glob over tool names such as session_* or
 //	                   backlog_add_item; the tool name is the snake_case
 //	                   service name without "Service", an underscore, and the

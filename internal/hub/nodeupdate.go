@@ -94,7 +94,7 @@ func (h *Hub) UpdateNode(ctx context.Context, req *connect.Request[pb.UpdateNode
 		}
 		h.authz.Record(ctx, auth.PrincipalFrom(ctx), req.Spec().Procedure, req.Msg.Name, err, code)
 	}()
-	ops, err := h.opsFor(req.Msg.Name, req.Msg.AllowCare)
+	ops, err := h.opsFor(ctx, req.Msg.Name)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (h *Hub) UpdateNode(ctx context.Context, req *connect.Request[pb.UpdateNode
 		return err
 	}
 	var sendErr error
-	base := &pb.PutFileRequest{Name: name, AllowCare: req.Msg.AllowCare, Path: updateStage, Overwrite: true}
+	base := &pb.PutFileRequest{Name: name, Path: updateStage, Overwrite: true}
 	put, _, _, err := node.Push(bin, true, base, func(r *pb.PutFileRequest) (*pb.PutFileResponse, error) { return ops.Put(ctx, r) }, func(sent uint64) {
 		if sendErr == nil {
 			sendErr = send(&pb.UpdateNodeProgress{Phase: pb.UpdatePhase_UPDATE_PHASE_SENDING, SentBytes: sent, TotalBytes: size})
@@ -139,7 +139,7 @@ func (h *Hub) UpdateNode(ctx context.Context, req *connect.Request[pb.UpdateNode
 	if err := send(&pb.UpdateNodeProgress{Phase: pb.UpdatePhase_UPDATE_PHASE_VERIFYING, SentBytes: size, TotalBytes: size}); err != nil {
 		return err
 	}
-	res, err := ops.Apply(ctx, &pb.ApplyUpdateRequest{Name: name, AllowCare: req.Msg.AllowCare, Path: put.Path, Size: size, Sha256: sum})
+	res, err := ops.Apply(ctx, &pb.ApplyUpdateRequest{Name: name, Path: put.Path, Size: size, Sha256: sum})
 	if err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}

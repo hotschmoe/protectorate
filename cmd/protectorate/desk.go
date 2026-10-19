@@ -29,7 +29,7 @@ func (o *opts) deskClient() (protectoratev1connect.DeskServiceClient, error) {
 
 type deskFlags struct {
 	lease, button, output string
-	double, allowCare     bool
+	double                bool
 }
 
 func deskCmd(o *opts) *cobra.Command {
@@ -80,7 +80,6 @@ arguments or negative numbers: desk win1 --lease L run -- notepad.exe a.txt`,
 	fl.StringVarP(&f.output, "output", "o", "", "screenshot file (default screenshot.png)")
 	fl.StringVar(&f.button, "button", "left", "mouse button for click: left, right or middle")
 	fl.BoolVar(&f.double, "double", false, "double-click")
-	fl.BoolVar(&f.allowCare, "allow-care", false, "allow nodes of tier care")
 	return c
 }
 
@@ -153,7 +152,7 @@ func parseDeskArgs(verb string, args []string, f deskFlags) (*pb.DeskActionReque
 
 func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceClient, node string, act *pb.DeskActionRequest, f deskFlags) error {
 	ctx := cmd.Context()
-	t := &pb.DeskTarget{Name: node, LeaseId: f.lease, AllowCare: f.allowCare}
+	t := &pb.DeskTarget{Name: node, LeaseId: f.lease}
 	switch a := act.Action.(type) {
 	case *pb.DeskActionRequest_Screenshot:
 		a.Screenshot.Target = t

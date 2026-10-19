@@ -56,18 +56,20 @@ enum JobState {
   JOB_STATE_TIMED_OUT = 6;
 }
 
-// JobTarget says where a job runs.
+// JobTarget says where a job runs. Nodes of tier "care" are never picked
+// by a selector or leased; naming one needs the owner token or a token with
+// the scope node_admin:<node>.
 message JobTarget {
   oneof target {
     // lease_id runs on the node of a live lease (and on its GPU, if any).
     string lease_id = 1;
     // node is a node name.
     string node = 2;
-    // selector picks the least-loaded fresh matching node that is not leased.
+    // selector picks the least-loaded fresh matching node of tier "shared"
+    // that is not leased.
     NodeSelector selector = 3;
   }
-  // allow_care admits nodes of tier "care".
-  bool allow_care = 4;
+  reserved 4;
 }
 
 // GitSource ships one commit of a repository on the hub.

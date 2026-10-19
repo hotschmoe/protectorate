@@ -31,6 +31,12 @@ type Principal struct {
 	Scopes []string
 }
 
+// AdminOn reports whether p may work on care node node and run admin jobs
+// there: the owner, or a node_admin grant matching it.
+func (p *Principal) AdminOn(node string) bool {
+	return p != nil && (p.Owner || AdminOn(p.Scopes, node))
+}
+
 // Actor is the audit label: "owner" or "token:<name>".
 func (p *Principal) Actor() string {
 	if p.Owner {

@@ -92,7 +92,7 @@ type deskLease struct {
 // must be live and on exactly this desktop; holding the id is the proof.
 // Without one, the hub takes a short lease for the caller when the desktop is
 // free, renews the caller's own, and refuses when someone else holds it.
-func (h *Hub) admitDesk(ctx context.Context, node, leaseID string, allowCare bool) (*deskLease, error) {
+func (h *Hub) admitDesk(ctx context.Context, node, leaseID string) (*deskLease, error) {
 	want := deskResource(node)
 	if leaseID == "" {
 		if err := h.gateDesk(ctx, node, true); err != nil {
@@ -130,7 +130,7 @@ func (h *Hub) admitDesk(ctx context.Context, node, leaseID string, allowCare boo
 			return &deskLease{lease: l}, nil
 		}
 		l, err := h.leases.Acquire(holder, autoDeskTTL, func(blocked func(string, *int) *pb.Lease) (string, *int, error) {
-			return h.acquireDesk(node, allowCare, blocked)
+			return h.acquireDesk(node, blocked)
 		})
 		if err == nil {
 			return &deskLease{lease: l, fresh: true}, nil
@@ -155,13 +155,13 @@ func (h *Hub) deskDo(ctx context.Context, t *pb.DeskTarget, mutating bool, act *
 	if t == nil || t.Name == "" {
 		return nil, nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("target.name is required"))
 	}
-	ops, err := h.opsFor(t.Name, t.AllowCare)
+	ops, err := h.opsFor(ctx, t.Name)
 	if err != nil {
 		return nil, nil, err
 	}
 	var dl *deskLease
 	if mutating {
-		if dl, err = h.admitDesk(ctx, t.Name, t.LeaseId, t.AllowCare); err != nil {
+		if dl, err = h.admitDesk(ctx, t.Name, t.LeaseId); err != nil {
 			return nil, nil, err
 		}
 	}

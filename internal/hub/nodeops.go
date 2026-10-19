@@ -111,13 +111,16 @@ func (h *Hub) EnableNodeOps(files *node.Files, d *node.Desk) {
 	h.local = localOps{files: files, desk: d}
 }
 
-// opsFor resolves a named node that can be used now.
-func (h *Hub) opsFor(name string, allowCare bool) (nodeOps, error) {
+// opsFor resolves a named node that can be used now by the caller in ctx.
+func (h *Hub) opsFor(ctx context.Context, name string) (nodeOps, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if !nodeNameRe.MatchString(name) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid node name %q", name))
 	}
-	if err := h.nodes.namedNode(name, nil, allowCare); err != nil {
+	if err := h.nodes.namedNode(name, nil); err != nil {
+		return nil, err
+	}
+	if err := h.nodes.careGate(ctx, name); err != nil {
 		return nil, err
 	}
 	st, err := h.nodes.Status(name)
@@ -131,7 +134,7 @@ func (h *Hub) opsFor(name string, allowCare bool) (nodeOps, error) {
 }
 
 func (h *Hub) PutFile(ctx context.Context, req *connect.Request[pb.PutFileRequest]) (*connect.Response[pb.PutFileResponse], error) {
-	ops, err := h.opsFor(req.Msg.Name, req.Msg.AllowCare)
+	ops, err := h.opsFor(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +155,7 @@ func (h *Hub) GetFile(ctx context.Context, req *connect.Request[pb.GetFileReques
 		}
 		h.authz.Record(ctx, auth.PrincipalFrom(ctx), req.Spec().Procedure, req.Msg.Name, err, code)
 	}()
-	ops, err := h.opsFor(req.Msg.Name, req.Msg.AllowCare)
+	ops, err := h.opsFor(ctx, req.Msg.Name)
 	if err != nil {
 		return err
 	}
@@ -160,7 +163,7 @@ func (h *Hub) GetFile(ctx context.Context, req *connect.Request[pb.GetFileReques
 }
 
 func (h *Hub) ApplyUpdate(ctx context.Context, req *connect.Request[pb.ApplyUpdateRequest]) (*connect.Response[pb.ApplyUpdateResponse], error) {
-	ops, err := h.opsFor(req.Msg.Name, req.Msg.AllowCare)
+	ops, err := h.opsFor(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, err
 	}

@@ -222,10 +222,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -262,10 +258,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -299,10 +291,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -333,10 +321,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -367,10 +351,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -416,10 +396,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -450,10 +426,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -484,10 +456,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -706,10 +674,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowCare": {
-              "description": "allow_care admits nodes of tier \"care\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id runs on the node of a live lease (and on its GPU, if any).",
               "type": "string"
@@ -720,7 +684,7 @@
             },
             "selector": {
               "additionalProperties": false,
-              "description": "selector picks the least-loaded fresh matching node that is not leased.",
+              "description": "selector picks the least-loaded fresh matching node of tier \"shared\" that is not leased.",
               "properties": {
                 "arch": {
                   "type": "string"
@@ -768,14 +732,10 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node that is not already leased. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased, except their desktop (\"desk:\u003cnode\u003e\") under the owner token or a node_admin grant. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowCare": {
-          "description": "allow_care admits nodes of tier \"care\", which are skipped otherwise.",
-          "type": "boolean"
-        },
         "holder": {
           "description": "holder labels who holds the lease, e.g. a sleeve or agent name.",
           "type": "string"
@@ -1037,9 +997,6 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowCare": {
-          "type": "boolean"
-        },
         "name": {
           "type": "string"
         }
@@ -1091,9 +1048,6 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowCare": {
-          "type": "boolean"
-        },
         "chunk": {
           "additionalProperties": false,
           "properties": {

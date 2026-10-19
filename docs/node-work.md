@@ -38,6 +38,22 @@ joined is re-invited with `--tier` instead. Headscale keeps a retired
 `tag:tier-server` on a machine after the policy stops owning it, so nodes
 keep working until `node tier` retags them.
 
+**(built)** Enforcement, in the hub:
+
+- Selectors (jobs and leases) never pick a `care` node; the refusal lists it
+  as `tier care`.
+- Leases never cover a `care` node or one of its GPUs, whoever asks
+  (failed_precondition). Its desktop (`desk:<node>`) is not compute and can
+  be leased like any desk command below.
+- A job naming a `care` node (`--on kidsbox`, or a lease on one taken before
+  it became `care`), a file transfer to or from one, and desk commands on it
+  need the owner token or a token with `node_admin:<glob>` matching the node
+  (permission_denied otherwise, with the command that mints a grant). Owner
+  only RPCs (`node update`, `desk policy`) are unaffected.
+- The `allow_care` fields and `--allow-care` flags are gone: the grant is the
+  explicit opt-in. `node_admin:<glob>` is a `path.Match` glob over node names
+  and admits no RPC by itself; `*` does not include it.
+
 ## Jobs today (built)
 
 `protectorate job run --on <node|lease|selector>` runs as the node agent's own

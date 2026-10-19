@@ -338,7 +338,7 @@ func (h *Hub) withDesk(s *pb.NodeStatus) *pb.NodeStatus {
 	return s
 }
 
-func (h *Hub) deskNode(name string, allowCare bool) (string, error) {
+func (h *Hub) deskNode(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if !nodeNameRe.MatchString(name) {
 		return "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid node name %q", name))
@@ -349,8 +349,6 @@ func (h *Hub) deskNode(name string, allowCare bool) (string, error) {
 		return "", nodeErr(err)
 	case st.Node.Local:
 		return "", connect.NewError(connect.CodeFailedPrecondition, errors.New("the hub's own node does not take a desk policy"))
-	case st.Node.Tier == TierCare && !allowCare:
-		return "", connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is tier care: set allow_care to use it", name))
 	case h.deskPol == nil:
 		return "", connect.NewError(connect.CodeUnimplemented, errors.New("desk policies need the lease store (hub started without jobs)"))
 	}
@@ -364,7 +362,7 @@ func (h *Hub) deskStatus(ctx context.Context, name string) *pb.DeskPolicyStatus 
 }
 
 func (h *Hub) SetDeskPolicy(ctx context.Context, req *connect.Request[pb.SetDeskPolicyRequest]) (*connect.Response[pb.DeskPolicyStatus], error) {
-	name, err := h.deskNode(req.Msg.Name, req.Msg.AllowCare)
+	name, err := h.deskNode(req.Msg.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +380,7 @@ func (h *Hub) SetDeskPolicy(ctx context.Context, req *connect.Request[pb.SetDesk
 }
 
 func (h *Hub) GetDeskPolicy(ctx context.Context, req *connect.Request[pb.GetDeskPolicyRequest]) (*connect.Response[pb.DeskPolicyStatus], error) {
-	name, err := h.deskNode(req.Msg.Name, req.Msg.AllowCare)
+	name, err := h.deskNode(req.Msg.Name)
 	if err != nil {
 		return nil, err
 	}
