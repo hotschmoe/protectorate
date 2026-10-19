@@ -216,7 +216,7 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 	invite.Flags().DurationVar(&expires, "expires", time.Hour, "how long the key can be redeemed")
 	invite.Flags().StringSliceVar(&pools, "pool", nil, "build pool to join (repeatable)")
 
-	var control, key, name string
+	var control, key, keyFile, name string
 	join := &cobra.Command{
 		Use:   "join",
 		Short: "Enroll this machine; state goes to $PROTECTORATE_HOME/tsnet",
@@ -226,10 +226,17 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 			if err != nil {
 				return err
 			}
+			k, err := resolveKey(key, keyFile, os.Getenv(enrollKeyEnv))
+			if err != nil {
+				return err
+			}
+			if k == "" {
+				return fmt.Errorf("an enrollment key is required: --key, --key-file or env %s", enrollKeyEnv)
+			}
 			if name == "" {
 				name = tailnet.SanitizeLabel(node.Hostname())
 			}
-			if err := enrollNode(cmd.Context(), home, control, key, name); err != nil {
+			if err := enrollNode(cmd.Context(), home, control, k, name); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "joined as %s; run `protectorate node serve`\n", name)
@@ -237,10 +244,10 @@ func nodeEnrollCmds(o *opts) []*cobra.Command {
 		},
 	}
 	join.Flags().StringVar(&control, "control", "", "headscale URL")
-	join.Flags().StringVar(&key, "key", "", "enrollment key from `node invite`")
+	join.Flags().StringVar(&key, "key", "", "enrollment key from `node invite` (prefer --key-file or env "+enrollKeyEnv+")")
+	join.Flags().StringVar(&keyFile, "key-file", "", "file holding the enrollment key")
 	join.Flags().StringVar(&name, "name", "", "tailnet name (default: sanitised hostname)")
 	_ = join.MarkFlagRequired("control")
-	_ = join.MarkFlagRequired("key")
 
 	revoke := &cobra.Command{
 		Use:   "revoke <name>",

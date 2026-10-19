@@ -20,6 +20,7 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/client/tailscale/apitype"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/net/netns"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
@@ -58,6 +59,13 @@ func Up(ctx context.Context, o Options) (*Net, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	// tsnet is userspace-only, so its sockets cannot loop back into the
+	// tailnet and need no bypass. Left on, a non-root process cannot set
+	// SO_MARK, so tailscale falls back to SO_BINDTODEVICE on the default
+	// route interface and every control and DERP dial ignores the real
+	// route (a VPN-only hub is never reached). tailscaled itself turns this
+	// off in netstack-only mode.
+	netns.SetEnabled(false)
 	srv := &tsnet.Server{
 		Dir: o.Dir, Hostname: o.Hostname, ControlURL: o.ControlURL, AuthKey: o.AuthKey,
 		Logf: logf, UserLogf: log.Printf,

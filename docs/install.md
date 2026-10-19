@@ -71,7 +71,7 @@ On the hub: `protectorate node invite <name>`. It prints a `node join ...` line;
 Linux:
 
 ```
-protectorate node join --control URL --key KEY --name NAME
+protectorate node join --control URL --key-file FILE --name NAME   # or env PROTECTORATE_ENROLL_KEY, or --key KEY
 protectorate service systemd node --binary ~/.local/bin/protectorate --install
 systemctl --user daemon-reload && systemctl --user enable --now protectorate-node
 ```
@@ -153,6 +153,8 @@ protectorate pair --app                      # QR for the native app; without --
 - A peer that stays on DERP while both sides are on one LAN usually has UDP blocked between them; the relay still works.
 - A peer with `online no` and an old handshake is down or revoked; `node ls` also lists nodes that were invited but never joined.
 - A node killed without a clean shutdown makes the relay see a dropped connection; those expected disconnects are not logged, other relay errors are.
+- A node that reaches the hub only through a VPN or a non-default route (a WireGuard interface with a host route to the hub, no default route through it) joins and works: the tailnet client never binds its sockets to the default-route interface. Upstream tailscale does so when it cannot set `SO_MARK` (any non-root process), which sent the control dial out the wrong interface and hung `node join` until its timeout with the hub seeing nothing. `internal/tailnet` turns that bypass off, as `tailscaled` does in netstack-only mode. A kernel without policy routing (`ip rule` fails with "Operation not supported") is fine.
+- Linux desk support for a graphical session owned by another user (for example Hyprland under `kids` with the node installed as `alarm`) would need access to that user's Wayland socket. Not built.
 
 ## Versions
 
