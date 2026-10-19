@@ -6,7 +6,9 @@ import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../nodes/add_node.dart';
 import '../nodes/node_update.dart';
+import '../nodes/remove_node.dart';
 import '../nodes/node_view.dart';
 import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
@@ -93,6 +95,15 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
     }
   }
 
+  Future<void> _remove(NodeStatus s) async {
+    final removed = await showRemoveNode(
+      context,
+      client: widget.client,
+      status: s,
+    );
+    if (removed && mounted) Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = _status;
@@ -132,6 +143,16 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
                       hubVersion: widget.versions.hub,
                       onFinished: _refresh,
                     ),
+              onRemove: s.node.local ? null : () => _remove(s),
+              onReissue: s.node.invited
+                  ? () => showAddNode(
+                      context,
+                      client: widget.client,
+                      initialName: s.node.name,
+                      reissue: true,
+                      onChanged: _refresh,
+                    )
+                  : null,
               onManageSleeves: s.node.local
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -201,6 +222,55 @@ class _VersionPanel extends StatelessWidget {
   }
 }
 
+// Inventory actions: reissue or cancel a pending invite, remove a node.
+class _ManagePanel extends StatelessWidget {
+  const _ManagePanel({required this.status, this.onRemove, this.onReissue});
+
+  final NodeStatus status;
+  final VoidCallback? onRemove;
+  final VoidCallback? onReissue;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    final pending = status.node.invited;
+    return Panel(
+      legend: pending ? 'PENDING INVITE' : 'INVENTORY',
+      trailing: status.draining
+          ? const LampLegend(label: 'REMOVING', tone: Tone.warn)
+          : null,
+      child: Wrap(
+        spacing: Tokens.gapS,
+        runSpacing: Tokens.gapS,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (pending)
+            Text(
+              'The machine has not enrolled yet. A new key replaces the old one.',
+              style: t.small(),
+            ),
+          if (onReissue != null)
+            OutlinedButton(
+              key: const ValueKey('reissue-key'),
+              onPressed: onReissue,
+              child: const Text('REISSUE KEY'),
+            ),
+          if (onRemove != null)
+            OutlinedButton(
+              key: const ValueKey('remove-node'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: t.p.alarm,
+                side: BorderSide(color: t.p.alarm),
+              ),
+              onPressed: onRemove,
+              child: Text(pending ? 'CANCEL INVITE' : 'REMOVE NODE'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class NodeDetail extends StatelessWidget {
   const NodeDetail({
     super.key,
@@ -209,6 +279,8 @@ class NodeDetail extends StatelessWidget {
     required this.now,
     this.error,
     this.onManageSleeves,
+    this.onRemove,
+    this.onReissue,
     this.onUpdate,
     this.versions = const Versions(),
     this.cpuHistory = const [],
@@ -216,6 +288,8 @@ class NodeDetail extends StatelessWidget {
   });
 
   final VoidCallback? onManageSleeves;
+  final VoidCallback? onRemove;
+  final VoidCallback? onReissue;
   final VoidCallback? onUpdate;
   final Versions versions;
   final NodeStatus status;
@@ -270,7 +344,15 @@ class NodeDetail extends StatelessWidget {
           'Refresh failed, showing the last result: $error',
           tone: Tone.alarm,
         ),
-      if (status.error.isNotEmpty) NoteStrip(status.error, tone: Tone.alarm),
+      if (status.error.isNotEmpty)
+        NoteStrip(
+          status.error,
+          tone: status.node.invited && status.alerts.isEmpty
+              ? Tone.info
+              : Tone.alarm,
+        ),
+      if (onRemove != null || onReissue != null)
+        _ManagePanel(status: status, onRemove: onRemove, onReissue: onReissue),
       if (down)
         NoteStrip(
           m == null

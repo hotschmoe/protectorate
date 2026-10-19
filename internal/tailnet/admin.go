@@ -237,6 +237,9 @@ func (a *Admin) Nodes(ctx context.Context) ([]Node, error) {
 	return res.Nodes, nil
 }
 
+// errNoNode is wrapped when no enrolled machine has the given name.
+var errNoNode = errors.New("no such node")
+
 func (a *Admin) find(ctx context.Context, name string) (Node, error) {
 	nodes, err := a.Nodes(ctx)
 	if err != nil {
@@ -247,23 +250,55 @@ func (a *Admin) find(ctx context.Context, name string) (Node, error) {
 			return n, nil
 		}
 	}
-	return Node{}, fmt.Errorf("no node named %q", name)
+	return Node{}, fmt.Errorf("%w: %q", errNoNode, name)
 }
 
-// Revoke expires and deletes the node so peers drop it from their netmap.
-func (a *Admin) Revoke(ctx context.Context, name string) error {
+// Revoke expires and deletes the node so peers drop it from their netmap. It
+// reports false when no machine of that name is enrolled.
+func (a *Admin) Revoke(ctx context.Context, name string) (bool, error) {
 	n, err := a.find(ctx, name)
+	if errors.Is(err, errNoNode) {
+		return false, nil
+	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	id := strconv.FormatUint(n.ID, 10)
 	if err := a.call(ctx, http.MethodPost, "/api/v1/node/"+id+"/expire", map[string]string{}, nil); err != nil {
-		return fmt.Errorf("expire node %s: %w", name, err)
+		return false, fmt.Errorf("expire node %s: %w", name, err)
 	}
 	if err := a.call(ctx, http.MethodDelete, "/api/v1/node/"+id, nil, nil); err != nil {
-		return fmt.Errorf("delete node %s: %w", name, err)
+		return false, fmt.Errorf("delete node %s: %w", name, err)
+	}
+	return true, nil
+}
+
+// ExpireKey makes the pre-auth key with headscale id id unusable. A key that
+// was already used or has expired stays so.
+func (a *Admin) ExpireKey(ctx context.Context, id uint64) error {
+	if err := a.call(ctx, http.MethodPost, "/api/v1/preauthkey/expire", map[string]string{"id": strconv.FormatUint(id, 10)}, nil); err != nil {
+		return fmt.Errorf("expire preauth key %d: %w", id, err)
 	}
 	return nil
+}
+
+// ControlURL is the URL machines enroll at.
+func (a *Admin) ControlURL() string { return a.cfg.ServerURL }
+
+// InviteNode issues a single-use key for a node of tier in pools, which must
+// be configured.
+func (a *Admin) InviteNode(ctx context.Context, name, tier string, pools []string, ttl time.Duration) (string, uint64, error) {
+	if !slices.Contains(Tiers, tier) {
+		return "", 0, fmt.Errorf("tier must be one of %s", strings.Join(Tiers, ", "))
+	}
+	tags := []string{TagNode, TierTag(tier)}
+	for _, p := range pools {
+		if !slices.Contains(a.cfg.Pools, p) {
+			return "", 0, fmt.Errorf("pool %q is not configured (`hub tailnet init --pool`)", p)
+		}
+		tags = append(tags, PoolTag(p))
+	}
+	return a.Invite(ctx, name, tags, ttl)
 }
 
 // SanitizeLabel lowercases s into a DNS label, replacing other runes with '-'.

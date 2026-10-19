@@ -162,5 +162,143 @@ class AlertKind extends $pb.ProtobufEnum {
   const AlertKind._(super.value, super.name);
 }
 
+class RemoveJobs extends $pb.ProtobufEnum {
+  /// REMOVE_JOBS_UNSPECIFIED refuses to remove a node that runs jobs.
+  static const RemoveJobs REMOVE_JOBS_UNSPECIFIED =
+      RemoveJobs._(0, _omitEnumNames ? '' : 'REMOVE_JOBS_UNSPECIFIED');
+
+  /// REMOVE_JOBS_WAIT lets running jobs finish, up to wait_timeout.
+  static const RemoveJobs REMOVE_JOBS_WAIT =
+      RemoveJobs._(1, _omitEnumNames ? '' : 'REMOVE_JOBS_WAIT');
+
+  /// REMOVE_JOBS_CANCEL cancels running jobs.
+  static const RemoveJobs REMOVE_JOBS_CANCEL =
+      RemoveJobs._(2, _omitEnumNames ? '' : 'REMOVE_JOBS_CANCEL');
+
+  static const $core.List<RemoveJobs> values = <RemoveJobs>[
+    REMOVE_JOBS_UNSPECIFIED,
+    REMOVE_JOBS_WAIT,
+    REMOVE_JOBS_CANCEL,
+  ];
+
+  static final $core.List<RemoveJobs?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 2);
+  static RemoveJobs? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const RemoveJobs._(super.value, super.name);
+}
+
+class RemovePhase extends $pb.ProtobufEnum {
+  static const RemovePhase REMOVE_PHASE_UNSPECIFIED =
+      RemovePhase._(0, _omitEnumNames ? '' : 'REMOVE_PHASE_UNSPECIFIED');
+
+  /// REMOVE_PHASE_DRAINING: no new jobs or leases; running_jobs still run.
+  static const RemovePhase REMOVE_PHASE_DRAINING =
+      RemovePhase._(1, _omitEnumNames ? '' : 'REMOVE_PHASE_DRAINING');
+
+  /// REMOVE_PHASE_UNINSTALLING: the agent was asked to uninstall (or skipped).
+  static const RemovePhase REMOVE_PHASE_UNINSTALLING =
+      RemovePhase._(2, _omitEnumNames ? '' : 'REMOVE_PHASE_UNINSTALLING');
+
+  /// REMOVE_PHASE_REVOKING: the invite key and tailnet enrollment are revoked.
+  static const RemovePhase REMOVE_PHASE_REVOKING =
+      RemovePhase._(3, _omitEnumNames ? '' : 'REMOVE_PHASE_REVOKING');
+
+  /// REMOVE_PHASE_REMOVED: the inventory entry is gone. Final.
+  static const RemovePhase REMOVE_PHASE_REMOVED =
+      RemovePhase._(4, _omitEnumNames ? '' : 'REMOVE_PHASE_REMOVED');
+
+  static const $core.List<RemovePhase> values = <RemovePhase>[
+    REMOVE_PHASE_UNSPECIFIED,
+    REMOVE_PHASE_DRAINING,
+    REMOVE_PHASE_UNINSTALLING,
+    REMOVE_PHASE_REVOKING,
+    REMOVE_PHASE_REMOVED,
+  ];
+
+  static final $core.List<RemovePhase?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 4);
+  static RemovePhase? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const RemovePhase._(super.value, super.name);
+}
+
+class InstallPlatform extends $pb.ProtobufEnum {
+  static const InstallPlatform INSTALL_PLATFORM_UNSPECIFIED = InstallPlatform._(
+      0, _omitEnumNames ? '' : 'INSTALL_PLATFORM_UNSPECIFIED');
+
+  /// INSTALL_PLATFORM_WINDOWS: Windows PowerShell 5.1 or pwsh, x64 or ARM64.
+  static const InstallPlatform INSTALL_PLATFORM_WINDOWS =
+      InstallPlatform._(1, _omitEnumNames ? '' : 'INSTALL_PLATFORM_WINDOWS');
+
+  /// INSTALL_PLATFORM_LINUX: sh with curl, x86_64 or aarch64.
+  static const InstallPlatform INSTALL_PLATFORM_LINUX =
+      InstallPlatform._(2, _omitEnumNames ? '' : 'INSTALL_PLATFORM_LINUX');
+
+  /// INSTALL_PLATFORM_TERMUX: Android under Termux, aarch64.
+  static const InstallPlatform INSTALL_PLATFORM_TERMUX =
+      InstallPlatform._(3, _omitEnumNames ? '' : 'INSTALL_PLATFORM_TERMUX');
+
+  static const $core.List<InstallPlatform> values = <InstallPlatform>[
+    INSTALL_PLATFORM_UNSPECIFIED,
+    INSTALL_PLATFORM_WINDOWS,
+    INSTALL_PLATFORM_LINUX,
+    INSTALL_PLATFORM_TERMUX,
+  ];
+
+  static final $core.List<InstallPlatform?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
+  static InstallPlatform? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const InstallPlatform._(super.value, super.name);
+}
+
+class NodeSetupStage extends $pb.ProtobufEnum {
+  static const NodeSetupStage NODE_SETUP_STAGE_UNSPECIFIED =
+      NodeSetupStage._(0, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_UNSPECIFIED');
+
+  /// NODE_SETUP_STAGE_INVITED: the key is issued; the machine has not
+  /// enrolled in the tailnet yet.
+  static const NodeSetupStage NODE_SETUP_STAGE_INVITED =
+      NodeSetupStage._(1, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_INVITED');
+
+  /// NODE_SETUP_STAGE_JOINED: the machine enrolled; the hub has not reached
+  /// its agent yet.
+  static const NodeSetupStage NODE_SETUP_STAGE_JOINED =
+      NodeSetupStage._(2, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_JOINED');
+
+  /// NODE_SETUP_STAGE_METRICS: the agent answered the hub; checks are pending.
+  static const NodeSetupStage NODE_SETUP_STAGE_METRICS =
+      NodeSetupStage._(3, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_METRICS');
+
+  /// NODE_SETUP_STAGE_READY: the node is in service. Final.
+  static const NodeSetupStage NODE_SETUP_STAGE_READY =
+      NodeSetupStage._(4, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_READY');
+
+  /// NODE_SETUP_STAGE_ATTENTION: something needs fixing; problems says what.
+  /// The watch goes on.
+  static const NodeSetupStage NODE_SETUP_STAGE_ATTENTION =
+      NodeSetupStage._(5, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_ATTENTION');
+
+  static const $core.List<NodeSetupStage> values = <NodeSetupStage>[
+    NODE_SETUP_STAGE_UNSPECIFIED,
+    NODE_SETUP_STAGE_INVITED,
+    NODE_SETUP_STAGE_JOINED,
+    NODE_SETUP_STAGE_METRICS,
+    NODE_SETUP_STAGE_READY,
+    NODE_SETUP_STAGE_ATTENTION,
+  ];
+
+  static final $core.List<NodeSetupStage?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 5);
+  static NodeSetupStage? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const NodeSetupStage._(super.value, super.name);
+}
+
 const $core.bool _omitEnumNames =
     $core.bool.fromEnvironment('protobuf.omit_enum_names');

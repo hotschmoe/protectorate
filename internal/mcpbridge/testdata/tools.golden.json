@@ -1147,25 +1147,6 @@
   },
   {
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "RemoveNode removes a node from the hub inventory. It does not touch the machine itself.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "node_remove_node"
-  },
-  {
-    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true

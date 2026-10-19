@@ -625,6 +625,8 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, allowFamily bool, blocked
 	switch {
 	case st.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH || st.Metrics == nil:
 		return nil, "not fresh"
+	case st.Draining:
+		return nil, "being removed"
 	case st.Node.Tier == TierFamily && !allowFamily:
 		return nil, "tier family"
 	case sel.GetOs() != "" && !strings.EqualFold(st.Metrics.Os, sel.Os):
@@ -695,6 +697,8 @@ func (m *NodeMonitor) namedNode(name string, gpu *int, allowFamily bool) error {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is unreachable", name))
 	case st.Freshness == pb.NodeFreshness_NODE_FRESHNESS_INVITED:
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is invited but has not joined yet", name))
+	case st.Draining:
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is being removed", name))
 	case st.Node.Tier == TierFamily && !allowFamily:
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is tier family: set allow_family to use it", name))
 	}

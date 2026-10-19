@@ -64,6 +64,11 @@ service NodeAgentService {
   // evaluates it now. The node enforces the policy itself on every input
   // command, so the hub's view can be a few seconds old without harm.
   rpc GetDeskState(GetDeskStateRequest) returns (DeskState);
+
+  // Uninstall unregisters the agent's startup (the logon task, systemd user
+  // unit or termux service `node install` registered) and stops the agent
+  // once it has answered. It deletes nothing; the response names what is left.
+  rpc Uninstall(UninstallRequest) returns (UninstallResponse);
 }
 
 // NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -89,9 +94,34 @@ service NodeService {
     option (protectorate.v1.owner_only_rpc) = true;
   }
 
-  // RemoveNode removes a node from the hub inventory. It does not touch the
-  // machine itself.
-  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+  // RemoveNode takes a node out of service and forgets it. It drains the
+  // node first (no new jobs or leases; running jobs are waited for or
+  // cancelled as jobs says), optionally asks the agent to uninstall itself,
+  // expires an unused invite key, revokes the node's tailnet enrollment,
+  // releases its leases and removes the inventory entry. It streams the
+  // steps and fails, leaving the node in service, if any step fails. A
+  // revoked machine that comes back cannot rejoin without a new invite.
+  // Cancelling a pending invite is the same call. Only the owner token may
+  // call it.
+  rpc RemoveNode(RemoveNodeRequest) returns (stream RemoveNodeProgress) {
+    option (protectorate.v1.owner_only_rpc) = true;
+    option (protectorate.v1.destructive) = true;
+  }
+
+  // InviteNode creates a single-use tailnet enrollment key for a new node,
+  // records the node in the inventory as invited and returns the one-line
+  // installers that use it. Inviting a pending node again expires its
+  // previous key. Only the owner token may call it.
+  rpc InviteNode(InviteNodeRequest) returns (InviteNodeResponse) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+
+  // WatchNodeSetup follows a node from its invite to ready. It sends the
+  // current stage at once and again whenever the stage or its problems
+  // change, and ends after READY.
+  rpc WatchNodeSetup(WatchNodeSetupRequest) returns (stream NodeSetupProgress) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // PutFile copies a file or directory to a node, one chunk per call so it
   // works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
@@ -519,6 +549,8 @@ message NodeStatus {
   string desk_holder = 9;
   // desk_inputs is today's desktop input commands per caller.
   repeated DeskUse desk_inputs = 10;
+  // draining marks a node being removed: no new jobs or leases go to it.
+  bool draining = 11;
 }
 
 message ListNodesRequest {}
@@ -538,8 +570,125 @@ message AddNodeRequest {
   bool update = 2;
 }
 
+enum RemoveJobs {
+  // REMOVE_JOBS_UNSPECIFIED refuses to remove a node that runs jobs.
+  REMOVE_JOBS_UNSPECIFIED = 0;
+  // REMOVE_JOBS_WAIT lets running jobs finish, up to wait_timeout.
+  REMOVE_JOBS_WAIT = 1;
+  // REMOVE_JOBS_CANCEL cancels running jobs.
+  REMOVE_JOBS_CANCEL = 2;
+}
+
 message RemoveNodeRequest {
+  string name = 1;
+  RemoveJobs jobs = 2;
+  // uninstall asks a reachable agent to unregister its startup and stop
+  // (UninstallResponse); an unreachable one is skipped with a message.
+  bool uninstall = 3;
+  // wait_timeout bounds REMOVE_JOBS_WAIT; unset means 1h.
+  google.protobuf.Duration wait_timeout = 4;
+}
+
+enum RemovePhase {
+  REMOVE_PHASE_UNSPECIFIED = 0;
+  // REMOVE_PHASE_DRAINING: no new jobs or leases; running_jobs still run.
+  REMOVE_PHASE_DRAINING = 1;
+  // REMOVE_PHASE_UNINSTALLING: the agent was asked to uninstall (or skipped).
+  REMOVE_PHASE_UNINSTALLING = 2;
+  // REMOVE_PHASE_REVOKING: the invite key and tailnet enrollment are revoked.
+  REMOVE_PHASE_REVOKING = 3;
+  // REMOVE_PHASE_REMOVED: the inventory entry is gone. Final.
+  REMOVE_PHASE_REMOVED = 4;
+}
+
+message RemoveNodeProgress {
+  RemovePhase phase = 1;
+  uint32 running_jobs = 2;
+  // message is a human line about the step.
+  string message = 3;
+}
+
+message UninstallRequest {}
+
+message UninstallResponse {
+  // actions are the steps the agent takes after answering.
+  repeated string actions = 1;
+  // left lists files and directories the user may delete.
+  repeated string left = 2;
+}
+
+message InviteNodeRequest {
+  // name must be a lowercase DNS label (a-z, 0-9, '-'), at most 63 long.
+  string name = 1;
+  // tier is "server" (default) or "family".
+  string tier = 2;
+  // pools are build pools configured on the hub's tailnet.
+  repeated string pools = 3;
+  // ttl is how long the key can be redeemed; unset means 1h, at most 24h.
+  google.protobuf.Duration ttl = 4;
+  // install_url is the hub URL the new machine downloads from. Empty means
+  // the hub's --public-url, else the URL this request was sent to.
+  string install_url = 5;
+}
+
+enum InstallPlatform {
+  INSTALL_PLATFORM_UNSPECIFIED = 0;
+  // INSTALL_PLATFORM_WINDOWS: Windows PowerShell 5.1 or pwsh, x64 or ARM64.
+  INSTALL_PLATFORM_WINDOWS = 1;
+  // INSTALL_PLATFORM_LINUX: sh with curl, x86_64 or aarch64.
+  INSTALL_PLATFORM_LINUX = 2;
+  // INSTALL_PLATFORM_TERMUX: Android under Termux, aarch64.
+  INSTALL_PLATFORM_TERMUX = 3;
+}
+
+message InstallCommand {
+  InstallPlatform platform = 1;
+  // shell is where to paste command, e.g. "PowerShell".
+  string shell = 2;
+  // command is one line that downloads the hub's installer and runs it with
+  // the key. It holds the key: treat it like one.
+  string command = 3;
+  string note = 4;
+}
+
+message InviteNodeResponse {
+  NodeInfo node = 1;
+  // control_url and key are for the manual path (`node install --control`).
+  string control_url = 2;
+  string key = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  string install_url = 5;
+  repeated InstallCommand commands = 6;
+}
+
+message WatchNodeSetupRequest {
   string name = 1;
 }
 
-message RemoveNodeResponse {}
+enum NodeSetupStage {
+  NODE_SETUP_STAGE_UNSPECIFIED = 0;
+  // NODE_SETUP_STAGE_INVITED: the key is issued; the machine has not
+  // enrolled in the tailnet yet.
+  NODE_SETUP_STAGE_INVITED = 1;
+  // NODE_SETUP_STAGE_JOINED: the machine enrolled; the hub has not reached
+  // its agent yet.
+  NODE_SETUP_STAGE_JOINED = 2;
+  // NODE_SETUP_STAGE_METRICS: the agent answered the hub; checks are pending.
+  NODE_SETUP_STAGE_METRICS = 3;
+  // NODE_SETUP_STAGE_READY: the node is in service. Final.
+  NODE_SETUP_STAGE_READY = 4;
+  // NODE_SETUP_STAGE_ATTENTION: something needs fixing; problems says what.
+  // The watch goes on.
+  NODE_SETUP_STAGE_ATTENTION = 5;
+}
+
+message NodeSetupProgress {
+  NodeSetupStage stage = 1;
+  // problems are what keeps the node from READY, one sentence each.
+  repeated string problems = 2;
+  // notes are worth knowing but do not block READY.
+  repeated string notes = 3;
+  // message is a human line about the stage.
+  string message = 4;
+  NodeStatus status = 5;
+}

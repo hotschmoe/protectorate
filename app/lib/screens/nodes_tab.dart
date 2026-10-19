@@ -7,6 +7,7 @@ import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
+import '../nodes/add_node.dart';
 import '../nodes/node_view.dart';
 import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
@@ -15,7 +16,13 @@ import '../vfd/meter.dart';
 import '../vfd/panel.dart';
 import 'node_detail_screen.dart';
 
-const nodeEventKinds = {'node.metrics', 'node.unreachable'};
+const nodeEventKinds = {
+  'node.metrics',
+  'node.unreachable',
+  'node.joined',
+  'node.invited',
+  'node.removed',
+};
 
 // The hub's keep-alive on the event stream; it shows as a lamp flicker, not a
 // log line.
@@ -101,8 +108,11 @@ class _NodesTabState extends State<NodesTab> {
     }
   }
 
-  void _open(NodeStatus s) {
-    Navigator.of(context).push(
+  void _add() =>
+      showAddNode(context, client: widget.client, onChanged: _refresh);
+
+  Future<void> _open(NodeStatus s) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => NodeDetailScreen(
           hub: widget.hub,
@@ -115,6 +125,7 @@ class _NodesTabState extends State<NodesTab> {
         ),
       ),
     );
+    _refresh();
   }
 
   @override
@@ -123,6 +134,27 @@ class _NodesTabState extends State<NodesTab> {
     if (_loading) return const BusyBar();
     return Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Tokens.gap,
+            Tokens.gap,
+            Tokens.gap,
+            0,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text('${_nodes.length} NODES', style: t.legend()),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('add-node'),
+                onPressed: _add,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('ADD NODE'),
+              ),
+            ],
+          ),
+        ),
         if (_error != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -207,7 +239,7 @@ String freshnessLabel(NodeFreshness f, Duration age) => switch (f) {
   NodeFreshness.NODE_FRESHNESS_UNREACHABLE => 'UNREACHABLE',
   NodeFreshness.NODE_FRESHNESS_STALE => 'STALE ${formatAge(age)}',
   NodeFreshness.NODE_FRESHNESS_FRESH => 'LIVE',
-  NodeFreshness.NODE_FRESHNESS_INVITED => 'INVITED',
+  NodeFreshness.NODE_FRESHNESS_INVITED => 'PENDING',
   _ => 'UNKNOWN',
 };
 
@@ -371,6 +403,10 @@ class NodeCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       const Annunciator(label: 'HUB', tone: Tone.info),
                     ],
+                    if (status.draining) ...[
+                      const SizedBox(width: 8),
+                      const Annunciator(label: 'REMOVING', tone: Tone.warn),
+                    ],
                   ],
                 ),
               ),
@@ -404,6 +440,12 @@ class NodeCard extends StatelessWidget {
               ].join(' '),
               key: const ValueKey('down-note'),
               style: t.data(t.p.alarm),
+            )
+          else if (status.node.invited)
+            Text(
+              'Invite pending: waiting for the machine to run the install line.',
+              key: const ValueKey('pending-note'),
+              style: t.small(),
             )
           else if (m == null)
             Text('No metrics yet.', style: t.small())

@@ -240,6 +240,52 @@ class _AnnunciatorState extends State<Annunciator>
   }
 }
 
+// A row of legend keys of which one is lit: a selector switch. Each key is a
+// touch target of its own; a null onSelected disables the row.
+class ChoiceKeys<T> extends StatelessWidget {
+  const ChoiceKeys({
+    super.key,
+    required this.options,
+    required this.selected,
+    required this.onSelected,
+    this.tone = Tone.info,
+  });
+
+  final List<(T, String)> options;
+  final T selected;
+  final ValueChanged<T>? onSelected;
+  final Tone tone;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      for (final (value, label) in options)
+        Semantics(
+          button: true,
+          selected: value == selected,
+          child: InkWell(
+            key: ValueKey('choice-$label'),
+            borderRadius: BorderRadius.circular(Tokens.innerRadius),
+            onTap: onSelected == null ? null : () => onSelected!(value),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: Tokens.touch),
+              child: Align(
+                widthFactor: 1,
+                child: Annunciator(
+                  label: label,
+                  tone: tone,
+                  lit: value == selected && onSelected != null,
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
 // A segment chaser in place of indeterminate progress.
 class BusyBar extends StatefulWidget {
   const BusyBar({super.key, this.tone = Tone.lit, this.height = 3});

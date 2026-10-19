@@ -99,6 +99,76 @@ final $typed_data.Uint8List alertKindDescriptor = $convert.base64Decode(
     'lTS19QRVJDRU5UEAESGwoXQUxFUlRfS0lORF9NRU1fUFJFU1NVUkUQAhIaChZBTEVSVF9LSU5E'
     'X1VOUkVBQ0hBQkxFEAMSHAoYQUxFUlRfS0lORF9OQU1FX01JU01BVENIEAQ=');
 
+@$core.Deprecated('Use removeJobsDescriptor instead')
+const RemoveJobs$json = {
+  '1': 'RemoveJobs',
+  '2': [
+    {'1': 'REMOVE_JOBS_UNSPECIFIED', '2': 0},
+    {'1': 'REMOVE_JOBS_WAIT', '2': 1},
+    {'1': 'REMOVE_JOBS_CANCEL', '2': 2},
+  ],
+};
+
+/// Descriptor for `RemoveJobs`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List removeJobsDescriptor = $convert.base64Decode(
+    'CgpSZW1vdmVKb2JzEhsKF1JFTU9WRV9KT0JTX1VOU1BFQ0lGSUVEEAASFAoQUkVNT1ZFX0pPQl'
+    'NfV0FJVBABEhYKElJFTU9WRV9KT0JTX0NBTkNFTBAC');
+
+@$core.Deprecated('Use removePhaseDescriptor instead')
+const RemovePhase$json = {
+  '1': 'RemovePhase',
+  '2': [
+    {'1': 'REMOVE_PHASE_UNSPECIFIED', '2': 0},
+    {'1': 'REMOVE_PHASE_DRAINING', '2': 1},
+    {'1': 'REMOVE_PHASE_UNINSTALLING', '2': 2},
+    {'1': 'REMOVE_PHASE_REVOKING', '2': 3},
+    {'1': 'REMOVE_PHASE_REMOVED', '2': 4},
+  ],
+};
+
+/// Descriptor for `RemovePhase`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List removePhaseDescriptor = $convert.base64Decode(
+    'CgtSZW1vdmVQaGFzZRIcChhSRU1PVkVfUEhBU0VfVU5TUEVDSUZJRUQQABIZChVSRU1PVkVfUE'
+    'hBU0VfRFJBSU5JTkcQARIdChlSRU1PVkVfUEhBU0VfVU5JTlNUQUxMSU5HEAISGQoVUkVNT1ZF'
+    'X1BIQVNFX1JFVk9LSU5HEAMSGAoUUkVNT1ZFX1BIQVNFX1JFTU9WRUQQBA==');
+
+@$core.Deprecated('Use installPlatformDescriptor instead')
+const InstallPlatform$json = {
+  '1': 'InstallPlatform',
+  '2': [
+    {'1': 'INSTALL_PLATFORM_UNSPECIFIED', '2': 0},
+    {'1': 'INSTALL_PLATFORM_WINDOWS', '2': 1},
+    {'1': 'INSTALL_PLATFORM_LINUX', '2': 2},
+    {'1': 'INSTALL_PLATFORM_TERMUX', '2': 3},
+  ],
+};
+
+/// Descriptor for `InstallPlatform`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List installPlatformDescriptor = $convert.base64Decode(
+    'Cg9JbnN0YWxsUGxhdGZvcm0SIAocSU5TVEFMTF9QTEFURk9STV9VTlNQRUNJRklFRBAAEhwKGE'
+    'lOU1RBTExfUExBVEZPUk1fV0lORE9XUxABEhoKFklOU1RBTExfUExBVEZPUk1fTElOVVgQAhIb'
+    'ChdJTlNUQUxMX1BMQVRGT1JNX1RFUk1VWBAD');
+
+@$core.Deprecated('Use nodeSetupStageDescriptor instead')
+const NodeSetupStage$json = {
+  '1': 'NodeSetupStage',
+  '2': [
+    {'1': 'NODE_SETUP_STAGE_UNSPECIFIED', '2': 0},
+    {'1': 'NODE_SETUP_STAGE_INVITED', '2': 1},
+    {'1': 'NODE_SETUP_STAGE_JOINED', '2': 2},
+    {'1': 'NODE_SETUP_STAGE_METRICS', '2': 3},
+    {'1': 'NODE_SETUP_STAGE_READY', '2': 4},
+    {'1': 'NODE_SETUP_STAGE_ATTENTION', '2': 5},
+  ],
+};
+
+/// Descriptor for `NodeSetupStage`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List nodeSetupStageDescriptor = $convert.base64Decode(
+    'Cg5Ob2RlU2V0dXBTdGFnZRIgChxOT0RFX1NFVFVQX1NUQUdFX1VOU1BFQ0lGSUVEEAASHAoYTk'
+    '9ERV9TRVRVUF9TVEFHRV9JTlZJVEVEEAESGwoXTk9ERV9TRVRVUF9TVEFHRV9KT0lORUQQAhIc'
+    'ChhOT0RFX1NFVFVQX1NUQUdFX01FVFJJQ1MQAxIaChZOT0RFX1NFVFVQX1NUQUdFX1JFQURZEA'
+    'QSHgoaTk9ERV9TRVRVUF9TVEFHRV9BVFRFTlRJT04QBQ==');
+
 @$core.Deprecated('Use getDeskStateRequestDescriptor instead')
 const GetDeskStateRequest$json = {
   '1': 'GetDeskStateRequest',
@@ -989,6 +1059,7 @@ const NodeStatus$json = {
       '6': '.protectorate.v1.DeskUse',
       '10': 'deskInputs'
     },
+    {'1': 'draining', '3': 11, '4': 1, '5': 8, '10': 'draining'},
   ],
 };
 
@@ -1002,7 +1073,8 @@ final $typed_data.Uint8List nodeStatusDescriptor = $convert.base64Decode(
     'NhZ2USFAoFZXJyb3IYBiABKAlSBWVycm9yEjIKBmFsZXJ0cxgHIAMoCzIaLnByb3RlY3RvcmF0'
     'ZS52MS5Ob2RlQWxlcnRSBmFsZXJ0cxIuCgRkZXNrGAggASgLMhoucHJvdGVjdG9yYXRlLnYxLk'
     'Rlc2tTdGF0ZVIEZGVzaxIfCgtkZXNrX2hvbGRlchgJIAEoCVIKZGVza0hvbGRlchI5CgtkZXNr'
-    'X2lucHV0cxgKIAMoCzIYLnByb3RlY3RvcmF0ZS52MS5EZXNrVXNlUgpkZXNrSW5wdXRz');
+    'X2lucHV0cxgKIAMoCzIYLnByb3RlY3RvcmF0ZS52MS5EZXNrVXNlUgpkZXNrSW5wdXRzEhoKCG'
+    'RyYWluaW5nGAsgASgIUghkcmFpbmluZw==');
 
 @$core.Deprecated('Use listNodesRequestDescriptor instead')
 const ListNodesRequest$json = {
@@ -1071,21 +1143,215 @@ const RemoveNodeRequest$json = {
   '1': 'RemoveNodeRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {
+      '1': 'jobs',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.RemoveJobs',
+      '10': 'jobs'
+    },
+    {'1': 'uninstall', '3': 3, '4': 1, '5': 8, '10': 'uninstall'},
+    {
+      '1': 'wait_timeout',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'waitTimeout'
+    },
   ],
 };
 
 /// Descriptor for `RemoveNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List removeNodeRequestDescriptor = $convert
-    .base64Decode('ChFSZW1vdmVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1l');
+final $typed_data.Uint8List removeNodeRequestDescriptor = $convert.base64Decode(
+    'ChFSZW1vdmVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEi8KBGpvYnMYAiABKA4yGy'
+    '5wcm90ZWN0b3JhdGUudjEuUmVtb3ZlSm9ic1IEam9icxIcCgl1bmluc3RhbGwYAyABKAhSCXVu'
+    'aW5zdGFsbBI8Cgx3YWl0X3RpbWVvdXQYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb2'
+    '5SC3dhaXRUaW1lb3V0');
 
-@$core.Deprecated('Use removeNodeResponseDescriptor instead')
-const RemoveNodeResponse$json = {
-  '1': 'RemoveNodeResponse',
+@$core.Deprecated('Use removeNodeProgressDescriptor instead')
+const RemoveNodeProgress$json = {
+  '1': 'RemoveNodeProgress',
+  '2': [
+    {
+      '1': 'phase',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.RemovePhase',
+      '10': 'phase'
+    },
+    {'1': 'running_jobs', '3': 2, '4': 1, '5': 13, '10': 'runningJobs'},
+    {'1': 'message', '3': 3, '4': 1, '5': 9, '10': 'message'},
+  ],
 };
 
-/// Descriptor for `RemoveNodeResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List removeNodeResponseDescriptor =
-    $convert.base64Decode('ChJSZW1vdmVOb2RlUmVzcG9uc2U=');
+/// Descriptor for `RemoveNodeProgress`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List removeNodeProgressDescriptor = $convert.base64Decode(
+    'ChJSZW1vdmVOb2RlUHJvZ3Jlc3MSMgoFcGhhc2UYASABKA4yHC5wcm90ZWN0b3JhdGUudjEuUm'
+    'Vtb3ZlUGhhc2VSBXBoYXNlEiEKDHJ1bm5pbmdfam9icxgCIAEoDVILcnVubmluZ0pvYnMSGAoH'
+    'bWVzc2FnZRgDIAEoCVIHbWVzc2FnZQ==');
+
+@$core.Deprecated('Use uninstallRequestDescriptor instead')
+const UninstallRequest$json = {
+  '1': 'UninstallRequest',
+};
+
+/// Descriptor for `UninstallRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List uninstallRequestDescriptor =
+    $convert.base64Decode('ChBVbmluc3RhbGxSZXF1ZXN0');
+
+@$core.Deprecated('Use uninstallResponseDescriptor instead')
+const UninstallResponse$json = {
+  '1': 'UninstallResponse',
+  '2': [
+    {'1': 'actions', '3': 1, '4': 3, '5': 9, '10': 'actions'},
+    {'1': 'left', '3': 2, '4': 3, '5': 9, '10': 'left'},
+  ],
+};
+
+/// Descriptor for `UninstallResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List uninstallResponseDescriptor = $convert.base64Decode(
+    'ChFVbmluc3RhbGxSZXNwb25zZRIYCgdhY3Rpb25zGAEgAygJUgdhY3Rpb25zEhIKBGxlZnQYAi'
+    'ADKAlSBGxlZnQ=');
+
+@$core.Deprecated('Use inviteNodeRequestDescriptor instead')
+const InviteNodeRequest$json = {
+  '1': 'InviteNodeRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'tier', '3': 2, '4': 1, '5': 9, '10': 'tier'},
+    {'1': 'pools', '3': 3, '4': 3, '5': 9, '10': 'pools'},
+    {
+      '1': 'ttl',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'ttl'
+    },
+    {'1': 'install_url', '3': 5, '4': 1, '5': 9, '10': 'installUrl'},
+  ],
+};
+
+/// Descriptor for `InviteNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List inviteNodeRequestDescriptor = $convert.base64Decode(
+    'ChFJbnZpdGVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEhIKBHRpZXIYAiABKAlSBH'
+    'RpZXISFAoFcG9vbHMYAyADKAlSBXBvb2xzEisKA3R0bBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1'
+    'Zi5EdXJhdGlvblIDdHRsEh8KC2luc3RhbGxfdXJsGAUgASgJUgppbnN0YWxsVXJs');
+
+@$core.Deprecated('Use installCommandDescriptor instead')
+const InstallCommand$json = {
+  '1': 'InstallCommand',
+  '2': [
+    {
+      '1': 'platform',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.InstallPlatform',
+      '10': 'platform'
+    },
+    {'1': 'shell', '3': 2, '4': 1, '5': 9, '10': 'shell'},
+    {'1': 'command', '3': 3, '4': 1, '5': 9, '10': 'command'},
+    {'1': 'note', '3': 4, '4': 1, '5': 9, '10': 'note'},
+  ],
+};
+
+/// Descriptor for `InstallCommand`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List installCommandDescriptor = $convert.base64Decode(
+    'Cg5JbnN0YWxsQ29tbWFuZBI8CghwbGF0Zm9ybRgBIAEoDjIgLnByb3RlY3RvcmF0ZS52MS5Jbn'
+    'N0YWxsUGxhdGZvcm1SCHBsYXRmb3JtEhQKBXNoZWxsGAIgASgJUgVzaGVsbBIYCgdjb21tYW5k'
+    'GAMgASgJUgdjb21tYW5kEhIKBG5vdGUYBCABKAlSBG5vdGU=');
+
+@$core.Deprecated('Use inviteNodeResponseDescriptor instead')
+const InviteNodeResponse$json = {
+  '1': 'InviteNodeResponse',
+  '2': [
+    {
+      '1': 'node',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.NodeInfo',
+      '10': 'node'
+    },
+    {'1': 'control_url', '3': 2, '4': 1, '5': 9, '10': 'controlUrl'},
+    {'1': 'key', '3': 3, '4': 1, '5': 9, '10': 'key'},
+    {
+      '1': 'expires_at',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'expiresAt'
+    },
+    {'1': 'install_url', '3': 5, '4': 1, '5': 9, '10': 'installUrl'},
+    {
+      '1': 'commands',
+      '3': 6,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.InstallCommand',
+      '10': 'commands'
+    },
+  ],
+};
+
+/// Descriptor for `InviteNodeResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List inviteNodeResponseDescriptor = $convert.base64Decode(
+    'ChJJbnZpdGVOb2RlUmVzcG9uc2USLQoEbm9kZRgBIAEoCzIZLnByb3RlY3RvcmF0ZS52MS5Ob2'
+    'RlSW5mb1IEbm9kZRIfCgtjb250cm9sX3VybBgCIAEoCVIKY29udHJvbFVybBIQCgNrZXkYAyAB'
+    'KAlSA2tleRI5CgpleHBpcmVzX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcF'
+    'IJZXhwaXJlc0F0Eh8KC2luc3RhbGxfdXJsGAUgASgJUgppbnN0YWxsVXJsEjsKCGNvbW1hbmRz'
+    'GAYgAygLMh8ucHJvdGVjdG9yYXRlLnYxLkluc3RhbGxDb21tYW5kUghjb21tYW5kcw==');
+
+@$core.Deprecated('Use watchNodeSetupRequestDescriptor instead')
+const WatchNodeSetupRequest$json = {
+  '1': 'WatchNodeSetupRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+  ],
+};
+
+/// Descriptor for `WatchNodeSetupRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List watchNodeSetupRequestDescriptor =
+    $convert.base64Decode(
+        'ChVXYXRjaE5vZGVTZXR1cFJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZQ==');
+
+@$core.Deprecated('Use nodeSetupProgressDescriptor instead')
+const NodeSetupProgress$json = {
+  '1': 'NodeSetupProgress',
+  '2': [
+    {
+      '1': 'stage',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.NodeSetupStage',
+      '10': 'stage'
+    },
+    {'1': 'problems', '3': 2, '4': 3, '5': 9, '10': 'problems'},
+    {'1': 'notes', '3': 3, '4': 3, '5': 9, '10': 'notes'},
+    {'1': 'message', '3': 4, '4': 1, '5': 9, '10': 'message'},
+    {
+      '1': 'status',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.NodeStatus',
+      '10': 'status'
+    },
+  ],
+};
+
+/// Descriptor for `NodeSetupProgress`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nodeSetupProgressDescriptor = $convert.base64Decode(
+    'ChFOb2RlU2V0dXBQcm9ncmVzcxI1CgVzdGFnZRgBIAEoDjIfLnByb3RlY3RvcmF0ZS52MS5Ob2'
+    'RlU2V0dXBTdGFnZVIFc3RhZ2USGgoIcHJvYmxlbXMYAiADKAlSCHByb2JsZW1zEhQKBW5vdGVz'
+    'GAMgAygJUgVub3RlcxIYCgdtZXNzYWdlGAQgASgJUgdtZXNzYWdlEjMKBnN0YXR1cxgFIAEoCz'
+    'IbLnByb3RlY3RvcmF0ZS52MS5Ob2RlU3RhdHVzUgZzdGF0dXM=');
 
 const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
   '1': 'NodeAgentService',
@@ -1149,6 +1415,11 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '1': 'GetDeskState',
       '2': '.protectorate.v1.GetDeskStateRequest',
       '3': '.protectorate.v1.DeskState'
+    },
+    {
+      '1': 'Uninstall',
+      '2': '.protectorate.v1.UninstallRequest',
+      '3': '.protectorate.v1.UninstallResponse'
     },
   ],
   '3': {},
@@ -1219,6 +1490,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetDeskStateRequest': GetDeskStateRequest$json,
   '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,
   '.protectorate.v1.DeskState': $0.DeskState$json,
+  '.protectorate.v1.UninstallRequest': UninstallRequest$json,
+  '.protectorate.v1.UninstallResponse': UninstallResponse$json,
 };
 
 /// Descriptor for `NodeAgentService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -1240,7 +1513,9 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     'b3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVzcG9uc2USWAoLQXBwbHlVcGRhdGUSIy5wcm90ZW'
     'N0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBk'
     'YXRlUmVzcG9uc2USUAoMR2V0RGVza1N0YXRlEiQucHJvdGVjdG9yYXRlLnYxLkdldERlc2tTdG'
-    'F0ZVJlcXVlc3QaGi5wcm90ZWN0b3JhdGUudjEuRGVza1N0YXRlGgSQtRgB');
+    'F0ZVJlcXVlc3QaGi5wcm90ZWN0b3JhdGUudjEuRGVza1N0YXRlElIKCVVuaW5zdGFsbBIhLnBy'
+    'b3RlY3RvcmF0ZS52MS5Vbmluc3RhbGxSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLlVuaW5zdG'
+    'FsbFJlc3BvbnNlGgSQtRgB');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',
@@ -1266,7 +1541,22 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
     {
       '1': 'RemoveNode',
       '2': '.protectorate.v1.RemoveNodeRequest',
-      '3': '.protectorate.v1.RemoveNodeResponse'
+      '3': '.protectorate.v1.RemoveNodeProgress',
+      '4': {},
+      '6': true
+    },
+    {
+      '1': 'InviteNode',
+      '2': '.protectorate.v1.InviteNodeRequest',
+      '3': '.protectorate.v1.InviteNodeResponse',
+      '4': {}
+    },
+    {
+      '1': 'WatchNodeSetup',
+      '2': '.protectorate.v1.WatchNodeSetupRequest',
+      '3': '.protectorate.v1.NodeSetupProgress',
+      '4': {'34': 1},
+      '6': true,
     },
     {
       '1': 'PutFile',
@@ -1336,7 +1626,12 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,
   '.protectorate.v1.RemoveNodeRequest': RemoveNodeRequest$json,
-  '.protectorate.v1.RemoveNodeResponse': RemoveNodeResponse$json,
+  '.protectorate.v1.RemoveNodeProgress': RemoveNodeProgress$json,
+  '.protectorate.v1.InviteNodeRequest': InviteNodeRequest$json,
+  '.protectorate.v1.InviteNodeResponse': InviteNodeResponse$json,
+  '.protectorate.v1.InstallCommand': InstallCommand$json,
+  '.protectorate.v1.WatchNodeSetupRequest': WatchNodeSetupRequest$json,
+  '.protectorate.v1.NodeSetupProgress': NodeSetupProgress$json,
   '.protectorate.v1.PutFileRequest': PutFileRequest$json,
   '.protectorate.v1.FileChunk': FileChunk$json,
   '.protectorate.v1.FileTrailer': FileTrailer$json,
@@ -1359,15 +1654,19 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'VxdWVzdBoiLnByb3RlY3RvcmF0ZS52MS5MaXN0Tm9kZXNSZXNwb25zZSIDkAIBEkwKB0dldE5v'
     'ZGUSHy5wcm90ZWN0b3JhdGUudjEuR2V0Tm9kZVJlcXVlc3QaGy5wcm90ZWN0b3JhdGUudjEuTm'
     '9kZVN0YXR1cyIDkAIBEksKB0FkZE5vZGUSHy5wcm90ZWN0b3JhdGUudjEuQWRkTm9kZVJlcXVl'
-    'c3QaGS5wcm90ZWN0b3JhdGUudjEuTm9kZUluZm8iBKC1GAESVQoKUmVtb3ZlTm9kZRIiLnByb3'
+    'c3QaGS5wcm90ZWN0b3JhdGUudjEuTm9kZUluZm8iBKC1GAESYQoKUmVtb3ZlTm9kZRIiLnByb3'
     'RlY3RvcmF0ZS52MS5SZW1vdmVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5SZW1vdmVO'
-    'b2RlUmVzcG9uc2USTAoHUHV0RmlsZRIfLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVxdWVzdB'
-    'ogLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVzcG9uc2USTgoHR2V0RmlsZRIfLnByb3RlY3Rv'
-    'cmF0ZS52MS5HZXRGaWxlUmVxdWVzdBogLnByb3RlY3RvcmF0ZS52MS5HZXRGaWxlUmVzcG9uc2'
-    'UwARJeCgtBcHBseVVwZGF0ZRIjLnByb3RlY3RvcmF0ZS52MS5BcHBseVVwZGF0ZVJlcXVlc3Qa'
-    'JC5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXNwb25zZSIEoLUYARJdCgpVcGRhdGVOb2'
-    'RlEiIucHJvdGVjdG9yYXRlLnYxLlVwZGF0ZU5vZGVSZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYx'
-    'LlVwZGF0ZU5vZGVQcm9ncmVzcyIEoLUYATABEl8KDVNldERlc2tQb2xpY3kSJS5wcm90ZWN0b3'
-    'JhdGUudjEuU2V0RGVza1BvbGljeVJlcXVlc3QaIS5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGlj'
-    'eVN0YXR1cyIEoLUYARJZCg1HZXREZXNrUG9saWN5EiUucHJvdGVjdG9yYXRlLnYxLkdldERlc2'
-    'tQb2xpY3lSZXF1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkRlc2tQb2xpY3lTdGF0dXM=');
+    'b2RlUHJvZ3Jlc3MiCIi1GAGgtRgBMAESWwoKSW52aXRlTm9kZRIiLnByb3RlY3RvcmF0ZS52MS'
+    '5JbnZpdGVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5JbnZpdGVOb2RlUmVzcG9uc2Ui'
+    'BKC1GAESYwoOV2F0Y2hOb2RlU2V0dXASJi5wcm90ZWN0b3JhdGUudjEuV2F0Y2hOb2RlU2V0dX'
+    'BSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLk5vZGVTZXR1cFByb2dyZXNzIgOQAgEwARJMCgdQ'
+    'dXRGaWxlEh8ucHJvdGVjdG9yYXRlLnYxLlB1dEZpbGVSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLn'
+    'YxLlB1dEZpbGVSZXNwb25zZRJOCgdHZXRGaWxlEh8ucHJvdGVjdG9yYXRlLnYxLkdldEZpbGVS'
+    'ZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLkdldEZpbGVSZXNwb25zZTABEl4KC0FwcGx5VXBkYX'
+    'RlEiMucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRlUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52'
+    'MS5BcHBseVVwZGF0ZVJlc3BvbnNlIgSgtRgBEl0KClVwZGF0ZU5vZGUSIi5wcm90ZWN0b3JhdG'
+    'UudjEuVXBkYXRlTm9kZVJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuVXBkYXRlTm9kZVByb2dy'
+    'ZXNzIgSgtRgBMAESXwoNU2V0RGVza1BvbGljeRIlLnByb3RlY3RvcmF0ZS52MS5TZXREZXNrUG'
+    '9saWN5UmVxdWVzdBohLnByb3RlY3RvcmF0ZS52MS5EZXNrUG9saWN5U3RhdHVzIgSgtRgBElkK'
+    'DUdldERlc2tQb2xpY3kSJS5wcm90ZWN0b3JhdGUudjEuR2V0RGVza1BvbGljeVJlcXVlc3QaIS'
+    '5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGljeVN0YXR1cw==');

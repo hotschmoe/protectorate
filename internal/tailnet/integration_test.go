@@ -243,7 +243,7 @@ func TestTailnetEndToEnd(t *testing.T) {
 	})
 
 	t.Run("revoked node drops off", func(t *testing.T) {
-		if err := svc.Admin.Revoke(ctx, "alpha"); err != nil {
+		if ok, err := svc.Admin.Revoke(ctx, "alpha"); err != nil || !ok {
 			t.Fatal(err)
 		}
 		deadline := time.Now().Add(30 * time.Second)
@@ -259,6 +259,74 @@ func TestTailnetEndToEnd(t *testing.T) {
 		}
 		if code, _, err := get(ctx, hc, nodeURL("beta"), 30*time.Second); err != nil || code != 200 {
 			t.Fatalf("beta after revoking alpha: code=%d err=%v", code, err)
+		}
+	})
+
+	joinFails := func(t *testing.T, key, name string) {
+		t.Helper()
+		jctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		if err := tailnet.Join(jctx, filepath.Join(t.TempDir(), "tsnet"), control, key, name); err == nil {
+			t.Fatalf("%s joined", name)
+		}
+	}
+
+	t.Run("invite key is single-use", func(t *testing.T) {
+		key, _, err := svc.Admin.InviteNode(ctx, "delta", "server", nil, 5*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tailnet.Join(ctx, filepath.Join(t.TempDir(), "tsnet"), control, key, "delta"); err != nil {
+			t.Fatal(err)
+		}
+		joinFails(t, key, "delta-again")
+	})
+
+	t.Run("expired invite key cannot enroll", func(t *testing.T) {
+		key, id, err := svc.Admin.Invite(ctx, "epsilon", []string{tailnet.TagNode}, 5*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.Admin.ExpireKey(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		joinFails(t, key, "epsilon")
+	})
+
+	t.Run("revoked node that returns is refused", func(t *testing.T) {
+		key, _, err := svc.Admin.Invite(ctx, "zeta", []string{tailnet.TagNode}, 5*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(t.TempDir(), "tsnet")
+		if err := tailnet.Join(ctx, dir, control, key, "zeta"); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := svc.Admin.Revoke(ctx, "zeta"); err != nil || !ok {
+			t.Fatalf("revoke: %t %v", ok, err)
+		}
+		// tsnet may come up from its cached state, but control no longer
+		// knows the machine: it is never registered again and never reached.
+		octx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		if n, err := tailnet.OpenNode(octx, dir); err == nil {
+			defer n.Close()
+			defer serveNode(t, n, "zeta")()
+		}
+		if _, _, err := get(ctx, hc, nodeURL("zeta"), 5*time.Second); err == nil {
+			t.Fatal("the hub reached the revoked node")
+		}
+		nodes, err := svc.Admin.Nodes(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range nodes {
+			if n.GivenName == "zeta" {
+				t.Fatalf("revoked node registered again: %+v", n)
+			}
+		}
+		if ok, err := svc.Admin.Revoke(ctx, "zeta"); ok || err != nil {
+			t.Fatalf("second revoke: %t %v", ok, err)
 		}
 	})
 }

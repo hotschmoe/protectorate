@@ -61,6 +61,8 @@ type installInput struct {
 	Name         string
 	Elevated     bool
 	ServeArgs    []string
+	// Self marks an uninstall the agent runs on itself.
+	Self bool
 }
 
 // pj joins path elements the way the target OS does, whatever OS plans.
@@ -162,34 +164,72 @@ func planInstall(in installInput) ([]installStep, error) {
 }
 
 // planUninstall lists what `node uninstall` does: unregister and stop, never
-// delete. The note names what is left for the user to remove.
-func planUninstall(in installInput) ([]installStep, error) {
+// delete. It also returns what is left for the user to remove, which the
+// closing note names. With in.Self the agent uninstalls itself: it only
+// unregisters, then exits on its own, because stopping it through its
+// startup registration would end it before the rest ran.
+func planUninstall(in installInput) ([]installStep, []string, error) {
 	bin, err := in.binaryPath()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var steps []installStep
 	var left []string
 	switch in.GOOS {
 	case "windows":
-		steps = append(steps,
-			installStep{Kind: stepRun, Soft: true, Argv: []string{schtasks, "/End", "/TN", taskName}, Desc: "stop the running agent"},
-			installStep{Kind: stepRun, Soft: true, Argv: []string{schtasks, "/Delete", "/TN", taskName, "/F"}, Desc: "unregister the logon task"},
-		)
+		if !in.Self {
+			steps = append(steps, installStep{Kind: stepRun, Soft: true, Argv: []string{schtasks, "/End", "/TN", taskName}, Desc: "stop the running agent"})
+		}
+		steps = append(steps, installStep{Kind: stepRun, Soft: true, Argv: []string{schtasks, "/Delete", "/TN", taskName, "/F"}, Desc: "unregister the logon task"})
 		left = append(left, pj(in.GOOS, in.Home, taskName+".xml"))
 	case "linux":
-		steps = append(steps, installStep{Kind: stepRun, Soft: true, Argv: []string{"systemctl", "--user", "disable", "--now", unitName}, Desc: "stop the agent and disable the unit"})
+		if in.Self {
+			steps = append(steps, installStep{Kind: stepRun, Soft: true, Argv: []string{"systemctl", "--user", "disable", unitName}, Desc: "disable the unit"})
+		} else {
+			steps = append(steps, installStep{Kind: stepRun, Soft: true, Argv: []string{"systemctl", "--user", "disable", "--now", unitName}, Desc: "stop the agent and disable the unit"})
+		}
 		left = append(left, pj(in.GOOS, in.UserHome, ".config", "systemd", "user", unitName))
 	case "android":
 		steps = append(steps, installStep{Kind: stepRun, Soft: true, Argv: []string{"sv-disable", taskName}, Desc: "stop the agent and disable the service"})
 		left = append(left, pj(in.GOOS, in.Prefix, "var", "service", taskName), pj(in.GOOS, in.UserHome, ".termux", "boot", taskName))
 	}
 	left = append(left, bin, in.Home+" (enrollment and node state)")
-	steps = append(steps,
-		installStep{Kind: stepNote, Desc: "nothing was deleted. You may delete: " + strings.Join(left, ", ")},
-		installStep{Kind: stepNote, Desc: "to remove the node from the tailnet too, run on the hub: protectorate node revoke " + in.Name},
-	)
-	return steps, nil
+	steps = append(steps, installStep{Kind: stepNote, Desc: "nothing was deleted. You may delete: " + strings.Join(left, ", ")})
+	if !in.Self {
+		steps = append(steps, installStep{Kind: stepNote, Desc: "to remove the node from the tailnet too, run on the hub: protectorate node rm " + in.Name})
+	}
+	return steps, left, nil
+}
+
+// agentUninstaller lets a running agent uninstall itself on the hub's
+// request; stop ends the agent once the steps ran.
+func agentUninstaller(w io.Writer, stop func()) func() ([]string, []string, func(), error) {
+	return func() ([]string, []string, func(), error) {
+		in, err := currentInstallInput()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		in.Self = true
+		steps, left, err := planUninstall(in)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		var actions []string
+		for _, s := range steps {
+			if s.Kind != stepNote {
+				actions = append(actions, s.Desc)
+			}
+		}
+		actions = append(actions, "stop the agent")
+		run := func() {
+			fmt.Fprintln(w, "node agent: uninstalling on the hub's request")
+			if err := runSteps(context.Background(), w, w, steps, nil); err != nil {
+				fmt.Fprintf(w, "node agent: uninstall: %v\n", err)
+			}
+			stop()
+		}
+		return actions, left, run, nil
+	}
 }
 
 // describe renders one step for a dry run or progress output.
@@ -352,7 +392,7 @@ file or directory; it prints the paths you may delete yourself.`,
 			if in.Name == "" {
 				in.Name = tailnet.SanitizeLabel(node.Hostname())
 			}
-			steps, err := planUninstall(in)
+			steps, _, err := planUninstall(in)
 			if err != nil {
 				return err
 			}

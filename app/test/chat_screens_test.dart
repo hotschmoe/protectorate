@@ -40,6 +40,8 @@ import 'package:protectorate/hubs/event_feed.dart';
 import 'package:protectorate/hubs/hub_client.dart';
 import 'package:protectorate/hubs/hub_profile.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
+import 'package:protectorate/nodes/add_node.dart';
+import 'package:protectorate/nodes/remove_node.dart';
 import 'package:protectorate/nodes/version_skew.dart';
 import 'package:protectorate/screens/chat_screen.dart';
 import 'package:protectorate/screens/sleeves_screen.dart';
@@ -883,6 +885,145 @@ void main() {
           await tester.pumpWidget(const SizedBox());
         });
       }
+
+      testWidgets('add-node $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 1500 : 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await _pumpShell(tester, key, b, 'nodes', events);
+        final hub = phone ? 'http://192.168.1.20:7470' : 'http://hub.lan:7470';
+        const key0 = 'hskey-auth-7f3a9c2e41b8-5d0e6a';
+        final client = HubClient.withTransport(
+          FakeTransportBuilder()
+              .unary(
+                NodeService.inviteNode,
+                (InviteNodeRequest r, ctx) async => InviteNodeResponse(
+                  node: NodeInfo(name: r.name, invited: true),
+                  key: key0,
+                  installUrl: hub,
+                  expiresAt: Timestamp.fromDateTime(
+                    DateTime.now().add(const Duration(hours: 1)),
+                  ),
+                  commands: [
+                    InstallCommand(
+                      platform: InstallPlatform.INSTALL_PLATFORM_WINDOWS,
+                      shell: 'PowerShell',
+                      command:
+                          "\$env:PROTECTORATE_ENROLL_KEY='$key0'; \$env:PROTECTORATE_NODE_NAME='${r.name}'; irm '$hub/install.ps1' | iex",
+                      note:
+                          'Paste into a normal PowerShell (not Run as administrator) as the user who stays logged in. It installs a logon task for that user, so the agent runs in their desktop session without administrator rights. x64 and ARM64.',
+                    ),
+                    InstallCommand(
+                      platform: InstallPlatform.INSTALL_PLATFORM_TERMUX,
+                      shell: 'Termux',
+                      command:
+                          "curl -fsSL '$hub/install.sh' | PROTECTORATE_ENROLL_KEY='$key0' sh -s -- --name '${r.name}'",
+                      note:
+                          'Paste into Termux. For start at boot, first pkg install termux-services (then restart Termux) and install the Termux:Boot app.',
+                    ),
+                  ],
+                ),
+              )
+              .server(
+                NodeService.watchNodeSetup,
+                (WatchNodeSetupRequest r, ctx) => Stream.value(
+                  NodeSetupProgress(
+                    stage: NodeSetupStage.NODE_SETUP_STAGE_JOINED,
+                    message:
+                        'enrolled in the tailnet; waiting for the hub to reach the agent',
+                    status: NodeStatus(
+                      node: NodeInfo(name: r.name, invited: true),
+                    ),
+                  ),
+                ),
+              )
+              .build(),
+        );
+        unawaited(
+          showAddNode(
+            tester.element(find.byType(Scaffold).first),
+            client: client,
+            initialName: phone ? 'pixel' : 'office-arm',
+            platform: phone ? TargetPlatform.android : TargetPlatform.windows,
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'add-node-form-$tag');
+        await tester.tap(find.byKey(const ValueKey('add-create')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        if (phone) {
+          await tester.tap(find.byKey(const ValueKey('choice-TERMUX')));
+        } else {
+          await tester.tap(find.byKey(const ValueKey('choice-WINDOWS')));
+        }
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'add-node-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('remove-node $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 1100 : 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await _pumpShell(tester, key, b, 'nodes', events);
+        final progress = StreamController<RemoveNodeProgress>();
+        addTearDown(progress.close);
+        final client = HubClient.withTransport(
+          FakeTransportBuilder()
+              .server(
+                NodeService.removeNode,
+                (RemoveNodeRequest r, ctx) => progress.stream,
+              )
+              .build(),
+        );
+        unawaited(
+          showRemoveNode(
+            tester.element(find.byType(Scaffold).first),
+            client: client,
+            status: NodeStatus(
+              node: NodeInfo(name: 'win-desk'),
+              freshness: NodeFreshness.NODE_FRESHNESS_FRESH,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.enterText(
+          find.byKey(const ValueKey('remove-confirm')),
+          'win-desk',
+        );
+        for (var i = 0; i < 5; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        await _shoot(tester, key, 'remove-node-$tag');
+        await tester.tap(find.byKey(const ValueKey('remove-go')));
+        await tester.pump();
+        progress.add(
+          RemoveNodeProgress(
+            phase: RemovePhase.REMOVE_PHASE_DRAINING,
+            runningJobs: 1,
+            message: 'waiting for 1 job(s) to finish',
+          ),
+        );
+        progress.add(
+          RemoveNodeProgress(
+            phase: RemovePhase.REMOVE_PHASE_UNINSTALLING,
+            message:
+                'the agent unregisters its startup and stops: unregister the logon task; stop the agent. Nothing is deleted.',
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'remove-node-progress-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
 
       for (final node in ['forge', 'win-desk']) {
         testWidgets('node $node $tag', (tester) async {

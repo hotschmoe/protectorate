@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"connectrpc.com/connect"
@@ -115,15 +114,7 @@ func (h *Hub) UpdateNode(ctx context.Context, req *connect.Request[pb.UpdateNode
 		return stream.Send(&pb.UpdateNodeProgress{Phase: pb.UpdatePhase_UPDATE_PHASE_SKIPPED, Version: prev, PreviousVersion: prev, Message: why})
 	}
 
-	self, _ := os.Executable()
-	if h.SelfExe != "" {
-		self = h.SelfExe
-	}
-	dir := h.BinaryDir
-	if dir == "" && self != "" {
-		dir = filepath.Dir(self)
-	}
-	bin := pickBinary(dir, st.Node.Os, st.Node.Arch, runtime.GOOS, runtime.GOARCH, self)
+	bin := h.binaryPath(st.Node.Os, st.Node.Arch)
 	size, sum, err := fileDigest(bin)
 	if err != nil {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("read %s (run `make cross`, or start the hub with --binary-dir): %w", bin, err))

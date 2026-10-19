@@ -38,7 +38,7 @@ func TestCatalog(t *testing.T) {
 		pCreate:  {owner: true},
 		pRespawn: {owner: true},
 		pAddNode: {owner: true},
-		pRmNode:  {},
+		pRmNode:  {owner: true, streaming: true},
 	}
 	for proc, w := range want {
 		m, ok := ms[proc]
@@ -98,6 +98,7 @@ const (
 	pRespawn = "/protectorate.v1.SessionService/RespawnSession"
 	pAddNode = "/protectorate.v1.NodeService/AddNode"
 	pRmNode  = "/protectorate.v1.NodeService/RemoveNode"
+	pPutFile = "/protectorate.v1.NodeService/PutFile"
 	pAdd     = "/protectorate.v1.BacklogService/AddItem"
 	pListIt  = "/protectorate.v1.BacklogService/ListItems"
 	pSub     = "/protectorate.v1.EventService/Subscribe"
@@ -136,7 +137,8 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"glob not respawn", []string{"session_*"}, false, pRespawn, false, "session_respawn_session is owner-only"},
 		{"star not add node", []string{"*", "node_add_node"}, false, pAddNode, false, "node_add_node is owner-only"},
 		{"owner create session", nil, true, pCreate, true, ""},
-		{"glob still kills", []string{"node_*"}, false, pRmNode, true, ""},
+		{"glob covers its service", []string{"node_*"}, false, pPutFile, true, ""},
+		{"glob not remove node", []string{"node_*"}, false, pRmNode, false, "node_remove_node is owner-only"},
 		{"star not token service", []string{"*"}, false, pTokNew, false, "owner token (token_create_token is owner-only)"},
 		{"star not token list", []string{"*", "read"}, false, pTokList, false, "owner token (token_list_tokens is owner-only)"},
 		{"terminal scope grants no rpc", []string{"terminal", "terminal:readonly"}, false, pStatus, false, "read or hub_get_status"},

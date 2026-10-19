@@ -32,6 +32,7 @@ clients (desktop, Android, web) talk to the same API.
 | Clients | `pair`, `mcp`, `hub serve --web` | QR pairing with a scoped device token; MCP tools generated from the API |
 | Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
 | Nodes | `node install/uninstall/doctor/update` | one-command node setup per OS, dry-run first; uninstall deletes nothing; update pushes a build, swaps it with one rollback binary |
+| Add and remove nodes (`docs/install.md`) | app ADD NODE / REMOVE NODE, `node invite`, `node rm [--jobs wait\|cancel] [--uninstall]` | the hub serves `/install.sh`, `/install.ps1` and sha256-checked builds under `/dl/`; a single-use key from the environment, never a URL; live INVITED, JOINED, FIRST METRICS, READY; removal drains, revokes the tailnet enrollment and deletes nothing on the machine |
 
 ## Build
 
