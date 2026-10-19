@@ -153,6 +153,13 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
   `tag:client` callers, authorized by WhoIs instead of the bearer token
   (terminal WebSockets still require the token). `tag:node` is denied by ACL
   and by the authorizer. Node agents accept only `tag:hub`.
+- `TailnetService.GetStatus` (read scope, `protectorate tailnet status`) maps
+  the hub's tsnet LocalClient status to the API: self identity and per peer
+  tags, IPs, online, handshake/last seen, direct address or DERP region and
+  rx/tx bytes (`internal/tailnet/status.go`). It answers FAILED_PRECONDITION
+  when the tailnet is not initialised. The embedded DERP server drops its
+  per-connection EOF/reset/closed-connection log lines, which every killed
+  node would otherwise repeat.
 - Right after a join the netmap may not yet hold every peer, so the hub's
   tailnet `http.Client` retries "no such host" lookups for up to 15s.
 - Reconnection after a node restart: a restarted member gets a new disco key,

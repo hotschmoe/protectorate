@@ -88,3 +88,11 @@ protectorate client invite --name phone      # follow the printed Tailscale app 
 protectorate client register <key>           # for the app's registration key
 protectorate pair --app                      # QR for the native app; without --app, the web link
 ```
+
+## Troubleshooting the tailnet
+
+`protectorate tailnet status` shows the hub's own view: its tailnet name and IPs, then one row per peer with tags, online flag, how the hub reaches it, last WireGuard handshake, last seen and rx/tx bytes. PATH reads `direct <ip:port>` for a UDP path, `DERP protectorate` when traffic goes through the hub's relay, and `-` when no path exists yet. `--json` prints the same data for scripts; the `tailnet_get_status` MCP tool and `TailnetService/GetStatus` carry it too (read scope). It fails with a precondition error when the hub runs without a tailnet.
+
+- A peer that stays on DERP while both sides are on one LAN usually has UDP blocked between them; the relay still works.
+- A peer with `online no` and an old handshake is down or revoked; `node ls` also lists nodes that were invited but never joined.
+- A node killed without a clean shutdown makes the relay see a dropped connection; those expected disconnects are not logged, other relay errors are.

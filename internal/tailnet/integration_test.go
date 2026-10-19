@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"tailscale.com/envknob"
 	"testing"
@@ -161,6 +162,25 @@ func TestTailnetEndToEnd(t *testing.T) {
 				t.Fatalf("%s: code=%d body=%q err=%v", n, code, body, err)
 			}
 		}
+	})
+
+	t.Run("status shows the peer", func(t *testing.T) {
+		st, err := svc.Net.Status(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Self.GetName() == "" || st.BackendState != "Running" {
+			t.Fatalf("self %v state %q", st.Self, st.BackendState)
+		}
+		for _, p := range st.Peers {
+			if strings.HasPrefix(p.Name, "alpha.") {
+				if !p.Online || len(p.Ips) == 0 || !slices.Contains(p.Tags, tailnet.TagNode) {
+					t.Fatalf("alpha: %v", p)
+				}
+				return
+			}
+		}
+		t.Fatalf("alpha not in status: %v", st.Peers)
 	})
 
 	t.Run("node rejects tag:node callers", func(t *testing.T) {
