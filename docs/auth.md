@@ -30,6 +30,7 @@ is implied (`read` does not include `events`; no glob includes the terminal).
 | `events` | the EventService stream |
 | `terminal` | the WebSocket terminal, read-write or read-only |
 | `terminal:readonly` | the terminal only with `readonly=1` |
+| `terminal:host` | the terminal, also read-write on sessions outside a sleeve sandbox (shell as the hub user) |
 | `<glob>` | `path.Match` glob over tool names |
 
 The canonical glob form is the MCP tool name: the snake_case service name
@@ -59,9 +60,10 @@ not include them.
 The terminal is the same hole by another door. Typing into a session that runs
 as the hub user is code execution as that user, so a `terminal` token may
 attach read-write only to `sleeve-*` sessions, which run in the sleeve
-sandbox. Read-write attach to any other session needs the owner token; a
-scoped token gets 403 with a hint to attach with `readonly=1`, which still
-works. `job_submit_job` is likewise shell access (on nodes, not the hub) and
+sandbox. Read-write attach to any other session needs the owner token or the
+explicit `terminal:host` scope; any other token gets 403 with a hint to attach
+with `readonly=1`, which still works. `protectorate pair --host-shell` adds
+`terminal:host` for a phone you want to type into host sessions from. `job_submit_job` is likewise shell access (on nodes, not the hub) and
 stays a deliberate grant.
 
 The hub sends its node token only to an address the owner added: inventory
@@ -120,7 +122,7 @@ protectorate audit tail -n 50
 Every command takes the token from `--token-file`, then env
 `PROTECTORATE_TOKEN`, then the local owner token file, so a scoped token also
 works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
-mints a device token (`read`, `events`, `terminal`, `session_*`, `backlog_*`,
+mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `backlog_*`,
 90 days) instead of embedding the owner token.
 
 ## Shared node token

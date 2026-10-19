@@ -12,12 +12,13 @@ const (
 	ScopeEvents           = "events"
 	ScopeTerminal         = "terminal"
 	ScopeTerminalReadonly = "terminal:readonly"
+	ScopeTerminalHost     = "terminal:host"
 
 	eventService = "EventService"
 )
 
 var specialScopes = map[string]bool{
-	ScopeRead: true, ScopeEvents: true, ScopeTerminal: true, ScopeTerminalReadonly: true,
+	ScopeRead: true, ScopeEvents: true, ScopeTerminal: true, ScopeTerminalReadonly: true, ScopeTerminalHost: true,
 }
 
 // ValidateScopes normalizes scopes (sorted, deduplicated) and rejects an empty
@@ -46,7 +47,7 @@ func ValidateScopes(scopes []string) ([]string, error) {
 				return nil, fmt.Errorf("bad scope %q: %w", s, err)
 			}
 			if !matchesAny(s, names) {
-				return nil, fmt.Errorf("scope %q matches no tool; scopes are read, events, terminal, terminal:readonly or globs over tool names such as session_*", s)
+				return nil, fmt.Errorf("scope %q matches no tool; scopes are read, events, terminal, terminal:readonly, terminal:host or globs over tool names such as session_*", s)
 			}
 		}
 		out = append(out, s)
@@ -89,7 +90,7 @@ func scopesAllow(scopes []string, m Method) bool {
 			if m.Service == eventService {
 				return true
 			}
-		case ScopeTerminal, ScopeTerminalReadonly:
+		case ScopeTerminal, ScopeTerminalReadonly, ScopeTerminalHost:
 		default:
 			if ok, _ := path.Match(s, m.Tool); ok {
 				return true
@@ -101,7 +102,16 @@ func scopesAllow(scopes []string, m Method) bool {
 
 func scopesAllowTerminal(scopes []string, readOnly bool) bool {
 	for _, s := range scopes {
-		if s == ScopeTerminal || (readOnly && s == ScopeTerminalReadonly) {
+		if s == ScopeTerminal || s == ScopeTerminalHost || (readOnly && s == ScopeTerminalReadonly) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasScope(scopes []string, want string) bool {
+	for _, s := range scopes {
+		if s == want {
 			return true
 		}
 	}

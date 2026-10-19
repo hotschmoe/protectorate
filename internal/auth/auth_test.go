@@ -65,7 +65,7 @@ func TestValidateScopes(t *testing.T) {
 		wantErr bool
 	}{
 		{"empty", nil, nil, true},
-		{"special", []string{"terminal", "read", "events", "terminal:readonly"}, []string{"events", "read", "terminal", "terminal:readonly"}, false},
+		{"special", []string{"terminal", "read", "events", "terminal:readonly", "terminal:host"}, []string{"events", "read", "terminal", "terminal:host", "terminal:readonly"}, false},
 		{"glob and tool", []string{"session_*", "backlog_add_item"}, []string{"backlog_add_item", "session_*"}, false},
 		{"dedup", []string{"read", "read"}, []string{"read"}, false},
 		{"star", []string{"*"}, []string{"*"}, false},
@@ -175,6 +175,9 @@ func TestAuthorizeTerminal(t *testing.T) {
 		{"terminal rw host session denied", &Principal{Scopes: []string{"terminal"}}, false, true, false},
 		{"terminal ro host session", &Principal{Scopes: []string{"terminal"}}, true, true, true},
 		{"terminal ro", &Principal{Scopes: []string{"terminal"}}, true, false, true},
+		{"host scope rw host session", &Principal{Scopes: []string{"terminal:host"}}, false, true, true},
+		{"host scope rw sleeve", &Principal{Scopes: []string{"terminal:host"}}, false, false, true},
+		{"readonly scope rw host denied", &Principal{Scopes: []string{"terminal:readonly", "terminal"}}, false, true, false},
 		{"readonly scope ro", &Principal{Scopes: []string{"terminal:readonly"}}, true, true, true},
 		{"readonly scope rw denied", &Principal{Scopes: []string{"terminal:readonly"}}, false, false, false},
 		{"star is not terminal", &Principal{Scopes: []string{"*", "read", "events"}}, true, false, false},

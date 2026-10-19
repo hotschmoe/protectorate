@@ -17,8 +17,9 @@ import (
 	"github.com/hotschmoe/protectorate/internal/hub"
 )
 
-// deviceScopes and deviceTTL are what `pair` grants a paired phone or browser.
-var deviceScopes = []string{"read", "terminal", "events", "session_*", "backlog_*"}
+// deviceScopes and deviceTTL are what `pair` grants a paired phone or browser;
+// --host-shell adds terminal:host.
+var deviceScopes = []string{"read", "terminal", "events", "session_*", "sleeve_*", "backlog_*"}
 
 const deviceTTL = 90 * 24 * time.Hour
 
@@ -72,7 +73,7 @@ func tokenCreateCmd(o *opts) *cobra.Command {
 			})
 		},
 	}
-	c.Flags().StringArrayVar(&scopes, "scope", nil, "scope to grant: read, events, terminal, terminal:readonly or a tool-name glob like 'session_*' (repeatable, required)")
+	c.Flags().StringArrayVar(&scopes, "scope", nil, "scope to grant: read, events, terminal, terminal:readonly, terminal:host or a tool-name glob like 'session_*' (repeatable, required)")
 	c.Flags().DurationVar(&ttl, "ttl", 720*time.Hour, "lifetime; 0 never expires")
 	return c
 }

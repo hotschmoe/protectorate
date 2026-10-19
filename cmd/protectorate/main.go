@@ -369,7 +369,7 @@ func versionCmd(o *opts) *cobra.Command {
 
 func pairCmd(o *opts) *cobra.Command {
 	var pubURL, name string
-	var appQR bool
+	var appQR, hostShell bool
 	ttl := deviceTTL
 	c := &cobra.Command{
 		Use:   "pair",
@@ -386,8 +386,12 @@ func pairCmd(o *opts) *cobra.Command {
 			if name == "" {
 				name, _ = os.Hostname()
 			}
+			scopes := deviceScopes
+			if hostShell {
+				scopes = append(append([]string(nil), deviceScopes...), auth.ScopeTerminalHost)
+			}
 			res, err := cl.CreateToken(cmd.Context(), connect.NewRequest(&pb.CreateTokenRequest{
-				Name: "pair: " + name, Scopes: deviceScopes, Ttl: durationpb.New(ttl),
+				Name: "pair: " + name, Scopes: scopes, Ttl: durationpb.New(ttl),
 			}))
 			if err != nil {
 				return fmt.Errorf("mint device token (needs the owner token): %w", err)
@@ -414,6 +418,7 @@ func pairCmd(o *opts) *cobra.Command {
 	c.Flags().StringVar(&name, "name", "", "label for the hub (default hostname)")
 	c.Flags().DurationVar(&ttl, "ttl", deviceTTL, "lifetime of the device token; 0 never expires")
 	c.Flags().BoolVar(&appQR, "app", false, "encode the protectorate:// link for the native app instead of the web link")
+	c.Flags().BoolVar(&hostShell, "host-shell", false, "also grant terminal:host, read-write typing into sessions outside a sleeve sandbox (shell access as the hub user)")
 	return c
 }
 

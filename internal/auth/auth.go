@@ -134,7 +134,7 @@ func (a *Authorizer) AuthorizeProcedure(p *Principal, procedure string) error {
 
 // AuthorizeTerminal checks p for a WebSocket terminal attach. hostShell marks
 // a session running unsandboxed as the hub's OS user: typing into it is code
-// execution as that user, so only the owner may attach read-write.
+// execution as that user, so read-write needs the owner or terminal:host.
 func (a *Authorizer) AuthorizeTerminal(p *Principal, readOnly, hostShell bool) error {
 	if p.Owner {
 		return nil
@@ -146,8 +146,8 @@ func (a *Authorizer) AuthorizeTerminal(p *Principal, readOnly, hostShell bool) e
 		}
 		return &DeniedError{Name: p.Name, Need: need}
 	}
-	if hostShell && !readOnly {
-		return &DeniedError{Name: p.Name, Need: "owner token (read-write terminal on a session outside a sleeve sandbox; attach with readonly=1)"}
+	if hostShell && !readOnly && !hasScope(p.Scopes, ScopeTerminalHost) {
+		return &DeniedError{Name: p.Name, Need: ScopeTerminalHost + " (read-write terminal on a session outside a sleeve sandbox; attach with readonly=1)"}
 	}
 	return nil
 }
