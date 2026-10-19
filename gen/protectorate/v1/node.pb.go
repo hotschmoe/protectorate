@@ -23,6 +23,57 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type FileKind int32
+
+const (
+	FileKind_FILE_KIND_UNSPECIFIED FileKind = 0
+	FileKind_FILE_KIND_FILE        FileKind = 1
+	// FILE_KIND_DIRECTORY travels as a tar stream of regular files and
+	// directories; symlinks and special files are skipped.
+	FileKind_FILE_KIND_DIRECTORY FileKind = 2
+)
+
+// Enum value maps for FileKind.
+var (
+	FileKind_name = map[int32]string{
+		0: "FILE_KIND_UNSPECIFIED",
+		1: "FILE_KIND_FILE",
+		2: "FILE_KIND_DIRECTORY",
+	}
+	FileKind_value = map[string]int32{
+		"FILE_KIND_UNSPECIFIED": 0,
+		"FILE_KIND_FILE":        1,
+		"FILE_KIND_DIRECTORY":   2,
+	}
+)
+
+func (x FileKind) Enum() *FileKind {
+	p := new(FileKind)
+	*p = x
+	return p
+}
+
+func (x FileKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FileKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_node_proto_enumTypes[0].Descriptor()
+}
+
+func (FileKind) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_node_proto_enumTypes[0]
+}
+
+func (x FileKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FileKind.Descriptor instead.
+func (FileKind) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{0}
+}
+
 type NodeFreshness int32
 
 const (
@@ -69,11 +120,11 @@ func (x NodeFreshness) String() string {
 }
 
 func (NodeFreshness) Descriptor() protoreflect.EnumDescriptor {
-	return file_protectorate_v1_node_proto_enumTypes[0].Descriptor()
+	return file_protectorate_v1_node_proto_enumTypes[1].Descriptor()
 }
 
 func (NodeFreshness) Type() protoreflect.EnumType {
-	return &file_protectorate_v1_node_proto_enumTypes[0]
+	return &file_protectorate_v1_node_proto_enumTypes[1]
 }
 
 func (x NodeFreshness) Number() protoreflect.EnumNumber {
@@ -82,7 +133,7 @@ func (x NodeFreshness) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NodeFreshness.Descriptor instead.
 func (NodeFreshness) EnumDescriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{0}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{1}
 }
 
 type AlertKind int32
@@ -126,11 +177,11 @@ func (x AlertKind) String() string {
 }
 
 func (AlertKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_protectorate_v1_node_proto_enumTypes[1].Descriptor()
+	return file_protectorate_v1_node_proto_enumTypes[2].Descriptor()
 }
 
 func (AlertKind) Type() protoreflect.EnumType {
-	return &file_protectorate_v1_node_proto_enumTypes[1]
+	return &file_protectorate_v1_node_proto_enumTypes[2]
 }
 
 func (x AlertKind) Number() protoreflect.EnumNumber {
@@ -139,8 +190,564 @@ func (x AlertKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AlertKind.Descriptor instead.
 func (AlertKind) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{2}
+}
+
+// FileChunk is a slice of the uncompressed stream, zstd-compressed only when
+// that made it smaller.
+type FileChunk struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Data       []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	Compressed bool                   `protobuf:"varint,2,opt,name=compressed,proto3" json:"compressed,omitempty"`
+	// raw_size is the length after decompression.
+	RawSize       uint32 `protobuf:"varint,3,opt,name=raw_size,json=rawSize,proto3" json:"raw_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileChunk) Reset() {
+	*x = FileChunk{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileChunk) ProtoMessage() {}
+
+func (x *FileChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileChunk.ProtoReflect.Descriptor instead.
+func (*FileChunk) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *FileChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *FileChunk) GetCompressed() bool {
+	if x != nil {
+		return x.Compressed
+	}
+	return false
+}
+
+func (x *FileChunk) GetRawSize() uint32 {
+	if x != nil {
+		return x.RawSize
+	}
+	return 0
+}
+
+type FileTrailer struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// size and sha256 (hex) cover the uncompressed stream.
+	Size   uint64 `protobuf:"varint,1,opt,name=size,proto3" json:"size,omitempty"`
+	Sha256 string `protobuf:"bytes,2,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	// skipped counts directory entries that were not sent (symlinks, devices).
+	Skipped       uint32 `protobuf:"varint,3,opt,name=skipped,proto3" json:"skipped,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileTrailer) Reset() {
+	*x = FileTrailer{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileTrailer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileTrailer) ProtoMessage() {}
+
+func (x *FileTrailer) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileTrailer.ProtoReflect.Descriptor instead.
+func (*FileTrailer) Descriptor() ([]byte, []int) {
 	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{1}
 }
+
+func (x *FileTrailer) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *FileTrailer) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *FileTrailer) GetSkipped() uint32 {
+	if x != nil {
+		return x.Skipped
+	}
+	return 0
+}
+
+type PutFileRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is the node name.
+	Name        string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	AllowFamily bool   `protobuf:"varint,2,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	// transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
+	TransferId string `protobuf:"bytes,3,opt,name=transfer_id,json=transferId,proto3" json:"transfer_id,omitempty"`
+	// path, kind, mode and overwrite are read on the first call (offset 0).
+	// A relative path is under the node's file root; the path names the
+	// destination itself, not a directory to put it in.
+	Path string   `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
+	Kind FileKind `protobuf:"varint,5,opt,name=kind,proto3,enum=protectorate.v1.FileKind" json:"kind,omitempty"`
+	// mode holds the permission bits of a file; ignored for directories.
+	Mode uint32 `protobuf:"varint,6,opt,name=mode,proto3" json:"mode,omitempty"`
+	// overwrite replaces an existing destination instead of failing with
+	// ALREADY_EXISTS.
+	Overwrite bool `protobuf:"varint,7,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
+	// offset is the number of uncompressed bytes sent in earlier calls.
+	Offset uint64     `protobuf:"varint,8,opt,name=offset,proto3" json:"offset,omitempty"`
+	Chunk  *FileChunk `protobuf:"bytes,9,opt,name=chunk,proto3" json:"chunk,omitempty"`
+	// last ends the transfer; trailer is then required.
+	Last          bool         `protobuf:"varint,10,opt,name=last,proto3" json:"last,omitempty"`
+	Trailer       *FileTrailer `protobuf:"bytes,11,opt,name=trailer,proto3" json:"trailer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutFileRequest) Reset() {
+	*x = PutFileRequest{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutFileRequest) ProtoMessage() {}
+
+func (x *PutFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutFileRequest.ProtoReflect.Descriptor instead.
+func (*PutFileRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PutFileRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PutFileRequest) GetAllowFamily() bool {
+	if x != nil {
+		return x.AllowFamily
+	}
+	return false
+}
+
+func (x *PutFileRequest) GetTransferId() string {
+	if x != nil {
+		return x.TransferId
+	}
+	return ""
+}
+
+func (x *PutFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *PutFileRequest) GetKind() FileKind {
+	if x != nil {
+		return x.Kind
+	}
+	return FileKind_FILE_KIND_UNSPECIFIED
+}
+
+func (x *PutFileRequest) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
+}
+
+func (x *PutFileRequest) GetOverwrite() bool {
+	if x != nil {
+		return x.Overwrite
+	}
+	return false
+}
+
+func (x *PutFileRequest) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *PutFileRequest) GetChunk() *FileChunk {
+	if x != nil {
+		return x.Chunk
+	}
+	return nil
+}
+
+func (x *PutFileRequest) GetLast() bool {
+	if x != nil {
+		return x.Last
+	}
+	return false
+}
+
+func (x *PutFileRequest) GetTrailer() *FileTrailer {
+	if x != nil {
+		return x.Trailer
+	}
+	return nil
+}
+
+type PutFileResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// path is the resolved destination, set once the transfer is complete.
+	Path          string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Received      uint64 `protobuf:"varint,2,opt,name=received,proto3" json:"received,omitempty"`
+	Done          bool   `protobuf:"varint,3,opt,name=done,proto3" json:"done,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutFileResponse) Reset() {
+	*x = PutFileResponse{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutFileResponse) ProtoMessage() {}
+
+func (x *PutFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutFileResponse.ProtoReflect.Descriptor instead.
+func (*PutFileResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PutFileResponse) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *PutFileResponse) GetReceived() uint64 {
+	if x != nil {
+		return x.Received
+	}
+	return 0
+}
+
+func (x *PutFileResponse) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+type GetFileRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	AllowFamily bool                   `protobuf:"varint,2,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	Path        string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	// no_compress sends every chunk as is.
+	NoCompress    bool `protobuf:"varint,4,opt,name=no_compress,json=noCompress,proto3" json:"no_compress,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFileRequest) Reset() {
+	*x = GetFileRequest{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFileRequest) ProtoMessage() {}
+
+func (x *GetFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFileRequest.ProtoReflect.Descriptor instead.
+func (*GetFileRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetFileRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GetFileRequest) GetAllowFamily() bool {
+	if x != nil {
+		return x.AllowFamily
+	}
+	return false
+}
+
+func (x *GetFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GetFileRequest) GetNoCompress() bool {
+	if x != nil {
+		return x.NoCompress
+	}
+	return false
+}
+
+type FileHeader struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  FileKind               `protobuf:"varint,1,opt,name=kind,proto3,enum=protectorate.v1.FileKind" json:"kind,omitempty"`
+	Mode  uint32                 `protobuf:"varint,2,opt,name=mode,proto3" json:"mode,omitempty"`
+	// size is the file size; 0 for directories, whose size is known at the end.
+	Size          uint64 `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
+	Path          string `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileHeader) Reset() {
+	*x = FileHeader{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileHeader) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileHeader) ProtoMessage() {}
+
+func (x *FileHeader) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileHeader.ProtoReflect.Descriptor instead.
+func (*FileHeader) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *FileHeader) GetKind() FileKind {
+	if x != nil {
+		return x.Kind
+	}
+	return FileKind_FILE_KIND_UNSPECIFIED
+}
+
+func (x *FileHeader) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
+}
+
+func (x *FileHeader) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *FileHeader) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type GetFileResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Part:
+	//
+	//	*GetFileResponse_Header
+	//	*GetFileResponse_Chunk
+	//	*GetFileResponse_Trailer
+	Part          isGetFileResponse_Part `protobuf_oneof:"part"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFileResponse) Reset() {
+	*x = GetFileResponse{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFileResponse) ProtoMessage() {}
+
+func (x *GetFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFileResponse.ProtoReflect.Descriptor instead.
+func (*GetFileResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetFileResponse) GetPart() isGetFileResponse_Part {
+	if x != nil {
+		return x.Part
+	}
+	return nil
+}
+
+func (x *GetFileResponse) GetHeader() *FileHeader {
+	if x != nil {
+		if x, ok := x.Part.(*GetFileResponse_Header); ok {
+			return x.Header
+		}
+	}
+	return nil
+}
+
+func (x *GetFileResponse) GetChunk() *FileChunk {
+	if x != nil {
+		if x, ok := x.Part.(*GetFileResponse_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+func (x *GetFileResponse) GetTrailer() *FileTrailer {
+	if x != nil {
+		if x, ok := x.Part.(*GetFileResponse_Trailer); ok {
+			return x.Trailer
+		}
+	}
+	return nil
+}
+
+type isGetFileResponse_Part interface {
+	isGetFileResponse_Part()
+}
+
+type GetFileResponse_Header struct {
+	Header *FileHeader `protobuf:"bytes,1,opt,name=header,proto3,oneof"`
+}
+
+type GetFileResponse_Chunk struct {
+	Chunk *FileChunk `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+type GetFileResponse_Trailer struct {
+	Trailer *FileTrailer `protobuf:"bytes,3,opt,name=trailer,proto3,oneof"`
+}
+
+func (*GetFileResponse_Header) isGetFileResponse_Part() {}
+
+func (*GetFileResponse_Chunk) isGetFileResponse_Part() {}
+
+func (*GetFileResponse_Trailer) isGetFileResponse_Part() {}
 
 type GetMetricsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -150,7 +757,7 @@ type GetMetricsRequest struct {
 
 func (x *GetMetricsRequest) Reset() {
 	*x = GetMetricsRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[0]
+	mi := &file_protectorate_v1_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -162,7 +769,7 @@ func (x *GetMetricsRequest) String() string {
 func (*GetMetricsRequest) ProtoMessage() {}
 
 func (x *GetMetricsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[0]
+	mi := &file_protectorate_v1_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -175,7 +782,7 @@ func (x *GetMetricsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMetricsRequest.ProtoReflect.Descriptor instead.
 func (*GetMetricsRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{0}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{7}
 }
 
 type WatchMetricsRequest struct {
@@ -188,7 +795,7 @@ type WatchMetricsRequest struct {
 
 func (x *WatchMetricsRequest) Reset() {
 	*x = WatchMetricsRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[1]
+	mi := &file_protectorate_v1_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -200,7 +807,7 @@ func (x *WatchMetricsRequest) String() string {
 func (*WatchMetricsRequest) ProtoMessage() {}
 
 func (x *WatchMetricsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[1]
+	mi := &file_protectorate_v1_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -213,7 +820,7 @@ func (x *WatchMetricsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchMetricsRequest.ProtoReflect.Descriptor instead.
 func (*WatchMetricsRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{1}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WatchMetricsRequest) GetIntervalSeconds() int32 {
@@ -252,7 +859,7 @@ type NodeMetrics struct {
 
 func (x *NodeMetrics) Reset() {
 	*x = NodeMetrics{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[2]
+	mi := &file_protectorate_v1_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -264,7 +871,7 @@ func (x *NodeMetrics) String() string {
 func (*NodeMetrics) ProtoMessage() {}
 
 func (x *NodeMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[2]
+	mi := &file_protectorate_v1_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -277,7 +884,7 @@ func (x *NodeMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeMetrics.ProtoReflect.Descriptor instead.
 func (*NodeMetrics) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{2}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *NodeMetrics) GetHostname() string {
@@ -399,7 +1006,7 @@ type CpuMetrics struct {
 
 func (x *CpuMetrics) Reset() {
 	*x = CpuMetrics{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[3]
+	mi := &file_protectorate_v1_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -411,7 +1018,7 @@ func (x *CpuMetrics) String() string {
 func (*CpuMetrics) ProtoMessage() {}
 
 func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[3]
+	mi := &file_protectorate_v1_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -424,7 +1031,7 @@ func (x *CpuMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CpuMetrics.ProtoReflect.Descriptor instead.
 func (*CpuMetrics) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{3}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CpuMetrics) GetLogicalCores() int32 {
@@ -477,7 +1084,7 @@ type MemoryMetrics struct {
 
 func (x *MemoryMetrics) Reset() {
 	*x = MemoryMetrics{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[4]
+	mi := &file_protectorate_v1_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +1096,7 @@ func (x *MemoryMetrics) String() string {
 func (*MemoryMetrics) ProtoMessage() {}
 
 func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[4]
+	mi := &file_protectorate_v1_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +1109,7 @@ func (x *MemoryMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryMetrics.ProtoReflect.Descriptor instead.
 func (*MemoryMetrics) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{4}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MemoryMetrics) GetTotalBytes() uint64 {
@@ -569,7 +1176,7 @@ type FilesystemMetrics struct {
 
 func (x *FilesystemMetrics) Reset() {
 	*x = FilesystemMetrics{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[5]
+	mi := &file_protectorate_v1_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +1188,7 @@ func (x *FilesystemMetrics) String() string {
 func (*FilesystemMetrics) ProtoMessage() {}
 
 func (x *FilesystemMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[5]
+	mi := &file_protectorate_v1_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +1201,7 @@ func (x *FilesystemMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilesystemMetrics.ProtoReflect.Descriptor instead.
 func (*FilesystemMetrics) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{5}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FilesystemMetrics) GetMount() string {
@@ -663,7 +1270,7 @@ type GpuMetrics struct {
 
 func (x *GpuMetrics) Reset() {
 	*x = GpuMetrics{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[6]
+	mi := &file_protectorate_v1_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -675,7 +1282,7 @@ func (x *GpuMetrics) String() string {
 func (*GpuMetrics) ProtoMessage() {}
 
 func (x *GpuMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[6]
+	mi := &file_protectorate_v1_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -688,7 +1295,7 @@ func (x *GpuMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuMetrics.ProtoReflect.Descriptor instead.
 func (*GpuMetrics) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{6}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GpuMetrics) GetIndex() int32 {
@@ -754,7 +1361,7 @@ type ContainerEngine struct {
 
 func (x *ContainerEngine) Reset() {
 	*x = ContainerEngine{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[7]
+	mi := &file_protectorate_v1_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -766,7 +1373,7 @@ func (x *ContainerEngine) String() string {
 func (*ContainerEngine) ProtoMessage() {}
 
 func (x *ContainerEngine) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[7]
+	mi := &file_protectorate_v1_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -779,7 +1386,7 @@ func (x *ContainerEngine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerEngine.ProtoReflect.Descriptor instead.
 func (*ContainerEngine) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{7}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ContainerEngine) GetKind() string {
@@ -829,7 +1436,7 @@ type EngineDiskUsage struct {
 
 func (x *EngineDiskUsage) Reset() {
 	*x = EngineDiskUsage{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[8]
+	mi := &file_protectorate_v1_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -841,7 +1448,7 @@ func (x *EngineDiskUsage) String() string {
 func (*EngineDiskUsage) ProtoMessage() {}
 
 func (x *EngineDiskUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[8]
+	mi := &file_protectorate_v1_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -854,7 +1461,7 @@ func (x *EngineDiskUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EngineDiskUsage.ProtoReflect.Descriptor instead.
 func (*EngineDiskUsage) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{8}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *EngineDiskUsage) GetImages() *DiskBucket {
@@ -896,7 +1503,7 @@ type DiskBucket struct {
 
 func (x *DiskBucket) Reset() {
 	*x = DiskBucket{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[9]
+	mi := &file_protectorate_v1_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1515,7 @@ func (x *DiskBucket) String() string {
 func (*DiskBucket) ProtoMessage() {}
 
 func (x *DiskBucket) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[9]
+	mi := &file_protectorate_v1_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1528,7 @@ func (x *DiskBucket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskBucket.ProtoReflect.Descriptor instead.
 func (*DiskBucket) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{9}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DiskBucket) GetCount() int64 {
@@ -970,7 +1577,7 @@ type ContainerMetrics struct {
 
 func (x *ContainerMetrics) Reset() {
 	*x = ContainerMetrics{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[10]
+	mi := &file_protectorate_v1_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -982,7 +1589,7 @@ func (x *ContainerMetrics) String() string {
 func (*ContainerMetrics) ProtoMessage() {}
 
 func (x *ContainerMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[10]
+	mi := &file_protectorate_v1_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -995,7 +1602,7 @@ func (x *ContainerMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerMetrics.ProtoReflect.Descriptor instead.
 func (*ContainerMetrics) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{10}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ContainerMetrics) GetId() string {
@@ -1098,7 +1705,7 @@ type DirSize struct {
 
 func (x *DirSize) Reset() {
 	*x = DirSize{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[11]
+	mi := &file_protectorate_v1_node_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1717,7 @@ func (x *DirSize) String() string {
 func (*DirSize) ProtoMessage() {}
 
 func (x *DirSize) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[11]
+	mi := &file_protectorate_v1_node_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1730,7 @@ func (x *DirSize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirSize.ProtoReflect.Descriptor instead.
 func (*DirSize) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{11}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DirSize) GetPath() string {
@@ -1182,7 +1789,7 @@ type NodeAlert struct {
 
 func (x *NodeAlert) Reset() {
 	*x = NodeAlert{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[12]
+	mi := &file_protectorate_v1_node_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1194,7 +1801,7 @@ func (x *NodeAlert) String() string {
 func (*NodeAlert) ProtoMessage() {}
 
 func (x *NodeAlert) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[12]
+	mi := &file_protectorate_v1_node_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1207,7 +1814,7 @@ func (x *NodeAlert) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeAlert.ProtoReflect.Descriptor instead.
 func (*NodeAlert) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{12}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *NodeAlert) GetKind() AlertKind {
@@ -1274,7 +1881,7 @@ type NodeInfo struct {
 
 func (x *NodeInfo) Reset() {
 	*x = NodeInfo{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[13]
+	mi := &file_protectorate_v1_node_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1286,7 +1893,7 @@ func (x *NodeInfo) String() string {
 func (*NodeInfo) ProtoMessage() {}
 
 func (x *NodeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[13]
+	mi := &file_protectorate_v1_node_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1299,7 +1906,7 @@ func (x *NodeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeInfo.ProtoReflect.Descriptor instead.
 func (*NodeInfo) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{13}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *NodeInfo) GetName() string {
@@ -1396,7 +2003,7 @@ type NodeStatus struct {
 
 func (x *NodeStatus) Reset() {
 	*x = NodeStatus{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[14]
+	mi := &file_protectorate_v1_node_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1408,7 +2015,7 @@ func (x *NodeStatus) String() string {
 func (*NodeStatus) ProtoMessage() {}
 
 func (x *NodeStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[14]
+	mi := &file_protectorate_v1_node_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1421,7 +2028,7 @@ func (x *NodeStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeStatus.ProtoReflect.Descriptor instead.
 func (*NodeStatus) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{14}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *NodeStatus) GetNode() *NodeInfo {
@@ -1481,7 +2088,7 @@ type ListNodesRequest struct {
 
 func (x *ListNodesRequest) Reset() {
 	*x = ListNodesRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[15]
+	mi := &file_protectorate_v1_node_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1493,7 +2100,7 @@ func (x *ListNodesRequest) String() string {
 func (*ListNodesRequest) ProtoMessage() {}
 
 func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[15]
+	mi := &file_protectorate_v1_node_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1506,7 +2113,7 @@ func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesRequest.ProtoReflect.Descriptor instead.
 func (*ListNodesRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{15}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{22}
 }
 
 type ListNodesResponse struct {
@@ -1518,7 +2125,7 @@ type ListNodesResponse struct {
 
 func (x *ListNodesResponse) Reset() {
 	*x = ListNodesResponse{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[16]
+	mi := &file_protectorate_v1_node_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1530,7 +2137,7 @@ func (x *ListNodesResponse) String() string {
 func (*ListNodesResponse) ProtoMessage() {}
 
 func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[16]
+	mi := &file_protectorate_v1_node_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1543,7 +2150,7 @@ func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesResponse.ProtoReflect.Descriptor instead.
 func (*ListNodesResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{16}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListNodesResponse) GetNodes() []*NodeStatus {
@@ -1562,7 +2169,7 @@ type GetNodeRequest struct {
 
 func (x *GetNodeRequest) Reset() {
 	*x = GetNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[17]
+	mi := &file_protectorate_v1_node_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +2181,7 @@ func (x *GetNodeRequest) String() string {
 func (*GetNodeRequest) ProtoMessage() {}
 
 func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[17]
+	mi := &file_protectorate_v1_node_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +2194,7 @@ func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{17}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetNodeRequest) GetName() string {
@@ -1609,7 +2216,7 @@ type AddNodeRequest struct {
 
 func (x *AddNodeRequest) Reset() {
 	*x = AddNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[18]
+	mi := &file_protectorate_v1_node_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1621,7 +2228,7 @@ func (x *AddNodeRequest) String() string {
 func (*AddNodeRequest) ProtoMessage() {}
 
 func (x *AddNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[18]
+	mi := &file_protectorate_v1_node_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1634,7 +2241,7 @@ func (x *AddNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddNodeRequest.ProtoReflect.Descriptor instead.
 func (*AddNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{18}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *AddNodeRequest) GetNode() *NodeInfo {
@@ -1660,7 +2267,7 @@ type RemoveNodeRequest struct {
 
 func (x *RemoveNodeRequest) Reset() {
 	*x = RemoveNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[19]
+	mi := &file_protectorate_v1_node_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1672,7 +2279,7 @@ func (x *RemoveNodeRequest) String() string {
 func (*RemoveNodeRequest) ProtoMessage() {}
 
 func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[19]
+	mi := &file_protectorate_v1_node_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1685,7 +2292,7 @@ func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeRequest.ProtoReflect.Descriptor instead.
 func (*RemoveNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{19}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RemoveNodeRequest) GetName() string {
@@ -1703,7 +2310,7 @@ type RemoveNodeResponse struct {
 
 func (x *RemoveNodeResponse) Reset() {
 	*x = RemoveNodeResponse{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[20]
+	mi := &file_protectorate_v1_node_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1715,7 +2322,7 @@ func (x *RemoveNodeResponse) String() string {
 func (*RemoveNodeResponse) ProtoMessage() {}
 
 func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[20]
+	mi := &file_protectorate_v1_node_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1728,14 +2335,59 @@ func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeResponse.ProtoReflect.Descriptor instead.
 func (*RemoveNodeResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{20}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{27}
 }
 
 var File_protectorate_v1_node_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19protectorate/v1/job.proto\x1a\x1dprotectorate/v1/options.proto\x1a\x1cprotectorate/v1/sleeve.proto\"\x13\n" +
+	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aprotectorate/v1/desk.proto\x1a\x19protectorate/v1/job.proto\x1a\x1dprotectorate/v1/options.proto\x1a\x1cprotectorate/v1/sleeve.proto\"Z\n" +
+	"\tFileChunk\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1e\n" +
+	"\n" +
+	"compressed\x18\x02 \x01(\bR\n" +
+	"compressed\x12\x19\n" +
+	"\braw_size\x18\x03 \x01(\rR\arawSize\"S\n" +
+	"\vFileTrailer\x12\x12\n" +
+	"\x04size\x18\x01 \x01(\x04R\x04size\x12\x16\n" +
+	"\x06sha256\x18\x02 \x01(\tR\x06sha256\x12\x18\n" +
+	"\askipped\x18\x03 \x01(\rR\askipped\"\xf3\x02\n" +
+	"\x0ePutFileRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
+	"\fallow_family\x18\x02 \x01(\bR\vallowFamily\x12\x1f\n" +
+	"\vtransfer_id\x18\x03 \x01(\tR\n" +
+	"transferId\x12\x12\n" +
+	"\x04path\x18\x04 \x01(\tR\x04path\x12-\n" +
+	"\x04kind\x18\x05 \x01(\x0e2\x19.protectorate.v1.FileKindR\x04kind\x12\x12\n" +
+	"\x04mode\x18\x06 \x01(\rR\x04mode\x12\x1c\n" +
+	"\toverwrite\x18\a \x01(\bR\toverwrite\x12\x16\n" +
+	"\x06offset\x18\b \x01(\x04R\x06offset\x120\n" +
+	"\x05chunk\x18\t \x01(\v2\x1a.protectorate.v1.FileChunkR\x05chunk\x12\x12\n" +
+	"\x04last\x18\n" +
+	" \x01(\bR\x04last\x126\n" +
+	"\atrailer\x18\v \x01(\v2\x1c.protectorate.v1.FileTrailerR\atrailer\"U\n" +
+	"\x0fPutFileResponse\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1a\n" +
+	"\breceived\x18\x02 \x01(\x04R\breceived\x12\x12\n" +
+	"\x04done\x18\x03 \x01(\bR\x04done\"|\n" +
+	"\x0eGetFileRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
+	"\fallow_family\x18\x02 \x01(\bR\vallowFamily\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x1f\n" +
+	"\vno_compress\x18\x04 \x01(\bR\n" +
+	"noCompress\"w\n" +
+	"\n" +
+	"FileHeader\x12-\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x19.protectorate.v1.FileKindR\x04kind\x12\x12\n" +
+	"\x04mode\x18\x02 \x01(\rR\x04mode\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\x04R\x04size\x12\x12\n" +
+	"\x04path\x18\x04 \x01(\tR\x04path\"\xbe\x01\n" +
+	"\x0fGetFileResponse\x125\n" +
+	"\x06header\x18\x01 \x01(\v2\x1b.protectorate.v1.FileHeaderH\x00R\x06header\x122\n" +
+	"\x05chunk\x18\x02 \x01(\v2\x1a.protectorate.v1.FileChunkH\x00R\x05chunk\x128\n" +
+	"\atrailer\x18\x03 \x01(\v2\x1c.protectorate.v1.FileTrailerH\x00R\atrailerB\x06\n" +
+	"\x04part\"\x13\n" +
 	"\x11GetMetricsRequest\"@\n" +
 	"\x13WatchMetricsRequest\x12)\n" +
 	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\x94\x05\n" +
@@ -1884,7 +2536,11 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x06update\x18\x02 \x01(\bR\x06update\"'\n" +
 	"\x11RemoveNodeRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoveNodeResponse*\x9f\x01\n" +
+	"\x12RemoveNodeResponse*R\n" +
+	"\bFileKind\x12\x19\n" +
+	"\x15FILE_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eFILE_KIND_FILE\x10\x01\x12\x17\n" +
+	"\x13FILE_KIND_DIRECTORY\x10\x02*\x9f\x01\n" +
 	"\rNodeFreshness\x12\x1e\n" +
 	"\x1aNODE_FRESHNESS_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14NODE_FRESHNESS_FRESH\x10\x01\x12\x18\n" +
@@ -1896,7 +2552,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x17ALERT_KIND_DISK_PERCENT\x10\x01\x12\x1b\n" +
 	"\x17ALERT_KIND_MEM_PRESSURE\x10\x02\x12\x1a\n" +
 	"\x16ALERT_KIND_UNREACHABLE\x10\x03\x12\x1c\n" +
-	"\x18ALERT_KIND_NAME_MISMATCH\x10\x042\xba\x04\n" +
+	"\x18ALERT_KIND_NAME_MISMATCH\x10\x042\xaf\x06\n" +
 	"\x10NodeAgentService\x12S\n" +
 	"\n" +
 	"GetMetrics\x12\".protectorate.v1.GetMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x01\x12Y\n" +
@@ -1905,13 +2561,19 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"PrepareJob\x12\".protectorate.v1.PrepareJobRequest\x1a#.protectorate.v1.PrepareJobResponse\x12^\n" +
 	"\rUploadJobData\x12%.protectorate.v1.UploadJobDataRequest\x1a&.protectorate.v1.UploadJobDataResponse\x12E\n" +
 	"\x06RunJob\x12\x1e.protectorate.v1.RunJobRequest\x1a\x19.protectorate.v1.JobEvent0\x01\x12r\n" +
-	"\tCancelJob\x121.protectorate.v1.NodeAgentServiceCancelJobRequest\x1a2.protectorate.v1.NodeAgentServiceCancelJobResponse\x1a\x04\x90\xb5\x18\x012\xd8\x02\n" +
+	"\tCancelJob\x121.protectorate.v1.NodeAgentServiceCancelJobRequest\x1a2.protectorate.v1.NodeAgentServiceCancelJobResponse\x12L\n" +
+	"\aPutFile\x12\x1f.protectorate.v1.PutFileRequest\x1a .protectorate.v1.PutFileResponse\x12N\n" +
+	"\aGetFile\x12\x1f.protectorate.v1.GetFileRequest\x1a .protectorate.v1.GetFileResponse0\x01\x12U\n" +
+	"\n" +
+	"DeskAction\x12\".protectorate.v1.DeskActionRequest\x1a#.protectorate.v1.DeskActionResponse\x1a\x04\x90\xb5\x18\x012\xf6\x03\n" +
 	"\vNodeService\x12W\n" +
 	"\tListNodes\x12!.protectorate.v1.ListNodesRequest\x1a\".protectorate.v1.ListNodesResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\"\x03\x90\x02\x01\x12K\n" +
 	"\aAddNode\x12\x1f.protectorate.v1.AddNodeRequest\x1a\x19.protectorate.v1.NodeInfo\"\x04\xa0\xb5\x18\x01\x12U\n" +
 	"\n" +
-	"RemoveNode\x12\".protectorate.v1.RemoveNodeRequest\x1a#.protectorate.v1.RemoveNodeResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"RemoveNode\x12\".protectorate.v1.RemoveNodeRequest\x1a#.protectorate.v1.RemoveNodeResponse\x12L\n" +
+	"\aPutFile\x12\x1f.protectorate.v1.PutFileRequest\x1a .protectorate.v1.PutFileResponse\x12N\n" +
+	"\aGetFile\x12\x1f.protectorate.v1.GetFileRequest\x1a .protectorate.v1.GetFileResponse0\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_node_proto_rawDescOnce sync.Once
@@ -1925,97 +2587,124 @@ func file_protectorate_v1_node_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_node_proto_rawDescData
 }
 
-var file_protectorate_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_protectorate_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_protectorate_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_protectorate_v1_node_proto_goTypes = []any{
-	(NodeFreshness)(0),                        // 0: protectorate.v1.NodeFreshness
-	(AlertKind)(0),                            // 1: protectorate.v1.AlertKind
-	(*GetMetricsRequest)(nil),                 // 2: protectorate.v1.GetMetricsRequest
-	(*WatchMetricsRequest)(nil),               // 3: protectorate.v1.WatchMetricsRequest
-	(*NodeMetrics)(nil),                       // 4: protectorate.v1.NodeMetrics
-	(*CpuMetrics)(nil),                        // 5: protectorate.v1.CpuMetrics
-	(*MemoryMetrics)(nil),                     // 6: protectorate.v1.MemoryMetrics
-	(*FilesystemMetrics)(nil),                 // 7: protectorate.v1.FilesystemMetrics
-	(*GpuMetrics)(nil),                        // 8: protectorate.v1.GpuMetrics
-	(*ContainerEngine)(nil),                   // 9: protectorate.v1.ContainerEngine
-	(*EngineDiskUsage)(nil),                   // 10: protectorate.v1.EngineDiskUsage
-	(*DiskBucket)(nil),                        // 11: protectorate.v1.DiskBucket
-	(*ContainerMetrics)(nil),                  // 12: protectorate.v1.ContainerMetrics
-	(*DirSize)(nil),                           // 13: protectorate.v1.DirSize
-	(*NodeAlert)(nil),                         // 14: protectorate.v1.NodeAlert
-	(*NodeInfo)(nil),                          // 15: protectorate.v1.NodeInfo
-	(*NodeStatus)(nil),                        // 16: protectorate.v1.NodeStatus
-	(*ListNodesRequest)(nil),                  // 17: protectorate.v1.ListNodesRequest
-	(*ListNodesResponse)(nil),                 // 18: protectorate.v1.ListNodesResponse
-	(*GetNodeRequest)(nil),                    // 19: protectorate.v1.GetNodeRequest
-	(*AddNodeRequest)(nil),                    // 20: protectorate.v1.AddNodeRequest
-	(*RemoveNodeRequest)(nil),                 // 21: protectorate.v1.RemoveNodeRequest
-	(*RemoveNodeResponse)(nil),                // 22: protectorate.v1.RemoveNodeResponse
-	(*timestamppb.Timestamp)(nil),             // 23: google.protobuf.Timestamp
-	(*Sleeve)(nil),                            // 24: protectorate.v1.Sleeve
-	(*durationpb.Duration)(nil),               // 25: google.protobuf.Duration
-	(*PrepareJobRequest)(nil),                 // 26: protectorate.v1.PrepareJobRequest
-	(*UploadJobDataRequest)(nil),              // 27: protectorate.v1.UploadJobDataRequest
-	(*RunJobRequest)(nil),                     // 28: protectorate.v1.RunJobRequest
-	(*NodeAgentServiceCancelJobRequest)(nil),  // 29: protectorate.v1.NodeAgentServiceCancelJobRequest
-	(*PrepareJobResponse)(nil),                // 30: protectorate.v1.PrepareJobResponse
-	(*UploadJobDataResponse)(nil),             // 31: protectorate.v1.UploadJobDataResponse
-	(*JobEvent)(nil),                          // 32: protectorate.v1.JobEvent
-	(*NodeAgentServiceCancelJobResponse)(nil), // 33: protectorate.v1.NodeAgentServiceCancelJobResponse
+	(FileKind)(0),                             // 0: protectorate.v1.FileKind
+	(NodeFreshness)(0),                        // 1: protectorate.v1.NodeFreshness
+	(AlertKind)(0),                            // 2: protectorate.v1.AlertKind
+	(*FileChunk)(nil),                         // 3: protectorate.v1.FileChunk
+	(*FileTrailer)(nil),                       // 4: protectorate.v1.FileTrailer
+	(*PutFileRequest)(nil),                    // 5: protectorate.v1.PutFileRequest
+	(*PutFileResponse)(nil),                   // 6: protectorate.v1.PutFileResponse
+	(*GetFileRequest)(nil),                    // 7: protectorate.v1.GetFileRequest
+	(*FileHeader)(nil),                        // 8: protectorate.v1.FileHeader
+	(*GetFileResponse)(nil),                   // 9: protectorate.v1.GetFileResponse
+	(*GetMetricsRequest)(nil),                 // 10: protectorate.v1.GetMetricsRequest
+	(*WatchMetricsRequest)(nil),               // 11: protectorate.v1.WatchMetricsRequest
+	(*NodeMetrics)(nil),                       // 12: protectorate.v1.NodeMetrics
+	(*CpuMetrics)(nil),                        // 13: protectorate.v1.CpuMetrics
+	(*MemoryMetrics)(nil),                     // 14: protectorate.v1.MemoryMetrics
+	(*FilesystemMetrics)(nil),                 // 15: protectorate.v1.FilesystemMetrics
+	(*GpuMetrics)(nil),                        // 16: protectorate.v1.GpuMetrics
+	(*ContainerEngine)(nil),                   // 17: protectorate.v1.ContainerEngine
+	(*EngineDiskUsage)(nil),                   // 18: protectorate.v1.EngineDiskUsage
+	(*DiskBucket)(nil),                        // 19: protectorate.v1.DiskBucket
+	(*ContainerMetrics)(nil),                  // 20: protectorate.v1.ContainerMetrics
+	(*DirSize)(nil),                           // 21: protectorate.v1.DirSize
+	(*NodeAlert)(nil),                         // 22: protectorate.v1.NodeAlert
+	(*NodeInfo)(nil),                          // 23: protectorate.v1.NodeInfo
+	(*NodeStatus)(nil),                        // 24: protectorate.v1.NodeStatus
+	(*ListNodesRequest)(nil),                  // 25: protectorate.v1.ListNodesRequest
+	(*ListNodesResponse)(nil),                 // 26: protectorate.v1.ListNodesResponse
+	(*GetNodeRequest)(nil),                    // 27: protectorate.v1.GetNodeRequest
+	(*AddNodeRequest)(nil),                    // 28: protectorate.v1.AddNodeRequest
+	(*RemoveNodeRequest)(nil),                 // 29: protectorate.v1.RemoveNodeRequest
+	(*RemoveNodeResponse)(nil),                // 30: protectorate.v1.RemoveNodeResponse
+	(*timestamppb.Timestamp)(nil),             // 31: google.protobuf.Timestamp
+	(*Sleeve)(nil),                            // 32: protectorate.v1.Sleeve
+	(*durationpb.Duration)(nil),               // 33: google.protobuf.Duration
+	(*PrepareJobRequest)(nil),                 // 34: protectorate.v1.PrepareJobRequest
+	(*UploadJobDataRequest)(nil),              // 35: protectorate.v1.UploadJobDataRequest
+	(*RunJobRequest)(nil),                     // 36: protectorate.v1.RunJobRequest
+	(*NodeAgentServiceCancelJobRequest)(nil),  // 37: protectorate.v1.NodeAgentServiceCancelJobRequest
+	(*DeskActionRequest)(nil),                 // 38: protectorate.v1.DeskActionRequest
+	(*PrepareJobResponse)(nil),                // 39: protectorate.v1.PrepareJobResponse
+	(*UploadJobDataResponse)(nil),             // 40: protectorate.v1.UploadJobDataResponse
+	(*JobEvent)(nil),                          // 41: protectorate.v1.JobEvent
+	(*NodeAgentServiceCancelJobResponse)(nil), // 42: protectorate.v1.NodeAgentServiceCancelJobResponse
+	(*DeskActionResponse)(nil),                // 43: protectorate.v1.DeskActionResponse
 }
 var file_protectorate_v1_node_proto_depIdxs = []int32{
-	23, // 0: protectorate.v1.NodeMetrics.collected_at:type_name -> google.protobuf.Timestamp
-	5,  // 1: protectorate.v1.NodeMetrics.cpu:type_name -> protectorate.v1.CpuMetrics
-	6,  // 2: protectorate.v1.NodeMetrics.memory:type_name -> protectorate.v1.MemoryMetrics
-	7,  // 3: protectorate.v1.NodeMetrics.filesystems:type_name -> protectorate.v1.FilesystemMetrics
-	8,  // 4: protectorate.v1.NodeMetrics.gpus:type_name -> protectorate.v1.GpuMetrics
-	9,  // 5: protectorate.v1.NodeMetrics.engine:type_name -> protectorate.v1.ContainerEngine
-	13, // 6: protectorate.v1.NodeMetrics.watch_dirs:type_name -> protectorate.v1.DirSize
-	24, // 7: protectorate.v1.NodeMetrics.sleeves:type_name -> protectorate.v1.Sleeve
-	10, // 8: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
-	23, // 9: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
-	12, // 10: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
-	11, // 11: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
-	11, // 12: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
-	11, // 13: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
-	11, // 14: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
-	23, // 15: protectorate.v1.ContainerMetrics.created_at:type_name -> google.protobuf.Timestamp
-	23, // 16: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
-	25, // 17: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
-	1,  // 18: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
-	15, // 19: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
-	4,  // 20: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
-	0,  // 21: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
-	23, // 22: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
-	25, // 23: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
-	14, // 24: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
-	16, // 25: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
-	15, // 26: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
-	2,  // 27: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
-	3,  // 28: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
-	26, // 29: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
-	27, // 30: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
-	28, // 31: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
-	29, // 32: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
-	17, // 33: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
-	19, // 34: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
-	20, // 35: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
-	21, // 36: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
-	4,  // 37: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
-	4,  // 38: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
-	30, // 39: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
-	31, // 40: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
-	32, // 41: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
-	33, // 42: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
-	18, // 43: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
-	16, // 44: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
-	15, // 45: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
-	22, // 46: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeResponse
-	37, // [37:47] is the sub-list for method output_type
-	27, // [27:37] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	0,  // 0: protectorate.v1.PutFileRequest.kind:type_name -> protectorate.v1.FileKind
+	3,  // 1: protectorate.v1.PutFileRequest.chunk:type_name -> protectorate.v1.FileChunk
+	4,  // 2: protectorate.v1.PutFileRequest.trailer:type_name -> protectorate.v1.FileTrailer
+	0,  // 3: protectorate.v1.FileHeader.kind:type_name -> protectorate.v1.FileKind
+	8,  // 4: protectorate.v1.GetFileResponse.header:type_name -> protectorate.v1.FileHeader
+	3,  // 5: protectorate.v1.GetFileResponse.chunk:type_name -> protectorate.v1.FileChunk
+	4,  // 6: protectorate.v1.GetFileResponse.trailer:type_name -> protectorate.v1.FileTrailer
+	31, // 7: protectorate.v1.NodeMetrics.collected_at:type_name -> google.protobuf.Timestamp
+	13, // 8: protectorate.v1.NodeMetrics.cpu:type_name -> protectorate.v1.CpuMetrics
+	14, // 9: protectorate.v1.NodeMetrics.memory:type_name -> protectorate.v1.MemoryMetrics
+	15, // 10: protectorate.v1.NodeMetrics.filesystems:type_name -> protectorate.v1.FilesystemMetrics
+	16, // 11: protectorate.v1.NodeMetrics.gpus:type_name -> protectorate.v1.GpuMetrics
+	17, // 12: protectorate.v1.NodeMetrics.engine:type_name -> protectorate.v1.ContainerEngine
+	21, // 13: protectorate.v1.NodeMetrics.watch_dirs:type_name -> protectorate.v1.DirSize
+	32, // 14: protectorate.v1.NodeMetrics.sleeves:type_name -> protectorate.v1.Sleeve
+	18, // 15: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
+	31, // 16: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
+	20, // 17: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
+	19, // 18: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
+	19, // 19: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
+	19, // 20: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
+	19, // 21: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
+	31, // 22: protectorate.v1.ContainerMetrics.created_at:type_name -> google.protobuf.Timestamp
+	31, // 23: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
+	33, // 24: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
+	2,  // 25: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
+	23, // 26: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
+	12, // 27: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
+	1,  // 28: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
+	31, // 29: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
+	33, // 30: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
+	22, // 31: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
+	24, // 32: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
+	23, // 33: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
+	10, // 34: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
+	11, // 35: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
+	34, // 36: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
+	35, // 37: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
+	36, // 38: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
+	37, // 39: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
+	5,  // 40: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	7,  // 41: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	38, // 42: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
+	25, // 43: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
+	27, // 44: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
+	28, // 45: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
+	29, // 46: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
+	5,  // 47: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	7,  // 48: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	12, // 49: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
+	12, // 50: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
+	39, // 51: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
+	40, // 52: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
+	41, // 53: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
+	42, // 54: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
+	6,  // 55: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	9,  // 56: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	43, // 57: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
+	26, // 58: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
+	24, // 59: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
+	23, // 60: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
+	30, // 61: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeResponse
+	6,  // 62: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	9,  // 63: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	49, // [49:64] is the sub-list for method output_type
+	34, // [34:49] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_node_proto_init() }
@@ -2023,17 +2712,23 @@ func file_protectorate_v1_node_proto_init() {
 	if File_protectorate_v1_node_proto != nil {
 		return
 	}
+	file_protectorate_v1_desk_proto_init()
 	file_protectorate_v1_job_proto_init()
 	file_protectorate_v1_options_proto_init()
 	file_protectorate_v1_sleeve_proto_init()
-	file_protectorate_v1_node_proto_msgTypes[3].OneofWrappers = []any{}
+	file_protectorate_v1_node_proto_msgTypes[6].OneofWrappers = []any{
+		(*GetFileResponse_Header)(nil),
+		(*GetFileResponse_Chunk)(nil),
+		(*GetFileResponse_Trailer)(nil),
+	}
+	file_protectorate_v1_node_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_node_proto_rawDesc), len(file_protectorate_v1_node_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   21,
+			NumEnums:      3,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

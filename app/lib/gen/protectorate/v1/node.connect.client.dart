@@ -7,6 +7,7 @@ import "package:connectrpc/connect.dart" as connect;
 import "node.pb.dart" as protectoratev1node;
 import "node.connect.spec.dart" as specs;
 import "job.pb.dart" as protectoratev1job;
+import "desk.pb.dart" as protectoratev1desk;
 
 /// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
 /// is for live views. The job RPCs are called by the hub only and are unary
@@ -125,6 +126,62 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// PutFile receives one chunk of a file or directory transfer into the
+  /// node's file root. The hub relays the caller's chunks unchanged.
+  Future<protectoratev1node.PutFileResponse> putFile(
+    protectoratev1node.PutFileRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeAgentService.putFile,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// GetFile streams a file or directory out of the node's file root.
+  Stream<protectoratev1node.GetFileResponse> getFile(
+    protectoratev1node.GetFileRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).server(
+      specs.NodeAgentService.getFile,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// DeskAction runs one desktop command in the node agent's interactive
+  /// session. See DeskService.
+  Future<protectoratev1desk.DeskActionResponse> deskAction(
+    protectoratev1desk.DeskActionRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeAgentService.deskAction,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -199,6 +256,49 @@ extension type NodeServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.NodeService.removeNode,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// PutFile copies a file or directory to a node, one chunk per call so it
+  /// works over plain HTTP/1.1. A transfer is a sequence of calls sharing a
+  /// transfer_id with consecutive offsets; the call with last set carries the
+  /// size and SHA-256 of the whole (uncompressed) stream, and only then is the
+  /// destination replaced, atomically. The hub relays chunks without storing
+  /// them. The remote path is confined to the node's file root unless the
+  /// node agent was started unconfined.
+  Future<protectoratev1node.PutFileResponse> putFile(
+    protectoratev1node.PutFileRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeService.putFile,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// GetFile streams a file or directory from a node: a header, chunks and a
+  /// trailer with the size and SHA-256 the receiver must verify.
+  Stream<protectoratev1node.GetFileResponse> getFile(
+    protectoratev1node.GetFileRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).server(
+      specs.NodeService.getFile,
       input,
       signal: signal,
       headers: headers,

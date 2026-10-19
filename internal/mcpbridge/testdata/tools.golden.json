@@ -203,6 +203,271 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Click moves the pointer and clicks. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "button": {
+          "description": "button is \"left\" (default), \"right\" or \"middle\".",
+          "type": "string"
+        },
+        "double": {
+          "type": "boolean"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_click"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Key presses a chord such as \"ctrl+s\", \"alt+f4\" or \"enter\". Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "chord": {
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_key"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "ListWindows lists visible top-level windows, topmost first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_list_windows"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Move puts the pointer at a position. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_move"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Run starts a program in the interactive session and returns at once. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "program": {
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_run"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Screenshot captures the whole virtual screen as a PNG.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_screenshot"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Type enters text as Unicode key events into the focused window. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "allowFamily": {
+              "type": "boolean"
+            },
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\"; required by mutating commands.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_type"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -552,6 +817,95 @@
       "type": "object"
     },
     "name": "node_list_nodes"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "PutFile copies a file or directory to a node, one chunk per call so it works over plain HTTP/1.1. A transfer is a sequence of calls sharing a transfer_id with consecutive offsets; the call with last set carries the size and SHA-256 of the whole (uncompressed) stream, and only then is the destination replaced, atomically. The hub relays chunks without storing them. The remote path is confined to the node's file root unless the node agent was started unconfined.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allowFamily": {
+          "type": "boolean"
+        },
+        "chunk": {
+          "additionalProperties": false,
+          "properties": {
+            "compressed": {
+              "type": "boolean"
+            },
+            "data": {
+              "contentEncoding": "base64",
+              "type": "string"
+            },
+            "rawSize": {
+              "description": "raw_size is the length after decompression.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "FILE_KIND_UNSPECIFIED",
+            "FILE_KIND_FILE",
+            "FILE_KIND_DIRECTORY"
+          ],
+          "type": "string"
+        },
+        "last": {
+          "description": "last ends the transfer; trailer is then required.",
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "mode holds the permission bits of a file; ignored for directories.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "name is the node name.",
+          "type": "string"
+        },
+        "offset": {
+          "description": "offset is the number of uncompressed bytes sent in earlier calls.",
+          "type": "integer"
+        },
+        "overwrite": {
+          "description": "overwrite replaces an existing destination instead of failing with ALREADY_EXISTS.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "path, kind, mode and overwrite are read on the first call (offset 0). A relative path is under the node's file root; the path names the destination itself, not a directory to put it in.",
+          "type": "string"
+        },
+        "trailer": {
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string"
+            },
+            "size": {
+              "description": "size and sha256 (hex) cover the uncompressed stream.",
+              "type": "integer"
+            },
+            "skipped": {
+              "description": "skipped counts directory entries that were not sent (symlinks, devices).",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "transferId": {
+          "description": "transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_put_file"
   },
   {
     "annotations": {

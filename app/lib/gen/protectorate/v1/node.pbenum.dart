@@ -14,6 +14,31 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
+class FileKind extends $pb.ProtobufEnum {
+  static const FileKind FILE_KIND_UNSPECIFIED =
+      FileKind._(0, _omitEnumNames ? '' : 'FILE_KIND_UNSPECIFIED');
+  static const FileKind FILE_KIND_FILE =
+      FileKind._(1, _omitEnumNames ? '' : 'FILE_KIND_FILE');
+
+  /// FILE_KIND_DIRECTORY travels as a tar stream of regular files and
+  /// directories; symlinks and special files are skipped.
+  static const FileKind FILE_KIND_DIRECTORY =
+      FileKind._(2, _omitEnumNames ? '' : 'FILE_KIND_DIRECTORY');
+
+  static const $core.List<FileKind> values = <FileKind>[
+    FILE_KIND_UNSPECIFIED,
+    FILE_KIND_FILE,
+    FILE_KIND_DIRECTORY,
+  ];
+
+  static final $core.List<FileKind?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 2);
+  static FileKind? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const FileKind._(super.value, super.name);
+}
+
 class NodeFreshness extends $pb.ProtobufEnum {
   static const NodeFreshness NODE_FRESHNESS_UNSPECIFIED =
       NodeFreshness._(0, _omitEnumNames ? '' : 'NODE_FRESHNESS_UNSPECIFIED');

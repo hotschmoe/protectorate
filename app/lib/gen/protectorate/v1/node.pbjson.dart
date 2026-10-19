@@ -20,9 +20,25 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
-import 'chat.pbjson.dart' as $4;
+import 'chat.pbjson.dart' as $5;
+import 'desk.pbjson.dart' as $4;
 import 'job.pbjson.dart' as $3;
 import 'sleeve.pbjson.dart' as $1;
+
+@$core.Deprecated('Use fileKindDescriptor instead')
+const FileKind$json = {
+  '1': 'FileKind',
+  '2': [
+    {'1': 'FILE_KIND_UNSPECIFIED', '2': 0},
+    {'1': 'FILE_KIND_FILE', '2': 1},
+    {'1': 'FILE_KIND_DIRECTORY', '2': 2},
+  ],
+};
+
+/// Descriptor for `FileKind`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List fileKindDescriptor = $convert.base64Decode(
+    'CghGaWxlS2luZBIZChVGSUxFX0tJTkRfVU5TUEVDSUZJRUQQABISCg5GSUxFX0tJTkRfRklMRR'
+    'ABEhcKE0ZJTEVfS0lORF9ESVJFQ1RPUlkQAg==');
 
 @$core.Deprecated('Use nodeFreshnessDescriptor instead')
 const NodeFreshness$json = {
@@ -59,6 +75,185 @@ final $typed_data.Uint8List alertKindDescriptor = $convert.base64Decode(
     'CglBbGVydEtpbmQSGgoWQUxFUlRfS0lORF9VTlNQRUNJRklFRBAAEhsKF0FMRVJUX0tJTkRfRE'
     'lTS19QRVJDRU5UEAESGwoXQUxFUlRfS0lORF9NRU1fUFJFU1NVUkUQAhIaChZBTEVSVF9LSU5E'
     'X1VOUkVBQ0hBQkxFEAMSHAoYQUxFUlRfS0lORF9OQU1FX01JU01BVENIEAQ=');
+
+@$core.Deprecated('Use fileChunkDescriptor instead')
+const FileChunk$json = {
+  '1': 'FileChunk',
+  '2': [
+    {'1': 'data', '3': 1, '4': 1, '5': 12, '10': 'data'},
+    {'1': 'compressed', '3': 2, '4': 1, '5': 8, '10': 'compressed'},
+    {'1': 'raw_size', '3': 3, '4': 1, '5': 13, '10': 'rawSize'},
+  ],
+};
+
+/// Descriptor for `FileChunk`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List fileChunkDescriptor = $convert.base64Decode(
+    'CglGaWxlQ2h1bmsSEgoEZGF0YRgBIAEoDFIEZGF0YRIeCgpjb21wcmVzc2VkGAIgASgIUgpjb2'
+    '1wcmVzc2VkEhkKCHJhd19zaXplGAMgASgNUgdyYXdTaXpl');
+
+@$core.Deprecated('Use fileTrailerDescriptor instead')
+const FileTrailer$json = {
+  '1': 'FileTrailer',
+  '2': [
+    {'1': 'size', '3': 1, '4': 1, '5': 4, '10': 'size'},
+    {'1': 'sha256', '3': 2, '4': 1, '5': 9, '10': 'sha256'},
+    {'1': 'skipped', '3': 3, '4': 1, '5': 13, '10': 'skipped'},
+  ],
+};
+
+/// Descriptor for `FileTrailer`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List fileTrailerDescriptor = $convert.base64Decode(
+    'CgtGaWxlVHJhaWxlchISCgRzaXplGAEgASgEUgRzaXplEhYKBnNoYTI1NhgCIAEoCVIGc2hhMj'
+    'U2EhgKB3NraXBwZWQYAyABKA1SB3NraXBwZWQ=');
+
+@$core.Deprecated('Use putFileRequestDescriptor instead')
+const PutFileRequest$json = {
+  '1': 'PutFileRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'transfer_id', '3': 3, '4': 1, '5': 9, '10': 'transferId'},
+    {'1': 'path', '3': 4, '4': 1, '5': 9, '10': 'path'},
+    {
+      '1': 'kind',
+      '3': 5,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.FileKind',
+      '10': 'kind'
+    },
+    {'1': 'mode', '3': 6, '4': 1, '5': 13, '10': 'mode'},
+    {'1': 'overwrite', '3': 7, '4': 1, '5': 8, '10': 'overwrite'},
+    {'1': 'offset', '3': 8, '4': 1, '5': 4, '10': 'offset'},
+    {
+      '1': 'chunk',
+      '3': 9,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.FileChunk',
+      '10': 'chunk'
+    },
+    {'1': 'last', '3': 10, '4': 1, '5': 8, '10': 'last'},
+    {
+      '1': 'trailer',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.FileTrailer',
+      '10': 'trailer'
+    },
+  ],
+};
+
+/// Descriptor for `PutFileRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List putFileRequestDescriptor = $convert.base64Decode(
+    'Cg5QdXRGaWxlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbWlseRgCIA'
+    'EoCFILYWxsb3dGYW1pbHkSHwoLdHJhbnNmZXJfaWQYAyABKAlSCnRyYW5zZmVySWQSEgoEcGF0'
+    'aBgEIAEoCVIEcGF0aBItCgRraW5kGAUgASgOMhkucHJvdGVjdG9yYXRlLnYxLkZpbGVLaW5kUg'
+    'RraW5kEhIKBG1vZGUYBiABKA1SBG1vZGUSHAoJb3ZlcndyaXRlGAcgASgIUglvdmVyd3JpdGUS'
+    'FgoGb2Zmc2V0GAggASgEUgZvZmZzZXQSMAoFY2h1bmsYCSABKAsyGi5wcm90ZWN0b3JhdGUudj'
+    'EuRmlsZUNodW5rUgVjaHVuaxISCgRsYXN0GAogASgIUgRsYXN0EjYKB3RyYWlsZXIYCyABKAsy'
+    'HC5wcm90ZWN0b3JhdGUudjEuRmlsZVRyYWlsZXJSB3RyYWlsZXI=');
+
+@$core.Deprecated('Use putFileResponseDescriptor instead')
+const PutFileResponse$json = {
+  '1': 'PutFileResponse',
+  '2': [
+    {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'received', '3': 2, '4': 1, '5': 4, '10': 'received'},
+    {'1': 'done', '3': 3, '4': 1, '5': 8, '10': 'done'},
+  ],
+};
+
+/// Descriptor for `PutFileResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List putFileResponseDescriptor = $convert.base64Decode(
+    'Cg9QdXRGaWxlUmVzcG9uc2USEgoEcGF0aBgBIAEoCVIEcGF0aBIaCghyZWNlaXZlZBgCIAEoBF'
+    'IIcmVjZWl2ZWQSEgoEZG9uZRgDIAEoCFIEZG9uZQ==');
+
+@$core.Deprecated('Use getFileRequestDescriptor instead')
+const GetFileRequest$json = {
+  '1': 'GetFileRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'allow_family', '3': 2, '4': 1, '5': 8, '10': 'allowFamily'},
+    {'1': 'path', '3': 3, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'no_compress', '3': 4, '4': 1, '5': 8, '10': 'noCompress'},
+  ],
+};
+
+/// Descriptor for `GetFileRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List getFileRequestDescriptor = $convert.base64Decode(
+    'Cg5HZXRGaWxlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEiEKDGFsbG93X2ZhbWlseRgCIA'
+    'EoCFILYWxsb3dGYW1pbHkSEgoEcGF0aBgDIAEoCVIEcGF0aBIfCgtub19jb21wcmVzcxgEIAEo'
+    'CFIKbm9Db21wcmVzcw==');
+
+@$core.Deprecated('Use fileHeaderDescriptor instead')
+const FileHeader$json = {
+  '1': 'FileHeader',
+  '2': [
+    {
+      '1': 'kind',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.FileKind',
+      '10': 'kind'
+    },
+    {'1': 'mode', '3': 2, '4': 1, '5': 13, '10': 'mode'},
+    {'1': 'size', '3': 3, '4': 1, '5': 4, '10': 'size'},
+    {'1': 'path', '3': 4, '4': 1, '5': 9, '10': 'path'},
+  ],
+};
+
+/// Descriptor for `FileHeader`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List fileHeaderDescriptor = $convert.base64Decode(
+    'CgpGaWxlSGVhZGVyEi0KBGtpbmQYASABKA4yGS5wcm90ZWN0b3JhdGUudjEuRmlsZUtpbmRSBG'
+    'tpbmQSEgoEbW9kZRgCIAEoDVIEbW9kZRISCgRzaXplGAMgASgEUgRzaXplEhIKBHBhdGgYBCAB'
+    'KAlSBHBhdGg=');
+
+@$core.Deprecated('Use getFileResponseDescriptor instead')
+const GetFileResponse$json = {
+  '1': 'GetFileResponse',
+  '2': [
+    {
+      '1': 'header',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.FileHeader',
+      '9': 0,
+      '10': 'header'
+    },
+    {
+      '1': 'chunk',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.FileChunk',
+      '9': 0,
+      '10': 'chunk'
+    },
+    {
+      '1': 'trailer',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.FileTrailer',
+      '9': 0,
+      '10': 'trailer'
+    },
+  ],
+  '8': [
+    {'1': 'part'},
+  ],
+};
+
+/// Descriptor for `GetFileResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List getFileResponseDescriptor = $convert.base64Decode(
+    'Cg9HZXRGaWxlUmVzcG9uc2USNQoGaGVhZGVyGAEgASgLMhsucHJvdGVjdG9yYXRlLnYxLkZpbG'
+    'VIZWFkZXJIAFIGaGVhZGVyEjIKBWNodW5rGAIgASgLMhoucHJvdGVjdG9yYXRlLnYxLkZpbGVD'
+    'aHVua0gAUgVjaHVuaxI4Cgd0cmFpbGVyGAMgASgLMhwucHJvdGVjdG9yYXRlLnYxLkZpbGVUcm'
+    'FpbGVySABSB3RyYWlsZXJCBgoEcGFydA==');
 
 @$core.Deprecated('Use getMetricsRequestDescriptor instead')
 const GetMetricsRequest$json = {
@@ -712,6 +907,22 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '2': '.protectorate.v1.NodeAgentServiceCancelJobRequest',
       '3': '.protectorate.v1.NodeAgentServiceCancelJobResponse'
     },
+    {
+      '1': 'PutFile',
+      '2': '.protectorate.v1.PutFileRequest',
+      '3': '.protectorate.v1.PutFileResponse'
+    },
+    {
+      '1': 'GetFile',
+      '2': '.protectorate.v1.GetFileRequest',
+      '3': '.protectorate.v1.GetFileResponse',
+      '6': true
+    },
+    {
+      '1': 'DeskAction',
+      '2': '.protectorate.v1.DeskActionRequest',
+      '3': '.protectorate.v1.DeskActionResponse'
+    },
   ],
   '3': {},
 };
@@ -735,7 +946,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Sleeve': $1.Sleeve$json,
   '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
-  '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
+  '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
   '.protectorate.v1.PrepareJobRequest': $3.PrepareJobRequest$json,
   '.protectorate.v1.PrepareJobResponse': $3.PrepareJobResponse$json,
@@ -752,6 +963,28 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
       $3.NodeAgentServiceCancelJobRequest$json,
   '.protectorate.v1.NodeAgentServiceCancelJobResponse':
       $3.NodeAgentServiceCancelJobResponse$json,
+  '.protectorate.v1.PutFileRequest': PutFileRequest$json,
+  '.protectorate.v1.FileChunk': FileChunk$json,
+  '.protectorate.v1.FileTrailer': FileTrailer$json,
+  '.protectorate.v1.PutFileResponse': PutFileResponse$json,
+  '.protectorate.v1.GetFileRequest': GetFileRequest$json,
+  '.protectorate.v1.GetFileResponse': GetFileResponse$json,
+  '.protectorate.v1.FileHeader': FileHeader$json,
+  '.protectorate.v1.DeskActionRequest': $4.DeskActionRequest$json,
+  '.protectorate.v1.ScreenshotRequest': $4.ScreenshotRequest$json,
+  '.protectorate.v1.DeskTarget': $4.DeskTarget$json,
+  '.protectorate.v1.ListWindowsRequest': $4.ListWindowsRequest$json,
+  '.protectorate.v1.ClickRequest': $4.ClickRequest$json,
+  '.protectorate.v1.MoveRequest': $4.MoveRequest$json,
+  '.protectorate.v1.TypeRequest': $4.TypeRequest$json,
+  '.protectorate.v1.KeyRequest': $4.KeyRequest$json,
+  '.protectorate.v1.RunRequest': $4.RunRequest$json,
+  '.protectorate.v1.DeskActionResponse': $4.DeskActionResponse$json,
+  '.protectorate.v1.ScreenshotResponse': $4.ScreenshotResponse$json,
+  '.protectorate.v1.ListWindowsResponse': $4.ListWindowsResponse$json,
+  '.protectorate.v1.DeskWindow': $4.DeskWindow$json,
+  '.protectorate.v1.InputResponse': $4.InputResponse$json,
+  '.protectorate.v1.RunResponse': $4.RunResponse$json,
 };
 
 /// Descriptor for `NodeAgentService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -766,7 +999,11 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     '4ucHJvdGVjdG9yYXRlLnYxLlJ1bkpvYlJlcXVlc3QaGS5wcm90ZWN0b3JhdGUudjEuSm9iRXZl'
     'bnQwARJyCglDYW5jZWxKb2ISMS5wcm90ZWN0b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbm'
     'NlbEpvYlJlcXVlc3QaMi5wcm90ZWN0b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbmNlbEpv'
-    'YlJlc3BvbnNlGgSQtRgB');
+    'YlJlc3BvbnNlEkwKB1B1dEZpbGUSHy5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlcXVlc3QaIC'
+    '5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlc3BvbnNlEk4KB0dldEZpbGUSHy5wcm90ZWN0b3Jh'
+    'dGUudjEuR2V0RmlsZVJlcXVlc3QaIC5wcm90ZWN0b3JhdGUudjEuR2V0RmlsZVJlc3BvbnNlMA'
+    'ESVQoKRGVza0FjdGlvbhIiLnByb3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVxdWVzdBojLnBy'
+    'b3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVzcG9uc2UaBJC1GAE=');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',
@@ -794,6 +1031,17 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '2': '.protectorate.v1.RemoveNodeRequest',
       '3': '.protectorate.v1.RemoveNodeResponse'
     },
+    {
+      '1': 'PutFile',
+      '2': '.protectorate.v1.PutFileRequest',
+      '3': '.protectorate.v1.PutFileResponse'
+    },
+    {
+      '1': 'GetFile',
+      '2': '.protectorate.v1.GetFileRequest',
+      '3': '.protectorate.v1.GetFileResponse',
+      '6': true
+    },
   ],
 };
 
@@ -819,12 +1067,19 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Sleeve': $1.Sleeve$json,
   '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
   '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
-  '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
+  '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,
   '.protectorate.v1.RemoveNodeRequest': RemoveNodeRequest$json,
   '.protectorate.v1.RemoveNodeResponse': RemoveNodeResponse$json,
+  '.protectorate.v1.PutFileRequest': PutFileRequest$json,
+  '.protectorate.v1.FileChunk': FileChunk$json,
+  '.protectorate.v1.FileTrailer': FileTrailer$json,
+  '.protectorate.v1.PutFileResponse': PutFileResponse$json,
+  '.protectorate.v1.GetFileRequest': GetFileRequest$json,
+  '.protectorate.v1.GetFileResponse': GetFileResponse$json,
+  '.protectorate.v1.FileHeader': FileHeader$json,
 };
 
 /// Descriptor for `NodeService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -835,4 +1090,7 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     '9kZVN0YXR1cyIDkAIBEksKB0FkZE5vZGUSHy5wcm90ZWN0b3JhdGUudjEuQWRkTm9kZVJlcXVl'
     'c3QaGS5wcm90ZWN0b3JhdGUudjEuTm9kZUluZm8iBKC1GAESVQoKUmVtb3ZlTm9kZRIiLnByb3'
     'RlY3RvcmF0ZS52MS5SZW1vdmVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5SZW1vdmVO'
-    'b2RlUmVzcG9uc2U=');
+    'b2RlUmVzcG9uc2USTAoHUHV0RmlsZRIfLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVxdWVzdB'
+    'ogLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVzcG9uc2USTgoHR2V0RmlsZRIfLnByb3RlY3Rv'
+    'cmF0ZS52MS5HZXRGaWxlUmVxdWVzdBogLnByb3RlY3RvcmF0ZS52MS5HZXRGaWxlUmVzcG9uc2'
+    'UwAQ==');

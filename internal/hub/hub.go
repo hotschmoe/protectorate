@@ -42,6 +42,7 @@ type Hub struct {
 	nodes   *NodeMonitor
 	leases  *LeaseTable
 	jobs    *JobManager
+	local   nodeOps
 	events  eventBus
 
 	tailnetStatus func(context.Context) (*pb.TailnetServiceGetStatusResponse, error)
@@ -207,6 +208,7 @@ func (h *Hub) Handler() http.Handler {
 	if h.jobs != nil {
 		mux.Handle(protectoratev1connect.NewLeaseServiceHandler(h, opts))
 		mux.Handle(protectoratev1connect.NewJobServiceHandler(h, opts))
+		mux.Handle(protectoratev1connect.NewDeskServiceHandler(h, opts))
 	}
 	if h.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
@@ -408,13 +410,14 @@ func (i authInterceptor) admit(ctx context.Context, procedure string, header htt
 		err = i.a.AuthorizeProcedure(p, procedure)
 	}
 	if err != nil {
-		if audited {
+		if audited || (known && !m.ReadOnly) {
 			i.a.Record(ctx, p, procedure, subject, err, deniedCode(err))
 		}
 		return ctx, nil, deniedConnectError(err)
 	}
+	quiet := continuesTransfer(msg)
 	finish := func(callErr error) {
-		if !audited {
+		if !audited || (quiet && callErr == nil) {
 			return
 		}
 		code := ""
@@ -424,6 +427,13 @@ func (i authInterceptor) admit(ctx context.Context, procedure string, header htt
 		i.a.Record(ctx, p, procedure, subject, callErr, code)
 	}
 	return auth.WithPrincipal(ctx, p), finish, nil
+}
+
+// continuesTransfer marks the middle chunks of a file upload, which are not
+// audited unless they fail: the first and last chunk record the transfer.
+func continuesTransfer(msg any) bool {
+	p, ok := msg.(*pb.PutFileRequest)
+	return ok && p.Offset > 0 && !p.Last
 }
 
 func deniedCode(err error) string { return deniedConnectError(err).Code().String() }

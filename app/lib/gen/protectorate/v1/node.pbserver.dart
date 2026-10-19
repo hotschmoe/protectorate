@@ -15,17 +15,18 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
+import 'desk.pb.dart' as $4;
 import 'job.pb.dart' as $3;
-import 'node.pb.dart' as $5;
+import 'node.pb.dart' as $6;
 import 'node.pbjson.dart';
 
 export 'node.pb.dart';
 
 abstract class NodeAgentServiceBase extends $pb.GeneratedService {
-  $async.Future<$5.NodeMetrics> getMetrics(
-      $pb.ServerContext ctx, $5.GetMetricsRequest request);
-  $async.Future<$5.NodeMetrics> watchMetrics(
-      $pb.ServerContext ctx, $5.WatchMetricsRequest request);
+  $async.Future<$6.NodeMetrics> getMetrics(
+      $pb.ServerContext ctx, $6.GetMetricsRequest request);
+  $async.Future<$6.NodeMetrics> watchMetrics(
+      $pb.ServerContext ctx, $6.WatchMetricsRequest request);
   $async.Future<$3.PrepareJobResponse> prepareJob(
       $pb.ServerContext ctx, $3.PrepareJobRequest request);
   $async.Future<$3.UploadJobDataResponse> uploadJobData(
@@ -34,13 +35,19 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $3.RunJobRequest request);
   $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
       $pb.ServerContext ctx, $3.NodeAgentServiceCancelJobRequest request);
+  $async.Future<$6.PutFileResponse> putFile(
+      $pb.ServerContext ctx, $6.PutFileRequest request);
+  $async.Future<$6.GetFileResponse> getFile(
+      $pb.ServerContext ctx, $6.GetFileRequest request);
+  $async.Future<$4.DeskActionResponse> deskAction(
+      $pb.ServerContext ctx, $4.DeskActionRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'GetMetrics':
-        return $5.GetMetricsRequest();
+        return $6.GetMetricsRequest();
       case 'WatchMetrics':
-        return $5.WatchMetricsRequest();
+        return $6.WatchMetricsRequest();
       case 'PrepareJob':
         return $3.PrepareJobRequest();
       case 'UploadJobData':
@@ -49,6 +56,12 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return $3.RunJobRequest();
       case 'CancelJob':
         return $3.NodeAgentServiceCancelJobRequest();
+      case 'PutFile':
+        return $6.PutFileRequest();
+      case 'GetFile':
+        return $6.GetFileRequest();
+      case 'DeskAction':
+        return $4.DeskActionRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -58,9 +71,9 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'GetMetrics':
-        return getMetrics(ctx, request as $5.GetMetricsRequest);
+        return getMetrics(ctx, request as $6.GetMetricsRequest);
       case 'WatchMetrics':
-        return watchMetrics(ctx, request as $5.WatchMetricsRequest);
+        return watchMetrics(ctx, request as $6.WatchMetricsRequest);
       case 'PrepareJob':
         return prepareJob(ctx, request as $3.PrepareJobRequest);
       case 'UploadJobData':
@@ -69,6 +82,12 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
         return runJob(ctx, request as $3.RunJobRequest);
       case 'CancelJob':
         return cancelJob(ctx, request as $3.NodeAgentServiceCancelJobRequest);
+      case 'PutFile':
+        return putFile(ctx, request as $6.PutFileRequest);
+      case 'GetFile':
+        return getFile(ctx, request as $6.GetFileRequest);
+      case 'DeskAction':
+        return deskAction(ctx, request as $4.DeskActionRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -80,25 +99,33 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
 }
 
 abstract class NodeServiceBase extends $pb.GeneratedService {
-  $async.Future<$5.ListNodesResponse> listNodes(
-      $pb.ServerContext ctx, $5.ListNodesRequest request);
-  $async.Future<$5.NodeStatus> getNode(
-      $pb.ServerContext ctx, $5.GetNodeRequest request);
-  $async.Future<$5.NodeInfo> addNode(
-      $pb.ServerContext ctx, $5.AddNodeRequest request);
-  $async.Future<$5.RemoveNodeResponse> removeNode(
-      $pb.ServerContext ctx, $5.RemoveNodeRequest request);
+  $async.Future<$6.ListNodesResponse> listNodes(
+      $pb.ServerContext ctx, $6.ListNodesRequest request);
+  $async.Future<$6.NodeStatus> getNode(
+      $pb.ServerContext ctx, $6.GetNodeRequest request);
+  $async.Future<$6.NodeInfo> addNode(
+      $pb.ServerContext ctx, $6.AddNodeRequest request);
+  $async.Future<$6.RemoveNodeResponse> removeNode(
+      $pb.ServerContext ctx, $6.RemoveNodeRequest request);
+  $async.Future<$6.PutFileResponse> putFile(
+      $pb.ServerContext ctx, $6.PutFileRequest request);
+  $async.Future<$6.GetFileResponse> getFile(
+      $pb.ServerContext ctx, $6.GetFileRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'ListNodes':
-        return $5.ListNodesRequest();
+        return $6.ListNodesRequest();
       case 'GetNode':
-        return $5.GetNodeRequest();
+        return $6.GetNodeRequest();
       case 'AddNode':
-        return $5.AddNodeRequest();
+        return $6.AddNodeRequest();
       case 'RemoveNode':
-        return $5.RemoveNodeRequest();
+        return $6.RemoveNodeRequest();
+      case 'PutFile':
+        return $6.PutFileRequest();
+      case 'GetFile':
+        return $6.GetFileRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -108,13 +135,17 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'ListNodes':
-        return listNodes(ctx, request as $5.ListNodesRequest);
+        return listNodes(ctx, request as $6.ListNodesRequest);
       case 'GetNode':
-        return getNode(ctx, request as $5.GetNodeRequest);
+        return getNode(ctx, request as $6.GetNodeRequest);
       case 'AddNode':
-        return addNode(ctx, request as $5.AddNodeRequest);
+        return addNode(ctx, request as $6.AddNodeRequest);
       case 'RemoveNode':
-        return removeNode(ctx, request as $5.RemoveNodeRequest);
+        return removeNode(ctx, request as $6.RemoveNodeRequest);
+      case 'PutFile':
+        return putFile(ctx, request as $6.PutFileRequest);
+      case 'GetFile':
+        return getFile(ctx, request as $6.GetFileRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
