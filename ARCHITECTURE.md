@@ -80,7 +80,26 @@ protectorate api call <Method> '<json>'   # generic escape hatch
   streaming needs HTTP/2 and is awkward in Flutter, and a terminal is just a
   pipe.
 
-## Networking: embedded tsnet + Headscale (spike)
+## Networking: embedded tsnet + Headscale (spike 1 done: `spikes/tailnet/`)
+
+Confirmed on linux/arm64, Windows AMD64 (officewin) and Termux-in-docker:
+- a tagged preauth join takes about 2 seconds, with no root and no TUN,
+- a `WhoIs` rejection of non-hub callers works,
+- state survives a restart.
+
+Costs:
+- about 15 MB of binary,
+- about 40 MB of idle RSS per node,
+- tsnet and Headscale versions must be upgraded together (Headscale rejects
+  clients older than v1.80).
+
+Before production we need:
+- Headscale's embedded DERP + STUN (UDP 3478) on the hub,
+- TLS on the control URL,
+- a key-expiry policy for tagged nodes,
+- a real-device Android test (Android 11+ restricts netlink).
+
+SSH stays as the bootstrap and break-glass path (`spikes/ssh-agentless/`).
 
 - Every hub and node binary embeds `tailscale.com/tsnet`, a userspace
   WireGuard node. Joining needs no TUN device and no admin rights.
