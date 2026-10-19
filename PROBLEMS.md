@@ -463,6 +463,28 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
 `[open]` Which ArchiCAD and ENERCALC workflows are first, and whether they can
 be done through APIs and files without the GUI.
 
+`[note]` Windows 10/11 has one live desktop session. A switched-away or
+disconnected session does not render, so it cannot be screenshotted or given
+input, and an RDP login takes over the console. An agent account cannot drive
+a desktop in the background while the user works on the same PC.
+
+`[decided]` (2026-10-20) For now: the user's own workstation desktop is
+leasable **while the user is away** (overnight). The node offers `desk:<node>`
+only inside an availability window and after a period without physical input,
+and ends the agent's lease the moment physical (non-injected) input arrives.
+The screen must stay unlocked for that window, which is a physical-security
+trade-off in the office.
+
+`[later]` Always-on agent desktops on machines with Intel Arc Pro cards, which
+support SR-IOV virtual GPUs: one or more Windows VMs (Hyper-V GPU partitioning,
+or a Linux KVM host with SR-IOV vGPUs, or Windows Server with Remote Desktop
+Services for several live sessions), each with its own always-logged-in agent
+account and node agent, so agents drive a desktop while the user works on
+theirs. To verify before building: which hypervisor the Arc Pro driver supports
+for vGPU (SR-IOV support has been Linux/KVM first; Hyper-V GPU-P support is
+unverified), ArchiCAD performance and licensing per VM, and how many seats a
+card supports.
+
 ---
 
 ## Emerging shape
