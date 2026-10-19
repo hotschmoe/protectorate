@@ -116,7 +116,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), leaseCmd(o), deskCmd(o), loginCmd(), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
 	return root
 }
 
@@ -132,7 +132,7 @@ func hubCmd() *cobra.Command {
 	var listen, tmuxSocket, webDir string
 	var quotaInterval, deadRetention time.Duration
 	var localURLs, localModelHosts []string
-	var nodeInterval time.Duration
+	var nodeInterval, ackTimeout time.Duration
 	var nodeTokenFile string
 	var watch, toolDirs []string
 	serve := &cobra.Command{
@@ -168,6 +168,8 @@ func hubCmd() *cobra.Command {
 			defer audit.Close()
 			defer store.Flush()
 			h := hub.New(version, tok)
+			h.SelfURL = hub.LocalURL(l.Addr())
+			h.AckTimeout = ackTimeout
 			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
 			h.DeadRetention = deadRetention
@@ -194,6 +196,7 @@ func hubCmd() *cobra.Command {
 		},
 	}
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
+	serve.Flags().DurationVar(&ackTimeout, "msg-ack-timeout", 30*time.Minute, "how long an ack-required message may stay unacked before it is re-delivered, and again before it is escalated to the orchestrator")
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")

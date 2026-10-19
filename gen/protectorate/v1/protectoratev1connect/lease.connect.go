@@ -49,14 +49,21 @@ const (
 type LeaseServiceClient interface {
 	// AcquireLease reserves one resource exclusively: a node name ("win1"), one
 	// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-	// least-loaded fresh matching node that is not already leased.
+	// least-loaded fresh matching node that is not already leased. When the
+	// resource is held, the call fails with failed_precondition, unless the
+	// request sets wait: then the caller is queued first in first out (highest
+	// priority first) and gets a ticket, a Lease in state QUEUED. When the hub
+	// grants a ticket it holds the lease for the waiter for a short claim
+	// window and sends it a notice message; RenewLease with no ttl claims the
+	// lease for the requested ttl, otherwise it passes to the next waiter.
+	// ReleaseLease on a ticket leaves the queue.
 	AcquireLease(context.Context, *connect.Request[v1.AcquireLeaseRequest]) (*connect.Response[v1.Lease], error)
 	// RenewLease pushes the expiry of a live lease to now plus a TTL.
 	RenewLease(context.Context, *connect.Request[v1.RenewLeaseRequest]) (*connect.Response[v1.Lease], error)
 	// ReleaseLease frees a lease at once. Releasing an unknown or expired lease
 	// is an error.
 	ReleaseLease(context.Context, *connect.Request[v1.ReleaseLeaseRequest]) (*connect.Response[v1.ReleaseLeaseResponse], error)
-	// ListLeases returns every live lease.
+	// ListLeases returns every live lease, then every queued ticket.
 	ListLeases(context.Context, *connect.Request[v1.ListLeasesRequest]) (*connect.Response[v1.ListLeasesResponse], error)
 }
 
@@ -131,14 +138,21 @@ func (c *leaseServiceClient) ListLeases(ctx context.Context, req *connect.Reques
 type LeaseServiceHandler interface {
 	// AcquireLease reserves one resource exclusively: a node name ("win1"), one
 	// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-	// least-loaded fresh matching node that is not already leased.
+	// least-loaded fresh matching node that is not already leased. When the
+	// resource is held, the call fails with failed_precondition, unless the
+	// request sets wait: then the caller is queued first in first out (highest
+	// priority first) and gets a ticket, a Lease in state QUEUED. When the hub
+	// grants a ticket it holds the lease for the waiter for a short claim
+	// window and sends it a notice message; RenewLease with no ttl claims the
+	// lease for the requested ttl, otherwise it passes to the next waiter.
+	// ReleaseLease on a ticket leaves the queue.
 	AcquireLease(context.Context, *connect.Request[v1.AcquireLeaseRequest]) (*connect.Response[v1.Lease], error)
 	// RenewLease pushes the expiry of a live lease to now plus a TTL.
 	RenewLease(context.Context, *connect.Request[v1.RenewLeaseRequest]) (*connect.Response[v1.Lease], error)
 	// ReleaseLease frees a lease at once. Releasing an unknown or expired lease
 	// is an error.
 	ReleaseLease(context.Context, *connect.Request[v1.ReleaseLeaseRequest]) (*connect.Response[v1.ReleaseLeaseResponse], error)
-	// ListLeases returns every live lease.
+	// ListLeases returns every live lease, then every queued ticket.
 	ListLeases(context.Context, *connect.Request[v1.ListLeasesRequest]) (*connect.Response[v1.ListLeasesResponse], error)
 }
 

@@ -20,7 +20,11 @@ import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $1;
 
+import 'lease.pbenum.dart';
+
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+export 'lease.pbenum.dart';
 
 /// NodeSelector describes the nodes a lease or job may land on. Zero fields
 /// match anything.
@@ -136,6 +140,8 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     $core.String? holder,
     $0.Duration? ttl,
     $core.bool? allowFamily,
+    $core.bool? wait,
+    $core.int? priority,
   }) {
     final result = AcquireLeaseRequest._();
     if (resource != null) result.resource = resource;
@@ -143,6 +149,8 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     if (holder != null) result.holder = holder;
     if (ttl != null) result.ttl = ttl;
     if (allowFamily != null) result.allowFamily = allowFamily;
+    if (wait != null) result.wait = wait;
+    if (priority != null) result.priority = priority;
     return result;
   }
 
@@ -174,6 +182,8 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
     ..aOM<$0.Duration>(4, _omitFieldNames ? '' : 'ttl',
         subBuilder: $0.Duration.$_createMessage)
     ..aOB(5, _omitFieldNames ? '' : 'allowFamily')
+    ..aOB(6, _omitFieldNames ? '' : 'wait')
+    ..aI(7, _omitFieldNames ? '' : 'priority')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -259,6 +269,26 @@ class AcquireLeaseRequest extends $pb.GeneratedMessage {
   $core.bool hasAllowFamily() => $_has(4);
   @$pb.TagNumber(5)
   void clearAllowFamily() => $_clearField(5);
+
+  /// wait queues the caller when the resource is held instead of failing.
+  @$pb.TagNumber(6)
+  $core.bool get wait => $_getBF(5);
+  @$pb.TagNumber(6)
+  set wait($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasWait() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearWait() => $_clearField(6);
+
+  /// priority orders the queue: larger first, then first come first served.
+  @$pb.TagNumber(7)
+  $core.int get priority => $_getIZ(6);
+  @$pb.TagNumber(7)
+  set priority($core.int value) => $_setSignedInt32(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasPriority() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearPriority() => $_clearField(7);
 }
 
 class RenewLeaseRequest extends $pb.GeneratedMessage {
@@ -532,7 +562,7 @@ class ListLeasesResponse extends $pb.GeneratedMessage {
   $pb.PbList<Lease> get leases => $_getList(0);
 }
 
-/// Lease is one reservation.
+/// Lease is one reservation, or a ticket waiting for one.
 class Lease extends $pb.GeneratedMessage {
   factory Lease({
     $core.String? id,
@@ -543,6 +573,8 @@ class Lease extends $pb.GeneratedMessage {
     $0.Duration? ttl,
     $1.Timestamp? acquiredAt,
     $1.Timestamp? expiresAt,
+    LeaseState? state,
+    $core.int? queuePosition,
   }) {
     final result = Lease._();
     if (id != null) result.id = id;
@@ -553,6 +585,8 @@ class Lease extends $pb.GeneratedMessage {
     if (ttl != null) result.ttl = ttl;
     if (acquiredAt != null) result.acquiredAt = acquiredAt;
     if (expiresAt != null) result.expiresAt = expiresAt;
+    if (state != null) result.state = state;
+    if (queuePosition != null) result.queuePosition = queuePosition;
     return result;
   }
 
@@ -581,6 +615,9 @@ class Lease extends $pb.GeneratedMessage {
         subBuilder: $1.Timestamp.$_createMessage)
     ..aOM<$1.Timestamp>(8, _omitFieldNames ? '' : 'expiresAt',
         subBuilder: $1.Timestamp.$_createMessage)
+    ..aE<LeaseState>(9, _omitFieldNames ? '' : 'state',
+        enumValues: LeaseState.values)
+    ..aI(10, _omitFieldNames ? '' : 'queuePosition')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -682,13 +719,33 @@ class Lease extends $pb.GeneratedMessage {
   void clearExpiresAt() => $_clearField(8);
   @$pb.TagNumber(8)
   $1.Timestamp ensureExpiresAt() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  LeaseState get state => $_getN(8);
+  @$pb.TagNumber(9)
+  set state(LeaseState value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasState() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearState() => $_clearField(9);
+
+  /// queue_position is 1 for the next ticket to be granted; set when QUEUED.
+  @$pb.TagNumber(10)
+  $core.int get queuePosition => $_getIZ(9);
+  @$pb.TagNumber(10)
+  set queuePosition($core.int value) => $_setSignedInt32(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasQueuePosition() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearQueuePosition() => $_clearField(10);
 }
 
 /// LeaseService reserves nodes and GPUs for a holder. A lease that is not
 /// renewed expires on its own, so a dead agent cannot hold hardware forever.
 /// Leases are kept across hub restarts and announced on EventService as
 /// "lease.acquired", "lease.renewed", "lease.released" and "lease.expired"
-/// (subject = lease id).
+/// (subject = lease id), and for the queue as "lease.queued", "lease.granted"
+/// and "lease.dropped" (subject = ticket id).
 class LeaseServiceApi {
   final $pb.RpcClient _client;
 
@@ -696,7 +753,14 @@ class LeaseServiceApi {
 
   /// AcquireLease reserves one resource exclusively: a node name ("win1"), one
   /// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-  /// least-loaded fresh matching node that is not already leased.
+  /// least-loaded fresh matching node that is not already leased. When the
+  /// resource is held, the call fails with failed_precondition, unless the
+  /// request sets wait: then the caller is queued first in first out (highest
+  /// priority first) and gets a ticket, a Lease in state QUEUED. When the hub
+  /// grants a ticket it holds the lease for the waiter for a short claim
+  /// window and sends it a notice message; RenewLease with no ttl claims the
+  /// lease for the requested ttl, otherwise it passes to the next waiter.
+  /// ReleaseLease on a ticket leaves the queue.
   $async.Future<Lease> acquireLease(
           $pb.ClientContext? ctx, AcquireLeaseRequest request) =>
       _client.invoke<Lease>(
@@ -715,7 +779,7 @@ class LeaseServiceApi {
       _client.invoke<ReleaseLeaseResponse>(
           ctx, 'LeaseService', 'ReleaseLease', request, ReleaseLeaseResponse());
 
-  /// ListLeases returns every live lease.
+  /// ListLeases returns every live lease, then every queued ticket.
   $async.Future<ListLeasesResponse> listLeases(
           $pb.ClientContext? ctx, ListLeasesRequest request) =>
       _client.invoke<ListLeasesResponse>(
