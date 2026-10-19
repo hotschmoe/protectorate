@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,9 +59,11 @@ type installInput struct {
 	WinUser      string
 	Home         string
 	Control      string
-	Name         string
-	Elevated     bool
-	ServeArgs    []string
+	// Linger is loginctl's Linger value for the user (linux): yes, no, or empty when unknown.
+	Linger    string
+	Name      string
+	Elevated  bool
+	ServeArgs []string
 	// Self marks an uninstall the agent runs on itself.
 	Self bool
 }
@@ -146,8 +149,13 @@ func planInstall(in installInput) ([]installStep, error) {
 			installStep{Kind: stepRun, Argv: []string{"systemctl", "--user", "daemon-reload"}, Desc: "reload the user manager"},
 			installStep{Kind: stepRun, Argv: []string{"systemctl", "--user", "enable", unitName}, Desc: "start the agent at login"},
 			installStep{Kind: stepRun, Argv: []string{"systemctl", "--user", "restart", unitName}, Desc: "start the agent now, or restart it onto the new binary"},
-			installStep{Kind: stepNote, Desc: "to keep the agent running while you are logged out, run once as root: loginctl enable-linger $USER (not done for you)"},
 		)
+		switch in.Linger {
+		case "yes":
+			steps = append(steps, installStep{Kind: stepNote, Desc: "linger is enabled"})
+		case "no":
+			steps = append(steps, installStep{Kind: stepNote, Desc: "to keep the agent running while you are logged out, run once as root: loginctl enable-linger $USER (not done for you)"})
+		}
 	case "android":
 		run, err := svcgen.TermuxRun(s)
 		if err != nil {
@@ -293,7 +301,24 @@ func currentInstallInput() (installInput, error) {
 	if u, err := user.Current(); err == nil && runtime.GOOS == "windows" {
 		in.WinUser = u.Username
 	}
+	if runtime.GOOS == "linux" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		out, _ := exec.CommandContext(ctx, "loginctl", "show-user", strconv.Itoa(os.Getuid()), "-p", "Linger").Output()
+		in.Linger = lingerValue(string(out))
+	}
 	return in, nil
+}
+
+// lingerValue parses `loginctl show-user -p Linger` output.
+func lingerValue(out string) string {
+	switch strings.TrimSpace(out) {
+	case "Linger=yes":
+		return "yes"
+	case "Linger=no":
+		return "no"
+	}
+	return ""
 }
 
 func nodeInstallCmd() *cobra.Command {
@@ -446,8 +471,6 @@ func runSteps(ctx context.Context, w, ew io.Writer, steps []installStep, enroll 
 			}
 		case stepRun:
 			err = runArgv(ctx, w, s.Argv)
-		case stepNote:
-			fmt.Fprintln(w, "    "+s.Desc)
 		}
 		if err == nil {
 			continue
