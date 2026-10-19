@@ -39,6 +39,8 @@ case " $* " in
   *) exec sleep 600;;
 esac
 compacts=0
+tdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/-w"
+mkdir -p "$tdir"
 echo '{"type":"system","subtype":"init","session_id":"'$sid'"}'
 while read -r line; do
   case "$line" in
@@ -60,6 +62,8 @@ while read -r line; do
       echo '{"type":"result","subtype":"error_during_execution","stop_reason":"cancelled","session_id":"'$sid'"}'
       ;;
     *)
+      printf '%s\n' '{"type":"user","message":{"role":"user","content":"please answer ping"}}' \
+        '{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"pong"}]}}' >> "$tdir/$sid.jsonl"
       echo '{"type":"assistant","message":{"id":"m1","model":"fake-1","content":[{"type":"text","text":"po"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":40}}}'
       echo '{"type":"assistant","message":{"id":"m1","model":"fake-1","content":[{"type":"text","text":"ng"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":40}}}'
       echo '{"type":"result","subtype":"success","session_id":"'$sid'","modelUsage":{"fake-1":{"contextWindow":1000}}}'

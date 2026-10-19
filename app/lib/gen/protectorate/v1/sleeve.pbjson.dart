@@ -15,6 +15,8 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
+    as $2;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
@@ -205,6 +207,14 @@ const Sleeve$json = {
       '10': 'chat'
     },
     {'1': 'supervised', '3': 16, '4': 1, '5': 8, '10': 'supervised'},
+    {
+      '1': 'handoff',
+      '3': 17,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Handoff',
+      '10': 'handoff'
+    },
   ],
   '8': [
     {'1': '_exit_code'},
@@ -224,8 +234,9 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'GAsgASgFSABSCGV4aXRDb2RliAEBEh8KC2V4aXRfc2lnbmFsGAwgASgFUgpleGl0U2lnbmFsEh'
     '0KCm9vbV9raWxsZWQYDSABKAhSCW9vbUtpbGxlZBIvCgRtb2RlGA4gASgOMhsucHJvdGVjdG9y'
     'YXRlLnYxLlNsZWV2ZU1vZGVSBG1vZGUSLwoEY2hhdBgPIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
-    '5DaGF0U3RhdHVzUgRjaGF0Eh4KCnN1cGVydmlzZWQYECABKAhSCnN1cGVydmlzZWRCDAoKX2V4'
-    'aXRfY29kZQ==');
+    '5DaGF0U3RhdHVzUgRjaGF0Eh4KCnN1cGVydmlzZWQYECABKAhSCnN1cGVydmlzZWQSMgoHaGFu'
+    'ZG9mZhgRIAEoCzIYLnByb3RlY3RvcmF0ZS52MS5IYW5kb2ZmUgdoYW5kb2ZmQgwKCl9leGl0X2'
+    'NvZGU=');
 
 @$core.Deprecated('Use spawnSleeveRequestDescriptor instead')
 const SpawnSleeveRequest$json = {
@@ -394,6 +405,58 @@ const KillSleeveResponse$json = {
 final $typed_data.Uint8List killSleeveResponseDescriptor =
     $convert.base64Decode('ChJLaWxsU2xlZXZlUmVzcG9uc2U=');
 
+@$core.Deprecated('Use resleeveSleeveRequestDescriptor instead')
+const ResleeveSleeveRequest$json = {
+  '1': 'ResleeveSleeveRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {
+      '1': 'to',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.Harness',
+      '10': 'to'
+    },
+    {'1': 'interrupt', '3': 3, '4': 1, '5': 8, '10': 'interrupt'},
+    {
+      '1': 'wait',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'wait'
+    },
+  ],
+};
+
+/// Descriptor for `ResleeveSleeveRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List resleeveSleeveRequestDescriptor = $convert.base64Decode(
+    'ChVSZXNsZWV2ZVNsZWV2ZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIoCgJ0bxgCIAEoDj'
+    'IYLnByb3RlY3RvcmF0ZS52MS5IYXJuZXNzUgJ0bxIcCglpbnRlcnJ1cHQYAyABKAhSCWludGVy'
+    'cnVwdBItCgR3YWl0GAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uUgR3YWl0');
+
+@$core.Deprecated('Use resleeveSleeveResponseDescriptor instead')
+const ResleeveSleeveResponse$json = {
+  '1': 'ResleeveSleeveResponse',
+  '2': [
+    {
+      '1': 'sleeve',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Sleeve',
+      '10': 'sleeve'
+    },
+  ],
+};
+
+/// Descriptor for `ResleeveSleeveResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List resleeveSleeveResponseDescriptor =
+    $convert.base64Decode(
+        'ChZSZXNsZWV2ZVNsZWV2ZVJlc3BvbnNlEi8KBnNsZWV2ZRgBIAEoCzIXLnByb3RlY3RvcmF0ZS'
+        '52MS5TbGVldmVSBnNsZWV2ZQ==');
+
 const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
   '1': 'SleeveService',
   '2': [
@@ -420,6 +483,11 @@ const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
       '3': '.protectorate.v1.KillSleeveResponse',
       '4': {}
     },
+    {
+      '1': 'ResleeveSleeve',
+      '2': '.protectorate.v1.ResleeveSleeveRequest',
+      '3': '.protectorate.v1.ResleeveSleeveResponse'
+    },
   ],
 };
 
@@ -435,12 +503,16 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.SleeveUsage': SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $1.ChatStatus$json,
+  '.protectorate.v1.Handoff': $1.Handoff$json,
   '.protectorate.v1.ListSleevesRequest': ListSleevesRequest$json,
   '.protectorate.v1.ListSleevesResponse': ListSleevesResponse$json,
   '.protectorate.v1.GetSleeveRequest': GetSleeveRequest$json,
   '.protectorate.v1.GetSleeveResponse': GetSleeveResponse$json,
   '.protectorate.v1.KillSleeveRequest': KillSleeveRequest$json,
   '.protectorate.v1.KillSleeveResponse': KillSleeveResponse$json,
+  '.protectorate.v1.ResleeveSleeveRequest': ResleeveSleeveRequest$json,
+  '.google.protobuf.Duration': $2.Duration$json,
+  '.protectorate.v1.ResleeveSleeveResponse': ResleeveSleeveResponse$json,
 };
 
 /// Descriptor for `SleeveService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -451,4 +523,6 @@ final $typed_data.Uint8List sleeveServiceDescriptor = $convert.base64Decode(
     'RvcmF0ZS52MS5MaXN0U2xlZXZlc1Jlc3BvbnNlIgOQAgESVwoJR2V0U2xlZXZlEiEucHJvdGVj'
     'dG9yYXRlLnYxLkdldFNsZWV2ZVJlcXVlc3QaIi5wcm90ZWN0b3JhdGUudjEuR2V0U2xlZXZlUm'
     'VzcG9uc2UiA5ACARJbCgpLaWxsU2xlZXZlEiIucHJvdGVjdG9yYXRlLnYxLktpbGxTbGVldmVS'
-    'ZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYxLktpbGxTbGVldmVSZXNwb25zZSIEiLUYAQ==');
+    'ZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYxLktpbGxTbGVldmVSZXNwb25zZSIEiLUYARJhCg5SZX'
+    'NsZWV2ZVNsZWV2ZRImLnByb3RlY3RvcmF0ZS52MS5SZXNsZWV2ZVNsZWV2ZVJlcXVlc3QaJy5w'
+    'cm90ZWN0b3JhdGUudjEuUmVzbGVldmVTbGVldmVSZXNwb25zZQ==');

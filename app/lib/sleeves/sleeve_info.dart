@@ -7,6 +7,10 @@ bool isLocalModel(Sleeve s) => s.hasChat() && s.chat.localModel;
 
 String sleeveProvider(Sleeve s) => s.hasChat() ? s.chat.provider : '';
 
+// The resleeve that started this harness had its summary written by a local
+// model (the fallback when no subscription had spare quota).
+bool summarizedLocally(Sleeve s) => s.hasHandoff() && s.handoff.summarizerLocal;
+
 // A spawn without a mode means chat for agent harnesses and terminal for
 // shell; older sleeves report unspecified.
 SleeveMode effectiveMode(Sleeve s) {

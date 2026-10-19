@@ -64,7 +64,7 @@ func (c *coordinator) chatMode(name string) string {
 	}
 	info, err := c.h.sleeves.Get(name)
 	switch {
-	case err != nil:
+	case err != nil, info.Helper != "":
 		return ""
 	case info.Mode == sleeve.ModeChat:
 		return "chat"

@@ -252,3 +252,25 @@ func TestOpenRequests(t *testing.T) {
 		t.Fatalf("open requests = %v", got)
 	}
 }
+
+func TestInvolving(t *testing.T) {
+	s, _, _ := newStore(t)
+	toAlice := mustSend(t, s, NewMessage{From: "bob", To: "alice", Kind: Request, AckRequired: true, Body: "do x", Recipients: []string{"alice"}})
+	acked := mustSend(t, s, NewMessage{From: "bob", To: "alice", Kind: Request, AckRequired: true, Body: "done", Recipients: []string{"alice"}})
+	mustSend(t, s, NewMessage{From: "bob", To: "alice", Kind: Note, Body: "fyi", Recipients: []string{"alice"}})
+	fromAlice := mustSend(t, s, NewMessage{From: "alice", To: "lib", Kind: Request, AckRequired: true, Body: "export Foo", Recipients: []string{"lib"}})
+	answered := mustSend(t, s, NewMessage{From: "alice", To: "lib", Kind: Request, AckRequired: true, Body: "old", Recipients: []string{"lib"}})
+	mustSend(t, s, NewMessage{From: "bob", To: "carol", Kind: Request, AckRequired: true, Body: "other", Recipients: []string{"carol"}})
+	for _, a := range [][2]string{{acked.ID, "alice"}, {answered.ID, "lib"}} {
+		if _, _, err := s.Ack(a[0], a[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var ids []string
+	for _, m := range s.Involving("alice") {
+		ids = append(ids, m.ID)
+	}
+	if want := []string{toAlice.ID, fromAlice.ID}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("involving alice = %v, want %v", ids, want)
+	}
+}

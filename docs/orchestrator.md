@@ -49,9 +49,11 @@ under the name `protectorate`.
 ## Scoping
 
 Default scopes are `read`, `events` and the explicit names of the mutating,
-non-destructive tools matching `backlog_*`, `lease_*` and `sleeve_spawn_sleeve`.
-In practice: read everything, stream events, add and update backlog items, and
-spawn sleeves. Not granted by default:
+non-destructive tools matching `backlog_*`, `lease_*`, `sleeve_spawn_sleeve`
+and `sleeve_resleeve_sleeve`. In practice: read everything, stream events, add
+and update backlog items, spawn sleeves, and move a sleeve to another harness
+(`sleeve resleeve`, see [chat.md](chat.md#resleeve)), which Poe may do without
+asking. Not granted by default:
 
 - token management, raw session creation, respawn and node add (owner-only
   whatever the scopes), `sleeve_kill_sleeve`, `session_kill_session` and

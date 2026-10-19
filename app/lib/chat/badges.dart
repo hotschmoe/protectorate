@@ -137,3 +137,22 @@ class ContextMeter extends StatelessWidget {
     );
   }
 }
+
+class LocalSummaryBadge extends StatelessWidget {
+  const LocalSummaryBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Tooltip(
+      message:
+          'The handoff this harness started from was summarized by a local '
+          'model, because no subscription had spare quota. Check it against '
+          'the facts in .protectorate/HANDOFF.md.',
+      child: Annunciator(
+        key: ValueKey('local-summary-badge'),
+        label: 'LOCAL SUMMARY',
+        tone: Tone.warn,
+      ),
+    );
+  }
+}

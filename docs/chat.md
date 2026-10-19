@@ -68,6 +68,60 @@ so it is local only with `--local-model-host llm.hotschmoe.com`; a provider
 A tailnet with a custom
 MagicDNS suffix other than `.ts.net` is only recognised by IP or inventory entry.
 
+## Resleeve
+
+```
+protectorate sleeve resleeve alice --to codex      # or --to auto
+protectorate sleeve resleeve alice --interrupt     # do not wait for the turn
+```
+
+`SleeveService.ResleeveSleeve` (MCP `sleeve_resleeve_sleeve`, owner and the
+orchestrator's default scopes) moves a chat sleeve to another harness on the
+same workspace under the same name. The outgoing harness is never asked
+anything. Decision record: `docs/memory-options.md`, sections 3 and 4.
+
+1. The hub takes the chat over: `Send` and `Compact` fail with
+   `failed_precondition` (the mailbox waits), then it waits for IDLE. A turn
+   still running after `--wait` (default 5m), or at once with `--interrupt`,
+   is interrupted; one that does not settle 30s later is closed under it.
+2. Facts, composed in code (`internal/handoff`): git status, `diff --stat
+   HEAD` and the last 10 commits (run in a read-only bwrap jail, since the
+   repository config is agent-written), the sleeve's claimed backlog items
+   and its project's open ones, open ack-required messages, whether
+   `.protectorate/NOTES.md` exists, and from the outgoing harness's own
+   transcript (read-only, inside the sleeve home: Claude
+   `.claude/projects/*/<id>.jsonl`, Codex `.codex/sessions/Y/M/D/rollout-*-<id>.jsonl`,
+   Grok `.grok/sessions/*/<id>/chat_history.jsonl`, pi
+   `.pi/sessions/*_<id>.jsonl`) the final assistant message, the latest user
+   message, the four before it and the first one. Each item is clipped (keeping
+   its end), the whole within 16 KiB, as t3code budgets its handoffs.
+   Harness-added context (a message wholly wrapped in tags) is left out.
+3. Summary: a throwaway helper sleeve (`sum-<name>`, empty workspace, hidden
+   from `sleeve ls`, never a mailbox recipient) runs the best subscription
+   from `quota suggest` other than the outgoing harness, in its asking mode
+   with every tool request denied, and answers Goal / State / Unfinished /
+   Next / Gotchas from the facts. With no subscription to spare, or when it
+   fails, pi (the local LLM) writes it; failing that the handoff holds the
+   facts only. It runs while the outgoing turn winds down, on the facts known
+   when the resleeve started; the file's facts are read after the turn ended.
+4. `<workspace>/.protectorate/HANDOFF.md` is overwritten (atomically, through
+   an `os.Root`, refusing a symlinked `.protectorate`), after `.protectorate/`
+   is added to the repository's `info/exclude`; a copy goes to
+   `<state dir>/handoffs/<name>/<time>-<from>-to-<to>.md`.
+5. The sleeve is stopped and spawned again on the new harness: same name,
+   workspace, limits, env and supervision, a fresh identity token, and the
+   chat log continues (a `Handoff` event marks the switch). If the new
+   harness does not start, the old one is spawned again on its own native
+   session and the call fails.
+6. The first `Send` is a plain user message from `hub`: "Continue the task in
+   this workspace. Read .protectorate/HANDOFF.md first ...".
+
+`Sleeve.handoff` keeps the record (who summarized; `summarizer_local` makes the
+app show LOCAL SUMMARY). Events: `resleeve.started`, `sleeve.resleeved`, and
+`resleeve.warning` when pi or no model wrote the summary. The outgoing
+harness's native session stays in the sleeve home; resleeving back later
+starts a new session that reads the newer handoff.
+
 ## The log
 
 `<state dir>/sleeves/<name>/chat.jsonl`, one proto-JSON `ChatEvent` per line,

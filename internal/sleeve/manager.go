@@ -55,6 +55,8 @@ type Info struct {
 	Chat *Chat `yaml:"chat,omitempty"`
 	// Supervised chat sleeves run the harness in its asking permission mode.
 	Supervised bool `yaml:"supervised,omitempty"`
+	// Handoff is set when a resleeve produced this sleeve's harness.
+	Handoff *Handoff `yaml:"handoff,omitempty"`
 	// Helper names the hub-internal job of a short-lived sleeve (such as a
 	// handoff summary); the directory and the mailbox leave such sleeves out.
 	Helper string    `yaml:"helper,omitempty"`

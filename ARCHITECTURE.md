@@ -437,6 +437,14 @@ sleeve stays in the mode it was spawned in.
   Codex enforces it itself.
 - **Grok:** it honors the user's `permission_mode` config outside sleeves;
   host-side drivers send `/always-approve off`.
+- **Supervised sleeves** (`--supervised`) run the harness in its asking mode
+  inside the same sandbox, so approvals reach `ChatService.Respond`.
+- **Resleeve** (`internal/handoff`, `internal/hub/resleeve.go`): the hub moves
+  a chat sleeve to another harness without asking the outgoing one: facts in
+  code from git and the native transcript, a summary from a separate model
+  (spare subscription, else local pi) in a throwaway helper sleeve, an
+  excluded `<workspace>/.protectorate/HANDOFF.md`, the same sleeve name on the
+  new harness, and one plain user message naming the file (`docs/chat.md`).
 
 ## Orchestrator
 
@@ -516,6 +524,7 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
   leases.yaml         # live leases and the lease queue (P9)
   directory.json      # projects, packages, last seen refs
   mailbox.jsonl       # messages and their delivery state
+  handoffs/<sleeve>/  # archived HANDOFF.md of every resleeve
   jobs/<id>/          # job.json, job.log, artifacts/ (P3)
   backlog.md          # low-priority work; items may link to GitHub issues (P6)
   ca/                 # SSH CA for short-lived certs to nodes

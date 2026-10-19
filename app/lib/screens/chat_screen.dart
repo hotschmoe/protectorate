@@ -276,6 +276,8 @@ class _Header extends StatelessWidget {
                         if (model.isNotEmpty)
                           Text(model, style: t.data(t.p.emph)),
                         if (isLocalModel(sleeve)) const LocalModelBadge(),
+                        if (summarizedLocally(sleeve))
+                          const LocalSummaryBadge(),
                       ],
                     ),
                   ),

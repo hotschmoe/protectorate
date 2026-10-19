@@ -101,6 +101,9 @@ message ChatEvent {
     Compaction compaction = 18;
     ChatError error = 19;
     StateChange state = 20;
+    // handoff marks where a resleeve replaced the harness; the events after
+    // it come from the new one.
+    Handoff handoff = 21;
   }
 }
 
@@ -176,6 +179,31 @@ message ChatError {
 
 message StateChange {
   ChatState state = 1;
+}
+
+// Handoff describes one resleeve: which harness gave way to which, and who
+// wrote the summary in the handoff file. Harness names are claude, codex,
+// grok and pi.
+message Handoff {
+  string from_harness = 1;
+  // from_session_id is the outgoing harness's native session, kept on disk
+  // for a later resume.
+  string from_session_id = 2;
+  string to_harness = 3;
+  // summarizer_harness is empty when no summary was written; summary_error
+  // then says why, and the handoff holds the facts only.
+  string summarizer_harness = 4;
+  string summarizer_model = 5;
+  string summarizer_provider = 6;
+  // summarizer_local is true when the summary came from a model served by
+  // the user's own machine or network (the fallback when no subscription
+  // has spare quota): show "summarized by local model".
+  bool summarizer_local = 7;
+  string summary_error = 8;
+  // path is the handoff file in the workspace; archive_path the hub's copy.
+  string path = 9;
+  string archive_path = 10;
+  google.protobuf.Timestamp at = 11;
 }
 
 message WatchRequest {

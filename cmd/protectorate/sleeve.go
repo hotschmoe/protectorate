@@ -14,6 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -58,7 +59,7 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 
 func sleeveCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
-	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o))
+	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
 
@@ -299,6 +300,9 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 				if s.Supervised {
 					fmt.Fprintln(w, "supervised\tyes (the harness asks; answer with chat respond)")
 				}
+				if s.Handoff != nil {
+					printHandoff(w, s.Handoff)
+				}
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))
@@ -357,4 +361,72 @@ func sleeveAttachCmd(o *opts) *cobra.Command {
 	c.Flags().BoolVar(&readOnly, "readonly", false, "attach without being able to send input")
 	c.Flags().StringVar(&escape, "escape", "^]", `detach key as ^X, or "none"`)
 	return c
+}
+
+func sleeveResleeveCmd(o *opts) *cobra.Command {
+	var to string
+	var interrupt bool
+	var wait time.Duration
+	c := &cobra.Command{
+		Use:   "resleeve <name> [--to auto|claude|codex|grok|pi] [--interrupt] [--wait 5m]",
+		Short: "Move a chat sleeve to another harness with a handoff",
+		Long: `Move a chat sleeve to another harness on the same workspace, under the same
+name. The outgoing harness is never asked: the hub waits for its turn to end
+(interrupting it after --wait, or at once with --interrupt), composes facts
+(git status, diff, recent commits, backlog, mail, the end of the outgoing
+harness's own transcript), has a separate model write a summary (the
+subscription with the most spare quota, else the local LLM through pi),
+overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git), starts the
+new harness and tells it to read the file. --to auto takes the top of
+'quota suggest' other than the current harness.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			h := pb.Harness_HARNESS_UNSPECIFIED
+			if to != "auto" {
+				var ok bool
+				if h, ok = harnessNames[to]; !ok || h == pb.Harness_HARNESS_SHELL {
+					return fmt.Errorf("unknown harness %q, want auto, claude, codex, grok or pi", to)
+				}
+			}
+			cl, err := sleeveClient(o)
+			if err != nil {
+				return err
+			}
+			req := &pb.ResleeveSleeveRequest{Name: args[0], To: h, Interrupt: interrupt}
+			if wait > 0 {
+				req.Wait = durationpb.New(wait)
+			}
+			res, err := cl.ResleeveSleeve(cmd.Context(), connect.NewRequest(req))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintf(w, "resleeved\t%s\n", res.Msg.Sleeve.Name)
+				printHandoff(w, res.Msg.Sleeve.Handoff)
+			})
+		},
+	}
+	c.Flags().StringVar(&to, "to", "auto", "auto, claude, codex, grok or pi")
+	c.Flags().BoolVar(&interrupt, "interrupt", false, "interrupt a running turn instead of waiting for it")
+	c.Flags().DurationVar(&wait, "wait", 0, "how long a running turn may continue before it is interrupted (default 5m)")
+	return c
+}
+
+func printHandoff(w io.Writer, h *pb.Handoff) {
+	if h == nil {
+		return
+	}
+	fmt.Fprintf(w, "resleeved from\t%s (session %s) to %s at %s\n", h.FromHarness, h.FromSessionId, h.ToHarness, h.At.AsTime().Local().Format(time.RFC3339))
+	switch {
+	case h.SummarizerHarness == "":
+		fmt.Fprintf(w, "summary\tnone: %s\n", h.SummaryError)
+	case h.SummarizerLocal:
+		fmt.Fprintf(w, "summary\tby local model %s %s %s (check it against the facts)\n", h.SummarizerHarness, h.SummarizerProvider, h.SummarizerModel)
+	default:
+		fmt.Fprintf(w, "summary\tby %s %s\n", h.SummarizerHarness, h.SummarizerModel)
+	}
+	fmt.Fprintf(w, "handoff\t%s\n", h.Path)
+	if h.ArchivePath != "" {
+		fmt.Fprintf(w, "archive\t%s\n", h.ArchivePath)
+	}
 }

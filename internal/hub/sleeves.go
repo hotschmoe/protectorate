@@ -36,6 +36,7 @@ func (h *Hub) SleeveOptions(cfg sleeve.Config) sleeve.Options {
 func (h *Hub) SetSleeves(m *sleeve.Manager) {
 	h.sleeves = m
 	h.chat = newChatManager(h)
+	h.dropHelpers(context.Background())
 }
 
 // sleeveProto is sleeveToProto with the live chat status laid over the
@@ -101,6 +102,18 @@ func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
 	return s
 }
 
+func handoffToProto(h *sleeve.Handoff) *pb.Handoff {
+	if h == nil {
+		return nil
+	}
+	return &pb.Handoff{
+		FromHarness: h.From, FromSessionId: h.FromSession, ToHarness: h.To,
+		SummarizerHarness: h.Summarizer, SummarizerModel: h.SummarizerModel, SummarizerProvider: h.SummarizerProvider,
+		SummarizerLocal: h.SummarizerLocal, SummaryError: h.SummaryError,
+		Path: h.Path, ArchivePath: h.Archive, At: timestamppb.New(h.At),
+	}
+}
+
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
 		Name:       i.Name,
@@ -112,6 +125,7 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Mode:       modeToProto(i.Mode),
 		Chat:       chatToProto(i.Chat),
 		Supervised: i.Supervised,
+		Handoff:    handoffToProto(i.Handoff),
 		Limits:     &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
 		State:      pb.SleeveState_SLEEVE_STATE_RUNNING,
 		Usage: &pb.SleeveUsage{
@@ -149,7 +163,7 @@ func (h *Hub) sleeveRows() []*pb.Sleeve {
 	}
 	var out []*pb.Sleeve
 	for _, i := range h.sleeves.List() {
-		if i.State == sleeve.Running {
+		if i.State == sleeve.Running && i.Helper == "" {
 			out = append(out, h.sleeveProto(i))
 		}
 	}
@@ -183,36 +197,57 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
 	}
+	if l := m.Limits; l != nil {
+		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
+	}
+	info, err := h.spawn(ctx, r, spawnOpts{})
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&pb.SpawnSleeveResponse{Sleeve: h.sleeveProto(info)}), nil
+}
+
+type spawnOpts struct {
+	// keepLog continues the sleeve's chat log instead of moving it aside.
+	keepLog bool
+	// resume is a native session id the chat driver resumes instead of
+	// starting a new session.
+	resume string
+	// hold leaves the new chat taken over by the hub.
+	hold bool
+}
+
+// spawn starts a sleeve with its own identity token and, in chat mode, its
+// driver, undoing all of it if any step fails.
+func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sleeve.Info, error) {
 	// the orchestrator carries its own token, minted by `orchestrator spawn`
 	var identity auth.Token
 	var secret string
-	if m.Name != sleeve.OrchestratorName {
+	if r.Name != sleeve.OrchestratorName {
 		var err error
-		if identity, secret, err = h.issueIdentity(m.Name); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+		if identity, secret, err = h.issueIdentity(r.Name); err != nil {
+			return sleeve.Info{}, connect.NewError(connect.CodeInternal, err)
 		}
-		r.Env = map[string]string{}
-		for k, v := range m.Env {
-			r.Env[k] = v
+		env := map[string]string{}
+		for k, v := range r.Env {
+			env[k] = v
 		}
 		for k, v := range h.identityEnv() {
-			r.Env[k] = v
+			env[k] = v
 		}
+		r.Env = env
 	}
 	revokeNew := func() {
 		if identity.ID != "" {
 			if _, err := h.authz.Store().Revoke(identity.ID, time.Now()); err != nil {
-				log.Printf("sleeve %s: revoke unused token: %v", m.Name, err)
+				log.Printf("sleeve %s: revoke unused token: %v", r.Name, err)
 			}
 		}
-	}
-	if l := m.Limits; l != nil {
-		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
 	}
 	info, err := h.sleeves.Spawn(ctx, r)
 	if err != nil {
 		revokeNew()
-		return nil, sleeveErr(err)
+		return sleeve.Info{}, sleeveErr(err)
 	}
 	if identity.ID != "" {
 		if err := h.installIdentity(info.Name, secret); err != nil {
@@ -220,30 +255,37 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
 				log.Printf("sleeve %s: kill after failed token install: %v", info.Name, kerr)
 			}
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return sleeve.Info{}, connect.NewError(connect.CodeInternal, err)
 		}
 		h.dropIdentity(info.Name, identity.ID)
 	}
 	if info.Mode == sleeve.ModeChat {
-		if err := h.chat.start(ctx, info.Name); err != nil {
+		if o.resume != "" {
+			if _, err := h.sleeves.SetChat(info.Name, func(c *sleeve.Chat) { c.SessionID = o.resume }); err != nil {
+				log.Printf("sleeve %s: record session to resume: %v", info.Name, err)
+			}
+		}
+		if err := h.chat.start(ctx, info.Name, !o.keepLog, o.hold); err != nil {
 			h.chat.remove(info.Name)
 			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
 				log.Printf("sleeve %s: kill after failed chat start: %v", info.Name, kerr)
 			}
 			h.dropIdentity(info.Name, "")
-			return nil, err
+			return sleeve.Info{}, err
 		}
 		info, _ = h.sleeves.Get(info.Name)
 	}
 	h.scanSessions(ctx)
 	h.pokeCoord()
-	return connect.NewResponse(&pb.SpawnSleeveResponse{Sleeve: h.sleeveProto(info)}), nil
+	return info, nil
 }
 
 func (h *Hub) ListSleeves(context.Context, *connect.Request[pb.ListSleevesRequest]) (*connect.Response[pb.ListSleevesResponse], error) {
 	res := &pb.ListSleevesResponse{}
 	for _, i := range h.sleeves.List() {
-		res.Sleeves = append(res.Sleeves, h.sleeveProto(i))
+		if i.Helper == "" {
+			res.Sleeves = append(res.Sleeves, h.sleeveProto(i))
+		}
 	}
 	return connect.NewResponse(res), nil
 }

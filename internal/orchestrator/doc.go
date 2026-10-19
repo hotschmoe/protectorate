@@ -44,6 +44,7 @@ var Workflow = []struct{ Command, Purpose string }{
 	{"backlog ls", "low-priority work waiting for spare capacity"},
 	{"sleeve ls", "running sleeves with CPU, memory and workspace"},
 	{"sleeve spawn", "start a harness in an isolated workspace"},
+	{"sleeve resleeve", "move a sleeve to another harness with a hub-written handoff (no confirmation needed)"},
 	{"session capture", "read what a sleeve's pane shows right now"},
 	{"backlog claim", "record which sleeve and harness took an item"},
 	{"backlog done", "mark an item finished"},
@@ -87,6 +88,7 @@ func RenderAgents(din DocInput) []byte {
 	w("- Never run a destructive action (killing a sleeve or session, removing a node, anything irreversible) without the user's explicit approval in this conversation, even if your token would allow it. Ask first and say what it will affect.\n")
 	w("- Do not try to widen your own permissions or work around a `permission_denied`. Report it to the user instead.\n")
 	w("- Start work only with `protectorate sleeve spawn`, which runs in a sandbox. Raw sessions run outside any sandbox and are not granted to you.\n")
+	w("- When a sleeve's subscription runs low, move it with `protectorate sleeve resleeve <name> --to auto`; no confirmation is needed. The hub writes the handoff and tells the new harness to read it.\n")
 	w("- Unknown or stale quota is not spare capacity. Prefer fresh data; run `protectorate quota suggest --refresh` when in doubt.\n")
 	w("- Work donated to public repositories lands in a review inbox (a branch on a fork plus a summary). Nothing public goes out without the user's approval.\n")
 	w("- This sandbox holds no SSH keys or harness credentials. `hosts.md` lists the user's machines for reference only.\n\n")
@@ -167,7 +169,7 @@ func firstSentence(s string, limit int) string {
 // them are dropped, so a new kill-style RPC is never granted by accident.
 // session_* is deliberately absent: session creation starts host processes
 // outside any sandbox. Poe starts work only through sandboxed sleeves.
-var DefaultGrants = []string{"backlog_*", "lease_*", "sleeve_spawn_sleeve"}
+var DefaultGrants = []string{"backlog_*", "lease_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of

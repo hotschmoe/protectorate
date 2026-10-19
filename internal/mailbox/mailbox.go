@@ -470,6 +470,25 @@ func (s *Store) Pending() map[string][]Message {
 	return out
 }
 
+// Involving returns the ack-required messages still open that name sent or
+// that are addressed to name and unacked by it, oldest first.
+func (s *Store) Involving(name string) []Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Message
+	for _, id := range s.order {
+		m := s.msgs[id]
+		if !m.AckRequired {
+			continue
+		}
+		d := m.Deliveries[name]
+		if (m.From == name && m.Open()) || (d != nil && d.Acked == nil) {
+			out = append(out, m.clone())
+		}
+	}
+	return out
+}
+
 // OpenRequests returns the unacked request messages addressed to project that
 // were sent from fromProject, oldest first.
 func (s *Store) OpenRequests(project, fromProject string) []Message {

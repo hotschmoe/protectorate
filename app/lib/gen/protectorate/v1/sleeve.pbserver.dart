@@ -15,31 +15,35 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'sleeve.pb.dart' as $2;
+import 'sleeve.pb.dart' as $3;
 import 'sleeve.pbjson.dart';
 
 export 'sleeve.pb.dart';
 
 abstract class SleeveServiceBase extends $pb.GeneratedService {
-  $async.Future<$2.SpawnSleeveResponse> spawnSleeve(
-      $pb.ServerContext ctx, $2.SpawnSleeveRequest request);
-  $async.Future<$2.ListSleevesResponse> listSleeves(
-      $pb.ServerContext ctx, $2.ListSleevesRequest request);
-  $async.Future<$2.GetSleeveResponse> getSleeve(
-      $pb.ServerContext ctx, $2.GetSleeveRequest request);
-  $async.Future<$2.KillSleeveResponse> killSleeve(
-      $pb.ServerContext ctx, $2.KillSleeveRequest request);
+  $async.Future<$3.SpawnSleeveResponse> spawnSleeve(
+      $pb.ServerContext ctx, $3.SpawnSleeveRequest request);
+  $async.Future<$3.ListSleevesResponse> listSleeves(
+      $pb.ServerContext ctx, $3.ListSleevesRequest request);
+  $async.Future<$3.GetSleeveResponse> getSleeve(
+      $pb.ServerContext ctx, $3.GetSleeveRequest request);
+  $async.Future<$3.KillSleeveResponse> killSleeve(
+      $pb.ServerContext ctx, $3.KillSleeveRequest request);
+  $async.Future<$3.ResleeveSleeveResponse> resleeveSleeve(
+      $pb.ServerContext ctx, $3.ResleeveSleeveRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'SpawnSleeve':
-        return $2.SpawnSleeveRequest();
+        return $3.SpawnSleeveRequest();
       case 'ListSleeves':
-        return $2.ListSleevesRequest();
+        return $3.ListSleevesRequest();
       case 'GetSleeve':
-        return $2.GetSleeveRequest();
+        return $3.GetSleeveRequest();
       case 'KillSleeve':
-        return $2.KillSleeveRequest();
+        return $3.KillSleeveRequest();
+      case 'ResleeveSleeve':
+        return $3.ResleeveSleeveRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -49,13 +53,15 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'SpawnSleeve':
-        return spawnSleeve(ctx, request as $2.SpawnSleeveRequest);
+        return spawnSleeve(ctx, request as $3.SpawnSleeveRequest);
       case 'ListSleeves':
-        return listSleeves(ctx, request as $2.ListSleevesRequest);
+        return listSleeves(ctx, request as $3.ListSleevesRequest);
       case 'GetSleeve':
-        return getSleeve(ctx, request as $2.GetSleeveRequest);
+        return getSleeve(ctx, request as $3.GetSleeveRequest);
       case 'KillSleeve':
-        return killSleeve(ctx, request as $2.KillSleeveRequest);
+        return killSleeve(ctx, request as $3.KillSleeveRequest);
+      case 'ResleeveSleeve':
+        return resleeveSleeve(ctx, request as $3.ResleeveSleeveRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

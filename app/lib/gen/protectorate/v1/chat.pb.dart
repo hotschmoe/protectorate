@@ -224,6 +224,7 @@ enum ChatEvent_Body {
   compaction,
   error,
   state,
+  handoff,
   notSet
 }
 
@@ -242,6 +243,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     Compaction? compaction,
     ChatError? error,
     StateChange? state,
+    Handoff? handoff,
   }) {
     final result = ChatEvent._();
     if (seq != null) result.seq = seq;
@@ -257,6 +259,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     if (compaction != null) result.compaction = compaction;
     if (error != null) result.error = error;
     if (state != null) result.state = state;
+    if (handoff != null) result.handoff = handoff;
     return result;
   }
 
@@ -281,6 +284,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     18: ChatEvent_Body.compaction,
     19: ChatEvent_Body.error,
     20: ChatEvent_Body.state,
+    21: ChatEvent_Body.handoff,
     0: ChatEvent_Body.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -288,7 +292,7 @@ class ChatEvent extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ChatEvent.$_createMessage)
-    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
+    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])
     ..a<$fixnum.Int64>(1, _omitFieldNames ? '' : 'seq', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOM<$0.Timestamp>(2, _omitFieldNames ? '' : 'time',
@@ -315,6 +319,8 @@ class ChatEvent extends $pb.GeneratedMessage {
         subBuilder: ChatError.$_createMessage)
     ..aOM<StateChange>(20, _omitFieldNames ? '' : 'state',
         subBuilder: StateChange.$_createMessage)
+    ..aOM<Handoff>(21, _omitFieldNames ? '' : 'handoff',
+        subBuilder: Handoff.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -348,6 +354,7 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(18)
   @$pb.TagNumber(19)
   @$pb.TagNumber(20)
+  @$pb.TagNumber(21)
   ChatEvent_Body whichBody() => _ChatEvent_BodyByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
@@ -360,6 +367,7 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(18)
   @$pb.TagNumber(19)
   @$pb.TagNumber(20)
+  @$pb.TagNumber(21)
   void clearBody() => $_clearField($_whichOneof(0));
 
   /// seq increases by one per event within a sleeve, starting at 1. All text
@@ -504,6 +512,19 @@ class ChatEvent extends $pb.GeneratedMessage {
   void clearState() => $_clearField(20);
   @$pb.TagNumber(20)
   StateChange ensureState() => $_ensure(12);
+
+  /// handoff marks where a resleeve replaced the harness; the events after
+  /// it come from the new one.
+  @$pb.TagNumber(21)
+  Handoff get handoff => $_getN(13);
+  @$pb.TagNumber(21)
+  set handoff(Handoff value) => $_setField(21, value);
+  @$pb.TagNumber(21)
+  $core.bool hasHandoff() => $_has(13);
+  @$pb.TagNumber(21)
+  void clearHandoff() => $_clearField(21);
+  @$pb.TagNumber(21)
+  Handoff ensureHandoff() => $_ensure(13);
 }
 
 class UserMessage extends $pb.GeneratedMessage {
@@ -1404,6 +1425,197 @@ class StateChange extends $pb.GeneratedMessage {
   $core.bool hasState() => $_has(0);
   @$pb.TagNumber(1)
   void clearState() => $_clearField(1);
+}
+
+/// Handoff describes one resleeve: which harness gave way to which, and who
+/// wrote the summary in the handoff file. Harness names are claude, codex,
+/// grok and pi.
+class Handoff extends $pb.GeneratedMessage {
+  factory Handoff({
+    $core.String? fromHarness,
+    $core.String? fromSessionId,
+    $core.String? toHarness,
+    $core.String? summarizerHarness,
+    $core.String? summarizerModel,
+    $core.String? summarizerProvider,
+    $core.bool? summarizerLocal,
+    $core.String? summaryError,
+    $core.String? path,
+    $core.String? archivePath,
+    $0.Timestamp? at,
+  }) {
+    final result = Handoff._();
+    if (fromHarness != null) result.fromHarness = fromHarness;
+    if (fromSessionId != null) result.fromSessionId = fromSessionId;
+    if (toHarness != null) result.toHarness = toHarness;
+    if (summarizerHarness != null) result.summarizerHarness = summarizerHarness;
+    if (summarizerModel != null) result.summarizerModel = summarizerModel;
+    if (summarizerProvider != null)
+      result.summarizerProvider = summarizerProvider;
+    if (summarizerLocal != null) result.summarizerLocal = summarizerLocal;
+    if (summaryError != null) result.summaryError = summaryError;
+    if (path != null) result.path = path;
+    if (archivePath != null) result.archivePath = archivePath;
+    if (at != null) result.at = at;
+    return result;
+  }
+
+  Handoff._();
+
+  factory Handoff.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Handoff()..mergeFromBuffer(data, registry);
+  factory Handoff.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Handoff()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Handoff',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: Handoff.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'fromHarness')
+    ..aOS(2, _omitFieldNames ? '' : 'fromSessionId')
+    ..aOS(3, _omitFieldNames ? '' : 'toHarness')
+    ..aOS(4, _omitFieldNames ? '' : 'summarizerHarness')
+    ..aOS(5, _omitFieldNames ? '' : 'summarizerModel')
+    ..aOS(6, _omitFieldNames ? '' : 'summarizerProvider')
+    ..aOB(7, _omitFieldNames ? '' : 'summarizerLocal')
+    ..aOS(8, _omitFieldNames ? '' : 'summaryError')
+    ..aOS(9, _omitFieldNames ? '' : 'path')
+    ..aOS(10, _omitFieldNames ? '' : 'archivePath')
+    ..aOM<$0.Timestamp>(11, _omitFieldNames ? '' : 'at',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Handoff clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Handoff copyWith(void Function(Handoff) updates) =>
+      super.copyWith((message) => updates(message as Handoff)) as Handoff;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Handoff() / Handoff.new instead')
+  static Handoff create() => Handoff._();
+  static $pb.GeneratedMessage $_createMessage() => Handoff._();
+  @$core.override
+  Handoff createEmptyInstance() => Handoff._();
+  @$core.pragma('dart2js:noInline')
+  static Handoff getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Handoff>(Handoff.$_createMessage);
+  static Handoff? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get fromHarness => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set fromHarness($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasFromHarness() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearFromHarness() => $_clearField(1);
+
+  /// from_session_id is the outgoing harness's native session, kept on disk
+  /// for a later resume.
+  @$pb.TagNumber(2)
+  $core.String get fromSessionId => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set fromSessionId($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasFromSessionId() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearFromSessionId() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get toHarness => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set toHarness($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasToHarness() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearToHarness() => $_clearField(3);
+
+  /// summarizer_harness is empty when no summary was written; summary_error
+  /// then says why, and the handoff holds the facts only.
+  @$pb.TagNumber(4)
+  $core.String get summarizerHarness => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set summarizerHarness($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasSummarizerHarness() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearSummarizerHarness() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get summarizerModel => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set summarizerModel($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasSummarizerModel() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearSummarizerModel() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $core.String get summarizerProvider => $_getSZ(5);
+  @$pb.TagNumber(6)
+  set summarizerProvider($core.String value) => $_setString(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasSummarizerProvider() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearSummarizerProvider() => $_clearField(6);
+
+  /// summarizer_local is true when the summary came from a model served by
+  /// the user's own machine or network (the fallback when no subscription
+  /// has spare quota): show "summarized by local model".
+  @$pb.TagNumber(7)
+  $core.bool get summarizerLocal => $_getBF(6);
+  @$pb.TagNumber(7)
+  set summarizerLocal($core.bool value) => $_setBool(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasSummarizerLocal() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearSummarizerLocal() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.String get summaryError => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set summaryError($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasSummaryError() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearSummaryError() => $_clearField(8);
+
+  /// path is the handoff file in the workspace; archive_path the hub's copy.
+  @$pb.TagNumber(9)
+  $core.String get path => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set path($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasPath() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearPath() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.String get archivePath => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set archivePath($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasArchivePath() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearArchivePath() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $0.Timestamp get at => $_getN(10);
+  @$pb.TagNumber(11)
+  set at($0.Timestamp value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasAt() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearAt() => $_clearField(11);
+  @$pb.TagNumber(11)
+  $0.Timestamp ensureAt() => $_ensure(10);
 }
 
 class WatchRequest extends $pb.GeneratedMessage {
