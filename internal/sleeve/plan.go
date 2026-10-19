@@ -45,12 +45,8 @@ func (c Config) Locate(h Harness) (Binary, error) {
 		if err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
 			continue
 		}
-		real, err := filepath.EvalSymlinks(p)
-		if err != nil {
-			continue
-		}
 		b := Binary{Path: p}
-		for _, dir := range []string{d, filepath.Dir(real)} {
+		for _, dir := range symlinkDirs(p) {
 			if !c.mounted(dir) && !contains(b.RO, dir) {
 				b.RO = append(b.RO, dir)
 			}
@@ -58,6 +54,28 @@ func (c Config) Locate(h Harness) (Binary, error) {
 		return b, nil
 	}
 	return Binary{}, fmt.Errorf("%w: %s not found in %s", ErrUnavailable, h.binary(), strings.Join(c.PathDirs, ":"))
+}
+
+// symlinkDirs returns the directory of p and of every symlink hop it
+// resolves through, so each can be mounted.
+func symlinkDirs(p string) []string {
+	dirs := []string{filepath.Dir(p)}
+	for i := 0; i < 16; i++ {
+		fi, err := os.Lstat(p)
+		if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+			break
+		}
+		t, err := os.Readlink(p)
+		if err != nil {
+			break
+		}
+		if !filepath.IsAbs(t) {
+			t = filepath.Join(filepath.Dir(p), t)
+		}
+		p = filepath.Clean(t)
+		dirs = append(dirs, filepath.Dir(p))
+	}
+	return dirs
 }
 
 func (c Config) mounted(p string) bool {

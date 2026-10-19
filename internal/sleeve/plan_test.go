@@ -130,3 +130,36 @@ func TestParseHarness(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestLocateFollowsSymlinkChain(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"tools/bin", "other/bin", "other/dl"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	real := filepath.Join(root, "other/dl/h-1.0")
+	if err := os.WriteFile(real, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(root, "other/bin/grok")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../other/bin/grok", filepath.Join(root, "tools/bin/grok")); err != nil {
+		t.Fatal(err)
+	}
+	c := testConfig()
+	c.ToolDirs = []string{filepath.Join(root, "tools")}
+	c.PathDirs = []string{filepath.Join(root, "tools/bin")}
+	b, err := c.Locate(Grok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "other/bin"), filepath.Join(root, "other/dl")}
+	if strings.Join(b.RO, ",") != strings.Join(want, ",") {
+		t.Errorf("RO = %v, want %v", b.RO, want)
+	}
+	if _, err := c.Locate(Pi); !errors.Is(err, ErrUnavailable) {
+		t.Errorf("missing harness err = %v", err)
+	}
+}
