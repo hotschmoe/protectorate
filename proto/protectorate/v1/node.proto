@@ -5,6 +5,7 @@ package protectorate.v1;
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "protectorate/v1/options.proto";
+import "protectorate/v1/sleeve.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
@@ -74,6 +75,9 @@ message NodeMetrics {
   repeated DirSize watch_dirs = 13;
   // warnings lists sections that could not be collected on this node.
   repeated string warnings = 14;
+  // sleeves lists the sleeves running on this node with their usage; only the
+  // hub's own node has any.
+  repeated Sleeve sleeves = 15;
 }
 
 message CpuMetrics {

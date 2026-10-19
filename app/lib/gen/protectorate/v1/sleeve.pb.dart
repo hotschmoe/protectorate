@@ -1,0 +1,991 @@
+// This is a generated file - do not edit.
+//
+// Generated from protectorate/v1/sleeve.proto.
+
+// @dart = 3.3
+
+// ignore_for_file: annotate_overrides, camel_case_types, comment_references
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: curly_braces_in_flow_control_structures
+// ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
+// ignore_for_file: non_constant_identifier_names, prefer_relative_imports
+
+import 'dart:async' as $async;
+import 'dart:core' as $core;
+
+import 'package:fixnum/fixnum.dart' as $fixnum;
+import 'package:protobuf/protobuf.dart' as $pb;
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
+    as $0;
+
+import 'sleeve.pbenum.dart';
+
+export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+export 'sleeve.pbenum.dart';
+
+class SleeveLimits extends $pb.GeneratedMessage {
+  factory SleeveLimits({
+    $core.int? cpuPercent,
+    $fixnum.Int64? memoryBytes,
+  }) {
+    final result = SleeveLimits._();
+    if (cpuPercent != null) result.cpuPercent = cpuPercent;
+    if (memoryBytes != null) result.memoryBytes = memoryBytes;
+    return result;
+  }
+
+  SleeveLimits._();
+
+  factory SleeveLimits.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SleeveLimits()..mergeFromBuffer(data, registry);
+  factory SleeveLimits.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SleeveLimits()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SleeveLimits',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SleeveLimits.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'cpuPercent', fieldType: $pb.PbFieldType.OU3)
+    ..a<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'memoryBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SleeveLimits clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SleeveLimits copyWith(void Function(SleeveLimits) updates) =>
+      super.copyWith((message) => updates(message as SleeveLimits))
+          as SleeveLimits;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SleeveLimits() / SleeveLimits.new instead')
+  static SleeveLimits create() => SleeveLimits._();
+  static $pb.GeneratedMessage $_createMessage() => SleeveLimits._();
+  @$core.override
+  SleeveLimits createEmptyInstance() => SleeveLimits._();
+  @$core.pragma('dart2js:noInline')
+  static SleeveLimits getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SleeveLimits>(
+          SleeveLimits.$_createMessage);
+  static SleeveLimits? _defaultInstance;
+
+  /// cpu_percent caps CPU time; 100 is one core, 200 two cores. 0 means unlimited.
+  @$pb.TagNumber(1)
+  $core.int get cpuPercent => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set cpuPercent($core.int value) => $_setUnsignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCpuPercent() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCpuPercent() => $_clearField(1);
+
+  /// memory_bytes caps memory including page cache and tmpfs; swap is disabled
+  /// when set. 0 means unlimited.
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get memoryBytes => $_getI64(1);
+  @$pb.TagNumber(2)
+  set memoryBytes($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasMemoryBytes() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearMemoryBytes() => $_clearField(2);
+}
+
+/// SleeveUsage is read from the sleeve's cgroup.
+class SleeveUsage extends $pb.GeneratedMessage {
+  factory SleeveUsage({
+    $core.double? cpuPercent,
+    $core.double? cpuSeconds,
+    $fixnum.Int64? memoryCurrentBytes,
+    $fixnum.Int64? memoryPeakBytes,
+    $core.int? pids,
+    $fixnum.Int64? oomKills,
+    $fixnum.Int64? workspaceDiskBytes,
+    $0.Timestamp? sampledAt,
+    $0.Timestamp? diskSampledAt,
+  }) {
+    final result = SleeveUsage._();
+    if (cpuPercent != null) result.cpuPercent = cpuPercent;
+    if (cpuSeconds != null) result.cpuSeconds = cpuSeconds;
+    if (memoryCurrentBytes != null)
+      result.memoryCurrentBytes = memoryCurrentBytes;
+    if (memoryPeakBytes != null) result.memoryPeakBytes = memoryPeakBytes;
+    if (pids != null) result.pids = pids;
+    if (oomKills != null) result.oomKills = oomKills;
+    if (workspaceDiskBytes != null)
+      result.workspaceDiskBytes = workspaceDiskBytes;
+    if (sampledAt != null) result.sampledAt = sampledAt;
+    if (diskSampledAt != null) result.diskSampledAt = diskSampledAt;
+    return result;
+  }
+
+  SleeveUsage._();
+
+  factory SleeveUsage.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SleeveUsage()..mergeFromBuffer(data, registry);
+  factory SleeveUsage.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SleeveUsage()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SleeveUsage',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SleeveUsage.$_createMessage)
+    ..aD(1, _omitFieldNames ? '' : 'cpuPercent')
+    ..aD(2, _omitFieldNames ? '' : 'cpuSeconds')
+    ..a<$fixnum.Int64>(
+        3, _omitFieldNames ? '' : 'memoryCurrentBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        4, _omitFieldNames ? '' : 'memoryPeakBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aI(5, _omitFieldNames ? '' : 'pids', fieldType: $pb.PbFieldType.OU3)
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'oomKills', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        7, _omitFieldNames ? '' : 'workspaceDiskBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOM<$0.Timestamp>(8, _omitFieldNames ? '' : 'sampledAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOM<$0.Timestamp>(9, _omitFieldNames ? '' : 'diskSampledAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SleeveUsage clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SleeveUsage copyWith(void Function(SleeveUsage) updates) =>
+      super.copyWith((message) => updates(message as SleeveUsage))
+          as SleeveUsage;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SleeveUsage() / SleeveUsage.new instead')
+  static SleeveUsage create() => SleeveUsage._();
+  static $pb.GeneratedMessage $_createMessage() => SleeveUsage._();
+  @$core.override
+  SleeveUsage createEmptyInstance() => SleeveUsage._();
+  @$core.pragma('dart2js:noInline')
+  static SleeveUsage getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SleeveUsage>(
+          SleeveUsage.$_createMessage);
+  static SleeveUsage? _defaultInstance;
+
+  /// cpu_percent is CPU used over the last sample interval; 100 is one core.
+  @$pb.TagNumber(1)
+  $core.double get cpuPercent => $_getN(0);
+  @$pb.TagNumber(1)
+  set cpuPercent($core.double value) => $_setDouble(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCpuPercent() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCpuPercent() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.double get cpuSeconds => $_getN(1);
+  @$pb.TagNumber(2)
+  set cpuSeconds($core.double value) => $_setDouble(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCpuSeconds() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCpuSeconds() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get memoryCurrentBytes => $_getI64(2);
+  @$pb.TagNumber(3)
+  set memoryCurrentBytes($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasMemoryCurrentBytes() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearMemoryCurrentBytes() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get memoryPeakBytes => $_getI64(3);
+  @$pb.TagNumber(4)
+  set memoryPeakBytes($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasMemoryPeakBytes() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearMemoryPeakBytes() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.int get pids => $_getIZ(4);
+  @$pb.TagNumber(5)
+  set pids($core.int value) => $_setUnsignedInt32(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasPids() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearPids() => $_clearField(5);
+
+  /// oom_kills counts processes the kernel killed for exceeding the memory limit.
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get oomKills => $_getI64(5);
+  @$pb.TagNumber(6)
+  set oomKills($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasOomKills() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearOomKills() => $_clearField(6);
+
+  /// workspace_disk_bytes is measured on a slow interval and is 0 until the
+  /// first measurement.
+  @$pb.TagNumber(7)
+  $fixnum.Int64 get workspaceDiskBytes => $_getI64(6);
+  @$pb.TagNumber(7)
+  set workspaceDiskBytes($fixnum.Int64 value) => $_setInt64(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasWorkspaceDiskBytes() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearWorkspaceDiskBytes() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $0.Timestamp get sampledAt => $_getN(7);
+  @$pb.TagNumber(8)
+  set sampledAt($0.Timestamp value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasSampledAt() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearSampledAt() => $_clearField(8);
+  @$pb.TagNumber(8)
+  $0.Timestamp ensureSampledAt() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  $0.Timestamp get diskSampledAt => $_getN(8);
+  @$pb.TagNumber(9)
+  set diskSampledAt($0.Timestamp value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasDiskSampledAt() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearDiskSampledAt() => $_clearField(9);
+  @$pb.TagNumber(9)
+  $0.Timestamp ensureDiskSampledAt() => $_ensure(8);
+}
+
+class Sleeve extends $pb.GeneratedMessage {
+  factory Sleeve({
+    $core.String? name,
+    Harness? harness,
+    $core.String? workspace,
+    $core.String? session,
+    $0.Timestamp? createdAt,
+    SleeveState? state,
+    SleeveLimits? limits,
+    SleeveUsage? usage,
+    $core.Iterable<$core.String>? args,
+    $0.Timestamp? exitedAt,
+  }) {
+    final result = Sleeve._();
+    if (name != null) result.name = name;
+    if (harness != null) result.harness = harness;
+    if (workspace != null) result.workspace = workspace;
+    if (session != null) result.session = session;
+    if (createdAt != null) result.createdAt = createdAt;
+    if (state != null) result.state = state;
+    if (limits != null) result.limits = limits;
+    if (usage != null) result.usage = usage;
+    if (args != null) result.args.addAll(args);
+    if (exitedAt != null) result.exitedAt = exitedAt;
+    return result;
+  }
+
+  Sleeve._();
+
+  factory Sleeve.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Sleeve()..mergeFromBuffer(data, registry);
+  factory Sleeve.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Sleeve()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Sleeve',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: Sleeve.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aE<Harness>(2, _omitFieldNames ? '' : 'harness',
+        enumValues: Harness.values)
+    ..aOS(3, _omitFieldNames ? '' : 'workspace')
+    ..aOS(4, _omitFieldNames ? '' : 'session')
+    ..aOM<$0.Timestamp>(5, _omitFieldNames ? '' : 'createdAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aE<SleeveState>(6, _omitFieldNames ? '' : 'state',
+        enumValues: SleeveState.values)
+    ..aOM<SleeveLimits>(7, _omitFieldNames ? '' : 'limits',
+        subBuilder: SleeveLimits.$_createMessage)
+    ..aOM<SleeveUsage>(8, _omitFieldNames ? '' : 'usage',
+        subBuilder: SleeveUsage.$_createMessage)
+    ..pPS(9, _omitFieldNames ? '' : 'args')
+    ..aOM<$0.Timestamp>(10, _omitFieldNames ? '' : 'exitedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Sleeve clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Sleeve copyWith(void Function(Sleeve) updates) =>
+      super.copyWith((message) => updates(message as Sleeve)) as Sleeve;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Sleeve() / Sleeve.new instead')
+  static Sleeve create() => Sleeve._();
+  static $pb.GeneratedMessage $_createMessage() => Sleeve._();
+  @$core.override
+  Sleeve createEmptyInstance() => Sleeve._();
+  @$core.pragma('dart2js:noInline')
+  static Sleeve getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Sleeve>(Sleeve.$_createMessage);
+  static Sleeve? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  Harness get harness => $_getN(1);
+  @$pb.TagNumber(2)
+  set harness(Harness value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasHarness() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearHarness() => $_clearField(2);
+
+  /// workspace is the absolute path bound read-write into the sandbox.
+  @$pb.TagNumber(3)
+  $core.String get workspace => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set workspace($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasWorkspace() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearWorkspace() => $_clearField(3);
+
+  /// session is the tmux session name to use with SessionService and the terminal.
+  @$pb.TagNumber(4)
+  $core.String get session => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set session($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasSession() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearSession() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $0.Timestamp get createdAt => $_getN(4);
+  @$pb.TagNumber(5)
+  set createdAt($0.Timestamp value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasCreatedAt() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearCreatedAt() => $_clearField(5);
+  @$pb.TagNumber(5)
+  $0.Timestamp ensureCreatedAt() => $_ensure(4);
+
+  @$pb.TagNumber(6)
+  SleeveState get state => $_getN(5);
+  @$pb.TagNumber(6)
+  set state(SleeveState value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasState() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearState() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  SleeveLimits get limits => $_getN(6);
+  @$pb.TagNumber(7)
+  set limits(SleeveLimits value) => $_setField(7, value);
+  @$pb.TagNumber(7)
+  $core.bool hasLimits() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearLimits() => $_clearField(7);
+  @$pb.TagNumber(7)
+  SleeveLimits ensureLimits() => $_ensure(6);
+
+  @$pb.TagNumber(8)
+  SleeveUsage get usage => $_getN(7);
+  @$pb.TagNumber(8)
+  set usage(SleeveUsage value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasUsage() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearUsage() => $_clearField(8);
+  @$pb.TagNumber(8)
+  SleeveUsage ensureUsage() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  $pb.PbList<$core.String> get args => $_getList(8);
+
+  @$pb.TagNumber(10)
+  $0.Timestamp get exitedAt => $_getN(9);
+  @$pb.TagNumber(10)
+  set exitedAt($0.Timestamp value) => $_setField(10, value);
+  @$pb.TagNumber(10)
+  $core.bool hasExitedAt() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearExitedAt() => $_clearField(10);
+  @$pb.TagNumber(10)
+  $0.Timestamp ensureExitedAt() => $_ensure(9);
+}
+
+class SpawnSleeveRequest extends $pb.GeneratedMessage {
+  factory SpawnSleeveRequest({
+    $core.String? name,
+    $core.String? workspace,
+    Harness? harness,
+    $core.Iterable<$core.String>? args,
+    SleeveLimits? limits,
+    $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
+  }) {
+    final result = SpawnSleeveRequest._();
+    if (name != null) result.name = name;
+    if (workspace != null) result.workspace = workspace;
+    if (harness != null) result.harness = harness;
+    if (args != null) result.args.addAll(args);
+    if (limits != null) result.limits = limits;
+    if (env != null) result.env.addEntries(env);
+    return result;
+  }
+
+  SpawnSleeveRequest._();
+
+  factory SpawnSleeveRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnSleeveRequest()..mergeFromBuffer(data, registry);
+  factory SpawnSleeveRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnSleeveRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SpawnSleeveRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SpawnSleeveRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'workspace')
+    ..aE<Harness>(3, _omitFieldNames ? '' : 'harness',
+        enumValues: Harness.values)
+    ..pPS(4, _omitFieldNames ? '' : 'args')
+    ..aOM<SleeveLimits>(5, _omitFieldNames ? '' : 'limits',
+        subBuilder: SleeveLimits.$_createMessage)
+    ..m<$core.String, $core.String>(6, _omitFieldNames ? '' : 'env',
+        entryClassName: 'SpawnSleeveRequest.EnvEntry',
+        keyFieldType: $pb.PbFieldType.OS,
+        valueFieldType: $pb.PbFieldType.OS,
+        packageName: const $pb.PackageName('protectorate.v1'))
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnSleeveRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnSleeveRequest copyWith(void Function(SpawnSleeveRequest) updates) =>
+      super.copyWith((message) => updates(message as SpawnSleeveRequest))
+          as SpawnSleeveRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SpawnSleeveRequest() / SpawnSleeveRequest.new instead')
+  static SpawnSleeveRequest create() => SpawnSleeveRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SpawnSleeveRequest._();
+  @$core.override
+  SpawnSleeveRequest createEmptyInstance() => SpawnSleeveRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SpawnSleeveRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SpawnSleeveRequest>(
+          SpawnSleeveRequest.$_createMessage);
+  static SpawnSleeveRequest? _defaultInstance;
+
+  /// name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  /// workspace is an absolute directory path on the hub, or a git URL to clone.
+  @$pb.TagNumber(2)
+  $core.String get workspace => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set workspace($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasWorkspace() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearWorkspace() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  Harness get harness => $_getN(2);
+  @$pb.TagNumber(3)
+  set harness(Harness value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasHarness() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearHarness() => $_clearField(3);
+
+  /// args are extra arguments for the harness, or the whole command for shell.
+  @$pb.TagNumber(4)
+  $pb.PbList<$core.String> get args => $_getList(3);
+
+  @$pb.TagNumber(5)
+  SleeveLimits get limits => $_getN(4);
+  @$pb.TagNumber(5)
+  set limits(SleeveLimits value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasLimits() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearLimits() => $_clearField(5);
+  @$pb.TagNumber(5)
+  SleeveLimits ensureLimits() => $_ensure(4);
+
+  /// env holds extra environment variables for the harness.
+  @$pb.TagNumber(6)
+  $pb.PbMap<$core.String, $core.String> get env => $_getMap(5);
+}
+
+class SpawnSleeveResponse extends $pb.GeneratedMessage {
+  factory SpawnSleeveResponse({
+    Sleeve? sleeve,
+  }) {
+    final result = SpawnSleeveResponse._();
+    if (sleeve != null) result.sleeve = sleeve;
+    return result;
+  }
+
+  SpawnSleeveResponse._();
+
+  factory SpawnSleeveResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnSleeveResponse()..mergeFromBuffer(data, registry);
+  factory SpawnSleeveResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnSleeveResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SpawnSleeveResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SpawnSleeveResponse.$_createMessage)
+    ..aOM<Sleeve>(1, _omitFieldNames ? '' : 'sleeve',
+        subBuilder: Sleeve.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnSleeveResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnSleeveResponse copyWith(void Function(SpawnSleeveResponse) updates) =>
+      super.copyWith((message) => updates(message as SpawnSleeveResponse))
+          as SpawnSleeveResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core
+      .Deprecated('Use SpawnSleeveResponse() / SpawnSleeveResponse.new instead')
+  static SpawnSleeveResponse create() => SpawnSleeveResponse._();
+  static $pb.GeneratedMessage $_createMessage() => SpawnSleeveResponse._();
+  @$core.override
+  SpawnSleeveResponse createEmptyInstance() => SpawnSleeveResponse._();
+  @$core.pragma('dart2js:noInline')
+  static SpawnSleeveResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SpawnSleeveResponse>(
+          SpawnSleeveResponse.$_createMessage);
+  static SpawnSleeveResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  Sleeve get sleeve => $_getN(0);
+  @$pb.TagNumber(1)
+  set sleeve(Sleeve value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Sleeve ensureSleeve() => $_ensure(0);
+}
+
+class ListSleevesRequest extends $pb.GeneratedMessage {
+  factory ListSleevesRequest() => ListSleevesRequest._();
+
+  ListSleevesRequest._();
+
+  factory ListSleevesRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListSleevesRequest()..mergeFromBuffer(data, registry);
+  factory ListSleevesRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListSleevesRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListSleevesRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListSleevesRequest.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListSleevesRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListSleevesRequest copyWith(void Function(ListSleevesRequest) updates) =>
+      super.copyWith((message) => updates(message as ListSleevesRequest))
+          as ListSleevesRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ListSleevesRequest() / ListSleevesRequest.new instead')
+  static ListSleevesRequest create() => ListSleevesRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ListSleevesRequest._();
+  @$core.override
+  ListSleevesRequest createEmptyInstance() => ListSleevesRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ListSleevesRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListSleevesRequest>(
+          ListSleevesRequest.$_createMessage);
+  static ListSleevesRequest? _defaultInstance;
+}
+
+class ListSleevesResponse extends $pb.GeneratedMessage {
+  factory ListSleevesResponse({
+    $core.Iterable<Sleeve>? sleeves,
+  }) {
+    final result = ListSleevesResponse._();
+    if (sleeves != null) result.sleeves.addAll(sleeves);
+    return result;
+  }
+
+  ListSleevesResponse._();
+
+  factory ListSleevesResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListSleevesResponse()..mergeFromBuffer(data, registry);
+  factory ListSleevesResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListSleevesResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListSleevesResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListSleevesResponse.$_createMessage)
+    ..pPM<Sleeve>(1, _omitFieldNames ? '' : 'sleeves',
+        subBuilder: Sleeve.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListSleevesResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListSleevesResponse copyWith(void Function(ListSleevesResponse) updates) =>
+      super.copyWith((message) => updates(message as ListSleevesResponse))
+          as ListSleevesResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core
+      .Deprecated('Use ListSleevesResponse() / ListSleevesResponse.new instead')
+  static ListSleevesResponse create() => ListSleevesResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ListSleevesResponse._();
+  @$core.override
+  ListSleevesResponse createEmptyInstance() => ListSleevesResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ListSleevesResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListSleevesResponse>(
+          ListSleevesResponse.$_createMessage);
+  static ListSleevesResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<Sleeve> get sleeves => $_getList(0);
+}
+
+class GetSleeveRequest extends $pb.GeneratedMessage {
+  factory GetSleeveRequest({
+    $core.String? name,
+  }) {
+    final result = GetSleeveRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  GetSleeveRequest._();
+
+  factory GetSleeveRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRequest()..mergeFromBuffer(data, registry);
+  factory GetSleeveRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetSleeveRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetSleeveRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRequest copyWith(void Function(GetSleeveRequest) updates) =>
+      super.copyWith((message) => updates(message as GetSleeveRequest))
+          as GetSleeveRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GetSleeveRequest() / GetSleeveRequest.new instead')
+  static GetSleeveRequest create() => GetSleeveRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetSleeveRequest._();
+  @$core.override
+  GetSleeveRequest createEmptyInstance() => GetSleeveRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetSleeveRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<GetSleeveRequest>(
+          GetSleeveRequest.$_createMessage);
+  static GetSleeveRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class GetSleeveResponse extends $pb.GeneratedMessage {
+  factory GetSleeveResponse({
+    Sleeve? sleeve,
+  }) {
+    final result = GetSleeveResponse._();
+    if (sleeve != null) result.sleeve = sleeve;
+    return result;
+  }
+
+  GetSleeveResponse._();
+
+  factory GetSleeveResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveResponse()..mergeFromBuffer(data, registry);
+  factory GetSleeveResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetSleeveResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetSleeveResponse.$_createMessage)
+    ..aOM<Sleeve>(1, _omitFieldNames ? '' : 'sleeve',
+        subBuilder: Sleeve.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveResponse copyWith(void Function(GetSleeveResponse) updates) =>
+      super.copyWith((message) => updates(message as GetSleeveResponse))
+          as GetSleeveResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GetSleeveResponse() / GetSleeveResponse.new instead')
+  static GetSleeveResponse create() => GetSleeveResponse._();
+  static $pb.GeneratedMessage $_createMessage() => GetSleeveResponse._();
+  @$core.override
+  GetSleeveResponse createEmptyInstance() => GetSleeveResponse._();
+  @$core.pragma('dart2js:noInline')
+  static GetSleeveResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<GetSleeveResponse>(
+          GetSleeveResponse.$_createMessage);
+  static GetSleeveResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  Sleeve get sleeve => $_getN(0);
+  @$pb.TagNumber(1)
+  set sleeve(Sleeve value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Sleeve ensureSleeve() => $_ensure(0);
+}
+
+class KillSleeveRequest extends $pb.GeneratedMessage {
+  factory KillSleeveRequest({
+    $core.String? name,
+  }) {
+    final result = KillSleeveRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  KillSleeveRequest._();
+
+  factory KillSleeveRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      KillSleeveRequest()..mergeFromBuffer(data, registry);
+  factory KillSleeveRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      KillSleeveRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'KillSleeveRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: KillSleeveRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  KillSleeveRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  KillSleeveRequest copyWith(void Function(KillSleeveRequest) updates) =>
+      super.copyWith((message) => updates(message as KillSleeveRequest))
+          as KillSleeveRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use KillSleeveRequest() / KillSleeveRequest.new instead')
+  static KillSleeveRequest create() => KillSleeveRequest._();
+  static $pb.GeneratedMessage $_createMessage() => KillSleeveRequest._();
+  @$core.override
+  KillSleeveRequest createEmptyInstance() => KillSleeveRequest._();
+  @$core.pragma('dart2js:noInline')
+  static KillSleeveRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<KillSleeveRequest>(
+          KillSleeveRequest.$_createMessage);
+  static KillSleeveRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class KillSleeveResponse extends $pb.GeneratedMessage {
+  factory KillSleeveResponse() => KillSleeveResponse._();
+
+  KillSleeveResponse._();
+
+  factory KillSleeveResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      KillSleeveResponse()..mergeFromBuffer(data, registry);
+  factory KillSleeveResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      KillSleeveResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'KillSleeveResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: KillSleeveResponse.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  KillSleeveResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  KillSleeveResponse copyWith(void Function(KillSleeveResponse) updates) =>
+      super.copyWith((message) => updates(message as KillSleeveResponse))
+          as KillSleeveResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use KillSleeveResponse() / KillSleeveResponse.new instead')
+  static KillSleeveResponse create() => KillSleeveResponse._();
+  static $pb.GeneratedMessage $_createMessage() => KillSleeveResponse._();
+  @$core.override
+  KillSleeveResponse createEmptyInstance() => KillSleeveResponse._();
+  @$core.pragma('dart2js:noInline')
+  static KillSleeveResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<KillSleeveResponse>(
+          KillSleeveResponse.$_createMessage);
+  static KillSleeveResponse? _defaultInstance;
+}
+
+/// SleeveService manages sleeves on the hub machine: one workspace plus one
+/// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
+/// memory limits. Each sleeve is a tmux session ("sleeve-<name>"), so
+/// CapturePane and the WebSocket terminal work on it. Sleeves are Linux-only.
+/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
+/// and "sleeve.oom" (subject = sleeve name).
+class SleeveServiceApi {
+  final $pb.RpcClient _client;
+
+  SleeveServiceApi(this._client);
+
+  /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
+  /// workspace is an existing directory (bound read-write at the same path) or
+  /// a git URL cloned into the hub's workspaces directory. Respawning the name
+  /// of an exited sleeve reuses its home directory and workspace.
+  $async.Future<SpawnSleeveResponse> spawnSleeve(
+          $pb.ClientContext? ctx, SpawnSleeveRequest request) =>
+      _client.invoke<SpawnSleeveResponse>(
+          ctx, 'SleeveService', 'SpawnSleeve', request, SpawnSleeveResponse());
+
+  /// ListSleeves returns every known sleeve, running or exited, with its latest
+  /// resource usage.
+  $async.Future<ListSleevesResponse> listSleeves(
+          $pb.ClientContext? ctx, ListSleevesRequest request) =>
+      _client.invoke<ListSleevesResponse>(
+          ctx, 'SleeveService', 'ListSleeves', request, ListSleevesResponse());
+
+  /// GetSleeve returns one sleeve with its latest resource usage.
+  $async.Future<GetSleeveResponse> getSleeve(
+          $pb.ClientContext? ctx, GetSleeveRequest request) =>
+      _client.invoke<GetSleeveResponse>(
+          ctx, 'SleeveService', 'GetSleeve', request, GetSleeveResponse());
+
+  /// KillSleeve stops a sleeve's harness and every process in its sandbox and
+  /// forgets the sleeve. The workspace and the sleeve's home directory are kept
+  /// on disk.
+  $async.Future<KillSleeveResponse> killSleeve(
+          $pb.ClientContext? ctx, KillSleeveRequest request) =>
+      _client.invoke<KillSleeveResponse>(
+          ctx, 'SleeveService', 'KillSleeve', request, KillSleeveResponse());
+}
+
+const $core.bool _omitFieldNames =
+    $core.bool.fromEnvironment('protobuf.omit_field_names');
+const $core.bool _omitMessageNames =
+    $core.bool.fromEnvironment('protobuf.omit_message_names');

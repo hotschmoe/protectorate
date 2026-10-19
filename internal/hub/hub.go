@@ -28,6 +28,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/backlog"
 	"github.com/hotschmoe/protectorate/internal/codec"
 	"github.com/hotschmoe/protectorate/internal/session"
+	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
 type Hub struct {
@@ -50,6 +51,7 @@ type Hub struct {
 	seeded bool
 
 	backlog *backlog.Store
+	sleeves *sleeve.Manager
 
 	// WebDir, when set, serves a built web client (app/build/web) from the
 	// hub's own origin so browsers need no CORS. The client still authenticates.
@@ -77,6 +79,7 @@ func New(version, token string) *Hub {
 // Handler or Serve.
 func (h *Hub) SetNodes(m *NodeMonitor) {
 	m.publish = h.emit
+	m.localSleeves = h.sleeveRows
 	h.nodes = m
 }
 
@@ -173,6 +176,9 @@ func (h *Hub) handler(extra ...connect.HandlerOption) http.Handler {
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
 	mux.Handle(protectoratev1connect.NewBacklogServiceHandler(h, opts))
+	if h.sleeves != nil {
+		mux.Handle(protectoratev1connect.NewSleeveServiceHandler(h, opts))
+	}
 	if h.nodes != nil {
 		mux.Handle(protectoratev1connect.NewNodeServiceHandler(h, opts))
 	}
@@ -222,6 +228,12 @@ func (h *Hub) Serve(ctx context.Context, l net.Listener, extra ...Extra) error {
 	watchDone := make(chan struct{})
 	go func() { defer close(watchDone); h.WatchSessions(ctx) }()
 	defer func() { <-watchDone }()
+
+	if h.sleeves != nil {
+		sleevesDone := make(chan struct{})
+		go func() { defer close(sleevesDone); h.sleeves.Run(ctx) }()
+		defer func() { <-sleevesDone }()
+	}
 
 	if h.nodes != nil {
 		nodesDone := make(chan struct{})

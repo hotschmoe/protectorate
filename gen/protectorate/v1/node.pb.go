@@ -232,7 +232,10 @@ type NodeMetrics struct {
 	Engine    *ContainerEngine `protobuf:"bytes,12,opt,name=engine,proto3" json:"engine,omitempty"`
 	WatchDirs []*DirSize       `protobuf:"bytes,13,rep,name=watch_dirs,json=watchDirs,proto3" json:"watch_dirs,omitempty"`
 	// warnings lists sections that could not be collected on this node.
-	Warnings      []string `protobuf:"bytes,14,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	Warnings []string `protobuf:"bytes,14,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	// sleeves lists the sleeves running on this node with their usage; only the
+	// hub's own node has any.
+	Sleeves       []*Sleeve `protobuf:"bytes,15,rep,name=sleeves,proto3" json:"sleeves,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -361,6 +364,13 @@ func (x *NodeMetrics) GetWatchDirs() []*DirSize {
 func (x *NodeMetrics) GetWarnings() []string {
 	if x != nil {
 		return x.Warnings
+	}
+	return nil
+}
+
+func (x *NodeMetrics) GetSleeves() []*Sleeve {
+	if x != nil {
+		return x.Sleeves
 	}
 	return nil
 }
@@ -1675,10 +1685,10 @@ var File_protectorate_v1_node_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\x13\n" +
+	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\x1a\x1cprotectorate/v1/sleeve.proto\"\x13\n" +
 	"\x11GetMetricsRequest\"@\n" +
 	"\x13WatchMetricsRequest\x12)\n" +
-	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\xe1\x04\n" +
+	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\x94\x05\n" +
 	"\vNodeMetrics\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x02 \x01(\tR\x02os\x12\x12\n" +
@@ -1695,7 +1705,8 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x06engine\x18\f \x01(\v2 .protectorate.v1.ContainerEngineR\x06engine\x127\n" +
 	"\n" +
 	"watch_dirs\x18\r \x03(\v2\x18.protectorate.v1.DirSizeR\twatchDirs\x12\x1a\n" +
-	"\bwarnings\x18\x0e \x03(\tR\bwarnings\"\xc8\x01\n" +
+	"\bwarnings\x18\x0e \x03(\tR\bwarnings\x121\n" +
+	"\asleeves\x18\x0f \x03(\v2\x17.protectorate.v1.SleeveR\asleeves\"\xc8\x01\n" +
 	"\n" +
 	"CpuMetrics\x12#\n" +
 	"\rlogical_cores\x18\x01 \x01(\x05R\flogicalCores\x12#\n" +
@@ -1878,7 +1889,8 @@ var file_protectorate_v1_node_proto_goTypes = []any{
 	(*RemoveNodeRequest)(nil),     // 21: protectorate.v1.RemoveNodeRequest
 	(*RemoveNodeResponse)(nil),    // 22: protectorate.v1.RemoveNodeResponse
 	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),   // 24: google.protobuf.Duration
+	(*Sleeve)(nil),                // 24: protectorate.v1.Sleeve
+	(*durationpb.Duration)(nil),   // 25: google.protobuf.Duration
 }
 var file_protectorate_v1_node_proto_depIdxs = []int32{
 	23, // 0: protectorate.v1.NodeMetrics.collected_at:type_name -> google.protobuf.Timestamp
@@ -1888,41 +1900,42 @@ var file_protectorate_v1_node_proto_depIdxs = []int32{
 	8,  // 4: protectorate.v1.NodeMetrics.gpus:type_name -> protectorate.v1.GpuMetrics
 	9,  // 5: protectorate.v1.NodeMetrics.engine:type_name -> protectorate.v1.ContainerEngine
 	13, // 6: protectorate.v1.NodeMetrics.watch_dirs:type_name -> protectorate.v1.DirSize
-	10, // 7: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
-	23, // 8: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
-	12, // 9: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
-	11, // 10: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
-	11, // 11: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
-	11, // 12: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
-	11, // 13: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
-	23, // 14: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
-	24, // 15: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
-	1,  // 16: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
-	15, // 17: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
-	4,  // 18: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
-	0,  // 19: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
-	23, // 20: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
-	24, // 21: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
-	14, // 22: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
-	16, // 23: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
-	15, // 24: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
-	2,  // 25: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
-	3,  // 26: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
-	17, // 27: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
-	19, // 28: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
-	20, // 29: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
-	21, // 30: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
-	4,  // 31: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
-	4,  // 32: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
-	18, // 33: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
-	16, // 34: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
-	15, // 35: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
-	22, // 36: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeResponse
-	31, // [31:37] is the sub-list for method output_type
-	25, // [25:31] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	24, // 7: protectorate.v1.NodeMetrics.sleeves:type_name -> protectorate.v1.Sleeve
+	10, // 8: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
+	23, // 9: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
+	12, // 10: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
+	11, // 11: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
+	11, // 12: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
+	11, // 13: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
+	11, // 14: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
+	23, // 15: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
+	25, // 16: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
+	1,  // 17: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
+	15, // 18: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
+	4,  // 19: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
+	0,  // 20: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
+	23, // 21: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
+	25, // 22: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
+	14, // 23: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
+	16, // 24: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
+	15, // 25: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
+	2,  // 26: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
+	3,  // 27: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
+	17, // 28: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
+	19, // 29: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
+	20, // 30: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
+	21, // 31: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
+	4,  // 32: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
+	4,  // 33: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
+	18, // 34: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
+	16, // 35: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
+	15, // 36: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
+	22, // 37: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeResponse
+	32, // [32:38] is the sub-list for method output_type
+	26, // [26:32] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_node_proto_init() }
@@ -1931,6 +1944,7 @@ func file_protectorate_v1_node_proto_init() {
 		return
 	}
 	file_protectorate_v1_options_proto_init()
+	file_protectorate_v1_sleeve_proto_init()
 	file_protectorate_v1_node_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

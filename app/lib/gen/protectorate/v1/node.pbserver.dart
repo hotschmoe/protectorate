@@ -15,23 +15,23 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'node.pb.dart' as $2;
+import 'node.pb.dart' as $3;
 import 'node.pbjson.dart';
 
 export 'node.pb.dart';
 
 abstract class NodeAgentServiceBase extends $pb.GeneratedService {
-  $async.Future<$2.NodeMetrics> getMetrics(
-      $pb.ServerContext ctx, $2.GetMetricsRequest request);
-  $async.Future<$2.NodeMetrics> watchMetrics(
-      $pb.ServerContext ctx, $2.WatchMetricsRequest request);
+  $async.Future<$3.NodeMetrics> getMetrics(
+      $pb.ServerContext ctx, $3.GetMetricsRequest request);
+  $async.Future<$3.NodeMetrics> watchMetrics(
+      $pb.ServerContext ctx, $3.WatchMetricsRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'GetMetrics':
-        return $2.GetMetricsRequest();
+        return $3.GetMetricsRequest();
       case 'WatchMetrics':
-        return $2.WatchMetricsRequest();
+        return $3.WatchMetricsRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -41,9 +41,9 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'GetMetrics':
-        return getMetrics(ctx, request as $2.GetMetricsRequest);
+        return getMetrics(ctx, request as $3.GetMetricsRequest);
       case 'WatchMetrics':
-        return watchMetrics(ctx, request as $2.WatchMetricsRequest);
+        return watchMetrics(ctx, request as $3.WatchMetricsRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -55,25 +55,25 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
 }
 
 abstract class NodeServiceBase extends $pb.GeneratedService {
-  $async.Future<$2.ListNodesResponse> listNodes(
-      $pb.ServerContext ctx, $2.ListNodesRequest request);
-  $async.Future<$2.NodeStatus> getNode(
-      $pb.ServerContext ctx, $2.GetNodeRequest request);
-  $async.Future<$2.NodeInfo> addNode(
-      $pb.ServerContext ctx, $2.AddNodeRequest request);
-  $async.Future<$2.RemoveNodeResponse> removeNode(
-      $pb.ServerContext ctx, $2.RemoveNodeRequest request);
+  $async.Future<$3.ListNodesResponse> listNodes(
+      $pb.ServerContext ctx, $3.ListNodesRequest request);
+  $async.Future<$3.NodeStatus> getNode(
+      $pb.ServerContext ctx, $3.GetNodeRequest request);
+  $async.Future<$3.NodeInfo> addNode(
+      $pb.ServerContext ctx, $3.AddNodeRequest request);
+  $async.Future<$3.RemoveNodeResponse> removeNode(
+      $pb.ServerContext ctx, $3.RemoveNodeRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'ListNodes':
-        return $2.ListNodesRequest();
+        return $3.ListNodesRequest();
       case 'GetNode':
-        return $2.GetNodeRequest();
+        return $3.GetNodeRequest();
       case 'AddNode':
-        return $2.AddNodeRequest();
+        return $3.AddNodeRequest();
       case 'RemoveNode':
-        return $2.RemoveNodeRequest();
+        return $3.RemoveNodeRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -83,13 +83,13 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'ListNodes':
-        return listNodes(ctx, request as $2.ListNodesRequest);
+        return listNodes(ctx, request as $3.ListNodesRequest);
       case 'GetNode':
-        return getNode(ctx, request as $2.GetNodeRequest);
+        return getNode(ctx, request as $3.GetNodeRequest);
       case 'AddNode':
-        return addNode(ctx, request as $2.AddNodeRequest);
+        return addNode(ctx, request as $3.AddNodeRequest);
       case 'RemoveNode':
-        return removeNode(ctx, request as $2.RemoveNodeRequest);
+        return removeNode(ctx, request as $3.RemoveNodeRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

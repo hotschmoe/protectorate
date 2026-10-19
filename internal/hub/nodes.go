@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -76,6 +77,8 @@ type NodeMonitor struct {
 	self  *pb.NodeInfo
 
 	publish func(kind, subject string, payload *structpb.Struct)
+	// localSleeves lists the hub's sleeves for its own node's metrics.
+	localSleeves func() []*pb.Sleeve
 	// fetchRemote is replaced in tests.
 	fetchRemote func(ctx context.Context, n *pb.NodeInfo) (*pb.NodeMetrics, error)
 
@@ -154,6 +157,10 @@ func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
 	var err error
 	if n.Local {
 		metrics, err = m.local.Collect(fctx)
+		if err == nil && m.localSleeves != nil {
+			metrics = proto.Clone(metrics).(*pb.NodeMetrics)
+			metrics.Sleeves = m.localSleeves()
+		}
 	} else {
 		metrics, err = m.fetchRemote(fctx, n)
 	}

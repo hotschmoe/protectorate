@@ -16,11 +16,12 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
-    as $1;
+    as $2;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
 import 'node.pbenum.dart';
+import 'sleeve.pb.dart' as $1;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
@@ -144,6 +145,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     ContainerEngine? engine,
     $core.Iterable<DirSize>? watchDirs,
     $core.Iterable<$core.String>? warnings,
+    $core.Iterable<$1.Sleeve>? sleeves,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -160,6 +162,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     if (engine != null) result.engine = engine;
     if (watchDirs != null) result.watchDirs.addAll(watchDirs);
     if (warnings != null) result.warnings.addAll(warnings);
+    if (sleeves != null) result.sleeves.addAll(sleeves);
     return result;
   }
 
@@ -198,6 +201,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
     ..pPM<DirSize>(13, _omitFieldNames ? '' : 'watchDirs',
         subBuilder: DirSize.$_createMessage)
     ..pPS(14, _omitFieldNames ? '' : 'warnings')
+    ..pPM<$1.Sleeve>(15, _omitFieldNames ? '' : 'sleeves',
+        subBuilder: $1.Sleeve.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -335,6 +340,11 @@ class NodeMetrics extends $pb.GeneratedMessage {
   /// warnings lists sections that could not be collected on this node.
   @$pb.TagNumber(14)
   $pb.PbList<$core.String> get warnings => $_getList(13);
+
+  /// sleeves lists the sleeves running on this node with their usage; only the
+  /// hub's own node has any.
+  @$pb.TagNumber(15)
+  $pb.PbList<$1.Sleeve> get sleeves => $_getList(14);
 }
 
 class CpuMetrics extends $pb.GeneratedMessage {
@@ -1339,7 +1349,7 @@ class DirSize extends $pb.GeneratedMessage {
     $core.String? path,
     $fixnum.Int64? sizeBytes,
     $0.Timestamp? measuredAt,
-    $1.Duration? took,
+    $2.Duration? took,
     $core.bool? complete,
     $core.String? error,
   }) {
@@ -1371,8 +1381,8 @@ class DirSize extends $pb.GeneratedMessage {
     ..aInt64(2, _omitFieldNames ? '' : 'sizeBytes')
     ..aOM<$0.Timestamp>(3, _omitFieldNames ? '' : 'measuredAt',
         subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$1.Duration>(4, _omitFieldNames ? '' : 'took',
-        subBuilder: $1.Duration.$_createMessage)
+    ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'took',
+        subBuilder: $2.Duration.$_createMessage)
     ..aOB(5, _omitFieldNames ? '' : 'complete')
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..hasRequiredFields = false;
@@ -1427,15 +1437,15 @@ class DirSize extends $pb.GeneratedMessage {
   $0.Timestamp ensureMeasuredAt() => $_ensure(2);
 
   @$pb.TagNumber(4)
-  $1.Duration get took => $_getN(3);
+  $2.Duration get took => $_getN(3);
   @$pb.TagNumber(4)
-  set took($1.Duration value) => $_setField(4, value);
+  set took($2.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasTook() => $_has(3);
   @$pb.TagNumber(4)
   void clearTook() => $_clearField(4);
   @$pb.TagNumber(4)
-  $1.Duration ensureTook() => $_ensure(3);
+  $2.Duration ensureTook() => $_ensure(3);
 
   /// complete is false when the time budget ended the walk early; size_bytes
   /// is then a lower bound.
@@ -1722,7 +1732,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     NodeMetrics? metrics,
     NodeFreshness? freshness,
     $0.Timestamp? fetchedAt,
-    $1.Duration? age,
+    $2.Duration? age,
     $core.String? error,
     $core.Iterable<NodeAlert>? alerts,
   }) {
@@ -1759,8 +1769,8 @@ class NodeStatus extends $pb.GeneratedMessage {
         enumValues: NodeFreshness.values)
     ..aOM<$0.Timestamp>(4, _omitFieldNames ? '' : 'fetchedAt',
         subBuilder: $0.Timestamp.$_createMessage)
-    ..aOM<$1.Duration>(5, _omitFieldNames ? '' : 'age',
-        subBuilder: $1.Duration.$_createMessage)
+    ..aOM<$2.Duration>(5, _omitFieldNames ? '' : 'age',
+        subBuilder: $2.Duration.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..pPM<NodeAlert>(7, _omitFieldNames ? '' : 'alerts',
         subBuilder: NodeAlert.$_createMessage)
@@ -1830,15 +1840,15 @@ class NodeStatus extends $pb.GeneratedMessage {
   $0.Timestamp ensureFetchedAt() => $_ensure(3);
 
   @$pb.TagNumber(5)
-  $1.Duration get age => $_getN(4);
+  $2.Duration get age => $_getN(4);
   @$pb.TagNumber(5)
-  set age($1.Duration value) => $_setField(5, value);
+  set age($2.Duration value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasAge() => $_has(4);
   @$pb.TagNumber(5)
   void clearAge() => $_clearField(5);
   @$pb.TagNumber(5)
-  $1.Duration ensureAge() => $_ensure(4);
+  $2.Duration ensureAge() => $_ensure(4);
 
   /// error is the failure of the most recent poll, empty if it succeeded.
   @$pb.TagNumber(6)

@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// SleeveService manages sleeves on the hub machine: one workspace plus one
+// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
+// memory limits. Each sleeve is a tmux session ("sleeve-<name>"), so
+// CapturePane and the WebSocket terminal work on it. Sleeves are Linux-only.
+// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
+// and "sleeve.oom" (subject = sleeve name).
+service SleeveService {
+  // SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
+  // workspace is an existing directory (bound read-write at the same path) or
+  // a git URL cloned into the hub's workspaces directory. Respawning the name
+  // of an exited sleeve reuses its home directory and workspace.
+  rpc SpawnSleeve(SpawnSleeveRequest) returns (SpawnSleeveResponse);
+
+  // ListSleeves returns every known sleeve, running or exited, with its latest
+  // resource usage.
+  rpc ListSleeves(ListSleevesRequest) returns (ListSleevesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetSleeve returns one sleeve with its latest resource usage.
+  rpc GetSleeve(GetSleeveRequest) returns (GetSleeveResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // KillSleeve stops a sleeve's harness and every process in its sandbox and
+  // forgets the sleeve. The workspace and the sleeve's home directory are kept
+  // on disk.
+  rpc KillSleeve(KillSleeveRequest) returns (KillSleeveResponse) {
+    option (protectorate.v1.destructive) = true;
+  }
+}
+
+enum Harness {
+  HARNESS_UNSPECIFIED = 0;
+  HARNESS_CLAUDE = 1;
+  HARNESS_CODEX = 2;
+  HARNESS_GROK = 3;
+  HARNESS_PI = 4;
+  // HARNESS_SHELL runs bash, or the argv in SpawnSleeveRequest.args when given.
+  HARNESS_SHELL = 5;
+}
+
+enum SleeveState {
+  SLEEVE_STATE_UNSPECIFIED = 0;
+  SLEEVE_STATE_RUNNING = 1;
+  // The harness ended or the session was killed outside KillSleeve.
+  SLEEVE_STATE_EXITED = 2;
+}
+
+message SleeveLimits {
+  // cpu_percent caps CPU time; 100 is one core, 200 two cores. 0 means unlimited.
+  uint32 cpu_percent = 1;
+  // memory_bytes caps memory including page cache and tmpfs; swap is disabled
+  // when set. 0 means unlimited.
+  uint64 memory_bytes = 2;
+}
+
+// SleeveUsage is read from the sleeve's cgroup.
+message SleeveUsage {
+  // cpu_percent is CPU used over the last sample interval; 100 is one core.
+  double cpu_percent = 1;
+  double cpu_seconds = 2;
+  uint64 memory_current_bytes = 3;
+  uint64 memory_peak_bytes = 4;
+  uint32 pids = 5;
+  // oom_kills counts processes the kernel killed for exceeding the memory limit.
+  uint64 oom_kills = 6;
+  // workspace_disk_bytes is measured on a slow interval and is 0 until the
+  // first measurement.
+  uint64 workspace_disk_bytes = 7;
+  google.protobuf.Timestamp sampled_at = 8;
+  google.protobuf.Timestamp disk_sampled_at = 9;
+}
+
+message Sleeve {
+  string name = 1;
+  Harness harness = 2;
+  // workspace is the absolute path bound read-write into the sandbox.
+  string workspace = 3;
+  // session is the tmux session name to use with SessionService and the terminal.
+  string session = 4;
+  google.protobuf.Timestamp created_at = 5;
+  SleeveState state = 6;
+  SleeveLimits limits = 7;
+  SleeveUsage usage = 8;
+  repeated string args = 9;
+  google.protobuf.Timestamp exited_at = 10;
+}
+
+message SpawnSleeveRequest {
+  // name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.
+  string name = 1;
+  // workspace is an absolute directory path on the hub, or a git URL to clone.
+  string workspace = 2;
+  Harness harness = 3;
+  // args are extra arguments for the harness, or the whole command for shell.
+  repeated string args = 4;
+  SleeveLimits limits = 5;
+  // env holds extra environment variables for the harness.
+  map<string, string> env = 6;
+}
+
+message SpawnSleeveResponse {
+  Sleeve sleeve = 1;
+}
+
+message ListSleevesRequest {}
+
+message ListSleevesResponse {
+  repeated Sleeve sleeves = 1;
+}
+
+message GetSleeveRequest {
+  string name = 1;
+}
+
+message GetSleeveResponse {
+  Sleeve sleeve = 1;
+}
+
+message KillSleeveRequest {
+  string name = 1;
+}
+
+message KillSleeveResponse {}

@@ -16,9 +16,11 @@ import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
 import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
-    as $1;
+    as $2;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
+
+import 'sleeve.pbjson.dart' as $1;
 
 @$core.Deprecated('Use nodeFreshnessDescriptor instead')
 const NodeFreshness$json = {
@@ -143,6 +145,14 @@ const NodeMetrics$json = {
       '10': 'watchDirs'
     },
     {'1': 'warnings', '3': 14, '4': 3, '5': 9, '10': 'warnings'},
+    {
+      '1': 'sleeves',
+      '3': 15,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.Sleeve',
+      '10': 'sleeves'
+    },
   ],
 };
 
@@ -158,7 +168,8 @@ final $typed_data.Uint8List nodeMetricsDescriptor = $convert.base64Decode(
     'lsZXN5c3RlbU1ldHJpY3NSC2ZpbGVzeXN0ZW1zEi8KBGdwdXMYCyADKAsyGy5wcm90ZWN0b3Jh'
     'dGUudjEuR3B1TWV0cmljc1IEZ3B1cxI4CgZlbmdpbmUYDCABKAsyIC5wcm90ZWN0b3JhdGUudj'
     'EuQ29udGFpbmVyRW5naW5lUgZlbmdpbmUSNwoKd2F0Y2hfZGlycxgNIAMoCzIYLnByb3RlY3Rv'
-    'cmF0ZS52MS5EaXJTaXplUgl3YXRjaERpcnMSGgoId2FybmluZ3MYDiADKAlSCHdhcm5pbmdz');
+    'cmF0ZS52MS5EaXJTaXplUgl3YXRjaERpcnMSGgoId2FybmluZ3MYDiADKAlSCHdhcm5pbmdzEj'
+    'EKB3NsZWV2ZXMYDyADKAsyFy5wcm90ZWN0b3JhdGUudjEuU2xlZXZlUgdzbGVldmVz');
 
 @$core.Deprecated('Use cpuMetricsDescriptor instead')
 const CpuMetrics$json = {
@@ -682,7 +693,10 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DiskBucket': DiskBucket$json,
   '.protectorate.v1.ContainerMetrics': ContainerMetrics$json,
   '.protectorate.v1.DirSize': DirSize$json,
-  '.google.protobuf.Duration': $1.Duration$json,
+  '.google.protobuf.Duration': $2.Duration$json,
+  '.protectorate.v1.Sleeve': $1.Sleeve$json,
+  '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
+  '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
 };
 
@@ -739,7 +753,10 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DiskBucket': DiskBucket$json,
   '.protectorate.v1.ContainerMetrics': ContainerMetrics$json,
   '.protectorate.v1.DirSize': DirSize$json,
-  '.google.protobuf.Duration': $1.Duration$json,
+  '.google.protobuf.Duration': $2.Duration$json,
+  '.protectorate.v1.Sleeve': $1.Sleeve$json,
+  '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
+  '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,

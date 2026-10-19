@@ -77,7 +77,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), eventsCmd(o), sessionCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), backlogCmd(o), eventsCmd(o), sessionCmd(o), sleeveCmd(o), apiCmd(o), mcpCmd(o), versionCmd(o))
 	return root
 }
 
@@ -95,7 +95,7 @@ func hubCmd() *cobra.Command {
 	var localURLs []string
 	var nodeInterval time.Duration
 	var nodeToken string
-	var watch []string
+	var watch, toolDirs []string
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -131,12 +131,16 @@ func hubCmd() *cobra.Command {
 			if err := attachNodes(h, nodeInterval, nodeToken, watch, nodeClient); err != nil {
 				return err
 			}
+			if err := attachSleeves(ctx, h, toolDirs); err != nil {
+				return err
+			}
 			return h.Serve(ctx, l, extra...)
 		},
 	}
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
 	serve.Flags().StringVar(&nodeToken, "node-token", "", "bearer token presented to node agents (env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
+	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local ~/.nvm ~/go ~/.cargo ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")
 	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")

@@ -344,5 +344,119 @@
       "type": "object"
     },
     "name": "session_list_sessions"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetSleeve returns one sleeve with its latest resource usage.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_get_sleeve"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "KillSleeve stops a sleeve's harness and every process in its sandbox and forgets the sleeve. The workspace and the sleeve's home directory are kept on disk.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_kill_sleeve"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListSleeves returns every known sleeve, running or exited, with its latest resource usage.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "sleeve_list_sleeves"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is an existing directory (bound read-write at the same path) or a git URL cloned into the hub's workspaces directory. Respawning the name of an exited sleeve reuses its home directory and workspace.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "description": "args are extra arguments for the harness, or the whole command for shell.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "env holds extra environment variables for the harness.",
+          "type": "object"
+        },
+        "harness": {
+          "enum": [
+            "HARNESS_UNSPECIFIED",
+            "HARNESS_CLAUDE",
+            "HARNESS_CODEX",
+            "HARNESS_GROK",
+            "HARNESS_PI",
+            "HARNESS_SHELL"
+          ],
+          "type": "string"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "cpuPercent": {
+              "description": "cpu_percent caps CPU time; 100 is one core, 200 two cores. 0 means unlimited.",
+              "type": "integer"
+            },
+            "memoryBytes": {
+              "description": "memory_bytes caps memory including page cache and tmpfs; swap is disabled when set. 0 means unlimited.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": {
+          "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",
+          "type": "string"
+        },
+        "workspace": {
+          "description": "workspace is an absolute directory path on the hub, or a git URL to clone.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_spawn_sleeve"
   }
 ]
