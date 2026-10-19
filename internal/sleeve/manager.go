@@ -291,6 +291,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err := launch.Layout.Apply(); err != nil {
 		return Info{}, fmt.Errorf("prepare sleeve layout: %w", err)
 	}
+	if err := m.cfg.writeEnvFile(req.Name, launch); err != nil {
+		return Info{}, err
+	}
 
 	if prev != nil {
 		if err := m.opts.Sessions.Kill(ctx, prev.Session); err != nil && !errors.Is(err, session.ErrNotFound) {
@@ -330,6 +333,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 			log.Printf("sleeve %s: persist after failed start: %v", req.Name, serr)
 		}
 		m.mu.Unlock()
+		if rerr := m.cfg.removeEnvFile(req.Name); rerr != nil {
+			log.Printf("sleeve %s: %v", req.Name, rerr)
+		}
 		return Info{}, err
 	}
 
@@ -413,6 +419,9 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 		if err := m.cfg.killScope(ctx, name); err != nil {
 			return err
 		}
+	}
+	if err := m.cfg.removeEnvFile(name); err != nil {
+		log.Printf("sleeve %s: %v", name, err)
 	}
 	m.mu.Lock()
 	wasRunning := e.State == Running

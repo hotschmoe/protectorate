@@ -1,3 +1,8 @@
+sh
+-c
+exec 3<"$1"; shift; exec "$@"
+sh
+/state/sleeves/alice/env.args
 systemd-run
 --user
 --scope
@@ -92,11 +97,7 @@ CLAUDE_SECURESTORAGE_CONFIG_DIR
 --setenv
 DISABLE_AUTOUPDATER
 1
---setenv
-A
-1
---setenv
-B
-2
+--args
+3
 --
 /home/u/.local/bin/claude

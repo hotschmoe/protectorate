@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -237,5 +238,48 @@ func TestOrchestratorWorkspace(t *testing.T) {
 		if err := c.CheckWorkspace(ws); (err == nil) != ok {
 			t.Errorf("CheckWorkspace(%s) = %v, want ok=%v", ws, err, ok)
 		}
+	}
+}
+
+func TestPlanKeepsEnvOutOfArgv(t *testing.T) {
+	linuxHost(t)
+	c := testConfig()
+	c.Home = t.TempDir()
+	spec := Spec{Name: "alice", Harness: Shell, Workspace: "/work/x", Env: map[string]string{"TOKEN": "s3cr3t-value", "A": "1"}}
+	l, err := c.Plan(spec, Binary{Path: "/usr/bin/bash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(l.Argv, "\x00"); strings.Contains(joined, "s3cr3t-value") || strings.Contains(joined, "TOKEN") {
+		t.Fatalf("env leaked into argv: %q", l.Argv)
+	}
+	want := "--setenv\x00A\x001\x00--setenv\x00TOKEN\x00s3cr3t-value\x00"
+	if string(l.EnvArgs) != want {
+		t.Fatalf("EnvArgs = %q, want %q", l.EnvArgs, want)
+	}
+
+	if err := c.writeEnvFile("alice", l); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(l.EnvFile)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("env file: %v, %v", fi, err)
+	}
+
+	out, err := exec.Command("sh", "-c", envShim, "sh", l.EnvFile, "sh", "-c", "cat <&3").Output()
+	if err != nil || string(out) != want {
+		t.Fatalf("shim read %q, %v", out, err)
+	}
+
+	if err := c.writeEnvFile("alice", Launch{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(l.EnvFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale env file kept: %v", err)
+	}
+	spec.Env = nil
+	l, err = c.Plan(spec, Binary{Path: "/usr/bin/bash"})
+	if err != nil || l.EnvFile != "" || l.Argv[0] != "systemd-run" {
+		t.Fatalf("no-env launch = %v, %v", l, err)
 	}
 }

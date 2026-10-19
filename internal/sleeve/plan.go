@@ -1,12 +1,15 @@
 package sleeve
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 // Spec is a validated request to run a harness.
@@ -20,12 +23,47 @@ type Spec struct {
 }
 
 // Launch is everything needed to start a sleeve: the pane argv and the host
-// filesystem layout it expects.
+// filesystem layout it expects. Caller-supplied env values never appear in
+// Argv, which is visible in /proc and in session listings: they travel in
+// EnvFile, a 0600 file holding bwrap's NUL-separated --args form, which
+// the pane's shell opens as fd 3 for `bwrap --args 3`. EnvFile is empty when
+// there is no caller env.
 type Launch struct {
-	Argv   []string
-	Unit   string
-	Layout Layout
+	Argv    []string
+	Unit    string
+	Layout  Layout
+	EnvFile string
+	EnvArgs []byte
 }
+
+const envFileName = "env.args"
+
+func (c Config) envFile(name string) string { return filepath.Join(c.sleeveDir(name), envFileName) }
+
+// writeEnvFile stores the launch's caller env for the pane's shell, or drops
+// a previous one when this launch has none.
+func (c Config) writeEnvFile(name string, l Launch) error {
+	if l.EnvFile == "" {
+		return c.removeEnvFile(name)
+	}
+	if err := os.MkdirAll(filepath.Dir(l.EnvFile), 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(l.EnvFile), err)
+	}
+	if err := fsutil.WriteFile(l.EnvFile, l.EnvArgs, 0o600); err != nil {
+		return fmt.Errorf("write sleeve env: %w", err)
+	}
+	return nil
+}
+
+func (c Config) removeEnvFile(name string) error {
+	if err := os.Remove(c.envFile(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove sleeve env: %w", err)
+	}
+	return nil
+}
+
+// envShim opens the env file as fd 3 and execs the real command.
+const envShim = `exec 3<"$1"; shift; exec "$@"`
 
 // Binary is a harness executable located on the host, with the extra
 // directories it needs mounted read-only to run.
@@ -209,16 +247,20 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		{"LANG", "C.UTF-8"},
 	}
 	env = append(env, lay.Env...)
+	for _, kv := range env {
+		argv = append(argv, "--setenv", kv[0], kv[1])
+	}
+	var envArgs []byte
 	keys := make([]string, 0, len(spec.Env))
 	for k := range spec.Env {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		env = append(env, [2]string{k, spec.Env[k]})
+		envArgs = append(envArgs, "--setenv\x00"+k+"\x00"+spec.Env[k]+"\x00"...)
 	}
-	for _, kv := range env {
-		argv = append(argv, "--setenv", kv[0], kv[1])
+	if len(envArgs) > 0 {
+		argv = append(argv, "--args", "3")
 	}
 	argv = append(argv, "--", bin.Path)
 	if spec.Harness == Shell && len(spec.Args) > 0 {
@@ -226,5 +268,10 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	} else {
 		argv = append(argv, spec.Args...)
 	}
-	return Launch{Argv: argv, Unit: unit, Layout: lay}, nil
+	launch := Launch{Argv: argv, Unit: unit, Layout: lay}
+	if len(envArgs) > 0 {
+		launch.EnvFile, launch.EnvArgs = c.envFile(spec.Name), envArgs
+		launch.Argv = append([]string{"sh", "-c", envShim, "sh", launch.EnvFile}, argv...)
+	}
+	return launch, nil
 }

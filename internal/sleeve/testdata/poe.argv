@@ -1,3 +1,8 @@
+sh
+-c
+exec 3<"$1"; shift; exec "$@"
+sh
+/state/sleeves/poe/env.args
 systemd-run
 --user
 --scope
@@ -92,11 +97,7 @@ CLAUDE_SECURESTORAGE_CONFIG_DIR
 --setenv
 DISABLE_AUTOUPDATER
 1
---setenv
-PROTECTORATE_HUB
-http://127.0.0.1:7470
---setenv
-PROTECTORATE_TOKEN_FILE
-/state/orchestrator/.protectorate-token
+--args
+3
 --
 /home/u/.local/bin/claude
