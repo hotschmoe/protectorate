@@ -85,6 +85,13 @@ open until the sleeve is killed or the hub stops, and restarts on the next Send
 after a crash or a hub restart, resuming the native session. A session id is
 only resumed once a turn was sent, since harnesses store a session only then.
 
+A hub restart while a turn, an approval or a compaction was running leaves the
+sleeve FAILED, with an error event "hub restarted mid-turn" (or
+"mid-compaction") in the log, as soon as the hub is up. The turn is not
+replayed; the next Send opens the harness again and resumes the same native
+session (`--resume`, `thread/resume`, `session/load`, `--session`). An idle
+sleeve comes back IDLE.
+
 ## Per harness
 
 | | Claude | Codex | Grok | pi |

@@ -36,6 +36,7 @@ func (h *Hub) SleeveOptions(cfg sleeve.Config) sleeve.Options {
 func (h *Hub) SetSleeves(m *sleeve.Manager) {
 	h.sleeves = m
 	h.chat = newChatManager(h)
+	h.chat.recover()
 }
 
 // sleeveProto is sleeveToProto with the live chat status laid over the

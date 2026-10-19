@@ -136,14 +136,41 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	if info.Chat != nil {
 		s.state = pb.ChatState(pb.ChatState_value[info.Chat.State])
 	}
-	// no driver runs after a hub restart, so a stale working or approval state is idle
-	if s.state != pb.ChatState_CHAT_STATE_IDLE {
+	// no driver runs after a hub restart: a harness that was in a turn is
+	// reported failed, anything else is idle
+	if prev := s.state; prev != pb.ChatState_CHAT_STATE_IDLE {
 		s.mu.Lock()
-		s.setStateLocked(pb.ChatState_CHAT_STATE_IDLE)
+		switch prev {
+		case pb.ChatState_CHAT_STATE_WORKING, pb.ChatState_CHAT_STATE_AWAITING_APPROVAL, pb.ChatState_CHAT_STATE_COMPACTING:
+			what := "turn"
+			if prev == pb.ChatState_CHAT_STATE_COMPACTING {
+				what = "compaction"
+			}
+			s.appendLocked(func(e *pb.ChatEvent) {
+				e.Body = &pb.ChatEvent_Error{Error: &pb.ChatError{Text: "hub restarted mid-" + what + "; the harness was stopped. Send again to resume its session."}}
+			})
+			s.setStateLocked(pb.ChatState_CHAT_STATE_FAILED)
+		default:
+			s.setStateLocked(pb.ChatState_CHAT_STATE_IDLE)
+		}
 		s.mu.Unlock()
 	}
 	m.sleeves[name] = s
 	return s, nil
+}
+
+// recover loads the chat state of every chat sleeve that was not idle when
+// the previous hub stopped, so a harness caught mid-turn shows FAILED at once
+// instead of on first use.
+func (m *chatManager) recover() {
+	for _, info := range m.h.sleeves.List() {
+		if info.Mode != sleeve.ModeChat || info.Chat == nil || info.Chat.State == "" || info.Chat.State == pb.ChatState_CHAT_STATE_IDLE.String() {
+			continue
+		}
+		if _, err := m.get(info.Name, false); err != nil {
+			log.Printf("chat %s: recover state: %v", info.Name, err)
+		}
+	}
 }
 
 // start attaches a freshly spawned chat sleeve and opens its driver, so a
