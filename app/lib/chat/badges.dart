@@ -106,22 +106,31 @@ class ContextMeter extends StatelessWidget {
       );
     }
     final pct = tokens * 100 / window;
+    final value = '${formatTokens(tokens)} / ${formatTokens(window)}';
+    if (width == null) {
+      return MeterRow(
+        meterKey: const ValueKey('context-bar'),
+        label: 'CTX',
+        labelChars: 3,
+        percent: pct,
+        value: value,
+        valueChars: 17,
+      );
+    }
     final meter = SegmentMeter(
       key: const ValueKey('context-bar'),
       percent: pct,
       height: 8,
     );
     return Row(
-      mainAxisSize: width == null ? MainAxisSize.max : MainAxisSize.min,
+      mainAxisSize: MainAxisSize.min,
       children: [
         label,
         const SizedBox(width: 8),
-        width == null
-            ? Expanded(child: meter)
-            : SizedBox(width: width, child: meter),
+        SizedBox(width: width, child: meter),
         const SizedBox(width: 8),
         Text(
-          '${formatTokens(tokens)} / ${formatTokens(window)}',
+          value,
           style: t.data(t.level(pct) == t.p.lit ? t.p.emph : t.level(pct)),
         ),
       ],

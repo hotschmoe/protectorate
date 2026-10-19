@@ -88,6 +88,52 @@ class HubsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: Tokens.gap),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: Tokens.contentMaxWidth,
+                  ),
+                  child: Panel(
+                    legend: 'PAIRING',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'On the hub, run the command below and scan its QR '
+                          'code, or open the link it prints on this device.',
+                          style: t.small(),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: t.p.bar,
+                            border: Border.all(color: t.p.bezel),
+                            borderRadius: BorderRadius.circular(
+                              Tokens.innerRadius,
+                            ),
+                          ),
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: '> ', style: t.data(t.p.info)),
+                                TextSpan(
+                                  text: 'protectorate pair',
+                                  style: t.data(t.p.emph),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ],
           );
         },
@@ -129,7 +175,6 @@ class HubsScreen extends StatelessWidget {
           ),
           IconButton(
             tooltip: 'Remove',
-            color: t.p.alarm,
             icon: const Icon(Icons.delete_outline),
             onPressed: () => store.remove(hub.id),
           ),

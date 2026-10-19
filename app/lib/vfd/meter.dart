@@ -163,6 +163,7 @@ class MeterRow extends StatelessWidget {
     this.valueChars = 12,
     this.segments = Tokens.segments,
     this.tone,
+    this.meterKey,
   });
 
   final String label;
@@ -173,6 +174,7 @@ class MeterRow extends StatelessWidget {
   final int valueChars;
   final int segments;
   final Tone? tone;
+  final Key? meterKey;
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +202,7 @@ class MeterRow extends StatelessWidget {
             ),
           Expanded(
             child: SegmentMeter(
+              key: meterKey,
               percent: percent,
               dim: dim,
               segments: segments,
