@@ -50,8 +50,19 @@ const MessageServiceSendRequest$json = {
       '6': '.protectorate.v1.MessageKind',
       '10': 'kind'
     },
-    {'1': 'ack_required', '3': 5, '4': 1, '5': 8, '10': 'ackRequired'},
+    {
+      '1': 'ack_required',
+      '3': 5,
+      '4': 1,
+      '5': 8,
+      '9': 0,
+      '10': 'ackRequired',
+      '17': true
+    },
     {'1': 'request_id', '3': 6, '4': 1, '5': 9, '10': 'requestId'},
+  ],
+  '8': [
+    {'1': '_ack_required'},
   ],
 };
 
@@ -59,8 +70,9 @@ const MessageServiceSendRequest$json = {
 final $typed_data.Uint8List messageServiceSendRequestDescriptor = $convert.base64Decode(
     'ChlNZXNzYWdlU2VydmljZVNlbmRSZXF1ZXN0Eg4KAnRvGAEgASgJUgJ0bxISCgRib2R5GAIgAS'
     'gJUgRib2R5EhsKCXRocmVhZF9pZBgDIAEoCVIIdGhyZWFkSWQSMAoEa2luZBgEIAEoDjIcLnBy'
-    'b3RlY3RvcmF0ZS52MS5NZXNzYWdlS2luZFIEa2luZBIhCgxhY2tfcmVxdWlyZWQYBSABKAhSC2'
-    'Fja1JlcXVpcmVkEh0KCnJlcXVlc3RfaWQYBiABKAlSCXJlcXVlc3RJZA==');
+    'b3RlY3RvcmF0ZS52MS5NZXNzYWdlS2luZFIEa2luZBImCgxhY2tfcmVxdWlyZWQYBSABKAhIAF'
+    'ILYWNrUmVxdWlyZWSIAQESHQoKcmVxdWVzdF9pZBgGIAEoCVIJcmVxdWVzdElkQg8KDV9hY2tf'
+    'cmVxdWlyZWQ=');
 
 @$core.Deprecated('Use messageServiceSendResponseDescriptor instead')
 const MessageServiceSendResponse$json = {

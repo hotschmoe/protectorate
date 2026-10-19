@@ -67,8 +67,10 @@ protectorate msg thread t7
 
 - **Addresses:** a sleeve name, `project:<id|owner/repo|name>`,
   `orchestrator` (sleeve `poe`) or `owner`.
-- **Kinds:** `note`, `request` (asks for action; `--ack` is the default),
-  `notice` (facts, usually from the hub).
+- **Kinds:** `note`, `request` (asks for action), `notice` (facts, usually
+  from the hub). `ack_required` is optional in the API: unset, a `request`
+  requires an ack and other kinds do not; an explicit false (`--ack=false`)
+  turns it off for a request.
 - **Threads:** `thread_id` groups messages (`t<n>`); `reply` keeps the thread
   and also acks the original. Messages are `m<n>`.
 - **Dedupe:** a retry with the same `request_id` from the same sender returns

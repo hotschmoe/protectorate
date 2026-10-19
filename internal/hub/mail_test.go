@@ -16,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -186,7 +187,7 @@ func TestMailWaitsForIdleAndIsAuthenticated(t *testing.T) {
 	}
 	r.waitState(pb.ChatState_CHAT_STATE_WORKING)
 
-	res := r.post(r.as("sender"), r.name, "ping from the sleeve", func(q *pb.MessageServiceSendRequest) { q.AckRequired = true })
+	res := r.post(r.as("sender"), r.name, "ping from the sleeve", func(q *pb.MessageServiceSendRequest) { q.AckRequired = proto.Bool(true) })
 	if res.Message.From != "sender" || res.Message.Id != "m1" || res.Message.ThreadId != "t1" || res.Waiting {
 		t.Fatalf("sent = %v", res)
 	}
@@ -309,7 +310,7 @@ func TestMailSendValidationAndDedupe(t *testing.T) {
 func TestMailSurvivesRestartAndTerminalSleevesUseInbox(t *testing.T) {
 	r := newMailRig(t)
 	r.spawnNamed("term", pb.SleeveMode_SLEEVE_MODE_TERMINAL, "")
-	sent := r.post(r.owner, "term", "read me", func(q *pb.MessageServiceSendRequest) { q.AckRequired = true })
+	sent := r.post(r.owner, "term", "read me", func(q *pb.MessageServiceSendRequest) { q.AckRequired = proto.Bool(true) })
 	r.pass()
 	m, _ := r.h.coord.mail.Get(sent.Message.Id)
 	if d := m.Deliveries["term"]; d.Delivered != nil || d.Since.IsZero() {
@@ -372,7 +373,7 @@ func TestMailEscalation(t *testing.T) {
 				}
 			}()
 
-			sent := r.post(r.owner, r.name, "please confirm", func(q *pb.MessageServiceSendRequest) { q.AckRequired = true })
+			sent := r.post(r.owner, r.name, "please confirm", func(q *pb.MessageServiceSendRequest) { q.AckRequired = proto.Bool(true) })
 			id := sent.Message.Id
 			r.pass()
 			r.waitIdle(r.name)
@@ -536,5 +537,32 @@ func TestLeaseGrantSendsNotice(t *testing.T) {
 	}
 	if strings.Contains(us[0].text, "msg reply") {
 		t.Errorf("a hub notice must not offer a reply:\n%s", us[0].text)
+	}
+}
+
+func TestMailRequestAcksByDefault(t *testing.T) {
+	r := newMailRig(t)
+	r.spawnNamed("alice", pb.SleeveMode_SLEEVE_MODE_TERMINAL, "")
+	alice := r.as("alice")
+	tests := []struct {
+		name string
+		kind pb.MessageKind
+		ack  *bool
+		want bool
+	}{
+		{"request unset", pb.MessageKind_MESSAGE_KIND_REQUEST, nil, true},
+		{"request explicit false", pb.MessageKind_MESSAGE_KIND_REQUEST, proto.Bool(false), false},
+		{"request explicit true", pb.MessageKind_MESSAGE_KIND_REQUEST, proto.Bool(true), true},
+		{"note unset", pb.MessageKind_MESSAGE_KIND_NOTE, nil, false},
+		{"note explicit true", pb.MessageKind_MESSAGE_KIND_NOTE, proto.Bool(true), true},
+		{"notice unset", pb.MessageKind_MESSAGE_KIND_NOTICE, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := r.post(alice, "owner", "x", func(q *pb.MessageServiceSendRequest) { q.Kind, q.AckRequired = tt.kind, tt.ack })
+			if res.Message.AckRequired != tt.want {
+				t.Fatalf("ack_required = %v, want %v", res.Message.AckRequired, tt.want)
+			}
+		})
 	}
 }

@@ -499,8 +499,12 @@ func (s messageService) Send(ctx context.Context, req *connect.Request[pb.Messag
 	if !ok {
 		return nil, invalid("unknown message kind")
 	}
+	ack := kind == mailbox.Request
+	if m.AckRequired != nil {
+		ack = *m.AckRequired
+	}
 	res, err := s.c.send(identity(ctx), sendArgs{
-		To: m.To, Body: m.Body, Thread: m.ThreadId, Kind: kind, AckRequired: m.AckRequired, RequestID: m.RequestId,
+		To: m.To, Body: m.Body, Thread: m.ThreadId, Kind: kind, AckRequired: ack, RequestID: m.RequestId,
 	})
 	if err != nil {
 		return nil, err
