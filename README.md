@@ -1,41 +1,57 @@
 # Protectorate
 
 One pane of glass over your coding-agent subscriptions, machines, sessions and
-work. A single Go binary is the hub, the node agent and the CLI.
+work. A single Go binary is the hub, the node agent and the CLI. Flutter
+clients (desktop, Android, web) talk to the same API.
 
 ## Ethos
 
-- Let the harness do the work: we orchestrate vendor CLIs, never wrap or re-prompt them.
-- Be as lightweight as possible: default to not building it.
-- Everything is drivable from the CLI, with machine-readable `--json` output.
+- **Hands-off toward harnesses:** each LLM runs its own CLI untouched. We never
+  wrap, patch, proxy or re-prompt it.
+- **Correct, robust and fast everywhere else:** the hub, sleeves, networking
+  and nodes are engineered as seriously as they need to be.
+- **Everything is drivable from the CLI** (`--json` everywhere), so MCP bridges
+  and an orchestrator agent can drive it too.
+
+## What works
+
+| Area | Commands | Notes |
+|------|----------|-------|
+| Subscription quota (P1) | `quota [--refresh]` | Claude, Codex, Grok, Antigravity, local LLM; resets, reset credits, projected unused; never refreshes tokens or redeems resets |
+| Sessions (P4) | `session ls/new/attach/capture/kill` | tmux on a dedicated socket; WebSocket terminal at `/ws/terminal/{name}` |
+| Sleeves (P7, P8) | `sleeve spawn/ls/show/attach/kill` | bwrap + systemd user scope: PID isolation, CPU/memory caps, shared live credentials |
+| Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, GPU, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
+| Tailnet | `hub tailnet install/init`, `node invite/join/revoke`, `client invite` | embedded tsnet + supervised Headscale; WhoIs gating; verified with a Windows node |
+| Backlog (P6) | `backlog ls/add/claim/done/edit` | one markdown file on the hub; items link to GitHub issues |
+| Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; append-only audit log |
+| Clients | `pair`, `mcp`, `hub serve --web` | QR pairing with a scoped device token; MCP tools generated from the API |
+| Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
 
 ## Build
 
-Needs Go, plus `buf`, `protoc-gen-go` and `protoc-gen-connect-go` (all via `go install`) to regenerate `gen/`.
-
 ```
-make gen     # buf generate -> gen/ (committed)
-make build   # bin/protectorate
-make test    # go vet + go test -race
-make cross   # linux/windows amd64+arm64, android/arm64 into bin/
+make gen        # buf generate -> gen/ (Go) and app/lib/gen/ (Dart), both committed
+make check-gen  # fails if generated code is stale
+make build      # bin/protectorate
+make test       # go vet + go test -race
+make cross      # linux/windows amd64+arm64, android/arm64 into bin/
+make app-check  # flutter analyze + test
 ```
 
 ## Run
 
 ```
-protectorate hub serve                 # token created at ~/.protectorate/token
-protectorate status
-protectorate events                    # stream; --json for proto-JSON per line
-protectorate api call HubService/GetStatus '{}'
-curl -H "Authorization: Bearer $(cat ~/.protectorate/token)" \
-     -H 'Content-Type: application/json' -d '{}' \
-     http://127.0.0.1:7470/protectorate.v1.HubService/GetStatus
+protectorate hub serve [--web app/build/web]   # owner token at ~/.protectorate/token
+protectorate quota
+protectorate session new demo -- claude
+protectorate sleeve spawn alice --workspace ~/src/proj --harness codex --mem 8G
+protectorate pair                               # QR code for the phone app
 ```
-
-Flags: `--hub` (env `PROTECTORATE_HUB`), `--json`. State dir override: `PROTECTORATE_HOME`.
 
 ## Docs
 
-- [docs/install.md](docs/install.md): hub, node and phone setup, service definitions
 - [PROBLEMS.md](PROBLEMS.md): what hurts and why
-- [ARCHITECTURE.md](ARCHITECTURE.md): the system we are building
+- [ARCHITECTURE.md](ARCHITECTURE.md): the system and the decisions behind it
+- [docs/install.md](docs/install.md): hub, node and phone setup
+- [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md)
+- `spikes/`: the experiments behind each decision, with measurements
