@@ -4,23 +4,47 @@ package protectorate.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
 // NodeAgentService runs on every node (and in-process for the hub's own
 // node). The hub polls GetMetrics; WatchMetrics is for live views.
 service NodeAgentService {
-  rpc GetMetrics(GetMetricsRequest) returns (NodeMetrics);
-  rpc WatchMetrics(WatchMetricsRequest) returns (stream NodeMetrics);
+  option (protectorate.v1.node_local) = true;
+
+  // GetMetrics collects this node's current metrics.
+  rpc GetMetrics(GetMetricsRequest) returns (NodeMetrics) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // WatchMetrics streams this node's metrics at an interval.
+  rpc WatchMetrics(WatchMetricsRequest) returns (stream NodeMetrics) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // NodeService runs on the hub: the inventory plus the latest metrics of each
 // node. Polls are announced on EventService as "node.metrics" (subject = node
 // name, payload = summary) and "node.unreachable".
 service NodeService {
-  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
-  rpc GetNode(GetNodeRequest) returns (NodeStatus);
+  // ListNodes returns every node with its latest metrics summary,
+  // freshness and alerts.
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetNode returns one node with full metrics: filesystems, GPUs,
+  // containers, engine disk usage and watched directories.
+  rpc GetNode(GetNodeRequest) returns (NodeStatus) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // AddNode adds or updates a node in the hub inventory.
   rpc AddNode(AddNodeRequest) returns (NodeInfo);
+
+  // RemoveNode removes a node from the hub inventory. It does not touch the
+  // machine itself.
   rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
 }
 

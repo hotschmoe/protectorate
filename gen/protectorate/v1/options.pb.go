@@ -30,6 +30,14 @@ var file_protectorate_v1_options_proto_extTypes = []protoimpl.ExtensionInfo{
 		Tag:           "varint,50001,opt,name=destructive",
 		Filename:      "protectorate/v1/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.ServiceOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50002,
+		Name:          "protectorate.v1.node_local",
+		Tag:           "varint,50002,opt,name=node_local",
+		Filename:      "protectorate/v1/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.MethodOptions.
@@ -41,22 +49,35 @@ var (
 	E_Destructive = &file_protectorate_v1_options_proto_extTypes[0]
 )
 
+// Extension fields to descriptorpb.ServiceOptions.
+var (
+	// node_local marks a service served by node agents, not by the hub. Hub
+	// clients such as the MCP bridge leave it out.
+	//
+	// optional bool node_local = 50002;
+	E_NodeLocal = &file_protectorate_v1_options_proto_extTypes[1]
+)
+
 var File_protectorate_v1_options_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_options_proto_rawDesc = "" +
 	"\n" +
 	"\x1dprotectorate/v1/options.proto\x12\x0fprotectorate.v1\x1a google/protobuf/descriptor.proto:B\n" +
-	"\vdestructive\x12\x1e.google.protobuf.MethodOptions\x18ц\x03 \x01(\bR\vdestructiveBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\vdestructive\x12\x1e.google.protobuf.MethodOptions\x18ц\x03 \x01(\bR\vdestructive:@\n" +
+	"\n" +
+	"node_local\x12\x1f.google.protobuf.ServiceOptions\x18҆\x03 \x01(\bR\tnodeLocalBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var file_protectorate_v1_options_proto_goTypes = []any{
-	(*descriptorpb.MethodOptions)(nil), // 0: google.protobuf.MethodOptions
+	(*descriptorpb.MethodOptions)(nil),  // 0: google.protobuf.MethodOptions
+	(*descriptorpb.ServiceOptions)(nil), // 1: google.protobuf.ServiceOptions
 }
 var file_protectorate_v1_options_proto_depIdxs = []int32{
 	0, // 0: protectorate.v1.destructive:extendee -> google.protobuf.MethodOptions
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	0, // [0:1] is the sub-list for extension extendee
+	1, // 1: protectorate.v1.node_local:extendee -> google.protobuf.ServiceOptions
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	0, // [0:2] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
@@ -72,7 +93,7 @@ func file_protectorate_v1_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_options_proto_rawDesc), len(file_protectorate_v1_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
-			NumExtensions: 1,
+			NumExtensions: 2,
 			NumServices:   0,
 		},
 		GoTypes:           file_protectorate_v1_options_proto_goTypes,

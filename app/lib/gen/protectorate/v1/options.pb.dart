@@ -22,8 +22,14 @@ class Options {
       _omitFieldNames ? '' : 'destructive',
       50001,
       $pb.PbFieldType.OB);
+  static final nodeLocal = $pb.Extension<$core.bool>(
+      _omitMessageNames ? '' : 'google.protobuf.ServiceOptions',
+      _omitFieldNames ? '' : 'nodeLocal',
+      50002,
+      $pb.PbFieldType.OB);
   static void registerAllExtensions($pb.ExtensionRegistry registry) {
     registry.add(destructive);
+    registry.add(nodeLocal);
   }
 }
 

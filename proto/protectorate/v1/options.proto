@@ -11,3 +11,9 @@ extend google.protobuf.MethodOptions {
   // as the MCP bridge surface it as a hint.
   bool destructive = 50001;
 }
+
+extend google.protobuf.ServiceOptions {
+  // node_local marks a service served by node agents, not by the hub. Hub
+  // clients such as the MCP bridge leave it out.
+  bool node_local = 50002;
+}

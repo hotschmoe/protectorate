@@ -126,6 +126,113 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "AddNode adds or updates a node in the hub inventory.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "description": "address is the tailnet name or an address; \":7475\" is assumed when no port is given.",
+              "type": "string"
+            },
+            "arch": {
+              "type": "string"
+            },
+            "local": {
+              "description": "local marks the hub's own node, which is not stored in the inventory.",
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "string"
+            },
+            "os": {
+              "type": "string"
+            },
+            "sshAlias": {
+              "description": "ssh_alias is the break-glass `ssh` host alias.",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "tier": {
+              "description": "tier is \"server\" or \"family\" and drives future command gating.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_add_node"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetNode returns one node with full metrics: filesystems, GPUs, containers, engine disk usage and watched directories.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_get_node"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListNodes returns every node with its latest metrics summary, freshness and alerts.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "node_list_nodes"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RemoveNode removes a node from the hub inventory. It does not touch the machine itself.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_remove_node"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true

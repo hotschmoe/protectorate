@@ -1675,7 +1675,7 @@ var File_protectorate_v1_node_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
+	"\x1aprotectorate/v1/node.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\x13\n" +
 	"\x11GetMetricsRequest\"@\n" +
 	"\x13WatchMetricsRequest\x12)\n" +
 	"\x10interval_seconds\x18\x01 \x01(\x05R\x0fintervalSeconds\"\xe1\x04\n" +
@@ -1827,14 +1827,14 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x16ALERT_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17ALERT_KIND_DISK_PERCENT\x10\x01\x12\x1b\n" +
 	"\x17ALERT_KIND_MEM_PRESSURE\x10\x02\x12\x1a\n" +
-	"\x16ALERT_KIND_UNREACHABLE\x10\x032\xb8\x01\n" +
-	"\x10NodeAgentService\x12N\n" +
+	"\x16ALERT_KIND_UNREACHABLE\x10\x032\xc8\x01\n" +
+	"\x10NodeAgentService\x12S\n" +
 	"\n" +
-	"GetMetrics\x12\".protectorate.v1.GetMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\x12T\n" +
-	"\fWatchMetrics\x12$.protectorate.v1.WatchMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics0\x012\xc8\x02\n" +
-	"\vNodeService\x12R\n" +
-	"\tListNodes\x12!.protectorate.v1.ListNodesRequest\x1a\".protectorate.v1.ListNodesResponse\x12G\n" +
-	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\x12E\n" +
+	"GetMetrics\x12\".protectorate.v1.GetMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x01\x12Y\n" +
+	"\fWatchMetrics\x12$.protectorate.v1.WatchMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x010\x01\x1a\x04\x90\xb5\x18\x012\xd2\x02\n" +
+	"\vNodeService\x12W\n" +
+	"\tListNodes\x12!.protectorate.v1.ListNodesRequest\x1a\".protectorate.v1.ListNodesResponse\"\x03\x90\x02\x01\x12L\n" +
+	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\"\x03\x90\x02\x01\x12E\n" +
 	"\aAddNode\x12\x1f.protectorate.v1.AddNodeRequest\x1a\x19.protectorate.v1.NodeInfo\x12U\n" +
 	"\n" +
 	"RemoveNode\x12\".protectorate.v1.RemoveNodeRequest\x1a#.protectorate.v1.RemoveNodeResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
@@ -1930,6 +1930,7 @@ func file_protectorate_v1_node_proto_init() {
 	if File_protectorate_v1_node_proto != nil {
 		return
 	}
+	file_protectorate_v1_options_proto_init()
 	file_protectorate_v1_node_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

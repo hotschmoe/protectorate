@@ -40,8 +40,8 @@ func (t ToolDef) Path() string {
 	return "/" + string(t.Method.Parent().FullName()) + "/" + string(t.Method.Name())
 }
 
-// Catalog lists every unary RPC in the embedded image, sorted by tool name.
-// Server-streaming RPCs are skipped.
+// Catalog lists every unary hub RPC in the embedded image, sorted by tool
+// name. node_local services and server-streaming RPCs are skipped.
 func Catalog() ([]ToolDef, error) {
 	var set descriptorpb.FileDescriptorSet
 	if err := proto.Unmarshal(image, &set); err != nil {
@@ -60,6 +60,9 @@ func Catalog() ([]ToolDef, error) {
 		}
 		for i := 0; i < fd.Services().Len(); i++ {
 			svc := fd.Services().Get(i)
+			if svcOpts, _ := svc.Options().(*descriptorpb.ServiceOptions); proto.GetExtension(svcOpts, pb.E_NodeLocal).(bool) {
+				continue
+			}
 			for j := 0; j < svc.Methods().Len(); j++ {
 				m := svc.Methods().Get(j)
 				if m.IsStreamingClient() || m.IsStreamingServer() {

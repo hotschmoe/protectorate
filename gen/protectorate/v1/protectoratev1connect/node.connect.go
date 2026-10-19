@@ -53,7 +53,9 @@ const (
 
 // NodeAgentServiceClient is a client for the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceClient interface {
+	// GetMetrics collects this node's current metrics.
 	GetMetrics(context.Context, *connect.Request[v1.GetMetricsRequest]) (*connect.Response[v1.NodeMetrics], error)
+	// WatchMetrics streams this node's metrics at an interval.
 	WatchMetrics(context.Context, *connect.Request[v1.WatchMetricsRequest]) (*connect.ServerStreamForClient[v1.NodeMetrics], error)
 }
 
@@ -72,12 +74,14 @@ func NewNodeAgentServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			httpClient,
 			baseURL+NodeAgentServiceGetMetricsProcedure,
 			connect.WithSchema(nodeAgentServiceMethods.ByName("GetMetrics")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		watchMetrics: connect.NewClient[v1.WatchMetricsRequest, v1.NodeMetrics](
 			httpClient,
 			baseURL+NodeAgentServiceWatchMetricsProcedure,
 			connect.WithSchema(nodeAgentServiceMethods.ByName("WatchMetrics")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -101,7 +105,9 @@ func (c *nodeAgentServiceClient) WatchMetrics(ctx context.Context, req *connect.
 
 // NodeAgentServiceHandler is an implementation of the protectorate.v1.NodeAgentService service.
 type NodeAgentServiceHandler interface {
+	// GetMetrics collects this node's current metrics.
 	GetMetrics(context.Context, *connect.Request[v1.GetMetricsRequest]) (*connect.Response[v1.NodeMetrics], error)
+	// WatchMetrics streams this node's metrics at an interval.
 	WatchMetrics(context.Context, *connect.Request[v1.WatchMetricsRequest], *connect.ServerStream[v1.NodeMetrics]) error
 }
 
@@ -116,12 +122,14 @@ func NewNodeAgentServiceHandler(svc NodeAgentServiceHandler, opts ...connect.Han
 		NodeAgentServiceGetMetricsProcedure,
 		svc.GetMetrics,
 		connect.WithSchema(nodeAgentServiceMethods.ByName("GetMetrics")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	nodeAgentServiceWatchMetricsHandler := connect.NewServerStreamHandler(
 		NodeAgentServiceWatchMetricsProcedure,
 		svc.WatchMetrics,
 		connect.WithSchema(nodeAgentServiceMethods.ByName("WatchMetrics")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/protectorate.v1.NodeAgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,9 +157,16 @@ func (UnimplementedNodeAgentServiceHandler) WatchMetrics(context.Context, *conne
 
 // NodeServiceClient is a client for the protectorate.v1.NodeService service.
 type NodeServiceClient interface {
+	// ListNodes returns every node with its latest metrics summary,
+	// freshness and alerts.
 	ListNodes(context.Context, *connect.Request[v1.ListNodesRequest]) (*connect.Response[v1.ListNodesResponse], error)
+	// GetNode returns one node with full metrics: filesystems, GPUs,
+	// containers, engine disk usage and watched directories.
 	GetNode(context.Context, *connect.Request[v1.GetNodeRequest]) (*connect.Response[v1.NodeStatus], error)
+	// AddNode adds or updates a node in the hub inventory.
 	AddNode(context.Context, *connect.Request[v1.AddNodeRequest]) (*connect.Response[v1.NodeInfo], error)
+	// RemoveNode removes a node from the hub inventory. It does not touch the
+	// machine itself.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
 }
 
@@ -170,12 +185,14 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			httpClient,
 			baseURL+NodeServiceListNodesProcedure,
 			connect.WithSchema(nodeServiceMethods.ByName("ListNodes")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		getNode: connect.NewClient[v1.GetNodeRequest, v1.NodeStatus](
 			httpClient,
 			baseURL+NodeServiceGetNodeProcedure,
 			connect.WithSchema(nodeServiceMethods.ByName("GetNode")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		addNode: connect.NewClient[v1.AddNodeRequest, v1.NodeInfo](
@@ -223,9 +240,16 @@ func (c *nodeServiceClient) RemoveNode(ctx context.Context, req *connect.Request
 
 // NodeServiceHandler is an implementation of the protectorate.v1.NodeService service.
 type NodeServiceHandler interface {
+	// ListNodes returns every node with its latest metrics summary,
+	// freshness and alerts.
 	ListNodes(context.Context, *connect.Request[v1.ListNodesRequest]) (*connect.Response[v1.ListNodesResponse], error)
+	// GetNode returns one node with full metrics: filesystems, GPUs,
+	// containers, engine disk usage and watched directories.
 	GetNode(context.Context, *connect.Request[v1.GetNodeRequest]) (*connect.Response[v1.NodeStatus], error)
+	// AddNode adds or updates a node in the hub inventory.
 	AddNode(context.Context, *connect.Request[v1.AddNodeRequest]) (*connect.Response[v1.NodeInfo], error)
+	// RemoveNode removes a node from the hub inventory. It does not touch the
+	// machine itself.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
 }
 
@@ -240,12 +264,14 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		NodeServiceListNodesProcedure,
 		svc.ListNodes,
 		connect.WithSchema(nodeServiceMethods.ByName("ListNodes")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	nodeServiceGetNodeHandler := connect.NewUnaryHandler(
 		NodeServiceGetNodeProcedure,
 		svc.GetNode,
 		connect.WithSchema(nodeServiceMethods.ByName("GetNode")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	nodeServiceAddNodeHandler := connect.NewUnaryHandler(
