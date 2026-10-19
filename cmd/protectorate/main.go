@@ -193,7 +193,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
 	serve.Flags().StringVar(&nodeToken, "node-token", "", "bearer token presented to node agents (env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
-	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local ~/.nvm ~/go ~/.cargo ~/.rustup)")
+	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")
 	serve.Flags().StringSliceVar(&localURLs, "local-llm-url", nil, "OpenAI-compatible local LLM base URL to monitor (repeatable)")
