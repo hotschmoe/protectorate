@@ -19,7 +19,7 @@ class HubProfile {
 
   Uri get baseUri => Uri.parse(baseUrl);
 
-  Uri terminalUri(String session) {
+  Uri terminalUri(String session, {bool readOnly = false}) {
     final base = baseUri;
     return base.replace(
       scheme: base.scheme == 'https' ? 'wss' : 'ws',
@@ -29,6 +29,7 @@ class HubProfile {
         'terminal',
         session,
       ],
+      queryParameters: readOnly ? {'readonly': '1'} : null,
     );
   }
 

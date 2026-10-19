@@ -115,6 +115,10 @@ void main() {
         _hub.terminalUri('alice').toString(),
         'wss://hub.example:7470/ws/terminal/alice',
       );
+      expect(
+        _hub.terminalUri('alice', readOnly: true).toString(),
+        'wss://hub.example:7470/ws/terminal/alice?readonly=1',
+      );
     });
 
     test('url validation', () {

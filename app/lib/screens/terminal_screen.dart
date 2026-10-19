@@ -37,6 +37,8 @@ class _TerminalScreenState extends State<TerminalScreen>
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
   String _status = 'connecting';
+  bool _readOnly = false;
+  bool _offerReadOnly = false;
   int _cols = 80;
   int _rows = 24;
   bool _focused = true;
@@ -61,8 +63,12 @@ class _TerminalScreenState extends State<TerminalScreen>
     _focused = focused;
   }
 
+  // A device token without terminal:host may only view sessions outside a
+  // sleeve sandbox; the hub refuses the read-write handshake.
+  bool get _hostSession => !widget.session.startsWith('sleeve-');
+
   void _connect() {
-    final uri = widget.hub.terminalUri(widget.session);
+    final uri = widget.hub.terminalUri(widget.session, readOnly: _readOnly);
     final channel = WebSocketChannel.connect(
       uri,
       protocols: terminalSubprotocols(widget.hub.token),
@@ -75,7 +81,15 @@ class _TerminalScreenState extends State<TerminalScreen>
           _sendFrame(encodeResize(_cols, _rows));
         })
         .catchError((Object e) {
-          if (mounted) setState(() => _status = 'failed: $e');
+          if (!mounted) return;
+          setState(() {
+            if (_hostSession && !_readOnly) {
+              _status = 'read-write refused';
+              _offerReadOnly = true;
+            } else {
+              _status = 'failed: $e';
+            }
+          });
         });
     _sub = channel.stream.listen(
       (frame) {
@@ -89,6 +103,17 @@ class _TerminalScreenState extends State<TerminalScreen>
         if (mounted) setState(() => _status = 'closed');
       },
     );
+  }
+
+  void _reconnectReadOnly() {
+    _sub?.cancel();
+    _channel?.sink.close();
+    setState(() {
+      _readOnly = true;
+      _offerReadOnly = false;
+      _status = 'connecting';
+    });
+    _connect();
   }
 
   void _sendFrame(List<int> frame) {
@@ -131,13 +156,28 @@ class _TerminalScreenState extends State<TerminalScreen>
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Center(child: Text(_status)),
+            child: Center(
+              child: Text(_readOnly ? '$_status (read-only)' : _status),
+            ),
           ),
         ],
       ),
       body: SafeArea(
         child: Column(
           children: [
+            if (_offerReadOnly)
+              MaterialBanner(
+                content: const Text(
+                  'Typing into a session outside a sleeve needs a device '
+                  'paired with --host-shell. You can still watch it.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: _reconnectReadOnly,
+                    child: const Text('View read-only'),
+                  ),
+                ],
+              ),
             Expanded(
               child: TerminalView(
                 _terminal,
@@ -145,8 +185,10 @@ class _TerminalScreenState extends State<TerminalScreen>
                 textStyle: terminalTextStyle,
               ),
             ),
-            ExtraKeysBar(modifiers: _modifiers, onInput: _send),
-            ComposeBox(onSend: _sendCompose),
+            if (!_readOnly) ...[
+              ExtraKeysBar(modifiers: _modifiers, onInput: _send),
+              ComposeBox(onSend: _sendCompose),
+            ],
           ],
         ),
       ),
