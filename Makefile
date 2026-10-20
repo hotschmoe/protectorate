@@ -48,7 +48,7 @@ cross:
 	done
 
 app-check:
-	cd app && flutter analyze && flutter test
+	cd app && flutter analyze && flutter test $${FLUTTER_TEST_CONCURRENCY:+--concurrency=$$FLUTTER_TEST_CONCURRENCY}
 
 app-build-web:
 	cd app && dart run tool/build_web.dart $(APP_VERSION_FLAGS) $(APP_FLAGS)

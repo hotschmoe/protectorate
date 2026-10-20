@@ -260,6 +260,7 @@ func (h *Hub) replaceHarness(ctx context.Context, info sleeve.Info, to sleeve.Ha
 	h.dropIdentity(info.Name, "")
 	return h.spawn(ctx, sleeve.SpawnRequest{
 		Parent: info.Parent, ParentID: info.ParentID,
+		ReadOnly: info.ReadOnly, ExitAfterIdle: info.ExitAfterIdle,
 		Name: info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
 		Limits: info.Limits(), Env: env, Supervised: info.Supervised,
 		Selection: o.selection,

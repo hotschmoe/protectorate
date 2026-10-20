@@ -35,7 +35,8 @@ service SleeveService {
   // ListWorkspaces returns the directories SpawnSleeve would accept as an
   // existing workspace: git checkouts and other directories under the hub's
   // workspaces directory (cloned or created by earlier sleeves), and the
-  // workspaces of known sleeves elsewhere on disk. It never walks the rest of
+  // workspaces of known sleeves elsewhere on disk. Read-only reference entries
+  // are also returned with read_only set. It never walks the rest of
   // the filesystem; any other absolute path can still be given to
   // SpawnSleeve directly.
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse) {
@@ -168,6 +169,14 @@ message Sleeve {
   Handoff handoff = 17;
   // parent is the authenticated identity that spawned this sleeve.
   string parent = 20;
+  repeated ReadOnlyMount read_only = 18;
+  google.protobuf.Duration exit_after_idle = 19;
+}
+
+message ReadOnlyMount {
+  string source = 1;
+  // Defaults to source when omitted.
+  string target = 2;
 }
 
 message SpawnSleeveRequest {
@@ -189,6 +198,9 @@ message SpawnSleeveRequest {
   bool supervised = 8;
   // Codex chat selection; omitted preserves native defaults. Other drivers reject it.
   ModelSelection selection = 9;
+  repeated ReadOnlyMount read_only = 10;
+  // Zero disables automatic removal. Applies only to chat sleeves.
+  google.protobuf.Duration exit_after_idle = 11;
 }
 
 message SpawnSleeveResponse {
@@ -220,6 +232,7 @@ message Workspace {
   // required_name is set for a workspace in the hub's state directory: only a
   // sleeve of exactly that name may use it. Other workspaces take any name.
   string required_name = 7;
+  bool read_only = 8;
 }
 
 message ListWorkspacesResponse {

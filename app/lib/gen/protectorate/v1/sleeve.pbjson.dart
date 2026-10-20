@@ -217,6 +217,22 @@ const Sleeve$json = {
       '10': 'handoff'
     },
     {'1': 'parent', '3': 20, '4': 1, '5': 9, '10': 'parent'},
+    {
+      '1': 'read_only',
+      '3': 18,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.ReadOnlyMount',
+      '10': 'readOnly'
+    },
+    {
+      '1': 'exit_after_idle',
+      '3': 19,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'exitAfterIdle'
+    },
   ],
   '8': [
     {'1': '_exit_code'},
@@ -238,7 +254,23 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'YXRlLnYxLlNsZWV2ZU1vZGVSBG1vZGUSLwoEY2hhdBgPIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
     '5DaGF0U3RhdHVzUgRjaGF0Eh4KCnN1cGVydmlzZWQYECABKAhSCnN1cGVydmlzZWQSMgoHaGFu'
     'ZG9mZhgRIAEoCzIYLnByb3RlY3RvcmF0ZS52MS5IYW5kb2ZmUgdoYW5kb2ZmEhYKBnBhcmVudB'
-    'gUIAEoCVIGcGFyZW50QgwKCl9leGl0X2NvZGU=');
+    'gUIAEoCVIGcGFyZW50EjsKCXJlYWRfb25seRgSIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5SZWFk'
+    'T25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYEyABKAsyGS5nb29nbGUucH'
+    'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGVCDAoKX2V4aXRfY29kZQ==');
+
+@$core.Deprecated('Use readOnlyMountDescriptor instead')
+const ReadOnlyMount$json = {
+  '1': 'ReadOnlyMount',
+  '2': [
+    {'1': 'source', '3': 1, '4': 1, '5': 9, '10': 'source'},
+    {'1': 'target', '3': 2, '4': 1, '5': 9, '10': 'target'},
+  ],
+};
+
+/// Descriptor for `ReadOnlyMount`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List readOnlyMountDescriptor = $convert.base64Decode(
+    'Cg1SZWFkT25seU1vdW50EhYKBnNvdXJjZRgBIAEoCVIGc291cmNlEhYKBnRhcmdldBgCIAEoCV'
+    'IGdGFyZ2V0');
 
 @$core.Deprecated('Use spawnSleeveRequestDescriptor instead')
 const SpawnSleeveRequest$json = {
@@ -288,6 +320,22 @@ const SpawnSleeveRequest$json = {
       '6': '.protectorate.v1.ModelSelection',
       '10': 'selection'
     },
+    {
+      '1': 'read_only',
+      '3': 10,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.ReadOnlyMount',
+      '10': 'readOnly'
+    },
+    {
+      '1': 'exit_after_idle',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'exitAfterIdle'
+    },
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -311,8 +359,10 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'YXRlLnYxLlNwYXduU2xlZXZlUmVxdWVzdC5FbnZFbnRyeVIDZW52Ei8KBG1vZGUYByABKA4yGy'
     '5wcm90ZWN0b3JhdGUudjEuU2xlZXZlTW9kZVIEbW9kZRIeCgpzdXBlcnZpc2VkGAggASgIUgpz'
     'dXBlcnZpc2VkEj0KCXNlbGVjdGlvbhgJIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbG'
-    'VjdGlvblIJc2VsZWN0aW9uGjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVl'
-    'GAIgASgJUgV2YWx1ZToCOAE=');
+    'VjdGlvblIJc2VsZWN0aW9uEjsKCXJlYWRfb25seRgKIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5S'
+    'ZWFkT25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYCyABKAsyGS5nb29nbG'
+    'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUaNgoIRW52RW50cnkSEAoDa2V5GAEg'
+    'ASgJUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AQ==');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {
@@ -383,6 +433,7 @@ const Workspace$json = {
     {'1': 'sleeve', '3': 5, '4': 1, '5': 9, '10': 'sleeve'},
     {'1': 'busy', '3': 6, '4': 1, '5': 8, '10': 'busy'},
     {'1': 'required_name', '3': 7, '4': 1, '5': 9, '10': 'requiredName'},
+    {'1': 'read_only', '3': 8, '4': 1, '5': 8, '10': 'readOnly'},
   ],
 };
 
@@ -391,7 +442,8 @@ final $typed_data.Uint8List workspaceDescriptor = $convert.base64Decode(
     'CglXb3Jrc3BhY2USEgoEbmFtZRgBIAEoCVIEbmFtZRISCgRwYXRoGAIgASgJUgRwYXRoEh0KCm'
     'dpdF9yZW1vdGUYAyABKAlSCWdpdFJlbW90ZRIdCgpnaXRfYnJhbmNoGAQgASgJUglnaXRCcmFu'
     'Y2gSFgoGc2xlZXZlGAUgASgJUgZzbGVldmUSEgoEYnVzeRgGIAEoCFIEYnVzeRIjCg1yZXF1aX'
-    'JlZF9uYW1lGAcgASgJUgxyZXF1aXJlZE5hbWU=');
+    'JlZF9uYW1lGAcgASgJUgxyZXF1aXJlZE5hbWUSGwoJcmVhZF9vbmx5GAggASgIUghyZWFkT25s'
+    'eQ==');
 
 @$core.Deprecated('Use listWorkspacesResponseDescriptor instead')
 const ListWorkspacesResponse$json = {
@@ -658,6 +710,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SpawnSleeveRequest.EnvEntry':
       SpawnSleeveRequest_EnvEntry$json,
   '.protectorate.v1.ModelSelection': $1.ModelSelection$json,
+  '.protectorate.v1.ReadOnlyMount': ReadOnlyMount$json,
+  '.google.protobuf.Duration': $2.Duration$json,
   '.protectorate.v1.SpawnSleeveResponse': SpawnSleeveResponse$json,
   '.protectorate.v1.Sleeve': Sleeve$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
@@ -675,7 +729,6 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.KillSleeveRequest': KillSleeveRequest$json,
   '.protectorate.v1.KillSleeveResponse': KillSleeveResponse$json,
   '.protectorate.v1.ResleeveSleeveRequest': ResleeveSleeveRequest$json,
-  '.google.protobuf.Duration': $2.Duration$json,
   '.protectorate.v1.ResleeveSleeveResponse': ResleeveSleeveResponse$json,
   '.protectorate.v1.SpawnEnvoyRequest': SpawnEnvoyRequest$json,
   '.protectorate.v1.SpawnEnvoyResponse': SpawnEnvoyResponse$json,

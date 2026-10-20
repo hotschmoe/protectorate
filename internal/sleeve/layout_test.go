@@ -1,6 +1,7 @@
 package sleeve
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,7 +51,7 @@ func TestSharedAuthVisibleAcrossSleeves(t *testing.T) {
 		t.Run(string(h), func(t *testing.T) {
 			a, b := c.layout("a-"+string(h), h), c.layout("b-"+string(h), h)
 			for _, l := range []Layout{a, b} {
-				if err := l.Apply(); err != nil {
+				if err := l.Apply(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -107,7 +108,7 @@ func TestLayoutApply(t *testing.T) {
 	linuxHost(t)
 	c := layoutConfig(t)
 	l := c.layout("s", Claude)
-	if err := l.Apply(); err != nil {
+	if err := l.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	seed := filepath.Join(c.sleeveHome("s"), ".claude/.claude.json")
@@ -115,7 +116,7 @@ func TestLayoutApply(t *testing.T) {
 		t.Errorf("seed = %q", got)
 	}
 	mustWrite(t, seed, "user-edited")
-	if err := l.Apply(); err != nil {
+	if err := l.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustRead(t, seed); got != "user-edited" {
@@ -131,7 +132,7 @@ func TestLayoutApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, link, "stale local login")
-	if err := cl.Apply(); err != nil {
+	if err := cl.Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.Readlink(link); got != filepath.Join(c.authDir(Codex), "auth.json") {
@@ -141,7 +142,7 @@ func TestLayoutApply(t *testing.T) {
 	if len(ents) != 1 || mustRead(t, ents[0]) != "stale local login" {
 		t.Errorf("stale file not preserved: %v", ents)
 	}
-	if err := cl.Apply(); err != nil {
+	if err := cl.Apply(context.Background()); err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
 	if ents, _ := filepath.Glob(link + ".orphaned-*"); len(ents) != 1 {
@@ -163,6 +164,7 @@ func TestLayoutEnv(t *testing.T) {
 		{Shell, nil},
 	}
 	for _, tt := range tests {
+		tt.want = append([]string{"PUB_CACHE=/home/u/.cache/pub", "GOMODCACHE=/home/u/.cache/go-mod"}, tt.want...)
 		var got []string
 		for _, kv := range c.layout("s", tt.h).Env {
 			if kv[0] != "DISABLE_AUTOUPDATER" {
@@ -178,7 +180,7 @@ func TestLayoutEnv(t *testing.T) {
 func TestCodexConfigSeed(t *testing.T) {
 	linuxHost(t)
 	c := layoutConfig(t)
-	if err := c.layout("s", Codex).Apply(); err != nil {
+	if err := c.layout("s", Codex).Apply(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustRead(t, filepath.Join(c.sleeveHome("s"), ".codex/config.toml")); got != codexSeed {

@@ -158,7 +158,7 @@ func hubCmd() *cobra.Command {
 	var nodeInterval, ackTimeout time.Duration
 	var nodeTokenFile, backupDir string
 	var backupEvery time.Duration
-	var watch, toolDirs []string
+	var watch, toolDirs, refDirs []string
 	var orchestratorGrants bool
 	var startEnvoy string
 	serve := &cobra.Command{
@@ -224,7 +224,7 @@ func hubCmd() *cobra.Command {
 			if err := attachNodes(h, nodeInterval, nodeTok, watch, ts.Client, ts.Peers); err != nil {
 				return err
 			}
-			if err := attachSleeves(ctx, h, toolDirs); err != nil {
+			if err := attachSleeves(ctx, h, toolDirs, refDirs); err != nil {
 				return err
 			}
 			tools, err := toolDocs()
@@ -266,6 +266,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().DurationVar(&ackTimeout, "msg-ack-timeout", 30*time.Minute, "how long an ack-required message may stay unacked before it is re-delivered, and again before it is escalated to the orchestrator")
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
+	serve.Flags().StringSliceVar(&refDirs, "sleeve-reference-dir", nil, "directory offered read-only to sleeves by 'sleeve workspaces' (repeatable), besides each workspace's references/")
 	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")

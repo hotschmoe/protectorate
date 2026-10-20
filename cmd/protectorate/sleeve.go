@@ -24,7 +24,7 @@ import (
 )
 
 // attachSleeves wires SleeveService into h and recovers persisted sleeves.
-func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs []string) error {
+func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs []string) error {
 	home, err := hub.Home()
 	if err != nil {
 		return err
@@ -36,6 +36,7 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs []string) error {
 	if err != nil {
 		return err
 	}
+	cfg.ReferenceDirs = refDirs
 	if exe, err := os.Executable(); err == nil {
 		if err := cfg.AddBinaryDir(exe); err != nil {
 			log.Printf("sleeves will not have the protectorate CLI: %v", err)
@@ -107,6 +108,8 @@ func sleeveSpawnCmd(o *opts) *cobra.Command {
 	var cpu uint32
 	var env []string
 	var supervised bool
+	var readOnly []string
+	var exitAfterIdle time.Duration
 	c := &cobra.Command{
 		Use:   "spawn <name> --workspace <dir|git url> --harness <h> [--cpu 200] [--mem 8G] [--supervised] [-- args...]",
 		Short: "Start a harness in an isolated sleeve",
@@ -117,7 +120,9 @@ For the shell harness, arguments after -- are the command to run. Agent
 harnesses start in chat mode (drive them with 'protectorate chat'); use
 --mode terminal for the TUI under tmux. A chat harness runs autonomous (the
 sandbox is the boundary) unless --supervised: then it asks before acting and
-'protectorate chat respond' answers.`,
+'protectorate chat respond' answers. --ro host-path[:sandbox-path] adds read-only
+reference directories (repeatable, default same path). --exit-after-idle 5m
+removes a chat sleeve after five minutes idle with no pending mail (default off).`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, extra := args[0], args[1:]
@@ -164,7 +169,13 @@ sandbox is the boundary) unless --supervised: then it asks before acting and
 			if err != nil {
 				return err
 			}
+			var mounts []*pb.ReadOnlyMount
+			for _, value := range readOnly {
+				source, target, _ := strings.Cut(value, ":")
+				mounts = append(mounts, &pb.ReadOnlyMount{Source: source, Target: target})
+			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
+				ReadOnly: mounts, ExitAfterIdle: durationpb.New(exitAfterIdle),
 				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode, Selection: optionalSelection(sel),
 				Supervised: supervised,
 			}))
@@ -182,6 +193,8 @@ sandbox is the boundary) unless --supervised: then it asks before acting and
 		},
 	}
 	c.Flags().StringVar(&workspace, "workspace", "", "directory on the hub, or git URL to clone")
+	c.Flags().StringArrayVar(&readOnly, "ro", nil, "read-only host directory[:sandbox directory] (repeatable; default same path)")
+	c.Flags().DurationVar(&exitAfterIdle, "exit-after-idle", 0, "kill chat sleeve after idle with no pending mail (0 disables)")
 	selectionFlags(c, sel)
 	c.Flags().StringVar(&harness, "harness", "", "claude, codex, grok, pi or shell")
 	c.Flags().Uint32Var(&cpu, "cpu", 0, "CPU limit in percent of one core (0 = unlimited)")
@@ -273,7 +286,8 @@ func sleeveWorkspacesCmd(o *opts) *cobra.Command {
 		Short:   "List workspaces on the hub that a sleeve can start in",
 		Long: `List the existing workspaces on the hub: checkouts and directories under its
 workspaces directory and the workspaces of known sleeves. Pass a PATH to
-'sleeve spawn --workspace'. A workspace marked with a required name can only be
+'sleeve spawn --workspace'. Read-only reference entries are for 'spawn --ro'.
+A workspace marked with a required name can only be
 used by a sleeve of that name. Any other absolute directory, or a git URL to
 clone, can also be given to spawn.`,
 		Args: cobra.NoArgs,
@@ -287,13 +301,13 @@ clone, can also be given to spawn.`,
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tBRANCH\tREMOTE\tSLEEVE\tNAME REQUIRED\tPATH")
+				fmt.Fprintln(w, "NAME\tBRANCH\tREMOTE\tSLEEVE\tNAME REQUIRED\tPATH\tREAD ONLY")
 				for _, ws := range res.Msg.Workspaces {
 					use := ws.Sleeve
 					if ws.Busy {
 						use += " (running)"
 					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", ws.Name, ws.GitBranch, ws.GitRemote, use, ws.RequiredName, ws.Path)
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%t\n", ws.Name, ws.GitBranch, ws.GitRemote, use, ws.RequiredName, ws.Path, ws.ReadOnly)
 				}
 			})
 		},

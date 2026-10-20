@@ -297,6 +297,8 @@ class Sleeve extends $pb.GeneratedMessage {
     $1.ChatStatus? chat,
     $core.bool? supervised,
     $1.Handoff? handoff,
+    $core.Iterable<ReadOnlyMount>? readOnly,
+    $2.Duration? exitAfterIdle,
     $core.String? parent,
   }) {
     final result = Sleeve._();
@@ -317,6 +319,8 @@ class Sleeve extends $pb.GeneratedMessage {
     if (chat != null) result.chat = chat;
     if (supervised != null) result.supervised = supervised;
     if (handoff != null) result.handoff = handoff;
+    if (readOnly != null) result.readOnly.addAll(readOnly);
+    if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
     if (parent != null) result.parent = parent;
     return result;
   }
@@ -361,6 +365,10 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOB(16, _omitFieldNames ? '' : 'supervised')
     ..aOM<$1.Handoff>(17, _omitFieldNames ? '' : 'handoff',
         subBuilder: $1.Handoff.$_createMessage)
+    ..pPM<ReadOnlyMount>(18, _omitFieldNames ? '' : 'readOnly',
+        subBuilder: ReadOnlyMount.$_createMessage)
+    ..aOM<$2.Duration>(19, _omitFieldNames ? '' : 'exitAfterIdle',
+        subBuilder: $2.Duration.$_createMessage)
     ..aOS(20, _omitFieldNames ? '' : 'parent')
     ..hasRequiredFields = false;
 
@@ -558,15 +566,100 @@ class Sleeve extends $pb.GeneratedMessage {
   @$pb.TagNumber(17)
   $1.Handoff ensureHandoff() => $_ensure(16);
 
+  @$pb.TagNumber(18)
+  $pb.PbList<ReadOnlyMount> get readOnly => $_getList(17);
+
+  @$pb.TagNumber(19)
+  $2.Duration get exitAfterIdle => $_getN(18);
+  @$pb.TagNumber(19)
+  set exitAfterIdle($2.Duration value) => $_setField(19, value);
+  @$pb.TagNumber(19)
+  $core.bool hasExitAfterIdle() => $_has(18);
+  @$pb.TagNumber(19)
+  void clearExitAfterIdle() => $_clearField(19);
+  @$pb.TagNumber(19)
+  $2.Duration ensureExitAfterIdle() => $_ensure(18);
+
   /// parent is the authenticated identity that spawned this sleeve.
   @$pb.TagNumber(20)
-  $core.String get parent => $_getSZ(17);
+  $core.String get parent => $_getSZ(19);
   @$pb.TagNumber(20)
-  set parent($core.String value) => $_setString(17, value);
+  set parent($core.String value) => $_setString(19, value);
   @$pb.TagNumber(20)
-  $core.bool hasParent() => $_has(17);
+  $core.bool hasParent() => $_has(19);
   @$pb.TagNumber(20)
   void clearParent() => $_clearField(20);
+}
+
+class ReadOnlyMount extends $pb.GeneratedMessage {
+  factory ReadOnlyMount({
+    $core.String? source,
+    $core.String? target,
+  }) {
+    final result = ReadOnlyMount._();
+    if (source != null) result.source = source;
+    if (target != null) result.target = target;
+    return result;
+  }
+
+  ReadOnlyMount._();
+
+  factory ReadOnlyMount.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReadOnlyMount()..mergeFromBuffer(data, registry);
+  factory ReadOnlyMount.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReadOnlyMount()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ReadOnlyMount',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ReadOnlyMount.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'source')
+    ..aOS(2, _omitFieldNames ? '' : 'target')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReadOnlyMount clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReadOnlyMount copyWith(void Function(ReadOnlyMount) updates) =>
+      super.copyWith((message) => updates(message as ReadOnlyMount))
+          as ReadOnlyMount;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ReadOnlyMount() / ReadOnlyMount.new instead')
+  static ReadOnlyMount create() => ReadOnlyMount._();
+  static $pb.GeneratedMessage $_createMessage() => ReadOnlyMount._();
+  @$core.override
+  ReadOnlyMount createEmptyInstance() => ReadOnlyMount._();
+  @$core.pragma('dart2js:noInline')
+  static ReadOnlyMount getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ReadOnlyMount>(
+          ReadOnlyMount.$_createMessage);
+  static ReadOnlyMount? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get source => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set source($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSource() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSource() => $_clearField(1);
+
+  /// Defaults to source when omitted.
+  @$pb.TagNumber(2)
+  $core.String get target => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set target($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTarget() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTarget() => $_clearField(2);
 }
 
 class SpawnSleeveRequest extends $pb.GeneratedMessage {
@@ -580,6 +673,8 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $1.SleeveMode? mode,
     $core.bool? supervised,
     $1.ModelSelection? selection,
+    $core.Iterable<ReadOnlyMount>? readOnly,
+    $2.Duration? exitAfterIdle,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -591,6 +686,8 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (mode != null) result.mode = mode;
     if (supervised != null) result.supervised = supervised;
     if (selection != null) result.selection = selection;
+    if (readOnly != null) result.readOnly.addAll(readOnly);
+    if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
     return result;
   }
 
@@ -625,6 +722,10 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     ..aOB(8, _omitFieldNames ? '' : 'supervised')
     ..aOM<$1.ModelSelection>(9, _omitFieldNames ? '' : 'selection',
         subBuilder: $1.ModelSelection.$_createMessage)
+    ..pPM<ReadOnlyMount>(10, _omitFieldNames ? '' : 'readOnly',
+        subBuilder: ReadOnlyMount.$_createMessage)
+    ..aOM<$2.Duration>(11, _omitFieldNames ? '' : 'exitAfterIdle',
+        subBuilder: $2.Duration.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -730,6 +831,21 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   void clearSelection() => $_clearField(9);
   @$pb.TagNumber(9)
   $1.ModelSelection ensureSelection() => $_ensure(8);
+
+  @$pb.TagNumber(10)
+  $pb.PbList<ReadOnlyMount> get readOnly => $_getList(9);
+
+  /// Zero disables automatic removal. Applies only to chat sleeves.
+  @$pb.TagNumber(11)
+  $2.Duration get exitAfterIdle => $_getN(10);
+  @$pb.TagNumber(11)
+  set exitAfterIdle($2.Duration value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasExitAfterIdle() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearExitAfterIdle() => $_clearField(11);
+  @$pb.TagNumber(11)
+  $2.Duration ensureExitAfterIdle() => $_ensure(10);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -943,6 +1059,7 @@ class Workspace extends $pb.GeneratedMessage {
     $core.String? sleeve,
     $core.bool? busy,
     $core.String? requiredName,
+    $core.bool? readOnly,
   }) {
     final result = Workspace._();
     if (name != null) result.name = name;
@@ -952,6 +1069,7 @@ class Workspace extends $pb.GeneratedMessage {
     if (sleeve != null) result.sleeve = sleeve;
     if (busy != null) result.busy = busy;
     if (requiredName != null) result.requiredName = requiredName;
+    if (readOnly != null) result.readOnly = readOnly;
     return result;
   }
 
@@ -976,6 +1094,7 @@ class Workspace extends $pb.GeneratedMessage {
     ..aOS(5, _omitFieldNames ? '' : 'sleeve')
     ..aOB(6, _omitFieldNames ? '' : 'busy')
     ..aOS(7, _omitFieldNames ? '' : 'requiredName')
+    ..aOB(8, _omitFieldNames ? '' : 'readOnly')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1069,6 +1188,15 @@ class Workspace extends $pb.GeneratedMessage {
   $core.bool hasRequiredName() => $_has(6);
   @$pb.TagNumber(7)
   void clearRequiredName() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.bool get readOnly => $_getBF(7);
+  @$pb.TagNumber(8)
+  set readOnly($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasReadOnly() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearReadOnly() => $_clearField(8);
 }
 
 class ListWorkspacesResponse extends $pb.GeneratedMessage {
@@ -1798,7 +1926,8 @@ class SleeveServiceApi {
   /// ListWorkspaces returns the directories SpawnSleeve would accept as an
   /// existing workspace: git checkouts and other directories under the hub's
   /// workspaces directory (cloned or created by earlier sleeves), and the
-  /// workspaces of known sleeves elsewhere on disk. It never walks the rest of
+  /// workspaces of known sleeves elsewhere on disk. Read-only reference entries
+  /// are also returned with read_only set. It never walks the rest of
   /// the filesystem; any other absolute path can still be given to
   /// SpawnSleeve directly.
   $async.Future<ListWorkspacesResponse> listWorkspaces(

@@ -1461,7 +1461,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "ListWorkspaces returns the directories SpawnSleeve would accept as an existing workspace: git checkouts and other directories under the hub's workspaces directory (cloned or created by earlier sleeves), and the workspaces of known sleeves elsewhere on disk. It never walks the rest of the filesystem; any other absolute path can still be given to SpawnSleeve directly.",
+    "description": "ListWorkspaces returns the directories SpawnSleeve would accept as an existing workspace: git checkouts and other directories under the hub's workspaces directory (cloned or created by earlier sleeves), and the workspaces of known sleeves elsewhere on disk. Read-only reference entries are also returned with read_only set. It never walks the rest of the filesystem; any other absolute path can still be given to SpawnSleeve directly.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
@@ -1551,6 +1551,11 @@
           "description": "env holds extra environment variables for the harness.",
           "type": "object"
         },
+        "exitAfterIdle": {
+          "description": "Zero disables automatic removal. Applies only to chat sleeves.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        },
         "harness": {
           "enum": [
             "HARNESS_UNSPECIFIED",
@@ -1587,6 +1592,22 @@
         "name": {
           "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",
           "type": "string"
+        },
+        "readOnly": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "target": {
+                "description": "Defaults to source when omitted.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
         },
         "selection": {
           "additionalProperties": false,
