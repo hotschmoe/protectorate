@@ -81,8 +81,8 @@ func OpenInventory(dir string, local *pb.NodeInfo) (*Inventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read inventory: %w", err)
 	}
-	f, err := parseInventory(inv.path(), raw)
-	if err != nil {
+	var f inventoryFile
+	if err := decodeState(inv.path(), raw, &f); err != nil {
 		return nil, err
 	}
 	if n := retiredTiers(f.Nodes); n > 0 {
@@ -107,14 +107,14 @@ func OpenInventory(dir string, local *pb.NodeInfo) (*Inventory, error) {
 
 func (i *Inventory) path() string { return filepath.Join(i.dir, "nodes.json") }
 
-func parseInventory(path string, raw []byte) (inventoryFile, error) {
-	var f inventoryFile
+// decodeState rejects unknown fields while accepting an empty state file.
+func decodeState(path string, raw []byte, out any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return f, fmt.Errorf("parse %s: %w", path, err)
+	if err := dec.Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
-	return f, nil
+	return nil
 }
 
 // ErrRetiredTiers marks an inventory written before the tiers were renamed.
@@ -150,8 +150,8 @@ func MigrateTiers(dir string, local *pb.NodeInfo) ([]TierChange, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read inventory: %w", err)
 	}
-	f, err := parseInventory(path, raw)
-	if err != nil {
+	var f inventoryFile
+	if err := decodeState(path, raw, &f); err != nil {
 		return nil, err
 	}
 	var changes []TierChange

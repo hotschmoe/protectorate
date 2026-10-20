@@ -1,14 +1,12 @@
 package hub
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"os"
@@ -158,10 +156,8 @@ func OpenLeases(path string, emit func(kind, subject string, payload *structpb.S
 		return nil, fmt.Errorf("read leases: %w", err)
 	}
 	var f leaseFile
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	if err := decodeState(path, raw, &f); err != nil {
+		return nil, err
 	}
 	for _, r := range f.Leases {
 		if r.ID == "" || r.Node == "" || r.TTL <= 0 {
