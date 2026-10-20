@@ -390,7 +390,7 @@ env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN \
 Using the sleeve home for test temporary files keeps binary and cache fixtures
 on disk. The sandbox's `/tmp` is tmpfs and its contents count toward the memory
 limit. The binary harness puts only tmux sockets in separate private
-`/tmp/prot-e2e-tmux-*` directories, stops each server, then removes its socket
+`/tmp/pt-tmux-*` directories, stops each server, then removes its socket
 directory. Long disk-backed test paths therefore cannot exceed Unix socket
 path limits.
 

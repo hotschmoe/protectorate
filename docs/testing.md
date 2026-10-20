@@ -31,9 +31,10 @@ full delegated namespace command. For nested runs, use a short disk-backed
 temporary root such as `TMPDIR="$HOME/.cache/pt"` to keep binary and cache
 fixtures off tmpfs. The binary harness isolates tmux sockets in short private
 directories under `/tmp`, independently of that root. The deeper nested
-scenario uses private synthetic SDK/cache lower trees to avoid stacking an
-overlay on the development sleeve's already overlaid SDK caches; it keeps
-all real namespace, cgroup, OOM and CPU throttling checks and rejects skips.
+scenario explicitly mounts its binary and Go toolchain, plus private Pub cache
+lowers, to avoid inheriting the development sleeve's overlaid Flutter SDK.
+It keeps all real namespace, cgroup, OOM and CPU throttling checks and rejects
+skips; the separate cache scenario exercises SDK cache sharing.
 
 The native Android shell has four tabs; web and native desktop retain the full
 shell at every viewport width. Build both shipping clients with `make apk` and

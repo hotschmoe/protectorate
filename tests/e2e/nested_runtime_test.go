@@ -35,9 +35,7 @@ func TestBinaryNestedRuntime(t *testing.T) {
 		c.nestedLimitsScenario(t)
 		return
 	}
-	flutter := filepath.Join(c.root, "flutter")
 	for _, dir := range []string{
-		filepath.Join(flutter, "bin/cache"),
 		filepath.Join(c.root, ".pub-cache/global_packages"),
 		filepath.Join(c.root, ".pub-cache/hosted"),
 		filepath.Join(c.root, ".pub-cache/git"),
@@ -46,12 +44,6 @@ func TestBinaryNestedRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(flutter, "bin/flutter"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	c.stop(c.hub)
-	c.env = append(c.env, "PROTECTORATE_FLUTTER_SDK="+flutter)
-	c.boot()
 	workspace := filepath.Join(c.root, "nested-project")
 	selectedVersion, err := exec.CommandContext(c.ctx, "bwrap", "--version").Output()
 	if err != nil {
@@ -84,8 +76,6 @@ func TestBinaryNestedRuntime(t *testing.T) {
 	}
 	script := `
 set +e
-mkdir -p "$HOME/.cache/protectorate-tests"
-export TMPDIR="$HOME/.cache/protectorate-tests"
 bwrap --version > nested.bwrap-version
 mkdir -p "$HOME/.cache/pt"
 export TMPDIR="$HOME/.cache/pt"
