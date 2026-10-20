@@ -3,7 +3,8 @@
 How sleeves, projects and the orchestrator find each other and talk, without a
 model in the loop. Everything here is hub code: it runs the same way every
 time, costs no tokens, and adds nothing to any harness (no hooks, skills, MCP
-config or AGENTS.md text; nothing is written into a worked-on repo). The
+config or worker AGENTS.md text; nothing is written into a worked-on repo). Mail
+delivery includes brief reply guidance; Envoy's generated instructions include it too. The
 decision record is `docs/memory-options.md`, section 4, decision 5.
 
 ## Identity
@@ -65,6 +66,34 @@ protectorate msg inbox --unread
 protectorate msg thread t7
 protectorate msg threads --sleeve api
 ```
+
+### Concise mail and budget
+
+Aim for 150 words. Lead with the result or blocker; include only actionable
+findings and essential evidence. Reference a file, commit or backlog note for
+details, using a location the recipient can access. Do not restate the request
+or prior context. No acknowledgements unless asked or ack-required; use `msg ack`
+when only confirmation is needed. The hub renders this guidance once per chat
+delivery batch and in non-JSON CLI inbox/thread/wait output, covering worker sleeves
+without writing instruction files into their workspaces.
+
+The 150-word target is advisory: critical evidence can exceed it without being
+lost or rejected. We retain the existing 32 KiB body ceiling rather than add a
+tighter hub limit. `coordinator.send` checks body bytes before persistence for
+both Send and Reply (including CLI and MCP); oversize bodies are rejected with
+`invalid_argument` naming the byte count and limit, never truncated. The stored
+mailbox format and API responses are unchanged.
+
+Live mailbox-wide sizes cannot be measured with a sleeve token, which only
+sees its own mail. Fixture evidence is deliberately small: the binary
+restart scenario sends `persist this request` (20 bytes), and the coordination
+scenarios include `please export Foo` (17 bytes) and `fyi` (3 bytes), plus a
+synthetic 32 KiB + 1 rejection case. These verify routing and validation, not
+production verbosity. A 150-word soft target leaves room for a result, evidence
+and next action; these fixtures provide no basis for rejecting larger useful
+reports. Detailed reports belong in referenced files or notes.
+
+### Message semantics
 
 - **Addresses:** a sleeve name, `project:<id|owner/repo|name>`,
   `orchestrator` (sleeve `envoy`) or `owner`.

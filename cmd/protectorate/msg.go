@@ -11,6 +11,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/mailbox"
 )
 
 func (o *opts) messageClient() (protectoratev1connect.MessageServiceClient, error) {
@@ -250,6 +251,7 @@ func writeMail(w io.Writer, msgs []*pb.MailMessage) {
 		fmt.Fprintln(w, "no messages")
 		return
 	}
+	fmt.Fprintln(w, mailbox.ConciseGuidance)
 	for _, m := range msgs {
 		kind := strings.ToLower(strings.TrimPrefix(m.Kind.String(), "MESSAGE_KIND_"))
 		flags := ""
