@@ -23,10 +23,11 @@ environment for another installation and restart the hub. Custom hub tool-dir
 lists replace automatic discovery; include the SDK and Pub tool directories.
 Install and prewarm the SDK and global code generators on the hub before
 starting workers. Sleeves expose Flutter, Dart, and `~/.pub-cache/bin` on PATH.
-The SDK remains read-only except for a sleeve-local copy of `bin/cache`.
-Pub's hosted/git package caches and global package metadata are copied when
-global Pub tools are available.
-Copies use reflinks where supported and otherwise consume additional disk.
+The SDK is read-only. A Dart workspace (a `pubspec.yaml` at its root or one
+directory down) also gets a sleeve-local copy of `bin/cache`, and of Pub's
+hosted/git package caches and global package metadata when global Pub tools
+are available. Copies use reflinks where supported; elsewhere the first spawn
+of a sleeve copies about 2.5 GB, and later spawns of that sleeve reuse it.
 
 `PUB_CACHE=$HOME/.cache/pub` and `GOMODCACHE=$HOME/.cache/go-mod` are writable
 per sleeve. Go first tries the host's existing module download cache through a

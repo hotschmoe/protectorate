@@ -60,6 +60,10 @@ fi
 	if err := os.WriteFile(filepath.Join(ws, "result.txt"), []byte("development\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Only Dart workspaces get a writable copy of the SDK and Pub caches.
+	if err := os.WriteFile(filepath.Join(ws, "pubspec.yaml"), []byte("name: environment_probe\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	_, err := r.m.Spawn(context.Background(), SpawnRequest{
 		Name: name, Workspace: ws, Harness: Shell, Args: []string{"bash", "-c", script},
 	})

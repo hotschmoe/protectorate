@@ -44,11 +44,19 @@ const profileSeed = "# Written by the protectorate hub: login shells keep the sl
 const sleevePathEnv = "PROTECTORATE_SLEEVE_PATH"
 
 // layout paths on the host live under the sleeve's home; the same paths
-// relative to $HOME are what the harness sees.
-func (c Config) layout(name string, h Harness) Layout {
+// relative to $HOME are what the harness sees. The SDK and Pub caches are
+// copied only for Dart workspaces (or when an earlier spawn copied them):
+// without reflinks a copy costs seconds and gigabytes per sleeve.
+func (c Config) layout(name string, h Harness, workspace string) Layout {
 	host := func(rel string) string { return filepath.Join(c.sleeveHome(name), rel) }
 	inside := func(rel string) string { return filepath.Join(c.UserHome, rel) }
 	l := Layout{Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
+	dart := dartWorkspace(workspace)
+	cacheCopy := func(m Mount) {
+		if _, err := os.Stat(m.Source); dart || err == nil {
+			l.CacheCopies = append(l.CacheCopies, m)
+		}
+	}
 	l.Dirs = append(l.Dirs, host(".cache/pub"), host(".cache/go-mod"))
 	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")})
 	if contains(c.ToolDirs, filepath.Join(c.UserHome, "go")) {
@@ -62,12 +70,12 @@ func (c Config) layout(name string, h Harness) Layout {
 			for _, part := range []string{"hosted", "hosted-hashes", "git", "global_packages"} {
 				p := filepath.Join(c.UserHome, ".pub-cache", part)
 				if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-					l.CacheCopies = append(l.CacheCopies, Mount{Source: host(".cache/pub/" + part), Target: p})
+					cacheCopy(Mount{Source: host(".cache/pub/" + part), Target: p})
 				}
 			}
 		}
 		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
-			l.CacheCopies = append(l.CacheCopies, Mount{Source: host(".cache/flutter"), Target: filepath.Join(d, "bin/cache")})
+			cacheCopy(Mount{Source: host(".cache/flutter"), Target: filepath.Join(d, "bin/cache")})
 		}
 	}
 	auth := c.authDir(h)
@@ -105,6 +113,17 @@ func (c Config) layout(name string, h Harness) Layout {
 			[2]string{"PI_CODING_AGENT_SESSION_DIR", inside(".pi/sessions")})
 	}
 	return l
+}
+
+func dartWorkspace(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pubspec.yaml")); err == nil {
+		return true
+	}
+	m, _ := filepath.Glob(filepath.Join(dir, "*", "pubspec.yaml"))
+	return len(m) > 0
 }
 
 // Apply creates the directories, symlinks and seed files. It is idempotent
