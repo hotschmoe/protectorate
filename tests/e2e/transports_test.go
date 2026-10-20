@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,8 @@ func (c *cluster) transportScenario(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, c.binary, "--hub", c.url, "mcp", "--allow", "*")
 	cmd.Env = c.env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +33,12 @@ func (c *cluster) transportScenario(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { input.Close(); _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	defer func() {
+		input.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		c.checkRace("CLI mcp stderr", stderr.Bytes())
+	}()
 	enc := json.NewEncoder(input)
 	scan := bufio.NewScanner(output)
 	scan.Buffer(nil, 4<<20)

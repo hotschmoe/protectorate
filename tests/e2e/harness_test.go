@@ -43,6 +43,7 @@ func newCluster(t *testing.T) *cluster {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	c := &cluster{t: t, owner: t, ctx: ctx, root: t.TempDir(), client: &http.Client{Timeout: 30 * time.Second}}
+	t.Cleanup(c.checkRaceLogs)
 	c.home = filepath.Join(c.root, "hub")
 	binDir := filepath.Join(c.root, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0700); err != nil {
@@ -81,6 +82,7 @@ func newCluster(t *testing.T) *cluster {
 	t.Cleanup(runCancel)
 	c.ctx = runCtx
 	c.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	c.env = append(c.env, c.raceEnv("CLI-helper"))
 	tmuxDir := filepath.Join(c.root, "tmux")
 	if err := os.Mkdir(tmuxDir, 0700); err != nil {
 		t.Fatal(err)
@@ -89,6 +91,7 @@ func newCluster(t *testing.T) *cluster {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		c.checkTmuxRaces(ctx)
 		cmd := exec.CommandContext(ctx, "tmux", "-L", "e2e-"+filepath.Base(c.root), "kill-server")
 		cmd.Env = c.env
 		_ = cmd.Run()
@@ -142,7 +145,7 @@ func (c *cluster) start(name string, env []string, args ...string) *process {
 		c.t.Fatal(err)
 	}
 	p := &process{cmd: exec.CommandContext(c.ctx, c.binary, args...), done: make(chan error, 1), log: f}
-	p.cmd.Env = env
+	p.cmd.Env = append(append([]string(nil), env...), c.raceEnv(name))
 	p.cmd.Stdout = f
 	p.cmd.Stderr = f
 	if err := p.cmd.Start(); err != nil {
@@ -244,7 +247,7 @@ func (c *cluster) cli(args ...string) string {
 	c.t.Helper()
 	cmd := exec.CommandContext(c.ctx, c.binary, append([]string{"--hub", c.url}, args...)...)
 	cmd.Env = c.env
-	out, err := cmd.CombinedOutput()
+	out, err := c.commandOutput(cmd)
 	if err != nil {
 		c.t.Fatalf("CLI %v: %v\n%s", args, err, out)
 	}
