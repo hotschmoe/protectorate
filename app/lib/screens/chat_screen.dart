@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../chat/badges.dart';
 import '../chat/chat_controller.dart';
+import '../chat/chat_model.dart';
 import '../chat/message_widgets.dart';
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
@@ -78,10 +79,12 @@ class ChatView extends StatefulWidget {
     required this.sleeve,
     this.onState,
     this.actions = const [],
+    this.phone = false,
   });
 
   final HubClient client;
   final Sleeve sleeve;
+  final bool phone;
   // Extra entries for the header menu, after COMPACT CONTEXT.
   final List<ChatAction> actions;
   final void Function(ChatState state, int tokens, int window)? onState;
@@ -171,66 +174,94 @@ class _ChatViewState extends State<ChatView> {
             : selectedModel;
         final effort =
             settings?.effective.effort ?? widget.sleeve.chat.reasoningEffort;
-        final items = tr.items.reversed.toList();
+        final pending = tr.pendingApprovals.toList();
+        final items = tr.items.reversed
+            .where(
+              (item) => !widget.phone || item is! ApprovalItem || item.resolved,
+            )
+            .toList();
         return Column(
           children: [
-            _Header(
-              sleeve: widget.sleeve,
-              model: [
-                model,
-                if (effort.isNotEmpty) 'effort $effort',
-              ].where((s) => s.isNotEmpty).join(' / '),
-              state: _chat.state,
-              tokens: tr.contextTokens,
-              window: tr.contextWindow,
-              cacheExpires: tr.cacheExpires,
-              menu: PopupMenuButton<Object>(
-                key: const ValueKey('chat-menu'),
-                tooltip: 'Chat actions',
-                icon: Icon(Icons.more_vert, color: t.p.dim),
-                onSelected: (m) {
-                  if (m == _Menu.compact) {
-                    _run(_chat.compact);
-                  } else if (m == _Menu.selection) {
-                    _run(() async {
-                      final sleeve = widget.sleeve.deepCopy();
-                      if (settings != null) sleeve.chat.settings = settings;
-                      sleeve.chat.model = model;
-                      sleeve.chat.reasoningEffort = effort;
-                      final updated = await editModelSelection(
-                        context,
-                        widget.client,
-                        sleeve,
-                      );
-                      if (updated != null && mounted) {
-                        setState(() => tr.settings = updated.settings);
-                      }
-                    });
-                  } else if (m is ChatAction) {
-                    m.run();
-                  }
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem<Object>(
-                    value: _Menu.selection,
-                    enabled: _chat.state == ChatState.CHAT_STATE_IDLE,
-                    child: const Text('MODEL AND EFFORT'),
-                  ),
-                  PopupMenuItem<Object>(
-                    key: const ValueKey('menu-compact'),
-                    value: _Menu.compact,
-                    enabled: _chat.canCompact,
-                    child: const Text('COMPACT CONTEXT'),
-                  ),
-                  for (final a in widget.actions)
-                    PopupMenuItem<Object>(
-                      key: ValueKey('menu-${a.id}'),
-                      value: a,
-                      child: Text(a.label),
+            if (widget.phone)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: Tokens.gapL),
+                constraints: const BoxConstraints(minHeight: 48),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: t.p.bezel)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        model,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.small(),
+                      ),
                     ),
-                ],
+                    const SizedBox(width: 8),
+                    StateLamp(state: _chat.state),
+                  ],
+                ),
+              )
+            else
+              _Header(
+                sleeve: widget.sleeve,
+                model: [
+                  model,
+                  if (effort.isNotEmpty) 'effort $effort',
+                ].where((s) => s.isNotEmpty).join(' / '),
+                state: _chat.state,
+                tokens: tr.contextTokens,
+                window: tr.contextWindow,
+                cacheExpires: tr.cacheExpires,
+                menu: PopupMenuButton<Object>(
+                  key: const ValueKey('chat-menu'),
+                  tooltip: 'Chat actions',
+                  icon: Icon(Icons.more_vert, color: t.p.dim),
+                  onSelected: (m) {
+                    if (m == _Menu.compact) {
+                      _run(_chat.compact);
+                    } else if (m == _Menu.selection) {
+                      _run(() async {
+                        final sleeve = widget.sleeve.deepCopy();
+                        if (settings != null) sleeve.chat.settings = settings;
+                        sleeve.chat.model = model;
+                        sleeve.chat.reasoningEffort = effort;
+                        final updated = await editModelSelection(
+                          context,
+                          widget.client,
+                          sleeve,
+                        );
+                        if (updated != null && mounted) {
+                          setState(() => tr.settings = updated.settings);
+                        }
+                      });
+                    } else if (m is ChatAction) {
+                      m.run();
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem<Object>(
+                      value: _Menu.selection,
+                      enabled: _chat.state == ChatState.CHAT_STATE_IDLE,
+                      child: const Text('MODEL AND EFFORT'),
+                    ),
+                    PopupMenuItem<Object>(
+                      key: const ValueKey('menu-compact'),
+                      value: _Menu.compact,
+                      enabled: _chat.canCompact,
+                      child: const Text('COMPACT CONTEXT'),
+                    ),
+                    for (final a in widget.actions)
+                      PopupMenuItem<Object>(
+                        key: ValueKey('menu-${a.id}'),
+                        value: a,
+                        child: Text(a.label),
+                      ),
+                  ],
+                ),
               ),
-            ),
             if (_chat.feedState == FeedState.retrying)
               const BusyBar(key: ValueKey('reconnecting'), tone: Tone.warn),
             Expanded(
@@ -246,6 +277,8 @@ class _ChatViewState extends State<ChatView> {
                       : ListView.separated(
                           key: const ValueKey('transcript'),
                           reverse: true,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
                           padding: const EdgeInsets.fromLTRB(
                             Tokens.gapL,
                             Tokens.gapL,
@@ -264,8 +297,16 @@ class _ChatViewState extends State<ChatView> {
                 ),
               ),
             ),
+            if (widget.phone && pending.isNotEmpty)
+              _PendingApproval(
+                item: pending.first,
+                count: pending.length,
+                onRespond: (allow) =>
+                    _run(() => _chat.respond(pending.first.id, allow)),
+              ),
             _Composer(
               controller: _input,
+              phone: widget.phone,
               working: _chat.working,
               onSend: _send,
               onStop: () => _run(_chat.interrupt),
@@ -273,6 +314,101 @@ class _ChatViewState extends State<ChatView> {
           ],
         );
       },
+    );
+  }
+}
+
+class _PendingApproval extends StatelessWidget {
+  const _PendingApproval({
+    required this.item,
+    required this.count,
+    required this.onRespond,
+  });
+
+  final ApprovalItem item;
+  final int count;
+  final void Function(bool allow) onRespond;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Tokens.gap),
+      decoration: BoxDecoration(
+        color: t.tint(t.p.warn),
+        border: Border(top: BorderSide(color: t.p.warn)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  count > 1 ? '$count APPROVALS NEEDED' : 'APPROVAL NEEDED',
+                  style: t.legend(t.p.warn),
+                ),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (sheetContext) => SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(Tokens.gap),
+                      child: SingleChildScrollView(
+                        child: ApprovalCard(
+                          item: item,
+                          onRespond: (allow) {
+                            Navigator.pop(sheetContext);
+                            onRespond(allow);
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                child: const Text('DETAILS'),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.summary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.small(t.p.emph),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                key: ValueKey('deny-${item.id}'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: t.p.alarm,
+                  minimumSize: const Size(64, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                onPressed: () => onRespond(false),
+                child: const Text('DENY'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                key: ValueKey('allow-${item.id}'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: t.p.warn,
+                  minimumSize: const Size(64, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                onPressed: () => onRespond(true),
+                child: const Text('ALLOW'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }
@@ -372,12 +508,14 @@ class _Header extends StatelessWidget {
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
+    required this.phone,
     required this.working,
     required this.onSend,
     required this.onStop,
   });
 
   final TextEditingController controller;
+  final bool phone;
   final bool working;
   final VoidCallback onSend;
   final VoidCallback onStop;
@@ -405,14 +543,16 @@ class _Composer extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 11),
-                  child: Text(
-                    '>',
-                    style: t.title(working ? t.p.info : t.p.lit),
+                if (!phone) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 11),
+                    child: Text(
+                      '>',
+                      style: t.title(working ? t.p.info : t.p.lit),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
+                  const SizedBox(width: 10),
+                ],
                 Expanded(
                   child: CallbackShortcuts(
                     bindings: {
@@ -422,7 +562,8 @@ class _Composer extends StatelessWidget {
                       key: const ValueKey('composer'),
                       controller: controller,
                       minLines: 1,
-                      maxLines: 6,
+                      maxLines: phone ? 4 : 6,
+                      textInputAction: TextInputAction.newline,
                       style: t.body(t.p.emph),
                       cursorWidth: 8,
                       cursorColor: t.p.lit.withValues(alpha: 0.85),
@@ -452,10 +593,15 @@ class _Composer extends StatelessWidget {
                         side: BorderSide(
                           color: t.p.alarm.withValues(alpha: 0.7),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        minimumSize: const Size(48, 48),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: phone ? 8 : 14,
+                        ),
                       ),
                       onPressed: onStop,
-                      child: const Text('STOP'),
+                      child: phone
+                          ? const Icon(Icons.stop, size: 22)
+                          : const Text('STOP'),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -465,10 +611,13 @@ class _Composer extends StatelessWidget {
                   child: FilledButton(
                     key: const ValueKey('send'),
                     style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      minimumSize: const Size(48, 48),
+                      padding: EdgeInsets.symmetric(horizontal: phone ? 8 : 14),
                     ),
                     onPressed: onSend,
-                    child: const Text('SEND'),
+                    child: phone
+                        ? const Icon(Icons.arrow_upward, size: 22)
+                        : const Text('SEND'),
                   ),
                 ),
               ],

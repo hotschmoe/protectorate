@@ -48,7 +48,6 @@ class AssistantMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (item.thinking) return ThinkingBlock(item: item);
-    final t = Tokens.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -65,11 +64,166 @@ class AssistantMessage extends StatelessWidget {
           else
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
-              child: SelectableText(seg.text, style: t.body()),
+              child: _MarkdownProse(text: seg.text),
             ),
       ],
     );
   }
+}
+
+class _MarkdownProse extends StatelessWidget {
+  const _MarkdownProse({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    final blocks = <Widget>[];
+    final paragraph = <String>[];
+    final heading = RegExp(r'^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?$');
+    final list = RegExp(r'^(\s*)([-+*]|\d+[.)])\s+(.+)$');
+
+    Widget prose(String value, TextStyle style) => SelectableText.rich(
+      TextSpan(children: _markdownSpans(value, style, t)),
+      style: style,
+    );
+
+    void flush() {
+      if (paragraph.isEmpty) return;
+      blocks.add(prose(paragraph.join('\n'), t.body()));
+      paragraph.clear();
+    }
+
+    for (final line in text.split('\n')) {
+      final h = heading.firstMatch(line);
+      final li = list.firstMatch(line);
+      if (line.trim().isEmpty) {
+        flush();
+      } else if (h != null) {
+        flush();
+        blocks.add(
+          prose(
+            h[2]!,
+            t
+                .body(t.p.emph)
+                .copyWith(
+                  fontSize: h[1]!.length <= 2 ? 18 : 15,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        );
+      } else if (li != null) {
+        flush();
+        blocks.add(
+          Padding(
+            padding: EdgeInsets.only(left: li[1]!.length.clamp(0, 8) * 4.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${li[2]} ', style: t.body(t.p.dim)),
+                Expanded(child: prose(li[3]!, t.body())),
+              ],
+            ),
+          ),
+        );
+      } else if (line.trimLeft().startsWith('> ')) {
+        flush();
+        blocks.add(
+          Container(
+            padding: const EdgeInsets.only(left: 12),
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: t.p.bezelHi, width: 2)),
+            ),
+            child: prose(line.trimLeft().substring(2), t.body(t.p.dim)),
+          ),
+        );
+      } else {
+        paragraph.add(line);
+      }
+    }
+    flush();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < blocks.length; i++)
+          Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 0 : 8),
+            child: blocks[i],
+          ),
+      ],
+    );
+  }
+}
+
+final _markdownInline = RegExp(
+  r'\\[\\`*_\[\]()]|`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\n]+)\)|\*\*(.+?)\*\*|__(.+?)__|\*([^*\n]+)\*|_([^_\n]+)_',
+);
+
+List<InlineSpan> _markdownSpans(
+  String text,
+  TextStyle style,
+  Tokens t, [
+  int depth = 0,
+]) {
+  if (depth >= 8) return [TextSpan(text: text, style: style)];
+  final spans = <InlineSpan>[];
+  var end = 0;
+  for (final match in _markdownInline.allMatches(text)) {
+    if (match.start > end) {
+      spans.add(TextSpan(text: text.substring(end, match.start), style: style));
+    }
+    if (match[1] != null) {
+      spans.add(
+        TextSpan(
+          text: match[1],
+          style: style.copyWith(color: t.p.emph, backgroundColor: t.p.bar),
+        ),
+      );
+    } else if (match[2] != null) {
+      spans.add(
+        TextSpan(
+          children: _markdownSpans(
+            match[2]!,
+            style.copyWith(
+              color: t.p.info,
+              decoration: TextDecoration.underline,
+            ),
+            t,
+            depth + 1,
+          ),
+        ),
+      );
+      if (match[2] != match[3]) {
+        spans.add(TextSpan(text: ' (${match[3]})', style: style));
+      }
+    } else if (match[4] != null || match[5] != null) {
+      spans.addAll(
+        _markdownSpans(
+          match[4] ?? match[5]!,
+          style.copyWith(fontWeight: FontWeight.w700),
+          t,
+          depth + 1,
+        ),
+      );
+    } else if (match[6] != null || match[7] != null) {
+      spans.addAll(
+        _markdownSpans(
+          match[6] ?? match[7]!,
+          style.copyWith(fontStyle: FontStyle.italic),
+          t,
+          depth + 1,
+        ),
+      );
+    } else {
+      spans.add(TextSpan(text: match[0]!.substring(1), style: style));
+    }
+    end = match.end;
+  }
+  if (end < text.length) {
+    spans.add(TextSpan(text: text.substring(end), style: style));
+  }
+  return spans;
 }
 
 class ThinkingBlock extends StatefulWidget {
@@ -95,7 +249,7 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
           borderRadius: BorderRadius.circular(Tokens.innerRadius),
           onTap: () => setState(() => _open = !_open),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 32),
+            constraints: const BoxConstraints(minHeight: 48),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -255,16 +409,20 @@ class _ToolCardState extends State<ToolCard> {
             borderRadius: BorderRadius.circular(Tokens.innerRadius + 2),
             onTap: () => setState(() => _open = !_open),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 40),
+              constraints: const BoxConstraints(minHeight: 48),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: Row(
                   children: [
                     Lamp(tone: tone, size: 8),
                     const SizedBox(width: 10),
-                    Text(
-                      it.name.toUpperCase(),
-                      style: t.legend(t.p.emph).copyWith(fontSize: 12),
+                    Flexible(
+                      child: Text(
+                        it.name.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: t.legend(t.p.emph).copyWith(fontSize: 12),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -400,6 +558,7 @@ class ApprovalCard extends StatelessWidget {
                 FilledButton(
                   key: ValueKey('allow-${item.id}'),
                   style: FilledButton.styleFrom(
+                    minimumSize: const Size(64, 48),
                     backgroundColor: t.p.warn,
                     foregroundColor: t.p.onKey,
                   ),
@@ -410,6 +569,7 @@ class ApprovalCard extends StatelessWidget {
                 OutlinedButton(
                   key: ValueKey('deny-${item.id}'),
                   style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(64, 48),
                     foregroundColor: t.p.alarm,
                     side: BorderSide(color: t.p.alarm.withValues(alpha: 0.7)),
                   ),

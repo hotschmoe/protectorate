@@ -12,10 +12,16 @@ import '../theme/tokens.dart';
 import '../vfd/panel.dart';
 
 class DevicesScreen extends StatefulWidget {
-  const DevicesScreen({super.key, required this.client, this.feed});
+  const DevicesScreen({
+    super.key,
+    required this.client,
+    this.feed,
+    this.embedded = false,
+  });
 
   final HubClient client;
   final EventFeed? feed;
+  final bool embedded;
 
   @override
   State<DevicesScreen> createState() => _DevicesScreenState();
@@ -163,6 +169,40 @@ class _DevicesScreenState extends State<DevicesScreen> {
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
+    final body = RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(Tokens.gap),
+        children: [
+          if (widget.embedded)
+            Row(
+              children: [
+                Expanded(
+                  child: Text('${_devices.length} DEVICES', style: t.legend()),
+                ),
+                IconButton(
+                  tooltip: 'Refresh devices',
+                  onPressed: _loading ? null : _load,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+          if (_loading) const LinearProgressIndicator(),
+          if (_error != null)
+            NoteStrip('Could not load devices: $_error', tone: Tone.alarm),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: Tokens.contentMaxWidth,
+              ),
+              child: _devicePanel(t),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (widget.embedded) return body;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Devices'),
@@ -174,85 +214,63 @@ class _DevicesScreenState extends State<DevicesScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(Tokens.gap),
-          children: [
-            if (_loading) const LinearProgressIndicator(),
-            if (_error != null)
-              NoteStrip('Could not load devices: $_error', tone: Tone.alarm),
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: Tokens.contentMaxWidth,
-                ),
-                child: Panel(
-                  legend: 'DEVICES · FULL ACCESS',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Devices can approve other devices and revoke access. Compare the code before approving a request.',
-                        style: t.small(),
-                      ),
-                      if (_devices.isEmpty && !_loading)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 24),
-                          child: Text(
-                            'No approved devices yet.',
-                            style: t.small(),
-                          ),
-                        ),
-                      for (final device in _devices) ...[
-                        const Divider(height: 24),
-                        Text(device.name, style: t.title()),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${device.platform.isEmpty ? 'Existing paired device' : device.platform} · ${device.hasRevokedAt() ? 'REVOKED' : 'FULL'}',
-                          style: t.legend(
-                            device.hasRevokedAt() ? t.p.alarm : t.p.ok,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          device.hasLastUsedAt()
-                              ? 'Last used ${device.lastUsedAt.toDateTime().toLocal()}'
-                              : 'Not used yet',
-                          style: t.small(),
-                        ),
-                        if (device.hasApprovedAt())
-                          Text(
-                            'Approved ${device.approvedAt.toDateTime().toLocal()} by ${device.approvedBy}',
-                            style: t.small(),
-                          ),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            TextButton(
-                              onPressed: _busy != null || device.hasRevokedAt()
-                                  ? null
-                                  : () => _rename(device),
-                              child: const Text('RENAME'),
-                            ),
-                            TextButton(
-                              onPressed: _busy != null || device.hasRevokedAt()
-                                  ? null
-                                  : () => _revoke(device),
-                              child: const Text('REVOKE'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      body: body,
     );
   }
+
+  Widget _devicePanel(Tokens t) => Panel(
+    legend: 'DEVICES · FULL ACCESS',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Devices can approve other devices and revoke access. Compare the code before approving a request.',
+          style: t.small(),
+        ),
+        if (_devices.isEmpty && !_loading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Text('No approved devices yet.', style: t.small()),
+          ),
+        for (final device in _devices) ...[
+          const Divider(height: 24),
+          Text(device.name, style: t.title()),
+          const SizedBox(height: 4),
+          Text(
+            '${device.platform.isEmpty ? 'Existing paired device' : device.platform} · ${device.hasRevokedAt() ? 'REVOKED' : 'FULL'}',
+            style: t.legend(device.hasRevokedAt() ? t.p.alarm : t.p.ok),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            device.hasLastUsedAt()
+                ? 'Last used ${device.lastUsedAt.toDateTime().toLocal()}'
+                : 'Not used yet',
+            style: t.small(),
+          ),
+          if (device.hasApprovedAt())
+            Text(
+              'Approved ${device.approvedAt.toDateTime().toLocal()} by ${device.approvedBy}',
+              style: t.small(),
+            ),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton(
+                onPressed: _busy != null || device.hasRevokedAt()
+                    ? null
+                    : () => _rename(device),
+                child: const Text('RENAME'),
+              ),
+              TextButton(
+                onPressed: _busy != null || device.hasRevokedAt()
+                    ? null
+                    : () => _revoke(device),
+                child: const Text('REVOKE'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    ),
+  );
 }

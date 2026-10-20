@@ -73,6 +73,7 @@ class OrchestratorTab extends StatefulWidget {
     required this.onSelect,
     required this.mail,
     required this.onMail,
+    this.envoyOnly = false,
   });
 
   final HubClient client;
@@ -81,6 +82,7 @@ class OrchestratorTab extends StatefulWidget {
   final void Function(String name) onSelect;
   final bool mail;
   final void Function(bool mail) onMail;
+  final bool envoyOnly;
 
   @override
   State<OrchestratorTab> createState() => _OrchestratorTabState();
@@ -100,14 +102,14 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     super.initState();
     _sub = widget.feed.incoming.listen((e) {
       if (e.kind.startsWith('sleeve.')) _refresh();
-      if (isMailEvent(e)) {
+      if (!widget.envoyOnly && isMailEvent(e)) {
         _mailDebounce?.cancel();
         _mailDebounce = Timer(const Duration(milliseconds: 300), _refreshMail);
       }
     });
     _poll = Timer.periodic(const Duration(seconds: 10), (_) => _refresh());
     _refresh();
-    _refreshMail();
+    if (!widget.envoyOnly) _refreshMail();
   }
 
   @override
@@ -291,6 +293,7 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.envoyOnly) return _chat(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -315,7 +318,10 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     final chat = _chatSleeves;
     Sleeve? current;
     for (final s in chat) {
-      if (s.name == widget.selected) current = s;
+      if (s.name == widget.selected &&
+          (!widget.envoyOnly || s.state == SleeveState.SLEEVE_STATE_RUNNING)) {
+        current = s;
+      }
     }
     final names = [
       if (!chat.any((s) => s.name == orchestratorSleeve)) orchestratorSleeve,
@@ -325,21 +331,26 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Selector(
-          names: names,
-          selected: widget.selected,
-          missing: {
-            for (final n in names)
-              if (!chat.any((s) => s.name == n)) n,
-          },
-          onSelect: widget.onSelect,
-        ),
+        if (!widget.envoyOnly)
+          _Selector(
+            names: names,
+            selected: widget.selected,
+            missing: {
+              for (final n in names)
+                if (!chat.any((s) => s.name == n)) n,
+            },
+            onSelect: widget.onSelect,
+          ),
         Expanded(
           child: current != null
               ? ChatView(
-                  key: ValueKey('${current.name}/${current.harness.value}'),
+                  key: ValueKey(
+                    '${current.name}/${current.harness.value}/'
+                    '${current.createdAt.seconds}:${current.createdAt.nanos}',
+                  ),
                   client: widget.client,
                   sleeve: current,
+                  phone: widget.envoyOnly,
                   actions: current.name == orchestratorSleeve
                       ? [
                           ChatAction(
@@ -363,6 +374,7 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
                   error: _error,
                   onRetry: _refresh,
                   onStart: _startEnvoy,
+                  phone: widget.envoyOnly,
                 ),
         ),
       ],
@@ -507,6 +519,7 @@ class _NotRunning extends StatefulWidget {
     required this.onRetry,
     required this.onStart,
     required this.client,
+    this.phone = false,
   });
 
   final String name;
@@ -514,6 +527,7 @@ class _NotRunning extends StatefulWidget {
   final VoidCallback onRetry;
   final Future<void> Function(Harness, ModelSelection) onStart;
   final HubClient client;
+  final bool phone;
 
   @override
   State<_NotRunning> createState() => _NotRunningState();
@@ -545,7 +559,8 @@ class _NotRunningState extends State<_NotRunning> {
     final name = widget.name;
     final error = widget.error;
     final envoy = name == orchestratorSleeve;
-    return Center(
+    return Align(
+      alignment: widget.phone ? Alignment.bottomCenter : Alignment.center,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(Tokens.gapL),
         child: ConstrainedBox(
@@ -568,39 +583,56 @@ class _NotRunningState extends State<_NotRunning> {
                 Text('$error', style: t.body())
               else if (envoy) ...[
                 Text(
-                  'Envoy is the orchestrator: an ordinary chat sleeve that '
-                  'drives the hub through the CLI. Start it on a harness, or '
-                  'let the hub pick the one with the most spare quota.',
+                  widget.phone
+                      ? 'Your point of contact for health, sleeves and new work. '
+                            'Start Envoy to begin a conversation.'
+                      : 'Envoy is the orchestrator: an ordinary chat sleeve that '
+                            'drives the hub through the CLI. Start it on a harness, or '
+                            'let the hub pick the one with the most spare quota.',
                   style: t.body(),
                 ),
                 const SizedBox(height: Tokens.gap),
-                Wrap(
-                  spacing: Tokens.gapL,
-                  runSpacing: Tokens.gap,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text('HARNESS', style: t.legend()),
-                    _HarnessPicker(
-                      key: const ValueKey('start-harness'),
-                      value: _harness,
-                      onChanged: (h) => setState(() {
-                        _harness = h;
-                        _selection = ModelSelection();
-                      }),
+                if (widget.phone)
+                  FilledButton.icon(
+                    key: const ValueKey('start-envoy'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
                     ),
-                    FilledButton(
-                      key: const ValueKey('start-envoy'),
-                      onPressed: _starting ? null : _start,
-                      child: const Text('START ENVOY'),
+                    onPressed: _starting ? null : _start,
+                    icon: const Icon(Icons.support_agent),
+                    label: Text(
+                      _starting ? 'STARTING ENVOY...' : 'START ENVOY',
                     ),
-                  ],
-                ),
-                ModelSelectionFields(
-                  client: widget.client,
-                  harness: _harness,
-                  selection: _selection,
-                  onChanged: (value) => setState(() => _selection = value),
-                ),
+                  )
+                else
+                  Wrap(
+                    spacing: Tokens.gapL,
+                    runSpacing: Tokens.gap,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('HARNESS', style: t.legend()),
+                      _HarnessPicker(
+                        key: const ValueKey('start-harness'),
+                        value: _harness,
+                        onChanged: (h) => setState(() {
+                          _harness = h;
+                          _selection = ModelSelection();
+                        }),
+                      ),
+                      FilledButton(
+                        key: const ValueKey('start-envoy'),
+                        onPressed: _starting ? null : _start,
+                        child: const Text('START ENVOY'),
+                      ),
+                    ],
+                  ),
+                if (!widget.phone)
+                  ModelSelectionFields(
+                    client: widget.client,
+                    harness: _harness,
+                    selection: _selection,
+                    onChanged: (value) => setState(() => _selection = value),
+                  ),
                 if (_startError != null) ...[
                   const SizedBox(height: Tokens.gap),
                   Text(
@@ -612,11 +644,12 @@ class _NotRunningState extends State<_NotRunning> {
               ] else
                 Text('Pick another sleeve above.', style: t.body()),
               const SizedBox(height: Tokens.gap),
-              OutlinedButton(
-                key: const ValueKey('orchestrator-retry'),
-                onPressed: widget.onRetry,
-                child: const Text('REFRESH'),
-              ),
+              if (!widget.phone || error != null)
+                OutlinedButton(
+                  key: const ValueKey('orchestrator-retry'),
+                  onPressed: widget.onRetry,
+                  child: const Text('REFRESH'),
+                ),
             ],
           ),
         ),

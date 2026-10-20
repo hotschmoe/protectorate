@@ -379,18 +379,20 @@ limit.
 Inside the new sleeve, build and run against its own checkout:
 
 ```sh
-mkdir -p "$HOME/t"
-TMPDIR="$HOME/t" make test
+mkdir -p "$HOME/.cache/pt"
+TMPDIR="$HOME/.cache/pt" make test
 env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN \
-  TMPDIR="$HOME/t" PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
+  TMPDIR="$HOME/.cache/pt" \
+  PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
   go test -count=1 -v ./tests/e2e -run '^TestBinaryNestedRuntime$'
 ```
 
-Using the sleeve home for test temporary files keeps SDK-copy fixtures on
-disk. The sandbox's `/tmp` is tmpfs and its contents count toward the memory
-limit. Keep the physical temporary-directory path short: tmux canonicalizes
-it before constructing Unix socket paths, so a long path can fail with
-`no tmux server running`; a shorter symlink does not avoid that limit.
+Using the sleeve home for test temporary files keeps binary and cache fixtures
+on disk. The sandbox's `/tmp` is tmpfs and its contents count toward the memory
+limit. The binary harness puts only tmux sockets in separate private
+`/tmp/pt-tmux-*` directories, stops each server, then removes its socket
+directory. Long disk-backed test paths therefore cannot exceed Unix socket
+path limits.
 
 The runtime automatically discovers the private cgroup mount at
 `/run/protectorate/cgroup`. It creates child cgroups there and runs nested
@@ -420,6 +422,13 @@ the runtime scenario there. It checks persisted opt-in, ownership, restart,
 chat, hidden parent state, actual memory OOM and CPU throttling, unchanged
 outer limits, and descendant cleanup. The same test can run inside an already
 nested-enabled sleeve and exercises another sandbox level.
+
+That scenario explicitly mounts the installed Go toolchain and its private
+executable peers, and seeds private Pub lower trees. It excludes unused Flutter
+caches to avoid stacking another overlay above the development sleeve's SDK.
+The selected real bwrap, production hub/CLI, namespace and cgroup checks stay
+unchanged, and the inner run fails on any skip. Its binary and cache fixtures
+use its private home as disk-backed temporary storage.
 
 Design references: [systemd cgroup delegation](https://systemd.io/CGROUP_DELEGATION/),
 [Linux 6.6 cgroup v2 delegation and namespaces](https://www.kernel.org/doc/html/v6.6/admin-guide/cgroup-v2.html),

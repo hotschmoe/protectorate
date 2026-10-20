@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,15 @@ func TestBinaryNestedRuntime(t *testing.T) {
 		c.nestedLimitsScenario(t)
 		return
 	}
+	for _, dir := range []string{
+		filepath.Join(c.root, ".pub-cache/global_packages"),
+		filepath.Join(c.root, ".pub-cache/hosted"),
+		filepath.Join(c.root, ".pub-cache/git"),
+	} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	workspace := filepath.Join(c.root, "nested-project")
 	selectedVersion, err := exec.CommandContext(c.ctx, "bwrap", "--version").Output()
 	if err != nil {
@@ -66,16 +76,23 @@ func TestBinaryNestedRuntime(t *testing.T) {
 	}
 	script := `
 set +e
-mkdir -p "$HOME/.cache/protectorate-tests"
-export TMPDIR="$HOME/.cache/protectorate-tests"
 bwrap --version > nested.bwrap-version
+mkdir -p "$HOME/.cache/pt"
+export TMPDIR="$HOME/.cache/pt"
 env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN PROT_E2E=1 PROT_E2E_NESTED_CHILD=1 PROT_E2E_BINARY="$PWD/protectorate" ./runtime.test -test.run '^TestBinaryNestedRuntime$' -test.v > nested.log 2>&1
 status=$?
 printf '%s\n' "$status" > nested.status
 exec sleep 600
 `
 	c.cli("sleeve", "spawn", "nested", "--workspace", workspace, "--harness", "shell", "--nested", "--cpu", "100", "--mem", "1G", "--", "sh", "-c", script)
-	t.Cleanup(func() { c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "nested"}, nil) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		previous := c.ctx
+		c.ctx = ctx
+		defer func() { c.ctx = previous }()
+		c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "nested"}, nil)
+	})
 	// The running delegated scope and its opt-in must survive a hub restart.
 	c.stop(c.hub)
 	c.boot()
@@ -165,7 +182,14 @@ exec sh -c 'while :; do :; done'
 		"limits": map[string]any{"cpuPercent": 50, "memoryBytes": "134217728"},
 		"args":   []string{"sh", "-c", script, "sh", filepath.Join(sleeve.DelegatedCgroupRoot, "cgroup.controllers"), c.home, secret},
 	})
-	t.Cleanup(func() { c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "limited"}, nil) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		previous := c.ctx
+		c.ctx = ctx
+		defer func() { c.ctx = previous }()
+		c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "limited"}, nil)
+	})
 	c.eventually(func() bool {
 		b, err := os.ReadFile(filepath.Join(workspace, "proof"))
 		return err == nil && string(b) == "confined"

@@ -23,24 +23,136 @@ class DeepLinks {
 
   static Future<DeepLinks> platform() async {
     if (kIsWeb) return DeepLinks(initial: Uri.base);
-    try {
-      final links = AppLinks();
-      return DeepLinks(
-        initial: await links.getInitialLink(),
-        stream: links.uriLinkStream,
-      );
-    } on Object {
-      return const DeepLinks();
-    }
+    final links = AppLinks();
+    return DeepLinks(
+      initial: await links.getInitialLink(),
+      stream: links.uriLinkStream,
+    );
   }
 }
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  final prefs = await SharedPreferences.getInstance();
-  runApp(
-    ProtectorateApp(store: HubStore(prefs), links: await DeepLinks.platform()),
+void main() {
+  var firstFrameRendered = false;
+  var startupFailed = false;
+  late final Zone startupZone;
+
+  void showStartupError(Object error, StackTrace stack) {
+    FlutterError.presentError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'Protectorate startup',
+      ),
+    );
+    if (startupFailed) return;
+    startupFailed = true;
+    startupZone.run(() => runApp(_StartupErrorApp(error: error)));
+  }
+
+  runZonedGuarded(
+    () async {
+      startupZone = Zone.current;
+      try {
+        WidgetsFlutterBinding.ensureInitialized();
+        final previousErrorHandler = FlutterError.onError;
+        FlutterError.onError = (details) {
+          if (!firstFrameRendered) {
+            showStartupError(
+              details.exception,
+              details.stack ?? StackTrace.current,
+            );
+          } else if (previousErrorHandler != null) {
+            previousErrorHandler(details);
+          } else {
+            FlutterError.presentError(details);
+          }
+        };
+        final prefs = await SharedPreferences.getInstance();
+        final app = ProtectorateApp(
+          store: HubStore(prefs),
+          links: await DeepLinks.platform(),
+        );
+        if (startupFailed) return;
+        runApp(app);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          firstFrameRendered = true;
+        });
+      } on Object catch (error, stack) {
+        showStartupError(error, stack);
+      }
+    },
+    (error, stack) {
+      if (!firstFrameRendered) {
+        showStartupError(error, stack);
+      } else {
+        Zone.current.handleUncaughtError(error, stack);
+      }
+    },
   );
+}
+
+class _StartupErrorApp extends StatelessWidget {
+  const _StartupErrorApp({required this.error});
+
+  final Object error;
+
+  @override
+  Widget build(BuildContext context) {
+    final home = Builder(
+      builder: (context) {
+        final t = Tokens.of(context);
+        return Scaffold(
+          key: const ValueKey('startup-error'),
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(Tokens.gapL),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: Tokens.contentMaxWidth,
+                  ),
+                  child: Panel(
+                    legend: 'STARTUP ERROR',
+                    tone: Tone.alarm,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Could not start Protectorate',
+                          style: t.title(t.p.alarm),
+                        ),
+                        const SizedBox(height: Tokens.gap),
+                        SelectableText(
+                          '$error',
+                          key: const ValueKey('startup-error-message'),
+                          style: t.body(),
+                        ),
+                        const SizedBox(height: Tokens.gap),
+                        Text('Restart the app to try again.', style: t.small()),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    return MaterialApp(
+      title: 'Protectorate',
+      theme: appTheme(Brightness.light),
+      darkTheme: appTheme(Brightness.dark),
+      routes: {Navigator.defaultRouteName: (_) => home},
+      onGenerateInitialRoutes: (_) => [
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: Navigator.defaultRouteName),
+          builder: (_) => home,
+        ),
+      ],
+    );
+  }
 }
 
 class ProtectorateApp extends StatefulWidget {
@@ -127,6 +239,7 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
 
   @override
   Widget build(BuildContext context) {
+    final home = HubsScreen(store: widget.store, clientFactory: _factory);
     return MaterialApp(
       navigatorKey: _navKey,
       title: 'Protectorate',
@@ -134,7 +247,13 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
       theme: appTheme(Brightness.light),
       darkTheme: appTheme(Brightness.dark),
       builder: (context, child) => WarmUp(child: child ?? const SizedBox()),
-      home: HubsScreen(store: widget.store, clientFactory: _factory),
+      routes: {Navigator.defaultRouteName: (_) => home},
+      onGenerateInitialRoutes: (_) => [
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: Navigator.defaultRouteName),
+          builder: (_) => home,
+        ),
+      ],
     );
   }
 }

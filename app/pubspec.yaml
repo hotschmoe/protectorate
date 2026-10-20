@@ -54,6 +54,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/protectorate.png
     - assets/fonts/Roboto-LICENSE.txt
 
   fonts:
