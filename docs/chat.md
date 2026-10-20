@@ -16,13 +16,46 @@ protectorate chat respond alice <approval-id> --allow
 protectorate chat compact alice
 ```
 
-The workspace is a directory on the hub or a git URL (cloned into
-`workspaces/<name>` in the hub's state directory; the hub has no git
-credentials, so the repository must be readable without a login). `protectorate
-sleeve workspaces` lists what the hub can reuse: directories under its
-`workspaces/` and the workspaces of known sleeves. A directory under
-`workspaces/` can only be used by a sleeve of the same name; any other absolute
-path outside the state directory is accepted if it passes the sandbox checks.
+## Workspaces
+
+The workspace is an existing directory on the hub or a git URL. It need not
+be a git repository. The API requires an absolute directory path and resolves
+symlinks before checking it. The CLI converts relative paths to absolute paths
+on the client; that resulting path must exist on the hub. Shell `~` expansion
+also happens on the client, so use an explicit hub path when calling remotely.
+
+An existing directory, including its `.git`, is mounted read-write at its
+resolved host path. Edits change the original checkout directly; no copy or
+worktree is created. Selecting it does not expose its parents or siblings.
+System/tool mounts are read-only, HOME is the sleeve's own writable home, and
+that harness's shared auth directory is writable. The host network is shared.
+Outward symlinks do not grant access to otherwise unmounted host paths. A linked
+git worktree may need a common git directory outside the workspace that is not
+mounted.
+
+Sandbox checks reject filesystem root, system directories, the real user home
+and its ancestors, and paths inside or containing protected credential or
+application-data paths (including `.ssh`, `.codex`, `.config`, `.cargo` and
+`.local/share` under the real home). Hub state and its ancestors are refused;
+within hub state only `workspaces/<sleeve-name>` and its descendants are allowed
+for an ordinary sleeve. Envoy has its own orchestrator workspace exception.
+The complete checks are `CheckWorkspace`/`CheckBind` in
+`internal/sleeve/plan.go` and the protected paths in `internal/sleeve/sleeve.go`.
+These checks do not scan arbitrary project files for embedded secrets.
+
+`protectorate sleeve workspaces` discovers immediate managed workspace
+directories and known sleeve workspaces, filtered by the sandbox checks. It
+is not a browser of every accepted hub directory. Outside hub state another
+existing absolute directory can be supplied if it passes those checks.
+
+Git URLs clone into `$PROTECTORATE_HOME/workspaces/<sleeve-name>`, with a
+ten-minute timeout. If that destination already has `.git`, it is reused
+without verifying the requested remote; a nonempty non-git destination fails.
+Choose a new sleeve name when a separate clone is needed. The clone command
+disables terminal prompts but inherits the hub process environment and git
+configuration, so ambient helpers or SSH credentials may still be used.
+Public repositories need no added authentication; there is no dedicated
+private-repository credential-management UI. Do not embed tokens in URLs.
 
 In the app, the SLEEVES tab shows every sleeve in a fence per node (the hub's
 node first; sleeves run only on the hub's machine today, so other nodes get a
@@ -40,6 +73,23 @@ A chat harness runs autonomous: the sandbox is the boundary. `sleeve spawn
 default`, Codex `approvalPolicy` `untrusted` with its `workspace-write`
 sandbox, Grok `/always-approve off`; pi has no gate), so approvals arrive as
 `ApprovalRequest` events and `chat respond` answers them.
+
+## Models and reasoning effort
+
+Chat creation and running-chat APIs, CLI and UI currently have no model or
+reasoning-effort controls, including Envoy. The model shown in chat is an
+observed native value, not a saved selection; it may be absent until usage is
+reported, and the Grok driver does not report a model name. No effort is
+reported. Native defaults and existing per-sleeve session/config state apply.
+Codex seeds permission/sandbox settings in the sleeve's config and does not
+copy the owner's `config.toml` or model choice.
+
+Extra harness arguments after `--` work in terminal mode; chat mode rejects
+them. There is no typed live model/effort update operation. Resleeving replaces
+the native session through a handoff and has no model/effort fields to carry
+across harnesses. Native model catalogs and capability-aware controls are
+proposed work, not current functionality. See [delegation](coordination.md#delegation)
+for the distinction between native tasks and separate sleeves.
 
 ## API
 

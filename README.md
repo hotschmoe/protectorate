@@ -4,6 +4,17 @@ One pane of glass over your coding-agent subscriptions, machines, sessions and
 work. A single Go binary is the hub, the node agent and the CLI. Flutter
 clients (desktop, Android, web) talk to the same API.
 
+## Start here
+
+| Task | Guide |
+|------|-------|
+| Install the hub and connect a client | [Install](docs/install.md) |
+| Start a sandboxed chat, choose a workspace, inspect model defaults | [Chat](docs/chat.md) |
+| Start Envoy or change its scopes | [Orchestrator](docs/orchestrator.md) |
+| Send work, acknowledge requests, understand delegation | [Coordination](docs/coordination.md) |
+| Understand owner authority and scoped tokens | [Authentication](docs/auth.md) |
+| Develop, select a branch, or inspect research references | [Development](DEV.md) |
+
 ## Ethos
 
 - **Hands-off toward harnesses:** each LLM runs its own CLI untouched. We never
@@ -46,6 +57,9 @@ It verifies the release against `SHA256SUMS`, lists missing prerequisites (bwrap
 
 ## Build
 
+Contributors: read [DEV.md](DEV.md) first. Development starts from
+`dev-hotschmoe`; a fresh clone normally starts on the release branch, `master`.
+
 ```
 make gen        # buf generate -> gen/ (Go) and app/lib/gen/ (Dart), both committed
 make check-gen  # fails if generated code is stale
@@ -59,12 +73,19 @@ make app-check  # flutter analyze + test
 
 ```
 protectorate hub serve [--web app/build/web]   # --web defaults to ~/.local/share/protectorate/web when installed; owner token at ~/.protectorate/token
-protectorate login claude                       # once per harness, on the hub; --status lists them
+protectorate login codex                        # once per harness, on the hub; --status lists them
 protectorate quota
-protectorate session new demo -- claude
-protectorate sleeve spawn alice --workspace ~/src/proj --harness codex --mem 8G
+protectorate sleeve spawn alice --workspace https://github.com/owner/project.git --harness codex --mem 8G
+protectorate chat send alice "Read the repository instructions and report the current state."
+protectorate chat watch alice
 protectorate pair                               # QR code for the phone app
 ```
+
+Replace the example URL with a repository you can read. A clone is placed at
+`$PROTECTORATE_HOME/workspaces/alice` on the hub. An existing hub directory can
+also be selected; the sleeve edits it directly. See [workspace safety](docs/chat.md#workspaces)
+before selecting a checkout. Raw `session new` commands run outside the sleeve
+sandbox and require owner authority.
 
 ## Docs
 

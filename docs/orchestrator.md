@@ -111,10 +111,27 @@ protectorate orchestrator spawn --add-scopes sleeve_kill_sleeve     # allow kill
 protectorate orchestrator spawn --scopes read,events,backlog_create_note   # replace the defaults
 ```
 
-Scopes use the tool names from `protectorate mcp` (see [auth.md](auth.md)).
-Widening takes effect on the next spawn, which revokes the old token. Granting
-`terminal` lets Envoy type into any session, which Envoy needs to hand a prompt to
-another sleeve; it is a large grant, so it is off by default.
+Run these commands with owner authentication (see [auth.md](auth.md)); Envoy
+cannot widen its own token. This is a creation/respawn option, not a hub
+configuration switch. An existing Envoy is stopped and recreated, and its old
+tokens are revoked. `--harness` defaults to `auto`; specify the desired harness
+when preserving that choice matters.
+
+`--add-scopes` extends the defaults, or the explicit `--scopes` list; it does
+not extend the running token's custom grants. To preserve custom grants, supply
+their complete list with `--scopes` and add the new scope with `--add-scopes`.
+Scopes use tool names (see [auth.md](auth.md)). The owner-only API is
+`SleeveService/SpawnEnvoy`, with `SpawnEnvoyRequest.scopes`, `add_scopes`,
+`harness` and `ttl`. There is no public in-place scope-update operation;
+automatic renewal keeps the existing scopes. No hub restart is needed.
+
+Envoy can assign work with `msg send <sleeve> ...`; the mailbox delivers it
+into chat according to [delivery rules](coordination.md#delivery). Direct
+`chat send`, interrupt and approval responses need additional chat scopes,
+which Envoy does not receive by default. `terminal` permits typing into sleeve
+terminal sessions; host sessions need `terminal:host` or the owner token.
+Neither terminal grant is needed for mailbox assignments. An explicit
+`sleeve_kill_sleeve` grant permits killing sleeves generally, not only children.
 
 ## External bridges are the same mechanism
 
@@ -134,7 +151,9 @@ protectorate mcp --token-file ~/.protectorate/claude-bridge.token --allow 'quota
 
 The outside reviews warned that a sleeve able to spawn others tends to collect
 holes until it is the hub. Envoy keeps its sandbox and gets only a revocable,
-expiring, audited token; the sandbox holds no harness credentials or SSH keys.
+expiring, audited token. Its harness's shared auth directory is mounted
+read-write so native login refresh works; the sandbox is not credential-free.
+The owner's real home and SSH key directory are not mounted as general access.
 Envoy can still spend quota by spawning sleeves, so the spawn scope is the thing
 to watch in the audit log.
 

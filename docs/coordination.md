@@ -136,6 +136,37 @@ protectorate msg threads --sleeve api
 - **Events** (subject = message id): `msg.sent`, `msg.delivered`,
   `msg.acked`, `msg.reminded`, `msg.escalated`.
 
+## Delegation
+
+Native subagents are managed by the harness inside one sleeve. Drivers use
+native headless protocols without supplying a replacement tool allowlist, but
+this does not guarantee that every installed harness enables delegation.
+Native tasks share the sleeve's workspace, sandbox, resource scope and access;
+they do not get independent Protectorate identities or isolated branches.
+
+The chat view is incomplete for native children: Claude filters nested
+`parent_tool_use_id` messages, Codex filters other thread IDs and does not
+normalize a complete child lifecycle, and Grok/pi show generic tool activity
+without a child hierarchy. There is no native-child registry or per-child
+budget. Turn interruption uses the harness protocol; recursive cancellation
+of all background native work is not guaranteed.
+
+Hub-managed sleeves are independent named workspaces/harnesses. Ordinary
+sleeve tokens cannot spawn them, send chat turns, resleeve or kill by default;
+they can request work from Envoy through the mailbox. Envoy can spawn/resleeve
+and send mailbox assignments, but direct chat mutation and kill require
+additional scopes. See [Envoy scoping](orchestrator.md#scoping).
+
+There is no parent-child ownership, recursive cancellation, automatic result
+collection or parent-exit policy. Use request/reply/ack and status/events for
+coordination; IDLE means a turn settled, not that the assigned task completed.
+Separate sleeves can use the same external checkout: a listed busy state does
+not create an exclusive workspace reservation. Use separate checkouts for
+independent write work; automatic worktree creation is not implemented.
+Killing a sleeve stops its scope and forgets its record while retaining its
+workspace and home. A disposable task does not imply deleting those files.
+Managed-child lifecycle controls remain proposed work.
+
 ## Leases
 
 `protectorate lease acquire --wait [--priority N]` (`AcquireLease` with
