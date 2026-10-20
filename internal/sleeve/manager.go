@@ -535,8 +535,24 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 		}
 		return cause
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// tmux limits each command message, including the saved respawn argv.
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\nexec")
+	for _, arg := range launch.Argv {
+		script.WriteString(" '")
+		script.WriteString(strings.ReplaceAll(arg, "'", "'\\''"))
+		script.WriteByte('\'')
+	}
+	script.WriteByte('\n')
+	launcher := filepath.Join(m.cfg.sleeveDir(info.Name), "launch.sh")
+	if err := fsutil.WriteFile(launcher, []byte(script.String()), 0o700); err != nil {
+		return fmt.Errorf("write sleeve launcher: %w", err)
+	}
 	if _, err := m.opts.Sessions.Create(ctx, session.CreateOptions{
-		Name: info.Session, Cwd: info.Workspace, Command: launch.Argv, Env: env,
+		Name: info.Session, Cwd: info.Workspace, Command: []string{"/bin/sh", launcher}, Env: env,
 	}); err != nil {
 		return fail(fmt.Errorf("start sleeve session: %w", err))
 	}

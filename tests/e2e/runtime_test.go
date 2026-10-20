@@ -54,7 +54,19 @@ func (c *cluster) runtimeScenario(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.call("SleeveService", "SpawnSleeve", map[string]any{"name": "isolation", "harness": "HARNESS_SHELL", "workspace": workspace, "args": []string{"sh", "-c", "printf isolated > proof; sleep 20"}})
-	t.Cleanup(func() { c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "isolation"}, nil) })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		previous := c.ctx
+		c.ctx = ctx
+		defer func() { c.ctx = previous }()
+		if t.Failed() {
+			var pane map[string]any
+			c.rpc("SessionService", "CapturePane", map[string]any{"name": "sleeve-isolation", "lines": 80}, &pane)
+			t.Logf("isolation pane: %v", pane)
+		}
+		c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "isolation"}, nil)
+	})
 	started := time.Now()
 	diagnosed := false
 	c.eventually(func() bool {
