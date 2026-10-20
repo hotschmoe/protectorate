@@ -38,6 +38,8 @@ The unit uses `KillMode=control-group` so a killed hub cannot orphan headscale. 
 
 Upgrading a v0.3 hub: since v0.4 the hub keeps `nodes`, `tokens`, `sleeves`, `leases` and `desk-policies` state in `.json` files (durations as integer nanoseconds) and ignores the old `.yaml` files, so an unconverted hub starts with no nodes, tokens or sleeves. Stop the hub and convert each file before starting v0.4 (the one known v0.3 hub was converted with a one-off tool that keeps the originals as `*.yaml.pre-json`).
 
+Upgrading a v0.4.0 hub to v0.4.1 needs no state conversion: restart the hub on the new binary and run `protectorate node update --all`. Existing sleeves keep their old cache layout until respawned; reclaim a sleeve's old private cache copies with `protectorate sleeve kill NAME --drop-caches` before respawning, and review leftovers with `protectorate sleeve prune` (it removes nothing without `--yes`). Copy-on-write caches need bubblewrap 0.9 or newer first on the hub service's PATH (see [sleeves](sleeves.md)); with Debian's 0.8 the hub keeps copying caches. Codex sleeves now default to reasoning effort `high` (`hub serve --sleeve-effort`).
+
 Log in to each harness once on the hub. This runs the harness's own login in your terminal and stores the credential in `~/.protectorate/auth/<harness>`, which every sleeve shares:
 
 ```

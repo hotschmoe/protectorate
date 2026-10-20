@@ -52,7 +52,7 @@ clients (desktop, Android, web) talk to the same API.
 Hub, on Linux (x86_64 or aarch64), per user, no sudo; re-run to upgrade:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.4.0/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.4.1/install-hub.sh | bash
 ```
 
 It verifies the release against `SHA256SUMS`, lists missing prerequisites (bwrap, tmux, git, systemd user manager) instead of installing them, and enables a `protectorate-hub` user unit. Nodes join from the web app (NODES, ADD NODE). Details in [docs/install.md](docs/install.md); branch and release rules in [DEV.md](DEV.md).

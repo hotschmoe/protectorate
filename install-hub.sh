@@ -3,7 +3,7 @@
 # no system packages, nothing is deleted. Re-run to upgrade.
 set -euo pipefail
 
-DEFAULT_VERSION=v0.4.0
+DEFAULT_VERSION=v0.4.1
 REPO=hotschmoe/protectorate
 
 say() { printf '%s\n' "$*"; }
