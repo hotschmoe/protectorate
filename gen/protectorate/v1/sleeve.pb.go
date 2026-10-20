@@ -373,7 +373,9 @@ type Sleeve struct {
 	// Latest self-reported result for the current brief, independent of mail turns.
 	Result *SleeveResult `protobuf:"bytes,25,opt,name=result,proto3" json:"result,omitempty"`
 	// Killed records remain inspectable until their name is respawned.
-	Killed        bool `protobuf:"varint,28,opt,name=killed,proto3" json:"killed,omitempty"`
+	Killed bool `protobuf:"varint,28,opt,name=killed,proto3" json:"killed,omitempty"`
+	// Allows sandboxed child sleeves within this sleeve's resource limits.
+	Nested        bool `protobuf:"varint,30,opt,name=nested,proto3" json:"nested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -586,6 +588,13 @@ func (x *Sleeve) GetResult() *SleeveResult {
 func (x *Sleeve) GetKilled() bool {
 	if x != nil {
 		return x.Killed
+	}
+	return false
+}
+
+func (x *Sleeve) GetNested() bool {
+	if x != nil {
+		return x.Nested
 	}
 	return false
 }
@@ -885,7 +894,9 @@ type SpawnSleeveRequest struct {
 	// Create and check out this branch from branch in a fresh clone.
 	NewBranch string `protobuf:"bytes,13,opt,name=new_branch,json=newBranch,proto3" json:"new_branch,omitempty"`
 	// First chat message, delivered before spawn succeeds. Chat mode only.
-	Brief         string `protobuf:"bytes,14,opt,name=brief,proto3" json:"brief,omitempty"`
+	Brief string `protobuf:"bytes,14,opt,name=brief,proto3" json:"brief,omitempty"`
+	// Delegates a private cgroup subtree; requires CPU and memory limits.
+	Nested        bool `protobuf:"varint,17,opt,name=nested,proto3" json:"nested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1016,6 +1027,13 @@ func (x *SpawnSleeveRequest) GetBrief() string {
 		return x.Brief
 	}
 	return ""
+}
+
+func (x *SpawnSleeveRequest) GetNested() bool {
+	if x != nil {
+		return x.Nested
+	}
+	return false
 }
 
 type SpawnSleeveResponse struct {
@@ -2045,7 +2063,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x0fhome_disk_bytes\x18\n" +
 	" \x01(\x04R\rhomeDiskBytes\x12(\n" +
 	"\x10cache_disk_bytes\x18\v \x01(\x04R\x0ecacheDiskBytes\x128\n" +
-	"\x19go_build_cache_disk_bytes\x18\f \x01(\x04R\x15goBuildCacheDiskBytes\"\xb4\b\n" +
+	"\x19go_build_cache_disk_bytes\x18\f \x01(\x04R\x15goBuildCacheDiskBytes\"\xcc\b\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -2080,7 +2098,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"baseBranch\x12\x19\n" +
 	"\bbase_tip\x18\x18 \x01(\tR\abaseTip\x125\n" +
 	"\x06result\x18\x19 \x01(\v2\x1d.protectorate.v1.SleeveResultR\x06result\x12\x16\n" +
-	"\x06killed\x18\x1c \x01(\bR\x06killedB\f\n" +
+	"\x06killed\x18\x1c \x01(\bR\x06killed\x12\x16\n" +
+	"\x06nested\x18\x1e \x01(\bR\x06nestedB\f\n" +
 	"\n" +
 	"_exit_code\"-\n" +
 	"\x17BrowseWorkspacesRequest\x12\x12\n" +
@@ -2105,7 +2124,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"?\n" +
 	"\rReadOnlyMount\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x16\n" +
-	"\x06target\x18\x02 \x01(\tR\x06target\"\x9a\x05\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\"\xb2\x05\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
@@ -2124,7 +2143,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x06branch\x18\f \x01(\tR\x06branch\x12\x1d\n" +
 	"\n" +
 	"new_branch\x18\r \x01(\tR\tnewBranch\x12\x14\n" +
-	"\x05brief\x18\x0e \x01(\tR\x05brief\x1a6\n" +
+	"\x05brief\x18\x0e \x01(\tR\x05brief\x12\x16\n" +
+	"\x06nested\x18\x11 \x01(\bR\x06nested\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +

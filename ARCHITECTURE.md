@@ -350,6 +350,12 @@ Design:
   deletion requires clean staged/worktree/untracked state and all local tips
   verified against a timed origin fetch. Git runs only against trusted
   temporary metadata, never agent-written config. See [disk](docs/sleeves.md#disk).
+- `--nested` delegates a cgroup subtree below the scope's CPU, memory and pid
+  ceilings. Nested hubs use child cgroups and nested bwrap instead of the host
+  user manager. Only the subtree is mounted, with its own cgroup namespace;
+  the outer limits and other sleeves' state remain inaccessible. The flag
+  requires finite CPU/memory limits and persists across restart and resleeve.
+  See [runtime development](docs/sleeves.md#running-runtime-tests-inside-a-sleeve).
 - Known gap: bwrap shares the host network, so two sleeves' dev servers can
   collide on ports. Docker covers per-sleeve networking if that becomes a hard
   requirement.

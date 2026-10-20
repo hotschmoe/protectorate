@@ -48,6 +48,15 @@ func newCluster(t *testing.T) *cluster {
 	if err := os.MkdirAll(binDir, 0700); err != nil {
 		t.Fatal(err)
 	}
+	if selected, err := exec.LookPath("bwrap"); err == nil {
+		b, err := os.ReadFile(selected)
+		if err != nil {
+			t.Fatalf("read selected bwrap %s: %v", selected, err)
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "bwrap"), b, 0700); err != nil {
+			t.Fatalf("copy selected bwrap into private home: %v", err)
+		}
+	}
 	c.binary = binary
 	if c.binary == "" {
 		c.binary = filepath.Join(binDir, "protectorate")
@@ -80,7 +89,7 @@ func newCluster(t *testing.T) *cluster {
 	runCtx, runCancel := context.WithTimeout(t.Context(), 75*time.Second)
 	t.Cleanup(runCancel)
 	c.ctx = runCtx
-	c.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	c.env = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
 	tmuxDir := filepath.Join(c.root, "tmux")
 	if err := os.Mkdir(tmuxDir, 0700); err != nil {
 		t.Fatal(err)

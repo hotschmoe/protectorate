@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,9 +54,6 @@ func newMailRig(t *testing.T) *mailRig {
 // spawnNamed starts another sleeve in the same workspace layout.
 func (m *mailRig) spawnNamed(name string, mode pb.SleeveMode, ws string) {
 	m.t.Helper()
-	m.t.Cleanup(func() {
-		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", m.cfg.UnitName(name)+".scope").Run()
-	})
 	if ws == "" {
 		ws = m.t.TempDir()
 	}

@@ -114,16 +114,20 @@ func newChatRig(t *testing.T) *chatRig {
 	h.Sessions = session.New(sock)
 	h.SessionPoll = 20 * time.Millisecond
 	name := fmt.Sprintf("chat%d", time.Now().UnixNano()%1000000)
-	t.Cleanup(func() {
-		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", cfg.UnitName(name)+".scope").Run()
-		exec.Command("tmux", "-L", sock, "kill-server").Run()
-	})
 	opts := h.SleeveOptions(cfg)
 	opts.UsageInterval = 100 * time.Millisecond
 	m, err := sleeve.Open(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, info := range m.List() {
+			_ = m.Kill(ctx, info.Name)
+		}
+		exec.CommandContext(ctx, "tmux", "-L", sock, "kill-server").Run()
+	})
 	h.SetSleeves(m)
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(srv.Close)

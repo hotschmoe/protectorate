@@ -134,6 +134,7 @@ func sleeveSpawnCmd(o *opts) *command {
 	var cpu uint32
 	var env []string
 	var supervised bool
+	var nested bool
 	var readOnly []string
 	var exitAfterIdle time.Duration
 	c := &command{
@@ -219,6 +220,7 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 				ReadOnly: mounts, ExitAfterIdle: durationpb.New(exitAfterIdle),
 				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode, Selection: optionalSelection(sel),
 				Supervised: supervised,
+				Nested:     nested,
 			}))
 			if err != nil {
 				return err
@@ -246,6 +248,7 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 	c.Flags().StringArrayVar(&env, "env", nil, "environment variable K=V (repeatable)")
 	c.Flags().StringVar(&mode, "mode", "", "chat or terminal (default: chat for agent harnesses, terminal for shell)")
 	c.Flags().BoolVar(&supervised, "supervised", false, "chat mode: the harness asks before acting (answer with chat respond)")
+	c.Flags().BoolVar(&nested, "nested", false, "allow sandboxed child sleeves within these CPU and memory limits (requires --cpu and --mem)")
 	return c
 }
 
@@ -438,6 +441,7 @@ func sleeveShowCmd(o *opts) *command {
 				if s.Result != nil {
 					fmt.Fprintf(w, "report\t%s (chat seq %d, %s)\n%s\n", reportStatusLabel(s.Result.Status), s.Result.ChatSeq, s.Result.Time.AsTime().Format(time.RFC3339), s.Result.Summary)
 				}
+				fmt.Fprintf(w, "nested\t%t\n", s.Nested)
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {
 					fmt.Fprintf(w, "exited\t%s\n", s.ExitedAt.AsTime().Local().Format(time.RFC3339))

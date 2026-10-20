@@ -257,6 +257,7 @@ const Sleeve$json = {
       '10': 'result'
     },
     {'1': 'killed', '3': 28, '4': 1, '5': 8, '10': 'killed'},
+    {'1': 'nested', '3': 30, '4': 1, '5': 8, '10': 'nested'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -284,7 +285,7 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
     'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXASNQoGcmVzdWx0GBkgASgL'
     'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0EhYKBmtpbGxlZBgcIAEoCF'
-    'IGa2lsbGVkQgwKCl9leGl0X2NvZGU=');
+    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkQgwKCl9leGl0X2NvZGU=');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -428,6 +429,7 @@ const SpawnSleeveRequest$json = {
     {'1': 'branch', '3': 12, '4': 1, '5': 9, '10': 'branch'},
     {'1': 'new_branch', '3': 13, '4': 1, '5': 9, '10': 'newBranch'},
     {'1': 'brief', '3': 14, '4': 1, '5': 9, '10': 'brief'},
+    {'1': 'nested', '3': 17, '4': 1, '5': 8, '10': 'nested'},
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -455,7 +457,8 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'ZWFkT25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYCyABKAsyGS5nb29nbG'
     'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSFgoGYnJhbmNoGAwgASgJUgZicmFu'
     'Y2gSHQoKbmV3X2JyYW5jaBgNIAEoCVIJbmV3QnJhbmNoEhQKBWJyaWVmGA4gASgJUgVicmllZh'
-    'o2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIUCgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
+    'IWCgZuZXN0ZWQYESABKAhSBm5lc3RlZBo2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIU'
+    'CgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {

@@ -287,7 +287,8 @@ func (h *Hub) replaceHarness(ctx context.Context, info sleeve.Info, to sleeve.Ha
 		Base:   &info,
 		Parent: info.Parent, ParentID: info.ParentID,
 		ReadOnly: info.ReadOnly, ExitAfterIdle: info.ExitAfterIdle,
-		Name: info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
+		Nested: info.Nested,
+		Name:   info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
 		Limits: info.Limits(), Env: env, Supervised: info.Supervised,
 		Selection: o.selection, EffortFallback: o.effortFallback,
 	}, o)

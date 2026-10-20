@@ -70,6 +70,17 @@ including resume, approvals, interruption, usage, tools, selection, compaction,
 process exit and ownership. Sleeve scenarios retain real cgroup limits,
 lifecycle, warm git clone, toolchain/cache and jailed repository execution.
 
+A sleeve spawned with `--nested --cpu 200 --mem 5G` runs these runtime lanes
+through private delegated cgroups and nested bwrap. A normal sleeve still
+skips them. `TestBinaryNestedRuntime` starts a real nested-enabled sleeve and
+runs the selected production binary's runtime scenarios inside it, failing if
+the inner run skips. It also verifies actual memory OOM, CPU throttling, hidden
+parent state, persisted opt-in, unchanged outer limits and cgroup cleanup.
+Private test homes retain the selected bwrap binary, and the nested scenario
+asserts its version so a newer user-installed bwrap reaches the inner runtime.
+This host e2e remains unverified in the original non-delegated development
+sleeve; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
+
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
 A forced kill can leave a server within its private directory; it cannot leave
@@ -170,7 +181,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=63, KEEP-FUZZ=5; total=68. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=64, KEEP-FUZZ=5; total=69. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -246,6 +257,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
 | tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
 | tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache/overlay cleanup, host-lower and running-data protection, owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
+| tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | host verification pending | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
 
 ## Deleted files
 

@@ -198,6 +198,8 @@ message Sleeve {
   SleeveResult result = 25;
   // Killed records remain inspectable until their name is respawned.
   bool killed = 28;
+  // Allows sandboxed child sleeves within this sleeve's resource limits.
+  bool nested = 30;
 }
 
 message BrowseWorkspacesRequest {
@@ -258,6 +260,8 @@ message SpawnSleeveRequest {
   string new_branch = 13;
   // First chat message, delivered before spawn succeeds. Chat mode only.
   string brief = 14;
+  // Delegates a private cgroup subtree; requires CPU and memory limits.
+  bool nested = 17;
 }
 
 message SpawnSleeveResponse {

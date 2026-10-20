@@ -53,6 +53,7 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 		BaseRepo: info.BaseRepo,
 		BaseTip:  info.BaseTip,
 		ReadOnly: info.ReadOnly,
+		Nested:   info.Nested,
 		Name:     info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
 	}, bin)
 	if err != nil {
@@ -70,7 +71,7 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 }
 
 // Command returns the argv builder for a driver.Options.Command that runs
-// the named sleeve's harness inside its sandbox and systemd scope, with the
+// the named sleeve's harness inside its sandbox and cgroup, with the
 // same mounts, credentials and limits the terminal path uses. The harness
 // executable the driver names is replaced by the one Locate finds.
 func (m *Manager) Command(name string) (func(bin string, args []string) ([]string, error), error) {

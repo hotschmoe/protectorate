@@ -95,6 +95,7 @@ TestBinaryBranchDispatch
 TestBinaryBaseNotices
 TestBinarySleeveReports
 TestBinarySleeveDiskPrune
+TestBinaryNestedRuntime
 """.split())
 DELETE = set()
 
