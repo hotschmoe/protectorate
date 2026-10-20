@@ -89,11 +89,9 @@ func (c *QuotaCache) Refresh(ctx context.Context) { c.refresh(ctx, true) }
 func (c *QuotaCache) refresh(ctx context.Context, forced bool) {
 	var wg sync.WaitGroup
 	for i := range c.readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			c.readOne(ctx, i, forced)
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -50,24 +50,12 @@ func LogPath(home string) string { return filepath.Join(Dir(home), "headscale.lo
 // until ctx is cancelled, at which point it stops it cleanly. It returns an
 // error only for setup failures.
 func (s *Supervisor) Run(ctx context.Context) error {
-	bin := BinaryPath(s.Home, HeadscaleVersion)
-	if _, err := os.Stat(bin); err != nil {
-		return fmt.Errorf("headscale binary: %w (run `protectorate hub tailnet install`)", err)
-	}
-	if err := s.Cfg.WriteFiles(s.Home); err != nil {
-		return err
-	}
-	logFile, err := openRotatingLog(LogPath(s.Home), logMaxSize, logKeep)
+	bin, logFile, err := s.prepare()
 	if err != nil {
-		return fmt.Errorf("open headscale log: %w", err)
+		return err
 	}
 	defer logFile.Close()
 
-	stop := s.StopTimeout
-	if stop == 0 {
-		stop = 10 * time.Second
-	}
-	cfgPath := filepath.Join(Dir(s.Home), "headscale.yaml")
 	backoff := backoffMin
 	for ctx.Err() == nil {
 		requested, err := headscaledb.Requested(s.Home)
@@ -89,43 +77,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		runCtx, cancel := context.WithCancel(ctx)
-		cmd := exec.CommandContext(runCtx, bin, "serve", "-c", cfgPath)
-		cmd.Stdout, cmd.Stderr = logFile, logFile
-		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-		cmd.WaitDelay = stop
-		start := time.Now()
-		err = cmd.Start()
-		paused := false
-		if err == nil {
-			s.logf("headscale started (pid %d)", cmd.Process.Pid)
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
-			tick := time.NewTicker(100 * time.Millisecond)
-		wait:
-			for {
-				select {
-				case err = <-done:
-					break wait
-				case <-runCtx.Done():
-					err = <-done
-					break wait
-				case <-tick.C:
-					requested, checkErr := headscaledb.Requested(s.Home)
-					if checkErr != nil {
-						s.logf("check backup request: %v", checkErr)
-					}
-					if requested {
-						paused = true
-						cancel()
-						err = <-done
-						break wait
-					}
-				}
-			}
-			tick.Stop()
-		}
-		cancel()
+		start, paused, err := s.runHeadscale(ctx, bin, logFile)
 		gate.Close()
 		if ctx.Err() != nil {
 			s.logf("headscale stopped")
@@ -147,6 +99,59 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		backoff = min(backoff*2, backoffMax)
 	}
 	return nil
+}
+
+func (s *Supervisor) prepare() (string, *rotatingLog, error) {
+	bin := BinaryPath(s.Home, HeadscaleVersion)
+	if _, err := os.Stat(bin); err != nil {
+		return "", nil, fmt.Errorf("headscale binary: %w (run `protectorate hub tailnet install`)", err)
+	}
+	if err := s.Cfg.WriteFiles(s.Home); err != nil {
+		return "", nil, err
+	}
+	f, err := openRotatingLog(LogPath(s.Home), logMaxSize, logKeep)
+	if err != nil {
+		return "", nil, fmt.Errorf("open headscale log: %w", err)
+	}
+	return bin, f, nil
+}
+
+func (s *Supervisor) runHeadscale(ctx context.Context, bin string, logFile *rotatingLog) (time.Time, bool, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "serve", "-c", filepath.Join(Dir(s.Home), "headscale.yaml"))
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = s.StopTimeout
+	if cmd.WaitDelay == 0 {
+		cmd.WaitDelay = 10 * time.Second
+	}
+	start := time.Now()
+	if err := cmd.Start(); err != nil {
+		return start, false, err
+	}
+	s.logf("headscale started (pid %d)", cmd.Process.Pid)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			return start, false, err
+		case <-ctx.Done():
+			return start, false, <-done
+		case <-tick.C:
+			requested, err := headscaledb.Requested(s.Home)
+			if err != nil {
+				s.logf("check backup request: %v", err)
+			}
+			if requested {
+				cancel()
+				return start, true, <-done
+			}
+		}
+	}
 }
 
 // rotatingLog appends to path and, once a write would push it past max bytes,

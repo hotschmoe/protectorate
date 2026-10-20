@@ -48,12 +48,7 @@ func ReadRefs(ctx context.Context, dir string) (RefState, error) {
 			remotes[strings.TrimPrefix(name, "refs/remotes/origin/")] = sha
 		}
 	}
-	sort.Slice(r.Tags, func(i, j int) bool {
-		if r.Tags[i].Unix != r.Tags[j].Unix {
-			return r.Tags[i].Unix < r.Tags[j].Unix
-		}
-		return r.Tags[i].Name < r.Tags[j].Name
-	})
+	sortTags(r.Tags)
 	if r.Default == "" {
 		for _, n := range []string{"main", "master"} {
 			if heads[n] != "" || remotes[n] != "" {
@@ -132,16 +127,20 @@ func Merge(old, now RefState, isAncestor func(old, new string) bool) RefState {
 			now.Tags = append(now.Tags, t)
 		}
 	}
-	sort.Slice(now.Tags, func(i, j int) bool {
-		if now.Tags[i].Unix != now.Tags[j].Unix {
-			return now.Tags[i].Unix < now.Tags[j].Unix
-		}
-		return now.Tags[i].Name < now.Tags[j].Name
-	})
+	sortTags(now.Tags)
 	if old.Default == now.Default && old.DefaultTip != "" && now.DefaultTip != old.DefaultTip && isAncestor(now.DefaultTip, old.DefaultTip) {
 		now.DefaultTip = old.DefaultTip
 	}
 	return now
+}
+
+func sortTags(tags []Tag) {
+	sort.Slice(tags, func(i, j int) bool {
+		if tags[i].Unix != tags[j].Unix {
+			return tags[i].Unix < tags[j].Unix
+		}
+		return tags[i].Name < tags[j].Name
+	})
 }
 
 // IsAncestor reports whether a is an ancestor of b in the repository in dir.

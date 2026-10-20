@@ -11,9 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -187,18 +189,12 @@ func (d *Directory) Update(scans []Scan) error {
 		for n := range provides {
 			delete(deps, n)
 		}
-		p.Provides, p.Deps = sortedKeys(provides), sortedKeys(deps)
+		p.Provides = slices.AppendSeq([]string{}, maps.Keys(provides))
+		p.Deps = slices.AppendSeq([]string{}, maps.Keys(deps))
+		slices.Sort(p.Provides)
+		slices.Sort(p.Deps)
 	}
 	return d.saveLocked()
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func (d *Directory) saveLocked() error {

@@ -150,13 +150,11 @@ func (m *NodeMonitor) pollAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, pollConcurrency)
 	for _, n := range targets {
-		wg.Add(1)
 		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			m.pollOne(ctx, n)
-		}()
+		})
 	}
 	wg.Wait()
 	// Prune against the inventory as it is now: a node added while this round

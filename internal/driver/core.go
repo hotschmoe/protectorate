@@ -188,6 +188,18 @@ func (c *core) finish(exitCode int, tail string) {
 	})
 }
 
+func (c *core) emitText(id, text string, thinking bool, raw []byte) {
+	if text != "" {
+		c.emit(Event{Kind: KindText, Text: text, MessageID: id, Thinking: thinking, Raw: raw})
+	}
+}
+
+func (c *core) emitToolResult(id, output string, failed bool, raw []byte) {
+	ev := toolResult(id, output, failed)
+	ev.Raw = raw
+	c.emit(ev)
+}
+
 // toolResult builds a KindToolResult event with the output bounded.
 func toolResult(callID, output string, isError bool) Event {
 	tr := &ToolResult{CallID: callID, IsError: isError}

@@ -282,43 +282,53 @@ func (m *Manager) release(name string) {
 }
 
 // Spawn starts a sleeve and returns once its scope is running.
-func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
-	start := time.Now()
+func (m *Manager) validateSpawn(req SpawnRequest) (SpawnRequest, error) {
 	if err := m.cfg.Preflight(); err != nil {
-		return Info{}, err
+		return SpawnRequest{}, err
 	}
 	if err := ValidName(req.Name); err != nil {
-		return Info{}, err
+		return SpawnRequest{}, err
 	}
 	if req.Harness == "" {
-		return Info{}, fmt.Errorf("%w: harness is required", ErrInvalid)
+		return SpawnRequest{}, fmt.Errorf("%w: harness is required", ErrInvalid)
 	}
 	if _, err := ParseHarness(string(req.Harness)); err != nil {
-		return Info{}, err
+		return SpawnRequest{}, err
 	}
 	if err := req.Limits.Validate(); err != nil {
-		return Info{}, err
+		return SpawnRequest{}, err
 	}
 	mode, err := resolveMode(req.Harness, req.Mode, req.Args)
 	if err != nil {
-		return Info{}, err
+		return SpawnRequest{}, err
 	}
 	if req.ExitAfterIdle < 0 || (req.ExitAfterIdle > 0 && mode != ModeChat) {
-		return Info{}, fmt.Errorf("%w: exit-after-idle requires chat mode and a nonnegative duration", ErrInvalid)
+		return SpawnRequest{}, fmt.Errorf("%w: exit-after-idle requires chat mode and a nonnegative duration", ErrInvalid)
 	}
 	req.ReadOnly, err = m.cfg.ResolveMounts(req.ReadOnly)
 	if err != nil {
-		return Info{}, err
+		return SpawnRequest{}, err
 	}
 	if req.Selection != (driver.Selection{}) && mode != ModeChat {
-		return Info{}, fmt.Errorf("%w: selection requires chat mode", ErrInvalid)
+		return SpawnRequest{}, fmt.Errorf("%w: selection requires chat mode", ErrInvalid)
 	}
 	if err := driver.CheckSelection(driver.Harness(req.Harness), req.Selection); err != nil {
-		return Info{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		return SpawnRequest{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	if req.Supervised && mode != ModeChat {
-		return Info{}, fmt.Errorf("%w: supervised applies to chat mode; a terminal sleeve's TUI asks in the terminal", ErrInvalid)
+		return SpawnRequest{}, fmt.Errorf("%w: supervised applies to chat mode; a terminal sleeve's TUI asks in the terminal", ErrInvalid)
 	}
+	req.Mode = mode
+	return req, nil
+}
+
+func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
+	start := time.Now()
+	req, err := m.validateSpawn(req)
+	if err != nil {
+		return Info{}, err
+	}
+	mode := req.Mode
 	if err := m.reserve(ctx, req.Name); err != nil {
 		return Info{}, err
 	}
@@ -338,16 +348,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	bin, err := m.cfg.Locate(req.Harness)
-	if err != nil {
-		return Info{}, err
-	}
-	args := req.Args
-	if mode == ModeTerminal {
-		args = terminalArgs(req.Harness, req.Args)
-	}
-	spec := Spec{Name: req.Name, Harness: req.Harness, Args: args, Workspace: ws, Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly}
-	launch, err := m.cfg.Plan(spec, bin)
+	launch, err := m.planSpawn(req, ws)
 	if err != nil {
 		return Info{}, err
 	}
@@ -379,57 +380,78 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		info.Chat = &Chat{Requested: req.Selection}
 	}
 	e := &entry{Info: info}
-	m.mu.Lock()
-	m.sleeves[req.Name] = e
-	err = m.saveLocked()
-	if err != nil {
-		if prev != nil {
-			m.sleeves[req.Name] = prev
-		} else {
-			delete(m.sleeves, req.Name)
-		}
-	}
-	m.mu.Unlock()
-	if err != nil {
+	if err := m.installSleeve(e, prev); err != nil {
 		return Info{}, fmt.Errorf("persist sleeve: %w", err)
 	}
 
-	if mode == ModeChat {
-		m.mu.Lock()
-		out := e.Info
-		m.mu.Unlock()
-		m.opts.Emit("sleeve.spawned", req.Name, map[string]any{
-			"harness": string(req.Harness), "workspace": ws, "mode": string(mode),
-			"spawn_ms": float64(time.Since(start).Milliseconds()),
-		})
-		return out, nil
-	}
-	if err := m.start(ctx, launch, info); err != nil {
-		m.mu.Lock()
-		if prev != nil {
-			m.sleeves[req.Name] = prev
-		} else {
-			delete(m.sleeves, req.Name)
+	if mode != ModeChat {
+		if err := m.start(ctx, launch, info); err != nil {
+			m.rollbackSpawn(req.Name, prev)
+			return Info{}, err
 		}
-		if serr := m.saveLocked(); serr != nil {
-			log.Printf("sleeve %s: persist after failed start: %v", req.Name, serr)
-		}
-		m.mu.Unlock()
-		if rerr := m.cfg.removeEnvFile(req.Name); rerr != nil {
-			log.Printf("sleeve %s: %v", req.Name, rerr)
-		}
-		return Info{}, err
 	}
 
 	m.mu.Lock()
-	m.sampleLocked(e, time.Now())
+	if mode != ModeChat {
+		m.sampleLocked(e, time.Now())
+	}
 	out := e.Info
 	m.mu.Unlock()
-	m.opts.Emit("sleeve.spawned", req.Name, map[string]any{
-		"harness": string(req.Harness), "workspace": ws, "session": info.Session, "mode": string(mode),
+	fields := map[string]any{
+		"harness": string(req.Harness), "workspace": ws, "mode": string(mode),
 		"spawn_ms": float64(time.Since(start).Milliseconds()),
-	})
+	}
+	if mode != ModeChat {
+		fields["session"] = info.Session
+	}
+	m.opts.Emit("sleeve.spawned", req.Name, fields)
 	return out, nil
+}
+
+func (m *Manager) restoreSleeveLocked(name string, prev *entry) {
+	if prev != nil {
+		m.sleeves[name] = prev
+	} else {
+		delete(m.sleeves, name)
+	}
+}
+
+func (m *Manager) installSleeve(e, prev *entry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sleeves[e.Name] = e
+	if err := m.saveLocked(); err != nil {
+		m.restoreSleeveLocked(e.Name, prev)
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) rollbackSpawn(name string, prev *entry) {
+	m.mu.Lock()
+	m.restoreSleeveLocked(name, prev)
+	if err := m.saveLocked(); err != nil {
+		log.Printf("sleeve %s: persist after failed start: %v", name, err)
+	}
+	m.mu.Unlock()
+	if err := m.cfg.removeEnvFile(name); err != nil {
+		log.Printf("sleeve %s: %v", name, err)
+	}
+}
+
+func (m *Manager) planSpawn(req SpawnRequest, workspace string) (Launch, error) {
+	bin, err := m.cfg.Locate(req.Harness)
+	if err != nil {
+		return Launch{}, err
+	}
+	args := req.Args
+	if req.Mode == ModeTerminal {
+		args = terminalArgs(req.Harness, args)
+	}
+	return m.cfg.Plan(Spec{
+		Name: req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
+		Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly,
+	}, bin)
 }
 
 // cleanupTimeout bounds teardown after a failed start, which must finish
@@ -482,7 +504,11 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 					ErrUnavailable, exitLabel(s), strings.Join(launch.Argv, " "), session.Tail(tail, 20)))
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-time.After(scopePollInterval):
+		}
 	}
 }
 
@@ -759,7 +785,7 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 		}
 		real, err := filepath.EvalSymlinks(ws)
 		if err != nil {
-			return "", fmt.Errorf("%w: workspace: %v", ErrInvalid, err)
+			return "", fmt.Errorf("%w: workspace: %w", ErrInvalid, err)
 		}
 		if fi, err := os.Stat(real); err != nil || !fi.IsDir() {
 			return "", fmt.Errorf("%w: workspace %s is not a directory", ErrInvalid, real)

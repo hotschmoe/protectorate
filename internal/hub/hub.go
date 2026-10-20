@@ -302,85 +302,12 @@ type Extra struct {
 // listener, until ctx is cancelled.
 func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) error {
 	ctx, cancelWorkers := context.WithCancel(parent)
-	newServer := func(handler http.Handler) *http.Server {
-		srv := &http.Server{
-			Handler:           handler,
-			ReadHeaderTimeout: 10 * time.Second,
-			BaseContext:       func(net.Listener) context.Context { return ctx },
-			Protocols:         new(http.Protocols),
-		}
-		srv.Protocols.SetHTTP1(true)
-		srv.Protocols.SetUnencryptedHTTP2(true)
-		return srv
-	}
-	servers := map[*http.Server]net.Listener{newServer(h.Handler()): l}
+	servers := map[*http.Server]net.Listener{newHTTPServer(ctx, h.Handler()): l}
 	for _, e := range extra {
-		servers[newServer(h.tailnetHandler(e.Identify))] = e.Listener
+		servers[newHTTPServer(ctx, h.tailnetHandler(e.Identify))] = e.Listener
 	}
-
-	pollDone := make(chan struct{})
-	pollCtx, stopPoll := context.WithCancel(ctx)
-	defer func() {
-		stopPoll()
-		<-pollDone
-	}()
-	go func() {
-		defer close(pollDone)
-		h.quota.Run(pollCtx)
-	}()
-
-	watchDone := make(chan struct{})
-	go func() { defer close(watchDone); h.WatchSessions(ctx) }()
-	defer func() { <-watchDone }()
-
-	if h.chat != nil {
-		defer h.chat.shutdown()
-	}
-	if h.envoy != nil {
-		envoyDone := make(chan struct{})
-		go func() { defer close(envoyDone); h.watchEnvoy(ctx) }()
-		defer func() { <-envoyDone }()
-	}
-	if h.sleeves != nil {
-		sleevesDone := make(chan struct{})
-		go func() { defer close(sleevesDone); h.sleeves.Run(ctx) }()
-		defer func() { <-sleevesDone }()
-	}
-
-	if h.coord != nil {
-		coordDone := make(chan struct{})
-		go func() { defer close(coordDone); h.coord.Run(ctx) }()
-		defer func() { <-coordDone; h.coord.close() }()
-	}
-
-	if h.nodes != nil {
-		nodesDone := make(chan struct{})
-		nodesCtx, stopNodes := context.WithCancel(ctx)
-		defer func() {
-			stopNodes()
-			<-nodesDone
-		}()
-		go func() {
-			defer close(nodesDone)
-			h.nodes.Run(nodesCtx)
-		}()
-	}
-
-	if h.jobs != nil {
-		leasesDone := make(chan struct{})
-		leasesCtx, stopLeases := context.WithCancel(ctx)
-		go func() { defer close(leasesDone); h.leases.Run(leasesCtx) }()
-		deskDone := make(chan struct{})
-		go func() { defer close(deskDone); h.watchDesks(leasesCtx) }()
-		defer func() {
-			stopLeases()
-			<-leasesDone
-			<-deskDone
-			h.jobs.Shutdown()
-		}()
-	}
-
-	// Registered last so it runs first: workers must stop before the waits above.
+	stopWorkers := h.startWorkers(ctx)
+	defer stopWorkers()
 	defer cancelWorkers()
 
 	errc := make(chan error, len(servers))
@@ -410,6 +337,61 @@ func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) erro
 		return nil
 	}
 	return first
+}
+
+func newHTTPServer(ctx context.Context, handler http.Handler) *http.Server {
+	srv := &http.Server{
+		Handler: handler, ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return ctx },
+		Protocols:   new(http.Protocols),
+	}
+	srv.Protocols.SetHTTP1(true)
+	srv.Protocols.SetUnencryptedHTTP2(true)
+	return srv
+}
+
+// startWorker returns a stop function that cancels and joins the worker.
+func startWorker(ctx context.Context, run func(context.Context)) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); run(ctx) }()
+	return func() { cancel(); <-done }
+}
+
+func (h *Hub) startWorkers(ctx context.Context) func() {
+	stops := []func(){startWorker(ctx, h.quota.Run), startWorker(ctx, h.WatchSessions)}
+	if h.chat != nil {
+		stops = append(stops, h.chat.shutdown)
+	}
+	if h.envoy != nil {
+		stops = append(stops, startWorker(ctx, h.watchEnvoy))
+	}
+	if h.sleeves != nil {
+		stops = append(stops, startWorker(ctx, h.sleeves.Run))
+	}
+	if h.coord != nil {
+		stop := startWorker(ctx, h.coord.Run)
+		stops = append(stops, func() { stop(); h.coord.close() })
+	}
+	if h.nodes != nil {
+		stops = append(stops, startWorker(ctx, h.nodes.Run))
+	}
+	if h.jobs != nil {
+		leasesCtx, cancel := context.WithCancel(ctx)
+		stopLeases := startWorker(leasesCtx, h.leases.Run)
+		stopDesks := startWorker(leasesCtx, h.watchDesks)
+		stops = append(stops, func() {
+			cancel()
+			stopLeases()
+			stopDesks()
+			h.jobs.Shutdown()
+		})
+	}
+	return func() {
+		for i := len(stops) - 1; i >= 0; i-- {
+			stops[i]()
+		}
+	}
 }
 
 func (h *Hub) GetStatus(context.Context, *connect.Request[pb.GetStatusRequest]) (*connect.Response[pb.GetStatusResponse], error) {
@@ -503,13 +485,20 @@ func (i authInterceptor) admit(ctx context.Context, procedure string, header htt
 		if !audited || (quiet && callErr == nil) {
 			return
 		}
-		code := ""
-		if callErr != nil {
-			code = connect.CodeOf(callErr).String()
-		}
-		i.a.Record(ctx, p, procedure, subject, callErr, code)
+		i.a.Record(ctx, p, procedure, subject, callErr, resultCode(callErr))
 	}
 	return auth.WithPrincipal(ctx, p), finish, nil
+}
+
+func resultCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	return connect.CodeOf(err).String()
+}
+
+func (h *Hub) recordStream(ctx context.Context, procedure, subject string, err error) {
+	h.authz.Record(ctx, auth.PrincipalFrom(ctx), procedure, subject, err, resultCode(err))
 }
 
 // continuesTransfer marks the middle chunks of a file upload, which are not

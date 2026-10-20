@@ -171,15 +171,6 @@ func scopesAllowTerminal(scopes []string, readOnly bool) bool {
 	return false
 }
 
-func hasScope(scopes []string, want string) bool {
-	for _, s := range scopes {
-		if s == want {
-			return true
-		}
-	}
-	return false
-}
-
 // Grants reports whether a token holding scopes may call the named tool, with
 // the same rules the hub applies. An unknown or owner-only tool is never
 // granted.

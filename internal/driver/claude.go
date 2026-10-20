@@ -133,11 +133,7 @@ func (s *claudeSession) Compact(ctx context.Context) (Compaction, error) {
 }
 
 func (s *claudeSession) Close() error {
-	if s.markShut() {
-		s.p.stop(s.opts.stopTimeout())
-	}
-	<-s.done
-	return nil
+	return s.closeProc(s.p)
 }
 
 type claudeLine struct {
@@ -210,46 +206,9 @@ func (s *claudeSession) handle(raw []byte) {
 			s.emit(Event{Kind: KindCompaction, Compaction: &c, Raw: raw})
 		}
 	case "assistant":
-		if m.ParentToolUseID != nil {
-			return
-		}
-		var blocks []claudeBlock
-		if json.Unmarshal(m.Message.Content, &blocks) != nil {
-			return
-		}
-		if u := m.Message.Usage; u != nil && m.Message.ID != "" && m.Message.ID != s.usageID {
-			s.usageID = m.Message.ID
-			s.emitUsage(u, m.Message.Model)
-		}
-		for _, b := range blocks {
-			switch b.Type {
-			case "text":
-				if b.Text != "" {
-					s.emit(Event{Kind: KindText, Text: b.Text, MessageID: m.Message.ID, Raw: raw})
-				}
-			case "thinking":
-				if b.Thinking != "" {
-					s.emit(Event{Kind: KindText, Text: b.Thinking, MessageID: m.Message.ID, Thinking: true, Raw: raw})
-				}
-			case "tool_use":
-				s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: b.ID, Name: b.Name, Input: b.Input}, Raw: raw})
-			}
-		}
+		s.onAssistant(m, raw)
 	case "user":
-		if m.ParentToolUseID != nil {
-			return
-		}
-		var blocks []claudeBlock
-		if json.Unmarshal(m.Message.Content, &blocks) != nil {
-			return
-		}
-		for _, b := range blocks {
-			if b.Type == "tool_result" {
-				ev := toolResult(b.ToolUseID, claudeText(b.Content), b.IsError)
-				ev.Raw = raw
-				s.emit(ev)
-			}
-		}
+		s.onUser(m, raw)
 	case "control_request":
 		if m.Request.Subtype != "can_use_tool" {
 			return
@@ -262,37 +221,80 @@ func (s *claudeSession) handle(raw []byte) {
 			Raw:     raw,
 		}})
 	case "result":
-		s.setID(m.SessionID)
-		var w int64
-		for _, mu := range m.ModelUsage {
-			w = max(w, mu.ContextWindow)
-		}
-		if w > 0 && w != s.window {
-			s.window = w
-			if s.last.ContextTokens > 0 {
-				u := s.last
-				u.ContextWindow = w
-				s.last = u
-				s.emit(Event{Kind: KindUsage, Usage: &u})
-			}
-		}
-		if s.compactPending() {
-			var err error
-			if m.IsError {
-				err = fmt.Errorf("claude compact: %s", m.Result)
-			}
-			s.resolveCompact(err)
-			return
-		}
-		if m.IsError {
-			s.emit(Event{Kind: KindError, Text: m.Result, Raw: raw})
-		}
-		stop := m.StopReason
-		if stop == "" {
-			stop = m.Subtype
-		}
-		s.settle(stop, raw)
+		s.onResult(m, raw)
 	}
+}
+
+func (s *claudeSession) onAssistant(m claudeLine, raw []byte) {
+	if m.ParentToolUseID != nil {
+		return
+	}
+	var blocks []claudeBlock
+	if json.Unmarshal(m.Message.Content, &blocks) != nil {
+		return
+	}
+	if u := m.Message.Usage; u != nil && m.Message.ID != "" && m.Message.ID != s.usageID {
+		s.usageID = m.Message.ID
+		s.emitUsage(u, m.Message.Model)
+	}
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			s.emitText(m.Message.ID, b.Text, false, raw)
+		case "thinking":
+			s.emitText(m.Message.ID, b.Thinking, true, raw)
+		case "tool_use":
+			s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: b.ID, Name: b.Name, Input: b.Input}, Raw: raw})
+		}
+	}
+}
+
+func (s *claudeSession) onUser(m claudeLine, raw []byte) {
+	if m.ParentToolUseID != nil {
+		return
+	}
+	var blocks []claudeBlock
+	if json.Unmarshal(m.Message.Content, &blocks) != nil {
+		return
+	}
+	for _, b := range blocks {
+		if b.Type == "tool_result" {
+			s.emitToolResult(b.ToolUseID, claudeText(b.Content), b.IsError, raw)
+		}
+	}
+}
+
+func (s *claudeSession) onResult(m claudeLine, raw []byte) {
+	s.setID(m.SessionID)
+	var w int64
+	for _, mu := range m.ModelUsage {
+		w = max(w, mu.ContextWindow)
+	}
+	if w > 0 && w != s.window {
+		s.window = w
+		if s.last.ContextTokens > 0 {
+			u := s.last
+			u.ContextWindow = w
+			s.last = u
+			s.emit(Event{Kind: KindUsage, Usage: &u})
+		}
+	}
+	if s.compactPending() {
+		var err error
+		if m.IsError {
+			err = fmt.Errorf("claude compact: %s", m.Result)
+		}
+		s.resolveCompact(err)
+		return
+	}
+	if m.IsError {
+		s.emit(Event{Kind: KindError, Text: m.Result, Raw: raw})
+	}
+	stop := m.StopReason
+	if stop == "" {
+		stop = m.Subtype
+	}
+	s.settle(stop, raw)
 }
 
 // emitUsage reports the prompt size of one model call. The cache lifetime is

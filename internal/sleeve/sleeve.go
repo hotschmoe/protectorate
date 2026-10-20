@@ -192,34 +192,9 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	c.CgroupRoot = filepath.Join("/sys/fs/cgroup/user.slice", fmt.Sprintf("user-%d.slice", os.Getuid()),
 		fmt.Sprintf("user@%d.service", os.Getuid()), "app.slice")
 
-	if toolDirs == nil {
-		flutter := os.Getenv("PROTECTORATE_FLUTTER_SDK")
-		if flutter == "" {
-			if p, err := exec.LookPath("flutter"); err == nil {
-				if p, err = filepath.EvalSymlinks(p); err == nil {
-					flutter = filepath.Dir(filepath.Dir(p))
-				}
-			}
-		}
-		if flutter == "" {
-			flutter = filepath.Join(uh, "development/flutter")
-		}
-		if fi, err := os.Stat(flutter); err == nil && fi.IsDir() {
-			c.ToolDirs = append(c.ToolDirs, flutter)
-		}
-		for _, d := range defaultToolDirs {
-			if fi, err := os.Stat(filepath.Join(uh, d)); err == nil && fi.IsDir() {
-				c.ToolDirs = append(c.ToolDirs, filepath.Join(uh, d))
-			}
-		}
-	} else {
-		for _, d := range toolDirs {
-			fi, err := os.Stat(d)
-			if err != nil || !fi.IsDir() {
-				return Config{}, fmt.Errorf("tool dir %q is not a directory", d)
-			}
-			c.ToolDirs = append(c.ToolDirs, filepath.Clean(d))
-		}
+	c.ToolDirs, err = discoverToolDirs(uh, toolDirs)
+	if err != nil {
+		return Config{}, err
 	}
 	for _, d := range c.ToolDirs {
 		r, err := filepath.EvalSymlinks(d)
@@ -236,6 +211,45 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 			c.PathDirs = append(c.PathDirs, filepath.Join(d, "bin"), filepath.Join(d, "bin/cache/dart-sdk/bin"))
 		}
 	}
+	c.readGitIdentity()
+	return c, nil
+}
+
+func discoverToolDirs(userHome string, requested []string) ([]string, error) {
+	var dirs []string
+	if requested == nil {
+		flutter := os.Getenv("PROTECTORATE_FLUTTER_SDK")
+		if flutter == "" {
+			if p, err := exec.LookPath("flutter"); err == nil {
+				if p, err = filepath.EvalSymlinks(p); err == nil {
+					flutter = filepath.Dir(filepath.Dir(p))
+				}
+			}
+		}
+		if flutter == "" {
+			flutter = filepath.Join(userHome, "development/flutter")
+		}
+		if fi, err := os.Stat(flutter); err == nil && fi.IsDir() {
+			dirs = append(dirs, flutter)
+		}
+		for _, d := range defaultToolDirs {
+			if fi, err := os.Stat(filepath.Join(userHome, d)); err == nil && fi.IsDir() {
+				dirs = append(dirs, filepath.Join(userHome, d))
+			}
+		}
+	} else {
+		for _, d := range requested {
+			fi, err := os.Stat(d)
+			if err != nil || !fi.IsDir() {
+				return nil, fmt.Errorf("tool dir %q is not a directory", d)
+			}
+			dirs = append(dirs, filepath.Clean(d))
+		}
+	}
+	return dirs, nil
+}
+
+func (c *Config) readGitIdentity() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for key, dst := range map[string]*string{"user.name": &c.GitName, "user.email": &c.GitEmail} {
@@ -244,13 +258,12 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 			*dst = strings.TrimSpace(string(b))
 		}
 		if *dst == "" {
-			cmd := exec.CommandContext(ctx, "git", "config", "--file", filepath.Join(uh, "github/protectorate/.git/config"), "--no-includes", "--get", key)
+			cmd := exec.CommandContext(ctx, "git", "config", "--file", filepath.Join(c.UserHome, "github/protectorate/.git/config"), "--no-includes", "--get", key)
 			if b, err := cmd.Output(); err == nil {
 				*dst = strings.TrimSpace(string(b))
 			}
 		}
 	}
-	return c, nil
 }
 
 // AddBinaryDir makes the directory holding exe, and every directory along its

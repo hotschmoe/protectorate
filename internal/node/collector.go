@@ -101,17 +101,14 @@ func (c *Collector) Run(ctx context.Context) {
 // then stores them for Collect.
 func (c *Collector) Refresh(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Add(2)
 	var dirs []*pb.DirSize
 	var df *dockerDF
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		dirs = measureDirs(ctx, c.opts.WatchPaths, c.opts.DirBudget)
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		df = c.docker.diskUsage(ctx)
-	}()
+	})
 	wg.Wait()
 	if ctx.Err() != nil {
 		return
@@ -137,87 +134,73 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 	if c.opts.Jobs != nil {
 		m.Jobs = c.opts.Jobs.Isolation()
 	}
-
-	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
-	)
-	warn := func(section string, err error) {
-		mu.Lock()
-		m.Warnings = append(m.Warnings, fmt.Sprintf("%s: %v", section, err))
-		mu.Unlock()
-	}
-	run := func(f func()) {
-		wg.Add(1)
-		go func() { defer wg.Done(); f() }()
-	}
-	run(func() {
-		info, err := hostInfo(ctx)
-		if err != nil {
-			warn("host", err)
-		}
-		mu.Lock()
-		m.Platform = strings.TrimSpace(info.Platform + " " + info.PlatformVersion)
-		m.UptimeSeconds = int64(info.Uptime)
-		if m.Hostname == "" {
-			m.Hostname = info.Hostname
-		}
-		mu.Unlock()
-	})
-	run(func() {
-		cm, err := c.cpuMetrics(ctx)
-		if err != nil {
-			warn("cpu", err)
-		}
-		mu.Lock()
-		m.Cpu = cm
-		mu.Unlock()
-	})
-	run(func() {
-		mm, err := memMetrics(ctx)
-		if err != nil {
-			warn("memory", err)
-			return
-		}
-		mu.Lock()
-		m.Memory = mm
-		mu.Unlock()
-	})
-	run(func() {
-		fs, errs := filesystemMetrics(ctx, c.probes)
-		mu.Lock()
-		m.Filesystems = fs
-		mu.Unlock()
-		for _, err := range errs {
-			warn("disk", err)
-		}
-	})
-	run(func() {
-		g, n := c.accelMetrics(ctx)
-		mu.Lock()
-		m.Gpus, m.Npus = g, n
-		mu.Unlock()
-	})
-	run(func() {
-		eng, err := c.engineMetrics(ctx)
-		if err != nil {
-			warn("container engine", err)
-		}
-		mu.Lock()
-		m.Engine = eng
-		mu.Unlock()
-	})
-	wg.Wait()
+	c.collectMetrics(ctx, m)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-
 	c.slowMu.RLock()
 	m.WatchDirs = c.dirs
 	c.slowMu.RUnlock()
 	sort.Strings(m.Warnings)
 	c.last, c.lastAt = m, time.Now()
 	return m, nil
+}
+
+func (c *Collector) collectMetrics(ctx context.Context, m *pb.NodeMetrics) {
+	var (
+		warningsMu sync.Mutex
+		wg         sync.WaitGroup
+	)
+	warn := func(section string, err error) {
+		warningsMu.Lock()
+		m.Warnings = append(m.Warnings, fmt.Sprintf("%s: %v", section, err))
+		warningsMu.Unlock()
+	}
+	wg.Go(func() {
+		info, err := hostInfo(ctx)
+		if err != nil {
+			warn("host", err)
+		}
+		m.Platform = strings.TrimSpace(info.Platform + " " + info.PlatformVersion)
+		m.UptimeSeconds = int64(info.Uptime)
+		if m.Hostname == "" {
+			m.Hostname = info.Hostname
+		}
+	})
+	wg.Go(func() {
+		cm, err := c.cpuMetrics(ctx)
+		if err != nil {
+			warn("cpu", err)
+		}
+		m.Cpu = cm
+	})
+	wg.Go(func() {
+		mm, err := memMetrics(ctx)
+		if err != nil {
+			warn("memory", err)
+			return
+		}
+		m.Memory = mm
+	})
+	wg.Go(func() {
+		fs, errs := filesystemMetrics(ctx, c.probes)
+		m.Filesystems = fs
+		for _, err := range errs {
+			warn("disk", err)
+		}
+	})
+	wg.Go(func() {
+		g, n := c.accelMetrics(ctx)
+		m.Gpus, m.Npus = g, n
+	})
+	wg.Go(func() {
+		eng, err := c.engineMetrics(ctx)
+		if err != nil {
+			warn("container engine", err)
+		}
+		m.Engine = eng
+	})
+	wg.Wait()
 }
 
 func (c *Collector) cpuMetrics(ctx context.Context) (*pb.CpuMetrics, error) {
@@ -450,11 +433,9 @@ func filesystemMetrics(ctx context.Context, pr *fsProber) ([]*pb.FilesystemMetri
 	results := make([]fsResult, len(cands))
 	var wg sync.WaitGroup
 	for i, p := range cands {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results[i] = pr.probe(ctx, p)
-		}()
+		})
 	}
 	wg.Wait()
 

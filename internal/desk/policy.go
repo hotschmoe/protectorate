@@ -72,7 +72,7 @@ func NewPolicy(window string, idle time.Duration, timezone string, lockAfter boo
 	loc := time.Local
 	if timezone != "" {
 		if loc, err = time.LoadLocation(timezone); err != nil {
-			return nil, fmt.Errorf("%w: time zone %q: %v", ErrInvalid, timezone, err)
+			return nil, fmt.Errorf("%w: time zone %q: %w", ErrInvalid, timezone, err)
 		}
 	}
 	return &Policy{Start: start, End: end, Idle: idle, Loc: loc, LockAfter: lockAfter}, nil

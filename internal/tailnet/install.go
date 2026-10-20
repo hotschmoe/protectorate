@@ -80,6 +80,7 @@ func install(ctx context.Context, home, version, base, goos, goarch string, hc *
 		return "", err
 	}
 	defer os.Remove(tmp.Name())
+	defer tmp.Close()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/"+asset, nil)
 	if err != nil {

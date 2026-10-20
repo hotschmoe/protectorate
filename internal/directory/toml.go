@@ -64,21 +64,8 @@ func parseTOML(src string) tomlDoc {
 
 // stripComment removes a trailing # comment that is not inside a string.
 func stripComment(s string) string {
-	var q byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case q != 0:
-			if c == '\\' && q == '"' {
-				i++
-			} else if c == q {
-				q = 0
-			}
-		case c == '"' || c == '\'':
-			q = c
-		case c == '#':
-			return s[:i]
-		}
+	if i := indexOutsideQuotes(s, '#'); i >= 0 {
+		return s[:i]
 	}
 	return s
 }

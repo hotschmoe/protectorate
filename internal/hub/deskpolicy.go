@@ -1,12 +1,10 @@
 package hub
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -71,10 +69,8 @@ func openDeskPolicies(path string) (*deskPolicies, error) {
 		return nil, fmt.Errorf("read desk policies: %w", err)
 	}
 	var f deskPolicyFile
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	if err := decodeState(path, raw, &f); err != nil {
+		return nil, err
 	}
 	for name, r := range f.Nodes {
 		if _, err := node.PolicyFromProto(r.proto()); err != nil {

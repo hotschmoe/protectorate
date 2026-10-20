@@ -1,14 +1,12 @@
 package hub
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"os"
@@ -158,10 +156,8 @@ func OpenLeases(path string, emit func(kind, subject string, payload *structpb.S
 		return nil, fmt.Errorf("read leases: %w", err)
 	}
 	var f leaseFile
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	if err := decodeState(path, raw, &f); err != nil {
+		return nil, err
 	}
 	for _, r := range f.Leases {
 		if r.ID == "" || r.Node == "" || r.TTL <= 0 {
@@ -622,51 +618,65 @@ func pickNode(statuses []*pb.NodeStatus, sel *pb.NodeSelector, busy func(string)
 // nodeFits returns the GPU to reserve (nil for the whole node) or the reason
 // the node does not fit.
 func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int) *pb.Lease) (*int, string) {
-	name := st.Node.Name
+	if why := nodeSelectorRefusal(st, sel); why != "" {
+		return nil, why
+	}
+	if sel.GetGpuVramBytes() > 0 {
+		return selectGPU(st, sel, blocked)
+	}
+	if why := idleGPURefusal(st, sel.GetGpu()); why != "" {
+		return nil, why
+	}
+	if l := blocked(st.Node.Name, nil); l != nil {
+		return nil, "leased by " + l.Holder
+	}
+	return nil, ""
+}
+
+func nodeSelectorRefusal(st *pb.NodeStatus, sel *pb.NodeSelector) string {
 	switch {
 	case st.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH || st.Metrics == nil:
-		return nil, "not fresh"
+		return "not fresh"
 	case st.Draining:
-		return nil, "being removed"
+		return "being removed"
 	case st.Node.Tier == TierCare:
-		return nil, "tier care"
+		return "tier care"
 	case sel.GetOs() != "" && !strings.EqualFold(st.Metrics.Os, sel.Os):
-		return nil, "os " + st.Metrics.Os
+		return "os " + st.Metrics.Os
 	case sel.GetArch() != "" && !strings.EqualFold(st.Metrics.Arch, sel.Arch):
-		return nil, "arch " + st.Metrics.Arch
+		return "arch " + st.Metrics.Arch
 	case sel.GetMinFreeMemoryBytes() > 0 && st.Metrics.GetMemory().GetAvailableBytes() < sel.MinFreeMemoryBytes:
-		return nil, "not enough free memory"
+		return "not enough free memory"
 	case sel.GetGpu() != "" && !slices.ContainsFunc(st.Metrics.Gpus, func(g *pb.GpuMetrics) bool { return accelMatches(g.Vendor, g.Name, sel.Gpu) }):
-		return nil, "no gpu matching " + sel.Gpu
+		return "no gpu matching " + sel.Gpu
 	case sel.GetNpu() != "" && !slices.ContainsFunc(st.Metrics.Npus, func(n *pb.AcceleratorMetrics) bool { return accelMatches(n.Vendor, n.Name, sel.Npu) }):
-		return nil, "no npu matching " + sel.Npu
+		return "no npu matching " + sel.Npu
 	}
-	if sel.GetGpu() == "" && sel.GetGpuVramBytes() == 0 {
+	return ""
+}
+
+func idleGPURefusal(st *pb.NodeStatus, want string) string {
+	if want == "" {
 		if idx, why := busyDiscrete(st); why != "" {
-			return nil, fmt.Sprintf("gpu %d busy: %s", idx, why)
+			return fmt.Sprintf("gpu %d busy: %s", idx, why)
 		}
-	} else if sel.GetGpuVramBytes() == 0 {
-		var busy string
-		free := slices.ContainsFunc(st.Metrics.Gpus, func(g *pb.GpuMetrics) bool {
-			if !accelMatches(g.Vendor, g.Name, sel.Gpu) {
-				return false
-			}
-			if why := busyReason(st, int(g.Index)); why != "" {
-				busy = fmt.Sprintf("gpu %d busy: %s", g.Index, why)
-				return false
-			}
-			return true
-		})
-		if !free {
-			return nil, busy
-		}
+		return ""
 	}
-	if sel.GetGpuVramBytes() == 0 {
-		if l := blocked(name, nil); l != nil {
-			return nil, "leased by " + l.Holder
+	var busy string
+	for _, g := range st.Metrics.Gpus {
+		if !accelMatches(g.Vendor, g.Name, want) {
+			continue
 		}
-		return nil, ""
+		if why := busyReason(st, int(g.Index)); why != "" {
+			busy = fmt.Sprintf("gpu %d busy: %s", g.Index, why)
+			continue
+		}
+		return ""
 	}
+	return busy
+}
+
+func selectGPU(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int) *pb.Lease) (*int, string) {
 	var gpu *int
 	var bestFree uint64
 	var busy string
@@ -687,7 +697,7 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int
 			free = 0
 		}
 		idx := int(g.Index)
-		if free < sel.GpuVramBytes || blocked(name, &idx) != nil {
+		if free < sel.GpuVramBytes || blocked(st.Node.Name, &idx) != nil {
 			continue
 		}
 		if gpu == nil || free > bestFree {

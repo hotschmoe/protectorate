@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -201,7 +202,7 @@ func (a *Authorizer) AuthorizeTerminal(p *Principal, readOnly, hostShell bool) e
 		}
 		return &DeniedError{Name: p.Name, Need: need}
 	}
-	if hostShell && !readOnly && !hasScope(p.Scopes, ScopeTerminalHost) {
+	if hostShell && !readOnly && !slices.Contains(p.Scopes, ScopeTerminalHost) {
 		return &DeniedError{Name: p.Name, Need: ScopeTerminalHost + " (read-write terminal on a session outside a sleeve sandbox; attach with readonly=1)"}
 	}
 	return nil

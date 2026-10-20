@@ -11,10 +11,12 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -407,7 +409,12 @@ func validateRun(req *pb.RunJobRequest) error {
 			return badArg("invalid environment variable name %q", k)
 		}
 	}
-	for _, g := range req.ArtifactGlobs {
+	return ValidateArtifactGlobs(req.ArtifactGlobs)
+}
+
+// ValidateArtifactGlobs checks glob syntax and confines matches to the workspace.
+func ValidateArtifactGlobs(globs []string) error {
+	for _, g := range globs {
 		if _, err := filepath.Match(g, ""); err != nil || !fs.ValidPath(g) {
 			return badArg("invalid artifact glob %q", g)
 		}
@@ -551,20 +558,13 @@ func (j *Jobs) Attach(ctx context.Context, id string, offset uint64, send func(*
 				return err
 			}
 		}
-		for offset < size {
+		if offset < size {
 			if buf == nil {
 				buf = make([]byte, logReadChunk)
 			}
-			n, err := f.ReadAt(buf[:min(uint64(len(buf)), size-offset)], int64(offset))
-			if n > 0 {
-				ev := &pb.JobEvent{Event: &pb.JobEvent_Output{Output: &pb.JobOutput{Data: append([]byte(nil), buf[:n]...)}}}
-				if err := send(ev); err != nil {
-					return err
-				}
-				offset += uint64(n)
-			}
-			if err != nil && n == 0 {
-				return connect.NewError(connect.CodeInternal, err)
+			offset, err = sendJobOutput(f, offset, size, buf, send)
+			if err != nil {
+				return err
 			}
 		}
 		if fin != nil {
@@ -582,6 +582,23 @@ func (j *Jobs) Attach(ctx context.Context, id string, offset uint64, send func(*
 			return ctx.Err()
 		}
 	}
+}
+
+func sendJobOutput(f *os.File, offset, size uint64, buf []byte, send func(*pb.JobEvent) error) (uint64, error) {
+	for offset < size {
+		n, err := f.ReadAt(buf[:min(uint64(len(buf)), size-offset)], int64(offset))
+		if n > 0 {
+			ev := &pb.JobEvent{Event: &pb.JobEvent_Output{Output: &pb.JobOutput{Data: append([]byte(nil), buf[:n]...)}}}
+			if err := send(ev); err != nil {
+				return offset, err
+			}
+			offset += uint64(n)
+		}
+		if err != nil && n == 0 {
+			return offset, connect.NewError(connect.CodeInternal, err)
+		}
+	}
+	return offset, nil
 }
 
 // workspace readies the working directory: the persistent worktree for git
@@ -672,11 +689,7 @@ var jobEnvKeys = []string{"PROTECTORATE_JOB_ID", "PROTECTORATE_JOB_DIR"}
 
 // envKeys returns the job's variable names, sorted, the node's own first.
 func envKeys(req *pb.RunJobRequest) []string {
-	keys := make([]string, 0, len(req.Env))
-	for k := range req.Env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(req.Env))
 	return append(append([]string(nil), jobEnvKeys...), keys...)
 }
 
@@ -774,22 +787,18 @@ func startExec(req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jo
 		for _, kv := range jobEnv(req, jobDir) {
 			cmd.Env = append(cmd.Env, kv[0]+"="+kv[1])
 		}
-		tree, err := startTree(cmd, req.Limits)
+	} else {
+		pr, pw, err := os.Pipe()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("sandbox env pipe: %w", err)
 		}
-		return execRunning{cmd, tree}, nil
+		defer pr.Close()
+		cmd.ExtraFiles = []*os.File{pr}
+		go func() {
+			_, _ = pw.Write(envArgs)
+			pw.Close()
+		}()
 	}
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return nil, fmt.Errorf("sandbox env pipe: %w", err)
-	}
-	defer pr.Close()
-	cmd.ExtraFiles = []*os.File{pr}
-	go func() {
-		_, _ = pw.Write(envArgs)
-		pw.Close()
-	}()
 	tree, err := startTree(cmd, req.Limits)
 	if err != nil {
 		return nil, err

@@ -12,7 +12,7 @@
 // them.
 //
 //	token, tokens.json, nodes.json, sleeves.json, leases.json, desk-policies.json,
-//	desk-use.json, directory.json, mailbox.jsonl, backlog.md, audit/, ca/,
+//	desk-use.json, directory.json, mailbox.jsonl, notes.json, audit/, ca/,
 //	tailnet/ (db.sqlite as a snapshot, config, DERP certificate and keys, noise
 //	key, tsnet state; not logs, sockets, headscale.yaml, policy.json, derpmap.json
 //	or the API key, which the hub regenerates),
@@ -158,46 +158,18 @@ func Create(ctx context.Context, opts Options) (string, error) {
 		return "", err
 	}
 	archiveHash := sha256.New()
-	zw, err := zstd.NewWriter(io.MultiWriter(part, archiveHash))
-	if err != nil {
-		return "", err
-	}
-	tw := tar.NewWriter(zw)
 	m := Manifest{Format: FormatVersion, Created: created, Version: opts.Version, Home: home}
-	for _, s := range srcs {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		f, err := addFile(ctx, tw, s)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return "", fmt.Errorf("back up %s: %w", s.rel, err)
-		}
-		m.Files = append(m.Files, f)
-	}
-	raw, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := writeEntry(tw, ManifestName, 0o600, raw); err != nil {
-		return "", err
-	}
-	if err := tw.Close(); err != nil {
-		return "", err
-	}
-	if err := zw.Close(); err != nil {
+	if err := writeArchive(ctx, io.MultiWriter(part, archiveHash), srcs, m); err != nil {
 		return "", err
 	}
 	if err := part.Sync(); err != nil {
-		return "", err
+		return "", fmt.Errorf("sync backup: %w", err)
 	}
 	if err := part.Close(); err != nil {
-		return "", err
+		return "", fmt.Errorf("close backup: %w", err)
 	}
 	if err := os.Rename(part.Name(), final); err != nil {
-		return "", err
+		return "", fmt.Errorf("publish backup: %w", err)
 	}
 	done = true
 	sum := hex.EncodeToString(archiveHash.Sum(nil))
@@ -207,13 +179,49 @@ func Create(ctx context.Context, opts Options) (string, error) {
 	return final, nil
 }
 
+func writeArchive(ctx context.Context, w io.Writer, srcs []source, m Manifest) error {
+	zw, err := zstd.NewWriter(w)
+	if err != nil {
+		return fmt.Errorf("compress backup: %w", err)
+	}
+	defer zw.Close()
+	tw := tar.NewWriter(zw)
+	for _, s := range srcs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		f, err := addFile(ctx, tw, s)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("back up %s: %w", s.rel, err)
+		}
+		m.Files = append(m.Files, f)
+	}
+	raw, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode manifest: %w", err)
+	}
+	if err := writeEntry(tw, ManifestName, 0o600, raw); err != nil {
+		return fmt.Errorf("write manifest: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("close backup archive: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("close backup compression: %w", err)
+	}
+	return nil
+}
+
 // plan lists what to archive, sorted by archive path.
 func plan(home string) ([]source, error) {
 	var out []source
 	add := func(rel string) {
 		out = append(out, source{rel: rel, path: filepath.Join(home, filepath.FromSlash(rel))})
 	}
-	for _, f := range []string{"token", "tokens.json", "nodes.json", "sleeves.json", "leases.json", "desk-policies.json", "desk-use.json", "directory.json", "mailbox.jsonl", "backlog.md", "jobs/request-ids.jsonl"} {
+	for _, f := range []string{"token", "tokens.json", "nodes.json", "sleeves.json", "leases.json", "desk-policies.json", "desk-use.json", "directory.json", "mailbox.jsonl", "notes.json", "jobs/request-ids.jsonl"} {
 		if fi, err := os.Lstat(filepath.Join(home, filepath.FromSlash(f))); err == nil && fi.Mode().IsRegular() {
 			add(f)
 		}
@@ -485,37 +493,52 @@ func scan(ctx context.Context, archive string, visit func(*tar.Header, io.Reader
 		if _, dup := seen[h.Name]; dup {
 			return nil, fmt.Errorf("archive lists %q twice", h.Name)
 		}
-		hash := sha256.New()
-		body := &countReader{r: io.TeeReader(tr, hash)}
-		if visit != nil {
-			if err := visit(h, body); err != nil {
-				return nil, err
-			}
+		entry, err := readArchiveFile(h, tr, visit)
+		if err != nil {
+			return nil, err
 		}
-		if _, err := io.Copy(io.Discard, body); err != nil {
-			return nil, fmt.Errorf("read %s: %w", h.Name, err)
-		}
-		seen[h.Name] = File{Path: h.Name, Size: body.n, SHA256: hex.EncodeToString(hash.Sum(nil)), Mode: uint32(h.Mode)}
+		seen[h.Name] = entry
 	}
+	if err := validateManifest(m, seen); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func readArchiveFile(h *tar.Header, r io.Reader, visit func(*tar.Header, io.Reader) error) (File, error) {
+	hash := sha256.New()
+	body := &countReader{r: io.TeeReader(r, hash)}
+	if visit != nil {
+		if err := visit(h, body); err != nil {
+			return File{}, err
+		}
+	}
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return File{}, fmt.Errorf("read %s: %w", h.Name, err)
+	}
+	return File{Path: h.Name, Size: body.n, SHA256: hex.EncodeToString(hash.Sum(nil)), Mode: uint32(h.Mode)}, nil
+}
+
+func validateManifest(m *Manifest, seen map[string]File) error {
 	if m == nil {
-		return nil, errors.New("archive has no manifest")
+		return errors.New("archive has no manifest")
 	}
 	if m.Format != FormatVersion {
-		return nil, fmt.Errorf("archive format %d, this binary reads %d", m.Format, FormatVersion)
+		return fmt.Errorf("archive format %d, this binary reads %d", m.Format, FormatVersion)
 	}
 	if len(m.Files) != len(seen) {
-		return nil, fmt.Errorf("manifest lists %d files, archive holds %d", len(m.Files), len(seen))
+		return fmt.Errorf("manifest lists %d files, archive holds %d", len(m.Files), len(seen))
 	}
 	for _, want := range m.Files {
 		got, ok := seen[want.Path]
 		switch {
 		case !ok:
-			return nil, fmt.Errorf("manifest lists %q, which is not in the archive", want.Path)
+			return fmt.Errorf("manifest lists %q, which is not in the archive", want.Path)
 		case got.Size != want.Size || got.SHA256 != want.SHA256:
-			return nil, fmt.Errorf("%s does not match the manifest (size %d, sha256 %s; manifest says %d, %s)", want.Path, got.Size, got.SHA256, want.Size, want.SHA256)
+			return fmt.Errorf("%s does not match the manifest (size %d, sha256 %s; manifest says %d, %s)", want.Path, got.Size, got.SHA256, want.Size, want.SHA256)
 		}
 	}
-	return m, nil
+	return nil
 }
 
 type countReader struct {
