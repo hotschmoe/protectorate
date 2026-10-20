@@ -605,6 +605,17 @@ message NodeStatus {
   repeated DeskUse desk_inputs = 10;
   // draining marks a node being removed: no new jobs or leases go to it.
   bool draining = 11;
+  // busy_gpus are the node's GPUs that something outside protectorate's
+  // leases is using, as the hub judges from the node's recent polls:
+  // automatic placement skips them, explicit requests are refused.
+  repeated GpuBusy busy_gpus = 12;
+}
+
+message GpuBusy {
+  // index is GpuMetrics.index.
+  int32 index = 1;
+  // reason says what makes it busy, e.g. "92% of its VRAM is in use".
+  string reason = 2;
 }
 
 message ListNodesRequest {}

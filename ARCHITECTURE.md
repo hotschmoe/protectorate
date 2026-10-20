@@ -350,7 +350,8 @@ node) executes.
   unreachable, never tier `care` (a care node is never leased, and a job naming one needs the
   owner token or a `node_admin:<node>` grant), matching os, arch,
   free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`
-  text, (for GPUs) free VRAM, and not under a conflicting lease.
+  text, (for GPUs) free VRAM, no busy GPU (another holder by VRAM, sustained
+  load or heat; docs/node-work.md), and not under a conflicting lease.
   Load is `(cpu% + mem%)/2` plus one core's worth per job already placed, so a
   burst of submits spreads out; a node that already ran a job from the same
   repo counts 20 points lighter, because its `target/` is warm.

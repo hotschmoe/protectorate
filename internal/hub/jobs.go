@@ -546,6 +546,11 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
+	if _, named := req.Target.GetTarget().(*pb.JobTarget_Node); named && mode != pb.JobMode_JOB_MODE_ADMIN {
+		if err := m.nodes.gpuFree(n.Name, nil); err != nil {
+			return nil, err
+		}
+	}
 	p := auth.PrincipalFrom(ctx)
 	id, err := newJobID()
 	if err != nil {

@@ -136,6 +136,27 @@ void main() {
       }
     });
 
+    testWidgets('busy gpus get a badge', (t) async {
+      await t.pumpWidget(
+        _host(
+          NodeCard(
+            status:
+                _status(
+                    'llm',
+                    NodeFreshness.NODE_FRESHNESS_FRESH,
+                    metrics: _metrics(gpu: true),
+                  )
+                  ..busyGpus.add(
+                    GpuBusy(index: 0, reason: '94% of its VRAM is in use'),
+                  ),
+            age: const Duration(seconds: 3),
+            onTap: () {},
+          ),
+        ),
+      );
+      expect(find.byKey(const ValueKey('alert-GPU0 BUSY')), findsOneWidget);
+    });
+
     testWidgets('stale node is labeled with its age', (t) async {
       await t.pumpWidget(
         _host(

@@ -3023,7 +3023,11 @@ type NodeStatus struct {
 	// desk_inputs is today's desktop input commands per caller.
 	DeskInputs []*DeskUse `protobuf:"bytes,10,rep,name=desk_inputs,json=deskInputs,proto3" json:"desk_inputs,omitempty"`
 	// draining marks a node being removed: no new jobs or leases go to it.
-	Draining      bool `protobuf:"varint,11,opt,name=draining,proto3" json:"draining,omitempty"`
+	Draining bool `protobuf:"varint,11,opt,name=draining,proto3" json:"draining,omitempty"`
+	// busy_gpus are the node's GPUs that something outside protectorate's
+	// leases is using, as the hub judges from the node's recent polls:
+	// automatic placement skips them, explicit requests are refused.
+	BusyGpus      []*GpuBusy `protobuf:"bytes,12,rep,name=busy_gpus,json=busyGpus,proto3" json:"busy_gpus,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3135,6 +3139,67 @@ func (x *NodeStatus) GetDraining() bool {
 	return false
 }
 
+func (x *NodeStatus) GetBusyGpus() []*GpuBusy {
+	if x != nil {
+		return x.BusyGpus
+	}
+	return nil
+}
+
+type GpuBusy struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// index is GpuMetrics.index.
+	Index int32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	// reason says what makes it busy, e.g. "92% of its VRAM is in use".
+	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GpuBusy) Reset() {
+	*x = GpuBusy{}
+	mi := &file_protectorate_v1_node_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GpuBusy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GpuBusy) ProtoMessage() {}
+
+func (x *GpuBusy) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_node_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GpuBusy.ProtoReflect.Descriptor instead.
+func (*GpuBusy) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *GpuBusy) GetIndex() int32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *GpuBusy) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type ListNodesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -3143,7 +3208,7 @@ type ListNodesRequest struct {
 
 func (x *ListNodesRequest) Reset() {
 	*x = ListNodesRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[32]
+	mi := &file_protectorate_v1_node_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3155,7 +3220,7 @@ func (x *ListNodesRequest) String() string {
 func (*ListNodesRequest) ProtoMessage() {}
 
 func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[32]
+	mi := &file_protectorate_v1_node_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3168,7 +3233,7 @@ func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesRequest.ProtoReflect.Descriptor instead.
 func (*ListNodesRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{32}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{33}
 }
 
 type ListNodesResponse struct {
@@ -3180,7 +3245,7 @@ type ListNodesResponse struct {
 
 func (x *ListNodesResponse) Reset() {
 	*x = ListNodesResponse{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[33]
+	mi := &file_protectorate_v1_node_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3192,7 +3257,7 @@ func (x *ListNodesResponse) String() string {
 func (*ListNodesResponse) ProtoMessage() {}
 
 func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[33]
+	mi := &file_protectorate_v1_node_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3205,7 +3270,7 @@ func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesResponse.ProtoReflect.Descriptor instead.
 func (*ListNodesResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{33}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListNodesResponse) GetNodes() []*NodeStatus {
@@ -3224,7 +3289,7 @@ type GetNodeRequest struct {
 
 func (x *GetNodeRequest) Reset() {
 	*x = GetNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[34]
+	mi := &file_protectorate_v1_node_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3236,7 +3301,7 @@ func (x *GetNodeRequest) String() string {
 func (*GetNodeRequest) ProtoMessage() {}
 
 func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[34]
+	mi := &file_protectorate_v1_node_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3249,7 +3314,7 @@ func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{34}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *GetNodeRequest) GetName() string {
@@ -3271,7 +3336,7 @@ type AddNodeRequest struct {
 
 func (x *AddNodeRequest) Reset() {
 	*x = AddNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[35]
+	mi := &file_protectorate_v1_node_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3283,7 +3348,7 @@ func (x *AddNodeRequest) String() string {
 func (*AddNodeRequest) ProtoMessage() {}
 
 func (x *AddNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[35]
+	mi := &file_protectorate_v1_node_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3296,7 +3361,7 @@ func (x *AddNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddNodeRequest.ProtoReflect.Descriptor instead.
 func (*AddNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{35}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *AddNodeRequest) GetNode() *NodeInfo {
@@ -3328,7 +3393,7 @@ type RemoveNodeRequest struct {
 
 func (x *RemoveNodeRequest) Reset() {
 	*x = RemoveNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[36]
+	mi := &file_protectorate_v1_node_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3340,7 +3405,7 @@ func (x *RemoveNodeRequest) String() string {
 func (*RemoveNodeRequest) ProtoMessage() {}
 
 func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[36]
+	mi := &file_protectorate_v1_node_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3353,7 +3418,7 @@ func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeRequest.ProtoReflect.Descriptor instead.
 func (*RemoveNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{36}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *RemoveNodeRequest) GetName() string {
@@ -3396,7 +3461,7 @@ type RemoveNodeProgress struct {
 
 func (x *RemoveNodeProgress) Reset() {
 	*x = RemoveNodeProgress{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[37]
+	mi := &file_protectorate_v1_node_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3408,7 +3473,7 @@ func (x *RemoveNodeProgress) String() string {
 func (*RemoveNodeProgress) ProtoMessage() {}
 
 func (x *RemoveNodeProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[37]
+	mi := &file_protectorate_v1_node_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3421,7 +3486,7 @@ func (x *RemoveNodeProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeProgress.ProtoReflect.Descriptor instead.
 func (*RemoveNodeProgress) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{37}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *RemoveNodeProgress) GetPhase() RemovePhase {
@@ -3453,7 +3518,7 @@ type UninstallRequest struct {
 
 func (x *UninstallRequest) Reset() {
 	*x = UninstallRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[38]
+	mi := &file_protectorate_v1_node_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3465,7 +3530,7 @@ func (x *UninstallRequest) String() string {
 func (*UninstallRequest) ProtoMessage() {}
 
 func (x *UninstallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[38]
+	mi := &file_protectorate_v1_node_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3478,7 +3543,7 @@ func (x *UninstallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallRequest.ProtoReflect.Descriptor instead.
 func (*UninstallRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{38}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{39}
 }
 
 type UninstallResponse struct {
@@ -3493,7 +3558,7 @@ type UninstallResponse struct {
 
 func (x *UninstallResponse) Reset() {
 	*x = UninstallResponse{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[39]
+	mi := &file_protectorate_v1_node_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3505,7 +3570,7 @@ func (x *UninstallResponse) String() string {
 func (*UninstallResponse) ProtoMessage() {}
 
 func (x *UninstallResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[39]
+	mi := &file_protectorate_v1_node_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3518,7 +3583,7 @@ func (x *UninstallResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UninstallResponse.ProtoReflect.Descriptor instead.
 func (*UninstallResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{39}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *UninstallResponse) GetActions() []string {
@@ -3554,7 +3619,7 @@ type InviteNodeRequest struct {
 
 func (x *InviteNodeRequest) Reset() {
 	*x = InviteNodeRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[40]
+	mi := &file_protectorate_v1_node_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3566,7 +3631,7 @@ func (x *InviteNodeRequest) String() string {
 func (*InviteNodeRequest) ProtoMessage() {}
 
 func (x *InviteNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[40]
+	mi := &file_protectorate_v1_node_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3579,7 +3644,7 @@ func (x *InviteNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteNodeRequest.ProtoReflect.Descriptor instead.
 func (*InviteNodeRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{40}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *InviteNodeRequest) GetName() string {
@@ -3632,7 +3697,7 @@ type InstallCommand struct {
 
 func (x *InstallCommand) Reset() {
 	*x = InstallCommand{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[41]
+	mi := &file_protectorate_v1_node_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3644,7 +3709,7 @@ func (x *InstallCommand) String() string {
 func (*InstallCommand) ProtoMessage() {}
 
 func (x *InstallCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[41]
+	mi := &file_protectorate_v1_node_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3657,7 +3722,7 @@ func (x *InstallCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallCommand.ProtoReflect.Descriptor instead.
 func (*InstallCommand) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{41}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *InstallCommand) GetPlatform() InstallPlatform {
@@ -3703,7 +3768,7 @@ type InviteNodeResponse struct {
 
 func (x *InviteNodeResponse) Reset() {
 	*x = InviteNodeResponse{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[42]
+	mi := &file_protectorate_v1_node_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3715,7 +3780,7 @@ func (x *InviteNodeResponse) String() string {
 func (*InviteNodeResponse) ProtoMessage() {}
 
 func (x *InviteNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[42]
+	mi := &file_protectorate_v1_node_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3728,7 +3793,7 @@ func (x *InviteNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteNodeResponse.ProtoReflect.Descriptor instead.
 func (*InviteNodeResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{42}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *InviteNodeResponse) GetNode() *NodeInfo {
@@ -3782,7 +3847,7 @@ type WatchNodeSetupRequest struct {
 
 func (x *WatchNodeSetupRequest) Reset() {
 	*x = WatchNodeSetupRequest{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[43]
+	mi := &file_protectorate_v1_node_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3794,7 +3859,7 @@ func (x *WatchNodeSetupRequest) String() string {
 func (*WatchNodeSetupRequest) ProtoMessage() {}
 
 func (x *WatchNodeSetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[43]
+	mi := &file_protectorate_v1_node_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3807,7 +3872,7 @@ func (x *WatchNodeSetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchNodeSetupRequest.ProtoReflect.Descriptor instead.
 func (*WatchNodeSetupRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{43}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *WatchNodeSetupRequest) GetName() string {
@@ -3833,7 +3898,7 @@ type NodeSetupProgress struct {
 
 func (x *NodeSetupProgress) Reset() {
 	*x = NodeSetupProgress{}
-	mi := &file_protectorate_v1_node_proto_msgTypes[44]
+	mi := &file_protectorate_v1_node_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3845,7 +3910,7 @@ func (x *NodeSetupProgress) String() string {
 func (*NodeSetupProgress) ProtoMessage() {}
 
 func (x *NodeSetupProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_node_proto_msgTypes[44]
+	mi := &file_protectorate_v1_node_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3858,7 +3923,7 @@ func (x *NodeSetupProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeSetupProgress.ProtoReflect.Descriptor instead.
 func (*NodeSetupProgress) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{44}
+	return file_protectorate_v1_node_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *NodeSetupProgress) GetStage() NodeSetupStage {
@@ -4128,7 +4193,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x05local\x18\t \x01(\bR\x05local\x12\x18\n" +
 	"\ainvited\x18\n" +
 	" \x01(\bR\ainvited\x12\"\n" +
-	"\rinvite_key_id\x18\v \x01(\x04R\vinviteKeyId\"\x8b\x04\n" +
+	"\rinvite_key_id\x18\v \x01(\x04R\vinviteKeyId\"\xc2\x04\n" +
 	"\n" +
 	"NodeStatus\x12-\n" +
 	"\x04node\x18\x01 \x01(\v2\x19.protectorate.v1.NodeInfoR\x04node\x126\n" +
@@ -4145,7 +4210,11 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\vdesk_inputs\x18\n" +
 	" \x03(\v2\x18.protectorate.v1.DeskUseR\n" +
 	"deskInputs\x12\x1a\n" +
-	"\bdraining\x18\v \x01(\bR\bdraining\"\x12\n" +
+	"\bdraining\x18\v \x01(\bR\bdraining\x125\n" +
+	"\tbusy_gpus\x18\f \x03(\v2\x18.protectorate.v1.GpuBusyR\bbusyGpus\"7\n" +
+	"\aGpuBusy\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x12\n" +
 	"\x10ListNodesRequest\"F\n" +
 	"\x11ListNodesResponse\x121\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x1b.protectorate.v1.NodeStatusR\x05nodes\"$\n" +
@@ -4292,7 +4361,7 @@ func file_protectorate_v1_node_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_protectorate_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_protectorate_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_protectorate_v1_node_proto_goTypes = []any{
 	(UpdatePhase)(0),                          // 0: protectorate.v1.UpdatePhase
 	(FileKind)(0),                             // 1: protectorate.v1.FileKind
@@ -4334,43 +4403,44 @@ var file_protectorate_v1_node_proto_goTypes = []any{
 	(*NodeAlert)(nil),                         // 37: protectorate.v1.NodeAlert
 	(*NodeInfo)(nil),                          // 38: protectorate.v1.NodeInfo
 	(*NodeStatus)(nil),                        // 39: protectorate.v1.NodeStatus
-	(*ListNodesRequest)(nil),                  // 40: protectorate.v1.ListNodesRequest
-	(*ListNodesResponse)(nil),                 // 41: protectorate.v1.ListNodesResponse
-	(*GetNodeRequest)(nil),                    // 42: protectorate.v1.GetNodeRequest
-	(*AddNodeRequest)(nil),                    // 43: protectorate.v1.AddNodeRequest
-	(*RemoveNodeRequest)(nil),                 // 44: protectorate.v1.RemoveNodeRequest
-	(*RemoveNodeProgress)(nil),                // 45: protectorate.v1.RemoveNodeProgress
-	(*UninstallRequest)(nil),                  // 46: protectorate.v1.UninstallRequest
-	(*UninstallResponse)(nil),                 // 47: protectorate.v1.UninstallResponse
-	(*InviteNodeRequest)(nil),                 // 48: protectorate.v1.InviteNodeRequest
-	(*InstallCommand)(nil),                    // 49: protectorate.v1.InstallCommand
-	(*InviteNodeResponse)(nil),                // 50: protectorate.v1.InviteNodeResponse
-	(*WatchNodeSetupRequest)(nil),             // 51: protectorate.v1.WatchNodeSetupRequest
-	(*NodeSetupProgress)(nil),                 // 52: protectorate.v1.NodeSetupProgress
-	(*DeskPolicy)(nil),                        // 53: protectorate.v1.DeskPolicy
-	(*DeskState)(nil),                         // 54: protectorate.v1.DeskState
-	(*DeskUse)(nil),                           // 55: protectorate.v1.DeskUse
-	(*timestamppb.Timestamp)(nil),             // 56: google.protobuf.Timestamp
-	(*Sleeve)(nil),                            // 57: protectorate.v1.Sleeve
-	(*JobIsolation)(nil),                      // 58: protectorate.v1.JobIsolation
-	(*durationpb.Duration)(nil),               // 59: google.protobuf.Duration
-	(*PrepareJobRequest)(nil),                 // 60: protectorate.v1.PrepareJobRequest
-	(*UploadJobDataRequest)(nil),              // 61: protectorate.v1.UploadJobDataRequest
-	(*RunJobRequest)(nil),                     // 62: protectorate.v1.RunJobRequest
-	(*NodeAgentServiceCancelJobRequest)(nil),  // 63: protectorate.v1.NodeAgentServiceCancelJobRequest
-	(*DeskActionRequest)(nil),                 // 64: protectorate.v1.DeskActionRequest
-	(*PrepareJobResponse)(nil),                // 65: protectorate.v1.PrepareJobResponse
-	(*UploadJobDataResponse)(nil),             // 66: protectorate.v1.UploadJobDataResponse
-	(*JobEvent)(nil),                          // 67: protectorate.v1.JobEvent
-	(*NodeAgentServiceCancelJobResponse)(nil), // 68: protectorate.v1.NodeAgentServiceCancelJobResponse
-	(*DeskActionResponse)(nil),                // 69: protectorate.v1.DeskActionResponse
+	(*GpuBusy)(nil),                           // 40: protectorate.v1.GpuBusy
+	(*ListNodesRequest)(nil),                  // 41: protectorate.v1.ListNodesRequest
+	(*ListNodesResponse)(nil),                 // 42: protectorate.v1.ListNodesResponse
+	(*GetNodeRequest)(nil),                    // 43: protectorate.v1.GetNodeRequest
+	(*AddNodeRequest)(nil),                    // 44: protectorate.v1.AddNodeRequest
+	(*RemoveNodeRequest)(nil),                 // 45: protectorate.v1.RemoveNodeRequest
+	(*RemoveNodeProgress)(nil),                // 46: protectorate.v1.RemoveNodeProgress
+	(*UninstallRequest)(nil),                  // 47: protectorate.v1.UninstallRequest
+	(*UninstallResponse)(nil),                 // 48: protectorate.v1.UninstallResponse
+	(*InviteNodeRequest)(nil),                 // 49: protectorate.v1.InviteNodeRequest
+	(*InstallCommand)(nil),                    // 50: protectorate.v1.InstallCommand
+	(*InviteNodeResponse)(nil),                // 51: protectorate.v1.InviteNodeResponse
+	(*WatchNodeSetupRequest)(nil),             // 52: protectorate.v1.WatchNodeSetupRequest
+	(*NodeSetupProgress)(nil),                 // 53: protectorate.v1.NodeSetupProgress
+	(*DeskPolicy)(nil),                        // 54: protectorate.v1.DeskPolicy
+	(*DeskState)(nil),                         // 55: protectorate.v1.DeskState
+	(*DeskUse)(nil),                           // 56: protectorate.v1.DeskUse
+	(*timestamppb.Timestamp)(nil),             // 57: google.protobuf.Timestamp
+	(*Sleeve)(nil),                            // 58: protectorate.v1.Sleeve
+	(*JobIsolation)(nil),                      // 59: protectorate.v1.JobIsolation
+	(*durationpb.Duration)(nil),               // 60: google.protobuf.Duration
+	(*PrepareJobRequest)(nil),                 // 61: protectorate.v1.PrepareJobRequest
+	(*UploadJobDataRequest)(nil),              // 62: protectorate.v1.UploadJobDataRequest
+	(*RunJobRequest)(nil),                     // 63: protectorate.v1.RunJobRequest
+	(*NodeAgentServiceCancelJobRequest)(nil),  // 64: protectorate.v1.NodeAgentServiceCancelJobRequest
+	(*DeskActionRequest)(nil),                 // 65: protectorate.v1.DeskActionRequest
+	(*PrepareJobResponse)(nil),                // 66: protectorate.v1.PrepareJobResponse
+	(*UploadJobDataResponse)(nil),             // 67: protectorate.v1.UploadJobDataResponse
+	(*JobEvent)(nil),                          // 68: protectorate.v1.JobEvent
+	(*NodeAgentServiceCancelJobResponse)(nil), // 69: protectorate.v1.NodeAgentServiceCancelJobResponse
+	(*DeskActionResponse)(nil),                // 70: protectorate.v1.DeskActionResponse
 }
 var file_protectorate_v1_node_proto_depIdxs = []int32{
-	53, // 0: protectorate.v1.GetDeskStateRequest.policy:type_name -> protectorate.v1.DeskPolicy
-	53, // 1: protectorate.v1.SetDeskPolicyRequest.policy:type_name -> protectorate.v1.DeskPolicy
-	53, // 2: protectorate.v1.DeskPolicyStatus.policy:type_name -> protectorate.v1.DeskPolicy
-	54, // 3: protectorate.v1.DeskPolicyStatus.state:type_name -> protectorate.v1.DeskState
-	55, // 4: protectorate.v1.DeskPolicyStatus.inputs:type_name -> protectorate.v1.DeskUse
+	54, // 0: protectorate.v1.GetDeskStateRequest.policy:type_name -> protectorate.v1.DeskPolicy
+	54, // 1: protectorate.v1.SetDeskPolicyRequest.policy:type_name -> protectorate.v1.DeskPolicy
+	54, // 2: protectorate.v1.DeskPolicyStatus.policy:type_name -> protectorate.v1.DeskPolicy
+	55, // 3: protectorate.v1.DeskPolicyStatus.state:type_name -> protectorate.v1.DeskState
+	56, // 4: protectorate.v1.DeskPolicyStatus.inputs:type_name -> protectorate.v1.DeskUse
 	0,  // 5: protectorate.v1.UpdateNodeProgress.phase:type_name -> protectorate.v1.UpdatePhase
 	1,  // 6: protectorate.v1.PutFileRequest.kind:type_name -> protectorate.v1.FileKind
 	17, // 7: protectorate.v1.PutFileRequest.chunk:type_name -> protectorate.v1.FileChunk
@@ -4379,102 +4449,103 @@ var file_protectorate_v1_node_proto_depIdxs = []int32{
 	22, // 10: protectorate.v1.GetFileResponse.header:type_name -> protectorate.v1.FileHeader
 	17, // 11: protectorate.v1.GetFileResponse.chunk:type_name -> protectorate.v1.FileChunk
 	18, // 12: protectorate.v1.GetFileResponse.trailer:type_name -> protectorate.v1.FileTrailer
-	56, // 13: protectorate.v1.NodeMetrics.collected_at:type_name -> google.protobuf.Timestamp
+	57, // 13: protectorate.v1.NodeMetrics.collected_at:type_name -> google.protobuf.Timestamp
 	27, // 14: protectorate.v1.NodeMetrics.cpu:type_name -> protectorate.v1.CpuMetrics
 	28, // 15: protectorate.v1.NodeMetrics.memory:type_name -> protectorate.v1.MemoryMetrics
 	29, // 16: protectorate.v1.NodeMetrics.filesystems:type_name -> protectorate.v1.FilesystemMetrics
 	30, // 17: protectorate.v1.NodeMetrics.gpus:type_name -> protectorate.v1.GpuMetrics
 	32, // 18: protectorate.v1.NodeMetrics.engine:type_name -> protectorate.v1.ContainerEngine
 	36, // 19: protectorate.v1.NodeMetrics.watch_dirs:type_name -> protectorate.v1.DirSize
-	57, // 20: protectorate.v1.NodeMetrics.sleeves:type_name -> protectorate.v1.Sleeve
+	58, // 20: protectorate.v1.NodeMetrics.sleeves:type_name -> protectorate.v1.Sleeve
 	31, // 21: protectorate.v1.NodeMetrics.npus:type_name -> protectorate.v1.AcceleratorMetrics
-	58, // 22: protectorate.v1.NodeMetrics.jobs:type_name -> protectorate.v1.JobIsolation
+	59, // 22: protectorate.v1.NodeMetrics.jobs:type_name -> protectorate.v1.JobIsolation
 	33, // 23: protectorate.v1.ContainerEngine.disk:type_name -> protectorate.v1.EngineDiskUsage
-	56, // 24: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
+	57, // 24: protectorate.v1.ContainerEngine.disk_measured_at:type_name -> google.protobuf.Timestamp
 	35, // 25: protectorate.v1.ContainerEngine.containers:type_name -> protectorate.v1.ContainerMetrics
 	34, // 26: protectorate.v1.EngineDiskUsage.images:type_name -> protectorate.v1.DiskBucket
 	34, // 27: protectorate.v1.EngineDiskUsage.containers:type_name -> protectorate.v1.DiskBucket
 	34, // 28: protectorate.v1.EngineDiskUsage.volumes:type_name -> protectorate.v1.DiskBucket
 	34, // 29: protectorate.v1.EngineDiskUsage.build_cache:type_name -> protectorate.v1.DiskBucket
-	56, // 30: protectorate.v1.ContainerMetrics.created_at:type_name -> google.protobuf.Timestamp
-	56, // 31: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
-	59, // 32: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
+	57, // 30: protectorate.v1.ContainerMetrics.created_at:type_name -> google.protobuf.Timestamp
+	57, // 31: protectorate.v1.DirSize.measured_at:type_name -> google.protobuf.Timestamp
+	60, // 32: protectorate.v1.DirSize.took:type_name -> google.protobuf.Duration
 	3,  // 33: protectorate.v1.NodeAlert.kind:type_name -> protectorate.v1.AlertKind
 	38, // 34: protectorate.v1.NodeStatus.node:type_name -> protectorate.v1.NodeInfo
 	26, // 35: protectorate.v1.NodeStatus.metrics:type_name -> protectorate.v1.NodeMetrics
 	2,  // 36: protectorate.v1.NodeStatus.freshness:type_name -> protectorate.v1.NodeFreshness
-	56, // 37: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
-	59, // 38: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
+	57, // 37: protectorate.v1.NodeStatus.fetched_at:type_name -> google.protobuf.Timestamp
+	60, // 38: protectorate.v1.NodeStatus.age:type_name -> google.protobuf.Duration
 	37, // 39: protectorate.v1.NodeStatus.alerts:type_name -> protectorate.v1.NodeAlert
-	54, // 40: protectorate.v1.NodeStatus.desk:type_name -> protectorate.v1.DeskState
-	55, // 41: protectorate.v1.NodeStatus.desk_inputs:type_name -> protectorate.v1.DeskUse
-	39, // 42: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
-	38, // 43: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
-	4,  // 44: protectorate.v1.RemoveNodeRequest.jobs:type_name -> protectorate.v1.RemoveJobs
-	59, // 45: protectorate.v1.RemoveNodeRequest.wait_timeout:type_name -> google.protobuf.Duration
-	5,  // 46: protectorate.v1.RemoveNodeProgress.phase:type_name -> protectorate.v1.RemovePhase
-	59, // 47: protectorate.v1.InviteNodeRequest.ttl:type_name -> google.protobuf.Duration
-	6,  // 48: protectorate.v1.InstallCommand.platform:type_name -> protectorate.v1.InstallPlatform
-	38, // 49: protectorate.v1.InviteNodeResponse.node:type_name -> protectorate.v1.NodeInfo
-	56, // 50: protectorate.v1.InviteNodeResponse.expires_at:type_name -> google.protobuf.Timestamp
-	49, // 51: protectorate.v1.InviteNodeResponse.commands:type_name -> protectorate.v1.InstallCommand
-	7,  // 52: protectorate.v1.NodeSetupProgress.stage:type_name -> protectorate.v1.NodeSetupStage
-	39, // 53: protectorate.v1.NodeSetupProgress.status:type_name -> protectorate.v1.NodeStatus
-	24, // 54: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
-	25, // 55: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
-	60, // 56: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
-	61, // 57: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
-	62, // 58: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
-	63, // 59: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
-	19, // 60: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
-	21, // 61: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
-	64, // 62: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
-	15, // 63: protectorate.v1.NodeAgentService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
-	9,  // 64: protectorate.v1.NodeAgentService.GetDeskState:input_type -> protectorate.v1.GetDeskStateRequest
-	46, // 65: protectorate.v1.NodeAgentService.Uninstall:input_type -> protectorate.v1.UninstallRequest
-	40, // 66: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
-	42, // 67: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
-	43, // 68: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
-	44, // 69: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
-	48, // 70: protectorate.v1.NodeService.InviteNode:input_type -> protectorate.v1.InviteNodeRequest
-	51, // 71: protectorate.v1.NodeService.WatchNodeSetup:input_type -> protectorate.v1.WatchNodeSetupRequest
-	19, // 72: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
-	21, // 73: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
-	15, // 74: protectorate.v1.NodeService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
-	13, // 75: protectorate.v1.NodeService.UpdateNode:input_type -> protectorate.v1.UpdateNodeRequest
-	10, // 76: protectorate.v1.NodeService.SetDeskPolicy:input_type -> protectorate.v1.SetDeskPolicyRequest
-	11, // 77: protectorate.v1.NodeService.GetDeskPolicy:input_type -> protectorate.v1.GetDeskPolicyRequest
-	8,  // 78: protectorate.v1.NodeService.SetNodeTier:input_type -> protectorate.v1.SetNodeTierRequest
-	26, // 79: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
-	26, // 80: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
-	65, // 81: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
-	66, // 82: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
-	67, // 83: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
-	68, // 84: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
-	20, // 85: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
-	23, // 86: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
-	69, // 87: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
-	16, // 88: protectorate.v1.NodeAgentService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
-	54, // 89: protectorate.v1.NodeAgentService.GetDeskState:output_type -> protectorate.v1.DeskState
-	47, // 90: protectorate.v1.NodeAgentService.Uninstall:output_type -> protectorate.v1.UninstallResponse
-	41, // 91: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
-	39, // 92: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
-	38, // 93: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
-	45, // 94: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeProgress
-	50, // 95: protectorate.v1.NodeService.InviteNode:output_type -> protectorate.v1.InviteNodeResponse
-	52, // 96: protectorate.v1.NodeService.WatchNodeSetup:output_type -> protectorate.v1.NodeSetupProgress
-	20, // 97: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
-	23, // 98: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
-	16, // 99: protectorate.v1.NodeService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
-	14, // 100: protectorate.v1.NodeService.UpdateNode:output_type -> protectorate.v1.UpdateNodeProgress
-	12, // 101: protectorate.v1.NodeService.SetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
-	12, // 102: protectorate.v1.NodeService.GetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
-	38, // 103: protectorate.v1.NodeService.SetNodeTier:output_type -> protectorate.v1.NodeInfo
-	79, // [79:104] is the sub-list for method output_type
-	54, // [54:79] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	55, // 40: protectorate.v1.NodeStatus.desk:type_name -> protectorate.v1.DeskState
+	56, // 41: protectorate.v1.NodeStatus.desk_inputs:type_name -> protectorate.v1.DeskUse
+	40, // 42: protectorate.v1.NodeStatus.busy_gpus:type_name -> protectorate.v1.GpuBusy
+	39, // 43: protectorate.v1.ListNodesResponse.nodes:type_name -> protectorate.v1.NodeStatus
+	38, // 44: protectorate.v1.AddNodeRequest.node:type_name -> protectorate.v1.NodeInfo
+	4,  // 45: protectorate.v1.RemoveNodeRequest.jobs:type_name -> protectorate.v1.RemoveJobs
+	60, // 46: protectorate.v1.RemoveNodeRequest.wait_timeout:type_name -> google.protobuf.Duration
+	5,  // 47: protectorate.v1.RemoveNodeProgress.phase:type_name -> protectorate.v1.RemovePhase
+	60, // 48: protectorate.v1.InviteNodeRequest.ttl:type_name -> google.protobuf.Duration
+	6,  // 49: protectorate.v1.InstallCommand.platform:type_name -> protectorate.v1.InstallPlatform
+	38, // 50: protectorate.v1.InviteNodeResponse.node:type_name -> protectorate.v1.NodeInfo
+	57, // 51: protectorate.v1.InviteNodeResponse.expires_at:type_name -> google.protobuf.Timestamp
+	50, // 52: protectorate.v1.InviteNodeResponse.commands:type_name -> protectorate.v1.InstallCommand
+	7,  // 53: protectorate.v1.NodeSetupProgress.stage:type_name -> protectorate.v1.NodeSetupStage
+	39, // 54: protectorate.v1.NodeSetupProgress.status:type_name -> protectorate.v1.NodeStatus
+	24, // 55: protectorate.v1.NodeAgentService.GetMetrics:input_type -> protectorate.v1.GetMetricsRequest
+	25, // 56: protectorate.v1.NodeAgentService.WatchMetrics:input_type -> protectorate.v1.WatchMetricsRequest
+	61, // 57: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
+	62, // 58: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
+	63, // 59: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
+	64, // 60: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
+	19, // 61: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	21, // 62: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	65, // 63: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
+	15, // 64: protectorate.v1.NodeAgentService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
+	9,  // 65: protectorate.v1.NodeAgentService.GetDeskState:input_type -> protectorate.v1.GetDeskStateRequest
+	47, // 66: protectorate.v1.NodeAgentService.Uninstall:input_type -> protectorate.v1.UninstallRequest
+	41, // 67: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
+	43, // 68: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
+	44, // 69: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
+	45, // 70: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
+	49, // 71: protectorate.v1.NodeService.InviteNode:input_type -> protectorate.v1.InviteNodeRequest
+	52, // 72: protectorate.v1.NodeService.WatchNodeSetup:input_type -> protectorate.v1.WatchNodeSetupRequest
+	19, // 73: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	21, // 74: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	15, // 75: protectorate.v1.NodeService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
+	13, // 76: protectorate.v1.NodeService.UpdateNode:input_type -> protectorate.v1.UpdateNodeRequest
+	10, // 77: protectorate.v1.NodeService.SetDeskPolicy:input_type -> protectorate.v1.SetDeskPolicyRequest
+	11, // 78: protectorate.v1.NodeService.GetDeskPolicy:input_type -> protectorate.v1.GetDeskPolicyRequest
+	8,  // 79: protectorate.v1.NodeService.SetNodeTier:input_type -> protectorate.v1.SetNodeTierRequest
+	26, // 80: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
+	26, // 81: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
+	66, // 82: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
+	67, // 83: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
+	68, // 84: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
+	69, // 85: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
+	20, // 86: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	23, // 87: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	70, // 88: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
+	16, // 89: protectorate.v1.NodeAgentService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
+	55, // 90: protectorate.v1.NodeAgentService.GetDeskState:output_type -> protectorate.v1.DeskState
+	48, // 91: protectorate.v1.NodeAgentService.Uninstall:output_type -> protectorate.v1.UninstallResponse
+	42, // 92: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
+	39, // 93: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
+	38, // 94: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
+	46, // 95: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeProgress
+	51, // 96: protectorate.v1.NodeService.InviteNode:output_type -> protectorate.v1.InviteNodeResponse
+	53, // 97: protectorate.v1.NodeService.WatchNodeSetup:output_type -> protectorate.v1.NodeSetupProgress
+	20, // 98: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	23, // 99: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	16, // 100: protectorate.v1.NodeService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
+	14, // 101: protectorate.v1.NodeService.UpdateNode:output_type -> protectorate.v1.UpdateNodeProgress
+	12, // 102: protectorate.v1.NodeService.SetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
+	12, // 103: protectorate.v1.NodeService.GetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
+	38, // 104: protectorate.v1.NodeService.SetNodeTier:output_type -> protectorate.v1.NodeInfo
+	80, // [80:105] is the sub-list for method output_type
+	55, // [55:80] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_node_proto_init() }
@@ -4499,7 +4570,7 @@ func file_protectorate_v1_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_node_proto_rawDesc), len(file_protectorate_v1_node_proto_rawDesc)),
 			NumEnums:      8,
-			NumMessages:   45,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

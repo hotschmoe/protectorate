@@ -321,6 +321,9 @@ func writeNodeStatus(w io.Writer, s *pb.NodeStatus) {
 	for _, a := range s.Alerts {
 		fmt.Fprintf(w, "ALERT\t%s\n", a.Message)
 	}
+	for _, b := range s.BusyGpus {
+		fmt.Fprintf(w, "gpu %d busy\t%s (placement skips it; ask before using it)\n", b.Index, b.Reason)
+	}
 	if s.Metrics == nil {
 		return
 	}

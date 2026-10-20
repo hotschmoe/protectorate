@@ -351,6 +351,9 @@ List<AlertBadge> alertBadges(NodeStatus s) {
         if (a.message.isNotEmpty) out.add(AlertBadge(a.message, false));
     }
   }
+  for (final b in s.busyGpus) {
+    out.add(AlertBadge('GPU${b.index} BUSY', false));
+  }
   return out;
 }
 

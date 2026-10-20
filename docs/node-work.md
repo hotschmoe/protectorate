@@ -137,6 +137,34 @@ with who holds it, and the caller is told to ask: a sleeve sends a request
 to the orchestrator or the owner (mailbox, `docs/coordination.md`), and the
 decision to free the GPUs is made by a person, never by the scheduler.
 
+**(built)** The hub judges each GPU from the node's own figures over its
+recent polls (`internal/hub/gpubusy.go`) and lists the busy ones in
+`NodeStatus.busy_gpus` (`node show` prints `gpu N busy`, the app a `GPUn
+BUSY` badge). A GPU is busy when:
+
+- more than half its VRAM is in use (the main signal where the driver
+  reports use: nvidia-smi, rocm-smi, amdgpu, Windows PDH, xpu-smi), or
+- its utilization stayed at or above 60% in every poll of the last 3 minutes
+  (at least 3 polls spanning 2 minutes), or
+- its temperature stayed at or above 75 C over the same window, for drivers
+  whose other figures say little.
+
+On b70-nas-server the xe driver does not tell an unprivileged reader how much
+VRAM is in use, so only load and heat count there: a model that is loaded but
+idle looks free. Installing `xpu-smi` there turns the memory signal on; until
+then the owner can keep the GPUs with a long lease held for the model server.
+After a hub restart the load and heat signals need two minutes of polls.
+
+Selector jobs and leases skip a node with a busy discrete GPU (an integrated
+GPU that drives a desktop does not count) and, when they ask for a GPU
+(`gpu:`, `gpu-vram`), take only a GPU that is not busy. A lease that names a
+busy GPU or its node, and a job that names the node, are refused
+(failed_precondition) with the reason, the node's running containers (the
+usual holders) and the line to ask with: `protectorate msg send orchestrator
+"please free <node> gpu <n> for ..."` (or `msg send owner`). Admin jobs are
+maintenance and are not refused. A refused lease is not queued: waiting
+would decide for the person.
+
 ## Sandboxes on nodes
 
 - **Linux `shared` nodes (built):** sandboxed jobs run in the sleeve sandbox:

@@ -78,6 +78,8 @@ type nodeState struct {
 	attempted   bool
 	lastErr     string
 	downEmitted bool
+	// gpus are the GPU figures of recent good polls, for busy detection.
+	gpus []gpuSample
 }
 
 // NodeMonitor polls every node's metrics, caches the last good result and
@@ -248,6 +250,7 @@ func (m *NodeMonitor) pollOne(ctx context.Context, n *pb.NodeInfo) {
 		st.lastErr = err.Error()
 	} else {
 		st.good, st.goodAt, st.lastErr, st.downEmitted = metrics, now, "", false
+		st.gpus = addGPUSample(st.gpus, now, metrics.Gpus)
 	}
 	status := m.statusLocked(n, st, now)
 	emitDown := status.Freshness == pb.NodeFreshness_NODE_FRESHNESS_UNREACHABLE && !st.downEmitted
@@ -419,6 +422,9 @@ func (m *NodeMonitor) statusLocked(n *pb.NodeInfo, st *nodeState, now time.Time)
 		default:
 			s.Freshness = pb.NodeFreshness_NODE_FRESHNESS_FRESH
 		}
+	}
+	if s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_UNREACHABLE {
+		s.BusyGpus = busyGPUs(st.gpus, now)
 	}
 	s.Alerts = alertsFor(s, m.opts.DiskAlertPercent, m.opts.MemAlertPercent)
 	return s

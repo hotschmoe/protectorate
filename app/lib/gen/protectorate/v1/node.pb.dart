@@ -3523,6 +3523,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     $core.String? deskHolder,
     $core.Iterable<$0.DeskUse>? deskInputs,
     $core.bool? draining,
+    $core.Iterable<GpuBusy>? busyGpus,
   }) {
     final result = NodeStatus._();
     if (node != null) result.node = node;
@@ -3536,6 +3537,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     if (deskHolder != null) result.deskHolder = deskHolder;
     if (deskInputs != null) result.deskInputs.addAll(deskInputs);
     if (draining != null) result.draining = draining;
+    if (busyGpus != null) result.busyGpus.addAll(busyGpus);
     return result;
   }
 
@@ -3572,6 +3574,8 @@ class NodeStatus extends $pb.GeneratedMessage {
     ..pPM<$0.DeskUse>(10, _omitFieldNames ? '' : 'deskInputs',
         subBuilder: $0.DeskUse.$_createMessage)
     ..aOB(11, _omitFieldNames ? '' : 'draining')
+    ..pPM<GpuBusy>(12, _omitFieldNames ? '' : 'busyGpus',
+        subBuilder: GpuBusy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3696,6 +3700,82 @@ class NodeStatus extends $pb.GeneratedMessage {
   $core.bool hasDraining() => $_has(10);
   @$pb.TagNumber(11)
   void clearDraining() => $_clearField(11);
+
+  /// busy_gpus are the node's GPUs that something outside protectorate's
+  /// leases is using, as the hub judges from the node's recent polls:
+  /// automatic placement skips them, explicit requests are refused.
+  @$pb.TagNumber(12)
+  $pb.PbList<GpuBusy> get busyGpus => $_getList(11);
+}
+
+class GpuBusy extends $pb.GeneratedMessage {
+  factory GpuBusy({
+    $core.int? index,
+    $core.String? reason,
+  }) {
+    final result = GpuBusy._();
+    if (index != null) result.index = index;
+    if (reason != null) result.reason = reason;
+    return result;
+  }
+
+  GpuBusy._();
+
+  factory GpuBusy.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GpuBusy()..mergeFromBuffer(data, registry);
+  factory GpuBusy.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GpuBusy()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GpuBusy',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GpuBusy.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'index')
+    ..aOS(2, _omitFieldNames ? '' : 'reason')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GpuBusy clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GpuBusy copyWith(void Function(GpuBusy) updates) =>
+      super.copyWith((message) => updates(message as GpuBusy)) as GpuBusy;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GpuBusy() / GpuBusy.new instead')
+  static GpuBusy create() => GpuBusy._();
+  static $pb.GeneratedMessage $_createMessage() => GpuBusy._();
+  @$core.override
+  GpuBusy createEmptyInstance() => GpuBusy._();
+  @$core.pragma('dart2js:noInline')
+  static GpuBusy getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GpuBusy>(GpuBusy.$_createMessage);
+  static GpuBusy? _defaultInstance;
+
+  /// index is GpuMetrics.index.
+  @$pb.TagNumber(1)
+  $core.int get index => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set index($core.int value) => $_setSignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasIndex() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearIndex() => $_clearField(1);
+
+  /// reason says what makes it busy, e.g. "92% of its VRAM is in use".
+  @$pb.TagNumber(2)
+  $core.String get reason => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set reason($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasReason() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearReason() => $_clearField(2);
 }
 
 class ListNodesRequest extends $pb.GeneratedMessage {

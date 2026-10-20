@@ -641,6 +641,26 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int
 	case sel.GetNpu() != "" && !slices.ContainsFunc(st.Metrics.Npus, func(n *pb.AcceleratorMetrics) bool { return accelMatches(n.Vendor, n.Name, sel.Npu) }):
 		return nil, "no npu matching " + sel.Npu
 	}
+	if sel.GetGpu() == "" && sel.GetGpuVramBytes() == 0 {
+		if idx, why := busyDiscrete(st); why != "" {
+			return nil, fmt.Sprintf("gpu %d busy: %s", idx, why)
+		}
+	} else if sel.GetGpuVramBytes() == 0 {
+		var busy string
+		free := slices.ContainsFunc(st.Metrics.Gpus, func(g *pb.GpuMetrics) bool {
+			if !accelMatches(g.Vendor, g.Name, sel.Gpu) {
+				return false
+			}
+			if why := busyReason(st, int(g.Index)); why != "" {
+				busy = fmt.Sprintf("gpu %d busy: %s", g.Index, why)
+				return false
+			}
+			return true
+		})
+		if !free {
+			return nil, busy
+		}
+	}
 	if sel.GetGpuVramBytes() == 0 {
 		if l := blocked(name, nil); l != nil {
 			return nil, "leased by " + l.Holder
@@ -649,8 +669,13 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int
 	}
 	var gpu *int
 	var bestFree uint64
+	var busy string
 	for _, g := range st.Metrics.Gpus {
 		if sel.GetGpu() != "" && !accelMatches(g.Vendor, g.Name, sel.Gpu) {
+			continue
+		}
+		if why := busyReason(st, int(g.Index)); why != "" {
+			busy = fmt.Sprintf("gpu %d busy: %s", g.Index, why)
 			continue
 		}
 		// Unknown use counts as free: a lease, not the figure, is what
@@ -670,6 +695,9 @@ func nodeFits(st *pb.NodeStatus, sel *pb.NodeSelector, blocked func(string, *int
 		}
 	}
 	if gpu == nil {
+		if busy != "" {
+			return nil, "no free gpu with enough vram (" + busy + ")"
+		}
 		return nil, "no free gpu with enough vram"
 	}
 	return gpu, ""
@@ -767,6 +795,9 @@ func (h *Hub) leaseChooser(m *pb.AcquireLeaseRequest) chooseFunc {
 		}
 		if info, err := h.nodes.info(node); err == nil && info.Tier == TierCare {
 			return "", nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is tier care, which is never leased: name it in a job with an admin grant for it instead", node))
+		}
+		if err := h.nodes.gpuFree(node, gpu); err != nil {
+			return "", nil, err
 		}
 		if l := blocked(node, gpu); l != nil {
 			return "", nil, busyErr("%s is leased by %s until %s", l.Resource, l.Holder, l.ExpiresAt.AsTime().Local().Format(time.RFC3339))

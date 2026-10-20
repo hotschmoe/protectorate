@@ -1146,6 +1146,14 @@ const NodeStatus$json = {
       '10': 'deskInputs'
     },
     {'1': 'draining', '3': 11, '4': 1, '5': 8, '10': 'draining'},
+    {
+      '1': 'busy_gpus',
+      '3': 12,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.GpuBusy',
+      '10': 'busyGpus'
+    },
   ],
 };
 
@@ -1160,7 +1168,22 @@ final $typed_data.Uint8List nodeStatusDescriptor = $convert.base64Decode(
     'ZS52MS5Ob2RlQWxlcnRSBmFsZXJ0cxIuCgRkZXNrGAggASgLMhoucHJvdGVjdG9yYXRlLnYxLk'
     'Rlc2tTdGF0ZVIEZGVzaxIfCgtkZXNrX2hvbGRlchgJIAEoCVIKZGVza0hvbGRlchI5CgtkZXNr'
     'X2lucHV0cxgKIAMoCzIYLnByb3RlY3RvcmF0ZS52MS5EZXNrVXNlUgpkZXNrSW5wdXRzEhoKCG'
-    'RyYWluaW5nGAsgASgIUghkcmFpbmluZw==');
+    'RyYWluaW5nGAsgASgIUghkcmFpbmluZxI1CglidXN5X2dwdXMYDCADKAsyGC5wcm90ZWN0b3Jh'
+    'dGUudjEuR3B1QnVzeVIIYnVzeUdwdXM=');
+
+@$core.Deprecated('Use gpuBusyDescriptor instead')
+const GpuBusy$json = {
+  '1': 'GpuBusy',
+  '2': [
+    {'1': 'index', '3': 1, '4': 1, '5': 5, '10': 'index'},
+    {'1': 'reason', '3': 2, '4': 1, '5': 9, '10': 'reason'},
+  ],
+};
+
+/// Descriptor for `GpuBusy`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List gpuBusyDescriptor = $convert.base64Decode(
+    'CgdHcHVCdXN5EhQKBWluZGV4GAEgASgFUgVpbmRleBIWCgZyZWFzb24YAiABKAlSBnJlYXNvbg'
+    '==');
 
 @$core.Deprecated('Use listNodesRequestDescriptor instead')
 const ListNodesRequest$json = {
@@ -1720,6 +1743,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,
   '.protectorate.v1.DeskUse': $0.DeskUse$json,
+  '.protectorate.v1.GpuBusy': GpuBusy$json,
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,
   '.protectorate.v1.RemoveNodeRequest': RemoveNodeRequest$json,
