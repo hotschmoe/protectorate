@@ -156,13 +156,13 @@ class MessageServiceSendResponse extends $pb.GeneratedMessage {
     MailMessage? message,
     $core.bool? duplicate,
     $core.bool? waiting,
-    $core.String? backlogItem,
+    $core.String? noteId,
   }) {
     final result = MessageServiceSendResponse._();
     if (message != null) result.message = message;
     if (duplicate != null) result.duplicate = duplicate;
     if (waiting != null) result.waiting = waiting;
-    if (backlogItem != null) result.backlogItem = backlogItem;
+    if (noteId != null) result.noteId = noteId;
     return result;
   }
 
@@ -184,7 +184,7 @@ class MessageServiceSendResponse extends $pb.GeneratedMessage {
         subBuilder: MailMessage.$_createMessage)
     ..aOB(2, _omitFieldNames ? '' : 'duplicate')
     ..aOB(3, _omitFieldNames ? '' : 'waiting')
-    ..aOS(4, _omitFieldNames ? '' : 'backlogItem')
+    ..aOS(4, _omitFieldNames ? '' : 'noteId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -246,15 +246,15 @@ class MessageServiceSendResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   void clearWaiting() => $_clearField(3);
 
-  /// backlog_item is the id of the backlog item a request was filed as.
+  /// note_id is the id of the backlog note a request was filed as.
   @$pb.TagNumber(4)
-  $core.String get backlogItem => $_getSZ(3);
+  $core.String get noteId => $_getSZ(3);
   @$pb.TagNumber(4)
-  set backlogItem($core.String value) => $_setString(3, value);
+  set noteId($core.String value) => $_setString(3, value);
   @$pb.TagNumber(4)
-  $core.bool hasBacklogItem() => $_has(3);
+  $core.bool hasNoteId() => $_has(3);
   @$pb.TagNumber(4)
-  void clearBacklogItem() => $_clearField(4);
+  void clearNoteId() => $_clearField(4);
 }
 
 class InboxRequest extends $pb.GeneratedMessage {
@@ -793,7 +793,7 @@ class MailMessage extends $pb.GeneratedMessage {
     $0.Timestamp? createdAt,
     $core.Iterable<MailDelivery>? deliveries,
     $0.Timestamp? escalatedAt,
-    $core.String? backlogItem,
+    $core.String? noteId,
   }) {
     final result = MailMessage._();
     if (id != null) result.id = id;
@@ -807,7 +807,7 @@ class MailMessage extends $pb.GeneratedMessage {
     if (createdAt != null) result.createdAt = createdAt;
     if (deliveries != null) result.deliveries.addAll(deliveries);
     if (escalatedAt != null) result.escalatedAt = escalatedAt;
-    if (backlogItem != null) result.backlogItem = backlogItem;
+    if (noteId != null) result.noteId = noteId;
     return result;
   }
 
@@ -840,7 +840,7 @@ class MailMessage extends $pb.GeneratedMessage {
         subBuilder: MailDelivery.$_createMessage)
     ..aOM<$0.Timestamp>(11, _omitFieldNames ? '' : 'escalatedAt',
         subBuilder: $0.Timestamp.$_createMessage)
-    ..aOS(12, _omitFieldNames ? '' : 'backlogItem')
+    ..aOS(12, _omitFieldNames ? '' : 'noteId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -966,13 +966,13 @@ class MailMessage extends $pb.GeneratedMessage {
   $0.Timestamp ensureEscalatedAt() => $_ensure(10);
 
   @$pb.TagNumber(12)
-  $core.String get backlogItem => $_getSZ(11);
+  $core.String get noteId => $_getSZ(11);
   @$pb.TagNumber(12)
-  set backlogItem($core.String value) => $_setString(11, value);
+  set noteId($core.String value) => $_setString(11, value);
   @$pb.TagNumber(12)
-  $core.bool hasBacklogItem() => $_has(11);
+  $core.bool hasNoteId() => $_has(11);
   @$pb.TagNumber(12)
-  void clearBacklogItem() => $_clearField(12);
+  void clearNoteId() => $_clearField(12);
 }
 
 /// MailDelivery is one recipient's state for a message.
@@ -1102,7 +1102,7 @@ class MailDelivery extends $pb.GeneratedMessage {
 /// at its next IDLE, never during a running turn; the text says how to reply
 /// and ack. A sleeve in terminal mode gets no injection and reads its Inbox.
 /// A project address resolves to the sleeves currently working on that project;
-/// with none live the message waits, and a request also becomes a backlog item.
+/// with none live the message waits, and a request also becomes a backlog note.
 /// An ack_required message not acked within the timeout (default 30 minutes)
 /// is delivered once more, then escalated to the orchestrator.
 ///

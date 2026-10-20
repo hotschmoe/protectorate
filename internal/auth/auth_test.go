@@ -66,7 +66,7 @@ func TestValidateScopes(t *testing.T) {
 	}{
 		{"empty", nil, nil, true},
 		{"special", []string{"terminal", "read", "events", "terminal:readonly", "terminal:host"}, []string{"events", "read", "terminal", "terminal:host", "terminal:readonly"}, false},
-		{"glob and tool", []string{"session_*", "backlog_add_item"}, []string{"backlog_add_item", "session_*"}, false},
+		{"glob and tool", []string{"session_*", "backlog_create_note"}, []string{"backlog_create_note", "session_*"}, false},
 		{"dedup", []string{"read", "read"}, []string{"read"}, false},
 		{"star", []string{"*"}, []string{"*"}, false},
 		{"typo matches nothing", []string{"sesion_*"}, nil, true},
@@ -182,8 +182,8 @@ const (
 	pAddNode = "/protectorate.v1.NodeService/AddNode"
 	pRmNode  = "/protectorate.v1.NodeService/RemoveNode"
 	pPutFile = "/protectorate.v1.NodeService/PutFile"
-	pAdd     = "/protectorate.v1.BacklogService/AddItem"
-	pListIt  = "/protectorate.v1.BacklogService/ListItems"
+	pAdd     = "/protectorate.v1.BacklogService/CreateNote"
+	pListIt  = "/protectorate.v1.BacklogService/ListNotes"
 	pSub     = "/protectorate.v1.EventService/Subscribe"
 	pTokList = "/protectorate.v1.TokenService/ListTokens"
 	pTokNew  = "/protectorate.v1.TokenService/CreateToken"
@@ -211,9 +211,9 @@ func TestAuthorizeProcedure(t *testing.T) {
 		{"events covers stream", []string{"events"}, false, pSub, true, ""},
 		{"events not reads", []string{"events"}, false, pStatus, false, "read or hub_get_status"},
 		{"glob", []string{"session_*"}, false, pKill, true, ""},
-		{"glob other service", []string{"session_*"}, false, pAdd, false, "backlog_add_item"},
-		{"exact tool", []string{"backlog_add_item"}, false, pAdd, true, ""},
-		{"exact tool not sibling", []string{"backlog_add_item"}, false, pListIt, false, "read or backlog_list_items"},
+		{"glob other service", []string{"session_*"}, false, pAdd, false, "backlog_create_note"},
+		{"exact tool", []string{"backlog_create_note"}, false, pAdd, true, ""},
+		{"exact tool not sibling", []string{"backlog_create_note"}, false, pListIt, false, "read or backlog_list_notes"},
 		{"star everything but owner-only", []string{"*"}, false, pKill, true, ""},
 		{"star not create session", []string{"*"}, false, pCreate, false, "session_create_session is owner-only"},
 		{"exact tool not create session", []string{"session_create_session"}, false, pCreate, false, "session_create_session is owner-only"},

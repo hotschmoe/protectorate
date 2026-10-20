@@ -24,6 +24,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 )
@@ -38,6 +39,9 @@ const (
 	uploadIdle        = time.Hour
 	defaultJobTimeout = time.Hour
 	knownCommits      = 8
+	// retention is how long a finished job's output and artifacts are held
+	// for the hub to collect.
+	retention = time.Hour
 )
 
 var (
@@ -49,6 +53,11 @@ var (
 //
 //	repos/<key>/       persistent git worktree of one hub repository
 //	jobs/<id>/         scratch space of one job, removed when it ends
+//	runs/<id>/         output (out.log) and collected artifacts of one job,
+//	                   kept for an hour after it ends
+//
+// A job runs independently of whoever started it: the hub can disconnect,
+// restart and attach again.
 type Jobs struct {
 	// Probe, when set before the first job or metrics poll, replaces probing
 	// the host for isolation and elevation (tests).
@@ -59,6 +68,7 @@ type Jobs struct {
 
 	dir   string
 	slots chan struct{}
+	now   func() time.Time
 
 	mu      sync.Mutex
 	uploads map[string]*upload
@@ -96,6 +106,51 @@ type upload struct {
 type jobRun struct {
 	cancel   context.CancelFunc
 	canceled atomic.Bool
+	dir      string
+
+	mu        sync.Mutex
+	wake      chan struct{}
+	logf      *os.File
+	logSize   uint64
+	started   *pb.JobStarted
+	fin       *pb.JobFinished
+	finAt     time.Time
+	artifacts []string
+}
+
+func (r *jobRun) signal() {
+	close(r.wake)
+	r.wake = make(chan struct{})
+}
+
+func (r *jobRun) setStarted(s *pb.JobStarted) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.started = s
+	r.signal()
+}
+
+func (r *jobRun) write(p []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, err := r.logf.Write(p)
+	r.logSize += uint64(n)
+	r.signal()
+	return err
+}
+
+func (r *jobRun) finish(f *pb.JobFinished, now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logf.Close()
+	r.fin, r.finAt = f, now
+	r.signal()
+}
+
+func (r *jobRun) done() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fin != nil
 }
 
 // NewJobs prepares dir and clears the scratch space left by a previous
@@ -111,15 +166,17 @@ func NewJobs(dir string, concurrency int) (*Jobs, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "repos"), 0o700); err != nil {
 		return nil, fmt.Errorf("create job dir: %w", err)
 	}
-	scratch := filepath.Join(dir, "jobs")
-	if err := os.RemoveAll(scratch); err != nil {
-		return nil, fmt.Errorf("clear stale jobs: %w", err)
-	}
-	if err := os.MkdirAll(scratch, 0o700); err != nil {
-		return nil, fmt.Errorf("create job dir: %w", err)
+	for _, sub := range []string{"jobs", "runs"} {
+		if err := os.RemoveAll(filepath.Join(dir, sub)); err != nil {
+			return nil, fmt.Errorf("clear stale %s: %w", sub, err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
+			return nil, fmt.Errorf("create job dir: %w", err)
+		}
 	}
 	return &Jobs{
 		dir:     dir,
+		now:     time.Now,
 		slots:   make(chan struct{}, concurrency),
 		uploads: map[string]*upload{},
 		runs:    map[string]*jobRun{},
@@ -131,6 +188,8 @@ func NewJobs(dir string, concurrency int) (*Jobs, error) {
 func (j *Jobs) Dir() string { return j.dir }
 
 func (j *Jobs) jobDir(id string) string { return filepath.Join(j.dir, "jobs", id) }
+
+func (j *Jobs) runDir(id string) string { return filepath.Join(j.dir, "runs", id) }
 
 func badArg(format string, args ...any) error {
 	return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(format, args...))
@@ -242,7 +301,8 @@ func (j *Jobs) dropUpload(id string, u *upload) {
 	os.RemoveAll(j.jobDir(id))
 }
 
-// Cancel kills a running job's process tree.
+// Cancel kills a running job's process tree. A job that already ended is
+// not found.
 func (j *Jobs) Cancel(id string) bool {
 	j.mu.Lock()
 	r := j.runs[id]
@@ -255,9 +315,52 @@ func (j *Jobs) Cancel(id string) bool {
 		j.dropUpload(id, u)
 		return true
 	}
+	if r.done() {
+		return false
+	}
 	r.canceled.Store(true)
 	r.cancel()
 	return true
+}
+
+// sweepRuns drops the output of jobs that ended more than retention ago. The
+// caller holds j.mu.
+func (j *Jobs) sweepRuns() {
+	now := j.now()
+	for id, r := range j.runs {
+		r.mu.Lock()
+		old := r.fin != nil && now.Sub(r.finAt) > retention
+		r.mu.Unlock()
+		if old {
+			delete(j.runs, id)
+			os.RemoveAll(r.dir)
+		}
+	}
+}
+
+// List reports the jobs the node is running or holds the result of.
+func (j *Jobs) List() []*pb.NodeJob {
+	j.mu.Lock()
+	j.sweepRuns()
+	ids := make([]string, 0, len(j.runs))
+	runs := make([]*jobRun, 0, len(j.runs))
+	for id, r := range j.runs {
+		ids = append(ids, id)
+		runs = append(runs, r)
+	}
+	j.mu.Unlock()
+	out := make([]*pb.NodeJob, len(runs))
+	for i, r := range runs {
+		r.mu.Lock()
+		nj := &pb.NodeJob{JobId: ids[i], Started: r.started != nil, Finished: r.fin, LogBytes: r.logSize}
+		if r.fin != nil {
+			nj.FinishedAt = timestamppb.New(r.finAt)
+		}
+		r.mu.Unlock()
+		out[i] = nj
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].JobId < out[b].JobId })
+	return out
 }
 
 func (j *Jobs) lockRepo(ctx context.Context, key string) (func(), error) {
@@ -311,52 +414,72 @@ func validateRun(req *pb.RunJobRequest) error {
 	return nil
 }
 
-// Run executes one job and reports through send. The job dies with ctx. A job
+// Run starts one job and streams it from the beginning through send. A job
 // that cannot be set up ends with a JOB_END_ERROR event, not a failed call.
+// The job outlives the stream: when ctx ends Run returns and the job keeps
+// going until it exits or times out; Attach picks it up again.
 func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.JobEvent) error) error {
+	if err := j.start(req); err != nil {
+		return err
+	}
+	return j.Attach(ctx, req.JobId, 0, send)
+}
+
+func (j *Jobs) start(req *pb.RunJobRequest) error {
 	if err := validateRun(req); err != nil {
 		return err
 	}
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	r := &jobRun{cancel: cancel}
+	runCtx, cancel := context.WithCancel(context.Background())
+	r := &jobRun{cancel: cancel, dir: j.runDir(req.JobId), wake: make(chan struct{})}
 	j.mu.Lock()
+	j.sweepRuns()
 	if j.runs[req.JobId] != nil {
 		j.mu.Unlock()
+		cancel()
 		return connect.NewError(connect.CodeAlreadyExists, errors.New("job is already running"))
 	}
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		j.mu.Unlock()
+		cancel()
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	f, err := os.OpenFile(filepath.Join(r.dir, "out.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		j.mu.Unlock()
+		cancel()
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	r.logf = f
 	j.runs[req.JobId] = r
 	j.mu.Unlock()
-	jobDir := j.jobDir(req.JobId)
-	defer func() {
-		j.mu.Lock()
-		delete(j.runs, req.JobId)
-		delete(j.uploads, req.JobId)
-		j.mu.Unlock()
-		os.RemoveAll(jobDir)
-		if j.Isolation(); j.box != nil {
-			j.box.forget(jobDir)
-		}
-	}()
+	go j.exec(runCtx, cancel, r, req)
+	return nil
+}
 
-	finish := func(f *pb.JobFinished) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return send(&pb.JobEvent{Event: &pb.JobEvent_Finished{Finished: f}})
+func (j *Jobs) exec(ctx context.Context, cancel context.CancelFunc, r *jobRun, req *pb.RunJobRequest) {
+	defer cancel()
+	jobDir := j.jobDir(req.JobId)
+	fin := j.runJob(ctx, r, req, jobDir)
+	j.mu.Lock()
+	delete(j.uploads, req.JobId)
+	j.mu.Unlock()
+	os.RemoveAll(jobDir)
+	if j.Isolation(); j.box != nil {
+		j.box.forget(jobDir)
 	}
-	setupFailed := func(err error) error {
+	r.finish(fin, j.now())
+}
+
+func (j *Jobs) runJob(ctx context.Context, r *jobRun, req *pb.RunJobRequest, jobDir string) *pb.JobFinished {
+	setupFailed := func(err error) *pb.JobFinished {
 		if r.canceled.Load() {
-			return finish(&pb.JobFinished{End: pb.JobEnd_JOB_END_CANCELED})
+			return &pb.JobFinished{End: pb.JobEnd_JOB_END_CANCELED}
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return finish(&pb.JobFinished{End: pb.JobEnd_JOB_END_ERROR, ExitCode: -1, Error: err.Error()})
+		return &pb.JobFinished{End: pb.JobEnd_JOB_END_ERROR, ExitCode: -1, Error: err.Error()}
 	}
 
 	if req.RepoKey != "" {
-		unlock, err := j.lockRepo(runCtx, req.RepoKey)
+		unlock, err := j.lockRepo(ctx, req.RepoKey)
 		if err != nil {
 			return setupFailed(err)
 		}
@@ -365,11 +488,11 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 	select {
 	case j.slots <- struct{}{}:
 		defer func() { <-j.slots }()
-	case <-runCtx.Done():
-		return setupFailed(runCtx.Err())
+	case <-ctx.Done():
+		return setupFailed(ctx.Err())
 	}
 
-	workdir, reused, err := j.workspace(runCtx, req, jobDir)
+	workdir, reused, err := j.workspace(ctx, req, jobDir)
 	if err != nil {
 		return setupFailed(err)
 	}
@@ -377,21 +500,84 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 	if err != nil {
 		return setupFailed(err)
 	}
-	if err := send(&pb.JobEvent{Event: &pb.JobEvent_Started{Started: &pb.JobStarted{WorkspaceReused: reused, Isolation: label}}}); err != nil {
-		return err
-	}
+	r.setStarted(&pb.JobStarted{WorkspaceReused: reused, Isolation: label})
 
 	timeout := req.Timeout.AsDuration()
 	if timeout <= 0 {
 		timeout = defaultJobTimeout
 	}
-	fin := j.execute(runCtx, r, req, argv, envArgs, workdir, jobDir, timeout, send)
+	fin := j.execute(ctx, r, req, argv, envArgs, workdir, jobDir, timeout)
 	if fin.End == pb.JobEnd_JOB_END_EXITED || fin.End == pb.JobEnd_JOB_END_TIMED_OUT {
-		if err := sendArtifacts(runCtx, workdir, req.ArtifactGlobs, send); err != nil && fin.Error == "" {
-			fin.Error = "send artifacts: " + err.Error()
+		files, err := collectArtifacts(workdir, req.ArtifactGlobs, filepath.Join(r.dir, "artifacts"))
+		if err != nil && fin.Error == "" {
+			fin.Error = "collect artifacts: " + err.Error()
+		}
+		r.mu.Lock()
+		r.artifacts = files
+		r.mu.Unlock()
+	}
+	return fin
+}
+
+// Attach streams a job from an output offset: started, the output from
+// offset, then the artifacts and the result once it ended. It returns when
+// the result is sent or ctx ends; the job is not affected either way.
+func (j *Jobs) Attach(ctx context.Context, id string, offset uint64, send func(*pb.JobEvent) error) error {
+	j.mu.Lock()
+	j.sweepRuns()
+	r := j.runs[id]
+	j.mu.Unlock()
+	if r == nil {
+		return connect.NewError(connect.CodeNotFound, fmt.Errorf("node has no job %q", id))
+	}
+	f, err := os.Open(filepath.Join(r.dir, "out.log"))
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	defer f.Close()
+	buf := make([]byte, ChunkSize)
+	sentStarted := false
+	for {
+		r.mu.Lock()
+		started, fin, size, wake, files := r.started, r.fin, r.logSize, r.wake, r.artifacts
+		r.mu.Unlock()
+		if offset > size {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("offset %d, node has %d bytes of output", offset, size))
+		}
+		if started != nil && !sentStarted {
+			sentStarted = true
+			if err := send(&pb.JobEvent{Event: &pb.JobEvent_Started{Started: started}}); err != nil {
+				return err
+			}
+		}
+		for offset < size {
+			n, err := f.ReadAt(buf[:min(uint64(len(buf)), size-offset)], int64(offset))
+			if n > 0 {
+				ev := &pb.JobEvent{Event: &pb.JobEvent_Output{Output: &pb.JobOutput{Data: append([]byte(nil), buf[:n]...)}}}
+				if err := send(ev); err != nil {
+					return err
+				}
+				offset += uint64(n)
+			}
+			if err != nil && n == 0 {
+				return connect.NewError(connect.CodeInternal, err)
+			}
+		}
+		if fin != nil {
+			abuf := make([]byte, ChunkSize)
+			for _, rel := range files {
+				if err := sendFile(ctx, filepath.Join(r.dir, "artifacts", filepath.FromSlash(rel)), rel, abuf, send); err != nil {
+					return err
+				}
+			}
+			return send(&pb.JobEvent{Event: &pb.JobEvent_Finished{Finished: fin}})
+		}
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	return finish(fin)
 }
 
 // workspace readies the working directory: the persistent worktree for git
@@ -607,8 +793,8 @@ func startExec(req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jo
 	return execRunning{cmd, tree}, nil
 }
 
-func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
-	w := &logWriter{send: send, onFail: r.cancel}
+func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, timeout time.Duration) *pb.JobFinished {
+	w := &logWriter{r: r}
 	start := time.Now()
 	p, err := j.launch(req, argv, envArgs, workdir, jobDir, w)
 	if err != nil {
@@ -630,9 +816,6 @@ func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, ar
 		switch {
 		case r.canceled.Load():
 			end = pb.JobEnd_JOB_END_CANCELED
-		case ctx.Err() != nil:
-			end = pb.JobEnd_JOB_END_CANCELED
-			errText = "caller disconnected"
 		default:
 			end = pb.JobEnd_JOB_END_TIMED_OUT
 			errText = fmt.Sprintf("timed out after %s", timeout)
@@ -654,11 +837,11 @@ func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, ar
 	return &pb.JobFinished{End: end, ExitCode: int32(code), Error: errText, RunTime: durationpb.New(time.Since(start))}
 }
 
-// logWriter forwards merged stdout and stderr as output events. Output past
-// maxLogBytes is replaced by one notice. A failed send cancels the job.
+// logWriter appends merged stdout and stderr to the job's output file.
+// Output past maxLogBytes is replaced by one notice. A failed write cancels
+// the job.
 type logWriter struct {
-	send      func(*pb.JobEvent) error
-	onFail    func()
+	r         *jobRun
 	sent      int
 	truncated bool
 	failed    bool
@@ -670,33 +853,63 @@ func (w *logWriter) Write(p []byte) (int, error) {
 	if w.failed || w.truncated {
 		return len(p), nil
 	}
-	chunk := append([]byte(nil), p...)
+	chunk := p
 	if room := maxLogBytes - w.sent; len(p) > room {
-		chunk = append(chunk[:room], truncatedNotice...)
+		chunk = append(append([]byte(nil), p[:room]...), truncatedNotice...)
 		w.truncated = true
 	}
 	w.sent += len(p)
-	if err := w.send(&pb.JobEvent{Event: &pb.JobEvent_Output{Output: &pb.JobOutput{Data: chunk}}}); err != nil {
+	if err := w.r.write(chunk); err != nil {
 		w.failed = true
-		w.onFail()
+		w.r.cancel()
 	}
 	return len(p), nil
 }
 
-// sendArtifacts streams files matching globs, relative to workdir. Matched
-// directories contribute the regular files below them; symlinks are skipped.
-func sendArtifacts(ctx context.Context, workdir string, globs []string, send func(*pb.JobEvent) error) error {
+// collectArtifacts copies files matching globs, relative to workdir, into dst
+// and returns their slash-separated relative paths. Matched directories
+// contribute the regular files below them; symlinks are skipped.
+func collectArtifacts(workdir string, globs []string, dst string) ([]string, error) {
+	if len(globs) == 0 {
+		return nil, nil
+	}
 	files, err := matchArtifacts(workdir, globs)
+	if err != nil {
+		return nil, err
+	}
+	for _, rel := range files {
+		if err := copyArtifact(filepath.Join(workdir, filepath.FromSlash(rel)), filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+			return nil, fmt.Errorf("%s: %w", rel, err)
+		}
+	}
+	return files, nil
+}
+
+func copyArtifact(src, dst string) error {
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	buf := make([]byte, ChunkSize)
-	for _, rel := range files {
-		if err := sendFile(ctx, filepath.Join(workdir, filepath.FromSlash(rel)), rel, buf, send); err != nil {
-			return err
-		}
+	defer in.Close()
+	fi, err := in.Stat()
+	if err != nil {
+		return err
 	}
-	return nil
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, fi.Mode().Perm())
 }
 
 func matchArtifacts(workdir string, globs []string) ([]string, error) {

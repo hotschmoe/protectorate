@@ -176,3 +176,16 @@ func run(steps []string) int {
 	}
 	return 0
 }
+
+// QuietGit turns off git's background auto-maintenance for every git process
+// the tests start, directly or through the code under test. Newer git runs it
+// detached after fetch, and it can still be writing into a repository when
+// the test's TempDir cleanup runs.
+func QuietGit() {
+	kv := [][2]string{{"gc.auto", "0"}, {"maintenance.auto", "false"}}
+	os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(len(kv)))
+	for i, p := range kv {
+		os.Setenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", i), p[0])
+		os.Setenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", i), p[1])
+	}
+}

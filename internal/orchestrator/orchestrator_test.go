@@ -43,7 +43,7 @@ func TestDefaultScopes(t *testing.T) {
 	}
 	for _, tool := range []string{
 		"quota_suggest", "quota_get_quota", "sleeve_list_sleeves", "session_list_sessions", "session_capture_pane",
-		"sleeve_spawn_sleeve", "backlog_add_item", "backlog_update_item", "backlog_list_items",
+		"sleeve_spawn_sleeve", "backlog_create_note", "backlog_update_note", "backlog_list_notes",
 	} {
 		if !auth.Grants(scopes, tool) {
 			t.Errorf("default scopes must grant %s: %v", tool, scopes)
@@ -66,11 +66,11 @@ func TestDefaultScopes(t *testing.T) {
 
 func TestDefaultScopesDropDestructive(t *testing.T) {
 	tools := []Tool{
-		{Name: "backlog_add_item"}, {Name: "backlog_purge", Destructive: true}, {Name: "backlog_list_items", ReadOnly: true},
+		{Name: "backlog_create_note"}, {Name: "backlog_purge", Destructive: true}, {Name: "backlog_list_notes", ReadOnly: true},
 		{Name: "sleeve_kill_sleeve", Destructive: true}, {Name: "sleeve_spawn_sleeve"}, {Name: "lease_acquire"},
 	}
 	got := strings.Join(DefaultScopes(tools), ",")
-	if want := "backlog_add_item,events,lease_acquire,read,sleeve_spawn_sleeve"; got != want {
+	if want := "backlog_create_note,events,lease_acquire,read,sleeve_spawn_sleeve"; got != want {
 		t.Errorf("scopes = %s, want %s", got, want)
 	}
 }
@@ -81,12 +81,12 @@ func fixtureInput() DocInput {
 		Harness:   "claude",
 		Hub:       "http://127.0.0.1:7470",
 		Token: TokenSummary{ID: "ab12cd34", Name: TokenName, Expires: "2026-11-18T12:00:00Z",
-			Scopes: []string{"backlog_add_item", "events", "read", "sleeve_spawn_sleeve"}},
+			Scopes: []string{"backlog_create_note", "events", "read", "sleeve_spawn_sleeve"}},
 		Tools: []Tool{
 			{Name: "sleeve_spawn_sleeve", Description: "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is a directory."},
 			{Name: "sleeve_kill_sleeve", Description: "KillSleeve stops a sleeve.", Destructive: true},
 			{Name: "quota_suggest", Description: "Suggest ranks the harnesses | by capacity.", ReadOnly: true},
-			{Name: "backlog_add_item", Description: "AddItem appends an item."},
+			{Name: "backlog_create_note", Description: "CreateNote adds a note."},
 		},
 		Commands: []Command{
 			{Path: "sleeve spawn", Use: "sleeve spawn <name> --workspace <dir>", Short: "Start a harness in an isolated sleeve",

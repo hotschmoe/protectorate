@@ -524,3 +524,49 @@ func TestLeasesSurviveHubRestart(t *testing.T) {
 		t.Fatalf("after restart = %v", got)
 	}
 }
+
+func TestLeaseTTLHoldsAcrossRestart(t *testing.T) {
+	tests := []struct {
+		name     string
+		downtime time.Duration
+		wantLive bool
+	}{
+		{"restart inside the ttl keeps the lease and its deadline", 2 * time.Minute, true},
+		{"a lease that ran out while the hub was down is gone at once", 6 * time.Minute, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "leases.yaml")
+			tb, clk, _ := newTable(t, path)
+			l, err := tb.Acquire("alice", 5*time.Minute, fixed("win", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var evs []recorded
+			re, err := OpenLeases(path, func(kind, subject string, _ *structpb.Struct) { evs = append(evs, recorded{kind, subject}) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			re.now = func() time.Time { return clk.now().Add(tt.downtime) }
+			got := re.List()
+			if tt.wantLive {
+				if len(got) != 1 || !got[0].ExpiresAt.AsTime().Equal(l.ExpiresAt.AsTime()) {
+					t.Fatalf("lease after restart = %v, want deadline %v", got, l.ExpiresAt.AsTime())
+				}
+				if _, err := re.Renew(l.Id, 5*time.Minute); err != nil {
+					t.Fatalf("renew after restart: %v", err)
+				}
+				return
+			}
+			if len(got) != 0 {
+				t.Fatalf("expired lease survived the restart: %v", got)
+			}
+			if _, err := re.Renew(l.Id, time.Minute); err == nil {
+				t.Fatal("renewing a lease that expired during downtime must fail")
+			}
+			if len(evs) != 1 || evs[0].kind != "lease.expired" {
+				t.Fatalf("events = %v", evs)
+			}
+		})
+	}
+}

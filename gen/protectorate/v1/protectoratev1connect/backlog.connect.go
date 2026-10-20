@@ -33,25 +33,35 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// BacklogServiceListItemsProcedure is the fully-qualified name of the BacklogService's ListItems
+	// BacklogServiceListNotesProcedure is the fully-qualified name of the BacklogService's ListNotes
 	// RPC.
-	BacklogServiceListItemsProcedure = "/protectorate.v1.BacklogService/ListItems"
-	// BacklogServiceAddItemProcedure is the fully-qualified name of the BacklogService's AddItem RPC.
-	BacklogServiceAddItemProcedure = "/protectorate.v1.BacklogService/AddItem"
-	// BacklogServiceUpdateItemProcedure is the fully-qualified name of the BacklogService's UpdateItem
+	BacklogServiceListNotesProcedure = "/protectorate.v1.BacklogService/ListNotes"
+	// BacklogServiceGetNoteProcedure is the fully-qualified name of the BacklogService's GetNote RPC.
+	BacklogServiceGetNoteProcedure = "/protectorate.v1.BacklogService/GetNote"
+	// BacklogServiceCreateNoteProcedure is the fully-qualified name of the BacklogService's CreateNote
 	// RPC.
-	BacklogServiceUpdateItemProcedure = "/protectorate.v1.BacklogService/UpdateItem"
+	BacklogServiceCreateNoteProcedure = "/protectorate.v1.BacklogService/CreateNote"
+	// BacklogServiceUpdateNoteProcedure is the fully-qualified name of the BacklogService's UpdateNote
+	// RPC.
+	BacklogServiceUpdateNoteProcedure = "/protectorate.v1.BacklogService/UpdateNote"
+	// BacklogServiceDeleteNoteProcedure is the fully-qualified name of the BacklogService's DeleteNote
+	// RPC.
+	BacklogServiceDeleteNoteProcedure = "/protectorate.v1.BacklogService/DeleteNote"
 )
 
 // BacklogServiceClient is a client for the protectorate.v1.BacklogService service.
 type BacklogServiceClient interface {
-	// ListItems returns backlog items, optionally filtered by project, state
-	// and harness.
-	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
-	// AddItem appends a new TODO item to a project and returns it with its id.
-	AddItem(context.Context, *connect.Request[v1.AddItemRequest]) (*connect.Response[v1.AddItemResponse], error)
-	// UpdateItem sets an item's state, claiming or releasing it.
-	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
+	// ListNotes returns notes, pinned first and then most recently updated,
+	// optionally filtered by project tag and a text query.
+	ListNotes(context.Context, *connect.Request[v1.ListNotesRequest]) (*connect.Response[v1.ListNotesResponse], error)
+	// GetNote returns one note by id.
+	GetNote(context.Context, *connect.Request[v1.GetNoteRequest]) (*connect.Response[v1.GetNoteResponse], error)
+	// CreateNote adds a note and returns it with its id.
+	CreateNote(context.Context, *connect.Request[v1.CreateNoteRequest]) (*connect.Response[v1.CreateNoteResponse], error)
+	// UpdateNote changes the fields that are set and leaves the others alone.
+	UpdateNote(context.Context, *connect.Request[v1.UpdateNoteRequest]) (*connect.Response[v1.UpdateNoteResponse], error)
+	// DeleteNote removes a note for good.
+	DeleteNote(context.Context, *connect.Request[v1.DeleteNoteRequest]) (*connect.Response[v1.DeleteNoteResponse], error)
 }
 
 // NewBacklogServiceClient constructs a client for the protectorate.v1.BacklogService service. By
@@ -65,23 +75,36 @@ func NewBacklogServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 	baseURL = strings.TrimRight(baseURL, "/")
 	backlogServiceMethods := v1.File_protectorate_v1_backlog_proto.Services().ByName("BacklogService").Methods()
 	return &backlogServiceClient{
-		listItems: connect.NewClient[v1.ListItemsRequest, v1.ListItemsResponse](
+		listNotes: connect.NewClient[v1.ListNotesRequest, v1.ListNotesResponse](
 			httpClient,
-			baseURL+BacklogServiceListItemsProcedure,
-			connect.WithSchema(backlogServiceMethods.ByName("ListItems")),
+			baseURL+BacklogServiceListNotesProcedure,
+			connect.WithSchema(backlogServiceMethods.ByName("ListNotes")),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
-		addItem: connect.NewClient[v1.AddItemRequest, v1.AddItemResponse](
+		getNote: connect.NewClient[v1.GetNoteRequest, v1.GetNoteResponse](
 			httpClient,
-			baseURL+BacklogServiceAddItemProcedure,
-			connect.WithSchema(backlogServiceMethods.ByName("AddItem")),
+			baseURL+BacklogServiceGetNoteProcedure,
+			connect.WithSchema(backlogServiceMethods.ByName("GetNote")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
-		updateItem: connect.NewClient[v1.UpdateItemRequest, v1.UpdateItemResponse](
+		createNote: connect.NewClient[v1.CreateNoteRequest, v1.CreateNoteResponse](
 			httpClient,
-			baseURL+BacklogServiceUpdateItemProcedure,
-			connect.WithSchema(backlogServiceMethods.ByName("UpdateItem")),
+			baseURL+BacklogServiceCreateNoteProcedure,
+			connect.WithSchema(backlogServiceMethods.ByName("CreateNote")),
+			connect.WithClientOptions(opts...),
+		),
+		updateNote: connect.NewClient[v1.UpdateNoteRequest, v1.UpdateNoteResponse](
+			httpClient,
+			baseURL+BacklogServiceUpdateNoteProcedure,
+			connect.WithSchema(backlogServiceMethods.ByName("UpdateNote")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteNote: connect.NewClient[v1.DeleteNoteRequest, v1.DeleteNoteResponse](
+			httpClient,
+			baseURL+BacklogServiceDeleteNoteProcedure,
+			connect.WithSchema(backlogServiceMethods.ByName("DeleteNote")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -89,35 +112,51 @@ func NewBacklogServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // backlogServiceClient implements BacklogServiceClient.
 type backlogServiceClient struct {
-	listItems  *connect.Client[v1.ListItemsRequest, v1.ListItemsResponse]
-	addItem    *connect.Client[v1.AddItemRequest, v1.AddItemResponse]
-	updateItem *connect.Client[v1.UpdateItemRequest, v1.UpdateItemResponse]
+	listNotes  *connect.Client[v1.ListNotesRequest, v1.ListNotesResponse]
+	getNote    *connect.Client[v1.GetNoteRequest, v1.GetNoteResponse]
+	createNote *connect.Client[v1.CreateNoteRequest, v1.CreateNoteResponse]
+	updateNote *connect.Client[v1.UpdateNoteRequest, v1.UpdateNoteResponse]
+	deleteNote *connect.Client[v1.DeleteNoteRequest, v1.DeleteNoteResponse]
 }
 
-// ListItems calls protectorate.v1.BacklogService.ListItems.
-func (c *backlogServiceClient) ListItems(ctx context.Context, req *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error) {
-	return c.listItems.CallUnary(ctx, req)
+// ListNotes calls protectorate.v1.BacklogService.ListNotes.
+func (c *backlogServiceClient) ListNotes(ctx context.Context, req *connect.Request[v1.ListNotesRequest]) (*connect.Response[v1.ListNotesResponse], error) {
+	return c.listNotes.CallUnary(ctx, req)
 }
 
-// AddItem calls protectorate.v1.BacklogService.AddItem.
-func (c *backlogServiceClient) AddItem(ctx context.Context, req *connect.Request[v1.AddItemRequest]) (*connect.Response[v1.AddItemResponse], error) {
-	return c.addItem.CallUnary(ctx, req)
+// GetNote calls protectorate.v1.BacklogService.GetNote.
+func (c *backlogServiceClient) GetNote(ctx context.Context, req *connect.Request[v1.GetNoteRequest]) (*connect.Response[v1.GetNoteResponse], error) {
+	return c.getNote.CallUnary(ctx, req)
 }
 
-// UpdateItem calls protectorate.v1.BacklogService.UpdateItem.
-func (c *backlogServiceClient) UpdateItem(ctx context.Context, req *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error) {
-	return c.updateItem.CallUnary(ctx, req)
+// CreateNote calls protectorate.v1.BacklogService.CreateNote.
+func (c *backlogServiceClient) CreateNote(ctx context.Context, req *connect.Request[v1.CreateNoteRequest]) (*connect.Response[v1.CreateNoteResponse], error) {
+	return c.createNote.CallUnary(ctx, req)
+}
+
+// UpdateNote calls protectorate.v1.BacklogService.UpdateNote.
+func (c *backlogServiceClient) UpdateNote(ctx context.Context, req *connect.Request[v1.UpdateNoteRequest]) (*connect.Response[v1.UpdateNoteResponse], error) {
+	return c.updateNote.CallUnary(ctx, req)
+}
+
+// DeleteNote calls protectorate.v1.BacklogService.DeleteNote.
+func (c *backlogServiceClient) DeleteNote(ctx context.Context, req *connect.Request[v1.DeleteNoteRequest]) (*connect.Response[v1.DeleteNoteResponse], error) {
+	return c.deleteNote.CallUnary(ctx, req)
 }
 
 // BacklogServiceHandler is an implementation of the protectorate.v1.BacklogService service.
 type BacklogServiceHandler interface {
-	// ListItems returns backlog items, optionally filtered by project, state
-	// and harness.
-	ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error)
-	// AddItem appends a new TODO item to a project and returns it with its id.
-	AddItem(context.Context, *connect.Request[v1.AddItemRequest]) (*connect.Response[v1.AddItemResponse], error)
-	// UpdateItem sets an item's state, claiming or releasing it.
-	UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error)
+	// ListNotes returns notes, pinned first and then most recently updated,
+	// optionally filtered by project tag and a text query.
+	ListNotes(context.Context, *connect.Request[v1.ListNotesRequest]) (*connect.Response[v1.ListNotesResponse], error)
+	// GetNote returns one note by id.
+	GetNote(context.Context, *connect.Request[v1.GetNoteRequest]) (*connect.Response[v1.GetNoteResponse], error)
+	// CreateNote adds a note and returns it with its id.
+	CreateNote(context.Context, *connect.Request[v1.CreateNoteRequest]) (*connect.Response[v1.CreateNoteResponse], error)
+	// UpdateNote changes the fields that are set and leaves the others alone.
+	UpdateNote(context.Context, *connect.Request[v1.UpdateNoteRequest]) (*connect.Response[v1.UpdateNoteResponse], error)
+	// DeleteNote removes a note for good.
+	DeleteNote(context.Context, *connect.Request[v1.DeleteNoteRequest]) (*connect.Response[v1.DeleteNoteResponse], error)
 }
 
 // NewBacklogServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -127,33 +166,50 @@ type BacklogServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewBacklogServiceHandler(svc BacklogServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	backlogServiceMethods := v1.File_protectorate_v1_backlog_proto.Services().ByName("BacklogService").Methods()
-	backlogServiceListItemsHandler := connect.NewUnaryHandler(
-		BacklogServiceListItemsProcedure,
-		svc.ListItems,
-		connect.WithSchema(backlogServiceMethods.ByName("ListItems")),
+	backlogServiceListNotesHandler := connect.NewUnaryHandler(
+		BacklogServiceListNotesProcedure,
+		svc.ListNotes,
+		connect.WithSchema(backlogServiceMethods.ByName("ListNotes")),
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
-	backlogServiceAddItemHandler := connect.NewUnaryHandler(
-		BacklogServiceAddItemProcedure,
-		svc.AddItem,
-		connect.WithSchema(backlogServiceMethods.ByName("AddItem")),
+	backlogServiceGetNoteHandler := connect.NewUnaryHandler(
+		BacklogServiceGetNoteProcedure,
+		svc.GetNote,
+		connect.WithSchema(backlogServiceMethods.ByName("GetNote")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
-	backlogServiceUpdateItemHandler := connect.NewUnaryHandler(
-		BacklogServiceUpdateItemProcedure,
-		svc.UpdateItem,
-		connect.WithSchema(backlogServiceMethods.ByName("UpdateItem")),
+	backlogServiceCreateNoteHandler := connect.NewUnaryHandler(
+		BacklogServiceCreateNoteProcedure,
+		svc.CreateNote,
+		connect.WithSchema(backlogServiceMethods.ByName("CreateNote")),
+		connect.WithHandlerOptions(opts...),
+	)
+	backlogServiceUpdateNoteHandler := connect.NewUnaryHandler(
+		BacklogServiceUpdateNoteProcedure,
+		svc.UpdateNote,
+		connect.WithSchema(backlogServiceMethods.ByName("UpdateNote")),
+		connect.WithHandlerOptions(opts...),
+	)
+	backlogServiceDeleteNoteHandler := connect.NewUnaryHandler(
+		BacklogServiceDeleteNoteProcedure,
+		svc.DeleteNote,
+		connect.WithSchema(backlogServiceMethods.ByName("DeleteNote")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/protectorate.v1.BacklogService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case BacklogServiceListItemsProcedure:
-			backlogServiceListItemsHandler.ServeHTTP(w, r)
-		case BacklogServiceAddItemProcedure:
-			backlogServiceAddItemHandler.ServeHTTP(w, r)
-		case BacklogServiceUpdateItemProcedure:
-			backlogServiceUpdateItemHandler.ServeHTTP(w, r)
+		case BacklogServiceListNotesProcedure:
+			backlogServiceListNotesHandler.ServeHTTP(w, r)
+		case BacklogServiceGetNoteProcedure:
+			backlogServiceGetNoteHandler.ServeHTTP(w, r)
+		case BacklogServiceCreateNoteProcedure:
+			backlogServiceCreateNoteHandler.ServeHTTP(w, r)
+		case BacklogServiceUpdateNoteProcedure:
+			backlogServiceUpdateNoteHandler.ServeHTTP(w, r)
+		case BacklogServiceDeleteNoteProcedure:
+			backlogServiceDeleteNoteHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -163,14 +219,22 @@ func NewBacklogServiceHandler(svc BacklogServiceHandler, opts ...connect.Handler
 // UnimplementedBacklogServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedBacklogServiceHandler struct{}
 
-func (UnimplementedBacklogServiceHandler) ListItems(context.Context, *connect.Request[v1.ListItemsRequest]) (*connect.Response[v1.ListItemsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.ListItems is not implemented"))
+func (UnimplementedBacklogServiceHandler) ListNotes(context.Context, *connect.Request[v1.ListNotesRequest]) (*connect.Response[v1.ListNotesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.ListNotes is not implemented"))
 }
 
-func (UnimplementedBacklogServiceHandler) AddItem(context.Context, *connect.Request[v1.AddItemRequest]) (*connect.Response[v1.AddItemResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.AddItem is not implemented"))
+func (UnimplementedBacklogServiceHandler) GetNote(context.Context, *connect.Request[v1.GetNoteRequest]) (*connect.Response[v1.GetNoteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.GetNote is not implemented"))
 }
 
-func (UnimplementedBacklogServiceHandler) UpdateItem(context.Context, *connect.Request[v1.UpdateItemRequest]) (*connect.Response[v1.UpdateItemResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.UpdateItem is not implemented"))
+func (UnimplementedBacklogServiceHandler) CreateNote(context.Context, *connect.Request[v1.CreateNoteRequest]) (*connect.Response[v1.CreateNoteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.CreateNote is not implemented"))
+}
+
+func (UnimplementedBacklogServiceHandler) UpdateNote(context.Context, *connect.Request[v1.UpdateNoteRequest]) (*connect.Response[v1.UpdateNoteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.UpdateNote is not implemented"))
+}
+
+func (UnimplementedBacklogServiceHandler) DeleteNote(context.Context, *connect.Request[v1.DeleteNoteRequest]) (*connect.Response[v1.DeleteNoteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.BacklogService.DeleteNote is not implemented"))
 }

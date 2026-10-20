@@ -10,7 +10,7 @@
 //	node_admin:<glob>  care nodes whose name the glob matches, and admin jobs
 //	                   there (granted per task, see the grant RPC)
 //	<glob>             path.Match glob over tool names such as session_* or
-//	                   backlog_add_item; the tool name is the snake_case
+//	                   backlog_create_note; the tool name is the snake_case
 //	                   service name without "Service", an underscore, and the
 //	                   snake_case method name
 //

@@ -24,6 +24,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/backup"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/quota"
 	"github.com/hotschmoe/protectorate/internal/session"
@@ -127,13 +128,36 @@ func envOr(key, def string) string {
 	return def
 }
 
+// installedDir returns flag when set, else the directory install-hub.sh fills
+// (~/.local/share/protectorate/<name>) when it exists and holds marker (any
+// entry when marker is empty), else "".
+func installedDir(flag, name, marker string) string {
+	if flag != "" {
+		return flag
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".local", "share", "protectorate", name)
+	probe := dir
+	if marker != "" {
+		probe = filepath.Join(dir, marker)
+	}
+	if _, err := os.Stat(probe); err != nil {
+		return ""
+	}
+	return dir
+}
+
 func hubCmd() *cobra.Command {
 	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
 	var listen, tmuxSocket, webDir, binaryDir, publicURL string
 	var quotaInterval, deadRetention time.Duration
 	var localURLs, localModelHosts []string
 	var nodeInterval, ackTimeout time.Duration
-	var nodeTokenFile string
+	var nodeTokenFile, backupDir string
+	var backupEvery time.Duration
 	var watch, toolDirs []string
 	var orchestratorGrants bool
 	serve := &cobra.Command{
@@ -141,6 +165,9 @@ func hubCmd() *cobra.Command {
 		Short: "Serve the hub API",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if backupDir != "" && backupEvery <= 0 {
+				return errors.New("--backup-every must be positive")
+			}
 			tok, err := hub.EnsureToken()
 			if err != nil {
 				return err
@@ -174,8 +201,8 @@ func hubCmd() *cobra.Command {
 			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
 			h.DeadRetention = deadRetention
-			h.WebDir = webDir
-			h.BinaryDir = binaryDir
+			h.WebDir = installedDir(webDir, "web", "index.html")
+			h.BinaryDir = installedDir(binaryDir, "bin", "")
 			h.PublicURL = publicURL
 			h.OrchestratorGrants = orchestratorGrants
 			h.LocalModelHosts = localModelHosts
@@ -199,9 +226,24 @@ func hubCmd() *cobra.Command {
 			if err := attachSleeves(ctx, h, toolDirs); err != nil {
 				return err
 			}
+			if backupDir != "" {
+				bctx, bstop := context.WithCancel(ctx)
+				backups := make(chan struct{})
+				go func() {
+					defer close(backups)
+					backup.Run(bctx, backup.Options{Home: home, Dir: backupDir, Version: version}, backupEvery,
+						func(format string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", args...) })
+				}()
+				defer func() {
+					bstop()
+					<-backups
+				}()
+			}
 			return h.Serve(ctx, l, ts.Extra...)
 		},
 	}
+	serve.Flags().StringVar(&backupDir, "backup-dir", "", "write hub backups here (see hub backup); old ones are never deleted")
+	serve.Flags().DurationVar(&backupEvery, "backup-every", 6*time.Hour, "how often to back up when --backup-dir is set")
 	serve.Flags().DurationVar(&nodeInterval, "node-interval", 30*time.Second, "how often to poll node metrics")
 	serve.Flags().DurationVar(&ackTimeout, "msg-ack-timeout", 30*time.Minute, "how long an ack-required message may stay unacked before it is re-delivered, and again before it is escalated to the orchestrator")
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
@@ -213,12 +255,12 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringSliceVar(&localModelHosts, "local-model-host", nil, "hostname of a model server of your own that the app flags as a local model, beyond private and tailnet addresses (repeatable)")
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
-	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at /")
-	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: the directory of this executable)")
+	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at / (default: ~/.local/share/protectorate/web when it exists)")
+	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: ~/.local/share/protectorate/bin when it exists, else the directory of this executable)")
 	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
 	serve.Flags().BoolVar(&orchestratorGrants, "orchestrator-admin-grants", false, "let the orchestrator mint admin grants (job_* and node_admin) for shared nodes; care nodes are granted by the owner only")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
-	c.AddCommand(serve, hubTailnetCmd())
+	c.AddCommand(serve, hubTailnetCmd(), hubBackupCmd(), hubRestoreCmd())
 	return c
 }
 

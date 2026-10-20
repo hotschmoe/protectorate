@@ -4313,7 +4313,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x17NODE_SETUP_STAGE_JOINED\x10\x02\x12\x1c\n" +
 	"\x18NODE_SETUP_STAGE_METRICS\x10\x03\x12\x1a\n" +
 	"\x16NODE_SETUP_STAGE_READY\x10\x04\x12\x1e\n" +
-	"\x1aNODE_SETUP_STAGE_ATTENTION\x10\x052\xaf\b\n" +
+	"\x1aNODE_SETUP_STAGE_ATTENTION\x10\x052\xf2\t\n" +
 	"\x10NodeAgentService\x12S\n" +
 	"\n" +
 	"GetMetrics\x12\".protectorate.v1.GetMetricsRequest\x1a\x1c.protectorate.v1.NodeMetrics\"\x03\x90\x02\x01\x12Y\n" +
@@ -4321,7 +4321,9 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\n" +
 	"PrepareJob\x12\".protectorate.v1.PrepareJobRequest\x1a#.protectorate.v1.PrepareJobResponse\x12^\n" +
 	"\rUploadJobData\x12%.protectorate.v1.UploadJobDataRequest\x1a&.protectorate.v1.UploadJobDataResponse\x12E\n" +
-	"\x06RunJob\x12\x1e.protectorate.v1.RunJobRequest\x1a\x19.protectorate.v1.JobEvent0\x01\x12r\n" +
+	"\x06RunJob\x12\x1e.protectorate.v1.RunJobRequest\x1a\x19.protectorate.v1.JobEvent0\x01\x12K\n" +
+	"\tAttachJob\x12!.protectorate.v1.AttachJobRequest\x1a\x19.protectorate.v1.JobEvent0\x01\x12t\n" +
+	"\bListJobs\x120.protectorate.v1.NodeAgentServiceListJobsRequest\x1a1.protectorate.v1.NodeAgentServiceListJobsResponse\"\x03\x90\x02\x01\x12r\n" +
 	"\tCancelJob\x121.protectorate.v1.NodeAgentServiceCancelJobRequest\x1a2.protectorate.v1.NodeAgentServiceCancelJobResponse\x12L\n" +
 	"\aPutFile\x12\x1f.protectorate.v1.PutFileRequest\x1a .protectorate.v1.PutFileResponse\x12N\n" +
 	"\aGetFile\x12\x1f.protectorate.v1.GetFileRequest\x1a .protectorate.v1.GetFileResponse0\x01\x12U\n" +
@@ -4427,13 +4429,16 @@ var file_protectorate_v1_node_proto_goTypes = []any{
 	(*PrepareJobRequest)(nil),                 // 61: protectorate.v1.PrepareJobRequest
 	(*UploadJobDataRequest)(nil),              // 62: protectorate.v1.UploadJobDataRequest
 	(*RunJobRequest)(nil),                     // 63: protectorate.v1.RunJobRequest
-	(*NodeAgentServiceCancelJobRequest)(nil),  // 64: protectorate.v1.NodeAgentServiceCancelJobRequest
-	(*DeskActionRequest)(nil),                 // 65: protectorate.v1.DeskActionRequest
-	(*PrepareJobResponse)(nil),                // 66: protectorate.v1.PrepareJobResponse
-	(*UploadJobDataResponse)(nil),             // 67: protectorate.v1.UploadJobDataResponse
-	(*JobEvent)(nil),                          // 68: protectorate.v1.JobEvent
-	(*NodeAgentServiceCancelJobResponse)(nil), // 69: protectorate.v1.NodeAgentServiceCancelJobResponse
-	(*DeskActionResponse)(nil),                // 70: protectorate.v1.DeskActionResponse
+	(*AttachJobRequest)(nil),                  // 64: protectorate.v1.AttachJobRequest
+	(*NodeAgentServiceListJobsRequest)(nil),   // 65: protectorate.v1.NodeAgentServiceListJobsRequest
+	(*NodeAgentServiceCancelJobRequest)(nil),  // 66: protectorate.v1.NodeAgentServiceCancelJobRequest
+	(*DeskActionRequest)(nil),                 // 67: protectorate.v1.DeskActionRequest
+	(*PrepareJobResponse)(nil),                // 68: protectorate.v1.PrepareJobResponse
+	(*UploadJobDataResponse)(nil),             // 69: protectorate.v1.UploadJobDataResponse
+	(*JobEvent)(nil),                          // 70: protectorate.v1.JobEvent
+	(*NodeAgentServiceListJobsResponse)(nil),  // 71: protectorate.v1.NodeAgentServiceListJobsResponse
+	(*NodeAgentServiceCancelJobResponse)(nil), // 72: protectorate.v1.NodeAgentServiceCancelJobResponse
+	(*DeskActionResponse)(nil),                // 73: protectorate.v1.DeskActionResponse
 }
 var file_protectorate_v1_node_proto_depIdxs = []int32{
 	54, // 0: protectorate.v1.GetDeskStateRequest.policy:type_name -> protectorate.v1.DeskPolicy
@@ -4496,53 +4501,57 @@ var file_protectorate_v1_node_proto_depIdxs = []int32{
 	61, // 57: protectorate.v1.NodeAgentService.PrepareJob:input_type -> protectorate.v1.PrepareJobRequest
 	62, // 58: protectorate.v1.NodeAgentService.UploadJobData:input_type -> protectorate.v1.UploadJobDataRequest
 	63, // 59: protectorate.v1.NodeAgentService.RunJob:input_type -> protectorate.v1.RunJobRequest
-	64, // 60: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
-	19, // 61: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
-	21, // 62: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
-	65, // 63: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
-	15, // 64: protectorate.v1.NodeAgentService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
-	9,  // 65: protectorate.v1.NodeAgentService.GetDeskState:input_type -> protectorate.v1.GetDeskStateRequest
-	47, // 66: protectorate.v1.NodeAgentService.Uninstall:input_type -> protectorate.v1.UninstallRequest
-	41, // 67: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
-	43, // 68: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
-	44, // 69: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
-	45, // 70: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
-	49, // 71: protectorate.v1.NodeService.InviteNode:input_type -> protectorate.v1.InviteNodeRequest
-	52, // 72: protectorate.v1.NodeService.WatchNodeSetup:input_type -> protectorate.v1.WatchNodeSetupRequest
-	19, // 73: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
-	21, // 74: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
-	15, // 75: protectorate.v1.NodeService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
-	13, // 76: protectorate.v1.NodeService.UpdateNode:input_type -> protectorate.v1.UpdateNodeRequest
-	10, // 77: protectorate.v1.NodeService.SetDeskPolicy:input_type -> protectorate.v1.SetDeskPolicyRequest
-	11, // 78: protectorate.v1.NodeService.GetDeskPolicy:input_type -> protectorate.v1.GetDeskPolicyRequest
-	8,  // 79: protectorate.v1.NodeService.SetNodeTier:input_type -> protectorate.v1.SetNodeTierRequest
-	26, // 80: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
-	26, // 81: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
-	66, // 82: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
-	67, // 83: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
-	68, // 84: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
-	69, // 85: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
-	20, // 86: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
-	23, // 87: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
-	70, // 88: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
-	16, // 89: protectorate.v1.NodeAgentService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
-	55, // 90: protectorate.v1.NodeAgentService.GetDeskState:output_type -> protectorate.v1.DeskState
-	48, // 91: protectorate.v1.NodeAgentService.Uninstall:output_type -> protectorate.v1.UninstallResponse
-	42, // 92: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
-	39, // 93: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
-	38, // 94: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
-	46, // 95: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeProgress
-	51, // 96: protectorate.v1.NodeService.InviteNode:output_type -> protectorate.v1.InviteNodeResponse
-	53, // 97: protectorate.v1.NodeService.WatchNodeSetup:output_type -> protectorate.v1.NodeSetupProgress
-	20, // 98: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
-	23, // 99: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
-	16, // 100: protectorate.v1.NodeService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
-	14, // 101: protectorate.v1.NodeService.UpdateNode:output_type -> protectorate.v1.UpdateNodeProgress
-	12, // 102: protectorate.v1.NodeService.SetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
-	12, // 103: protectorate.v1.NodeService.GetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
-	38, // 104: protectorate.v1.NodeService.SetNodeTier:output_type -> protectorate.v1.NodeInfo
-	80, // [80:105] is the sub-list for method output_type
-	55, // [55:80] is the sub-list for method input_type
+	64, // 60: protectorate.v1.NodeAgentService.AttachJob:input_type -> protectorate.v1.AttachJobRequest
+	65, // 61: protectorate.v1.NodeAgentService.ListJobs:input_type -> protectorate.v1.NodeAgentServiceListJobsRequest
+	66, // 62: protectorate.v1.NodeAgentService.CancelJob:input_type -> protectorate.v1.NodeAgentServiceCancelJobRequest
+	19, // 63: protectorate.v1.NodeAgentService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	21, // 64: protectorate.v1.NodeAgentService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	67, // 65: protectorate.v1.NodeAgentService.DeskAction:input_type -> protectorate.v1.DeskActionRequest
+	15, // 66: protectorate.v1.NodeAgentService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
+	9,  // 67: protectorate.v1.NodeAgentService.GetDeskState:input_type -> protectorate.v1.GetDeskStateRequest
+	47, // 68: protectorate.v1.NodeAgentService.Uninstall:input_type -> protectorate.v1.UninstallRequest
+	41, // 69: protectorate.v1.NodeService.ListNodes:input_type -> protectorate.v1.ListNodesRequest
+	43, // 70: protectorate.v1.NodeService.GetNode:input_type -> protectorate.v1.GetNodeRequest
+	44, // 71: protectorate.v1.NodeService.AddNode:input_type -> protectorate.v1.AddNodeRequest
+	45, // 72: protectorate.v1.NodeService.RemoveNode:input_type -> protectorate.v1.RemoveNodeRequest
+	49, // 73: protectorate.v1.NodeService.InviteNode:input_type -> protectorate.v1.InviteNodeRequest
+	52, // 74: protectorate.v1.NodeService.WatchNodeSetup:input_type -> protectorate.v1.WatchNodeSetupRequest
+	19, // 75: protectorate.v1.NodeService.PutFile:input_type -> protectorate.v1.PutFileRequest
+	21, // 76: protectorate.v1.NodeService.GetFile:input_type -> protectorate.v1.GetFileRequest
+	15, // 77: protectorate.v1.NodeService.ApplyUpdate:input_type -> protectorate.v1.ApplyUpdateRequest
+	13, // 78: protectorate.v1.NodeService.UpdateNode:input_type -> protectorate.v1.UpdateNodeRequest
+	10, // 79: protectorate.v1.NodeService.SetDeskPolicy:input_type -> protectorate.v1.SetDeskPolicyRequest
+	11, // 80: protectorate.v1.NodeService.GetDeskPolicy:input_type -> protectorate.v1.GetDeskPolicyRequest
+	8,  // 81: protectorate.v1.NodeService.SetNodeTier:input_type -> protectorate.v1.SetNodeTierRequest
+	26, // 82: protectorate.v1.NodeAgentService.GetMetrics:output_type -> protectorate.v1.NodeMetrics
+	26, // 83: protectorate.v1.NodeAgentService.WatchMetrics:output_type -> protectorate.v1.NodeMetrics
+	68, // 84: protectorate.v1.NodeAgentService.PrepareJob:output_type -> protectorate.v1.PrepareJobResponse
+	69, // 85: protectorate.v1.NodeAgentService.UploadJobData:output_type -> protectorate.v1.UploadJobDataResponse
+	70, // 86: protectorate.v1.NodeAgentService.RunJob:output_type -> protectorate.v1.JobEvent
+	70, // 87: protectorate.v1.NodeAgentService.AttachJob:output_type -> protectorate.v1.JobEvent
+	71, // 88: protectorate.v1.NodeAgentService.ListJobs:output_type -> protectorate.v1.NodeAgentServiceListJobsResponse
+	72, // 89: protectorate.v1.NodeAgentService.CancelJob:output_type -> protectorate.v1.NodeAgentServiceCancelJobResponse
+	20, // 90: protectorate.v1.NodeAgentService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	23, // 91: protectorate.v1.NodeAgentService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	73, // 92: protectorate.v1.NodeAgentService.DeskAction:output_type -> protectorate.v1.DeskActionResponse
+	16, // 93: protectorate.v1.NodeAgentService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
+	55, // 94: protectorate.v1.NodeAgentService.GetDeskState:output_type -> protectorate.v1.DeskState
+	48, // 95: protectorate.v1.NodeAgentService.Uninstall:output_type -> protectorate.v1.UninstallResponse
+	42, // 96: protectorate.v1.NodeService.ListNodes:output_type -> protectorate.v1.ListNodesResponse
+	39, // 97: protectorate.v1.NodeService.GetNode:output_type -> protectorate.v1.NodeStatus
+	38, // 98: protectorate.v1.NodeService.AddNode:output_type -> protectorate.v1.NodeInfo
+	46, // 99: protectorate.v1.NodeService.RemoveNode:output_type -> protectorate.v1.RemoveNodeProgress
+	51, // 100: protectorate.v1.NodeService.InviteNode:output_type -> protectorate.v1.InviteNodeResponse
+	53, // 101: protectorate.v1.NodeService.WatchNodeSetup:output_type -> protectorate.v1.NodeSetupProgress
+	20, // 102: protectorate.v1.NodeService.PutFile:output_type -> protectorate.v1.PutFileResponse
+	23, // 103: protectorate.v1.NodeService.GetFile:output_type -> protectorate.v1.GetFileResponse
+	16, // 104: protectorate.v1.NodeService.ApplyUpdate:output_type -> protectorate.v1.ApplyUpdateResponse
+	14, // 105: protectorate.v1.NodeService.UpdateNode:output_type -> protectorate.v1.UpdateNodeProgress
+	12, // 106: protectorate.v1.NodeService.SetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
+	12, // 107: protectorate.v1.NodeService.GetDeskPolicy:output_type -> protectorate.v1.DeskPolicyStatus
+	38, // 108: protectorate.v1.NodeService.SetNodeTier:output_type -> protectorate.v1.NodeInfo
+	82, // [82:109] is the sub-list for method output_type
+	55, // [55:82] is the sub-list for method input_type
 	55, // [55:55] is the sub-list for extension type_name
 	55, // [55:55] is the sub-list for extension extendee
 	0,  // [0:55] is the sub-list for field type_name

@@ -20,6 +20,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
@@ -78,13 +79,17 @@ type chatRig struct {
 	ws   string
 	name string
 	cfg  sleeve.Config
+	// harness is what spawn runs; zero means Claude.
+	harness pb.Harness
 }
 
 func newChatRig(t *testing.T) *chatRig {
 	t.Helper()
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(fakeClaude), 0o755); err != nil {
-		t.Fatal(err)
+	for _, h := range []string{"claude", "codex", "grok", "pi"} {
+		if err := os.WriteFile(filepath.Join(bin, h), []byte(fakeClaude), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	home := t.TempDir()
@@ -129,8 +134,12 @@ func newChatRig(t *testing.T) *chatRig {
 
 func (r *chatRig) spawn(mode pb.SleeveMode) *pb.Sleeve {
 	r.t.Helper()
+	harness := r.harness
+	if harness == pb.Harness_HARNESS_UNSPECIFIED {
+		harness = pb.Harness_HARNESS_CLAUDE
+	}
 	res, err := r.sl.SpawnSleeve(r.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
-		Name: r.name, Workspace: r.ws, Harness: pb.Harness_HARNESS_CLAUDE, Mode: mode,
+		Name: r.name, Workspace: r.ws, Harness: harness, Mode: mode,
 		Limits: &pb.SleeveLimits{CpuPercent: 100, MemoryBytes: 512 << 20},
 	}))
 	if err != nil {
@@ -215,6 +224,8 @@ func describe(evs []*pb.ChatEvent) string {
 			out = append(out, fmt.Sprintf("%d:approval:%s", e.Seq, b.Approval.Id))
 		case *pb.ChatEvent_ApprovalResolved:
 			out = append(out, fmt.Sprintf("%d:resolved:%s:%v:%s", e.Seq, b.ApprovalResolved.Id, b.ApprovalResolved.Allow, b.ApprovalResolved.By))
+		case *pb.ChatEvent_Error:
+			out = append(out, fmt.Sprintf("%d:error:%s", e.Seq, b.Error.Text))
 		default:
 			out = append(out, fmt.Sprintf("%d:other", e.Seq))
 		}
@@ -455,5 +466,110 @@ func TestSleeveTokenReadsOnlyItself(t *testing.T) {
 	}
 	if len(list.Msg.Sessions) != 0 {
 		t.Fatalf("another sleeve's token listed sessions: %v", list.Msg.Sessions)
+	}
+}
+
+func TestChatSendRequestIDsSurviveHubRestart(t *testing.T) {
+	r := newChatRig(t)
+	r.spawn(pb.SleeveMode_SLEEVE_MODE_UNSPECIFIED)
+	live := r.watch(0)
+	first, err := r.send("hello", "req-persist-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "turn settles", func() bool { return strings.Contains(describe(live.all()), ":settled") })
+	r.waitState(pb.ChatState_CHAT_STATE_IDLE)
+
+	r.h.chat.remove(r.name)
+	again, err := r.send("hello", "req-persist-1")
+	if err != nil || again.Seq != first.Seq {
+		t.Fatalf("send after restart: %v %v, want seq %d", err, again, first.Seq)
+	}
+	replay := r.watch(0)
+	waitFor(t, "replay", func() bool { return strings.Contains(describe(replay.all()), ":settled") })
+	if n := strings.Count(describe(replay.all()), ":user:"); n != 1 {
+		t.Fatalf("%d user messages after a deduped resend: %s", n, describe(replay.all()))
+	}
+}
+
+// stuckSession is a driver session whose turn never ends, so the hub can be
+// "restarted" in the middle of it.
+type stuckSession struct {
+	h      driver.Harness
+	id     string
+	events chan driver.Event
+	once   sync.Once
+}
+
+func (s *stuckSession) Harness() driver.Harness            { return s.h }
+func (s *stuckSession) Caps() driver.Caps                  { return driver.Caps{Interrupt: true} }
+func (s *stuckSession) SessionID() string                  { return s.id }
+func (s *stuckSession) Events() <-chan driver.Event        { return s.events }
+func (s *stuckSession) Send(context.Context, string) error { return nil }
+func (s *stuckSession) Respond(context.Context, string, bool, string) error {
+	return driver.ErrUnsupported
+}
+func (s *stuckSession) Interrupt(context.Context) error { return nil }
+func (s *stuckSession) Compact(context.Context) (driver.Compaction, error) {
+	return driver.Compaction{}, driver.ErrUnsupported
+}
+func (s *stuckSession) Close() error {
+	s.once.Do(func() {
+		s.events <- driver.Event{Kind: driver.KindExited}
+		close(s.events)
+	})
+	return nil
+}
+
+func TestChatHubRestartMidTurnFailsThenResumes(t *testing.T) {
+	for _, harness := range []pb.Harness{pb.Harness_HARNESS_CLAUDE, pb.Harness_HARNESS_CODEX, pb.Harness_HARNESS_GROK, pb.Harness_HARNESS_PI} {
+		t.Run(harness.String(), func(t *testing.T) {
+			r := newChatRig(t)
+			r.harness = harness
+			var mu sync.Mutex
+			var resumed []string
+			open := func(_ context.Context, h driver.Harness, _, sessionID, _ string, _ driver.Options) (driver.Session, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				resumed = append(resumed, sessionID)
+				if sessionID == "" {
+					sessionID = "native-" + string(h)
+				}
+				return &stuckSession{h: h, id: sessionID, events: make(chan driver.Event, 2)}, nil
+			}
+			r.h.chat.open = open
+			r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
+			if _, err := r.send("work", ""); err != nil {
+				t.Fatal(err)
+			}
+			r.waitState(pb.ChatState_CHAT_STATE_WORKING)
+
+			// the hub dies with the turn running: nothing but the persisted
+			// WORKING state and the session id is left
+			r.h.chat.remove(r.name)
+			if _, err := r.h.sleeves.SetChat(r.name, func(c *sleeve.Chat) { c.State = pb.ChatState_CHAT_STATE_WORKING.String() }); err != nil {
+				t.Fatal(err)
+			}
+			r.h.chat = newChatManager(r.h)
+			r.h.chat.open = open
+			r.h.chat.recover()
+
+			st := r.get().Chat
+			if st.State != pb.ChatState_CHAT_STATE_FAILED || st.HarnessSessionId != "native-"+string(harnessFromProto(harness)) {
+				t.Fatalf("after restart mid-turn: %v", st)
+			}
+			live := r.watch(0)
+			waitFor(t, "failure event", func() bool { return strings.Contains(describe(live.all()), "hub restarted mid-turn") })
+
+			if _, err := r.send("again", ""); err != nil {
+				t.Fatal(err)
+			}
+			r.waitState(pb.ChatState_CHAT_STATE_WORKING)
+			mu.Lock()
+			defer mu.Unlock()
+			if want := "native-" + string(harnessFromProto(harness)); len(resumed) != 2 || resumed[0] != "" || resumed[1] != want {
+				t.Fatalf("driver opens (resume ids) = %q, want a fresh open then a resume of %s", resumed, want)
+			}
+		})
 	}
 }

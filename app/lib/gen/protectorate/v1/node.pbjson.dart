@@ -1495,6 +1495,18 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '6': true
     },
     {
+      '1': 'AttachJob',
+      '2': '.protectorate.v1.AttachJobRequest',
+      '3': '.protectorate.v1.JobEvent',
+      '6': true
+    },
+    {
+      '1': 'ListJobs',
+      '2': '.protectorate.v1.NodeAgentServiceListJobsRequest',
+      '3': '.protectorate.v1.NodeAgentServiceListJobsResponse',
+      '4': {'34': 1},
+    },
+    {
       '1': 'CancelJob',
       '2': '.protectorate.v1.NodeAgentServiceCancelJobRequest',
       '3': '.protectorate.v1.NodeAgentServiceCancelJobResponse'
@@ -1569,6 +1581,12 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.JobOutput': $3.JobOutput$json,
   '.protectorate.v1.JobArtifactChunk': $3.JobArtifactChunk$json,
   '.protectorate.v1.JobFinished': $3.JobFinished$json,
+  '.protectorate.v1.AttachJobRequest': $3.AttachJobRequest$json,
+  '.protectorate.v1.NodeAgentServiceListJobsRequest':
+      $3.NodeAgentServiceListJobsRequest$json,
+  '.protectorate.v1.NodeAgentServiceListJobsResponse':
+      $3.NodeAgentServiceListJobsResponse$json,
+  '.protectorate.v1.NodeJob': $3.NodeJob$json,
   '.protectorate.v1.NodeAgentServiceCancelJobRequest':
       $3.NodeAgentServiceCancelJobRequest$json,
   '.protectorate.v1.NodeAgentServiceCancelJobResponse':
@@ -1616,18 +1634,21 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     '9uc2USXgoNVXBsb2FkSm9iRGF0YRIlLnByb3RlY3RvcmF0ZS52MS5VcGxvYWRKb2JEYXRhUmVx'
     'dWVzdBomLnByb3RlY3RvcmF0ZS52MS5VcGxvYWRKb2JEYXRhUmVzcG9uc2USRQoGUnVuSm9iEh'
     '4ucHJvdGVjdG9yYXRlLnYxLlJ1bkpvYlJlcXVlc3QaGS5wcm90ZWN0b3JhdGUudjEuSm9iRXZl'
-    'bnQwARJyCglDYW5jZWxKb2ISMS5wcm90ZWN0b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbm'
-    'NlbEpvYlJlcXVlc3QaMi5wcm90ZWN0b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbmNlbEpv'
-    'YlJlc3BvbnNlEkwKB1B1dEZpbGUSHy5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlcXVlc3QaIC'
-    '5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlc3BvbnNlEk4KB0dldEZpbGUSHy5wcm90ZWN0b3Jh'
-    'dGUudjEuR2V0RmlsZVJlcXVlc3QaIC5wcm90ZWN0b3JhdGUudjEuR2V0RmlsZVJlc3BvbnNlMA'
-    'ESVQoKRGVza0FjdGlvbhIiLnByb3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVxdWVzdBojLnBy'
-    'b3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVzcG9uc2USWAoLQXBwbHlVcGRhdGUSIy5wcm90ZW'
-    'N0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBk'
-    'YXRlUmVzcG9uc2USUAoMR2V0RGVza1N0YXRlEiQucHJvdGVjdG9yYXRlLnYxLkdldERlc2tTdG'
-    'F0ZVJlcXVlc3QaGi5wcm90ZWN0b3JhdGUudjEuRGVza1N0YXRlElIKCVVuaW5zdGFsbBIhLnBy'
-    'b3RlY3RvcmF0ZS52MS5Vbmluc3RhbGxSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLlVuaW5zdG'
-    'FsbFJlc3BvbnNlGgSQtRgB');
+    'bnQwARJLCglBdHRhY2hKb2ISIS5wcm90ZWN0b3JhdGUudjEuQXR0YWNoSm9iUmVxdWVzdBoZLn'
+    'Byb3RlY3RvcmF0ZS52MS5Kb2JFdmVudDABEnQKCExpc3RKb2JzEjAucHJvdGVjdG9yYXRlLnYx'
+    'Lk5vZGVBZ2VudFNlcnZpY2VMaXN0Sm9ic1JlcXVlc3QaMS5wcm90ZWN0b3JhdGUudjEuTm9kZU'
+    'FnZW50U2VydmljZUxpc3RKb2JzUmVzcG9uc2UiA5ACARJyCglDYW5jZWxKb2ISMS5wcm90ZWN0'
+    'b3JhdGUudjEuTm9kZUFnZW50U2VydmljZUNhbmNlbEpvYlJlcXVlc3QaMi5wcm90ZWN0b3JhdG'
+    'UudjEuTm9kZUFnZW50U2VydmljZUNhbmNlbEpvYlJlc3BvbnNlEkwKB1B1dEZpbGUSHy5wcm90'
+    'ZWN0b3JhdGUudjEuUHV0RmlsZVJlcXVlc3QaIC5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlc3'
+    'BvbnNlEk4KB0dldEZpbGUSHy5wcm90ZWN0b3JhdGUudjEuR2V0RmlsZVJlcXVlc3QaIC5wcm90'
+    'ZWN0b3JhdGUudjEuR2V0RmlsZVJlc3BvbnNlMAESVQoKRGVza0FjdGlvbhIiLnByb3RlY3Rvcm'
+    'F0ZS52MS5EZXNrQWN0aW9uUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVz'
+    'cG9uc2USWAoLQXBwbHlVcGRhdGUSIy5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXF1ZX'
+    'N0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRlUmVzcG9uc2USUAoMR2V0RGVza1N0YXRl'
+    'EiQucHJvdGVjdG9yYXRlLnYxLkdldERlc2tTdGF0ZVJlcXVlc3QaGi5wcm90ZWN0b3JhdGUudj'
+    'EuRGVza1N0YXRlElIKCVVuaW5zdGFsbBIhLnByb3RlY3RvcmF0ZS52MS5Vbmluc3RhbGxSZXF1'
+    'ZXN0GiIucHJvdGVjdG9yYXRlLnYxLlVuaW5zdGFsbFJlc3BvbnNlGgSQtRgB');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',

@@ -7,20 +7,21 @@ import "package:connectrpc/connect.dart" as connect;
 import "backlog.pb.dart" as protectoratev1backlog;
 import "backlog.connect.spec.dart" as specs;
 
-/// BacklogService fronts the markdown file at $PROTECTORATE_HOME/backlog.md.
-/// Mutations publish backlog.* events on EventService.
+/// BacklogService keeps the owner's notes on the hub (docs/backlog.md). The
+/// owner writes them in the app or CLI; the orchestrator reads and edits them
+/// through the same API. Mutations publish note.* events on EventService.
 extension type BacklogServiceClient (connect.Transport _transport) {
-  /// ListItems returns backlog items, optionally filtered by project, state
-  /// and harness.
-  Future<protectoratev1backlog.ListItemsResponse> listItems(
-    protectoratev1backlog.ListItemsRequest input, {
+  /// ListNotes returns notes, pinned first and then most recently updated,
+  /// optionally filtered by project tag and a text query.
+  Future<protectoratev1backlog.ListNotesResponse> listNotes(
+    protectoratev1backlog.ListNotesRequest input, {
     connect.Headers? headers,
     connect.AbortSignal? signal,
     Function(connect.Headers)? onHeader,
     Function(connect.Headers)? onTrailer,
   }) {
     return connect.Client(_transport).unary(
-      specs.BacklogService.listItems,
+      specs.BacklogService.listNotes,
       input,
       signal: signal,
       headers: headers,
@@ -29,16 +30,16 @@ extension type BacklogServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// AddItem appends a new TODO item to a project and returns it with its id.
-  Future<protectoratev1backlog.AddItemResponse> addItem(
-    protectoratev1backlog.AddItemRequest input, {
+  /// GetNote returns one note by id.
+  Future<protectoratev1backlog.GetNoteResponse> getNote(
+    protectoratev1backlog.GetNoteRequest input, {
     connect.Headers? headers,
     connect.AbortSignal? signal,
     Function(connect.Headers)? onHeader,
     Function(connect.Headers)? onTrailer,
   }) {
     return connect.Client(_transport).unary(
-      specs.BacklogService.addItem,
+      specs.BacklogService.getNote,
       input,
       signal: signal,
       headers: headers,
@@ -47,16 +48,52 @@ extension type BacklogServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// UpdateItem sets an item's state, claiming or releasing it.
-  Future<protectoratev1backlog.UpdateItemResponse> updateItem(
-    protectoratev1backlog.UpdateItemRequest input, {
+  /// CreateNote adds a note and returns it with its id.
+  Future<protectoratev1backlog.CreateNoteResponse> createNote(
+    protectoratev1backlog.CreateNoteRequest input, {
     connect.Headers? headers,
     connect.AbortSignal? signal,
     Function(connect.Headers)? onHeader,
     Function(connect.Headers)? onTrailer,
   }) {
     return connect.Client(_transport).unary(
-      specs.BacklogService.updateItem,
+      specs.BacklogService.createNote,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// UpdateNote changes the fields that are set and leaves the others alone.
+  Future<protectoratev1backlog.UpdateNoteResponse> updateNote(
+    protectoratev1backlog.UpdateNoteRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.BacklogService.updateNote,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// DeleteNote removes a note for good.
+  Future<protectoratev1backlog.DeleteNoteResponse> deleteNote(
+    protectoratev1backlog.DeleteNoteRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.BacklogService.deleteNote,
       input,
       signal: signal,
       headers: headers,

@@ -20,7 +20,7 @@ message SubscribeRequest {}
 message Event {
   string id = 1;
   google.protobuf.Timestamp time = 2;
-  // kind is a dotted name such as "quota.updated", "session.created" or "backlog.added".
+  // kind is a dotted name such as "quota.updated", "session.created" or "note.created".
   string kind = 3;
   // subject is the entity the event is about, e.g. a provider or item id.
   string subject = 4;

@@ -10,8 +10,10 @@ import "job.connect.spec.dart" as specs;
 /// JobService runs commands on nodes. The hub picks the node, ships the source
 /// and streams the logs; the node executes. Jobs are kept under
 /// $PROTECTORATE_HOME/jobs/<id>/ (job.json, job.log, artifacts/) and announced
-/// on EventService as "job.updated" (subject = job id). A running job is lost
-/// when the hub restarts and is then marked failed.
+/// on EventService as "job.updated" (subject = job id). A running job survives a
+/// hub restart: the node keeps it, and the restarted hub reconciles with the
+/// node and reattaches the log stream. It is marked failed only when the node
+/// reports it never had the job.
 /// A job executes arbitrary commands as the node agent's user, so the scopes
 /// that admit SubmitJob are as powerful as shell access to every node.
 extension type JobServiceClient (connect.Transport _transport) {

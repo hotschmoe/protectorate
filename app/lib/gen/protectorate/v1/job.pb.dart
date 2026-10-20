@@ -2793,11 +2793,313 @@ class NodeAgentServiceCancelJobResponse extends $pb.GeneratedMessage {
   void clearFound() => $_clearField(1);
 }
 
+class NodeAgentServiceListJobsRequest extends $pb.GeneratedMessage {
+  factory NodeAgentServiceListJobsRequest() =>
+      NodeAgentServiceListJobsRequest._();
+
+  NodeAgentServiceListJobsRequest._();
+
+  factory NodeAgentServiceListJobsRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeAgentServiceListJobsRequest()..mergeFromBuffer(data, registry);
+  factory NodeAgentServiceListJobsRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeAgentServiceListJobsRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NodeAgentServiceListJobsRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: NodeAgentServiceListJobsRequest.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeAgentServiceListJobsRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeAgentServiceListJobsRequest copyWith(
+          void Function(NodeAgentServiceListJobsRequest) updates) =>
+      super.copyWith(
+              (message) => updates(message as NodeAgentServiceListJobsRequest))
+          as NodeAgentServiceListJobsRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use NodeAgentServiceListJobsRequest() / NodeAgentServiceListJobsRequest.new instead')
+  static NodeAgentServiceListJobsRequest create() =>
+      NodeAgentServiceListJobsRequest._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      NodeAgentServiceListJobsRequest._();
+  @$core.override
+  NodeAgentServiceListJobsRequest createEmptyInstance() =>
+      NodeAgentServiceListJobsRequest._();
+  @$core.pragma('dart2js:noInline')
+  static NodeAgentServiceListJobsRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<NodeAgentServiceListJobsRequest>(
+          NodeAgentServiceListJobsRequest.$_createMessage);
+  static NodeAgentServiceListJobsRequest? _defaultInstance;
+}
+
+class NodeAgentServiceListJobsResponse extends $pb.GeneratedMessage {
+  factory NodeAgentServiceListJobsResponse({
+    $core.Iterable<NodeJob>? jobs,
+  }) {
+    final result = NodeAgentServiceListJobsResponse._();
+    if (jobs != null) result.jobs.addAll(jobs);
+    return result;
+  }
+
+  NodeAgentServiceListJobsResponse._();
+
+  factory NodeAgentServiceListJobsResponse.fromBuffer(
+          $core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeAgentServiceListJobsResponse()..mergeFromBuffer(data, registry);
+  factory NodeAgentServiceListJobsResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeAgentServiceListJobsResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NodeAgentServiceListJobsResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: NodeAgentServiceListJobsResponse.$_createMessage)
+    ..pPM<NodeJob>(1, _omitFieldNames ? '' : 'jobs',
+        subBuilder: NodeJob.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeAgentServiceListJobsResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeAgentServiceListJobsResponse copyWith(
+          void Function(NodeAgentServiceListJobsResponse) updates) =>
+      super.copyWith(
+              (message) => updates(message as NodeAgentServiceListJobsResponse))
+          as NodeAgentServiceListJobsResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use NodeAgentServiceListJobsResponse() / NodeAgentServiceListJobsResponse.new instead')
+  static NodeAgentServiceListJobsResponse create() =>
+      NodeAgentServiceListJobsResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      NodeAgentServiceListJobsResponse._();
+  @$core.override
+  NodeAgentServiceListJobsResponse createEmptyInstance() =>
+      NodeAgentServiceListJobsResponse._();
+  @$core.pragma('dart2js:noInline')
+  static NodeAgentServiceListJobsResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<NodeAgentServiceListJobsResponse>(
+          NodeAgentServiceListJobsResponse.$_createMessage);
+  static NodeAgentServiceListJobsResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<NodeJob> get jobs => $_getList(0);
+}
+
+/// NodeJob is a job the node holds: running, or finished and kept until the
+/// hub has had time to collect the result.
+class NodeJob extends $pb.GeneratedMessage {
+  factory NodeJob({
+    $core.String? jobId,
+    $core.bool? started,
+    JobFinished? finished,
+    $fixnum.Int64? logBytes,
+    $2.Timestamp? finishedAt,
+  }) {
+    final result = NodeJob._();
+    if (jobId != null) result.jobId = jobId;
+    if (started != null) result.started = started;
+    if (finished != null) result.finished = finished;
+    if (logBytes != null) result.logBytes = logBytes;
+    if (finishedAt != null) result.finishedAt = finishedAt;
+    return result;
+  }
+
+  NodeJob._();
+
+  factory NodeJob.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeJob()..mergeFromBuffer(data, registry);
+  factory NodeJob.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeJob()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NodeJob',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: NodeJob.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'jobId')
+    ..aOB(2, _omitFieldNames ? '' : 'started')
+    ..aOM<JobFinished>(3, _omitFieldNames ? '' : 'finished',
+        subBuilder: JobFinished.$_createMessage)
+    ..a<$fixnum.Int64>(
+        4, _omitFieldNames ? '' : 'logBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOM<$2.Timestamp>(5, _omitFieldNames ? '' : 'finishedAt',
+        subBuilder: $2.Timestamp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeJob clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeJob copyWith(void Function(NodeJob) updates) =>
+      super.copyWith((message) => updates(message as NodeJob)) as NodeJob;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use NodeJob() / NodeJob.new instead')
+  static NodeJob create() => NodeJob._();
+  static $pb.GeneratedMessage $_createMessage() => NodeJob._();
+  @$core.override
+  NodeJob createEmptyInstance() => NodeJob._();
+  @$core.pragma('dart2js:noInline')
+  static NodeJob getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<NodeJob>(NodeJob.$_createMessage);
+  static NodeJob? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get jobId => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set jobId($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasJobId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearJobId() => $_clearField(1);
+
+  /// started is true once the command was launched.
+  @$pb.TagNumber(2)
+  $core.bool get started => $_getBF(1);
+  @$pb.TagNumber(2)
+  set started($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasStarted() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearStarted() => $_clearField(2);
+
+  /// finished is set once the job ended; its artifacts are still held.
+  @$pb.TagNumber(3)
+  JobFinished get finished => $_getN(2);
+  @$pb.TagNumber(3)
+  set finished(JobFinished value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasFinished() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearFinished() => $_clearField(3);
+  @$pb.TagNumber(3)
+  JobFinished ensureFinished() => $_ensure(2);
+
+  /// log_bytes is the size of the output so far; a reattach can resume at any
+  /// offset up to it.
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get logBytes => $_getI64(3);
+  @$pb.TagNumber(4)
+  set logBytes($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasLogBytes() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearLogBytes() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $2.Timestamp get finishedAt => $_getN(4);
+  @$pb.TagNumber(5)
+  set finishedAt($2.Timestamp value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasFinishedAt() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearFinishedAt() => $_clearField(5);
+  @$pb.TagNumber(5)
+  $2.Timestamp ensureFinishedAt() => $_ensure(4);
+}
+
+class AttachJobRequest extends $pb.GeneratedMessage {
+  factory AttachJobRequest({
+    $core.String? jobId,
+    $fixnum.Int64? fromOffset,
+  }) {
+    final result = AttachJobRequest._();
+    if (jobId != null) result.jobId = jobId;
+    if (fromOffset != null) result.fromOffset = fromOffset;
+    return result;
+  }
+
+  AttachJobRequest._();
+
+  factory AttachJobRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      AttachJobRequest()..mergeFromBuffer(data, registry);
+  factory AttachJobRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      AttachJobRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'AttachJobRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: AttachJobRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'jobId')
+    ..a<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'fromOffset', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  AttachJobRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  AttachJobRequest copyWith(void Function(AttachJobRequest) updates) =>
+      super.copyWith((message) => updates(message as AttachJobRequest))
+          as AttachJobRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use AttachJobRequest() / AttachJobRequest.new instead')
+  static AttachJobRequest create() => AttachJobRequest._();
+  static $pb.GeneratedMessage $_createMessage() => AttachJobRequest._();
+  @$core.override
+  AttachJobRequest createEmptyInstance() => AttachJobRequest._();
+  @$core.pragma('dart2js:noInline')
+  static AttachJobRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<AttachJobRequest>(
+          AttachJobRequest.$_createMessage);
+  static AttachJobRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get jobId => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set jobId($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasJobId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearJobId() => $_clearField(1);
+
+  /// from_offset is the first output byte to send.
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get fromOffset => $_getI64(1);
+  @$pb.TagNumber(2)
+  set fromOffset($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasFromOffset() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearFromOffset() => $_clearField(2);
+}
+
 /// JobService runs commands on nodes. The hub picks the node, ships the source
 /// and streams the logs; the node executes. Jobs are kept under
 /// $PROTECTORATE_HOME/jobs/<id>/ (job.json, job.log, artifacts/) and announced
-/// on EventService as "job.updated" (subject = job id). A running job is lost
-/// when the hub restarts and is then marked failed.
+/// on EventService as "job.updated" (subject = job id). A running job survives a
+/// hub restart: the node keeps it, and the restarted hub reconciles with the
+/// node and reattaches the log stream. It is marked failed only when the node
+/// reports it never had the job.
 ///
 /// A job executes arbitrary commands as the node agent's user, so the scopes
 /// that admit SubmitJob are as powerful as shell access to every node.

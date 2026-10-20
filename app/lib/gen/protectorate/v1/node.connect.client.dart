@@ -90,8 +90,9 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
   }
 
   /// RunJob checks the source out, runs the command and streams its output;
-  /// matching artifacts follow the exit. The job dies with the stream: if the
-  /// caller disconnects, the process tree is killed.
+  /// matching artifacts follow the exit. The job does not depend on the
+  /// stream: if the caller disconnects it keeps running (bounded by its
+  /// timeout) and AttachJob picks the stream up again.
   Stream<protectoratev1job.JobEvent> runJob(
     protectoratev1job.RunJobRequest input, {
     connect.Headers? headers,
@@ -101,6 +102,44 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).server(
       specs.NodeAgentService.runJob,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// AttachJob streams a job again from an output offset: started, the output
+  /// from from_offset, then artifacts and the result once it ended. A finished
+  /// job is kept for an hour. NOT_FOUND when the node never had the job.
+  Stream<protectoratev1job.JobEvent> attachJob(
+    protectoratev1job.AttachJobRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).server(
+      specs.NodeAgentService.attachJob,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// ListJobs lists the jobs the node is running or still holds the result of.
+  Future<protectoratev1job.NodeAgentServiceListJobsResponse> listJobs(
+    protectoratev1job.NodeAgentServiceListJobsRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeAgentService.listJobs,
       input,
       signal: signal,
       headers: headers,

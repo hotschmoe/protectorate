@@ -38,9 +38,20 @@ service NodeAgentService {
   rpc UploadJobData(UploadJobDataRequest) returns (UploadJobDataResponse);
 
   // RunJob checks the source out, runs the command and streams its output;
-  // matching artifacts follow the exit. The job dies with the stream: if the
-  // caller disconnects, the process tree is killed.
+  // matching artifacts follow the exit. The job does not depend on the
+  // stream: if the caller disconnects it keeps running (bounded by its
+  // timeout) and AttachJob picks the stream up again.
   rpc RunJob(RunJobRequest) returns (stream JobEvent);
+
+  // AttachJob streams a job again from an output offset: started, the output
+  // from from_offset, then artifacts and the result once it ended. A finished
+  // job is kept for an hour. NOT_FOUND when the node never had the job.
+  rpc AttachJob(AttachJobRequest) returns (stream JobEvent);
+
+  // ListJobs lists the jobs the node is running or still holds the result of.
+  rpc ListJobs(NodeAgentServiceListJobsRequest) returns (NodeAgentServiceListJobsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // CancelJob kills a running job's process tree.
   rpc CancelJob(NodeAgentServiceCancelJobRequest) returns (NodeAgentServiceCancelJobResponse);

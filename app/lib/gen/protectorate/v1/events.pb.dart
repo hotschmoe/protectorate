@@ -143,7 +143,7 @@ class Event extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $0.Timestamp ensureTime() => $_ensure(1);
 
-  /// kind is a dotted name such as "quota.updated", "session.created" or "backlog.added".
+  /// kind is a dotted name such as "quota.updated", "session.created" or "note.created".
   @$pb.TagNumber(3)
   $core.String get kind => $_getSZ(2);
   @$pb.TagNumber(3)

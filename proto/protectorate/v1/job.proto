@@ -11,8 +11,10 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // JobService runs commands on nodes. The hub picks the node, ships the source
 // and streams the logs; the node executes. Jobs are kept under
 // $PROTECTORATE_HOME/jobs/<id>/ (job.json, job.log, artifacts/) and announced
-// on EventService as "job.updated" (subject = job id). A running job is lost
-// when the hub restarts and is then marked failed.
+// on EventService as "job.updated" (subject = job id). A running job survives a
+// hub restart: the node keeps it, and the restarted hub reconciles with the
+// node and reattaches the log stream. It is marked failed only when the node
+// reports it never had the job.
 //
 // A job executes arbitrary commands as the node agent's user, so the scopes
 // that admit SubmitJob are as powerful as shell access to every node.
@@ -378,4 +380,30 @@ message NodeAgentServiceCancelJobRequest {
 message NodeAgentServiceCancelJobResponse {
   // found is false when no such job is running.
   bool found = 1;
+}
+
+message NodeAgentServiceListJobsRequest {}
+
+message NodeAgentServiceListJobsResponse {
+  repeated NodeJob jobs = 1;
+}
+
+// NodeJob is a job the node holds: running, or finished and kept until the
+// hub has had time to collect the result.
+message NodeJob {
+  string job_id = 1;
+  // started is true once the command was launched.
+  bool started = 2;
+  // finished is set once the job ended; its artifacts are still held.
+  JobFinished finished = 3;
+  // log_bytes is the size of the output so far; a reattach can resume at any
+  // offset up to it.
+  uint64 log_bytes = 4;
+  google.protobuf.Timestamp finished_at = 5;
+}
+
+message AttachJobRequest {
+  string job_id = 1;
+  // from_offset is the first output byte to send.
+  uint64 from_offset = 2;
 }

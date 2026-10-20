@@ -64,7 +64,7 @@ type Event struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Time  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=time,proto3" json:"time,omitempty"`
-	// kind is a dotted name such as "quota.updated", "session.created" or "backlog.added".
+	// kind is a dotted name such as "quota.updated", "session.created" or "note.created".
 	Kind string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
 	// subject is the entity the event is about, e.g. a provider or item id.
 	Subject string `protobuf:"bytes,4,opt,name=subject,proto3" json:"subject,omitempty"`
