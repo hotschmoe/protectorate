@@ -10,7 +10,7 @@ cd app
 flutter pub get
 flutter run -d chrome        # or -d linux / windows / macos / an Android device
 flutter analyze && flutter test
-flutter build web
+dart run tool/build_web.dart
 ```
 
 ## Codegen
@@ -23,6 +23,54 @@ dart pub global activate connectrpc
 ```
 
 Do not pass the `grpc` option to `protoc-gen-dart`.
+
+## Offline web release
+
+`dart run tool/build_web.dart` forwards Flutter build flags and prunes
+`build/web/canvaskit` to `canvaskit.js` and `canvaskit.wasm`. Use this entry
+point for release builds. The release archive, installer and `hub serve --web`
+consume that directory without changing its contents.
+
+The bootstrap pins the full CanvasKit renderer for Chromium, Firefox and Safari,
+with engine and fallback-font URLs resolved against the document base URL.
+Chromium-only CanvasKit, skwasm, Wimp, experimental renderers and debug symbols
+are excluded. Roboto is bundled (Apache 2.0) alongside the existing UI fonts,
+so Flutter does not fetch its default font from Google at startup. Glyphs absent
+from the bundled fonts need additional fonts hosted under `web/fonts/` using
+Flutter's fallback-font URL layout; they never fall back to an external CDN.
+
+Measured with Flutter 3.44.1 on 2026-10-20 (sum of file sizes, same release
+before/after pruning): web output 44,516,126 -> 13,356,836 bytes; engine assets
+38,475,613 -> 7,316,326 bytes; gzip release tarball 15,014,711 -> 4,668,712 bytes.
+Manual Chromium verification served the pruned output over loopback HTTP at
+412x860, blocked all off-origin requests and waited for `flutter-first-frame`:
+the hub picker rendered with zero off-origin requests, failed responses or
+JavaScript errors. Both engine requests used the local full CanvasKit pair.
+
+## Terminal dependency
+
+The app uses MIT-licensed [xterm2 5.3.0](https://pub.dev/packages/xterm2/versions/5.3.0),
+pinned to the reviewed release. It replaces xterm without adding a second terminal
+implementation. Its `characters` dependency was already present through Flutter.
+
+Reviewed on 2026-10-20:
+
+- [xterm](https://pub.dev/packages/xterm/versions/4.0.0): last release 2024-02-27,
+  MIT; upstream last pushed 2025-06-19, with 109 open issues/PRs. It analyzes on
+  Flutter 3.44.1, but unresolved reports include Android keyboard/composition
+  problems and [Flutter 3.44 Windows input](https://github.com/TerminalStudio/xterm.dart/issues/228).
+- [xterm2](https://github.com/SoFluffyOS/xterm2): 5.3.0 published 2026-10-12,
+  last pushed 2026-10-15, zero open issues/PRs at review. The published source
+  supplies the Flutter view ID to `TextInputConfiguration` and includes parser,
+  resize, paste and IME fixes. Compilation does not replace phone-device testing.
+- [xterm3](https://github.com/klc/xterm3): latest 6.3.7 published 2026-10-08;
+  its AGPL-3.0 license rules it out.
+
+The remaining direct dependencies all have callers: connectrpc/protobuf/fixnum
+serve the generated API, shared_preferences stores hub profiles, web_socket_channel
+supports browser/native terminal sockets, app_links handles native pairing links,
+and qr renders node enrollment codes. None can be dropped without removing behavior
+or reimplementing it.
 
 ## Hub auth
 

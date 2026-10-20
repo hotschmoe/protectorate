@@ -56,7 +56,13 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/fonts/Roboto-LICENSE.txt
+
   fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
     - family: JetBrains Mono
       fonts:
         - asset: assets/fonts/JetBrainsMonoNL-Regular.ttf
