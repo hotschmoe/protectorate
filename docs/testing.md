@@ -68,6 +68,8 @@ page; the temporary device request stays unapproved during these scenes.
 The phone NODES tab also embeds the shared hub and fleet update cards below
 the hardware inventory. Release and fleet mutations retain their existing
 capability checks and progress displays.
+The update captures scroll the NODES tab with real wheel input and assert that
+the hub update card is visible, alongside the fleet card when available.
 
 Run `make test-race` to build `bin/protectorate-race` with `-race`, the same
 feature tags, trimpath and version ldflags as `make build`, and run the full

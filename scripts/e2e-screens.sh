@@ -129,6 +129,7 @@ if [ "${E2E_PHONE:-0}" = 1 ]; then
         fi
       done
       shot phone-node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true
+      shot phone-nodes-updates "$size" "$web&tab=orchestrator" "$theme" true updates
     done
   done
 else

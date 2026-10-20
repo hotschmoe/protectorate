@@ -98,7 +98,7 @@ try {
   }; true`);
   inspect = () => evaluate(`(() => {
     const elements = window.screenshotElements();
-    const label = el => (el.getAttribute('aria-label') || el.textContent || '').trim();
+    const label = el => (el.getAttribute('aria-label') || el.textContent || '').replace(/\\s+/g, ' ').trim();
     const bounds = el => {
       const rect = el.getBoundingClientRect();
       return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
@@ -111,6 +111,8 @@ try {
         .map(el => ({ label: label(el), selected: (el.getAttribute('aria-current') || el.getAttribute('aria-selected')) === 'true', ...bounds(el) })),
       inputs: elements.filter(el => el.matches('input, textarea') && !el.readOnly && !el.disabled)
         .map(el => ({ value: el.value, ...bounds(el) })),
+      updates: elements.filter(el => /^(?:HUB UPDATE|NODE UPDATES)(?: |$)/.test(label(el)))
+        .map(el => ({ label: label(el).startsWith('HUB UPDATE') ? 'HUB UPDATE' : 'NODE UPDATES', ...bounds(el) })),
       active: { tag: active?.tagName, value: active?.value },
     };
   })()`);
@@ -143,9 +145,20 @@ try {
     await evaluate(`window.screenshotElements().find(el => el.tagName === 'FLT-SEMANTICS-PLACEHOLDER')?.click(); true`);
     await waitFor('phone navigation semantics', state => state.tabs.some(tab => tab.label === 'ENVOY'));
   }
-  if (interaction === 'nodes') {
+  if (interaction === 'nodes' || interaction === 'updates') {
     await selectTab('NODES');
     await delay(1000);
+    if (interaction === 'updates') {
+      const visible = (item, state) => item.y >= 0 && item.y + item.height <= state.viewport.height - 72;
+      const state = await inspect();
+      await call('Input.dispatchMouseEvent', {
+        type: 'mouseWheel', x: state.viewport.width / 2, y: state.viewport.height * 0.7,
+        deltaX: 0, deltaY: 10_000,
+      });
+      await delay(500);
+      await waitFor('visible hub update card', state => state.updates.some(item => item.label === 'HUB UPDATE' && visible(item, state)));
+      await delay(1000);
+    }
   } else if (interaction === 'draft') {
     const text = 'Check the node again later.';
     await focusComposer();
