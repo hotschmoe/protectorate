@@ -233,7 +233,7 @@ func (h *Hub) SetAuth(a *auth.Authorizer) { h.authz = a }
 // are static and public.
 func (h *Hub) Handler() http.Handler {
 	opts := connect.WithHandlerOptions(
-		connect.WithInterceptors(authInterceptor{a: h.authz}),
+		connect.WithInterceptors(authInterceptor{a: h.authz, h: h}),
 		connect.WithCodec(codec.StrictJSON{}),
 	)
 	mux := http.NewServeMux()
@@ -459,7 +459,10 @@ func (h *Hub) heartbeat() *pb.Event {
 	}
 }
 
-type authInterceptor struct{ a *auth.Authorizer }
+type authInterceptor struct {
+	a *auth.Authorizer
+	h *Hub
+}
 
 func bearerToken(header http.Header) string {
 	v := header.Get("Authorization")
@@ -482,6 +485,9 @@ func (i authInterceptor) admit(ctx context.Context, procedure string, header htt
 	ctx = auth.WithNote(ctx)
 	if err == nil {
 		err = i.a.AuthorizeProcedure(p, procedure)
+		if err != nil && procedure == protectoratev1connect.SleeveServiceKillSleeveProcedure && i.h != nil && i.h.ownsSleeve(p, msg) {
+			err = nil
+		}
 	}
 	if err != nil {
 		if audited || (known && !m.ReadOnly) {

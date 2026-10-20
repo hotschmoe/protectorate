@@ -15,6 +15,8 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
+    as $1;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
@@ -400,9 +402,60 @@ final $typed_data.Uint8List mailDeliveryDescriptor = $convert.base64Decode(
     'tlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSB2Fja2VkQXQSHAoJcmVt'
     'aW5kZXJzGAUgASgNUglyZW1pbmRlcnM=');
 
+@$core.Deprecated('Use messageServiceWaitRequestDescriptor instead')
+const MessageServiceWaitRequest$json = {
+  '1': 'MessageServiceWaitRequest',
+  '2': [
+    {'1': 'target', '3': 1, '4': 1, '5': 9, '10': 'target'},
+    {
+      '1': 'timeout',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'timeout'
+    },
+  ],
+};
+
+/// Descriptor for `MessageServiceWaitRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List messageServiceWaitRequestDescriptor =
+    $convert.base64Decode(
+        'ChlNZXNzYWdlU2VydmljZVdhaXRSZXF1ZXN0EhYKBnRhcmdldBgBIAEoCVIGdGFyZ2V0EjMKB3'
+        'RpbWVvdXQYAiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQ=');
+
+@$core.Deprecated('Use messageServiceWaitResponseDescriptor instead')
+const MessageServiceWaitResponse$json = {
+  '1': 'MessageServiceWaitResponse',
+  '2': [
+    {
+      '1': 'message',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.MailMessage',
+      '10': 'message'
+    },
+    {'1': 'timed_out', '3': 2, '4': 1, '5': 8, '10': 'timedOut'},
+  ],
+};
+
+/// Descriptor for `MessageServiceWaitResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List messageServiceWaitResponseDescriptor =
+    $convert.base64Decode(
+        'ChpNZXNzYWdlU2VydmljZVdhaXRSZXNwb25zZRI2CgdtZXNzYWdlGAEgASgLMhwucHJvdGVjdG'
+        '9yYXRlLnYxLk1haWxNZXNzYWdlUgdtZXNzYWdlEhsKCXRpbWVkX291dBgCIAEoCFIIdGltZWRP'
+        'dXQ=');
+
 const $core.Map<$core.String, $core.dynamic> MessageServiceBase$json = {
   '1': 'MessageService',
   '2': [
+    {
+      '1': 'Wait',
+      '2': '.protectorate.v1.MessageServiceWaitRequest',
+      '3': '.protectorate.v1.MessageServiceWaitResponse',
+      '4': {'34': 1},
+    },
     {
       '1': 'Send',
       '2': '.protectorate.v1.MessageServiceSendRequest',
@@ -441,12 +494,16 @@ const $core.Map<$core.String, $core.dynamic> MessageServiceBase$json = {
 @$core.Deprecated('Use messageServiceDescriptor instead')
 const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
     MessageServiceBase$messageJson = {
-  '.protectorate.v1.MessageServiceSendRequest': MessageServiceSendRequest$json,
-  '.protectorate.v1.MessageServiceSendResponse':
-      MessageServiceSendResponse$json,
+  '.protectorate.v1.MessageServiceWaitRequest': MessageServiceWaitRequest$json,
+  '.google.protobuf.Duration': $1.Duration$json,
+  '.protectorate.v1.MessageServiceWaitResponse':
+      MessageServiceWaitResponse$json,
   '.protectorate.v1.MailMessage': MailMessage$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.MailDelivery': MailDelivery$json,
+  '.protectorate.v1.MessageServiceSendRequest': MessageServiceSendRequest$json,
+  '.protectorate.v1.MessageServiceSendResponse':
+      MessageServiceSendResponse$json,
   '.protectorate.v1.InboxRequest': InboxRequest$json,
   '.protectorate.v1.InboxResponse': InboxResponse$json,
   '.protectorate.v1.AckRequest': AckRequest$json,
@@ -462,12 +519,14 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 
 /// Descriptor for `MessageService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List messageServiceDescriptor = $convert.base64Decode(
-    'Cg5NZXNzYWdlU2VydmljZRJfCgRTZW5kEioucHJvdGVjdG9yYXRlLnYxLk1lc3NhZ2VTZXJ2aW'
-    'NlU2VuZFJlcXVlc3QaKy5wcm90ZWN0b3JhdGUudjEuTWVzc2FnZVNlcnZpY2VTZW5kUmVzcG9u'
-    'c2USRgoFSW5ib3gSHS5wcm90ZWN0b3JhdGUudjEuSW5ib3hSZXF1ZXN0Gh4ucHJvdGVjdG9yYX'
-    'RlLnYxLkluYm94UmVzcG9uc2USQAoDQWNrEhsucHJvdGVjdG9yYXRlLnYxLkFja1JlcXVlc3Qa'
-    'HC5wcm90ZWN0b3JhdGUudjEuQWNrUmVzcG9uc2USRgoFUmVwbHkSHS5wcm90ZWN0b3JhdGUudj'
-    'EuUmVwbHlSZXF1ZXN0Gh4ucHJvdGVjdG9yYXRlLnYxLlJlcGx5UmVzcG9uc2USTgoGVGhyZWFk'
-    'Eh4ucHJvdGVjdG9yYXRlLnYxLlRocmVhZFJlcXVlc3QaHy5wcm90ZWN0b3JhdGUudjEuVGhyZW'
-    'FkUmVzcG9uc2UiA5ACARJdCgtMaXN0VGhyZWFkcxIjLnByb3RlY3RvcmF0ZS52MS5MaXN0VGhy'
-    'ZWFkc1JlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuTGlzdFRocmVhZHNSZXNwb25zZSIDkAIB');
+    'Cg5NZXNzYWdlU2VydmljZRJkCgRXYWl0EioucHJvdGVjdG9yYXRlLnYxLk1lc3NhZ2VTZXJ2aW'
+    'NlV2FpdFJlcXVlc3QaKy5wcm90ZWN0b3JhdGUudjEuTWVzc2FnZVNlcnZpY2VXYWl0UmVzcG9u'
+    'c2UiA5ACARJfCgRTZW5kEioucHJvdGVjdG9yYXRlLnYxLk1lc3NhZ2VTZXJ2aWNlU2VuZFJlcX'
+    'Vlc3QaKy5wcm90ZWN0b3JhdGUudjEuTWVzc2FnZVNlcnZpY2VTZW5kUmVzcG9uc2USRgoFSW5i'
+    'b3gSHS5wcm90ZWN0b3JhdGUudjEuSW5ib3hSZXF1ZXN0Gh4ucHJvdGVjdG9yYXRlLnYxLkluYm'
+    '94UmVzcG9uc2USQAoDQWNrEhsucHJvdGVjdG9yYXRlLnYxLkFja1JlcXVlc3QaHC5wcm90ZWN0'
+    'b3JhdGUudjEuQWNrUmVzcG9uc2USRgoFUmVwbHkSHS5wcm90ZWN0b3JhdGUudjEuUmVwbHlSZX'
+    'F1ZXN0Gh4ucHJvdGVjdG9yYXRlLnYxLlJlcGx5UmVzcG9uc2USTgoGVGhyZWFkEh4ucHJvdGVj'
+    'dG9yYXRlLnYxLlRocmVhZFJlcXVlc3QaHy5wcm90ZWN0b3JhdGUudjEuVGhyZWFkUmVzcG9uc2'
+    'UiA5ACARJdCgtMaXN0VGhyZWFkcxIjLnByb3RlY3RvcmF0ZS52MS5MaXN0VGhyZWFkc1JlcXVl'
+    'c3QaJC5wcm90ZWN0b3JhdGUudjEuTGlzdFRocmVhZHNSZXNwb25zZSIDkAIB');

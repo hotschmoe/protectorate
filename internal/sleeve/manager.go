@@ -43,6 +43,8 @@ type Usage struct {
 
 // Info is one sleeve. Everything but Usage is persisted in sleeves.yaml.
 type Info struct {
+	Parent    string    `yaml:"parent,omitempty"`
+	ParentID  string    `yaml:"parent_id,omitempty"`
 	Name      string    `yaml:"name"`
 	Harness   Harness   `yaml:"harness"`
 	Workspace string    `yaml:"workspace"`
@@ -79,6 +81,8 @@ type Info struct {
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
 
 type SpawnRequest struct {
+	Parent    string
+	ParentID  string
 	Selection driver.Selection
 	Name      string
 	Workspace string // absolute directory or git URL
@@ -349,6 +353,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	}
 
 	info := Info{
+		Parent: req.Parent, ParentID: req.ParentID,
 		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
 		CPU: req.Limits.CPUPercent, Memory: req.Limits.MemoryBytes, Args: req.Args,

@@ -167,7 +167,7 @@ func planEnvoyRenewal(tokens []auth.Token, now time.Time) (rotate *auth.Token, r
 // CLI reads the file on every call.
 func (h *Hub) swapEnvoyToken(info sleeve.Info, scopes []string, ttl time.Duration, now time.Time) (auth.Token, error) {
 	st := h.authz.Store()
-	t, secret, err := st.Create(orchestrator.TokenName, scopes, ttl, now)
+	t, secret, err := st.Renew(auth.Token{Name: orchestrator.TokenName, Scopes: scopes}, ttl, now)
 	if err != nil {
 		return auth.Token{}, fmt.Errorf("mint envoy token: %w", err)
 	}

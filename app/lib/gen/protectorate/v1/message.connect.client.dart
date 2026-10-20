@@ -22,6 +22,25 @@ import "message.connect.spec.dart" as specs;
 /// Changes are announced on EventService as "msg.sent", "msg.delivered",
 /// "msg.acked", "msg.reminded" and "msg.escalated" (subject = message id).
 extension type MessageServiceClient (connect.Transport _transport) {
+  /// Wait blocks until a reply or ack to an outgoing message, or incoming mail
+  /// or an outgoing ack in a thread. Existing outcomes return immediately.
+  Future<protectoratev1message.MessageServiceWaitResponse> wait(
+    protectoratev1message.MessageServiceWaitRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.MessageService.wait,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
   /// Send addresses a message to a sleeve name, "project:<id-or-name>",
   /// "orchestrator" or "owner". Retrying with the same request_id returns the
   /// original message instead of sending twice.

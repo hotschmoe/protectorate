@@ -15,39 +15,43 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'message.pb.dart' as $1;
+import 'message.pb.dart' as $2;
 import 'message.pbjson.dart';
 
 export 'message.pb.dart';
 
 abstract class MessageServiceBase extends $pb.GeneratedService {
-  $async.Future<$1.MessageServiceSendResponse> send(
-      $pb.ServerContext ctx, $1.MessageServiceSendRequest request);
-  $async.Future<$1.InboxResponse> inbox(
-      $pb.ServerContext ctx, $1.InboxRequest request);
-  $async.Future<$1.AckResponse> ack(
-      $pb.ServerContext ctx, $1.AckRequest request);
-  $async.Future<$1.ReplyResponse> reply(
-      $pb.ServerContext ctx, $1.ReplyRequest request);
-  $async.Future<$1.ThreadResponse> thread(
-      $pb.ServerContext ctx, $1.ThreadRequest request);
-  $async.Future<$1.ListThreadsResponse> listThreads(
-      $pb.ServerContext ctx, $1.ListThreadsRequest request);
+  $async.Future<$2.MessageServiceWaitResponse> wait(
+      $pb.ServerContext ctx, $2.MessageServiceWaitRequest request);
+  $async.Future<$2.MessageServiceSendResponse> send(
+      $pb.ServerContext ctx, $2.MessageServiceSendRequest request);
+  $async.Future<$2.InboxResponse> inbox(
+      $pb.ServerContext ctx, $2.InboxRequest request);
+  $async.Future<$2.AckResponse> ack(
+      $pb.ServerContext ctx, $2.AckRequest request);
+  $async.Future<$2.ReplyResponse> reply(
+      $pb.ServerContext ctx, $2.ReplyRequest request);
+  $async.Future<$2.ThreadResponse> thread(
+      $pb.ServerContext ctx, $2.ThreadRequest request);
+  $async.Future<$2.ListThreadsResponse> listThreads(
+      $pb.ServerContext ctx, $2.ListThreadsRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
+      case 'Wait':
+        return $2.MessageServiceWaitRequest();
       case 'Send':
-        return $1.MessageServiceSendRequest();
+        return $2.MessageServiceSendRequest();
       case 'Inbox':
-        return $1.InboxRequest();
+        return $2.InboxRequest();
       case 'Ack':
-        return $1.AckRequest();
+        return $2.AckRequest();
       case 'Reply':
-        return $1.ReplyRequest();
+        return $2.ReplyRequest();
       case 'Thread':
-        return $1.ThreadRequest();
+        return $2.ThreadRequest();
       case 'ListThreads':
-        return $1.ListThreadsRequest();
+        return $2.ListThreadsRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -56,18 +60,20 @@ abstract class MessageServiceBase extends $pb.GeneratedService {
   $async.Future<$pb.GeneratedMessage> handleCall($pb.ServerContext ctx,
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
+      case 'Wait':
+        return wait(ctx, request as $2.MessageServiceWaitRequest);
       case 'Send':
-        return send(ctx, request as $1.MessageServiceSendRequest);
+        return send(ctx, request as $2.MessageServiceSendRequest);
       case 'Inbox':
-        return inbox(ctx, request as $1.InboxRequest);
+        return inbox(ctx, request as $2.InboxRequest);
       case 'Ack':
-        return ack(ctx, request as $1.AckRequest);
+        return ack(ctx, request as $2.AckRequest);
       case 'Reply':
-        return reply(ctx, request as $1.ReplyRequest);
+        return reply(ctx, request as $2.ReplyRequest);
       case 'Thread':
-        return thread(ctx, request as $1.ThreadRequest);
+        return thread(ctx, request as $2.ThreadRequest);
       case 'ListThreads':
-        return listThreads(ctx, request as $1.ListThreadsRequest);
+        return listThreads(ctx, request as $2.ListThreadsRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

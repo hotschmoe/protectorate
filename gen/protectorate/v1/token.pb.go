@@ -545,6 +545,111 @@ func (x *RevokeTokenResponse) GetToken() *TokenInfo {
 	return nil
 }
 
+type UpdateTokenScopesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is an exact token ID or an unambiguous active token name.
+	Id            string   `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Add           []string `protobuf:"bytes,2,rep,name=add,proto3" json:"add,omitempty"`
+	Remove        []string `protobuf:"bytes,3,rep,name=remove,proto3" json:"remove,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTokenScopesRequest) Reset() {
+	*x = UpdateTokenScopesRequest{}
+	mi := &file_protectorate_v1_token_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTokenScopesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTokenScopesRequest) ProtoMessage() {}
+
+func (x *UpdateTokenScopesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_token_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTokenScopesRequest.ProtoReflect.Descriptor instead.
+func (*UpdateTokenScopesRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_token_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UpdateTokenScopesRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UpdateTokenScopesRequest) GetAdd() []string {
+	if x != nil {
+		return x.Add
+	}
+	return nil
+}
+
+func (x *UpdateTokenScopesRequest) GetRemove() []string {
+	if x != nil {
+		return x.Remove
+	}
+	return nil
+}
+
+type UpdateTokenScopesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         *TokenInfo             `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTokenScopesResponse) Reset() {
+	*x = UpdateTokenScopesResponse{}
+	mi := &file_protectorate_v1_token_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTokenScopesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTokenScopesResponse) ProtoMessage() {}
+
+func (x *UpdateTokenScopesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_token_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTokenScopesResponse.ProtoReflect.Descriptor instead.
+func (*UpdateTokenScopesResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_token_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UpdateTokenScopesResponse) GetToken() *TokenInfo {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
 var File_protectorate_v1_token_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_token_proto_rawDesc = "" +
@@ -584,9 +689,16 @@ const file_protectorate_v1_token_proto_rawDesc = "" +
 	"\x12RevokeTokenRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"G\n" +
 	"\x13RevokeTokenResponse\x120\n" +
-	"\x05token\x18\x01 \x01(\v2\x1a.protectorate.v1.TokenInfoR\x05token2\xaa\x02\n" +
+	"\x05token\x18\x01 \x01(\v2\x1a.protectorate.v1.TokenInfoR\x05token\"T\n" +
+	"\x18UpdateTokenScopesRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
+	"\x03add\x18\x02 \x03(\tR\x03add\x12\x16\n" +
+	"\x06remove\x18\x03 \x03(\tR\x06remove\"M\n" +
+	"\x19UpdateTokenScopesResponse\x120\n" +
+	"\x05token\x18\x01 \x01(\v2\x1a.protectorate.v1.TokenInfoR\x05token2\x96\x03\n" +
 	"\fTokenService\x12X\n" +
-	"\vCreateToken\x12#.protectorate.v1.CreateTokenRequest\x1a$.protectorate.v1.CreateTokenResponse\x12Z\n" +
+	"\vCreateToken\x12#.protectorate.v1.CreateTokenRequest\x1a$.protectorate.v1.CreateTokenResponse\x12j\n" +
+	"\x11UpdateTokenScopes\x12).protectorate.v1.UpdateTokenScopesRequest\x1a*.protectorate.v1.UpdateTokenScopesResponse\x12Z\n" +
 	"\n" +
 	"ListTokens\x12\".protectorate.v1.ListTokensRequest\x1a#.protectorate.v1.ListTokensResponse\"\x03\x90\x02\x01\x12^\n" +
 	"\vRevokeToken\x12#.protectorate.v1.RevokeTokenRequest\x1a$.protectorate.v1.RevokeTokenResponse\"\x04\x88\xb5\x18\x01\x1a\x04\x98\xb5\x18\x012n\n" +
@@ -605,7 +717,7 @@ func file_protectorate_v1_token_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_token_proto_rawDescData
 }
 
-var file_protectorate_v1_token_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_protectorate_v1_token_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_protectorate_v1_token_proto_goTypes = []any{
 	(*GrantServiceAdminRequest)(nil),  // 0: protectorate.v1.GrantServiceAdminRequest
 	(*GrantServiceAdminResponse)(nil), // 1: protectorate.v1.GrantServiceAdminResponse
@@ -616,33 +728,38 @@ var file_protectorate_v1_token_proto_goTypes = []any{
 	(*ListTokensResponse)(nil),        // 6: protectorate.v1.ListTokensResponse
 	(*RevokeTokenRequest)(nil),        // 7: protectorate.v1.RevokeTokenRequest
 	(*RevokeTokenResponse)(nil),       // 8: protectorate.v1.RevokeTokenResponse
-	(*durationpb.Duration)(nil),       // 9: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil),     // 10: google.protobuf.Timestamp
+	(*UpdateTokenScopesRequest)(nil),  // 9: protectorate.v1.UpdateTokenScopesRequest
+	(*UpdateTokenScopesResponse)(nil), // 10: protectorate.v1.UpdateTokenScopesResponse
+	(*durationpb.Duration)(nil),       // 11: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),     // 12: google.protobuf.Timestamp
 }
 var file_protectorate_v1_token_proto_depIdxs = []int32{
-	9,  // 0: protectorate.v1.GrantServiceAdminRequest.ttl:type_name -> google.protobuf.Duration
+	11, // 0: protectorate.v1.GrantServiceAdminRequest.ttl:type_name -> google.protobuf.Duration
 	2,  // 1: protectorate.v1.GrantServiceAdminResponse.token:type_name -> protectorate.v1.TokenInfo
-	10, // 2: protectorate.v1.TokenInfo.created_at:type_name -> google.protobuf.Timestamp
-	10, // 3: protectorate.v1.TokenInfo.expires_at:type_name -> google.protobuf.Timestamp
-	10, // 4: protectorate.v1.TokenInfo.last_used_at:type_name -> google.protobuf.Timestamp
-	10, // 5: protectorate.v1.TokenInfo.revoked_at:type_name -> google.protobuf.Timestamp
-	9,  // 6: protectorate.v1.CreateTokenRequest.ttl:type_name -> google.protobuf.Duration
+	12, // 2: protectorate.v1.TokenInfo.created_at:type_name -> google.protobuf.Timestamp
+	12, // 3: protectorate.v1.TokenInfo.expires_at:type_name -> google.protobuf.Timestamp
+	12, // 4: protectorate.v1.TokenInfo.last_used_at:type_name -> google.protobuf.Timestamp
+	12, // 5: protectorate.v1.TokenInfo.revoked_at:type_name -> google.protobuf.Timestamp
+	11, // 6: protectorate.v1.CreateTokenRequest.ttl:type_name -> google.protobuf.Duration
 	2,  // 7: protectorate.v1.CreateTokenResponse.token:type_name -> protectorate.v1.TokenInfo
 	2,  // 8: protectorate.v1.ListTokensResponse.tokens:type_name -> protectorate.v1.TokenInfo
 	2,  // 9: protectorate.v1.RevokeTokenResponse.token:type_name -> protectorate.v1.TokenInfo
-	3,  // 10: protectorate.v1.TokenService.CreateToken:input_type -> protectorate.v1.CreateTokenRequest
-	5,  // 11: protectorate.v1.TokenService.ListTokens:input_type -> protectorate.v1.ListTokensRequest
-	7,  // 12: protectorate.v1.TokenService.RevokeToken:input_type -> protectorate.v1.RevokeTokenRequest
-	0,  // 13: protectorate.v1.GrantService.Admin:input_type -> protectorate.v1.GrantServiceAdminRequest
-	4,  // 14: protectorate.v1.TokenService.CreateToken:output_type -> protectorate.v1.CreateTokenResponse
-	6,  // 15: protectorate.v1.TokenService.ListTokens:output_type -> protectorate.v1.ListTokensResponse
-	8,  // 16: protectorate.v1.TokenService.RevokeToken:output_type -> protectorate.v1.RevokeTokenResponse
-	1,  // 17: protectorate.v1.GrantService.Admin:output_type -> protectorate.v1.GrantServiceAdminResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	2,  // 10: protectorate.v1.UpdateTokenScopesResponse.token:type_name -> protectorate.v1.TokenInfo
+	3,  // 11: protectorate.v1.TokenService.CreateToken:input_type -> protectorate.v1.CreateTokenRequest
+	9,  // 12: protectorate.v1.TokenService.UpdateTokenScopes:input_type -> protectorate.v1.UpdateTokenScopesRequest
+	5,  // 13: protectorate.v1.TokenService.ListTokens:input_type -> protectorate.v1.ListTokensRequest
+	7,  // 14: protectorate.v1.TokenService.RevokeToken:input_type -> protectorate.v1.RevokeTokenRequest
+	0,  // 15: protectorate.v1.GrantService.Admin:input_type -> protectorate.v1.GrantServiceAdminRequest
+	4,  // 16: protectorate.v1.TokenService.CreateToken:output_type -> protectorate.v1.CreateTokenResponse
+	10, // 17: protectorate.v1.TokenService.UpdateTokenScopes:output_type -> protectorate.v1.UpdateTokenScopesResponse
+	6,  // 18: protectorate.v1.TokenService.ListTokens:output_type -> protectorate.v1.ListTokensResponse
+	8,  // 19: protectorate.v1.TokenService.RevokeToken:output_type -> protectorate.v1.RevokeTokenResponse
+	1,  // 20: protectorate.v1.GrantService.Admin:output_type -> protectorate.v1.GrantServiceAdminResponse
+	16, // [16:21] is the sub-list for method output_type
+	11, // [11:16] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_token_proto_init() }
@@ -657,7 +774,7 @@ func file_protectorate_v1_token_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_token_proto_rawDesc), len(file_protectorate_v1_token_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

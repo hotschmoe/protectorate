@@ -7,7 +7,7 @@ import "package:connectrpc/connect.dart" as connect;
 import "token.pb.dart" as protectoratev1token;
 import "token.connect.spec.dart" as specs;
 
-/// TokenService issues and revokes scoped API tokens. Only the owner token (the
+/// TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
 /// one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
 extension type TokenServiceClient (connect.Transport _transport) {
   /// CreateToken issues a scoped token. The secret is returned once and only
@@ -21,6 +21,24 @@ extension type TokenServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.TokenService.createToken,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// UpdateTokenScopes changes grants without rotating the secret.
+  Future<protectoratev1token.UpdateTokenScopesResponse> updateTokenScopes(
+    protectoratev1token.UpdateTokenScopesRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.TokenService.updateTokenScopes,
       input,
       signal: signal,
       headers: headers,

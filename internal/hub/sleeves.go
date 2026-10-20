@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -121,6 +122,7 @@ func handoffToProto(h *sleeve.Handoff) *pb.Handoff {
 
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
+		Parent:     i.Parent,
 		Name:       i.Name,
 		Harness:    harnessToProto[i.Harness],
 		Workspace:  i.Workspace,
@@ -200,6 +202,17 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		Selection: selectionFromProto(m.Selection),
 		Name:      m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
+	}
+	if p := auth.PrincipalFrom(ctx); p != nil {
+		r.Parent, r.ParentID = "token:"+p.Name, p.ID
+		switch {
+		case p.Owner:
+			r.Parent = "owner"
+		case p.Name == sleeve.OrchestratorTokenName:
+			r.Parent = sleeve.OrchestratorName
+		case strings.HasPrefix(p.Name, sleeveTokenPrefix):
+			r.Parent = p.Name
+		}
 	}
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
@@ -329,4 +342,27 @@ func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeve
 	h.scanSessions(ctx)
 	h.pokeCoord()
 	return connect.NewResponse(&pb.KillSleeveResponse{}), nil
+}
+
+func (h *Hub) ownsSleeve(p *auth.Principal, msg any) bool {
+	if p == nil || h.sleeves == nil {
+		return false
+	}
+	var name string
+	switch r := msg.(type) {
+	case *pb.KillSleeveRequest:
+		name = r.Name
+	default:
+		return false
+	}
+	if name == sleeve.OrchestratorName {
+		return false
+	}
+	info, err := h.sleeves.Get(name)
+	if err != nil {
+		return false
+	}
+	return info.ParentID != "" && info.ParentID == p.ID ||
+		info.Parent == sleeve.OrchestratorName && p.Name == sleeve.OrchestratorTokenName ||
+		info.Parent == p.Name && strings.HasPrefix(p.Name, sleeveTokenPrefix)
 }

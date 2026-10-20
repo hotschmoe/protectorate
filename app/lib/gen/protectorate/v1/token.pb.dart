@@ -734,7 +734,146 @@ class RevokeTokenResponse extends $pb.GeneratedMessage {
   TokenInfo ensureToken() => $_ensure(0);
 }
 
-/// TokenService issues and revokes scoped API tokens. Only the owner token (the
+class UpdateTokenScopesRequest extends $pb.GeneratedMessage {
+  factory UpdateTokenScopesRequest({
+    $core.String? id,
+    $core.Iterable<$core.String>? add,
+    $core.Iterable<$core.String>? remove,
+  }) {
+    final result = UpdateTokenScopesRequest._();
+    if (id != null) result.id = id;
+    if (add != null) result.add.addAll(add);
+    if (remove != null) result.remove.addAll(remove);
+    return result;
+  }
+
+  UpdateTokenScopesRequest._();
+
+  factory UpdateTokenScopesRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateTokenScopesRequest()..mergeFromBuffer(data, registry);
+  factory UpdateTokenScopesRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateTokenScopesRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UpdateTokenScopesRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: UpdateTokenScopesRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'id')
+    ..pPS(2, _omitFieldNames ? '' : 'add')
+    ..pPS(3, _omitFieldNames ? '' : 'remove')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateTokenScopesRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateTokenScopesRequest copyWith(
+          void Function(UpdateTokenScopesRequest) updates) =>
+      super.copyWith((message) => updates(message as UpdateTokenScopesRequest))
+          as UpdateTokenScopesRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use UpdateTokenScopesRequest() / UpdateTokenScopesRequest.new instead')
+  static UpdateTokenScopesRequest create() => UpdateTokenScopesRequest._();
+  static $pb.GeneratedMessage $_createMessage() => UpdateTokenScopesRequest._();
+  @$core.override
+  UpdateTokenScopesRequest createEmptyInstance() =>
+      UpdateTokenScopesRequest._();
+  @$core.pragma('dart2js:noInline')
+  static UpdateTokenScopesRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<UpdateTokenScopesRequest>(
+          UpdateTokenScopesRequest.$_createMessage);
+  static UpdateTokenScopesRequest? _defaultInstance;
+
+  /// id is an exact token ID or an unambiguous active token name.
+  @$pb.TagNumber(1)
+  $core.String get id => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set id($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.String> get add => $_getList(1);
+
+  @$pb.TagNumber(3)
+  $pb.PbList<$core.String> get remove => $_getList(2);
+}
+
+class UpdateTokenScopesResponse extends $pb.GeneratedMessage {
+  factory UpdateTokenScopesResponse({
+    TokenInfo? token,
+  }) {
+    final result = UpdateTokenScopesResponse._();
+    if (token != null) result.token = token;
+    return result;
+  }
+
+  UpdateTokenScopesResponse._();
+
+  factory UpdateTokenScopesResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateTokenScopesResponse()..mergeFromBuffer(data, registry);
+  factory UpdateTokenScopesResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      UpdateTokenScopesResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'UpdateTokenScopesResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: UpdateTokenScopesResponse.$_createMessage)
+    ..aOM<TokenInfo>(1, _omitFieldNames ? '' : 'token',
+        subBuilder: TokenInfo.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateTokenScopesResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  UpdateTokenScopesResponse copyWith(
+          void Function(UpdateTokenScopesResponse) updates) =>
+      super.copyWith((message) => updates(message as UpdateTokenScopesResponse))
+          as UpdateTokenScopesResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use UpdateTokenScopesResponse() / UpdateTokenScopesResponse.new instead')
+  static UpdateTokenScopesResponse create() => UpdateTokenScopesResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      UpdateTokenScopesResponse._();
+  @$core.override
+  UpdateTokenScopesResponse createEmptyInstance() =>
+      UpdateTokenScopesResponse._();
+  @$core.pragma('dart2js:noInline')
+  static UpdateTokenScopesResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<UpdateTokenScopesResponse>(
+          UpdateTokenScopesResponse.$_createMessage);
+  static UpdateTokenScopesResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  TokenInfo get token => $_getN(0);
+  @$pb.TagNumber(1)
+  set token(TokenInfo value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasToken() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearToken() => $_clearField(1);
+  @$pb.TagNumber(1)
+  TokenInfo ensureToken() => $_ensure(0);
+}
+
+/// TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
 /// one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
 class TokenServiceApi {
   final $pb.RpcClient _client;
@@ -747,6 +886,12 @@ class TokenServiceApi {
           $pb.ClientContext? ctx, CreateTokenRequest request) =>
       _client.invoke<CreateTokenResponse>(
           ctx, 'TokenService', 'CreateToken', request, CreateTokenResponse());
+
+  /// UpdateTokenScopes changes grants without rotating the secret.
+  $async.Future<UpdateTokenScopesResponse> updateTokenScopes(
+          $pb.ClientContext? ctx, UpdateTokenScopesRequest request) =>
+      _client.invoke<UpdateTokenScopesResponse>(ctx, 'TokenService',
+          'UpdateTokenScopes', request, UpdateTokenScopesResponse());
 
   /// ListTokens returns every issued token, including revoked and expired
   /// ones, without secrets.

@@ -141,6 +141,24 @@ type Grant struct {
 	TTL                  time.Duration
 }
 
+// Renew issues a new secret for an existing token's grants, including an empty set.
+func (s *Store) Renew(t Token, ttl time.Duration, now time.Time) (Token, string, error) {
+	if t.Name == "" {
+		return Token{}, "", errors.New("name is required")
+	}
+	if ttl < 0 {
+		return Token{}, "", errors.New("ttl must not be negative")
+	}
+	if len(t.Scopes) > 0 {
+		scopes, err := validateScopes(t.Scopes)
+		if err != nil {
+			return Token{}, "", fmt.Errorf("renew token scopes: %w", err)
+		}
+		t.Scopes = scopes
+	}
+	return s.create(Token{Name: t.Name, Scopes: append([]string(nil), t.Scopes...), Task: t.Task, MintedBy: t.MintedBy}, ttl, now)
+}
+
 // MaxGrantTTL bounds an admin grant's lifetime.
 const MaxGrantTTL = 24 * time.Hour
 
@@ -216,6 +234,79 @@ func (s *Store) Revoke(id string, now time.Time) (Token, error) {
 		return s.tokens[i].clone(), nil
 	}
 	return Token{}, ErrUnknownToken
+}
+
+// UpdateScopes changes grants atomically, keeping the token's identity and secret.
+func (s *Store) UpdateScopes(id string, add, remove []string, now time.Time) (Token, []string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := -1
+	for i, t := range s.tokens {
+		if t.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		for i, t := range s.tokens {
+			if t.Name != id || t.RevokedAt != nil || t.Expires != nil && !now.Before(*t.Expires) {
+				continue
+			}
+			if idx >= 0 {
+				return Token{}, nil, fmt.Errorf("token name %q is ambiguous; use an ID", id)
+			}
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return Token{}, nil, ErrUnknownToken
+	}
+	t := s.tokens[idx]
+	if t.RevokedAt != nil {
+		return Token{}, nil, ErrRevoked
+	}
+	if t.Expires != nil && !now.Before(*t.Expires) {
+		return Token{}, nil, ErrExpired
+	}
+	for i, scopes := range [][]string{add, remove} {
+		if len(scopes) > 0 {
+			validate := ValidateScopes
+			if i == 1 {
+				validate = validateScopes
+			}
+			if _, err := validate(scopes); err != nil {
+				return Token{}, nil, err
+			}
+		}
+	}
+	scopes := append([]string(nil), t.Scopes...)
+	scopes = append(scopes, add...)
+	var next []string
+	for _, scope := range scopes {
+		drop := false
+		for _, removed := range remove {
+			if scope == removed {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			next = append(next, scope)
+		}
+	}
+	if len(next) > 0 {
+		var err error
+		next, err = validateScopes(next)
+		if err != nil {
+			return Token{}, nil, err
+		}
+	}
+	s.tokens[idx].Scopes = next
+	if err := s.writeLocked(); err != nil {
+		s.tokens[idx] = t
+		return Token{}, nil, err
+	}
+	return s.tokens[idx].clone(), t.Scopes, nil
 }
 
 // List returns all tokens in creation order.

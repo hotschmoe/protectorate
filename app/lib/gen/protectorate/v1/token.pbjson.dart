@@ -222,6 +222,43 @@ final $typed_data.Uint8List revokeTokenResponseDescriptor = $convert.base64Decod
     'ChNSZXZva2VUb2tlblJlc3BvbnNlEjAKBXRva2VuGAEgASgLMhoucHJvdGVjdG9yYXRlLnYxLl'
     'Rva2VuSW5mb1IFdG9rZW4=');
 
+@$core.Deprecated('Use updateTokenScopesRequestDescriptor instead')
+const UpdateTokenScopesRequest$json = {
+  '1': 'UpdateTokenScopesRequest',
+  '2': [
+    {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
+    {'1': 'add', '3': 2, '4': 3, '5': 9, '10': 'add'},
+    {'1': 'remove', '3': 3, '4': 3, '5': 9, '10': 'remove'},
+  ],
+};
+
+/// Descriptor for `UpdateTokenScopesRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List updateTokenScopesRequestDescriptor =
+    $convert.base64Decode(
+        'ChhVcGRhdGVUb2tlblNjb3Blc1JlcXVlc3QSDgoCaWQYASABKAlSAmlkEhAKA2FkZBgCIAMoCV'
+        'IDYWRkEhYKBnJlbW92ZRgDIAMoCVIGcmVtb3Zl');
+
+@$core.Deprecated('Use updateTokenScopesResponseDescriptor instead')
+const UpdateTokenScopesResponse$json = {
+  '1': 'UpdateTokenScopesResponse',
+  '2': [
+    {
+      '1': 'token',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenInfo',
+      '10': 'token'
+    },
+  ],
+};
+
+/// Descriptor for `UpdateTokenScopesResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List updateTokenScopesResponseDescriptor =
+    $convert.base64Decode(
+        'ChlVcGRhdGVUb2tlblNjb3Blc1Jlc3BvbnNlEjAKBXRva2VuGAEgASgLMhoucHJvdGVjdG9yYX'
+        'RlLnYxLlRva2VuSW5mb1IFdG9rZW4=');
+
 const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
   '1': 'TokenService',
   '2': [
@@ -229,6 +266,11 @@ const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
       '1': 'CreateToken',
       '2': '.protectorate.v1.CreateTokenRequest',
       '3': '.protectorate.v1.CreateTokenResponse'
+    },
+    {
+      '1': 'UpdateTokenScopes',
+      '2': '.protectorate.v1.UpdateTokenScopesRequest',
+      '3': '.protectorate.v1.UpdateTokenScopesResponse'
     },
     {
       '1': 'ListTokens',
@@ -254,6 +296,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.CreateTokenResponse': CreateTokenResponse$json,
   '.protectorate.v1.TokenInfo': TokenInfo$json,
   '.google.protobuf.Timestamp': $1.Timestamp$json,
+  '.protectorate.v1.UpdateTokenScopesRequest': UpdateTokenScopesRequest$json,
+  '.protectorate.v1.UpdateTokenScopesResponse': UpdateTokenScopesResponse$json,
   '.protectorate.v1.ListTokensRequest': ListTokensRequest$json,
   '.protectorate.v1.ListTokensResponse': ListTokensResponse$json,
   '.protectorate.v1.RevokeTokenRequest': RevokeTokenRequest$json,
@@ -263,11 +307,13 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 /// Descriptor for `TokenService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List tokenServiceDescriptor = $convert.base64Decode(
     'CgxUb2tlblNlcnZpY2USWAoLQ3JlYXRlVG9rZW4SIy5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlVG'
-    '9rZW5SZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkNyZWF0ZVRva2VuUmVzcG9uc2USWgoKTGlz'
-    'dFRva2VucxIiLnByb3RlY3RvcmF0ZS52MS5MaXN0VG9rZW5zUmVxdWVzdBojLnByb3RlY3Rvcm'
-    'F0ZS52MS5MaXN0VG9rZW5zUmVzcG9uc2UiA5ACARJeCgtSZXZva2VUb2tlbhIjLnByb3RlY3Rv'
-    'cmF0ZS52MS5SZXZva2VUb2tlblJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuUmV2b2tlVG9rZW'
-    '5SZXNwb25zZSIEiLUYARoEmLUYAQ==');
+    '9rZW5SZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkNyZWF0ZVRva2VuUmVzcG9uc2USagoRVXBk'
+    'YXRlVG9rZW5TY29wZXMSKS5wcm90ZWN0b3JhdGUudjEuVXBkYXRlVG9rZW5TY29wZXNSZXF1ZX'
+    'N0GioucHJvdGVjdG9yYXRlLnYxLlVwZGF0ZVRva2VuU2NvcGVzUmVzcG9uc2USWgoKTGlzdFRv'
+    'a2VucxIiLnByb3RlY3RvcmF0ZS52MS5MaXN0VG9rZW5zUmVxdWVzdBojLnByb3RlY3RvcmF0ZS'
+    '52MS5MaXN0VG9rZW5zUmVzcG9uc2UiA5ACARJeCgtSZXZva2VUb2tlbhIjLnByb3RlY3RvcmF0'
+    'ZS52MS5SZXZva2VUb2tlblJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuUmV2b2tlVG9rZW5SZX'
+    'Nwb25zZSIEiLUYARoEmLUYAQ==');
 
 const $core.Map<$core.String, $core.dynamic> GrantServiceBase$json = {
   '1': 'GrantService',

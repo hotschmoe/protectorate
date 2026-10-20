@@ -23,6 +23,8 @@ export 'token.pb.dart';
 abstract class TokenServiceBase extends $pb.GeneratedService {
   $async.Future<$2.CreateTokenResponse> createToken(
       $pb.ServerContext ctx, $2.CreateTokenRequest request);
+  $async.Future<$2.UpdateTokenScopesResponse> updateTokenScopes(
+      $pb.ServerContext ctx, $2.UpdateTokenScopesRequest request);
   $async.Future<$2.ListTokensResponse> listTokens(
       $pb.ServerContext ctx, $2.ListTokensRequest request);
   $async.Future<$2.RevokeTokenResponse> revokeToken(
@@ -32,6 +34,8 @@ abstract class TokenServiceBase extends $pb.GeneratedService {
     switch (methodName) {
       case 'CreateToken':
         return $2.CreateTokenRequest();
+      case 'UpdateTokenScopes':
+        return $2.UpdateTokenScopesRequest();
       case 'ListTokens':
         return $2.ListTokensRequest();
       case 'RevokeToken':
@@ -46,6 +50,8 @@ abstract class TokenServiceBase extends $pb.GeneratedService {
     switch (methodName) {
       case 'CreateToken':
         return createToken(ctx, request as $2.CreateTokenRequest);
+      case 'UpdateTokenScopes':
+        return updateTokenScopes(ctx, request as $2.UpdateTokenScopesRequest);
       case 'ListTokens':
         return listTokens(ctx, request as $2.ListTokensRequest);
       case 'RevokeToken':

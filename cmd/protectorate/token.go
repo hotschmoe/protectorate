@@ -17,6 +17,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/hub"
+	"github.com/hotschmoe/protectorate/internal/orchestrator"
 )
 
 // deviceScopes and deviceTTL are what `pair` grants a paired phone or browser;
@@ -36,12 +37,61 @@ func (o *opts) tokenClient() (protectoratev1connect.TokenServiceClient, error) {
 func tokenCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "token",
-		Short: "Issue, list and revoke scoped API tokens (owner token only)",
+		Short: "Issue, list, update and revoke scoped API tokens (owner token only)",
 		Long: `Scoped tokens limit what a phone, bridge or agent can do. The owner token
 in $PROTECTORATE_HOME/token has full access; every issued token starts with
 nothing and gains only the scopes it is created with. See docs/auth.md.`,
 	}
-	c.AddCommand(tokenCreateCmd(o), tokenLsCmd(o), tokenRevokeCmd(o))
+	c.AddCommand(tokenCreateCmd(o), tokenLsCmd(o), tokenRevokeCmd(o), tokenScopesCmd(o, false))
+	return c
+}
+
+func tokenScopesCmd(o *opts, envoy bool) *cobra.Command {
+	var add, remove []string
+	c := &cobra.Command{
+		Use: "scopes <id|name>", Short: "Change token scopes in place (owner only)", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(add) == 0 && len(remove) == 0 {
+				return fmt.Errorf("provide --add or --remove")
+			}
+			cl, err := o.tokenClient()
+			if err != nil {
+				return err
+			}
+			id := ""
+			if envoy {
+				list, err := cl.ListTokens(cmd.Context(), connect.NewRequest(&pb.ListTokensRequest{}))
+				if err != nil {
+					return err
+				}
+				var latest *pb.TokenInfo
+				for _, t := range list.Msg.Tokens {
+					if t.Name == orchestrator.TokenName && t.RevokedAt == nil && (t.ExpiresAt == nil || time.Now().Before(t.ExpiresAt.AsTime())) && (latest == nil || t.CreatedAt.AsTime().After(latest.CreatedAt.AsTime())) {
+						latest = t
+					}
+				}
+				if latest == nil {
+					return fmt.Errorf("no active Envoy token")
+				}
+				id = latest.Id
+			} else {
+				id = args[0]
+			}
+			res, err := cl.UpdateTokenScopes(cmd.Context(), connect.NewRequest(&pb.UpdateTokenScopesRequest{Id: id, Add: add, Remove: remove}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintf(w, "token\t%s (%s)\nscopes\t%v\n", res.Msg.Token.Id, res.Msg.Token.Name, res.Msg.Token.Scopes)
+			})
+		},
+	}
+	if envoy {
+		c.Use = "scopes"
+		c.Args = cobra.NoArgs
+	}
+	c.Flags().StringSliceVar(&add, "add", nil, "scopes to add (comma separated or repeated)")
+	c.Flags().StringSliceVar(&remove, "remove", nil, "exact scopes to remove (comma separated or repeated)")
 	return c
 }
 

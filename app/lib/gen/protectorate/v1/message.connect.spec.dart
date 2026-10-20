@@ -24,6 +24,16 @@ abstract final class MessageService {
   /// Fully-qualified name of the MessageService service.
   static const name = 'protectorate.v1.MessageService';
 
+  /// Wait blocks until a reply or ack to an outgoing message, or incoming mail
+  /// or an outgoing ack in a thread. Existing outcomes return immediately.
+  static const wait = connect.Spec(
+    '/$name/Wait',
+    connect.StreamType.unary,
+    protectoratev1message.MessageServiceWaitRequest.new,
+    protectoratev1message.MessageServiceWaitResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
   /// Send addresses a message to a sleeve name, "project:<id-or-name>",
   /// "orchestrator" or "owner". Retrying with the same request_id returns the
   /// original message instead of sending twice.

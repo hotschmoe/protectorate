@@ -297,6 +297,7 @@ class Sleeve extends $pb.GeneratedMessage {
     $1.ChatStatus? chat,
     $core.bool? supervised,
     $1.Handoff? handoff,
+    $core.String? parent,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -316,6 +317,7 @@ class Sleeve extends $pb.GeneratedMessage {
     if (chat != null) result.chat = chat;
     if (supervised != null) result.supervised = supervised;
     if (handoff != null) result.handoff = handoff;
+    if (parent != null) result.parent = parent;
     return result;
   }
 
@@ -359,6 +361,7 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOB(16, _omitFieldNames ? '' : 'supervised')
     ..aOM<$1.Handoff>(17, _omitFieldNames ? '' : 'handoff',
         subBuilder: $1.Handoff.$_createMessage)
+    ..aOS(20, _omitFieldNames ? '' : 'parent')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -554,6 +557,16 @@ class Sleeve extends $pb.GeneratedMessage {
   void clearHandoff() => $_clearField(17);
   @$pb.TagNumber(17)
   $1.Handoff ensureHandoff() => $_ensure(16);
+
+  /// parent is the authenticated identity that spawned this sleeve.
+  @$pb.TagNumber(20)
+  $core.String get parent => $_getSZ(17);
+  @$pb.TagNumber(20)
+  set parent($core.String value) => $_setString(17, value);
+  @$pb.TagNumber(20)
+  $core.bool hasParent() => $_has(17);
+  @$pb.TagNumber(20)
+  void clearParent() => $_clearField(20);
 }
 
 class SpawnSleeveRequest extends $pb.GeneratedMessage {

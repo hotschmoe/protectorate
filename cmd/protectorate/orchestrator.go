@@ -101,7 +101,7 @@ $PROTECTORATE_HOME/orchestrator on the hub machine. It holds generated AGENTS.md
 (and CLAUDE.md), hosts.md and a scoped token; its only tool is this CLI. The hub
 does the work, so the app's ENVOY tab starts it as well. See docs/orchestrator.md.`,
 	}
-	c.AddCommand(orchestratorSpawnCmd(o), orchestratorStatusCmd(o))
+	c.AddCommand(orchestratorSpawnCmd(o), orchestratorStatusCmd(o), tokenScopesCmd(o, true))
 	return c
 }
 
@@ -123,7 +123,8 @@ harness's prompt cache. --harness auto takes the top of 'quota suggest'.
 Default scopes: read, events and the non-destructive backlog_*, lease_*,
 message_*, sleeve_spawn_sleeve and sleeve_resleeve_sleeve tools (never session
 creation: it runs outside the sandbox), named explicitly. --scopes replaces them;
---add-scopes extends them, e.g. --add-scopes sleeve_kill_sleeve to allow kill.
+--add-scopes extends them. Envoy can kill its own workers without a kill scope.
+Use orchestrator scopes --add/--remove to change its grants in place.
 The hub renews the token before it expires without restarting the harness.
 Needs the owner token.`,
 		Args: cobra.NoArgs,

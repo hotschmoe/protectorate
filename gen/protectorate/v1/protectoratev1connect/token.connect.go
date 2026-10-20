@@ -38,6 +38,9 @@ const (
 	// TokenServiceCreateTokenProcedure is the fully-qualified name of the TokenService's CreateToken
 	// RPC.
 	TokenServiceCreateTokenProcedure = "/protectorate.v1.TokenService/CreateToken"
+	// TokenServiceUpdateTokenScopesProcedure is the fully-qualified name of the TokenService's
+	// UpdateTokenScopes RPC.
+	TokenServiceUpdateTokenScopesProcedure = "/protectorate.v1.TokenService/UpdateTokenScopes"
 	// TokenServiceListTokensProcedure is the fully-qualified name of the TokenService's ListTokens RPC.
 	TokenServiceListTokensProcedure = "/protectorate.v1.TokenService/ListTokens"
 	// TokenServiceRevokeTokenProcedure is the fully-qualified name of the TokenService's RevokeToken
@@ -52,6 +55,8 @@ type TokenServiceClient interface {
 	// CreateToken issues a scoped token. The secret is returned once and only
 	// its SHA-256 hash is stored, so it cannot be recovered later.
 	CreateToken(context.Context, *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error)
+	// UpdateTokenScopes changes grants without rotating the secret.
+	UpdateTokenScopes(context.Context, *connect.Request[v1.UpdateTokenScopesRequest]) (*connect.Response[v1.UpdateTokenScopesResponse], error)
 	// ListTokens returns every issued token, including revoked and expired
 	// ones, without secrets.
 	ListTokens(context.Context, *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error)
@@ -77,6 +82,12 @@ func NewTokenServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(tokenServiceMethods.ByName("CreateToken")),
 			connect.WithClientOptions(opts...),
 		),
+		updateTokenScopes: connect.NewClient[v1.UpdateTokenScopesRequest, v1.UpdateTokenScopesResponse](
+			httpClient,
+			baseURL+TokenServiceUpdateTokenScopesProcedure,
+			connect.WithSchema(tokenServiceMethods.ByName("UpdateTokenScopes")),
+			connect.WithClientOptions(opts...),
+		),
 		listTokens: connect.NewClient[v1.ListTokensRequest, v1.ListTokensResponse](
 			httpClient,
 			baseURL+TokenServiceListTokensProcedure,
@@ -95,14 +106,20 @@ func NewTokenServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 
 // tokenServiceClient implements TokenServiceClient.
 type tokenServiceClient struct {
-	createToken *connect.Client[v1.CreateTokenRequest, v1.CreateTokenResponse]
-	listTokens  *connect.Client[v1.ListTokensRequest, v1.ListTokensResponse]
-	revokeToken *connect.Client[v1.RevokeTokenRequest, v1.RevokeTokenResponse]
+	createToken       *connect.Client[v1.CreateTokenRequest, v1.CreateTokenResponse]
+	updateTokenScopes *connect.Client[v1.UpdateTokenScopesRequest, v1.UpdateTokenScopesResponse]
+	listTokens        *connect.Client[v1.ListTokensRequest, v1.ListTokensResponse]
+	revokeToken       *connect.Client[v1.RevokeTokenRequest, v1.RevokeTokenResponse]
 }
 
 // CreateToken calls protectorate.v1.TokenService.CreateToken.
 func (c *tokenServiceClient) CreateToken(ctx context.Context, req *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error) {
 	return c.createToken.CallUnary(ctx, req)
+}
+
+// UpdateTokenScopes calls protectorate.v1.TokenService.UpdateTokenScopes.
+func (c *tokenServiceClient) UpdateTokenScopes(ctx context.Context, req *connect.Request[v1.UpdateTokenScopesRequest]) (*connect.Response[v1.UpdateTokenScopesResponse], error) {
+	return c.updateTokenScopes.CallUnary(ctx, req)
 }
 
 // ListTokens calls protectorate.v1.TokenService.ListTokens.
@@ -120,6 +137,8 @@ type TokenServiceHandler interface {
 	// CreateToken issues a scoped token. The secret is returned once and only
 	// its SHA-256 hash is stored, so it cannot be recovered later.
 	CreateToken(context.Context, *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error)
+	// UpdateTokenScopes changes grants without rotating the secret.
+	UpdateTokenScopes(context.Context, *connect.Request[v1.UpdateTokenScopesRequest]) (*connect.Response[v1.UpdateTokenScopesResponse], error)
 	// ListTokens returns every issued token, including revoked and expired
 	// ones, without secrets.
 	ListTokens(context.Context, *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error)
@@ -141,6 +160,12 @@ func NewTokenServiceHandler(svc TokenServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(tokenServiceMethods.ByName("CreateToken")),
 		connect.WithHandlerOptions(opts...),
 	)
+	tokenServiceUpdateTokenScopesHandler := connect.NewUnaryHandler(
+		TokenServiceUpdateTokenScopesProcedure,
+		svc.UpdateTokenScopes,
+		connect.WithSchema(tokenServiceMethods.ByName("UpdateTokenScopes")),
+		connect.WithHandlerOptions(opts...),
+	)
 	tokenServiceListTokensHandler := connect.NewUnaryHandler(
 		TokenServiceListTokensProcedure,
 		svc.ListTokens,
@@ -158,6 +183,8 @@ func NewTokenServiceHandler(svc TokenServiceHandler, opts ...connect.HandlerOpti
 		switch r.URL.Path {
 		case TokenServiceCreateTokenProcedure:
 			tokenServiceCreateTokenHandler.ServeHTTP(w, r)
+		case TokenServiceUpdateTokenScopesProcedure:
+			tokenServiceUpdateTokenScopesHandler.ServeHTTP(w, r)
 		case TokenServiceListTokensProcedure:
 			tokenServiceListTokensHandler.ServeHTTP(w, r)
 		case TokenServiceRevokeTokenProcedure:
@@ -173,6 +200,10 @@ type UnimplementedTokenServiceHandler struct{}
 
 func (UnimplementedTokenServiceHandler) CreateToken(context.Context, *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.TokenService.CreateToken is not implemented"))
+}
+
+func (UnimplementedTokenServiceHandler) UpdateTokenScopes(context.Context, *connect.Request[v1.UpdateTokenScopesRequest]) (*connect.Response[v1.UpdateTokenScopesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.TokenService.UpdateTokenScopes is not implemented"))
 }
 
 func (UnimplementedTokenServiceHandler) ListTokens(context.Context, *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error) {

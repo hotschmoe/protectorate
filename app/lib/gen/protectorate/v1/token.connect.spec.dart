@@ -6,7 +6,7 @@
 import "package:connectrpc/connect.dart" as connect;
 import "token.pb.dart" as protectoratev1token;
 
-/// TokenService issues and revokes scoped API tokens. Only the owner token (the
+/// TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
 /// one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
 abstract final class TokenService {
   /// Fully-qualified name of the TokenService service.
@@ -19,6 +19,14 @@ abstract final class TokenService {
     connect.StreamType.unary,
     protectoratev1token.CreateTokenRequest.new,
     protectoratev1token.CreateTokenResponse.new,
+  );
+
+  /// UpdateTokenScopes changes grants without rotating the secret.
+  static const updateTokenScopes = connect.Spec(
+    '/$name/UpdateTokenScopes',
+    connect.StreamType.unary,
+    protectoratev1token.UpdateTokenScopesRequest.new,
+    protectoratev1token.UpdateTokenScopesResponse.new,
   );
 
   /// ListTokens returns every issued token, including revoked and expired

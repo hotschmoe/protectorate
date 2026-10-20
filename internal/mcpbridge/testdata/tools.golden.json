@@ -1141,6 +1141,29 @@
   },
   {
     "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Wait blocks until a reply or ack to an outgoing message, or incoming mail or an outgoing ack in a thread. Existing outcomes return immediately.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Default 10 minutes; positive and at most 24 hours.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_wait"
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false,

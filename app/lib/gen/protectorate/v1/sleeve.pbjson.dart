@@ -216,6 +216,7 @@ const Sleeve$json = {
       '6': '.protectorate.v1.Handoff',
       '10': 'handoff'
     },
+    {'1': 'parent', '3': 20, '4': 1, '5': 9, '10': 'parent'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -236,8 +237,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     '0KCm9vbV9raWxsZWQYDSABKAhSCW9vbUtpbGxlZBIvCgRtb2RlGA4gASgOMhsucHJvdGVjdG9y'
     'YXRlLnYxLlNsZWV2ZU1vZGVSBG1vZGUSLwoEY2hhdBgPIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
     '5DaGF0U3RhdHVzUgRjaGF0Eh4KCnN1cGVydmlzZWQYECABKAhSCnN1cGVydmlzZWQSMgoHaGFu'
-    'ZG9mZhgRIAEoCzIYLnByb3RlY3RvcmF0ZS52MS5IYW5kb2ZmUgdoYW5kb2ZmQgwKCl9leGl0X2'
-    'NvZGU=');
+    'ZG9mZhgRIAEoCzIYLnByb3RlY3RvcmF0ZS52MS5IYW5kb2ZmUgdoYW5kb2ZmEhYKBnBhcmVudB'
+    'gUIAEoCVIGcGFyZW50QgwKCl9leGl0X2NvZGU=');
 
 @$core.Deprecated('Use spawnSleeveRequestDescriptor instead')
 const SpawnSleeveRequest$json = {

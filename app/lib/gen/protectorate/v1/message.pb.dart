@@ -14,6 +14,8 @@ import 'dart:async' as $async;
 import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
+import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
+    as $1;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
@@ -1390,6 +1392,162 @@ class MailDelivery extends $pb.GeneratedMessage {
   void clearReminders() => $_clearField(5);
 }
 
+class MessageServiceWaitRequest extends $pb.GeneratedMessage {
+  factory MessageServiceWaitRequest({
+    $core.String? target,
+    $1.Duration? timeout,
+  }) {
+    final result = MessageServiceWaitRequest._();
+    if (target != null) result.target = target;
+    if (timeout != null) result.timeout = timeout;
+    return result;
+  }
+
+  MessageServiceWaitRequest._();
+
+  factory MessageServiceWaitRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      MessageServiceWaitRequest()..mergeFromBuffer(data, registry);
+  factory MessageServiceWaitRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      MessageServiceWaitRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'MessageServiceWaitRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: MessageServiceWaitRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'target')
+    ..aOM<$1.Duration>(2, _omitFieldNames ? '' : 'timeout',
+        subBuilder: $1.Duration.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  MessageServiceWaitRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  MessageServiceWaitRequest copyWith(
+          void Function(MessageServiceWaitRequest) updates) =>
+      super.copyWith((message) => updates(message as MessageServiceWaitRequest))
+          as MessageServiceWaitRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use MessageServiceWaitRequest() / MessageServiceWaitRequest.new instead')
+  static MessageServiceWaitRequest create() => MessageServiceWaitRequest._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      MessageServiceWaitRequest._();
+  @$core.override
+  MessageServiceWaitRequest createEmptyInstance() =>
+      MessageServiceWaitRequest._();
+  @$core.pragma('dart2js:noInline')
+  static MessageServiceWaitRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<MessageServiceWaitRequest>(
+          MessageServiceWaitRequest.$_createMessage);
+  static MessageServiceWaitRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get target => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set target($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasTarget() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearTarget() => $_clearField(1);
+
+  /// Default 10 minutes; positive and at most 24 hours.
+  @$pb.TagNumber(2)
+  $1.Duration get timeout => $_getN(1);
+  @$pb.TagNumber(2)
+  set timeout($1.Duration value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTimeout() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTimeout() => $_clearField(2);
+  @$pb.TagNumber(2)
+  $1.Duration ensureTimeout() => $_ensure(1);
+}
+
+class MessageServiceWaitResponse extends $pb.GeneratedMessage {
+  factory MessageServiceWaitResponse({
+    MailMessage? message,
+    $core.bool? timedOut,
+  }) {
+    final result = MessageServiceWaitResponse._();
+    if (message != null) result.message = message;
+    if (timedOut != null) result.timedOut = timedOut;
+    return result;
+  }
+
+  MessageServiceWaitResponse._();
+
+  factory MessageServiceWaitResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      MessageServiceWaitResponse()..mergeFromBuffer(data, registry);
+  factory MessageServiceWaitResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      MessageServiceWaitResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'MessageServiceWaitResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: MessageServiceWaitResponse.$_createMessage)
+    ..aOM<MailMessage>(1, _omitFieldNames ? '' : 'message',
+        subBuilder: MailMessage.$_createMessage)
+    ..aOB(2, _omitFieldNames ? '' : 'timedOut')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  MessageServiceWaitResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  MessageServiceWaitResponse copyWith(
+          void Function(MessageServiceWaitResponse) updates) =>
+      super.copyWith(
+              (message) => updates(message as MessageServiceWaitResponse))
+          as MessageServiceWaitResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use MessageServiceWaitResponse() / MessageServiceWaitResponse.new instead')
+  static MessageServiceWaitResponse create() => MessageServiceWaitResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      MessageServiceWaitResponse._();
+  @$core.override
+  MessageServiceWaitResponse createEmptyInstance() =>
+      MessageServiceWaitResponse._();
+  @$core.pragma('dart2js:noInline')
+  static MessageServiceWaitResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<MessageServiceWaitResponse>(
+          MessageServiceWaitResponse.$_createMessage);
+  static MessageServiceWaitResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  MailMessage get message => $_getN(0);
+  @$pb.TagNumber(1)
+  set message(MailMessage value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasMessage() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearMessage() => $_clearField(1);
+  @$pb.TagNumber(1)
+  MailMessage ensureMessage() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  $core.bool get timedOut => $_getBF(1);
+  @$pb.TagNumber(2)
+  set timedOut($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTimedOut() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTimedOut() => $_clearField(2);
+}
+
 /// MessageService is the hub's mailbox between sleeves, the orchestrator and
 /// the owner. The sender of a message is the authenticated caller (a sleeve's
 /// own token names the sleeve), never a claimed name. Messages are kept on the
@@ -1410,6 +1568,13 @@ class MessageServiceApi {
   final $pb.RpcClient _client;
 
   MessageServiceApi(this._client);
+
+  /// Wait blocks until a reply or ack to an outgoing message, or incoming mail
+  /// or an outgoing ack in a thread. Existing outcomes return immediately.
+  $async.Future<MessageServiceWaitResponse> wait(
+          $pb.ClientContext? ctx, MessageServiceWaitRequest request) =>
+      _client.invoke<MessageServiceWaitResponse>(
+          ctx, 'MessageService', 'Wait', request, MessageServiceWaitResponse());
 
   /// Send addresses a message to a sleeve name, "project:<id-or-name>",
   /// "orchestrator" or "owner". Retrying with the same request_id returns the

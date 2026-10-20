@@ -59,6 +59,25 @@ func toProtoToken(t auth.Token) *pb.TokenInfo {
 	}
 }
 
+func (h *Hub) UpdateTokenScopes(ctx context.Context, req *connect.Request[pb.UpdateTokenScopesRequest]) (*connect.Response[pb.UpdateTokenScopesResponse], error) {
+	h.envoyState.mu.Lock()
+	defer h.envoyState.mu.Unlock()
+	p := auth.PrincipalFrom(ctx)
+	if p == nil || !p.Owner {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("scope changes require the owner token"))
+	}
+	t, before, err := h.authz.Store().UpdateScopes(req.Msg.Id, req.Msg.Add, req.Msg.Remove, time.Now())
+	if err != nil {
+		code := connect.CodeInvalidArgument
+		if errors.Is(err, auth.ErrUnknownToken) {
+			code = connect.CodeNotFound
+		}
+		return nil, connect.NewError(code, fmt.Errorf("update token scopes: %w", err))
+	}
+	auth.Annotate(ctx, t.ID, fmt.Sprintf("scopes %q -> %q", before, t.Scopes))
+	return connect.NewResponse(&pb.UpdateTokenScopesResponse{Token: toProtoToken(t)}), nil
+}
+
 const (
 	defaultAuditPage = 50
 	maxAuditPage     = 500
