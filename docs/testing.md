@@ -120,7 +120,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=60, KEEP-FUZZ=5; total=65. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=61, KEEP-FUZZ=5; total=66. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -191,6 +191,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
 | tests/e2e/backup_manifest_test.go | TestBinaryBackupManifestCoverage | Real-binary restore rejects duplicate manifest entries hiding altered state and changed file permissions before creating the destination | 1.430s pass | KEEP-E2E | complete manifest verification regression |
+| tests/e2e/quota_cleanup_test.go | TestBinaryQuotaReapsClosedStdoutPeer | Hub polls a synthetic Codex peer that closes stdout and ignores TERM, publishes quota promptly and reaps the process | 4.350s pass | KEEP-E2E | process lifetime, rather than stdout EOF, bounds cleanup |
 
 ## Deleted files
 
