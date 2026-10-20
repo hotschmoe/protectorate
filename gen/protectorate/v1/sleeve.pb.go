@@ -338,7 +338,7 @@ type Sleeve struct {
 	// handoff is set when a resleeve produced this sleeve's harness.
 	Handoff *Handoff `protobuf:"bytes,17,opt,name=handoff,proto3" json:"handoff,omitempty"`
 	// parent is the authenticated identity that spawned this sleeve.
-	Parent        string `protobuf:"bytes,18,opt,name=parent,proto3" json:"parent,omitempty"`
+	Parent        string `protobuf:"bytes,20,opt,name=parent,proto3" json:"parent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1433,7 +1433,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"supervised\x18\x10 \x01(\bR\n" +
 	"supervised\x122\n" +
 	"\ahandoff\x18\x11 \x01(\v2\x18.protectorate.v1.HandoffR\ahandoff\x12\x16\n" +
-	"\x06parent\x18\x12 \x01(\tR\x06parentB\f\n" +
+	"\x06parent\x18\x14 \x01(\tR\x06parentB\f\n" +
 	"\n" +
 	"_exit_code\"\xcd\x03\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +

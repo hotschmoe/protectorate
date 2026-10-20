@@ -167,7 +167,7 @@ message Sleeve {
   // handoff is set when a resleeve produced this sleeve's harness.
   Handoff handoff = 17;
   // parent is the authenticated identity that spawned this sleeve.
-  string parent = 18;
+  string parent = 20;
 }
 
 message SpawnSleeveRequest {
