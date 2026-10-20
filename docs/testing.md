@@ -64,6 +64,9 @@ Phone Envoy captures type an unsent draft, switch to NODES and back, and assert
 the editor retained the text. NODES captures use the actual bottom tab button.
 A separate node-detail capture checks the pending device banner on a pushed
 page; the temporary device request stays unapproved during these scenes.
+The phone NODES tab also embeds the shared hub and fleet update cards below
+the hardware inventory. Release and fleet mutations retain their existing
+capability checks and progress displays.
 
 Run `make test-race` to build `bin/protectorate-race` with `-race`, the same
 feature tags, trimpath and version ldflags as `make build`, and run the full

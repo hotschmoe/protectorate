@@ -11,6 +11,8 @@ import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
 import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
+import '../updates/fleet_update_card.dart';
+import '../updates/hub_update_card.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
@@ -203,6 +205,18 @@ class _PhoneNodesTabState extends State<PhoneNodesTab> {
               onTap: () => _open(node),
             ),
           ],
+          const SizedBox(height: Tokens.gap),
+          HubUpdateCard(
+            key: const ValueKey('phone-hub-update'),
+            client: widget.client,
+            feed: widget.feed,
+          ),
+          const SizedBox(height: Tokens.gap),
+          FleetUpdateCard(
+            key: const ValueKey('phone-fleet-update'),
+            client: widget.client,
+            feed: widget.feed,
+          ),
         ],
       ),
     );

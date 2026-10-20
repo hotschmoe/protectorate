@@ -1,3 +1,4 @@
+import 'package:connectrpc/connect.dart';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/sleeve.pb.dart';
@@ -20,9 +21,16 @@ class PhoneDevicesTab extends StatefulWidget {
 }
 
 class _PhoneDevicesTabState extends State<PhoneDevicesTab> {
+  final _abort = CancelableSignal();
   bool _stopping = false;
   String? _result;
   bool _failed = false;
+
+  @override
+  void dispose() {
+    _abort.cancel();
+    super.dispose();
+  }
 
   Future<void> _stop() async {
     final confirmed = await showModalBottomSheet<bool>(
@@ -78,17 +86,22 @@ class _PhoneDevicesTabState extends State<PhoneDevicesTab> {
     try {
       final list = await widget.client.sleeves.listSleeves(
         ListSleevesRequest(),
+        signal: TimeoutSignal(const Duration(seconds: 10), parent: _abort),
       );
       final targets = list.sleeves
           .where((sleeve) => sleeve.name != orchestratorSleeve)
           .toList();
       var next = 0;
       Future<void> stopNext() async {
-        while (next < targets.length) {
+        while (mounted && next < targets.length) {
           final sleeve = targets[next++];
           try {
             await widget.client.sleeves.killSleeve(
               KillSleeveRequest(name: sleeve.name),
+              signal: TimeoutSignal(
+                const Duration(seconds: 20),
+                parent: _abort,
+              ),
             );
             stopped++;
           } on Object catch (e) {
