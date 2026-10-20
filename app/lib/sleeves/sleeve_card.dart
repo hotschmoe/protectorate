@@ -157,6 +157,12 @@ class SleeveCard extends StatelessWidget {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (sleeve.gitBranch.isNotEmpty)
+                      Text(
+                        'branch ${sleeve.gitBranch}',
+                        overflow: TextOverflow.ellipsis,
+                        style: t.small(t.p.lit),
+                      ),
                     if (!compact)
                       Text(
                         sleeve.workspace,

@@ -455,6 +455,8 @@ class SleeveStatusPane extends StatelessWidget {
               Text('WORKSPACE', style: t.legend()),
               const SizedBox(height: 2),
               Text(sleeve.workspace, style: t.small(t.p.lit)),
+              if (sleeve.gitBranch.isNotEmpty)
+                Text('BRANCH ${sleeve.gitBranch}', style: t.small(t.p.lit)),
               if (u.oomKills > 0)
                 Text('${u.oomKills} OOM kills', style: t.small(t.p.alarm)),
             ],
