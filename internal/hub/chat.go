@@ -71,6 +71,9 @@ type chatSleeve struct {
 	state      pb.ChatState
 	sessionID  string
 	model      string
+	effort     string
+	requested  driver.Selection
+	defaults   driver.Selection
 	provider   string
 	local      bool
 	context    uint64
@@ -136,6 +139,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	if c := info.Chat; c != nil {
 		s.sessionID, s.model, s.context, s.window = c.SessionID, c.Model, c.Context, c.Window
 		s.provider, s.local = c.Provider, c.LocalModel
+		s.effort, s.requested, s.defaults = c.Effort, c.Requested, c.Defaults
 		s.cacheExp, s.activity = c.CacheExpires, c.LastActivity
 		s.used = c.SessionID != ""
 	}
@@ -253,7 +257,9 @@ func (m *chatManager) overlay(s *pb.Sleeve) {
 func (s *chatSleeve) statusLocked() *pb.ChatStatus {
 	st := &pb.ChatStatus{
 		State: s.state, HarnessSessionId: s.sessionID, Model: s.model, Provider: s.provider, LocalModel: s.local,
-		ContextTokens: s.context, ContextWindow: s.window, LastSeq: s.log.Last(),
+		ReasoningEffort: s.effort,
+		Settings:        settingsToProto(driver.SelectionState{Requested: s.requested, Effective: driver.Selection{Model: s.model, Effort: s.effort}, Defaults: s.defaults}),
+		ContextTokens:   s.context, ContextWindow: s.window, LastSeq: s.log.Last(),
 	}
 	if !s.cacheExp.IsZero() {
 		st.CacheExpiresAt = timestamppb.New(s.cacheExp)
@@ -272,16 +278,17 @@ func (s *chatSleeve) status() *pb.ChatStatus {
 
 // persistLocked writes the summary into the sleeve record; usage-only
 // updates are rate limited.
-func (s *chatSleeve) persistLocked(force bool) {
+func (s *chatSleeve) persistLocked(force bool) error {
 	now := time.Now()
 	if !force && now.Sub(s.lastPersist) < persistEvery {
-		return
+		return nil
 	}
 	s.lastPersist = now
 	st := s.statusLocked()
 	_, err := s.m.h.sleeves.SetChat(s.name, func(c *sleeve.Chat) {
 		c.State, c.Model, c.Context, c.Window = st.State.String(), st.Model, st.ContextTokens, st.ContextWindow
 		c.Provider, c.LocalModel = st.Provider, st.LocalModel
+		c.Effort, c.Requested, c.Defaults = s.effort, s.requested, s.defaults
 		c.CacheExpires, c.LastActivity, c.LastSeq = s.cacheExp, s.activity, st.LastSeq
 		if c.SessionID == "" && s.used {
 			c.SessionID = s.sessionID
@@ -290,6 +297,7 @@ func (s *chatSleeve) persistLocked(force bool) {
 	if err != nil && !errors.Is(err, sleeve.ErrNotFound) {
 		log.Printf("chat %s: persist status: %v", s.name, err)
 	}
+	return err
 }
 
 func (s *chatSleeve) publishLocked(force bool) {
@@ -301,7 +309,8 @@ func (s *chatSleeve) publishLocked(force bool) {
 	st := s.statusLocked()
 	p, err := structpb.NewStruct(map[string]any{
 		"state": st.State.String(), "model": st.Model, "provider": st.Provider, "local_model": st.LocalModel, "context_tokens": float64(st.ContextTokens),
-		"context_window": float64(st.ContextWindow), "last_seq": float64(st.LastSeq),
+		"reasoning_effort": st.ReasoningEffort,
+		"context_window":   float64(st.ContextWindow), "last_seq": float64(st.LastSeq),
 	})
 	if err == nil {
 		s.m.h.emit("chat.state", s.name, p)
@@ -354,6 +363,7 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
+	requested, defaults := s.requested, s.defaults
 	s.mu.Unlock()
 	info, err := s.m.h.sleeves.Get(s.name)
 	if err != nil {
@@ -370,7 +380,7 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 	octx, cancel := context.WithTimeout(ctx, driverOpenTimeout)
 	defer cancel()
 	sess, err := s.m.open(octx, driver.Harness(info.Harness), info.Workspace, resume, "chat:"+s.name,
-		driver.Options{Command: cmd, Autonomous: !info.Supervised})
+		driver.Options{Command: cmd, Autonomous: !info.Supervised, Selection: requested, Defaults: defaults})
 	if err != nil {
 		s.mu.Lock()
 		s.appendLocked(func(e *pb.ChatEvent) {
@@ -385,6 +395,12 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 	s.mu.Lock()
 	s.sess, s.pumpDone, s.closing = sess, done, false
 	s.sessionID = sess.SessionID()
+	if sess.Caps().Selection {
+		sel := sess.Selection()
+		s.requested, s.defaults = sel.Requested, sel.Defaults
+		s.model, s.effort = sel.Effective.Model, sel.Effective.Effort
+	}
+	s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Settings{Settings: s.statusLocked().Settings} })
 	s.turn, s.compacting = false, false
 	s.approvals = map[string]bool{}
 	s.refreshLocked()
@@ -431,6 +447,14 @@ func (s *chatSleeve) handle(sess driver.Session, ev driver.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch ev.Kind {
+	case driver.KindSelection:
+		if ev.Selection != nil {
+			st := ev.Selection
+			s.requested, s.defaults, s.model, s.effort = st.Requested, st.Defaults, st.Effective.Model, st.Effective.Effort
+			s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Settings{Settings: settingsToProto(*st)} })
+			s.persistLocked(true)
+			s.publishLocked(true)
+		}
 	case driver.KindToolCall:
 		s.appendLocked(func(e *pb.ChatEvent) {
 			e.Body = &pb.ChatEvent_ToolCall{ToolCall: &pb.ToolCall{Id: ev.Tool.ID, Name: ev.Tool.Name, InputJson: string(ev.Tool.Input)}}

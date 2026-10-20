@@ -12,6 +12,22 @@ Generated code must be byte-identical everywhere, so the generators are pinned, 
 
 Checks before every commit and before every merge: `go vet ./...`, `go test -race ./...`, `gofmt -l cmd internal` printing nothing, `make check-gen`, `make cross`, `make app-check`, `make check-version`. `make check` runs them all. CI runs the same on pushes to `master` and `dev-hotschmoe` and on pull requests.
 
+## Research references and access
+
+`archive/` and `references/` are read-only research material, not the current
+implementation. Relevant owner-provided sources are
+`references/t3code` (native model catalogs and model/effort selection) and
+`references/secondary/pi/packages/durable` (checkpoint/replay design). They
+may exist only in the owner's hub checkout and are not guaranteed to be
+included in a fresh clone or mounted inside a sleeve.
+
+Check the visible workspace before using a reference. If it is unavailable,
+report the missing path and request an explicit read-only reference mount or
+an approved workspace containing it; do not work around denied access.
+Distinguish inspected reference behavior, current Protectorate behavior, and
+proposed changes. In particular, durable intent records do not make external
+effects exactly-once or snapshot another harness's native session.
+
 ## Release
 
 The version is the git tag (`make version` prints it); nothing else defines it.

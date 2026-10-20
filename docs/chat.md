@@ -16,13 +16,46 @@ protectorate chat respond alice <approval-id> --allow
 protectorate chat compact alice
 ```
 
-The workspace is a directory on the hub or a git URL (cloned into
-`workspaces/<name>` in the hub's state directory; the hub has no git
-credentials, so the repository must be readable without a login). `protectorate
-sleeve workspaces` lists what the hub can reuse: directories under its
-`workspaces/` and the workspaces of known sleeves. A directory under
-`workspaces/` can only be used by a sleeve of the same name; any other absolute
-path outside the state directory is accepted if it passes the sandbox checks.
+## Workspaces
+
+The workspace is an existing directory on the hub or a git URL. It need not
+be a git repository. The API requires an absolute directory path and resolves
+symlinks before checking it. The CLI converts relative paths to absolute paths
+on the client; that resulting path must exist on the hub. Shell `~` expansion
+also happens on the client, so use an explicit hub path when calling remotely.
+
+An existing directory, including its `.git`, is mounted read-write at its
+resolved host path. Edits change the original checkout directly; no copy or
+worktree is created. Selecting it does not expose its parents or siblings.
+System/tool mounts are read-only, HOME is the sleeve's own writable home, and
+that harness's shared auth directory is writable. The host network is shared.
+Outward symlinks do not grant access to otherwise unmounted host paths. A linked
+git worktree may need a common git directory outside the workspace that is not
+mounted.
+
+Sandbox checks reject filesystem root, system directories, the real user home
+and its ancestors, and paths inside or containing protected credential or
+application-data paths (including `.ssh`, `.codex`, `.config`, `.cargo` and
+`.local/share` under the real home). Hub state and its ancestors are refused;
+within hub state only `workspaces/<sleeve-name>` and its descendants are allowed
+for an ordinary sleeve. Envoy has its own orchestrator workspace exception.
+The complete checks are `CheckWorkspace`/`CheckBind` in
+`internal/sleeve/plan.go` and the protected paths in `internal/sleeve/sleeve.go`.
+These checks do not scan arbitrary project files for embedded secrets.
+
+`protectorate sleeve workspaces` discovers immediate managed workspace
+directories and known sleeve workspaces, filtered by the sandbox checks. It
+is not a browser of every accepted hub directory. Outside hub state another
+existing absolute directory can be supplied if it passes those checks.
+
+Git URLs clone into `$PROTECTORATE_HOME/workspaces/<sleeve-name>`, with a
+ten-minute timeout. If that destination already has `.git`, it is reused
+without verifying the requested remote; a nonempty non-git destination fails.
+Choose a new sleeve name when a separate clone is needed. The clone command
+disables terminal prompts but inherits the hub process environment and git
+configuration, so ambient helpers or SSH credentials may still be used.
+Public repositories need no added authentication; there is no dedicated
+private-repository credential-management UI. Do not embed tokens in URLs.
 
 In the app, the SLEEVES tab shows every sleeve in a fence per node (the hub's
 node first; sleeves run only on the hub's machine today, so other nodes get a
@@ -40,6 +73,72 @@ A chat harness runs autonomous: the sandbox is the boundary. `sleeve spawn
 default`, Codex `approvalPolicy` `untrusted` with its `workspace-write`
 sandbox, Grok `/always-approve off`; pi has no gate), so approvals arrive as
 `ApprovalRequest` events and `chat respond` answers them.
+
+## Models and reasoning effort
+
+Codex chats, including Envoy, support model and reasoning-effort selection at
+creation and between turns. The hub queries the native paginated `model/list`
+catalog: model IDs, effort values and per-model defaults come from that
+installation, not a Protectorate enum. Catalog presence does not guarantee
+account access; the harness can still reject an inference request.
+
+```
+protectorate chat models --harness codex       # discover before creation
+protectorate chat models alice                # this sleeve's native catalog
+protectorate sleeve spawn alice --workspace /srv/project --harness codex --model MODEL --effort EFFORT
+protectorate chat settings alice              # requested/effective settings
+protectorate chat settings alice --model MODEL --effort EFFORT
+protectorate chat settings alice --native-defaults
+protectorate chat settings envoy --model MODEL --effort EFFORT
+```
+
+Replace MODEL and EFFORT with advertised values. Creation also supports
+`orchestrator spawn --harness codex --model MODEL --effort EFFORT`; this
+respawns Envoy, so use `chat settings envoy` for an existing conversation.
+In the app, Codex creation forms have native selectors, and an idle chat's
+menu has MODEL AND EFFORT. Effective model and effort appear in the chat header
+and sleeve information. Other harnesses explain that controls are unavailable.
+
+`--model`/`--effort` replace the complete requested selection. An omitted model
+uses the native session's original model; an explicit model with omitted effort
+uses that model's advertised default effort. `--native-defaults` restores both
+defaults captured before the first override. With no selection at creation the
+driver sends no override. Requested, effective and captured default settings are
+persisted separately. Native model rerouting updates the effective model and
+leaves effort unknown when the harness does not report it.
+
+Updates require an idle chat with no pending approval, compaction or resleeve.
+Codex uses native `thread/settings/update` without a turn or restart,
+preserving the session and workspace. Older Codex versions without that
+operation return an explicit error; there is no hidden restart fallback.
+The driver reads native model/effort on start/resume. Codex's per-sleeve config
+seeds permission/sandbox settings and does not copy the owner's `config.toml`
+or model choice.
+
+Claude, Grok and pi retain native defaults/session/config behavior; explicit
+selection is rejected until those drivers implement verified controls. Their
+effective effort is unknown. Model names may be absent until usage arrives;
+Grok currently reports no model name. Extra harness arguments after `--` work
+in terminal mode; chat rejects them and typed selection is chat-only.
+
+The API is `ChatService.ListModels` (read) and `SetSelection` (requires
+`chat_set_selection` or a matching chat scope). Ordinary sleeve and Envoy
+tokens lack that write scope by default; use owner authentication or an
+explicitly granted token. `SpawnSleeveRequest.selection` and
+`SpawnEnvoyRequest.selection` carry creation settings. `ChatStatus.settings`
+and replayable settings events separate requested/effective values;
+`ChatStatus.reasoning_effort` reports the effective effort.
+
+Resleeving preserves the request on the same harness. When moving a selected
+chat to another harness, explicitly choose target `--model`/`--effort` or
+`--native-defaults`; there is no automatic vendor mapping. The API fields are
+`ResleeveSleeveRequest.selection` and `native_defaults`. See
+[delegation](coordination.md#delegation) for native tasks versus sleeves.
+
+Catalog discovery before creation runs in a temporary-home sandbox with the
+native auth directory and read-only tools, without a project mount, sleeve
+record or inference turn. Existing chats query their own driver. No model
+traffic is proxied and no credentials are copied into settings responses.
 
 ## API
 
@@ -60,6 +159,10 @@ covered by `chat_*`.
   harness confirmed it. `failed_precondition` unless the chat is IDLE, or when
   there is too little to compact; `unimplemented` for Grok, where `/compact`
   over ACP is not verified.
+- **ListModels(sleeve, harness)** queries native discovery without starting an
+  inference turn. Supply a sleeve or a harness for creation-time discovery.
+- **SetSelection(sleeve, selection)** replaces requested model/effort while
+  idle. Unsupported drivers and invalid catalog combinations fail.
 
 `Sleeve.chat` (`ChatStatus`) is kept current: state, harness session id, model,
 `context_tokens` (the prompt size of the last model call), `context_window`,

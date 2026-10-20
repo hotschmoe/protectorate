@@ -14,6 +14,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
@@ -37,12 +38,13 @@ type Hub interface {
 
 // Options configure one spawn.
 type Options struct {
-	Home    string // $PROTECTORATE_HOME
-	HubURL  string // reached from inside the sandbox
-	Harness string // auto, claude, codex, grok or pi
-	Scopes  []string
-	TTL     time.Duration
-	Tools   []Tool
+	Selection *pb.ModelSelection
+	Home      string // $PROTECTORATE_HOME
+	HubURL    string // reached from inside the sandbox
+	Harness   string // auto, claude, codex, grok or pi
+	Scopes    []string
+	TTL       time.Duration
+	Tools     []Tool
 	// Commands feed the generated CLI reference.
 	Commands []Command
 }
@@ -78,6 +80,9 @@ func HarnessName(h pb.Harness) string {
 func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 	harness, reason, err := resolveHarness(ctx, hub, o.Harness)
 	if err != nil {
+		return nil, err
+	}
+	if err := driver.CheckSelection(driver.Harness(HarnessName(harness)), driver.Selection{Model: o.Selection.GetModel(), Effort: o.Selection.GetEffort()}); err != nil {
 		return nil, err
 	}
 	scopes := o.Scopes
@@ -132,7 +137,8 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 
 	spawned, err := hub.SpawnSleeve(ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
 		Name: SleeveName, Workspace: ws, Harness: harness, Mode: pb.SleeveMode_SLEEVE_MODE_CHAT,
-		Env: map[string]string{"PROTECTORATE_HUB": o.HubURL, "PROTECTORATE_TOKEN_FILE": tokenPath},
+		Selection: o.Selection,
+		Env:       map[string]string{"PROTECTORATE_HUB": o.HubURL, "PROTECTORATE_TOKEN_FILE": tokenPath},
 	}))
 	if err != nil {
 		return fail(fmt.Errorf("spawn %s: %w", SleeveName, err))

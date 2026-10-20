@@ -14,6 +14,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/orchestrator"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
@@ -107,12 +108,21 @@ func (h *Hub) SpawnEnvoy(ctx context.Context, req *connect.Request[pb.SpawnEnvoy
 		scopes = orchestrator.DefaultScopes(h.envoy.Tools)
 	}
 	scopes = orchestrator.MergeScopes(scopes, m.AddScopes)
+	if selectionFromProto(m.Selection) != (driver.Selection{}) {
+		if m.Harness != pb.Harness_HARNESS_CODEX {
+			return nil, invalid("choose Codex explicitly for model/effort selection")
+		}
+		if err := h.validateSelection(ctx, driver.Codex, selectionFromProto(m.Selection)); err != nil {
+			return nil, err
+		}
+	}
 
 	h.envoyState.mu.Lock()
 	defer h.envoyState.mu.Unlock()
 	res, err := orchestrator.Spawn(context.WithValue(ctx, envoySpawnKey{}, true), h, orchestrator.Options{
 		Home: h.sleeves.StateDir(), HubURL: h.identityEnv()["PROTECTORATE_HUB"], Harness: harness,
 		Scopes: scopes, TTL: ttl, Tools: h.envoy.Tools, Commands: h.envoy.Commands,
+		Selection: m.Selection,
 	})
 	if err != nil {
 		return nil, rpcErr(err)

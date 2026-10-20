@@ -9,6 +9,7 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../mail/thread_view.dart';
 import '../sleeves/sleeve_info.dart';
+import '../sleeves/model_selection.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import 'chat_screen.dart';
@@ -143,8 +144,10 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     }
   }
 
-  Future<void> _startEnvoy(Harness harness) async {
-    await widget.client.sleeves.spawnEnvoy(SpawnEnvoyRequest(harness: harness));
+  Future<void> _startEnvoy(Harness harness, ModelSelection selection) async {
+    await widget.client.sleeves.spawnEnvoy(
+      SpawnEnvoyRequest(harness: harness, selection: selection),
+    );
     await _refresh();
   }
 
@@ -180,7 +183,10 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     if (ok != true) return;
     try {
       await widget.client.sleeves.spawnEnvoy(
-        SpawnEnvoyRequest(harness: current.harness),
+        SpawnEnvoyRequest(
+          harness: current.harness,
+          selection: current.chat.settings.requested,
+        ),
       );
       await _refresh();
     } on Object catch (e) {
@@ -190,26 +196,53 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
 
   Future<void> _resleeve(Sleeve current) async {
     var to = Harness.HARNESS_UNSPECIFIED;
+    var selection = ModelSelection();
+    var nativeDefaults = false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           title: const Text('RESLEEVE ENVOY'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Moves Envoy to another harness with a handoff summary. The '
-                'new harness starts a new session, so its prompt cache is '
-                'cold on the first message.',
-              ),
-              _HarnessPicker(
-                key: const ValueKey('resleeve-harness'),
-                value: to,
-                onChanged: (h) => setState(() => to = h),
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Moves Envoy to another harness with a handoff summary. The '
+                  'new harness starts a new session, so its prompt cache is '
+                  'cold on the first message.',
+                ),
+                _HarnessPicker(
+                  key: const ValueKey('resleeve-harness'),
+                  value: to,
+                  onChanged: (h) => setState(() {
+                    to = h;
+                    selection = ModelSelection();
+                    nativeDefaults = false;
+                  }),
+                ),
+                ModelSelectionFields(
+                  client: widget.client,
+                  harness: to,
+                  selection: selection,
+                  onChanged: (value) => setState(() {
+                    selection = value;
+                    nativeDefaults = false;
+                  }),
+                ),
+                CheckboxListTile(
+                  value: nativeDefaults,
+                  title: const Text(
+                    'Use target native defaults (discard current selection)',
+                  ),
+                  onChanged: (v) => setState(() {
+                    nativeDefaults = v ?? false;
+                    if (nativeDefaults) selection = ModelSelection();
+                  }),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -228,7 +261,14 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     if (ok != true) return;
     try {
       await widget.client.sleeves.resleeveSleeve(
-        ResleeveSleeveRequest(name: current.name, to: to),
+        ResleeveSleeveRequest(
+          name: current.name,
+          to: to,
+          nativeDefaults: nativeDefaults,
+          selection: selection.model.isEmpty && selection.effort.isEmpty
+              ? null
+              : selection,
+        ),
       );
       await _refresh();
     } on Object catch (e) {
@@ -318,6 +358,7 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
               : _loading
               ? const SizedBox.shrink()
               : _NotRunning(
+                  client: widget.client,
                   name: widget.selected,
                   error: _error,
                   onRetry: _refresh,
@@ -465,12 +506,14 @@ class _NotRunning extends StatefulWidget {
     required this.error,
     required this.onRetry,
     required this.onStart,
+    required this.client,
   });
 
   final String name;
   final Object? error;
   final VoidCallback onRetry;
-  final Future<void> Function(Harness) onStart;
+  final Future<void> Function(Harness, ModelSelection) onStart;
+  final HubClient client;
 
   @override
   State<_NotRunning> createState() => _NotRunningState();
@@ -478,6 +521,7 @@ class _NotRunning extends StatefulWidget {
 
 class _NotRunningState extends State<_NotRunning> {
   Harness _harness = Harness.HARNESS_UNSPECIFIED;
+  ModelSelection _selection = ModelSelection();
   bool _starting = false;
   Object? _startError;
 
@@ -487,7 +531,7 @@ class _NotRunningState extends State<_NotRunning> {
       _startError = null;
     });
     try {
-      await widget.onStart(_harness);
+      await widget.onStart(_harness, _selection);
     } on Object catch (e) {
       if (mounted) setState(() => _startError = e);
     } finally {
@@ -539,7 +583,10 @@ class _NotRunningState extends State<_NotRunning> {
                     _HarnessPicker(
                       key: const ValueKey('start-harness'),
                       value: _harness,
-                      onChanged: (h) => setState(() => _harness = h),
+                      onChanged: (h) => setState(() {
+                        _harness = h;
+                        _selection = ModelSelection();
+                      }),
                     ),
                     FilledButton(
                       key: const ValueKey('start-envoy'),
@@ -547,6 +594,12 @@ class _NotRunningState extends State<_NotRunning> {
                       child: const Text('START ENVOY'),
                     ),
                   ],
+                ),
+                ModelSelectionFields(
+                  client: widget.client,
+                  harness: _harness,
+                  selection: _selection,
+                  onChanged: (value) => setState(() => _selection = value),
                 ),
                 if (_startError != null) ...[
                   const SizedBox(height: Tokens.gap),

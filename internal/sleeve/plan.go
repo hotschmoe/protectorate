@@ -309,7 +309,11 @@ func (c Config) BoxArgv(b Box) []string {
 		"--hostname", b.Hostname, "--tmpfs", "/")
 	argv = append(argv, c.System...)
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp")
-	argv = append(argv, "--bind", b.Home, c.UserHome)
+	if b.Home == "" {
+		argv = append(argv, "--tmpfs", c.UserHome)
+	} else {
+		argv = append(argv, "--bind", b.Home, c.UserHome)
+	}
 	ro := append(append([]string(nil), c.ToolDirs...), b.RO...)
 	for _, d := range ro {
 		argv = append(argv, "--ro-bind", d, d)

@@ -34,6 +34,9 @@ var resleeveTiming = struct{ stop, summary, poll time.Duration }{stopWait, summa
 
 func (h *Hub) ResleeveSleeve(ctx context.Context, req *connect.Request[pb.ResleeveSleeveRequest]) (*connect.Response[pb.ResleeveSleeveResponse], error) {
 	m := req.Msg
+	if m.NativeDefaults && selectionFromProto(m.Selection) != (driver.Selection{}) {
+		return nil, invalid("native_defaults cannot be combined with explicit selection")
+	}
 	info, err := h.sleeves.Get(m.Name)
 	if err != nil {
 		return nil, sleeveErr(err)
@@ -50,11 +53,27 @@ func (h *Hub) ResleeveSleeve(ctx context.Context, req *connect.Request[pb.Reslee
 	if err != nil {
 		return nil, err
 	}
+	selection := driver.Selection{}
+	if info.Chat != nil && to == info.Harness {
+		selection = info.Chat.Requested
+	}
+	if m.Selection != nil {
+		selection = selectionFromProto(m.Selection)
+	}
+	if m.NativeDefaults {
+		selection = driver.Selection{}
+	}
+	if to != info.Harness && info.Chat != nil && info.Chat.Requested != (driver.Selection{}) && m.Selection == nil && !m.NativeDefaults {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("choose target selection or explicitly use native defaults when changing harnesses"))
+	}
+	if err := h.validateSelection(ctx, driver.Harness(to), selection); err != nil {
+		return nil, err
+	}
 	wait := defaultResleeveWait
 	if m.Wait != nil && m.Wait.AsDuration() > 0 {
 		wait = m.Wait.AsDuration()
 	}
-	out, err := h.resleeve(ctx, info, to, m.Interrupt, wait)
+	out, err := h.resleeve(ctx, info, to, m.Interrupt, wait, selection)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +112,7 @@ func (h *Hub) summarizers(from sleeve.Harness) []sleeve.Harness {
 	return append(out, sleeve.Pi)
 }
 
-func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness, interrupt bool, wait time.Duration) (sleeve.Info, error) {
+func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness, interrupt bool, wait time.Duration, selection driver.Selection) (sleeve.Info, error) {
 	cs, err := h.chat.get(info.Name, false)
 	if err != nil {
 		return sleeve.Info{}, err
@@ -155,9 +174,15 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err != nil {
 		log.Printf("resleeve %s: read env: %v", info.Name, err)
 	}
-	out, err := h.replaceHarness(bg, info, to, env, spawnOpts{keepLog: true, hold: true})
+	out, err := h.replaceHarness(bg, info, to, env, spawnOpts{keepLog: true, hold: true, selection: selection})
 	if err != nil {
-		if _, rerr := h.replaceHarness(bg, info, info.Harness, env, spawnOpts{keepLog: true, resume: facts.SessionID}); rerr != nil {
+		original := driver.Selection{}
+		defaults := driver.Selection{}
+		if info.Chat != nil {
+			original = info.Chat.Requested
+			defaults = info.Chat.Defaults
+		}
+		if _, rerr := h.replaceHarness(bg, info, info.Harness, env, spawnOpts{keepLog: true, resume: facts.SessionID, selection: original, defaults: defaults}); rerr != nil {
 			return sleeve.Info{}, connect.NewError(connect.CodeInternal, fmt.Errorf("start %s: %v; restoring %s also failed: %w", to, err, info.Harness, rerr))
 		}
 		return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("start %s: %w; %s is back on its own session", to, err, info.Harness))
@@ -236,6 +261,7 @@ func (h *Hub) replaceHarness(ctx context.Context, info sleeve.Info, to sleeve.Ha
 	return h.spawn(ctx, sleeve.SpawnRequest{
 		Name: info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
 		Limits: info.Limits(), Env: env, Supervised: info.Supervised,
+		Selection: o.selection,
 	}, o)
 }
 

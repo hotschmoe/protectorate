@@ -22,8 +22,11 @@ type codexSession struct {
 	// model is what thread/start or thread/resume reported
 	model string
 	// context bookkeeping for compaction records
-	ctxTokens   int64
-	compactPost int64
+	ctxTokens    int64
+	compactPost  int64
+	selection    SelectionState
+	smu          sync.Mutex
+	settingsWait chan Selection
 }
 
 type codexPending struct {
@@ -32,7 +35,7 @@ type codexPending struct {
 	params json.RawMessage
 }
 
-func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Session, error) {
+func startCodex(ctx context.Context, cwd string, opts Options) (*codexSession, error) {
 	p, err := startProc(opts.bin("codex"), []string{"app-server"}, cwd, opts)
 	if err != nil {
 		return nil, fmt.Errorf("open codex: %w", err)
@@ -47,7 +50,7 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 		s.rpc.close()
 	}()
 
-	fail := func(err error) (Session, error) {
+	fail := func(err error) (*codexSession, error) {
 		s.markShut()
 		p.stop(opts.stopTimeout())
 		<-s.done
@@ -62,6 +65,15 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 	if err := s.rpc.notify("initialized", nil); err != nil {
 		return fail(err)
 	}
+	return s, nil
+}
+
+func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Session, error) {
+	s, err := startCodex(ctx, cwd, opts)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (Session, error) { s.Close(); return nil, fmt.Errorf("open codex: %w", err) }
 	params := map[string]any{"cwd": cwd}
 	if !opts.Autonomous {
 		params["approvalPolicy"], params["sandbox"] = "untrusted", "workspace-write"
@@ -80,7 +92,8 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
-		Model string `json:"model"`
+		Model  string `json:"model"`
+		Effort string `json:"reasoningEffort"`
 	}
 	if json.Unmarshal(res, &r) != nil || r.Thread.ID == "" {
 		return fail(fmt.Errorf("%s returned no thread id", method))
@@ -88,8 +101,93 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 	s.setID(r.Thread.ID)
 	s.tmu.Lock()
 	s.model = r.Model
+	s.selection = SelectionState{Effective: Selection{Model: r.Model, Effort: r.Effort}, Defaults: opts.Defaults}
+	if s.selection.Defaults == (Selection{}) {
+		s.selection.Defaults = s.selection.Effective
+	}
 	s.tmu.Unlock()
+	if opts.Selection != (Selection{}) {
+		if err := s.SetSelection(ctx, opts.Selection); err != nil {
+			return fail(err)
+		}
+	}
 	return s, nil
+}
+
+func (s *codexSession) Models(ctx context.Context) ([]Model, error) {
+	var out []Model
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		params := map[string]any{"limit": 100}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		res, err := s.rpc.call(ctx, "model/list", params)
+		if err != nil {
+			return nil, fmt.Errorf("codex model/list: %w", err)
+		}
+		var page struct {
+			Data []Model `json:"data"`
+			Next string  `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(res, &page); err != nil {
+			return nil, fmt.Errorf("codex catalog: %w", err)
+		}
+		out = append(out, page.Data...)
+		if page.Next == "" {
+			return out, nil
+		}
+		if seen[page.Next] || len(out) > 10000 {
+			return nil, errors.New("codex catalog pagination did not finish")
+		}
+		seen[page.Next], cursor = true, page.Next
+	}
+}
+
+func (s *codexSession) Selection() SelectionState {
+	s.tmu.Lock()
+	defer s.tmu.Unlock()
+	return s.selection
+}
+
+func (s *codexSession) SetSelection(ctx context.Context, requested Selection) error {
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	if s.isBusy() {
+		return ErrBusy
+	}
+	models, err := s.Models(ctx)
+	if err != nil {
+		return err
+	}
+	effective, err := resolveSelection(models, s.Selection().Defaults, requested)
+	if err != nil {
+		return err
+	}
+	params := map[string]any{"threadId": s.SessionID(), "model": effective.Model}
+	if effective.Effort != "" {
+		params["effort"] = effective.Effort
+	}
+	confirmed := make(chan Selection, 1)
+	s.tmu.Lock()
+	s.settingsWait = confirmed
+	s.tmu.Unlock()
+	defer func() { s.tmu.Lock(); s.settingsWait = nil; s.tmu.Unlock() }()
+	if _, err := s.rpc.call(ctx, "thread/settings/update", params); err != nil {
+		return fmt.Errorf("codex thread/settings/update (requires native support): %w", err)
+	}
+	select {
+	case effective = <-confirmed:
+	case <-ctx.Done():
+		return fmt.Errorf("codex settings acknowledged but effective values unconfirmed; inspect native state: %w", ctx.Err())
+	case <-s.done:
+		return ErrClosed
+	}
+	s.tmu.Lock()
+	s.selection.Requested, s.selection.Effective, s.model = requested, effective, effective.Model
+	s.tmu.Unlock()
+	return nil
 }
 
 func (s *codexSession) setTurn(id string) {
@@ -109,6 +207,8 @@ func codexInput(prompt string) []map[string]any {
 }
 
 func (s *codexSession) Send(ctx context.Context, prompt string) error {
+	s.smu.Lock()
+	defer s.smu.Unlock()
 	steering, err := s.beginTurn(s.caps.Steer)
 	if err != nil {
 		return err
@@ -192,7 +292,9 @@ func (s *codexSession) Compact(ctx context.Context) (Compaction, error) {
 func (s *codexSession) Close() error {
 	if s.markShut() {
 		ctx, cancel := context.WithTimeout(context.Background(), s.opts.stopTimeout())
-		_, _ = s.rpc.call(ctx, "thread/unsubscribe", map[string]any{"threadId": s.SessionID()})
+		if s.SessionID() != "" {
+			_, _ = s.rpc.call(ctx, "thread/unsubscribe", map[string]any{"threadId": s.SessionID()})
+		}
 		cancel()
 		s.p.stop(s.opts.stopTimeout())
 	}
@@ -240,6 +342,37 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 	}
 	raw = append([]byte(nil), raw...)
 	switch method {
+	case "thread/settings/updated":
+		var changed struct {
+			Settings Selection `json:"threadSettings"`
+		}
+		if json.Unmarshal(params, &changed) != nil || changed.Settings.Model == "" {
+			return
+		}
+		s.tmu.Lock()
+		s.model, s.selection.Effective = changed.Settings.Model, changed.Settings
+		waiting, state := s.settingsWait, s.selection
+		s.tmu.Unlock()
+		if waiting != nil {
+			select {
+			case waiting <- changed.Settings:
+			default:
+			}
+		} else {
+			s.emit(Event{Kind: KindSelection, Selection: &state, Raw: raw})
+		}
+	case "model/rerouted":
+		var routed struct {
+			Model string `json:"toModel"`
+		}
+		if json.Unmarshal(params, &routed) == nil && routed.Model != "" {
+			s.tmu.Lock()
+			s.model = routed.Model
+			s.selection.Effective = Selection{Model: routed.Model}
+			state := s.selection
+			s.tmu.Unlock()
+			s.emit(Event{Kind: KindSelection, Selection: &state, Raw: raw})
+		}
 	case "turn/started":
 		s.setTurn(p.Turn.ID)
 	case "item/agentMessage/delta":

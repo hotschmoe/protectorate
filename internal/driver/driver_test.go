@@ -246,7 +246,7 @@ func TestOpenErrors(t *testing.T) {
 func TestCaps(t *testing.T) {
 	want := map[Harness]Caps{
 		Claude: {Approvals: true, Interrupt: true},
-		Codex:  {Approvals: true, Interrupt: true, Steer: true},
+		Codex:  {Approvals: true, Interrupt: true, Steer: true, Selection: true},
 		Grok:   {Approvals: true, Interrupt: true},
 		Pi:     {Interrupt: true, Steer: true},
 	}

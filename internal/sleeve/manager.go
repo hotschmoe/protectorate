@@ -17,6 +17,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
@@ -78,6 +79,7 @@ type Info struct {
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
 
 type SpawnRequest struct {
+	Selection driver.Selection
 	Name      string
 	Workspace string // absolute directory or git URL
 	Harness   Harness
@@ -292,6 +294,12 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
+	if req.Selection != (driver.Selection{}) && mode != ModeChat {
+		return Info{}, fmt.Errorf("%w: selection requires chat mode", ErrInvalid)
+	}
+	if err := driver.CheckSelection(driver.Harness(req.Harness), req.Selection); err != nil {
+		return Info{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
 	if req.Supervised && mode != ModeChat {
 		return Info{}, fmt.Errorf("%w: supervised applies to chat mode; a terminal sleeve's TUI asks in the terminal", ErrInvalid)
 	}
@@ -350,7 +358,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		info.Session = SessionName(req.Name)
 	}
 	if mode == ModeChat {
-		info.Chat = &Chat{}
+		info.Chat = &Chat{Requested: req.Selection}
 	}
 	e := &entry{Info: info}
 	m.mu.Lock()

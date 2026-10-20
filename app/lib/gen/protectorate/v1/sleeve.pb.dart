@@ -566,6 +566,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
     $1.SleeveMode? mode,
     $core.bool? supervised,
+    $1.ModelSelection? selection,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -576,6 +577,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (env != null) result.env.addEntries(env);
     if (mode != null) result.mode = mode;
     if (supervised != null) result.supervised = supervised;
+    if (selection != null) result.selection = selection;
     return result;
   }
 
@@ -608,6 +610,8 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     ..aE<$1.SleeveMode>(7, _omitFieldNames ? '' : 'mode',
         enumValues: $1.SleeveMode.values)
     ..aOB(8, _omitFieldNames ? '' : 'supervised')
+    ..aOM<$1.ModelSelection>(9, _omitFieldNames ? '' : 'selection',
+        subBuilder: $1.ModelSelection.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -701,6 +705,18 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   $core.bool hasSupervised() => $_has(7);
   @$pb.TagNumber(8)
   void clearSupervised() => $_clearField(8);
+
+  /// Codex chat selection; omitted preserves native defaults. Other drivers reject it.
+  @$pb.TagNumber(9)
+  $1.ModelSelection get selection => $_getN(8);
+  @$pb.TagNumber(9)
+  set selection($1.ModelSelection value) => $_setField(9, value);
+  @$pb.TagNumber(9)
+  $core.bool hasSelection() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearSelection() => $_clearField(9);
+  @$pb.TagNumber(9)
+  $1.ModelSelection ensureSelection() => $_ensure(8);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -1322,12 +1338,16 @@ class ResleeveSleeveRequest extends $pb.GeneratedMessage {
     Harness? to,
     $core.bool? interrupt,
     $2.Duration? wait,
+    $1.ModelSelection? selection,
+    $core.bool? nativeDefaults,
   }) {
     final result = ResleeveSleeveRequest._();
     if (name != null) result.name = name;
     if (to != null) result.to = to;
     if (interrupt != null) result.interrupt = interrupt;
     if (wait != null) result.wait = wait;
+    if (selection != null) result.selection = selection;
+    if (nativeDefaults != null) result.nativeDefaults = nativeDefaults;
     return result;
   }
 
@@ -1350,6 +1370,9 @@ class ResleeveSleeveRequest extends $pb.GeneratedMessage {
     ..aOB(3, _omitFieldNames ? '' : 'interrupt')
     ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'wait',
         subBuilder: $2.Duration.$_createMessage)
+    ..aOM<$1.ModelSelection>(5, _omitFieldNames ? '' : 'selection',
+        subBuilder: $1.ModelSelection.$_createMessage)
+    ..aOB(6, _omitFieldNames ? '' : 'nativeDefaults')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1418,6 +1441,27 @@ class ResleeveSleeveRequest extends $pb.GeneratedMessage {
   void clearWait() => $_clearField(4);
   @$pb.TagNumber(4)
   $2.Duration ensureWait() => $_ensure(3);
+
+  @$pb.TagNumber(5)
+  $1.ModelSelection get selection => $_getN(4);
+  @$pb.TagNumber(5)
+  set selection($1.ModelSelection value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasSelection() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearSelection() => $_clearField(5);
+  @$pb.TagNumber(5)
+  $1.ModelSelection ensureSelection() => $_ensure(4);
+
+  /// Explicitly discard the outgoing selection when switching harnesses.
+  @$pb.TagNumber(6)
+  $core.bool get nativeDefaults => $_getBF(5);
+  @$pb.TagNumber(6)
+  set nativeDefaults($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasNativeDefaults() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearNativeDefaults() => $_clearField(6);
 }
 
 class ResleeveSleeveResponse extends $pb.GeneratedMessage {
@@ -1491,12 +1535,14 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? scopes,
     $core.Iterable<$core.String>? addScopes,
     $2.Duration? ttl,
+    $1.ModelSelection? selection,
   }) {
     final result = SpawnEnvoyRequest._();
     if (harness != null) result.harness = harness;
     if (scopes != null) result.scopes.addAll(scopes);
     if (addScopes != null) result.addScopes.addAll(addScopes);
     if (ttl != null) result.ttl = ttl;
+    if (selection != null) result.selection = selection;
     return result;
   }
 
@@ -1520,6 +1566,8 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     ..pPS(3, _omitFieldNames ? '' : 'addScopes')
     ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'ttl',
         subBuilder: $2.Duration.$_createMessage)
+    ..aOM<$1.ModelSelection>(5, _omitFieldNames ? '' : 'selection',
+        subBuilder: $1.ModelSelection.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1576,6 +1624,17 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
   void clearTtl() => $_clearField(4);
   @$pb.TagNumber(4)
   $2.Duration ensureTtl() => $_ensure(3);
+
+  @$pb.TagNumber(5)
+  $1.ModelSelection get selection => $_getN(4);
+  @$pb.TagNumber(5)
+  set selection($1.ModelSelection value) => $_setField(5, value);
+  @$pb.TagNumber(5)
+  $core.bool hasSelection() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearSelection() => $_clearField(5);
+  @$pb.TagNumber(5)
+  $1.ModelSelection ensureSelection() => $_ensure(4);
 }
 
 class SpawnEnvoyResponse extends $pb.GeneratedMessage {

@@ -2,6 +2,8 @@ import 'package:fixnum/fixnum.dart';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/sleeve.pb.dart';
+import '../gen/protectorate/v1/chat.pb.dart';
+import 'model_selection.dart';
 import '../hubs/hub_client.dart';
 import '../nodes/node_view.dart';
 
@@ -29,16 +31,15 @@ String suggestSleeveName(String workspace) {
 Future<Sleeve?> startSleeve(BuildContext context, HubClient client) async {
   var known = const <Workspace>[];
   try {
-    known = (await client.sleeves.listWorkspaces(
-      ListWorkspacesRequest(),
-    )).workspaces;
+    known = (await client.sleeves.listWorkspaces(ListWorkspacesRequest()))
+        .workspaces;
   } on Object {
     // An older hub has no list; the dialog still takes a URL or a path.
   }
   if (!context.mounted) return null;
   final req = await showDialog<SpawnSleeveRequest>(
     context: context,
-    builder: (_) => SpawnSleeveDialog(workspaces: known),
+    builder: (_) => SpawnSleeveDialog(workspaces: known, client: client),
   );
   if (req == null) return null;
   return (await client.sleeves.spawnSleeve(req)).sleeve;
@@ -47,7 +48,8 @@ Future<Sleeve?> startSleeve(BuildContext context, HubClient client) async {
 enum _Source { existing, clone, path }
 
 class SpawnSleeveDialog extends StatefulWidget {
-  const SpawnSleeveDialog({super.key, this.workspaces = const []});
+  const SpawnSleeveDialog({super.key, this.workspaces = const [], this.client});
+  final HubClient? client;
 
   final List<Workspace> workspaces;
 
@@ -62,6 +64,7 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
   final _cpu = TextEditingController();
   final _mem = TextEditingController();
   Harness _harness = Harness.HARNESS_CLAUDE;
+  ModelSelection _selection = ModelSelection();
   late _Source _source;
   Workspace? _picked;
   bool _nameTouched = false;
@@ -133,6 +136,7 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
         name: _name.text.trim(),
         workspace: _workspace,
         harness: _harness,
+        selection: _selection,
         limits: SleeveLimits(cpuPercent: cpu, memoryBytes: Int64(memMb) << 20),
       ),
     );
@@ -252,7 +256,16 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
                   ))
                     DropdownMenuItem(value: h, child: Text(harnessLabel(h))),
                 ],
-                onChanged: (h) => setState(() => _harness = h ?? _harness),
+                onChanged: (h) => setState(() {
+                  _harness = h ?? _harness;
+                  _selection = ModelSelection();
+                }),
+              ),
+              ModelSelectionFields(
+                client: widget.client,
+                harness: _harness,
+                selection: _selection,
+                onChanged: (value) => setState(() => _selection = value),
               ),
               TextFormField(
                 key: const ValueKey('sleeve-cpu'),

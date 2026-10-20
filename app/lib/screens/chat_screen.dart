@@ -10,6 +10,7 @@ import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../sleeves/sleeve_info.dart';
+import '../sleeves/model_selection.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import 'sleeves_screen.dart';
@@ -67,7 +68,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
 const chatPaneBreakpoint = 1100.0;
 
-enum _Menu { compact }
+enum _Menu { compact, selection }
 
 // The transcript, its status strip and the composer for one sleeve.
 class ChatView extends StatefulWidget {
@@ -163,13 +164,22 @@ class _ChatViewState extends State<ChatView> {
       listenable: _chat,
       builder: (context, _) {
         final tr = _chat.transcript;
-        final model = widget.sleeve.hasChat() ? widget.sleeve.chat.model : '';
+        final settings = tr.settings;
+        final selectedModel = settings?.effective.model ?? '';
+        final model = selectedModel.isEmpty
+            ? widget.sleeve.chat.model
+            : selectedModel;
+        final effort =
+            settings?.effective.effort ?? widget.sleeve.chat.reasoningEffort;
         final items = tr.items.reversed.toList();
         return Column(
           children: [
             _Header(
               sleeve: widget.sleeve,
-              model: model,
+              model: [
+                model,
+                if (effort.isNotEmpty) 'effort $effort',
+              ].where((s) => s.isNotEmpty).join(' / '),
               state: _chat.state,
               tokens: tr.contextTokens,
               window: tr.contextWindow,
@@ -181,11 +191,31 @@ class _ChatViewState extends State<ChatView> {
                 onSelected: (m) {
                   if (m == _Menu.compact) {
                     _run(_chat.compact);
+                  } else if (m == _Menu.selection) {
+                    _run(() async {
+                      final sleeve = widget.sleeve.deepCopy();
+                      if (settings != null) sleeve.chat.settings = settings;
+                      sleeve.chat.model = model;
+                      sleeve.chat.reasoningEffort = effort;
+                      final updated = await editModelSelection(
+                        context,
+                        widget.client,
+                        sleeve,
+                      );
+                      if (updated != null && mounted) {
+                        setState(() => tr.settings = updated.settings);
+                      }
+                    });
                   } else if (m is ChatAction) {
                     m.run();
                   }
                 },
                 itemBuilder: (_) => [
+                  PopupMenuItem<Object>(
+                    value: _Menu.selection,
+                    enabled: _chat.state == ChatState.CHAT_STATE_IDLE,
+                    child: const Text('MODEL AND EFFORT'),
+                  ),
                   PopupMenuItem<Object>(
                     key: const ValueKey('menu-compact'),
                     value: _Menu.compact,

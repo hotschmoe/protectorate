@@ -98,9 +98,8 @@ class _SleevesScreenState extends State<SleevesScreen> {
       var nodes = const <NodeStatus>[];
       if (widget.embedded) {
         try {
-          nodes = (await widget.client.node.listNodes(
-            ListNodesRequest(),
-          )).nodes;
+          nodes = (await widget.client.node.listNodes(ListNodesRequest()))
+              .nodes;
         } on Object {
           // The hub's own fence still shows.
         }
@@ -420,6 +419,12 @@ class SleeveStatusPane extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               StateLamp(state: live?.$1 ?? sleeveState(sleeve), big: true),
+              if (c.model.isNotEmpty)
+                Text('Model: ${c.model}', style: t.data(t.p.emph)),
+              Text(
+                'Effort: ${c.reasoningEffort.isEmpty ? "unknown" : c.reasoningEffort}',
+                style: t.data(t.p.dim),
+              ),
             ],
           ),
         ),

@@ -31,6 +31,10 @@ abstract class ChatServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $1.RespondRequest request);
   $async.Future<$1.CompactResponse> compact(
       $pb.ServerContext ctx, $1.CompactRequest request);
+  $async.Future<$1.ListModelsResponse> listModels(
+      $pb.ServerContext ctx, $1.ListModelsRequest request);
+  $async.Future<$1.SetSelectionResponse> setSelection(
+      $pb.ServerContext ctx, $1.SetSelectionRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -44,6 +48,10 @@ abstract class ChatServiceBase extends $pb.GeneratedService {
         return $1.RespondRequest();
       case 'Compact':
         return $1.CompactRequest();
+      case 'ListModels':
+        return $1.ListModelsRequest();
+      case 'SetSelection':
+        return $1.SetSelectionRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -62,6 +70,10 @@ abstract class ChatServiceBase extends $pb.GeneratedService {
         return respond(ctx, request as $1.RespondRequest);
       case 'Compact':
         return compact(ctx, request as $1.CompactRequest);
+      case 'ListModels':
+        return listModels(ctx, request as $1.ListModelsRequest);
+      case 'SetSelection':
+        return setSelection(ctx, request as $1.SetSelectionRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
