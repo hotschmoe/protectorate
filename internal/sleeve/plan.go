@@ -461,6 +461,9 @@ func (c Config) validateSpec(spec Spec) ([]Mount, error) {
 	if spec.Nested && (spec.Limits.CPUPercent == 0 || spec.Limits.MemoryBytes == 0) {
 		return nil, fmt.Errorf("%w: nested sleeves require CPU and memory limits", ErrInvalid)
 	}
+	if spec.Nested && c.NestedUnsupported != "" {
+		return nil, fmt.Errorf("%w: nested sleeves are unavailable on this host: %s", ErrInvalid, c.NestedUnsupported)
+	}
 	if err := checkEnv(spec.Env); err != nil {
 		return nil, err
 	}

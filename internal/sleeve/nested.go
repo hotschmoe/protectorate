@@ -61,7 +61,7 @@ trap 'exit 143' TERM HUP
 trap ':' INT QUIT
 printf '%s\n' "$cpu" > "$root/cpu.max"
 printf '%s\n' "$memory" > "$root/memory.max"
-printf '0\n' > "$root/memory.swap.max"
+test ! -e "$root/memory.swap.max" || printf '0\n' > "$root/memory.swap.max"
 printf '%s\n' "$tasks" > "$root/pids.max"
 exec 4<&0
 /usr/bin/env --default-signal=INT,QUIT /bin/sh -ec 'root=$1; shift; /usr/bin/mkdir "$root/run"; printf "%s\n" "$$" > "$root/run/cgroup.procs"; exec "$@"' sh "$root" "$@" <&4 &

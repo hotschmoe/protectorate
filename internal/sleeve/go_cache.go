@@ -67,7 +67,10 @@ func (m *Manager) initGoCaches() {
 		}
 	}
 	m.cfg.goCaches = s
-	log.Printf("sleeve runtime: bwrap=%s version=%q overlays=%t", m.cfg.bwrap(), m.cfg.BwrapVersion, m.cfg.Overlays)
+	log.Printf("sleeve runtime: bwrap=%s version=%q overlays=%t nested=%t", m.cfg.bwrap(), m.cfg.BwrapVersion, m.cfg.Overlays, m.cfg.NestedUnsupported == "")
+	if m.cfg.NestedUnsupported != "" {
+		log.Printf("sleeve runtime: --nested unavailable: %s", m.cfg.NestedUnsupported)
+	}
 }
 
 func (s *goCacheSnapshots) enabled() bool {

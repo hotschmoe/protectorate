@@ -371,7 +371,10 @@ The host needs cgroup v2 with delegated cpu, memory and pids controllers,
 unprivileged user namespaces, bwrap 0.8 or newer, and util-linux `unshare` and
 `flock` (plus GNU coreutils and findutils).
 Missing delegation or namespace support fails the launch; it never falls back
-to running a command outside the sandbox.
+to running a command outside the sandbox. The hub probes `unshare --user
+--map-current-user --cgroup` at startup and refuses `--nested` with the reason
+when it fails; kernels without swap accounting simply skip the child's swap
+limit.
 
 Inside the new sleeve, build and run against its own checkout:
 

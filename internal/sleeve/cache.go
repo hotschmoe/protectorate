@@ -3,6 +3,7 @@ package sleeve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,9 @@ func (c *Config) probeRuntime() {
 		if b, err := exec.CommandContext(ctx, c.BwrapPath, "--help").Output(); err == nil {
 			c.Overlays = strings.Contains(string(b), "--overlay-src ") && strings.Contains(string(b), "--overlay ")
 		}
+	}
+	if out, err := exec.CommandContext(ctx, "unshare", "--user", "--map-current-user", "--cgroup", "true").CombinedOutput(); err != nil {
+		c.NestedUnsupported = fmt.Sprintf("unshare --user --map-current-user --cgroup failed (needs util-linux 2.38+ and unprivileged user and cgroup namespaces): %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	var env struct{ GOCACHE, GOMODCACHE string }
 	goBin := "go"
