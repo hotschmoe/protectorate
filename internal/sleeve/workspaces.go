@@ -11,10 +11,11 @@ import (
 
 // Workspace is a directory Spawn would accept as an existing workspace.
 type Workspace struct {
-	Name   string
-	Path   string
-	Remote string
-	Branch string
+	ReadOnly bool
+	Name     string
+	Path     string
+	Remote   string
+	Branch   string
 	// Sleeve names the sleeve that uses the directory, running or exited.
 	Sleeve string
 	// Busy is true while that sleeve is running.
@@ -74,6 +75,20 @@ func (m *Manager) Workspaces() []Workspace {
 		if w.Sleeve == "" || i.State == Running {
 			w.Sleeve = i.Name
 			w.Busy = i.State == Running
+		}
+	}
+	refs := []string{filepath.Join(m.cfg.UserHome, "github/protectorate/references")}
+	for _, w := range byPath {
+		refs = append(refs, filepath.Join(w.Path, "references"))
+	}
+	for _, p := range refs {
+		mounts, err := m.cfg.ResolveMounts([]Mount{{Source: p}})
+		if err != nil {
+			continue
+		}
+		r := mounts[0].Source
+		if byPath[r] == nil {
+			byPath[r] = &Workspace{Name: filepath.Base(r), Path: r, ReadOnly: true}
 		}
 	}
 

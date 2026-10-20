@@ -1,9 +1,12 @@
 package sleeve
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -11,11 +14,12 @@ import (
 // ARCHITECTURE.md: shared auth directories bound read-write at their host
 // path, per-sleeve config directories inside the sleeve's home.
 type Layout struct {
-	Dirs  []string
-	Links []Link
-	Seeds []Seed
-	Binds []string
-	Env   [][2]string
+	CacheCopies []Mount
+	Dirs        []string
+	Links       []Link
+	Seeds       []Seed
+	Binds       []string
+	Env         [][2]string
 }
 
 type Link struct{ Path, Target string }
@@ -45,6 +49,27 @@ func (c Config) layout(name string, h Harness) Layout {
 	host := func(rel string) string { return filepath.Join(c.sleeveHome(name), rel) }
 	inside := func(rel string) string { return filepath.Join(c.UserHome, rel) }
 	l := Layout{Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
+	l.Dirs = append(l.Dirs, host(".cache/pub"), host(".cache/go-mod"))
+	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")})
+	if contains(c.ToolDirs, filepath.Join(c.UserHome, "go")) {
+		l.Env = append(l.Env, [2]string{"GOPROXY", "file://" + filepath.Join(c.UserHome, "go/pkg/mod/cache/download") + ",https://proxy.golang.org,direct"})
+	}
+	if c.GitName != "" && c.GitEmail != "" {
+		l.Seeds = append(l.Seeds, Seed{host(".gitconfig"), "[user]\n\tname = " + strconv.Quote(c.GitName) + "\n\temail = " + strconv.Quote(c.GitEmail) + "\n"})
+	}
+	for _, d := range c.ToolDirs {
+		if filepath.Base(d) == "global_packages" && filepath.Dir(d) == filepath.Join(c.UserHome, ".pub-cache") {
+			for _, part := range []string{"hosted", "hosted-hashes", "git", "global_packages"} {
+				p := filepath.Join(c.UserHome, ".pub-cache", part)
+				if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+					l.CacheCopies = append(l.CacheCopies, Mount{Source: host(".cache/pub/" + part), Target: p})
+				}
+			}
+		}
+		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
+			l.CacheCopies = append(l.CacheCopies, Mount{Source: host(".cache/flutter"), Target: filepath.Join(d, "bin/cache")})
+		}
+	}
 	auth := c.authDir(h)
 	shared := func() {
 		l.Dirs = append(l.Dirs, auth)
@@ -84,7 +109,28 @@ func (c Config) layout(name string, h Harness) Layout {
 
 // Apply creates the directories, symlinks and seed files. It is idempotent
 // and never deletes: a file that is in the way of a symlink is renamed aside.
-func (l Layout) Apply() error {
+func (l Layout) Apply(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	for _, m := range l.CacheCopies {
+		if _, err := os.Stat(m.Source); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(m.Source), 0700); err != nil {
+			return fmt.Errorf("create SDK cache parent: %w", err)
+		}
+		stage, err := os.MkdirTemp(filepath.Dir(m.Source), ".cache-seed-")
+		if err != nil {
+			return fmt.Errorf("create tool cache staging directory: %w", err)
+		}
+		cmd := exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", "--", m.Target+"/.", stage)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("seed sleeve tool cache: %w: %s", err, out)
+		}
+		if err := os.Rename(stage, m.Source); err != nil {
+			return fmt.Errorf("install sleeve tool cache: %w", err)
+		}
+	}
 	for _, d := range l.Dirs {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)

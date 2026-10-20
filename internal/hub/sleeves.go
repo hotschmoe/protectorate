@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -143,6 +144,10 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 			WorkspaceDiskBytes: i.Usage.DiskBytes,
 		},
 	}
+	s.ExitAfterIdle = durationpb.New(i.ExitAfterIdle)
+	for _, m := range i.ReadOnly {
+		s.ReadOnly = append(s.ReadOnly, &pb.ReadOnlyMount{Source: m.Source, Target: m.Target})
+	}
 	if !i.Usage.Sampled.IsZero() {
 		s.Usage.SampledAt = timestamppb.New(i.Usage.Sampled)
 	}
@@ -200,6 +205,15 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		Selection: selectionFromProto(m.Selection),
 		Name:      m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
+	}
+	if d := m.ExitAfterIdle; d != nil {
+		if err := d.CheckValid(); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		r.ExitAfterIdle = d.AsDuration()
+	}
+	for _, mount := range m.ReadOnly {
+		r.ReadOnly = append(r.ReadOnly, sleeve.Mount{Source: mount.Source, Target: mount.Target})
 	}
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
@@ -306,10 +320,49 @@ func (h *Hub) ListWorkspaces(context.Context, *connect.Request[pb.ListWorkspaces
 	for _, w := range h.sleeves.Workspaces() {
 		res.Workspaces = append(res.Workspaces, &pb.Workspace{
 			Name: w.Name, Path: w.Path, GitRemote: w.Remote, GitBranch: w.Branch,
-			Sleeve: w.Sleeve, Busy: w.Busy, RequiredName: w.RequiredName,
+			Sleeve: w.Sleeve, Busy: w.Busy, RequiredName: w.RequiredName, ReadOnly: w.ReadOnly,
 		})
 	}
 	return connect.NewResponse(res), nil
+}
+
+func (c *coordinator) reapIdle(ctx context.Context) {
+	c.passMu.Lock()
+	defer c.passMu.Unlock()
+	for _, info := range c.h.sleeves.List() {
+		if info.State != sleeve.Running || info.Mode != sleeve.ModeChat || info.ExitAfterIdle <= 0 {
+			continue
+		}
+		c.h.chat.mu.Lock()
+		s := c.h.chat.sleeves[info.Name]
+		c.h.chat.mu.Unlock()
+		if s == nil {
+			continue
+		}
+		if !s.opMu.TryLock() {
+			continue
+		}
+		s.mu.Lock()
+		pending := len(c.mail.Pending()[info.Name]) > 0 || len(c.mail.Queued(info.Name)) > 0
+		idle := s.state == pb.ChatState_CHAT_STATE_IDLE && !s.hubOwned && !pending
+		if !idle {
+			s.idleSince = time.Time{}
+		} else if s.idleSince.IsZero() {
+			s.idleSince = time.Now()
+		}
+		due := idle && time.Since(s.idleSince) >= info.ExitAfterIdle
+		if due {
+			s.hubOwned = true
+		}
+		s.mu.Unlock()
+		s.opMu.Unlock()
+		if due {
+			if _, err := c.h.KillSleeve(ctx, connect.NewRequest(&pb.KillSleeveRequest{Name: info.Name})); err != nil {
+				s.giveBack()
+				log.Printf("reap idle sleeve %s: %v", info.Name, err)
+			}
+		}
+	}
 }
 
 func (h *Hub) GetSleeve(_ context.Context, req *connect.Request[pb.GetSleeveRequest]) (*connect.Response[pb.GetSleeveResponse], error) {

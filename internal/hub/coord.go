@@ -107,6 +107,7 @@ func (c *coordinator) Run(ctx context.Context) {
 		case <-c.wake:
 		}
 		c.pass(ctx)
+		c.reapIdle(ctx)
 	}
 }
 

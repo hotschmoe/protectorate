@@ -69,7 +69,8 @@ type SleeveServiceClient interface {
 	// ListWorkspaces returns the directories SpawnSleeve would accept as an
 	// existing workspace: git checkouts and other directories under the hub's
 	// workspaces directory (cloned or created by earlier sleeves), and the
-	// workspaces of known sleeves elsewhere on disk. It never walks the rest of
+	// workspaces of known sleeves elsewhere on disk. Read-only reference entries
+	// are also returned with read_only set. It never walks the rest of
 	// the filesystem; any other absolute path can still be given to
 	// SpawnSleeve directly.
 	ListWorkspaces(context.Context, *connect.Request[v1.ListWorkspacesRequest]) (*connect.Response[v1.ListWorkspacesResponse], error)
@@ -229,7 +230,8 @@ type SleeveServiceHandler interface {
 	// ListWorkspaces returns the directories SpawnSleeve would accept as an
 	// existing workspace: git checkouts and other directories under the hub's
 	// workspaces directory (cloned or created by earlier sleeves), and the
-	// workspaces of known sleeves elsewhere on disk. It never walks the rest of
+	// workspaces of known sleeves elsewhere on disk. Read-only reference entries
+	// are also returned with read_only set. It never walks the rest of
 	// the filesystem; any other absolute path can still be given to
 	// SpawnSleeve directly.
 	ListWorkspaces(context.Context, *connect.Request[v1.ListWorkspacesRequest]) (*connect.Response[v1.ListWorkspacesResponse], error)

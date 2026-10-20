@@ -69,6 +69,7 @@ type chatSleeve struct {
 	closing    bool
 	releaseTUI func()
 	state      pb.ChatState
+	idleSince  time.Time
 	sessionID  string
 	model      string
 	effort     string
@@ -340,6 +341,11 @@ func (s *chatSleeve) setStateLocked(st pb.ChatState) {
 		return
 	}
 	s.state = st
+	if st == pb.ChatState_CHAT_STATE_IDLE {
+		s.idleSince = time.Now()
+	} else {
+		s.idleSince = time.Time{}
+	}
 	if _, err := s.log.Append(&pb.ChatEvent{Body: &pb.ChatEvent_State{State: &pb.StateChange{State: st}}}); err != nil {
 		log.Printf("chat %s: log state: %v", s.name, err)
 	}

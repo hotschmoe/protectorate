@@ -20,6 +20,67 @@ type Spec struct {
 	Workspace string // absolute, symlinks resolved
 	Env       map[string]string
 	Limits    Limits
+	ReadOnly  []Mount
+}
+
+type Mount struct {
+	Source string `yaml:"source"`
+	Target string `yaml:"target"`
+}
+
+func (c Config) ResolveMounts(mounts []Mount) ([]Mount, error) {
+	out := make([]Mount, 0, len(mounts))
+	for _, m := range mounts {
+		if m.Target == "" {
+			m.Target = m.Source
+		}
+		for _, p := range []string{m.Source, m.Target} {
+			if err := c.CheckBind(p); err != nil {
+				return nil, err
+			}
+			if within(p, c.Home) {
+				return nil, fmt.Errorf("%w: read-only mount touches hub state", ErrInvalid)
+			}
+		}
+		r, err := filepath.EvalSymlinks(m.Source)
+		if err != nil {
+			return nil, fmt.Errorf("%w: resolve read-only mount: %w", ErrInvalid, err)
+		}
+		if err := c.CheckBind(r); err != nil {
+			return nil, err
+		}
+		if within(r, c.Home) {
+			return nil, fmt.Errorf("%w: read-only mount resolves into hub state", ErrInvalid)
+		}
+		fi, err := os.Stat(r)
+		if err != nil {
+			return nil, fmt.Errorf("%w: stat read-only source %s: %w", ErrInvalid, r, err)
+		}
+		if !fi.IsDir() {
+			return nil, fmt.Errorf("%w: read-only source %s is not a directory", ErrInvalid, r)
+		}
+		parent := m.Target
+		for {
+			resolved, err := filepath.EvalSymlinks(parent)
+			if err == nil {
+				rel, _ := filepath.Rel(parent, m.Target)
+				resolved = filepath.Join(resolved, rel)
+				if err := c.CheckBind(resolved); err != nil {
+					return nil, err
+				}
+				if within(resolved, c.Home) {
+					return nil, fmt.Errorf("%w: read-only target resolves into hub state", ErrInvalid)
+				}
+				break
+			}
+			if !os.IsNotExist(err) || parent == "/" {
+				return nil, fmt.Errorf("%w: resolve read-only target: %w", ErrInvalid, err)
+			}
+			parent = filepath.Dir(parent)
+		}
+		out = append(out, Mount{Source: r, Target: m.Target})
+	}
+	return out, nil
 }
 
 // Launch is everything needed to start a sleeve: the pane argv and the host
@@ -271,6 +332,9 @@ func checkEnv(env map[string]string) error {
 // read-only, known secret files masked, and only the binds named here
 // writable. Sleeves and node jobs are both boxes.
 type Box struct {
+	Mounts         []Mount
+	WritableMounts []Mount
+
 	Unit     string
 	Hostname string
 	Limits   Limits
@@ -330,6 +394,12 @@ func (c Config) BoxArgv(b Box) []string {
 	for _, d := range b.RW {
 		argv = append(argv, "--bind", d, d)
 	}
+	for _, m := range b.Mounts {
+		argv = append(argv, "--ro-bind", m.Source, m.Target)
+	}
+	for _, m := range b.WritableMounts {
+		argv = append(argv, "--bind", m.Source, m.Target)
+	}
 	argv = append(argv, "--chdir", b.Chdir, "--clearenv")
 	for _, kv := range b.Env {
 		argv = append(argv, "--setenv", kv[0], kv[1])
@@ -371,6 +441,15 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		}
 	}
 	lay := c.layout(spec.Name, spec.Harness)
+	mounts, err := c.ResolveMounts(spec.ReadOnly)
+	if err != nil {
+		return Launch{}, err
+	}
+	for _, m := range mounts {
+		if within(spec.Workspace, m.Target) {
+			return Launch{}, fmt.Errorf("%w: read-only mount overlaps workspace", ErrInvalid)
+		}
+	}
 	unit := c.UnitName(spec.Name)
 	env := [][2]string{
 		{"HOME", c.UserHome},
@@ -384,6 +463,15 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		{"LANG", "C.UTF-8"},
 	}
 	env = append(env, lay.Env...)
+	n := 1
+	if spec.Limits.CPUPercent > 0 {
+		n = max(1, int(spec.Limits.CPUPercent/100))
+	}
+	for _, kv := range [][2]string{{"GOMAXPROCS", strconv.Itoa(n)}, {"GOFLAGS", "-p=" + strconv.Itoa(n)}, {"FLUTTER_TEST_CONCURRENCY", strconv.Itoa(n)}} {
+		if _, ok := spec.Env[kv[0]]; !ok {
+			env = append(env, kv)
+		}
+	}
 	keys := make([]string, 0, len(spec.Env))
 	for k := range spec.Env {
 		keys = append(keys, k)
@@ -403,7 +491,9 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	argv := c.BoxArgv(Box{
 		Unit: unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
 		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
-		RW: append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,
+		Mounts:         mounts,
+		WritableMounts: lay.CacheCopies,
+		RW:             append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,
 		Env: env, EnvFD: len(envArgs) > 0, Command: command,
 	})
 	launch := Launch{Argv: argv, Unit: unit, Layout: lay}

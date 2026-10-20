@@ -3,14 +3,17 @@
 package sleeve
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var (
@@ -106,6 +109,8 @@ type Config struct {
 	// Protected are extra resolved paths that must never be mounted or used
 	// as a workspace, such as the targets of symlinked credential dirs.
 	Protected []string
+	GitName   string
+	GitEmail  string
 }
 
 // Names of the orchestrator sleeve and the state subdirectory that is its
@@ -123,7 +128,7 @@ const (
 // reached through the symlink chain of their binary in ~/.local/bin.
 var defaultToolDirs = []string{
 	".local/bin", ".local/lib", ".local/opt", ".local/go", ".local/share/pi-omp-setup",
-	".nvm", "go", ".cargo/bin", ".rustup",
+	".nvm", "go", ".cargo/bin", ".rustup", ".pub-cache/bin", ".pub-cache/global_packages",
 }
 
 // maskedFiles are known secret files under $HOME. Any that exists inside a
@@ -139,7 +144,7 @@ var credentialDirs = []string{".claude", ".codex", ".grok", ".pi", ".ssh", ".gnu
 // read-write without masks, may neither be inside nor contain one.
 var secretPaths = []string{
 	".cargo", ".local/share", ".config", ".docker", ".kube", ".netrc", ".git-credentials",
-	".npmrc", ".pypirc", ".password-store",
+	".npmrc", ".pypirc", ".password-store", ".pub-cache",
 }
 
 // DefaultConfig probes the host. toolDirs replaces the default toolchain
@@ -173,6 +178,20 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 		fmt.Sprintf("user@%d.service", os.Getuid()), "app.slice")
 
 	if toolDirs == nil {
+		flutter := os.Getenv("PROTECTORATE_FLUTTER_SDK")
+		if flutter == "" {
+			if p, err := exec.LookPath("flutter"); err == nil {
+				if p, err = filepath.EvalSymlinks(p); err == nil {
+					flutter = filepath.Dir(filepath.Dir(p))
+				}
+			}
+		}
+		if flutter == "" {
+			flutter = filepath.Join(uh, "development/flutter")
+		}
+		if fi, err := os.Stat(flutter); err == nil && fi.IsDir() {
+			c.ToolDirs = append(c.ToolDirs, flutter)
+		}
 		for _, d := range defaultToolDirs {
 			if fi, err := os.Stat(filepath.Join(uh, d)); err == nil && fi.IsDir() {
 				c.ToolDirs = append(c.ToolDirs, filepath.Join(uh, d))
@@ -197,6 +216,25 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 		}
 	}
 	c.PathDirs = c.defaultPath(os.Getenv("PATH"))
+	for _, d := range c.ToolDirs {
+		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
+			c.PathDirs = append(c.PathDirs, filepath.Join(d, "bin"), filepath.Join(d, "bin/cache/dart-sdk/bin"))
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for key, dst := range map[string]*string{"user.name": &c.GitName, "user.email": &c.GitEmail} {
+		cmd := exec.CommandContext(ctx, "git", "config", "--global", "--get", key)
+		if b, err := cmd.Output(); err == nil {
+			*dst = strings.TrimSpace(string(b))
+		}
+		if *dst == "" {
+			cmd := exec.CommandContext(ctx, "git", "config", "--file", filepath.Join(uh, "github/protectorate/.git/config"), "--no-includes", "--get", key)
+			if b, err := cmd.Output(); err == nil {
+				*dst = strings.TrimSpace(string(b))
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -296,7 +334,7 @@ func (c Config) defaultPath(hostPath string) []string {
 			add(d)
 		}
 	}
-	for _, d := range []string{".local/bin", ".local/go/bin", ".cargo/bin", "go/bin"} {
+	for _, d := range []string{".local/bin", ".local/go/bin", ".cargo/bin", "go/bin", ".pub-cache/bin"} {
 		if c.underTools(filepath.Join(c.UserHome, d)) {
 			add(filepath.Join(c.UserHome, d))
 		}

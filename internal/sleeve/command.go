@@ -50,14 +50,15 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 		return Launch{}, err
 	}
 	launch, err := c.Plan(Spec{
-		Name: info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
+		ReadOnly: info.ReadOnly,
+		Name:     info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
 	}, bin)
 	if err != nil {
 		return Launch{}, err
 	}
 	// systemd-run refuses a unit name that is still being torn down.
 	c.waitGone(context.Background(), info.Name, 5*time.Second)
-	if err := launch.Layout.Apply(); err != nil {
+	if err := launch.Layout.Apply(context.Background()); err != nil {
 		return Launch{}, fmt.Errorf("prepare sleeve layout: %w", err)
 	}
 	if err := c.writeEnvFile(info.Name, launch); err != nil {

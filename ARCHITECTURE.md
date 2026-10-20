@@ -293,8 +293,16 @@ Design:
   workspaces of known sleeves that pass the checks below, with branch and
   origin read from `.git/HEAD` and `.git/config` (never by running git: a
   repository an agent wrote to must not run code on the hub) and credentials
-  removed from http(s) remotes. Other paths are not discovered.
+  removed from http(s) remotes. Read-only reference discovery is described
+  below; other paths are not discovered.
 - Mounts:
+  - `sleeve spawn --ro <host-path>[:<sandbox-path>]` adds repeatable read-only
+    directory mounts, defaulting to the same absolute path. Both paths and
+    resolved sources pass the workspace secret-path checks; hub state is
+    always refused. A read-only mount may cover a subdirectory of the workspace
+    but cannot cover the workspace itself. Mounts persist across chat restarts
+    and resleeves. `ListWorkspaces` also reports read-only reference directories
+    under known checkouts and `~/github/protectorate/references`;
   - the workspace is read-write. Inside the state directory only the sleeve's
     own `workspaces/<name>` (or `orchestrator/` for `envoy`) is allowed; the
     state directory, the shared `workspaces/` parent and other sleeves'
@@ -313,7 +321,25 @@ Design:
     `~/.cargo/credentials*` is masked with `/dev/null` if a mounted tool dir
     contains it;
   - each sleeve has its own config dirs;
+  - Flutter is discovered through `PROTECTORATE_FLUTTER_SDK`, `flutter` on
+    PATH, or `~/development/flutter`. Its SDK and the global Pub executable
+    directories are read-only. The SDK's `bin/cache` is seeded into the sleeve
+    home and overlaid writable, since Flutter requires cache locks. Pub package
+    caches are seeded likewise; `PUB_CACHE` and `GOMODCACHE` are sleeve-local.
+    Go uses the host module download cache as its first file proxy when present;
+  - a sleeve-local `.gitconfig` seeds the owner's global name/email, falling
+    back to the owner checkout's literal identity settings (includes disabled).
+    The owner's config and repository config are never modified. Commits keep
+    the owner as author; harness attribution uses an explicit `Co-Authored-By`
+    trailer, as documented in [sleeves](docs/sleeves.md);
+  - concurrency defaults are `max(1, floor(CPUQuota/100))`, or one when no
+    CPU quota is requested: `GOMAXPROCS`, `GOFLAGS=-p=N` and
+    `FLUTTER_TEST_CONCURRENCY` (consumed by `make app-check`). Caller `--env`
+    values take precedence, including when a chat driver reopens;
   - shared credential **dirs** are laid out per the credential table below.
+- `--exit-after-idle <duration>` removes a chat sleeve through the normal kill
+  path after continuous IDLE with no pending or queued mail. It defaults off,
+  resets on activity or pending mail, and preserves the workspace and home.
 - Known gap: bwrap shares the host network, so two sleeves' dev servers can
   collide on ports. Docker covers per-sleeve networking if that becomes a hard
   requirement.

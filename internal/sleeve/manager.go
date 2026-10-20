@@ -43,6 +43,9 @@ type Usage struct {
 
 // Info is one sleeve. Everything but Usage is persisted in sleeves.yaml.
 type Info struct {
+	ReadOnly      []Mount       `yaml:"read_only,omitempty"`
+	ExitAfterIdle time.Duration `yaml:"exit_after_idle,omitempty"`
+
 	Name      string    `yaml:"name"`
 	Harness   Harness   `yaml:"harness"`
 	Workspace string    `yaml:"workspace"`
@@ -79,6 +82,9 @@ type Info struct {
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
 
 type SpawnRequest struct {
+	ReadOnly      []Mount
+	ExitAfterIdle time.Duration
+
 	Selection driver.Selection
 	Name      string
 	Workspace string // absolute directory or git URL
@@ -294,6 +300,13 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
+	if req.ExitAfterIdle < 0 || (req.ExitAfterIdle > 0 && mode != ModeChat) {
+		return Info{}, fmt.Errorf("%w: exit-after-idle requires chat mode and a nonnegative duration", ErrInvalid)
+	}
+	req.ReadOnly, err = m.cfg.ResolveMounts(req.ReadOnly)
+	if err != nil {
+		return Info{}, err
+	}
 	if req.Selection != (driver.Selection{}) && mode != ModeChat {
 		return Info{}, fmt.Errorf("%w: selection requires chat mode", ErrInvalid)
 	}
@@ -330,12 +343,12 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if mode == ModeTerminal {
 		args = terminalArgs(req.Harness, req.Args)
 	}
-	spec := Spec{Name: req.Name, Harness: req.Harness, Args: args, Workspace: ws, Env: req.Env, Limits: req.Limits}
+	spec := Spec{Name: req.Name, Harness: req.Harness, Args: args, Workspace: ws, Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly}
 	launch, err := m.cfg.Plan(spec, bin)
 	if err != nil {
 		return Info{}, err
 	}
-	if err := launch.Layout.Apply(); err != nil {
+	if err := launch.Layout.Apply(ctx); err != nil {
 		return Info{}, fmt.Errorf("prepare sleeve layout: %w", err)
 	}
 	if err := m.cfg.writeEnvFile(req.Name, launch); err != nil {
@@ -349,6 +362,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	}
 
 	info := Info{
+		ReadOnly: req.ReadOnly, ExitAfterIdle: req.ExitAfterIdle,
 		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
 		CPU: req.Limits.CPUPercent, Memory: req.Limits.MemoryBytes, Args: req.Args,
