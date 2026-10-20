@@ -14,6 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -58,7 +59,7 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 
 func sleeveCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
-	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o))
+	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
 
@@ -104,15 +105,18 @@ func sleeveSpawnCmd(o *opts) *cobra.Command {
 	var workspace, harness, mem, mode string
 	var cpu uint32
 	var env []string
+	var supervised bool
 	c := &cobra.Command{
-		Use:   "spawn <name> --workspace <dir|git url> --harness <h> [--cpu 200] [--mem 8G] [-- args...]",
+		Use:   "spawn <name> --workspace <dir|git url> --harness <h> [--cpu 200] [--mem 8G] [--supervised] [-- args...]",
 		Short: "Start a harness in an isolated sleeve",
 		Long: `Start a harness (claude, codex, grok, pi or shell) in a sandbox with its own
 process namespace and CPU/memory limits. The workspace is a directory on the
 hub or a git URL to clone. --cpu is a percentage of one core (200 = two cores).
 For the shell harness, arguments after -- are the command to run. Agent
 harnesses start in chat mode (drive them with 'protectorate chat'); use
---mode terminal for the TUI under tmux.`,
+--mode terminal for the TUI under tmux. A chat harness runs autonomous (the
+sandbox is the boundary) unless --supervised: then it asks before acting and
+'protectorate chat respond' answers.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, extra := args[0], args[1:]
@@ -161,6 +165,7 @@ harnesses start in chat mode (drive them with 'protectorate chat'); use
 			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
 				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode,
+				Supervised: supervised,
 			}))
 			if err != nil {
 				return err
@@ -181,6 +186,7 @@ harnesses start in chat mode (drive them with 'protectorate chat'); use
 	c.Flags().StringVar(&mem, "mem", "", "memory limit such as 512M or 8G (empty = unlimited)")
 	c.Flags().StringArrayVar(&env, "env", nil, "environment variable K=V (repeatable)")
 	c.Flags().StringVar(&mode, "mode", "", "chat or terminal (default: chat for agent harnesses, terminal for shell)")
+	c.Flags().BoolVar(&supervised, "supervised", false, "chat mode: the harness asks before acting (answer with chat respond)")
 	return c
 }
 
@@ -291,6 +297,12 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 					fmt.Fprintf(w, "exit\t%s\n", exitLabel(s))
 				}
 				fmt.Fprintf(w, "args\t%s\nlimits\t%s\n", strings.Join(s.Args, " "), limitLabel(s.Limits))
+				if s.Supervised {
+					fmt.Fprintln(w, "supervised\tyes (the harness asks; answer with chat respond)")
+				}
+				if s.Handoff != nil {
+					printHandoff(w, s.Handoff)
+				}
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))
@@ -349,4 +361,73 @@ func sleeveAttachCmd(o *opts) *cobra.Command {
 	c.Flags().BoolVar(&readOnly, "readonly", false, "attach without being able to send input")
 	c.Flags().StringVar(&escape, "escape", "^]", `detach key as ^X, or "none"`)
 	return c
+}
+
+func sleeveResleeveCmd(o *opts) *cobra.Command {
+	var to string
+	var interrupt bool
+	var wait time.Duration
+	c := &cobra.Command{
+		Use:   "resleeve <name> [--to auto|claude|codex|grok|pi] [--interrupt] [--wait 5m]",
+		Short: "Move a chat sleeve to another harness with a handoff",
+		Long: `Move a chat sleeve to another harness on the same workspace, under the same
+name. The outgoing harness is never asked: the hub waits for its turn to end
+(interrupting it after --wait, or at once with --interrupt), composes facts
+(git status, diff, recent commits, backlog, mail, the end of the outgoing
+harness's own transcript), has a separate model write a summary (the
+subscription with the most spare quota, else the local LLM through pi),
+overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git), starts the
+new harness and tells it to read the file. --to auto takes the top of
+'quota suggest' other than the current harness.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			h := pb.Harness_HARNESS_UNSPECIFIED
+			if to != "auto" {
+				var ok bool
+				if h, ok = harnessNames[to]; !ok || h == pb.Harness_HARNESS_SHELL {
+					return fmt.Errorf("unknown harness %q, want auto, claude, codex, grok or pi", to)
+				}
+			}
+			cl, err := sleeveClient(o)
+			if err != nil {
+				return err
+			}
+			req := &pb.ResleeveSleeveRequest{Name: args[0], To: h, Interrupt: interrupt}
+			if wait > 0 {
+				req.Wait = durationpb.New(wait)
+			}
+			res, err := cl.ResleeveSleeve(cmd.Context(), connect.NewRequest(req))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintf(w, "resleeved\t%s\n", res.Msg.Sleeve.Name)
+				printHandoff(w, res.Msg.Sleeve.Handoff)
+			})
+		},
+	}
+	c.Flags().StringVar(&to, "to", "auto", "auto, claude, codex, grok or pi")
+	c.Flags().BoolVar(&interrupt, "interrupt", false, "interrupt a running turn instead of waiting for it")
+	c.Flags().DurationVar(&wait, "wait", 0, "how long a running turn may continue before it is interrupted (default 5m)")
+	return c
+}
+
+func printHandoff(w io.Writer, h *pb.Handoff) {
+	if h == nil {
+		return
+	}
+	fmt.Fprintf(w, "resleeved from\t%s (session %s) to %s at %s\n", h.FromHarness, h.FromSessionId, h.ToHarness, h.At.AsTime().Local().Format(time.RFC3339))
+	by := strings.Join(strings.Fields(h.SummarizerHarness+" "+h.SummarizerProvider+" "+h.SummarizerModel), " ")
+	switch {
+	case h.SummarizerHarness == "":
+		fmt.Fprintf(w, "summary\tnone: %s\n", h.SummaryError)
+	case h.SummarizerLocal:
+		fmt.Fprintf(w, "summary\tby local model %s (check it against the facts)\n", by)
+	default:
+		fmt.Fprintf(w, "summary\tby %s\n", by)
+	}
+	fmt.Fprintf(w, "handoff\t%s\n", h.Path)
+	if h.ArchivePath != "" {
+		fmt.Fprintf(w, "archive\t%s\n", h.ArchivePath)
+	}
 }

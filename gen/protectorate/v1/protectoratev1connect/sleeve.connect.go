@@ -44,6 +44,9 @@ const (
 	// SleeveServiceKillSleeveProcedure is the fully-qualified name of the SleeveService's KillSleeve
 	// RPC.
 	SleeveServiceKillSleeveProcedure = "/protectorate.v1.SleeveService/KillSleeve"
+	// SleeveServiceResleeveSleeveProcedure is the fully-qualified name of the SleeveService's
+	// ResleeveSleeve RPC.
+	SleeveServiceResleeveSleeveProcedure = "/protectorate.v1.SleeveService/ResleeveSleeve"
 )
 
 // SleeveServiceClient is a client for the protectorate.v1.SleeveService service.
@@ -63,6 +66,24 @@ type SleeveServiceClient interface {
 	// forgets the sleeve. The workspace and the sleeve's home directory are kept
 	// on disk.
 	KillSleeve(context.Context, *connect.Request[v1.KillSleeveRequest]) (*connect.Response[v1.KillSleeveResponse], error)
+	// ResleeveSleeve moves a chat sleeve to another harness on the same
+	// workspace, under the same name, without asking the outgoing harness
+	// anything. The hub takes the chat over (no other sender can start a
+	// turn), waits for it to be IDLE (interrupting a turn that runs past wait),
+	// composes facts in code (git status, diff --stat, recent commits, backlog
+	// and mail, the last user messages and the final assistant message from
+	// the outgoing harness's own transcript), has a separate model write a
+	// Goal/State/Unfinished/Next/Gotchas summary (the subscription with the
+	// most spare quota other than the outgoing harness, else pi with the local
+	// LLM), overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git
+	// through .git/info/exclude, archived under the hub's state directory),
+	// replaces the harness and sends it one plain user message naming the
+	// handoff. The summary runs while the outgoing turn winds down. The old
+	// native session stays on disk for a later resume. If the new harness
+	// cannot start, the old one is respawned on its own session. Announced as
+	// "sleeve.resleeved"; a summary by the fallback model, or none, also emits
+	// "resleeve.warning".
+	ResleeveSleeve(context.Context, *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error)
 }
 
 // NewSleeveServiceClient constructs a client for the protectorate.v1.SleeveService service. By
@@ -102,15 +123,22 @@ func NewSleeveServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(sleeveServiceMethods.ByName("KillSleeve")),
 			connect.WithClientOptions(opts...),
 		),
+		resleeveSleeve: connect.NewClient[v1.ResleeveSleeveRequest, v1.ResleeveSleeveResponse](
+			httpClient,
+			baseURL+SleeveServiceResleeveSleeveProcedure,
+			connect.WithSchema(sleeveServiceMethods.ByName("ResleeveSleeve")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // sleeveServiceClient implements SleeveServiceClient.
 type sleeveServiceClient struct {
-	spawnSleeve *connect.Client[v1.SpawnSleeveRequest, v1.SpawnSleeveResponse]
-	listSleeves *connect.Client[v1.ListSleevesRequest, v1.ListSleevesResponse]
-	getSleeve   *connect.Client[v1.GetSleeveRequest, v1.GetSleeveResponse]
-	killSleeve  *connect.Client[v1.KillSleeveRequest, v1.KillSleeveResponse]
+	spawnSleeve    *connect.Client[v1.SpawnSleeveRequest, v1.SpawnSleeveResponse]
+	listSleeves    *connect.Client[v1.ListSleevesRequest, v1.ListSleevesResponse]
+	getSleeve      *connect.Client[v1.GetSleeveRequest, v1.GetSleeveResponse]
+	killSleeve     *connect.Client[v1.KillSleeveRequest, v1.KillSleeveResponse]
+	resleeveSleeve *connect.Client[v1.ResleeveSleeveRequest, v1.ResleeveSleeveResponse]
 }
 
 // SpawnSleeve calls protectorate.v1.SleeveService.SpawnSleeve.
@@ -133,6 +161,11 @@ func (c *sleeveServiceClient) KillSleeve(ctx context.Context, req *connect.Reque
 	return c.killSleeve.CallUnary(ctx, req)
 }
 
+// ResleeveSleeve calls protectorate.v1.SleeveService.ResleeveSleeve.
+func (c *sleeveServiceClient) ResleeveSleeve(ctx context.Context, req *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error) {
+	return c.resleeveSleeve.CallUnary(ctx, req)
+}
+
 // SleeveServiceHandler is an implementation of the protectorate.v1.SleeveService service.
 type SleeveServiceHandler interface {
 	// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
@@ -150,6 +183,24 @@ type SleeveServiceHandler interface {
 	// forgets the sleeve. The workspace and the sleeve's home directory are kept
 	// on disk.
 	KillSleeve(context.Context, *connect.Request[v1.KillSleeveRequest]) (*connect.Response[v1.KillSleeveResponse], error)
+	// ResleeveSleeve moves a chat sleeve to another harness on the same
+	// workspace, under the same name, without asking the outgoing harness
+	// anything. The hub takes the chat over (no other sender can start a
+	// turn), waits for it to be IDLE (interrupting a turn that runs past wait),
+	// composes facts in code (git status, diff --stat, recent commits, backlog
+	// and mail, the last user messages and the final assistant message from
+	// the outgoing harness's own transcript), has a separate model write a
+	// Goal/State/Unfinished/Next/Gotchas summary (the subscription with the
+	// most spare quota other than the outgoing harness, else pi with the local
+	// LLM), overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git
+	// through .git/info/exclude, archived under the hub's state directory),
+	// replaces the harness and sends it one plain user message naming the
+	// handoff. The summary runs while the outgoing turn winds down. The old
+	// native session stays on disk for a later resume. If the new harness
+	// cannot start, the old one is respawned on its own session. Announced as
+	// "sleeve.resleeved"; a summary by the fallback model, or none, also emits
+	// "resleeve.warning".
+	ResleeveSleeve(context.Context, *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error)
 }
 
 // NewSleeveServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -185,6 +236,12 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(sleeveServiceMethods.ByName("KillSleeve")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sleeveServiceResleeveSleeveHandler := connect.NewUnaryHandler(
+		SleeveServiceResleeveSleeveProcedure,
+		svc.ResleeveSleeve,
+		connect.WithSchema(sleeveServiceMethods.ByName("ResleeveSleeve")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.SleeveService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SleeveServiceSpawnSleeveProcedure:
@@ -195,6 +252,8 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 			sleeveServiceGetSleeveHandler.ServeHTTP(w, r)
 		case SleeveServiceKillSleeveProcedure:
 			sleeveServiceKillSleeveHandler.ServeHTTP(w, r)
+		case SleeveServiceResleeveSleeveProcedure:
+			sleeveServiceResleeveSleeveHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -218,4 +277,8 @@ func (UnimplementedSleeveServiceHandler) GetSleeve(context.Context, *connect.Req
 
 func (UnimplementedSleeveServiceHandler) KillSleeve(context.Context, *connect.Request[v1.KillSleeveRequest]) (*connect.Response[v1.KillSleeveResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.KillSleeve is not implemented"))
+}
+
+func (UnimplementedSleeveServiceHandler) ResleeveSleeve(context.Context, *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.ResleeveSleeve is not implemented"))
 }

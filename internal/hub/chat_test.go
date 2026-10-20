@@ -40,6 +40,8 @@ case " $* " in
   *) exec sleep 600;;
 esac
 compacts=0
+tdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/-w"
+mkdir -p "$tdir"
 echo '{"type":"system","subtype":"init","session_id":"'$sid'"}'
 while read -r line; do
   case "$line" in
@@ -61,6 +63,8 @@ while read -r line; do
       echo '{"type":"result","subtype":"error_during_execution","stop_reason":"cancelled","session_id":"'$sid'"}'
       ;;
     *)
+      printf '%s\n' '{"type":"user","message":{"role":"user","content":"please answer ping"}}' \
+        '{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"pong"}]}}' >> "$tdir/$sid.jsonl"
       echo '{"type":"assistant","message":{"id":"m1","model":"fake-1","content":[{"type":"text","text":"po"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":40}}}'
       echo '{"type":"assistant","message":{"id":"m1","model":"fake-1","content":[{"type":"text","text":"ng"}],"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":40}}}'
       echo '{"type":"result","subtype":"success","session_id":"'$sid'","modelUsage":{"fake-1":{"contextWindow":1000}}}'
@@ -410,6 +414,44 @@ func TestChatShellAndMissing(t *testing.T) {
 		Name: r.name, Workspace: r.ws, Harness: pb.Harness_HARNESS_SHELL, Mode: pb.SleeveMode_SLEEVE_MODE_CHAT,
 	})); code(err) != connect.CodeInvalidArgument {
 		t.Fatalf("shell chat spawn: %v", err)
+	}
+}
+
+func TestChatSupervisedPermissionMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		supervised bool
+		mode       pb.SleeveMode
+		wantArg    string
+		wantCode   connect.Code
+	}{
+		{"autonomous by default", false, pb.SleeveMode_SLEEVE_MODE_CHAT, "--permission-mode bypassPermissions", 0},
+		{"supervised asks", true, pb.SleeveMode_SLEEVE_MODE_CHAT, "--permission-mode default", 0},
+		{"supervised terminal refused", true, pb.SleeveMode_SLEEVE_MODE_TERMINAL, "", connect.CodeInvalidArgument},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newChatRig(t)
+			res, err := r.sl.SpawnSleeve(r.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
+				Name: r.name, Workspace: r.ws, Harness: pb.Harness_HARNESS_CLAUDE, Mode: tc.mode, Supervised: tc.supervised,
+			}))
+			if tc.wantCode != 0 {
+				if code(err) != tc.wantCode {
+					t.Fatalf("spawn: %v, want %v", err, tc.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Msg.Sleeve.Supervised != tc.supervised {
+				t.Fatalf("supervised = %v", res.Msg.Sleeve.Supervised)
+			}
+			waitFor(t, "harness args with "+tc.wantArg, func() bool {
+				args, _ := os.ReadFile(filepath.Join(r.ws, "args.log"))
+				return strings.Contains(string(args), tc.wantArg)
+			})
+		})
 	}
 }
 

@@ -161,6 +161,29 @@ void main() {
       expect(t.apply(_text(2, 'x', 'dup')), isFalse);
       expect(t.items.length, 1);
     });
+
+    test('a handoff marks where the harness changed', () {
+      final t = ChatTranscript();
+      t.apply(_text(1, 'm1', 'old harness'));
+      t.apply(
+        _ev(
+          2,
+          (e) => e.handoff = Handoff(
+            fromHarness: 'claude',
+            toHarness: 'codex',
+            summarizerHarness: 'pi',
+            summarizerLocal: true,
+          ),
+        ),
+      );
+      t.apply(_text(3, 'm2', 'new harness'));
+      expect(t.items.map((i) => i.runtimeType), [
+        AssistantItem,
+        HandoffItem,
+        AssistantItem,
+      ]);
+      expect((t.items[1] as HandoffItem).handoff.toHarness, 'codex');
+    });
   });
 
   test('status priority', () {
@@ -531,6 +554,31 @@ void main() {
       expect(find.text('OPEN CHAT'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('open-pi1')));
       expect(log, ['open']);
+    });
+
+    testWidgets('a local summary is flagged on the card', (tester) async {
+      Sleeve sleeve(bool local) => Sleeve(
+        name: 'cx',
+        harness: Harness.HARNESS_CODEX,
+        workspace: '/w/app',
+        state: SleeveState.SLEEVE_STATE_RUNNING,
+        mode: SleeveMode.SLEEVE_MODE_CHAT,
+        chat: ChatStatus(model: 'gpt', provider: 'openai'),
+        handoff: Handoff(
+          fromHarness: 'claude',
+          toHarness: 'codex',
+          summarizerHarness: local ? 'pi' : 'grok',
+          summarizerLocal: local,
+        ),
+      );
+      for (final local in [true, false]) {
+        await pump(tester, sleeve(local), []);
+        expect(
+          find.byKey(const ValueKey('local-summary-badge')),
+          local ? findsOneWidget : findsNothing,
+        );
+        expect(find.byKey(const ValueKey('local-model-badge')), findsNothing);
+      }
     });
 
     testWidgets('pi on a hosted open model has no warning', (tester) async {

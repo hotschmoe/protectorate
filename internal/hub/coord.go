@@ -118,7 +118,7 @@ func (c *coordinator) close() {
 func (c *coordinator) refresh(ctx context.Context) {
 	var scans []directory.Scan
 	for _, i := range c.h.sleeves.List() {
-		if i.State != sleeve.Running {
+		if i.State != sleeve.Running || i.Helper != "" {
 			continue
 		}
 		scans = append(scans, directory.Scan{Sleeve: i.Name, Workspace: directory.Inspect(ctx, i.Workspace)})

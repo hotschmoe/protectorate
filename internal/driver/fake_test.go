@@ -310,14 +310,14 @@ func fakeCodex(f fakeIO) {
 					tid = "cx-policy-set"
 				}
 			}
-			reply(map[string]any{"thread": map[string]any{"id": tid}})
+			reply(map[string]any{"thread": map[string]any{"id": tid}, "model": "gpt-fake"})
 		case "thread/resume":
 			tid, _ = params["threadId"].(string)
 			if tid == "locked" {
 				f.send(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": "thread locked already has an active writer"}})
 				continue
 			}
-			reply(map[string]any{"thread": map[string]any{"id": tid}})
+			reply(map[string]any{"thread": map[string]any{"id": tid}, "model": "gpt-fake"})
 		case "thread/compact/start":
 			reply(map[string]any{})
 			compacts++

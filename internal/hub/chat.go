@@ -80,8 +80,11 @@ type chatSleeve struct {
 	turn       bool
 	// used is set once a turn was sent: the harness stores a session only
 	// then, so only then is its id worth resuming.
-	used        bool
-	compacting  bool
+	used       bool
+	compacting bool
+	// hubOwned is set while a resleeve has taken the chat over: no sender
+	// may start a turn or compact.
+	hubOwned    bool
 	approvals   map[string]bool
 	lastPersist time.Time
 	lastPublish time.Time
@@ -96,6 +99,9 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	}
 	if info.Mode != sleeve.ModeChat {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s runs in terminal mode, which has no chat", name))
+	}
+	if info.Helper != "" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s is the hub's own (%s) and has no chat", name, info.Helper))
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -174,11 +180,16 @@ func (m *chatManager) recover() {
 }
 
 // start attaches a freshly spawned chat sleeve and opens its driver, so a
-// harness that cannot start fails the spawn.
-func (m *chatManager) start(ctx context.Context, name string) error {
-	s, err := m.get(name, true)
+// harness that cannot start fails the spawn. fresh moves an earlier sleeve's
+// log of the same name aside; otherwise the log continues. hold keeps the
+// chat the hub's until giveBack, so no other sender gets in first.
+func (m *chatManager) start(ctx context.Context, name string, fresh, hold bool) error {
+	s, err := m.get(name, fresh)
 	if err != nil {
 		return err
+	}
+	if hold {
+		s.takeOver()
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -359,7 +370,7 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 	octx, cancel := context.WithTimeout(ctx, driverOpenTimeout)
 	defer cancel()
 	sess, err := s.m.open(octx, driver.Harness(info.Harness), info.Workspace, resume, "chat:"+s.name,
-		driver.Options{Command: cmd, Sandboxed: true})
+		driver.Options{Command: cmd, Autonomous: !info.Supervised})
 	if err != nil {
 		s.mu.Lock()
 		s.appendLocked(func(e *pb.ChatEvent) {
@@ -515,14 +526,47 @@ func (s *chatSleeve) liveSession() driver.Session {
 
 func (s *chatSleeve) send(ctx context.Context, from, text, requestID string) (uint64, error) {
 	if requestID == "" {
-		return s.sendOnce(ctx, from, text)
+		return s.sendOnce(ctx, from, text, false)
 	}
-	return s.keys.do(ctx, requestID, func() (uint64, error) { return s.sendOnce(ctx, from, text) })
+	return s.keys.do(ctx, requestID, func() (uint64, error) { return s.sendOnce(ctx, from, text, false) })
 }
 
-func (s *chatSleeve) sendOnce(ctx context.Context, from, text string) (uint64, error) {
+// sendAsOwner is the hub's own send into a chat it has taken over.
+func (s *chatSleeve) sendAsOwner(ctx context.Context, text string) (uint64, error) {
+	return s.sendOnce(ctx, hubName, text, true)
+}
+
+// takeOver claims the chat for a resleeve; false if one already has it.
+func (s *chatSleeve) takeOver() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hubOwned {
+		return false
+	}
+	s.hubOwned = true
+	return true
+}
+
+func (s *chatSleeve) giveBack() {
+	s.mu.Lock()
+	s.hubOwned = false
+	s.mu.Unlock()
+}
+
+var errResleeving = errors.New("the hub is resleeving this sleeve onto another harness; send again once it is done")
+
+func (s *chatSleeve) owned() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hubOwned
+}
+
+func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner bool) (uint64, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if s.owned() && !owner {
+		return 0, connect.NewError(connect.CodeFailedPrecondition, errResleeving)
+	}
 	if st := s.status().State; st == pb.ChatState_CHAT_STATE_COMPACTING {
 		return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("the harness is compacting; retry when it is idle"))
 	}
@@ -604,6 +648,9 @@ func (s *chatSleeve) respond(ctx context.Context, by, approvalID string, allow b
 func (s *chatSleeve) compact(ctx context.Context) (*pb.Compaction, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if s.owned() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errResleeving)
+	}
 	if st := s.status().State; st != pb.ChatState_CHAT_STATE_IDLE {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("compaction runs only while the chat is idle; it is %s", st))
 	}

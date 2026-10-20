@@ -221,6 +221,15 @@ const ChatEvent$json = {
       '9': 0,
       '10': 'state'
     },
+    {
+      '1': 'handoff',
+      '3': 21,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Handoff',
+      '9': 0,
+      '10': 'handoff'
+    },
   ],
   '8': [
     {'1': 'body'},
@@ -242,7 +251,8 @@ final $typed_data.Uint8List chatEventDescriptor = $convert.base64Decode(
     'B3NldHRsZWQSPQoKY29tcGFjdGlvbhgSIAEoCzIbLnByb3RlY3RvcmF0ZS52MS5Db21wYWN0aW'
     '9uSABSCmNvbXBhY3Rpb24SMgoFZXJyb3IYEyABKAsyGi5wcm90ZWN0b3JhdGUudjEuQ2hhdEVy'
     'cm9ySABSBWVycm9yEjQKBXN0YXRlGBQgASgLMhwucHJvdGVjdG9yYXRlLnYxLlN0YXRlQ2hhbm'
-    'dlSABSBXN0YXRlQgYKBGJvZHk=');
+    'dlSABSBXN0YXRlEjQKB2hhbmRvZmYYFSABKAsyGC5wcm90ZWN0b3JhdGUudjEuSGFuZG9mZkgA'
+    'UgdoYW5kb2ZmQgYKBGJvZHk=');
 
 @$core.Deprecated('Use userMessageDescriptor instead')
 const UserMessage$json = {
@@ -429,6 +439,54 @@ final $typed_data.Uint8List stateChangeDescriptor = $convert.base64Decode(
     'CgtTdGF0ZUNoYW5nZRIwCgVzdGF0ZRgBIAEoDjIaLnByb3RlY3RvcmF0ZS52MS5DaGF0U3RhdG'
     'VSBXN0YXRl');
 
+@$core.Deprecated('Use handoffDescriptor instead')
+const Handoff$json = {
+  '1': 'Handoff',
+  '2': [
+    {'1': 'from_harness', '3': 1, '4': 1, '5': 9, '10': 'fromHarness'},
+    {'1': 'from_session_id', '3': 2, '4': 1, '5': 9, '10': 'fromSessionId'},
+    {'1': 'to_harness', '3': 3, '4': 1, '5': 9, '10': 'toHarness'},
+    {
+      '1': 'summarizer_harness',
+      '3': 4,
+      '4': 1,
+      '5': 9,
+      '10': 'summarizerHarness'
+    },
+    {'1': 'summarizer_model', '3': 5, '4': 1, '5': 9, '10': 'summarizerModel'},
+    {
+      '1': 'summarizer_provider',
+      '3': 6,
+      '4': 1,
+      '5': 9,
+      '10': 'summarizerProvider'
+    },
+    {'1': 'summarizer_local', '3': 7, '4': 1, '5': 8, '10': 'summarizerLocal'},
+    {'1': 'summary_error', '3': 8, '4': 1, '5': 9, '10': 'summaryError'},
+    {'1': 'path', '3': 9, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'archive_path', '3': 10, '4': 1, '5': 9, '10': 'archivePath'},
+    {
+      '1': 'at',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'at'
+    },
+  ],
+};
+
+/// Descriptor for `Handoff`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List handoffDescriptor = $convert.base64Decode(
+    'CgdIYW5kb2ZmEiEKDGZyb21faGFybmVzcxgBIAEoCVILZnJvbUhhcm5lc3MSJgoPZnJvbV9zZX'
+    'NzaW9uX2lkGAIgASgJUg1mcm9tU2Vzc2lvbklkEh0KCnRvX2hhcm5lc3MYAyABKAlSCXRvSGFy'
+    'bmVzcxItChJzdW1tYXJpemVyX2hhcm5lc3MYBCABKAlSEXN1bW1hcml6ZXJIYXJuZXNzEikKEH'
+    'N1bW1hcml6ZXJfbW9kZWwYBSABKAlSD3N1bW1hcml6ZXJNb2RlbBIvChNzdW1tYXJpemVyX3By'
+    'b3ZpZGVyGAYgASgJUhJzdW1tYXJpemVyUHJvdmlkZXISKQoQc3VtbWFyaXplcl9sb2NhbBgHIA'
+    'EoCFIPc3VtbWFyaXplckxvY2FsEiMKDXN1bW1hcnlfZXJyb3IYCCABKAlSDHN1bW1hcnlFcnJv'
+    'chISCgRwYXRoGAkgASgJUgRwYXRoEiEKDGFyY2hpdmVfcGF0aBgKIAEoCVILYXJjaGl2ZVBhdG'
+    'gSKgoCYXQYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wUgJhdA==');
+
 @$core.Deprecated('Use watchRequestDescriptor instead')
 const WatchRequest$json = {
   '1': 'WatchRequest',
@@ -599,6 +657,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Compaction': Compaction$json,
   '.protectorate.v1.ChatError': ChatError$json,
   '.protectorate.v1.StateChange': StateChange$json,
+  '.protectorate.v1.Handoff': Handoff$json,
   '.protectorate.v1.SendRequest': SendRequest$json,
   '.protectorate.v1.SendResponse': SendResponse$json,
   '.protectorate.v1.InterruptRequest': InterruptRequest$json,

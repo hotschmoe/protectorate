@@ -159,6 +159,9 @@ Split by problem:
    service.
 2. Summary pass (step 3), then coordination (decision 5), then (c).
 
+Built 2026-10-20, steps 1 to 6 including the summary pass: `docs/chat.md`,
+"Resleeve". The orchestrator holds `sleeve_resleeve_sleeve` by default.
+
 ### What to measure
 - Resume success: does the new harness's first turn reference the right file,
   branch and next action (manual rubric, 10 trials per harness pair).

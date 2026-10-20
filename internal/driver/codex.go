@@ -19,6 +19,8 @@ type codexSession struct {
 
 	tmu    sync.Mutex
 	turnID string
+	// model is what thread/start or thread/resume reported
+	model string
 	// context bookkeeping for compaction records
 	ctxTokens   int64
 	compactPost int64
@@ -61,7 +63,7 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 		return fail(err)
 	}
 	params := map[string]any{"cwd": cwd}
-	if !opts.Sandboxed {
+	if !opts.Autonomous {
 		params["approvalPolicy"], params["sandbox"] = "untrusted", "workspace-write"
 	}
 	method := "thread/start"
@@ -78,11 +80,15 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
+		Model string `json:"model"`
 	}
 	if json.Unmarshal(res, &r) != nil || r.Thread.ID == "" {
 		return fail(fmt.Errorf("%s returned no thread id", method))
 	}
 	s.setID(r.Thread.ID)
+	s.tmu.Lock()
+	s.model = r.Model
+	s.tmu.Unlock()
 	return s, nil
 }
 
@@ -286,10 +292,11 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 		}
 		s.tmu.Lock()
 		s.ctxTokens = u.In
+		model := s.model
 		s.tmu.Unlock()
 		s.emit(Event{Kind: KindUsage, Usage: &Usage{
 			ContextTokens: u.In, ContextWindow: p.Usage.Window, InputTokens: u.In - u.Cached, OutputTokens: u.Out,
-			CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite, Provider: "openai",
+			CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite, Model: model, Provider: "openai",
 		}})
 	case "turn/completed":
 		s.setTurn("")

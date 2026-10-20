@@ -2,6 +2,7 @@ package sleeve
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -92,3 +93,59 @@ func (m *Manager) HomeDir(name string) string { return m.cfg.sleeveHome(name) }
 
 // UserHome is the path the sleeve's home has inside the sandbox.
 func (m *Manager) UserHome() string { return m.cfg.UserHome }
+
+// Handoff records the resleeve that put a sleeve on its harness. The sleeve
+// layer stores it for the hub and does not interpret it.
+type Handoff struct {
+	From               string    `yaml:"from"`
+	FromSession        string    `yaml:"from_session,omitempty"`
+	To                 string    `yaml:"to"`
+	Summarizer         string    `yaml:"summarizer,omitempty"`
+	SummarizerModel    string    `yaml:"summarizer_model,omitempty"`
+	SummarizerProvider string    `yaml:"summarizer_provider,omitempty"`
+	SummarizerLocal    bool      `yaml:"summarizer_local,omitempty"`
+	SummaryError       string    `yaml:"summary_error,omitempty"`
+	Path               string    `yaml:"path"`
+	Archive            string    `yaml:"archive,omitempty"`
+	At                 time.Time `yaml:"at"`
+}
+
+// SetHandoff records how a sleeve got its harness.
+func (m *Manager) SetHandoff(name string, h Handoff) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e := m.sleeves[name]
+	if e == nil {
+		return ErrNotFound
+	}
+	e.Handoff = &h
+	if err := m.saveLocked(); err != nil {
+		return fmt.Errorf("persist sleeves: %w", err)
+	}
+	return nil
+}
+
+// Env returns the caller environment a sleeve was spawned with (including
+// what the hub added), so a replacement harness can be started with it.
+func (m *Manager) Env(name string) (map[string]string, error) {
+	if _, err := m.Get(name); err != nil {
+		return nil, err
+	}
+	return m.cfg.readEnvFile(name)
+}
+
+// ScratchWorkspace creates, if needed, the empty workspace a hub-owned
+// sleeve of that name may use, inside the hub's workspaces directory.
+func (m *Manager) ScratchWorkspace(name string) (string, error) {
+	if err := ValidName(name); err != nil {
+		return "", err
+	}
+	d := filepath.Join(m.cfg.workspacesDir(), name)
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		return "", fmt.Errorf("create scratch workspace: %w", err)
+	}
+	return filepath.EvalSymlinks(d)
+}
+
+// StateDir is the hub's state directory the sleeves live in.
+func (m *Manager) StateDir() string { return m.cfg.Home }

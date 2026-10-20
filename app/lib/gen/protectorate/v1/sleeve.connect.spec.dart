@@ -58,4 +58,28 @@ abstract final class SleeveService {
     protectoratev1sleeve.KillSleeveRequest.new,
     protectoratev1sleeve.KillSleeveResponse.new,
   );
+
+  /// ResleeveSleeve moves a chat sleeve to another harness on the same
+  /// workspace, under the same name, without asking the outgoing harness
+  /// anything. The hub takes the chat over (no other sender can start a
+  /// turn), waits for it to be IDLE (interrupting a turn that runs past wait),
+  /// composes facts in code (git status, diff --stat, recent commits, backlog
+  /// and mail, the last user messages and the final assistant message from
+  /// the outgoing harness's own transcript), has a separate model write a
+  /// Goal/State/Unfinished/Next/Gotchas summary (the subscription with the
+  /// most spare quota other than the outgoing harness, else pi with the local
+  /// LLM), overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git
+  /// through .git/info/exclude, archived under the hub's state directory),
+  /// replaces the harness and sends it one plain user message naming the
+  /// handoff. The summary runs while the outgoing turn winds down. The old
+  /// native session stays on disk for a later resume. If the new harness
+  /// cannot start, the old one is respawned on its own session. Announced as
+  /// "sleeve.resleeved"; a summary by the fallback model, or none, also emits
+  /// "resleeve.warning".
+  static const resleeveSleeve = connect.Spec(
+    '/$name/ResleeveSleeve',
+    connect.StreamType.unary,
+    protectoratev1sleeve.ResleeveSleeveRequest.new,
+    protectoratev1sleeve.ResleeveSleeveResponse.new,
+  );
 }
