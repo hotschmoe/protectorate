@@ -31,7 +31,7 @@ picked, and the local LLM through pi is always the fallback.
 Chat mode is what lets the hub reach Poe: escalations (an ack-required message
 that stayed unacked) and other mailbox notices are injected into its chat as
 ordinary user messages at its next idle (see [coordination.md](coordination.md)).
-Watch it with `protectorate chat watch poe`, and answer its approval requests
+The app's POE tab (the first one) is a dedicated, always-reachable chat with Poe and a selector for any other chat-mode sleeve; when Poe is not running it shows the spawn command, since spawning needs the owner token and the CLI on the hub machine. Watch it with `protectorate chat watch poe`, and answer its approval requests
 with `chat respond`. There is no terminal mode for Poe.
 
 `AGENTS.md` holds the role, the working loop, the token's id and scopes, a table

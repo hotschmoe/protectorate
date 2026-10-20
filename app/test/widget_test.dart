@@ -166,6 +166,8 @@ void main() {
       await openHub(tester);
       expect(find.byKey(const ValueKey('nav-bar')), findsOneWidget);
       expect(find.byKey(const ValueKey('nav-rail')), findsNothing);
+      await tester.tap(find.text('OVERVIEW'));
+      await tester.pumpAndSettle();
       expect(find.text('EVENTS LIVE'), findsOneWidget);
       expect(find.text('box (linux/arm64)'), findsOneWidget);
       expect(find.text('session.started'), findsOneWidget);

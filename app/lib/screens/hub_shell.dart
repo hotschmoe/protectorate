@@ -13,11 +13,13 @@ import '../version.dart' as ver;
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
+import '../mail/thread_view.dart' show orchestratorSleeve;
 import 'audit_screen.dart';
 import 'backlog_tab.dart';
 import 'messages_tab.dart';
 import 'node_detail_screen.dart';
 import 'nodes_tab.dart';
+import 'orchestrator_tab.dart';
 import 'overview_tab.dart';
 import 'quota_tab.dart';
 import 'sleeves_screen.dart';
@@ -32,6 +34,7 @@ class _Destination {
 }
 
 const _destinations = [
+  _Destination('orchestrator', 'POE', Icons.support_agent),
   _Destination('overview', 'OVERVIEW', Icons.grid_view),
   _Destination('nodes', 'NODES', Icons.memory),
   _Destination('quota', 'QUOTA', Icons.speed),
@@ -75,6 +78,7 @@ class _HubShellState extends State<HubShell> {
   )..start();
   late int _index = tabIndex(widget.initialTab);
   final _history = NodeHistory();
+  String _orchestratorSleeve = orchestratorSleeve;
   String _hubVersion = '';
   FeedState _lastFeedState = FeedState.connecting;
   DateTime _clock = DateTime.now();
@@ -140,6 +144,12 @@ class _HubShellState extends State<HubShell> {
   }
 
   Widget _body() => switch (_destinations[_index].id) {
+    'orchestrator' => OrchestratorTab(
+      client: _client,
+      feed: _feed,
+      selected: _orchestratorSleeve,
+      onSelect: (n) => setState(() => _orchestratorSleeve = n),
+    ),
     'overview' => OverviewTab(
       hub: widget.hub,
       client: _client,
@@ -341,19 +351,21 @@ class _Rail extends StatelessWidget {
         painter: t.dark ? null : _TractorFeed(t),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-          child: Column(
-            children: [
-              for (var i = 0; i < _destinations.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: _NavKey(
-                    d: _destinations[i],
-                    selected: i == index,
-                    onTap: () => onSelect(i),
-                    height: 76,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                for (var i = 0; i < _destinations.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _NavKey(
+                      d: _destinations[i],
+                      selected: i == index,
+                      onTap: () => onSelect(i),
+                      height: 76,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
