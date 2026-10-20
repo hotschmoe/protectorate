@@ -91,7 +91,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
-	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o), nodeTierCmd(o))
+	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o), nodeTierCmd(o), nodeMigrateTiersCmd())
 	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
 }
@@ -192,6 +192,43 @@ tailnet (tag:tier-<tier>) and then records the tier in its inventory.`,
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "%s is now tier %s\n", res.Msg.Name, res.Msg.Tier) })
+		},
+	}
+}
+
+func nodeMigrateTiersCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate-tiers",
+		Short: "Rename the retired tiers in this hub's nodes.yaml (server to shared, family to care)",
+		Long: `Run once on the hub machine, with the hub stopped, when the hub refuses to
+start because nodes.yaml still names the tiers server or family. It copies
+nodes.yaml to nodes.yaml.pre-tiers (refusing if that copy exists), rewrites
+the tiers atomically and regenerates hosts.md. Then start the hub and retag
+each node on the tailnet with the printed node tier commands.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := hub.Home()
+			if err != nil {
+				return err
+			}
+			changes, err := hub.MigrateTiers(home, hub.LocalNodeInfo(localNodeName(), runtime.GOOS, runtime.GOARCH))
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			if len(changes) == 0 {
+				fmt.Fprintln(w, "nodes.yaml has no retired tiers; nothing to do")
+				return nil
+			}
+			for _, c := range changes {
+				fmt.Fprintf(w, "%s: %s -> %s\n", c.Node, c.From, c.To)
+			}
+			fmt.Fprintf(w, "\nkept the old file as %s\n", filepath.Join(home, "nodes.yaml.pre-tiers"))
+			fmt.Fprintln(w, "start the hub, then retag each node on the tailnet:")
+			for _, c := range changes {
+				fmt.Fprintf(w, "  protectorate node tier %s %s\n", c.Node, c.To)
+			}
+			return nil
 		},
 	}
 }

@@ -37,7 +37,9 @@ app. `protectorate node tier <name> shared|care` (owner only,
 `NodeService.SetNodeTier`) retags the machine through headscale's API, keeping
 its other tags and dropping any other `tag:tier-*`, then records the tier;
 the hub's own node is always `shared`, and an invited node that has not
-joined is re-invited with `--tier` instead. Headscale keeps a retired
+joined is re-invited with `--tier` instead. An inventory that still names `server` or
+`family` is refused on load with the command that migrates it, `protectorate
+node migrate-tiers` (owner-local; see Rollout). Headscale keeps a retired
 `tag:tier-server` on a machine after the policy stops owning it, so nodes
 keep working until `node tier` retags them.
 
@@ -365,10 +367,13 @@ read-only calls:
 
 ## Rollout
 
-1. Stop the hub, then rename the tiers in `~/.protectorate/nodes.yaml`
-   (`tier: server` becomes `tier: shared`, `family` becomes `care`); the new
-   hub refuses to load the old names. Queued lease tickets and job records
-   written with the old `allowFamily` field still load.
+1. Stop the hub and run `protectorate node migrate-tiers` on the hub machine:
+   it copies `nodes.yaml` to `nodes.yaml.pre-tiers` (refusing if that copy
+   exists), rewrites `server` to `shared` and `family` to `care` atomically,
+   regenerates `hosts.md` and prints the `node tier` commands for step 3. A
+   new hub started on the old file refuses to load and names this command.
+   Queued lease tickets and job records written with the old `allowFamily`
+   field still load.
 2. Start the new hub (`hub serve` as today; add `--orchestrator-admin-grants`
    only if the orchestrator should mint grants for shared nodes), with the web
    client rebuilt (`make app-build-web`) for the CARE, GPU BUSY and JOBS

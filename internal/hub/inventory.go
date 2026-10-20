@@ -82,11 +82,12 @@ func OpenInventory(dir string, local *pb.NodeInfo) (*Inventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read inventory: %w", err)
 	}
-	var f inventoryFile
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("parse %s: %w", inv.path(), err)
+	f, err := parseInventory(inv.path(), raw)
+	if err != nil {
+		return nil, err
+	}
+	if n := retiredTiers(f.Nodes); n > 0 {
+		return nil, fmt.Errorf("%w: %s has %d node(s) with tier server or family; stop the hub and run `protectorate node migrate-tiers`", ErrRetiredTiers, inv.path(), n)
 	}
 	seen := map[string]bool{}
 	for i := range f.Nodes {
@@ -106,6 +107,92 @@ func OpenInventory(dir string, local *pb.NodeInfo) (*Inventory, error) {
 }
 
 func (i *Inventory) path() string { return filepath.Join(i.dir, "nodes.yaml") }
+
+func parseInventory(path string, raw []byte) (inventoryFile, error) {
+	var f inventoryFile
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
+		return f, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return f, nil
+}
+
+// ErrRetiredTiers marks an inventory written before the tiers were renamed.
+var ErrRetiredTiers = errors.New("retired tier names")
+
+// retiredTierNames maps the tiers before 2026-10-20 to their new names.
+var retiredTierNames = map[string]string{"server": TierShared, "family": TierCare}
+
+func retiredTiers(nodes []nodeRecord) int {
+	n := 0
+	for _, r := range nodes {
+		if _, ok := retiredTierNames[strings.ToLower(strings.TrimSpace(r.Tier))]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// TierChange is one node MigrateTiers renamed.
+type TierChange struct{ Node, From, To string }
+
+// MigrateTiers rewrites the retired tiers in dir/nodes.yaml (server becomes
+// shared, family becomes care). It first copies the file to
+// nodes.yaml.pre-tiers, refusing to overwrite an earlier copy, then replaces
+// nodes.yaml atomically and regenerates hosts.md. An inventory without
+// retired tiers is left alone. The hub must not be running.
+func MigrateTiers(dir string, local *pb.NodeInfo) ([]TierChange, error) {
+	path := filepath.Join(dir, "nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read inventory: %w", err)
+	}
+	f, err := parseInventory(path, raw)
+	if err != nil {
+		return nil, err
+	}
+	var changes []TierChange
+	for i, r := range f.Nodes {
+		if to, ok := retiredTierNames[strings.ToLower(strings.TrimSpace(r.Tier))]; ok {
+			changes = append(changes, TierChange{Node: r.Name, From: r.Tier, To: to})
+			f.Nodes[i].Tier = to
+		}
+	}
+	if len(changes) == 0 {
+		return nil, nil
+	}
+	backup := path + ".pre-tiers"
+	bf, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("keep a copy of the old inventory: %w", err)
+	}
+	if _, err := bf.Write(raw); err != nil {
+		bf.Close()
+		return nil, fmt.Errorf("write %s: %w", backup, err)
+	}
+	if err := bf.Close(); err != nil {
+		return nil, fmt.Errorf("write %s: %w", backup, err)
+	}
+	inv := &Inventory{dir: dir, local: local}
+	next := make([]nodeRecord, len(f.Nodes))
+	for i := range f.Nodes {
+		n, err := normalize(&f.Nodes[i])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		next[i] = *n
+	}
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+	if err := inv.commit(next); err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
 
 // normalize validates r in place semantics and returns the cleaned record.
 func normalize(r *nodeRecord) (*nodeRecord, error) {

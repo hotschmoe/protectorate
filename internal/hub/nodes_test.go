@@ -665,3 +665,68 @@ func TestNodeTokenNotSentOnRedirect(t *testing.T) {
 		t.Fatalf("redirect was followed %d times", leaked.Load())
 	}
 }
+
+func TestMigrateTiers(t *testing.T) {
+	const old = "nodes:\n  - name: kidsbox\n    addr: kidsbox\n    tier: family\n  - name: agentworld\n    addr: agentworld\n    tier: server\n  - name: newer\n    addr: newer\n    tier: shared\n"
+	tests := []struct {
+		name        string
+		content     string
+		backup      bool
+		wantChanges []TierChange
+		wantErr     string
+	}{
+		{"renames and keeps a copy", old, false, []TierChange{{"kidsbox", "family", "care"}, {"agentworld", "server", "shared"}}, ""},
+		{"already migrated", "nodes:\n  - name: a\n    addr: a\n    tier: care\n", false, nil, ""},
+		{"no inventory", "", false, nil, ""},
+		{"never overwrites an earlier copy", old, true, nil, "keep a copy"},
+		{"corrupt file", "nodes: [", false, nil, "parse"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "nodes.yaml")
+			if tt.content != "" {
+				writeFile(t, path, []byte(tt.content), 0o600)
+				if _, err := OpenInventory(dir, testSelf); tt.wantChanges != nil && (!errors.Is(err, ErrRetiredTiers) || !strings.Contains(err.Error(), "protectorate node migrate-tiers")) {
+					t.Fatalf("open before migrating: %v", err)
+				}
+			}
+			if tt.backup {
+				writeFile(t, path+".pre-tiers", []byte("earlier"), 0o600)
+			}
+			got, err := MigrateTiers(dir, testSelf)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				if b, _ := os.ReadFile(path); string(b) != tt.content {
+					t.Fatalf("a failed migration changed nodes.yaml:\n%s", b)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, tt.wantChanges) {
+				t.Fatalf("changes %v %v, want %v", got, err, tt.wantChanges)
+			}
+			if tt.wantChanges == nil {
+				return
+			}
+			if b, _ := os.ReadFile(path + ".pre-tiers"); string(b) != tt.content {
+				t.Fatalf("backup %q", b)
+			}
+			inv, err := OpenInventory(dir, testSelf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tiers := map[string]string{}
+			for _, n := range inv.List() {
+				tiers[n.Name] = n.Tier
+			}
+			if tiers["kidsbox"] != TierCare || tiers["agentworld"] != TierShared || tiers["newer"] != TierShared {
+				t.Fatalf("tiers %v", tiers)
+			}
+			if again, err := MigrateTiers(dir, testSelf); err != nil || again != nil {
+				t.Fatalf("second run %v %v", again, err)
+			}
+		})
+	}
+}

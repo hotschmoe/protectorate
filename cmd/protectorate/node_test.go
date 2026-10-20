@@ -372,3 +372,23 @@ func TestNoSecretFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeMigrateTiers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PROTECTORATE_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "nodes.yaml"), []byte("nodes:\n  - name: kidsbox\n    addr: kidsbox\n    tier: family\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := newRoot()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"node", "migrate-tiers"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"kidsbox: family -> care", "protectorate node tier kidsbox care", "nodes.yaml.pre-tiers"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
