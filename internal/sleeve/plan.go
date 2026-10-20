@@ -336,7 +336,6 @@ func checkEnv(env map[string]string) error {
 // writable. Sleeves and node jobs are both boxes.
 type Box struct {
 	EmptyDirs      []string
-	Masks          []string
 	Mounts         []Mount
 	WritableMounts []Mount
 
@@ -404,9 +403,6 @@ func (c Config) BoxArgv(b Box) []string {
 	}
 	for _, m := range b.WritableMounts {
 		argv = append(argv, "--bind", m.Source, m.Target)
-	}
-	for _, p := range b.Masks {
-		argv = append(argv, "--ro-bind", "/dev/null", p)
 	}
 	for _, p := range b.EmptyDirs {
 		argv = append(argv, "--tmpfs", p)
@@ -494,9 +490,12 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		return Launch{}, err
 	}
 	lay := c.layout(spec.Name, spec.Harness, spec.Workspace)
-	var masks []string
 	var emptyDirs []string
 	if spec.BaseRepo != "" {
+		// Mask sources live in the hub-owned sleeve directory, outside the
+		// writable home, and are regular files: binds are mounted nodev.
+		empty := filepath.Join(c.sleeveDir(spec.Name), "base-empty")
+		lay.Seeds = append(lay.Seeds, Seed{empty, ""})
 		base, err := c.baseMounts(spec.BaseRepo)
 		if err != nil {
 			return Launch{}, err
@@ -510,12 +509,12 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 				p := filepath.Join(m.Target, f)
 				if _, err := os.Lstat(p); err == nil {
 					if f == "config" && len(spec.BaseTip) == 64 {
-						safe := filepath.Join(c.sleeveHome(spec.Name), ".cache/base-sha256.gitconfig")
+						safe := filepath.Join(c.sleeveDir(spec.Name), "base-sha256.gitconfig")
 						lay.Seeds = append(lay.Seeds, Seed{safe, "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectFormat = sha256\n"})
 						mounts = append(mounts, Mount{Source: safe, Target: p})
 						continue
 					}
-					masks = append(masks, p)
+					mounts = append(mounts, Mount{Source: empty, Target: p})
 				}
 			}
 		}
@@ -534,7 +533,6 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	}
 	argv := c.BoxArgv(Box{
 		EmptyDirs: emptyDirs,
-		Masks:     masks,
 		Unit:      unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
 		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
 		Mounts:         mounts,

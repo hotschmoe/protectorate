@@ -81,8 +81,14 @@ func TestBinaryBranchDispatch(t *testing.T) {
 	if got := git(repo, "branch", "--show-current"); got != "main" {
 		t.Fatalf("source branch changed: %s", got)
 	}
-	proof, err := os.ReadFile(filepath.Join(ws, "dispatch-proof"))
-	if err != nil || string(proof) != "fetched read-only base" {
+	// Spawn returns once the brief is recorded; the harness fetches the base as it starts.
+	var proof []byte
+	var err error
+	c.eventually(func() bool {
+		proof, err = os.ReadFile(filepath.Join(ws, "dispatch-proof"))
+		return err == nil
+	})
+	if string(proof) != "fetched read-only base" {
 		t.Fatalf("base sandbox proof=%q err=%v", proof, err)
 	}
 	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url)
