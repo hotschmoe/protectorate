@@ -3,9 +3,9 @@
     "short_name": "protectorate",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#07080A",
+    "theme_color": "#07080A",
+    "description": "One pane of glass over your coding-agent subscriptions, machines, sessions and work.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

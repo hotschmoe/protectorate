@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" alt="" width="96">
+
 # Protectorate
 
 One pane of glass over your coding-agent subscriptions, machines, sessions and
