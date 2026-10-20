@@ -78,6 +78,9 @@ func (m *Manager) Command(name string) (func(bin string, args []string) ([]strin
 	if err != nil {
 		return nil, err
 	}
+	if info.Killed {
+		return nil, fmt.Errorf("%w: sleeve %s was killed; respawn it before starting a harness", ErrInvalid, name)
+	}
 	return func(_ string, args []string) ([]string, error) {
 		l, err := m.cfg.launch(info, args)
 		return l.Argv, err

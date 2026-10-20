@@ -110,6 +110,15 @@ const SleeveUsage$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'diskSampledAt'
     },
+    {'1': 'home_disk_bytes', '3': 10, '4': 1, '5': 4, '10': 'homeDiskBytes'},
+    {'1': 'cache_disk_bytes', '3': 11, '4': 1, '5': 4, '10': 'cacheDiskBytes'},
+    {
+      '1': 'go_build_cache_disk_bytes',
+      '3': 12,
+      '4': 1,
+      '5': 4,
+      '10': 'goBuildCacheDiskBytes'
+    },
   ],
 };
 
@@ -122,7 +131,9 @@ final $typed_data.Uint8List sleeveUsageDescriptor = $convert.base64Decode(
     'EjAKFHdvcmtzcGFjZV9kaXNrX2J5dGVzGAcgASgEUhJ3b3Jrc3BhY2VEaXNrQnl0ZXMSOQoKc2'
     'FtcGxlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSCXNhbXBsZWRBdBJC'
     'Cg9kaXNrX3NhbXBsZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wUg1kaX'
-    'NrU2FtcGxlZEF0');
+    'NrU2FtcGxlZEF0EiYKD2hvbWVfZGlza19ieXRlcxgKIAEoBFINaG9tZURpc2tCeXRlcxIoChBj'
+    'YWNoZV9kaXNrX2J5dGVzGAsgASgEUg5jYWNoZURpc2tCeXRlcxI4Chlnb19idWlsZF9jYWNoZV'
+    '9kaXNrX2J5dGVzGAwgASgEUhVnb0J1aWxkQ2FjaGVEaXNrQnl0ZXM=');
 
 @$core.Deprecated('Use sleeveDescriptor instead')
 const Sleeve$json = {
@@ -245,6 +256,7 @@ const Sleeve$json = {
       '6': '.protectorate.v1.SleeveResult',
       '10': 'result'
     },
+    {'1': 'killed', '3': 28, '4': 1, '5': 8, '10': 'killed'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -271,7 +283,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSHQoKZ2l0X2JyYW5jaBgVIAEoCVIJZ2l0'
     'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
     'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXASNQoGcmVzdWx0GBkgASgL'
-    'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0QgwKCl9leGl0X2NvZGU=');
+    'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0EhYKBmtpbGxlZBgcIAEoCF'
+    'IGa2lsbGVkQgwKCl9leGl0X2NvZGU=');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -583,12 +596,14 @@ const KillSleeveRequest$json = {
   '1': 'KillSleeveRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'drop_caches', '3': 2, '4': 1, '5': 8, '10': 'dropCaches'},
   ],
 };
 
 /// Descriptor for `KillSleeveRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List killSleeveRequestDescriptor = $convert
-    .base64Decode('ChFLaWxsU2xlZXZlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1l');
+final $typed_data.Uint8List killSleeveRequestDescriptor = $convert.base64Decode(
+    'ChFLaWxsU2xlZXZlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEh8KC2Ryb3BfY2FjaGVzGA'
+    'IgASgIUgpkcm9wQ2FjaGVz');
 
 @$core.Deprecated('Use killSleeveResponseDescriptor instead')
 const KillSleeveResponse$json = {
@@ -736,6 +751,65 @@ final $typed_data.Uint8List spawnEnvoyResponseDescriptor = $convert.base64Decode
     'b1IFdG9rZW4SHAoJd29ya3NwYWNlGAMgASgJUgl3b3Jrc3BhY2USFgoGcmVhc29uGAQgASgJUg'
     'ZyZWFzb24SGgoIcmVwbGFjZWQYBSABKAhSCHJlcGxhY2Vk');
 
+@$core.Deprecated('Use pruneSleevesRequestDescriptor instead')
+const PruneSleevesRequest$json = {
+  '1': 'PruneSleevesRequest',
+  '2': [
+    {'1': 'yes', '3': 1, '4': 1, '5': 8, '10': 'yes'},
+    {'1': 'caches', '3': 2, '4': 1, '5': 8, '10': 'caches'},
+    {'1': 'homes', '3': 3, '4': 1, '5': 8, '10': 'homes'},
+    {'1': 'workspaces', '3': 4, '4': 1, '5': 8, '10': 'workspaces'},
+    {'1': 'running', '3': 5, '4': 1, '5': 8, '10': 'running'},
+  ],
+};
+
+/// Descriptor for `PruneSleevesRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List pruneSleevesRequestDescriptor = $convert.base64Decode(
+    'ChNQcnVuZVNsZWV2ZXNSZXF1ZXN0EhAKA3llcxgBIAEoCFIDeWVzEhYKBmNhY2hlcxgCIAEoCF'
+    'IGY2FjaGVzEhQKBWhvbWVzGAMgASgIUgVob21lcxIeCgp3b3Jrc3BhY2VzGAQgASgIUgp3b3Jr'
+    'c3BhY2VzEhgKB3J1bm5pbmcYBSABKAhSB3J1bm5pbmc=');
+
+@$core.Deprecated('Use pruneSleevesResponseDescriptor instead')
+const PruneSleevesResponse$json = {
+  '1': 'PruneSleevesResponse',
+  '2': [
+    {
+      '1': 'entries',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.SleeveDiskEntry',
+      '10': 'entries'
+    },
+  ],
+};
+
+/// Descriptor for `PruneSleevesResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List pruneSleevesResponseDescriptor = $convert.base64Decode(
+    'ChRQcnVuZVNsZWV2ZXNSZXNwb25zZRI6CgdlbnRyaWVzGAEgAygLMiAucHJvdGVjdG9yYXRlLn'
+    'YxLlNsZWV2ZURpc2tFbnRyeVIHZW50cmllcw==');
+
+@$core.Deprecated('Use sleeveDiskEntryDescriptor instead')
+const SleeveDiskEntry$json = {
+  '1': 'SleeveDiskEntry',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {'1': 'path', '3': 2, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'kind', '3': 3, '4': 1, '5': 9, '10': 'kind'},
+    {'1': 'bytes', '3': 4, '4': 1, '5': 4, '10': 'bytes'},
+    {'1': 'eligible', '3': 5, '4': 1, '5': 8, '10': 'eligible'},
+    {'1': 'removed', '3': 6, '4': 1, '5': 8, '10': 'removed'},
+    {'1': 'reason', '3': 7, '4': 1, '5': 9, '10': 'reason'},
+  ],
+};
+
+/// Descriptor for `SleeveDiskEntry`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List sleeveDiskEntryDescriptor = $convert.base64Decode(
+    'Cg9TbGVldmVEaXNrRW50cnkSFgoGc2xlZXZlGAEgASgJUgZzbGVldmUSEgoEcGF0aBgCIAEoCV'
+    'IEcGF0aBISCgRraW5kGAMgASgJUgRraW5kEhQKBWJ5dGVzGAQgASgEUgVieXRlcxIaCghlbGln'
+    'aWJsZRgFIAEoCFIIZWxpZ2libGUSGAoHcmVtb3ZlZBgGIAEoCFIHcmVtb3ZlZBIWCgZyZWFzb2'
+    '4YByABKAlSBnJlYXNvbg==');
+
 const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
   '1': 'SleeveService',
   '2': [
@@ -785,6 +859,12 @@ const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
       '3': '.protectorate.v1.SpawnEnvoyResponse',
       '4': {}
     },
+    {
+      '1': 'PruneSleeves',
+      '2': '.protectorate.v1.PruneSleevesRequest',
+      '3': '.protectorate.v1.PruneSleevesResponse',
+      '4': {}
+    },
   ],
 };
 
@@ -823,6 +903,9 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SpawnEnvoyRequest': SpawnEnvoyRequest$json,
   '.protectorate.v1.SpawnEnvoyResponse': SpawnEnvoyResponse$json,
   '.protectorate.v1.TokenInfo': $3.TokenInfo$json,
+  '.protectorate.v1.PruneSleevesRequest': PruneSleevesRequest$json,
+  '.protectorate.v1.PruneSleevesResponse': PruneSleevesResponse$json,
+  '.protectorate.v1.SleeveDiskEntry': SleeveDiskEntry$json,
 };
 
 /// Descriptor for `SleeveService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -841,4 +924,6 @@ final $typed_data.Uint8List sleeveServiceDescriptor = $convert.base64Decode(
     'VldmUSJi5wcm90ZWN0b3JhdGUudjEuUmVzbGVldmVTbGVldmVSZXF1ZXN0GicucHJvdGVjdG9y'
     'YXRlLnYxLlJlc2xlZXZlU2xlZXZlUmVzcG9uc2USWwoKU3Bhd25FbnZveRIiLnByb3RlY3Rvcm'
     'F0ZS52MS5TcGF3bkVudm95UmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5TcGF3bkVudm95UmVz'
-    'cG9uc2UiBKC1GAE=');
+    'cG9uc2UiBKC1GAESZQoMUHJ1bmVTbGVldmVzEiQucHJvdGVjdG9yYXRlLnYxLlBydW5lU2xlZX'
+    'Zlc1JlcXVlc3QaJS5wcm90ZWN0b3JhdGUudjEuUHJ1bmVTbGVldmVzUmVzcG9uc2UiCIi1GAGg'
+    'tRgB');

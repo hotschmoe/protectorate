@@ -3,6 +3,7 @@ package sleeve
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -163,12 +164,23 @@ func dirSize(ctx context.Context, dir string) (uint64, error) {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err != nil || !d.Type().IsRegular() {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		if fi, err := d.Info(); err == nil {
-			total += uint64(fi.Size())
+		if err != nil {
+			return err
 		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		fi, err := d.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		total += uint64(fi.Size())
 		return nil
 	})
 	return total, err

@@ -56,6 +56,9 @@ const (
 	// SleeveServiceSpawnEnvoyProcedure is the fully-qualified name of the SleeveService's SpawnEnvoy
 	// RPC.
 	SleeveServiceSpawnEnvoyProcedure = "/protectorate.v1.SleeveService/SpawnEnvoy"
+	// SleeveServicePruneSleevesProcedure is the fully-qualified name of the SleeveService's
+	// PruneSleeves RPC.
+	SleeveServicePruneSleevesProcedure = "/protectorate.v1.SleeveService/PruneSleeves"
 )
 
 // SleeveServiceClient is a client for the protectorate.v1.SleeveService service.
@@ -86,8 +89,8 @@ type SleeveServiceClient interface {
 	// GetSleeve returns one sleeve with its latest resource usage.
 	GetSleeve(context.Context, *connect.Request[v1.GetSleeveRequest]) (*connect.Response[v1.GetSleeveResponse], error)
 	// KillSleeve stops a sleeve's harness and every process in its sandbox and
-	// forgets the sleeve. The workspace and the sleeve's home directory are kept
-	// on disk.
+	// retains its exited record. The workspace and the sleeve's home directory
+	// are kept on disk unless drop_caches removes regenerable caches.
 	KillSleeve(context.Context, *connect.Request[v1.KillSleeveRequest]) (*connect.Response[v1.KillSleeveResponse], error)
 	// ResleeveSleeve moves a chat sleeve to another harness on the same
 	// workspace, under the same name, without asking the outgoing harness
@@ -118,6 +121,8 @@ type SleeveServiceClient interface {
 	// prompt-cache prefix. Only the owner token may call it, and the token it
 	// mints never holds it.
 	SpawnEnvoy(context.Context, *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error)
+	// PruneSleeves inventories disk and removes eligible data only with yes.
+	PruneSleeves(context.Context, *connect.Request[v1.PruneSleevesRequest]) (*connect.Response[v1.PruneSleevesResponse], error)
 }
 
 // NewSleeveServiceClient constructs a client for the protectorate.v1.SleeveService service. By
@@ -183,6 +188,12 @@ func NewSleeveServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(sleeveServiceMethods.ByName("SpawnEnvoy")),
 			connect.WithClientOptions(opts...),
 		),
+		pruneSleeves: connect.NewClient[v1.PruneSleevesRequest, v1.PruneSleevesResponse](
+			httpClient,
+			baseURL+SleeveServicePruneSleevesProcedure,
+			connect.WithSchema(sleeveServiceMethods.ByName("PruneSleeves")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -196,6 +207,7 @@ type sleeveServiceClient struct {
 	killSleeve       *connect.Client[v1.KillSleeveRequest, v1.KillSleeveResponse]
 	resleeveSleeve   *connect.Client[v1.ResleeveSleeveRequest, v1.ResleeveSleeveResponse]
 	spawnEnvoy       *connect.Client[v1.SpawnEnvoyRequest, v1.SpawnEnvoyResponse]
+	pruneSleeves     *connect.Client[v1.PruneSleevesRequest, v1.PruneSleevesResponse]
 }
 
 // SpawnSleeve calls protectorate.v1.SleeveService.SpawnSleeve.
@@ -238,6 +250,11 @@ func (c *sleeveServiceClient) SpawnEnvoy(ctx context.Context, req *connect.Reque
 	return c.spawnEnvoy.CallUnary(ctx, req)
 }
 
+// PruneSleeves calls protectorate.v1.SleeveService.PruneSleeves.
+func (c *sleeveServiceClient) PruneSleeves(ctx context.Context, req *connect.Request[v1.PruneSleevesRequest]) (*connect.Response[v1.PruneSleevesResponse], error) {
+	return c.pruneSleeves.CallUnary(ctx, req)
+}
+
 // SleeveServiceHandler is an implementation of the protectorate.v1.SleeveService service.
 type SleeveServiceHandler interface {
 	// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
@@ -266,8 +283,8 @@ type SleeveServiceHandler interface {
 	// GetSleeve returns one sleeve with its latest resource usage.
 	GetSleeve(context.Context, *connect.Request[v1.GetSleeveRequest]) (*connect.Response[v1.GetSleeveResponse], error)
 	// KillSleeve stops a sleeve's harness and every process in its sandbox and
-	// forgets the sleeve. The workspace and the sleeve's home directory are kept
-	// on disk.
+	// retains its exited record. The workspace and the sleeve's home directory
+	// are kept on disk unless drop_caches removes regenerable caches.
 	KillSleeve(context.Context, *connect.Request[v1.KillSleeveRequest]) (*connect.Response[v1.KillSleeveResponse], error)
 	// ResleeveSleeve moves a chat sleeve to another harness on the same
 	// workspace, under the same name, without asking the outgoing harness
@@ -298,6 +315,8 @@ type SleeveServiceHandler interface {
 	// prompt-cache prefix. Only the owner token may call it, and the token it
 	// mints never holds it.
 	SpawnEnvoy(context.Context, *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error)
+	// PruneSleeves inventories disk and removes eligible data only with yes.
+	PruneSleeves(context.Context, *connect.Request[v1.PruneSleevesRequest]) (*connect.Response[v1.PruneSleevesResponse], error)
 }
 
 // NewSleeveServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -359,6 +378,12 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(sleeveServiceMethods.ByName("SpawnEnvoy")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sleeveServicePruneSleevesHandler := connect.NewUnaryHandler(
+		SleeveServicePruneSleevesProcedure,
+		svc.PruneSleeves,
+		connect.WithSchema(sleeveServiceMethods.ByName("PruneSleeves")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.SleeveService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SleeveServiceSpawnSleeveProcedure:
@@ -377,6 +402,8 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 			sleeveServiceResleeveSleeveHandler.ServeHTTP(w, r)
 		case SleeveServiceSpawnEnvoyProcedure:
 			sleeveServiceSpawnEnvoyHandler.ServeHTTP(w, r)
+		case SleeveServicePruneSleevesProcedure:
+			sleeveServicePruneSleevesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -416,4 +443,8 @@ func (UnimplementedSleeveServiceHandler) ResleeveSleeve(context.Context, *connec
 
 func (UnimplementedSleeveServiceHandler) SpawnEnvoy(context.Context, *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.SpawnEnvoy is not implemented"))
+}
+
+func (UnimplementedSleeveServiceHandler) PruneSleeves(context.Context, *connect.Request[v1.PruneSleevesRequest]) (*connect.Response[v1.PruneSleevesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.PruneSleeves is not implemented"))
 }

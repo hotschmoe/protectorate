@@ -85,7 +85,7 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 
 func sleeveCmd(o *opts) *command {
 	c := &command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
-	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveBrowseCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
+	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveBrowseCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleevePruneCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
 
@@ -275,6 +275,9 @@ func exitLabel(s *pb.Sleeve) string {
 }
 
 func sleeveRowState(s *pb.Sleeve) string {
+	if s.Killed {
+		return "killed"
+	}
 	if s.State == pb.SleeveState_SLEEVE_STATE_RUNNING || s.ExitCode == nil {
 		return sleeveStateLabel(s.State)
 	}
@@ -312,7 +315,7 @@ func sleeveLsCmd(o *opts) *command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tHARNESS\tMODEL\tEFFORT\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
+				fmt.Fprintln(w, "NAME\tHARNESS\tMODEL\tEFFORT\tSTATE\tCPU\tMEM\tPEAK\tHOME\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
 				for _, s := range res.Msg.Sleeves {
 					u := s.Usage
 					model, effort := "-", "-"
@@ -325,8 +328,8 @@ func sleeveLsCmd(o *opts) *command {
 							effort = "unknown"
 						}
 					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), model, effort, sleeveRowState(s),
-						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace, s.Parent, s.GitBranch)
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), model, effort, sleeveRowState(s),
+						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), fmtBytes(u.HomeDiskBytes), limitLabel(s.Limits), s.Workspace, s.Parent, s.GitBranch)
 				}
 			})
 		},
@@ -425,7 +428,7 @@ func sleeveShowCmd(o *opts) *command {
 				}
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
+				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s), s.Workspace, s.Session)
 				fmt.Fprintf(w, "branch\t%s\n", s.GitBranch)
 				if s.BaseRepo != "" {
 					fmt.Fprintf(w, "base repo\t%s\nbase branch\t%s\nbase tip\t%s\n", s.BaseRepo, s.BaseBranch, s.BaseTip)
@@ -469,6 +472,7 @@ func sleeveShowCmd(o *opts) *command {
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))
+				fmt.Fprintf(w, "home disk\t%s (cache %s, rest %s)\ngo build cache\t%s\n", fmtBytes(u.HomeDiskBytes), fmtBytes(u.CacheDiskBytes), fmtBytes(u.HomeDiskBytes-u.CacheDiskBytes), fmtBytes(u.GoBuildCacheDiskBytes))
 				if u.SampledAt != nil {
 					fmt.Fprintf(w, "usage sampled\t%s\n", u.SampledAt.AsTime().Local().Format(time.RFC3339))
 				}
@@ -486,7 +490,8 @@ func sleeveShowCmd(o *opts) *command {
 }
 
 func sleeveKillCmd(o *opts) *command {
-	return &command{
+	var dropCaches bool
+	c := &command{
 		Use:   "kill <name>",
 		Short: "Stop a sleeve and its processes; the workspace is kept",
 		Args:  exactArgs(1),
@@ -495,13 +500,53 @@ func sleeveKillCmd(o *opts) *command {
 			if err != nil {
 				return err
 			}
-			res, err := cl.KillSleeve(cmd.Context(), connect.NewRequest(&pb.KillSleeveRequest{Name: args[0]}))
+			res, err := cl.KillSleeve(cmd.Context(), connect.NewRequest(&pb.KillSleeveRequest{Name: args[0], DropCaches: dropCaches}))
 			if err != nil {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "killed\t%s\n", args[0]) })
 		},
 	}
+	c.Flags().BoolVar(&dropCaches, "drop-caches", false, "owner only: drop regenerable home caches after stopping")
+	return c
+}
+
+func sleevePruneCmd(o *opts) *command {
+	r := &pb.PruneSleevesRequest{}
+	c := &command{
+		Use: "prune", Short: "Inventory unused sleeve disk; remove only with --yes (owner only)", Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
+			cl, err := sleeveClient(o)
+			if err != nil {
+				return err
+			}
+			res, err := cl.PruneSleeves(cmd.Context(), connect.NewRequest(r))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintln(w, "SLEEVE\tKIND\tSIZE\tACTION\tPATH\tREASON")
+				for _, e := range res.Msg.Entries {
+					action := "keep"
+					if e.Removed {
+						action = "removed"
+					} else if e.Eligible {
+						action = "would remove"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Sleeve, e.Kind, fmtBytes(e.Bytes), action, e.Path, e.Reason)
+				}
+				if !r.Yes {
+					fmt.Fprintln(w, "Dry run; pass --yes to remove eligible entries.")
+				}
+			})
+		},
+	}
+	c.Flags().BoolVar(&r.Yes, "yes", false, "remove eligible entries (default: dry run)")
+	c.Flags().BoolVar(&r.Caches, "caches", false, "drop regenerable caches (default when no category selected)")
+	c.Flags().BoolVar(&r.Homes, "homes", false, "remove whole non-running homes, including sessions and config")
+	c.Flags().BoolVar(&r.Workspaces, "workspaces", false, "remove clean hub clones with all local work verified outside the clone")
+	c.Flags().BoolVar(&r.Running, "running", false, "include running sleeves in inventory; their data is always kept")
+	return c
 }
 
 func sleeveAttachCmd(o *opts) *command {

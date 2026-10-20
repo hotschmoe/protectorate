@@ -106,6 +106,9 @@ func (m *chatManager) get(name string, fresh, allowStarting bool) (*chatSleeve, 
 	if info.Chat != nil && info.Chat.Starting && !allowStarting {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the sleeve is starting; wait for spawn to finish"))
 	}
+	if info.Killed {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s was killed; respawn it before opening chat", name))
+	}
 	if info.Helper != "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s is the hub's own (%s) and has no chat", name, info.Helper))
 	}

@@ -29,15 +29,18 @@ const (
 )
 
 type Usage struct {
-	CPUPercent  float64
-	CPUSeconds  float64
-	MemCurrent  uint64
-	MemPeak     uint64
-	Pids        uint64
-	OOMKills    uint64
-	DiskBytes   uint64
-	Sampled     time.Time
-	DiskSampled time.Time
+	CPUPercent        float64
+	CPUSeconds        float64
+	MemCurrent        uint64
+	MemPeak           uint64
+	Pids              uint64
+	OOMKills          uint64
+	DiskBytes         uint64
+	HomeBytes         uint64
+	CacheBytes        uint64
+	GoBuildCacheBytes uint64
+	Sampled           time.Time
+	DiskSampled       time.Time
 }
 
 // Info is one sleeve. Everything but Usage is persisted in sleeves.json.
@@ -81,6 +84,7 @@ type Info struct {
 	// OOMKilled is set when the harness exited with status 137 after the
 	// kernel OOM killer fired in its cgroup.
 	OOMKilled bool  `json:"oom_killed,omitempty"`
+	Killed    bool  `json:"killed,omitempty"`
 	Usage     Usage `json:"-"`
 }
 
@@ -190,11 +194,13 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 		}
 	}
 	if errors.Is(m.cfg.Preflight(), ErrUnsupported) {
+		m.discoverHomes()
 		return m, nil
 	}
 	if err := m.renameRecord(ctx, previousOrchestratorName, OrchestratorName); err != nil {
 		log.Printf("migrate orchestrator sleeve: %v", err)
 	}
+	m.discoverHomes()
 	if err := m.Reconcile(ctx); err != nil {
 		return nil, err
 	}
@@ -547,7 +553,7 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 	}
 }
 
-// Kill stops the sleeve's processes and forgets it. Its workspace and home
+// Kill stops the sleeve's processes and retains its record. Its workspace and home
 // directory stay on disk.
 func (m *Manager) Kill(ctx context.Context, name string) error {
 	if err := m.reserve(ctx, name); err != nil {
@@ -575,10 +581,15 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 	}
 	m.mu.Lock()
 	wasRunning := e.State == Running
-	delete(m.sleeves, name)
+	previous := e.Info
+	e.State, e.Killed, e.Session, e.Chat = Exited, true, "", nil
+	if e.Exited.IsZero() {
+		e.Exited = time.Now()
+	}
+	e.Usage.CPUPercent, e.Usage.Pids = 0, 0
 	err := m.saveLocked()
 	if err != nil {
-		m.sleeves[name] = e
+		e.Info = previous
 	}
 	m.mu.Unlock()
 	if wasRunning {
@@ -735,10 +746,9 @@ func (m *Manager) sample() {
 	defer m.mu.Unlock()
 	var due []*entry
 	for _, e := range m.sleeves {
-		if e.State != Running {
-			continue
+		if e.State == Running {
+			m.sampleLocked(e, now)
 		}
-		m.sampleLocked(e, now)
 		if now.Sub(e.Usage.DiskSampled) >= m.opts.DiskInterval {
 			due = append(due, e)
 		}
@@ -793,14 +803,25 @@ func (m *Manager) measureDisk(ctx context.Context, list []*entry) {
 		ws := e.Workspace
 		m.mu.Unlock()
 		n, err := dirSize(ctx, ws)
+		home, caches, goBuild, homeErr := homeSize(ctx, m.cfg.sleeveHome(e.Name))
 		if ctx.Err() != nil {
 			return
 		}
 		m.mu.Lock()
+		e.Usage.DiskSampled = time.Now()
 		if err == nil {
-			e.Usage.DiskBytes, e.Usage.DiskSampled = n, time.Now()
+			e.Usage.DiskBytes = n
+		}
+		if homeErr == nil {
+			e.Usage.HomeBytes, e.Usage.CacheBytes, e.Usage.GoBuildCacheBytes = home, caches, goBuild
 		}
 		m.mu.Unlock()
+		if err != nil {
+			log.Printf("sleeve %s: measure workspace disk: %v", e.Name, err)
+		}
+		if homeErr != nil {
+			log.Printf("sleeve %s: measure home disk: %v", e.Name, homeErr)
+		}
 	}
 }
 

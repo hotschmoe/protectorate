@@ -133,6 +133,18 @@ restart persistence. The host-only binary chat subscenario also checks that
 pending mail drains before idle, mail leaves a result intact, a retried brief
 preserves it and a new brief clears it.
 
+`TestBinarySleeveDiskPrune` boots the real hub with killed, leftover and running
+records and real clones backed by a local bare origin and a local checkout.
+It verifies home/cache/rest accounting, text and JSON dry runs, cache-only
+cleanup, whole-home cleanup, owner-only cache dropping and audit records.
+Clean published clones are removed; unpublished branches, staged work,
+untracked files and edits hidden by assume-unchanged are kept. Running homes,
+owner workspaces and auth/session/config files survive cache cleanup. Overlay
+upper/work bytes count as cache usage, with Go overlay bytes included in the
+Go total; prune and kill remove sleeve overlays while preserving host lower
+directories, even when linked from an overlay upper directory. Clone
+and origin fsmonitor/filter/upload-pack programs must never execute.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -158,7 +170,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=62, KEEP-FUZZ=5; total=67. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=63, KEEP-FUZZ=5; total=68. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -233,6 +245,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | tests/e2e/dispatch_test.go | TestBinaryBranchDispatch | Real CLI branch dispatch, atomic brief replay, credential-stripped remotes, jailed fetch and source write denial, packed refs, coalesced notices, restart dedupe and own-advance suppression | host runtime required | KEEP-E2E | deterministic Claude protocol peer; requires systemd user manager and bwrap |
 | tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
 | tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
+| tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache/overlay cleanup, host-lower and running-data protection, owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
 
 ## Deleted files
 

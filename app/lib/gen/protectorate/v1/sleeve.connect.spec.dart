@@ -78,8 +78,8 @@ abstract final class SleeveService {
   );
 
   /// KillSleeve stops a sleeve's harness and every process in its sandbox and
-  /// forgets the sleeve. The workspace and the sleeve's home directory are kept
-  /// on disk.
+  /// retains its exited record. The workspace and the sleeve's home directory
+  /// are kept on disk unless drop_caches removes regenerable caches.
   static const killSleeve = connect.Spec(
     '/$name/KillSleeve',
     connect.StreamType.unary,
@@ -126,5 +126,13 @@ abstract final class SleeveService {
     connect.StreamType.unary,
     protectoratev1sleeve.SpawnEnvoyRequest.new,
     protectoratev1sleeve.SpawnEnvoyResponse.new,
+  );
+
+  /// PruneSleeves inventories disk and removes eligible data only with yes.
+  static const pruneSleeves = connect.Spec(
+    '/$name/PruneSleeves',
+    connect.StreamType.unary,
+    protectoratev1sleeve.PruneSleevesRequest.new,
+    protectoratev1sleeve.PruneSleevesResponse.new,
   );
 }

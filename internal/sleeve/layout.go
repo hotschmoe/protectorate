@@ -58,7 +58,7 @@ func (c Config) layout(name string, h Harness, workspace string) Layout {
 		}
 	}
 	l.Dirs = append(l.Dirs, host(".cache/pub"), host(".cache/go-mod"))
-	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")})
+	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")}, [2]string{"GOCACHE", inside(".cache/go-build")})
 	if contains(c.ToolDirs, filepath.Join(c.UserHome, "go")) {
 		l.Env = append(l.Env, [2]string{"GOPROXY", "file://" + filepath.Join(c.UserHome, "go/pkg/mod/cache/download") + ",https://proxy.golang.org,direct"})
 	}

@@ -397,7 +397,7 @@ func TestChatEndToEnd(t *testing.T) {
 	if err := <-live.done; err != nil {
 		t.Fatalf("watch after kill ended with %v", err)
 	}
-	if _, err := r.send("dead", ""); code(err) != connect.CodeNotFound {
+	if _, err := r.send("dead", ""); code(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("send to killed sleeve: %v", err)
 	}
 }

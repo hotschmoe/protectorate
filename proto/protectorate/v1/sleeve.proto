@@ -58,8 +58,8 @@ service SleeveService {
   }
 
   // KillSleeve stops a sleeve's harness and every process in its sandbox and
-  // forgets the sleeve. The workspace and the sleeve's home directory are kept
-  // on disk.
+  // retains its exited record. The workspace and the sleeve's home directory
+  // are kept on disk unless drop_caches removes regenerable caches.
   rpc KillSleeve(KillSleeveRequest) returns (KillSleeveResponse) {
     option (protectorate.v1.destructive) = true;
   }
@@ -94,6 +94,12 @@ service SleeveService {
   // prompt-cache prefix. Only the owner token may call it, and the token it
   // mints never holds it.
   rpc SpawnEnvoy(SpawnEnvoyRequest) returns (SpawnEnvoyResponse) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+
+  // PruneSleeves inventories disk and removes eligible data only with yes.
+  rpc PruneSleeves(PruneSleevesRequest) returns (PruneSleevesResponse) {
+    option (protectorate.v1.destructive) = true;
     option (protectorate.v1.owner_only_rpc) = true;
   }
 }
@@ -141,6 +147,9 @@ message SleeveUsage {
   uint64 workspace_disk_bytes = 7;
   google.protobuf.Timestamp sampled_at = 8;
   google.protobuf.Timestamp disk_sampled_at = 9;
+  uint64 home_disk_bytes = 10;
+  uint64 cache_disk_bytes = 11;
+  uint64 go_build_cache_disk_bytes = 12;
 }
 
 message Sleeve {
@@ -187,6 +196,8 @@ message Sleeve {
   string base_tip = 24;
   // Latest self-reported result for the current brief, independent of mail turns.
   SleeveResult result = 25;
+  // Killed records remain inspectable until their name is respawned.
+  bool killed = 28;
 }
 
 message BrowseWorkspacesRequest {
@@ -295,6 +306,8 @@ message GetSleeveResponse {
 
 message KillSleeveRequest {
   string name = 1;
+  // Owner only: remove regenerable home caches after stopping the sleeve.
+  bool drop_caches = 2;
 }
 
 message KillSleeveResponse {}
@@ -344,4 +357,28 @@ message SpawnEnvoyResponse {
   string reason = 4;
   // replaced is true when a running Envoy was stopped first.
   bool replaced = 5;
+}
+
+message PruneSleevesRequest {
+  bool yes = 1;
+  // With no category selected, caches is the default.
+  bool caches = 2;
+  bool homes = 3;
+  bool workspaces = 4;
+  // Running sleeves are inventoried but always kept.
+  bool running = 5;
+}
+
+message PruneSleevesResponse {
+  repeated SleeveDiskEntry entries = 1;
+}
+
+message SleeveDiskEntry {
+  string sleeve = 1;
+  string path = 2;
+  string kind = 3;
+  uint64 bytes = 4;
+  bool eligible = 5;
+  bool removed = 6;
+  string reason = 7;
 }
