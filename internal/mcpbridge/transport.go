@@ -440,6 +440,7 @@ func (s *Server) httpHandler() http.Handler {
 			return
 		}
 		req, res := parseRequest(raw)
+		created := false
 		if res == nil && ss == nil {
 			if req.Method != "initialize" && req.Method != "server/discover" {
 				http.Error(w, "session id required", http.StatusBadRequest)
@@ -447,6 +448,7 @@ func (s *Server) httpHandler() http.Handler {
 			}
 			sessionCtx, cancel := context.WithCancel(context.Background())
 			ss = &httpSession{session: newSession(), ctx: sessionCtx, cancel: cancel}
+			created = true
 			ss.legacyHTTP = true
 			if req.Method == "server/discover" {
 				defer cancel()
@@ -481,7 +483,7 @@ func (s *Server) httpHandler() http.Handler {
 				sessions[id] = ss
 				mu.Unlock()
 				w.Header().Set("Mcp-Session-Id", id)
-			} else if req.Method == "initialize" {
+			} else if req.Method == "initialize" && created {
 				ss.cancel()
 			}
 		}
