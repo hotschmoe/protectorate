@@ -66,7 +66,9 @@ return the sleeve name and its result. Cancellation ends the subscription.
 `protectorate events` already carries `chat.state` and `sleeve.exited`;
 `sleeve.report` adds the status, summary, time and chat/brief sequences, and
 `sleeve.brief` announces that a new brief cleared a result. Use `events --json`
-for payloads. This remains the single owner event stream.
+for payloads. `sleeve.killed` announces a kill independently of whether its
+record is retained; a stored result still satisfies a report wait after exit.
+This remains the single owner event stream.
 Mailbox reads also emit `msg.read`, so idle waits wake when pending mail is
 read without starting a harness turn.
 

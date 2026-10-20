@@ -148,7 +148,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	}
 	// no driver runs after a hub restart: a harness that was in a turn is
 	// reported failed, anything else is idle
-	if prev := s.state; info.Mode == sleeve.ModeChat && prev != pb.ChatState_CHAT_STATE_IDLE {
+	if prev := s.state; info.Mode == sleeve.ModeChat && info.State == sleeve.Running && prev != pb.ChatState_CHAT_STATE_IDLE {
 		s.mu.Lock()
 		switch prev {
 		case pb.ChatState_CHAT_STATE_WORKING, pb.ChatState_CHAT_STATE_AWAITING_APPROVAL, pb.ChatState_CHAT_STATE_COMPACTING:

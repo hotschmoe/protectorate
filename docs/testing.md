@@ -98,9 +98,10 @@ text and JSON, without needing the host user manager.
 `TestBinarySleeveReports` uses persisted chat sleeve records and identity tokens
 minted by the temporary hub, so no AI CLI or user manager is needed. It checks
 own-sleeve reporting, cross-sleeve and owner/scoped forgery denial, status/size
-validation, timeout, exit and removal failures, immediate idle waits, concurrent CLI
-waits printing each summary as it lands, owner report events, replacement
-history, read-scoped waits, cross-sleeve wait denial, MCP wait-for-report and
+validation, timeout and exit/kill failures, immediate idle waits, concurrent CLI
+waits printing each summary as it lands, owner report and kill events, replacement
+history, retained exited chat/terminal result replay without restoring chat state,
+read-scoped waits, cross-sleeve wait denial, MCP wait-for-report and
 restart persistence. The host-only binary chat subscenario also checks that
 pending mail drains before idle, mail leaves a result intact, a retried brief
 preserves it and a new brief clears it.

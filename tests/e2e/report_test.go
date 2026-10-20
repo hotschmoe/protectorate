@@ -21,13 +21,20 @@ func TestBinarySleeveReports(t *testing.T) {
 	c := newCluster(t)
 	c.stop(c.hub)
 	var records []any
-	for _, name := range []string{"reporter", "other", "exited", "removed"} {
+	for _, name := range []string{"reporter", "other", "exited", "killed", "kept", "terminal"} {
 		state := "running"
-		if name == "exited" {
+		if name == "exited" || name == "kept" || name == "terminal" {
 			state = "exited"
 		}
-		records = append(records, map[string]any{"name": name, "harness": "claude", "mode": "chat", "workspace": c.root,
-			"state": state, "created": "2026-01-01T00:00:00Z", "chat": map[string]any{"state": "CHAT_STATE_IDLE"}})
+		record := map[string]any{"name": name, "harness": "claude", "mode": "chat", "workspace": c.root,
+			"state": state, "created": "2026-01-01T00:00:00Z", "chat": map[string]any{"state": "CHAT_STATE_IDLE"}}
+		if name == "kept" || name == "terminal" {
+			delete(record, "chat")
+		}
+		if name == "terminal" {
+			record["mode"] = "terminal"
+		}
+		records = append(records, record)
 	}
 	b, err := json.Marshal(map[string]any{"sleeves": records})
 	if err != nil {
@@ -61,25 +68,6 @@ func TestBinarySleeveReports(t *testing.T) {
 	if got := c.cli("chat", "wait", "reporter", "--until", "idle", "--timeout", "1s"); !strings.Contains(got, "idle") {
 		t.Fatalf("idle wait: %s", got)
 	}
-	removedWaiter := c.start("wait-removed", c.env, "--hub", c.url, "chat", "wait", "removed", "--until", "report", "--timeout", "5s")
-	select {
-	case err := <-removedWaiter.done:
-		t.Fatalf("wait returned before removal: %v", err)
-	case <-time.After(150 * time.Millisecond):
-	}
-	c.call("SleeveService", "KillSleeve", map[string]any{"name": "removed"})
-	select {
-	case err := <-removedWaiter.done:
-		if err == nil {
-			t.Fatal("wait succeeded when the sleeve was removed without a report")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait did not notice sleeve removal promptly")
-	}
-	if output, _ := os.ReadFile(removedWaiter.log.Name()); !strings.Contains(string(output), "absent or was removed") {
-		t.Fatalf("unclear removal error: %s", output)
-	}
-
 	eventCtx, stopEvents := context.WithTimeout(c.ctx, 5*time.Second)
 	defer stopEvents()
 	eventClient := protectoratev1connect.NewEventServiceClient(&http.Client{}, c.url)
@@ -92,6 +80,32 @@ func TestBinarySleeveReports(t *testing.T) {
 	defer events.Close()
 	if !events.Receive() {
 		t.Fatalf("event stream did not open: %v", events.Err())
+	}
+	killedWaiter := c.start("wait-killed", c.env, "--hub", c.url, "chat", "wait", "killed", "--until", "report", "--timeout", "5s")
+	select {
+	case err := <-killedWaiter.done:
+		t.Fatalf("wait returned before kill: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	c.call("SleeveService", "KillSleeve", map[string]any{"name": "killed"})
+	select {
+	case err := <-killedWaiter.done:
+		if err == nil {
+			t.Fatal("wait succeeded when the sleeve was killed without a report")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait did not notice sleeve kill promptly")
+	}
+	if output, _ := os.ReadFile(killedWaiter.log.Name()); !strings.Contains(string(output), "wait for killed") || strings.Contains(string(output), "deadline_exceeded") {
+		t.Fatalf("unclear kill error: %s", output)
+	}
+	for events.Receive() {
+		if ev := events.Msg(); ev.Kind == "sleeve.killed" && ev.Subject == "killed" {
+			break
+		}
+	}
+	if events.Err() != nil {
+		t.Fatalf("no kill event: %v", events.Err())
 	}
 	waiter := c.start("wait-reports", c.env, "--hub", c.url, "chat", "wait", "reporter", "other", "--until", "report", "--timeout", "5s")
 	select {
@@ -170,6 +184,30 @@ func TestBinarySleeveReports(t *testing.T) {
 		}
 	}
 	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url)
+	for _, name := range []string{"kept", "terminal"} {
+		keptIdentity := c.call("TokenService", "CreateToken", map[string]any{"name": "sleeve:" + name, "scopes": []string{"read", "chat_report"}})["secret"].(string)
+		c.token = keptIdentity
+		c.call("ChatService", "Report", map[string]any{"status": "REPORT_STATUS_COMPLETE", "summary": "Retained result."})
+		c.token = owner
+		if got := c.cli("chat", "wait", name, "--until", "report", "--timeout", "1s"); !strings.Contains(got, "Retained result.") {
+			t.Fatalf("exited sleeve %s lost its result: %s", name, got)
+		}
+		keptReq := connect.NewRequest(&pb.WatchRequest{Sleeve: name})
+		keptReq.Header().Set("Authorization", "Bearer "+owner)
+		keptCtx, stopKept := context.WithTimeout(c.ctx, 3*time.Second)
+		defer stopKept()
+		keptHistory, err := client.Watch(keptCtx, keptReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !keptHistory.Receive() || keptHistory.Msg().GetReport().GetSummary() != "Retained result." {
+			t.Fatalf("exited sleeve %s report history: %v", name, keptHistory.Err())
+		}
+		keptHistory.Close()
+		if kept := c.call("SleeveService", "GetSleeve", map[string]any{"name": name})["sleeve"].(map[string]any); kept["chat"] != nil {
+			t.Fatalf("reading retained report history recreated chat state: %v", kept)
+		}
+	}
 	watchReq := connect.NewRequest(&pb.WatchRequest{Sleeve: "reporter"})
 	watchReq.Header().Set("Authorization", "Bearer "+owner)
 	watchCtx, stopWatch := context.WithTimeout(c.ctx, 3*time.Second)

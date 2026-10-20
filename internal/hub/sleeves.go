@@ -408,7 +408,7 @@ func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeve
 		return nil, sleeveErr(err)
 	}
 	h.dropIdentity(req.Msg.Name, "")
-	h.emit("sleeve.removed", req.Msg.Name, nil)
+	h.emit("sleeve.killed", req.Msg.Name, nil)
 	h.scanSessions(ctx)
 	h.pokeCoord()
 	return connect.NewResponse(&pb.KillSleeveResponse{}), nil
