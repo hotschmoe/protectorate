@@ -18,6 +18,7 @@ BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 APP_VERSION_FLAGS := --build-name=$(BUILD_NAME) --build-number=$(BUILD_NUMBER) --dart-define=PROTECTORATE_VERSION=$(VERSION)
 # APP_FLAGS adds flutter build flags, e.g. --dart-define=E2E_AUTOCONFIRM=true.
 APP_FLAGS ?=
+FLUTTER_TEST_CONCURRENCY ?= 2
 LDFLAGS := -s -w -X main.version=$(VERSION)
 # Keep tsnet transport, DNS, NAT traversal, Android integration and system roots.
 # See docs/footprint.md for feature measurements and integration checks.
@@ -71,10 +72,10 @@ cross:
 	done
 
 app-check:
-	cd app && flutter analyze && flutter test
+	cd app && flutter analyze && flutter test --concurrency=$(FLUTTER_TEST_CONCURRENCY)
 
 app-build-web:
-	cd app && flutter build web $(APP_VERSION_FLAGS) $(APP_FLAGS)
+	cd app && dart run tool/build_web.dart $(APP_VERSION_FLAGS) $(APP_FLAGS)
 
 apk:
 	cd app && flutter build apk $(APP_VERSION_FLAGS) $(APP_FLAGS)
