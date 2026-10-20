@@ -133,11 +133,7 @@ func (s *claudeSession) Compact(ctx context.Context) (Compaction, error) {
 }
 
 func (s *claudeSession) Close() error {
-	if s.markShut() {
-		s.p.stop(s.opts.stopTimeout())
-	}
-	<-s.done
-	return nil
+	return s.closeProc(s.p)
 }
 
 type claudeLine struct {

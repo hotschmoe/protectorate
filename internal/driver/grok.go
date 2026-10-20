@@ -185,11 +185,7 @@ func (s *grokSession) Compact(context.Context) (Compaction, error) {
 }
 
 func (s *grokSession) Close() error {
-	if s.markShut() {
-		s.p.stop(s.opts.stopTimeout())
-	}
-	<-s.done
-	return nil
+	return s.closeProc(s.p)
 }
 
 type grokPending struct {

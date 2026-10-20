@@ -45,7 +45,6 @@ type proc struct {
 	stderr *tailBuf
 	wmu    sync.Mutex
 	done   chan struct{}
-	code   int
 }
 
 func startProc(bin string, args []string, cwd string, opts Options) (*proc, error) {
@@ -109,11 +108,11 @@ func (p *proc) run(c *core, handle func(line []byte)) {
 		killProc(p.cmd)
 	}
 	err := p.cmd.Wait()
-	p.code = 0
+	code := 0
 	if err != nil {
-		p.code = -1
+		code = -1
 		if ee, ok := err.(*exec.ExitError); ok {
-			p.code = ee.ExitCode()
+			code = ee.ExitCode()
 		}
 	}
 	tail := p.stderr.String()
@@ -121,7 +120,15 @@ func (p *proc) run(c *core, handle func(line []byte)) {
 		tail = fmt.Sprintf("read stdout: %v; %s", scanErr, tail)
 	}
 	close(p.done)
-	c.finish(p.code, tail)
+	c.finish(code, tail)
+}
+
+func (c *core) closeProc(p *proc) error {
+	if c.markShut() {
+		p.stop(c.opts.stopTimeout())
+	}
+	<-c.done
+	return nil
 }
 
 // stop closes stdin and waits for a graceful exit, then escalates to

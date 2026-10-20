@@ -26,8 +26,7 @@ type rpcMsg struct {
 
 var errPeerDead = errors.New("driver: connection lost")
 
-// rpcPeer is a JSON-RPC 2.0 endpoint over any message transport (stdio
-// lines for ACP, websocket frames for the Codex daemon).
+// rpcPeer routes JSON-RPC 2.0 messages on the harness's stdio transport.
 type rpcPeer struct {
 	send   func(any) error
 	onNote func(method string, params, raw json.RawMessage)

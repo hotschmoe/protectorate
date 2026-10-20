@@ -172,11 +172,7 @@ func (s *piSession) Compact(ctx context.Context) (Compaction, error) {
 }
 
 func (s *piSession) Close() error {
-	if s.markShut() {
-		s.p.stop(s.opts.stopTimeout())
-	}
-	<-s.done
-	return nil
+	return s.closeProc(s.p)
 }
 
 func (s *piSession) handle(raw []byte) {
