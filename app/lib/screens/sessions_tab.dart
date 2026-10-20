@@ -1,18 +1,12 @@
 import 'package:connectrpc/connect.dart';
 import 'package:flutter/material.dart';
 
-import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/session.pb.dart';
-import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
-import '../nodes/node_view.dart';
-import '../sleeves/sleeve_info.dart';
-import '../sleeves/spawn_dialog.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
-import 'chat_screen.dart';
 import 'terminal_screen.dart';
 
 class SessionsTab extends StatefulWidget {
@@ -33,7 +27,6 @@ class SessionsTab extends StatefulWidget {
 
 class _SessionsTabState extends State<SessionsTab> {
   List<Session> _sessions = const [];
-  List<Sleeve> _sleeves = const [];
   Object? _error;
   bool _loading = true;
 
@@ -63,40 +56,9 @@ class _SessionsTabState extends State<SessionsTab> {
       }
     } on Object catch (e) {
       if (mounted) setState(() => _error = e);
-    }
-    try {
-      final r = await widget.client.sleeves.listSleeves(ListSleevesRequest());
-      if (mounted) setState(() => _sleeves = r.sleeves);
-    } on Object {
-      // Sleeves are Linux hub only; the raw sessions still list.
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  Future<void> _start() async {
-    try {
-      final s = await startSleeve(context, widget.client);
-      if (s == null) return;
-      await _refresh();
-      if (mounted) _openSleeve(s);
-    } on Object catch (e) {
-      if (mounted) setState(() => _error = e);
-    }
-  }
-
-  void _openSleeve(Sleeve s) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => effectiveMode(s) == SleeveMode.SLEEVE_MODE_CHAT
-            ? ChatScreen(hub: widget.hub, client: widget.client, sleeve: s)
-            : TerminalScreen(
-                hub: widget.hub,
-                client: widget.client,
-                session: s.session,
-              ),
-      ),
-    );
   }
 
   void _open(String name) {
@@ -173,7 +135,7 @@ class _SessionsTabState extends State<SessionsTab> {
       setState(
         () => _error = e.code == Code.permissionDenied
             ? 'Raw sessions run unsandboxed and need the owner token. '
-                  'Use START WORK to run a harness in a sandboxed sleeve instead.'
+                  'Start work in a sleeve instead (SLEEVES tab, NEW SLEEVE).'
             : e,
       );
     } on Object catch (e) {
@@ -196,10 +158,10 @@ class _SessionsTabState extends State<SessionsTab> {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
-        key: const ValueKey('start-work'),
-        onPressed: _start,
+        key: const ValueKey('new-session'),
+        onPressed: _create,
         icon: const Icon(Icons.add),
-        label: const Text('START WORK'),
+        label: const Text('NEW RAW SESSION'),
       ),
       body: Column(
         children: [
@@ -226,64 +188,27 @@ class _SessionsTabState extends State<SessionsTab> {
                       constraints: const BoxConstraints(
                         maxWidth: Tokens.contentMaxWidth,
                       ),
-                      child: Column(
-                        children: [
-                          Panel(
-                            legend: 'SLEEVES',
-                            trailing: Text(
-                              '${_sleeves.length}',
-                              style: t.legend(),
-                            ),
-                            padding: const EdgeInsets.all(4),
-                            child: _sleeves.isEmpty
-                                ? Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Text(
-                                      _loading
-                                          ? ''
-                                          : 'NO SLEEVES. START WORK PICKS A '
-                                                'REPOSITORY AND A HARNESS.',
-                                      style: t.legend(),
-                                    ),
-                                  )
-                                : Column(
-                                    children: [
-                                      for (var i = 0; i < _sleeves.length; i++)
-                                        _sleeveRow(t, i, _sleeves[i]),
-                                    ],
-                                  ),
-                          ),
-                          const SizedBox(height: Tokens.gap),
-                          Panel(
-                            legend: 'RAW TERMINAL SESSIONS',
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text('${_sessions.length}', style: t.legend()),
-                                TextButton(
-                                  key: const ValueKey('new-session'),
-                                  onPressed: _create,
-                                  child: const Text('NEW RAW SESSION'),
+                      child: Panel(
+                        legend: 'RAW TERMINAL SESSIONS',
+                        trailing: Text(
+                          '${_sessions.length}',
+                          style: t.legend(),
+                        ),
+                        padding: const EdgeInsets.all(4),
+                        child: _sessions.isEmpty
+                            ? Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Text(
+                                  _loading ? '' : 'NO SESSIONS',
+                                  style: t.legend(),
                                 ),
-                              ],
-                            ),
-                            padding: const EdgeInsets.all(4),
-                            child: _sessions.isEmpty
-                                ? Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Text(
-                                      _loading ? '' : 'NO SESSIONS',
-                                      style: t.legend(),
-                                    ),
-                                  )
-                                : Column(
-                                    children: [
-                                      for (var i = 0; i < _sessions.length; i++)
-                                        _row(t, i, _sessions[i]),
-                                    ],
-                                  ),
-                          ),
-                        ],
+                              )
+                            : Column(
+                                children: [
+                                  for (var i = 0; i < _sessions.length; i++)
+                                    _row(t, i, _sessions[i]),
+                                ],
+                              ),
                       ),
                     ),
                   ),
@@ -292,41 +217,6 @@ class _SessionsTabState extends State<SessionsTab> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _sleeveRow(Tokens t, int i, Sleeve s) {
-    return InkWell(
-      key: ValueKey('sleeve-${s.name}'),
-      borderRadius: BorderRadius.circular(Tokens.innerRadius),
-      onTap: () => _openSleeve(s),
-      child: BarRow(
-        index: i,
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-        child: Row(
-          children: [
-            Lamp(
-              tone: Tone.ok,
-              on: s.state == SleeveState.SLEEVE_STATE_RUNNING,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(s.name, style: t.data(t.p.emph)),
-                  Text(
-                    s.workspace,
-                    style: t.small(),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            Text(harnessLabel(s.harness).toUpperCase(), style: t.legend()),
-          ],
-        ),
       ),
     );
   }
@@ -369,4 +259,25 @@ class _SessionsTabState extends State<SessionsTab> {
       ),
     );
   }
+}
+
+// Unsandboxed tmux sessions on the hub, for the owner. Work normally starts
+// in a sleeve.
+class RawSessionsScreen extends StatelessWidget {
+  const RawSessionsScreen({
+    super.key,
+    required this.hub,
+    required this.client,
+    this.openSession,
+  });
+
+  final HubProfile hub;
+  final HubClient client;
+  final String? openSession;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Raw sessions')),
+    body: SessionsTab(hub: hub, client: client, openSession: openSession),
+  );
 }

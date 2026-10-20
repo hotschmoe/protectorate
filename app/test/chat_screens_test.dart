@@ -1288,7 +1288,7 @@ void main() {
         'overview',
         'nodes',
         'quota',
-        'sessions',
+        'sleeves',
         'messages',
         'backlog',
       ]) {

@@ -20,7 +20,7 @@ import 'node_detail_screen.dart';
 import 'nodes_tab.dart';
 import 'overview_tab.dart';
 import 'quota_tab.dart';
-import 'sessions_tab.dart';
+import 'sleeves_screen.dart';
 
 const phoneBreakpoint = 600.0;
 
@@ -35,7 +35,7 @@ const _destinations = [
   _Destination('overview', 'OVERVIEW', Icons.grid_view),
   _Destination('nodes', 'NODES', Icons.memory),
   _Destination('quota', 'QUOTA', Icons.speed),
-  _Destination('sessions', 'SESSIONS', Icons.terminal),
+  _Destination('sleeves', 'SLEEVES', Icons.smart_toy_outlined),
   _Destination('messages', 'MESSAGES', Icons.mail_outline),
   _Destination('backlog', 'BACKLOG', Icons.checklist),
 ];
@@ -155,9 +155,11 @@ class _HubShellState extends State<HubShell> {
       versions: _versions,
     ),
     'quota' => QuotaTab(client: _client, feed: _feed),
-    'sessions' => SessionsTab(
+    'sleeves' => SleevesScreen(
       hub: widget.hub,
       client: _client,
+      feed: _feed,
+      embedded: true,
       openSession: widget.openSession,
     ),
     'messages' => MessagesTab(client: _client, feed: _feed),

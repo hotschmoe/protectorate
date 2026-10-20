@@ -15,6 +15,8 @@ import 'package:protectorate/gen/protectorate/v1/quota.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/quota.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/session.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/session.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/sleeve.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/sleeve.pb.dart';
 import 'package:protectorate/screens/quota_tab.dart';
 import 'package:protectorate/hubs/event_feed.dart';
 import 'package:protectorate/hubs/hub_client.dart';
@@ -77,6 +79,12 @@ HubClient _fakeClient(HubProfile p, {void Function(String?)? onAuth}) {
         SessionService.listSessions,
         (ListSessionsRequest r, ctx) => ListSessionsResponse(
           sessions: [Session(name: 'work', cwd: '/src')],
+        ),
+      )
+      .unary(
+        SleeveService.listSleeves,
+        (ListSleevesRequest r, ctx) => ListSleevesResponse(
+          sleeves: [Sleeve(name: 'alice', workspace: '/w/a')],
         ),
       )
       .server(EventService.subscribe, (SubscribeRequest r, ctx) async* {
@@ -162,9 +170,14 @@ void main() {
       expect(find.text('box (linux/arm64)'), findsOneWidget);
       expect(find.text('session.started'), findsOneWidget);
       expect(find.text('heartbeat'), findsNothing);
-      await tester.tap(find.text('SESSIONS'));
+      await tester.tap(find.text('SLEEVES'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('sleeve-alice')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('raw-sessions')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('session-work')), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tester.tap(find.text('QUOTA'));
       await tester.pumpAndSettle();
       expect(find.bySemanticsLabel('5h: 40% used'), findsOneWidget);

@@ -1,13 +1,16 @@
 import 'package:connectrpc/test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:protectorate/gen/protectorate/v1/session.connect.spec.dart';
-import 'package:protectorate/gen/protectorate/v1/session.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
+import 'package:protectorate/hubs/event_feed.dart';
 import 'package:protectorate/gen/protectorate/v1/sleeve.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/sleeve.pb.dart';
 import 'package:protectorate/hubs/hub_client.dart';
 import 'package:protectorate/hubs/hub_profile.dart';
-import 'package:protectorate/screens/sessions_tab.dart';
+import 'package:protectorate/screens/sleeves_screen.dart';
+import 'package:protectorate/sleeves/node_fence.dart';
 import 'package:protectorate/sleeves/spawn_dialog.dart';
 
 const _hub = HubProfile(id: '1', name: 'home', baseUrl: 'http://h');
@@ -175,62 +178,127 @@ void main() {
     });
   });
 
-  testWidgets('sessions tab starts a sleeve from START WORK', (t) async {
-    final spawned = <SpawnSleeveRequest>[];
-    final transport = FakeTransportBuilder()
-        .unary(
-          SessionService.listSessions,
-          (ListSessionsRequest r, ctx) => ListSessionsResponse(),
-        )
-        .unary(
-          SleeveService.listSleeves,
-          (ListSleevesRequest r, ctx) => ListSleevesResponse(
-            sleeves: [
-              Sleeve(
-                name: 'alice',
-                harness: Harness.HARNESS_CODEX,
-                workspace: '/w/a',
-                state: SleeveState.SLEEVE_STATE_RUNNING,
-              ),
-            ],
-          ),
-        )
-        .unary(
-          SleeveService.listWorkspaces,
-          (ListWorkspacesRequest r, ctx) =>
-              ListWorkspacesResponse(workspaces: _workspaces),
-        )
-        .unary(SleeveService.spawnSleeve, (SpawnSleeveRequest r, ctx) {
-          spawned.add(r);
-          return SpawnSleeveResponse(
-            sleeve: Sleeve(name: r.name, session: 'sleeve-${r.name}'),
-          );
-        })
-        .build();
-    await t.pumpWidget(
-      MaterialApp(
-        home: SessionsTab(
-          hub: _hub,
-          client: HubClient.withTransport(transport),
-        ),
+  group('sleeves tab', () {
+    final nodes = [
+      NodeStatus(
+        node: NodeInfo(name: 'zeta', local: false),
+        freshness: NodeFreshness.NODE_FRESHNESS_UNREACHABLE,
+        metrics: NodeMetrics(sleeves: [Sleeve(name: 'remote-one')]),
       ),
-    );
-    await t.pumpAndSettle();
-    expect(find.text('START WORK'), findsOneWidget);
-    expect(find.text('NEW RAW SESSION'), findsOneWidget);
-    expect(find.byKey(const ValueKey('sleeve-alice')), findsOneWidget);
+      NodeStatus(
+        node: NodeInfo(name: 'forge', local: true),
+        freshness: NodeFreshness.NODE_FRESHNESS_FRESH,
+      ),
+      NodeStatus(
+        node: NodeInfo(name: 'idle-box'),
+        freshness: NodeFreshness.NODE_FRESHNESS_FRESH,
+      ),
+    ];
 
-    await t.tap(find.byKey(const ValueKey('start-work')));
-    await t.pumpAndSettle();
-    expect(find.text('Start a sleeve'), findsOneWidget);
-    await t.tap(find.byKey(const ValueKey('sleeve-existing')));
-    await t.pumpAndSettle();
-    await t.tap(find.text('shared').last);
-    await t.pumpAndSettle();
-    await t.tap(find.byKey(const ValueKey('sleeve-spawn')));
-    await t.pump();
-    await t.pump(const Duration(milliseconds: 100));
-    expect(spawned.single.workspace, '/srv/shared');
-    expect(spawned.single.name, 'shared');
+    test('the hub node leads, nodes without sleeves get no fence', () {
+      final g = groupSleeves(nodes, [Sleeve(name: 'alice')], 'home');
+      expect(g.map((x) => x.name), ['forge', 'zeta']);
+      expect(g.first.sleeves.single.name, 'alice');
+      expect(g.last.sleeves.single.name, 'remote-one');
+      expect(groupSleeves(const [], const [], 'home').single.name, 'home');
+    });
+
+    Future<List<SpawnSleeveRequest>> pump(WidgetTester t) async {
+      final spawned = <SpawnSleeveRequest>[];
+      final transport = FakeTransportBuilder()
+          .unary(
+            NodeService.listNodes,
+            (ListNodesRequest r, ctx) => ListNodesResponse(nodes: nodes),
+          )
+          .unary(
+            SleeveService.listSleeves,
+            (ListSleevesRequest r, ctx) => ListSleevesResponse(
+              sleeves: [
+                Sleeve(
+                  name: 'alice',
+                  harness: Harness.HARNESS_CODEX,
+                  workspace: '/w/a',
+                  state: SleeveState.SLEEVE_STATE_RUNNING,
+                ),
+                Sleeve(
+                  name: 'bob',
+                  workspace: '/w/b',
+                  state: SleeveState.SLEEVE_STATE_EXITED,
+                ),
+              ],
+            ),
+          )
+          .unary(
+            SleeveService.listWorkspaces,
+            (ListWorkspacesRequest r, ctx) =>
+                ListWorkspacesResponse(workspaces: _workspaces),
+          )
+          .unary(SleeveService.spawnSleeve, (SpawnSleeveRequest r, ctx) {
+            spawned.add(r);
+            return SpawnSleeveResponse(
+              sleeve: Sleeve(name: r.name, session: 'sleeve-${r.name}'),
+            );
+          })
+          .build();
+      final feed = EventFeed(() => const Stream<Event>.empty());
+      addTearDown(feed.dispose);
+      await t.pumpWidget(
+        MaterialApp(
+          home: SleevesScreen(
+            hub: _hub,
+            client: HubClient.withTransport(transport),
+            feed: feed,
+            embedded: true,
+          ),
+        ),
+      );
+      await t.pumpAndSettle();
+      return spawned;
+    }
+
+    testWidgets('each node has a fence holding its own sleeves', (t) async {
+      await pump(t);
+      Finder inFence(String node, String sleeve) => find.descendant(
+        of: find.byKey(ValueKey('fence-$node')),
+        matching: find.byKey(ValueKey('sleeve-$sleeve')),
+      );
+      expect(inFence('forge', 'alice'), findsOneWidget);
+      expect(inFence('forge', 'bob'), findsOneWidget);
+      expect(inFence('zeta', 'remote-one'), findsOneWidget);
+      expect(inFence('forge', 'remote-one'), findsNothing);
+      expect(find.byKey(const ValueKey('fence-idle-box')), findsNothing);
+      expect(find.text('2 SLEEVES, 1 RUNNING'), findsOneWidget);
+      expect(find.text('1 SLEEVES, 0 RUNNING'), findsOneWidget);
+      expect(
+        t.widget<Opacity>(find.byKey(const ValueKey('fence-zeta'))).opacity,
+        lessThan(1),
+      );
+      expect(
+        t.widget<Opacity>(find.byKey(const ValueKey('fence-forge'))).opacity,
+        1,
+      );
+      expect(find.byKey(const ValueKey('fence-new-forge')), findsOneWidget);
+      expect(find.byKey(const ValueKey('fence-new-zeta')), findsNothing);
+      expect(find.text('NEW SLEEVE'), findsOneWidget);
+      expect(find.text('RAW SESSIONS'), findsOneWidget);
+    });
+
+    testWidgets('the fence plus starts a sleeve on the picked workspace', (
+      t,
+    ) async {
+      final spawned = await pump(t);
+      await t.tap(find.byKey(const ValueKey('fence-new-forge')));
+      await t.pumpAndSettle();
+      expect(find.text('Start a sleeve'), findsOneWidget);
+      await t.tap(find.byKey(const ValueKey('sleeve-existing')));
+      await t.pumpAndSettle();
+      await t.tap(find.text('shared').last);
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const ValueKey('sleeve-spawn')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 100));
+      expect(spawned.single.workspace, '/srv/shared');
+      expect(spawned.single.name, 'shared');
+    });
   });
 }
