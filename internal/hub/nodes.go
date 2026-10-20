@@ -147,11 +147,9 @@ func (m *NodeMonitor) targets() []*pb.NodeInfo {
 
 func (m *NodeMonitor) pollAll(ctx context.Context) {
 	targets := m.targets()
-	names := make(map[string]bool, len(targets))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, pollConcurrency)
 	for _, n := range targets {
-		names[n.Name] = true
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -161,7 +159,14 @@ func (m *NodeMonitor) pollAll(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+	// Prune against the inventory as it is now: a node added while this round
+	// ran has a kicked poll whose state must survive.
 	m.mu.Lock()
+	current := m.targets()
+	names := make(map[string]bool, len(current))
+	for _, n := range current {
+		names[n.Name] = true
+	}
 	for name := range m.state {
 		if !names[name] {
 			delete(m.state, name)
