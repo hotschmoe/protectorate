@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const [chromium, profile, size, destination, theme, output, hub, credential, connected] = process.argv.slice(2);
+const [chromium, profile, size, destination, theme, output, hub, credential, connected, interaction] = process.argv.slice(2);
 const browser = spawn(chromium, [
   '--headless=new', '--disable-gpu', '--no-sandbox',
   `--user-data-dir=${profile}`, '--remote-debugging-port=0',
@@ -57,6 +57,30 @@ try {
   }
   await call('Page.navigate', { url: destination });
   await delay(12_000);
+  const [width, height] = size.split(',').map(Number);
+  const tap = async (x, y) => {
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await call('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+    }
+    await delay(250);
+  };
+  if (interaction === 'nodes') {
+    await tap(width * 5 / 8, height - 36);
+    await delay(1000);
+  } else if (interaction === 'draft') {
+    await tap(70, height - 108);
+    await call('Input.insertText', { text: 'Check the node again later.' });
+    await tap(width * 5 / 8, height - 36);
+    await tap(width / 8, height - 36);
+    await tap(70, height - 108);
+    const draft = await call('Runtime.evaluate', {
+      expression: `(() => { let el = document.activeElement; while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement; return el?.value; })()`,
+      returnByValue: true,
+    });
+    if (draft.result.value !== 'Check the node again later.') {
+      throw new Error('Phone draft was lost while switching tabs');
+    }
+  }
   const screenshot = await call('Page.captureScreenshot', { format: 'png' });
   await writeFile(output, Buffer.from(screenshot.data, 'base64'));
   await call('Browser.close');

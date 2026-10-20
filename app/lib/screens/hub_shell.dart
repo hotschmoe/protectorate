@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../devices/device_approval_banner.dart';
 import '../gen/protectorate/v1/events.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
@@ -17,6 +18,7 @@ import '../vfd/panel.dart';
 import '../mail/thread_view.dart' show orchestratorSleeve;
 import 'audit_screen.dart';
 import 'backlog_tab.dart';
+import 'devices_screen.dart';
 import 'node_detail_screen.dart';
 import 'nodes_tab.dart';
 import 'orchestrator_tab.dart';
@@ -45,6 +47,7 @@ const _destinations = [
   _Destination('sleeves', 'SLEEVES', Icons.smart_toy_outlined),
   _Destination('nodes', 'NODES', Icons.memory),
   _Destination('notes', 'NOTES', Icons.sticky_note_2_outlined),
+  _Destination('devices', 'DEVICES', Icons.phonelink_lock),
 ];
 
 const _phoneDestinations = [
@@ -88,6 +91,8 @@ class HubShell extends StatefulWidget {
 }
 
 class _HubShellState extends State<HubShell> {
+  final _navigation = GlobalKey<NavigatorState>();
+  final _revision = ValueNotifier(0);
   late final HubClient _client = widget.clientFactory(widget.hub);
   late final EventFeed _feed = EventFeed(
     (signal) => _client.events.subscribe(SubscribeRequest(), signal: signal),
@@ -112,14 +117,14 @@ class _HubShellState extends State<HubShell> {
     _feed.addListener(_feedChanged);
     if (!usesPhoneShell) {
       _tick = Timer.periodic(const Duration(seconds: 15), (_) {
-        if (mounted) setState(() => _clock = DateTime.now());
+        if (mounted) _update(() => _clock = DateTime.now());
       });
     }
     final node = widget.openNode;
     if (node != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Navigator.of(context).push(
+        _navigation.currentState?.push(
           PageRouteBuilder<void>(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
@@ -143,7 +148,7 @@ class _HubShellState extends State<HubShell> {
   Future<void> _loadHubVersion() async {
     try {
       final s = await _client.hub.getStatus(GetStatusRequest());
-      if (mounted) setState(() => _hubVersion = s.version);
+      if (mounted) _update(() => _hubVersion = s.version);
     } on Object {
       // Skew is hidden until the hub's version is known.
     }
@@ -164,6 +169,7 @@ class _HubShellState extends State<HubShell> {
     _feed.removeListener(_feedChanged);
     _tick?.cancel();
     _feed.dispose();
+    _revision.dispose();
     super.dispose();
   }
 
@@ -172,9 +178,9 @@ class _HubShellState extends State<HubShell> {
       client: _client,
       feed: _feed,
       selected: _orchestratorSleeve,
-      onSelect: (n) => setState(() => _orchestratorSleeve = n),
+      onSelect: (n) => _update(() => _orchestratorSleeve = n),
       mail: _orchestratorMail,
-      onMail: (m) => setState(() => _orchestratorMail = m),
+      onMail: (m) => _update(() => _orchestratorMail = m),
     ),
     'overview' => OverviewTab(
       hub: widget.hub,
@@ -197,6 +203,7 @@ class _HubShellState extends State<HubShell> {
       embedded: true,
       openSession: widget.openSession,
     ),
+    'devices' => DevicesScreen(client: _client, feed: _feed, embedded: true),
     _ => BacklogTab(client: _client, feed: _feed),
   };
 
@@ -220,17 +227,61 @@ class _HubShellState extends State<HubShell> {
     ),
     _ => PhoneDevicesTab(
       client: _client,
-      devices: const Center(child: Text('DEVICES')),
+      devices: DevicesScreen(client: _client, feed: _feed, embedded: true),
     ),
   };
 
   void _go(int i) {
     FocusScope.of(context).unfocus();
-    setState(() => _index = i);
+    _update(() => _index = i);
+  }
+
+  void _update(VoidCallback change) {
+    change();
+    _revision.value++;
   }
 
   @override
   Widget build(BuildContext context) {
+    final available =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom;
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: available.clamp(0, double.infinity) * 0.28,
+            ),
+            child: SingleChildScrollView(
+              child: DeviceApprovalBanner(client: _client, feed: _feed),
+            ),
+          ),
+          Expanded(
+            child: NavigatorPopHandler<void>(
+              onPopWithResult: (_) => _navigation.currentState?.maybePop(),
+              child: Navigator(
+                key: _navigation,
+                onGenerateRoute: (settings) => MaterialPageRoute<void>(
+                  settings: settings,
+                  builder: (_) => ListenableBuilder(
+                    listenable: _revision,
+                    builder: (context, _) => _buildShell(context),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _leaveHub() => Navigator.of(context).maybePop();
+
+  Widget _buildShell(BuildContext context) {
     final t = Tokens.of(context);
     if (usesPhoneShell) return _phoneScaffold(context);
     final wide = MediaQuery.sizeOf(context).width >= phoneBreakpoint;
@@ -238,6 +289,7 @@ class _HubShellState extends State<HubShell> {
     final mm = _clock.minute.toString().padLeft(2, '0');
     return Scaffold(
       appBar: AppBar(
+        leading: BackButton(onPressed: _leaveHub),
         title: Text(widget.hub.name),
         actions: [
           IconButton(
@@ -295,6 +347,7 @@ class _HubShellState extends State<HubShell> {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       appBar: AppBar(
+        leading: BackButton(onPressed: _leaveHub),
         titleSpacing: 0,
         title: Row(
           children: [

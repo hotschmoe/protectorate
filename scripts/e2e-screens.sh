@@ -83,11 +83,11 @@ login_pid=
 credential=$(node -e 'const path = require("node:path"); const hash = require("node:crypto").createHash("sha256").update(process.argv[2]).digest("hex"); process.stdout.write(path.join(process.argv[1], "clients", hash + ".token"));' "$work/client" "$PROTECTORATE_HUB")
 
 shot() {
-  local name=$1 size=$2 url=$3 theme=${4:-light} connected=${5:-false} profile
+  local name=$1 size=$2 url=$3 theme=${4:-light} connected=${5:-false} interaction=${6:-} profile
   [ -z "${E2E_ONLY:-}" ] || [[ $name == $E2E_ONLY ]] || return 0
   profile=$(mktemp -d "$work/chrome.XXXXXX")
   node "$root/scripts/e2e-screens.mjs" "$chromium" "$profile" "$size" "$url" "$theme" \
-    "$out/$name-${size%%,*}${theme/light/}.png" "$PROTECTORATE_HUB" "$credential" "$connected"
+    "$out/$name-${size%%,*}${theme/light/}.png" "$PROTECTORATE_HUB" "$credential" "$connected" "$interaction"
 }
 
 wait_envoy() {
@@ -116,11 +116,19 @@ if [ "${E2E_PHONE:-0}" = 1 ]; then
   wait_envoy CHAT_STATE_IDLE
   "$bin" api call ChatService/Send '{"sleeve":"envoy","text":"How is the hardware doing? Show the check and ask before restarting anything.","requestId":"phone-screenshot-health"}' >"$work/envoy-send.json"
   wait_envoy CHAT_STATE_AWAITING_APPROVAL
+  "$bin" api call DeviceService/StartDeviceAuth '{"name":"new phone","platform":"android"}' >"$work/pending-device.json"
   for size in 360,800 412,860; do
     for theme in light dark; do
       for tab in orchestrator quotas nodes devices; do
-        shot "phone-$tab" "$size" "$web&tab=$tab" "$theme" true
+        if [ "$tab" = nodes ]; then
+          shot "phone-$tab" "$size" "$web&tab=orchestrator" "$theme" true nodes
+        elif [ "$tab" = orchestrator ]; then
+          shot "phone-$tab" "$size" "$web&tab=$tab" "$theme" true draft
+        else
+          shot "phone-$tab" "$size" "$web&tab=$tab" "$theme" true
+        fi
       done
+      shot phone-node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true
     done
   done
 else

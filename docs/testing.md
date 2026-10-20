@@ -55,6 +55,15 @@ establish provider-specific supervised behavior. The default command captures
 the full responsive web shell at 412 and 1280 px. Both commands use private
 hub state and scrub inherited sleeve credentials. `E2E_ONLY` filters captures,
 `E2E_OUT` selects the output directory, and `CHROMIUM` selects the browser.
+Authentication uses a real CLI device login, approval by the temporary hub's
+owner and saved browser profiles injected through Chromium's debugging API.
+No credential appears in the pairing URL and there is no production bypass.
+The hub keeps a shared approval banner above its nested navigator, so pending
+devices remain actionable on tabs, node details and other pushed pages.
+Phone Envoy captures type an unsent draft, switch to NODES and back, and assert
+the editor retained the text. NODES captures use the actual bottom tab button.
+A separate node-detail capture checks the pending device banner on a pushed
+page; the temporary device request stays unapproved during these scenes.
 
 Run `make test-race` to build `bin/protectorate-race` with `-race`, the same
 feature tags, trimpath and version ldflags as `make build`, and run the full
@@ -96,11 +105,9 @@ interleavings, non-Go/uninstrumented helpers and unreachable child output are
 not covered. Runtime and tailnet scenarios still require their documented host
 prerequisites and opt-in lane; skips inside a sleeve do not verify those paths.
 
-Inside a nested sleeve, use a short disk-backed temporary path such as
-`mkdir -p "$HOME/t"` followed by `TMPDIR="$HOME/t" make check`. Long physical
-paths overflow tmux's Unix socket path limit and can report
-`no tmux server running`; symlinks are canonicalized and do not fix it.
-The short path also keeps large SDK fixtures off the sleeve's tmpfs.
+Inside a nested sleeve, use disk-backed temporary storage such as
+`mkdir -p "$HOME/.cache/pt"` followed by `TMPDIR="$HOME/.cache/pt" make check`.
+Runtime helpers keep tmux sockets in separate short private directories.
 
 `PROT_E2E=1 go test ./tests/e2e` also works, building one binary if necessary.
 Supply an absolute `PROT_E2E_BINARY` to avoid that build. This is the single
@@ -264,19 +271,11 @@ on disk, avoiding the nested sandbox's memory-backed `/tmp`.
 The scenario passed in a nested-enabled development sleeve in 15.39 seconds
 with no inner skips; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
 
-Inside a sleeve, use a short physical disk-backed temporary directory such as
-`TMPDIR="$HOME/t"`; long paths can exceed tmux's Unix socket limit, and tmux
-resolves symlinks before creating its socket. If the inherited Flutter SDK
-cache already uses an overlay, the nested runtime suite would add two more
-layers and exceed Linux's filesystem stacking limit. Copy the visible real SDK
-to a fresh directory on disk (for example,
-`cp -a --reflink=auto /path/to/flutter "$HOME/f7"`, with `f7` absent), then run
-with `PATH="$HOME/f7/bin:$HOME/f7/bin/cache/dart-sdk/bin:$PATH"`. The copied
-cache has a flat backing filesystem, so both tested cache overlays remain
-enabled. On this nested sleeve, the explicit `TestBinaryNestedRuntime` passed
-in 9.550s with that setup, including inner ownership, chat, OOM, CPU throttling,
-hidden limits and cleanup; the original inherited-overlay setup failed with
-`bwrap: Can't make overlay mount ... Invalid argument` at the third layer.
+The nested runtime fixture seeds private synthetic SDK/cache lower trees to
+avoid adding a third overlay above the development sleeve's existing caches.
+The selected real bwrap, production binaries, namespace and cgroup checks stay
+unchanged, including actual OOM, CPU throttling, hidden limits and cleanup.
+Its inner run rejects skips; no manual SDK copy or production fallback is used.
 
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
