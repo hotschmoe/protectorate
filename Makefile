@@ -51,7 +51,7 @@ app-check:
 	cd app && flutter analyze && flutter test
 
 app-build-web:
-	cd app && flutter build web $(APP_VERSION_FLAGS) $(APP_FLAGS)
+	cd app && dart run tool/build_web.dart $(APP_VERSION_FLAGS) $(APP_FLAGS)
 
 apk:
 	cd app && flutter build apk $(APP_VERSION_FLAGS) $(APP_FLAGS)
