@@ -2,7 +2,6 @@ package node
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -211,9 +210,9 @@ func (j *Jobs) Prepare(ctx context.Context, req *pb.PrepareJobRequest) (*pb.Prep
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
 		return res, nil
 	}
-	_, err := gitOut(ctx, repo, "cat-file", "-e", req.Commit+"^{commit}")
+	_, err := j.gitOut(ctx, repo, repo, "cat-file", "-e", req.Commit+"^{commit}")
 	res.HasCommit = err == nil
-	out, err := gitOut(ctx, repo, "for-each-ref", "--sort=-committerdate", fmt.Sprintf("--count=%d", knownCommits), "--format=%(objectname)", "refs/pc/")
+	out, err := j.gitOut(ctx, repo, repo, "for-each-ref", "--sort=-committerdate", fmt.Sprintf("--count=%d", knownCommits), "--format=%(objectname)", "refs/pc/")
 	if err == nil {
 		res.KnownCommits = strings.Fields(out)
 	}
@@ -644,44 +643,27 @@ func (j *Jobs) checkout(ctx context.Context, req *pb.RunJobRequest, jobDir strin
 		if err := os.MkdirAll(repo, 0o700); err != nil {
 			return "", false, err
 		}
-		if _, err := gitOut(ctx, repo, "init", "--quiet"); err != nil {
+		if _, err := j.gitOut(ctx, repo, jobDir, "init", "--quiet"); err != nil {
 			return "", false, err
 		}
 	}
 	ref := "refs/pc/" + req.Commit
 	if req.BundleUploaded {
 		bundle := filepath.Join(jobDir, "upload")
-		if _, err := gitOut(ctx, repo, "fetch", "--quiet", bundle, "+"+ref+":"+ref); err != nil {
+		if _, err := j.gitOut(ctx, repo, jobDir, "fetch", "--quiet", bundle, "+"+ref+":"+ref); err != nil {
 			return "", false, err
 		}
 	}
-	if _, err := gitOut(ctx, repo, "cat-file", "-e", req.Commit+"^{commit}"); err != nil {
+	if _, err := j.gitOut(ctx, repo, jobDir, "cat-file", "-e", req.Commit+"^{commit}"); err != nil {
 		return "", false, fmt.Errorf("commit %s is not in the node's cache and no bundle was sent", req.Commit)
 	}
-	if _, err := gitOut(ctx, repo, "update-ref", ref, req.Commit); err != nil {
+	if _, err := j.gitOut(ctx, repo, jobDir, "update-ref", ref, req.Commit); err != nil {
 		return "", false, err
 	}
-	if _, err := gitOut(ctx, repo, "checkout", "--quiet", "--force", "--detach", req.Commit); err != nil {
+	if _, err := j.gitOut(ctx, repo, jobDir, "checkout", "--quiet", "--force", "--detach", req.Commit); err != nil {
 		return "", false, err
 	}
 	return repo, reused, nil
-}
-
-// gitOut runs git with settings that keep checkouts byte-identical across
-// platforms and never prompt.
-func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-c", "gc.auto=0"}, args...)...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return "", errors.New("git is not installed on this node")
-		}
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(errb.String()))
-	}
-	return out.String(), nil
 }
 
 // jobEnvKeys are the variables every job gets besides the requested ones.
