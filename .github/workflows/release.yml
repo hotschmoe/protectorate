@@ -73,6 +73,7 @@ jobs:
           mkdir -p dist
           cp bin/protectorate-* dist/
           tar -czf "dist/protectorate-web-$version.tar.gz" -C app/build/web .
+          printf '%s\n' "$version" > dist/VERSION
           apk=app/build/app/outputs/flutter-apk/app-release.apk
           if [ -f "$apk" ]; then cp "$apk" "dist/protectorate-$version.apk"; fi
           cd dist

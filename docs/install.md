@@ -5,12 +5,16 @@
 On Linux (x86_64, aarch64), as the user that will run the hub; no sudo, nothing is deleted, re-running upgrades:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.3.0/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.4.2/install-hub.sh | bash
 ```
 
-Pass flags with `bash -s -- --listen 0.0.0.0:7470 --public-url http://NAME:7470`; also `--version TAG`, `--home DIR`, `--dry-run` (downloads and verifies into a temporary directory, installs nothing). The script downloads the release's `SHA256SUMS`, the binary for this machine, `protectorate-web-<version>.tar.gz` and the other platforms' builds, and checks each against the sums. It installs `~/.local/bin/protectorate`, the web client into `~/.local/share/protectorate/web-<version>` (with `web` a symlink to it), the other builds into `~/.local/share/protectorate/bin`, writes and enables the `protectorate-hub` systemd user unit (an existing unit is kept as it is), and runs `hub tailnet install`. Missing bwrap, tmux, git or a systemd user manager are listed with the package to install; it installs no system packages. Then it prints the next steps: `hub tailnet init`, `protectorate login <harness>` and, when linger is off, the `enable-linger` hint.
+Pass flags with `bash -s -- --listen 0.0.0.0:7470 --public-url http://NAME:7470`; also `--channel stable|dev`, `--version TAG`, `--release-repo OWNER/REPO`, `--release-dir DIR`, `--home DIR`, `--dry-run` (downloads and verifies into a temporary directory, installs nothing). Stable is the default and installs GitHub's latest non-prerelease; dev installs the rolling `dev` prerelease. An explicit `--version` selects that release tag. The script downloads `SHA256SUMS`, `VERSION`, all five platform binaries and `protectorate-web-<version>.tar.gz`, and verifies every asset against the sums before installing anything.
 
-`hub serve` uses `~/.local/share/protectorate/web` for `--web` and `~/.local/share/protectorate/bin` for `--binary-dir` when they exist and the flag is not given, so ADD NODE and node updates work on a fresh install.
+Releases live in `${XDG_DATA_HOME:-~/.local/share}/protectorate/releases/<version>/`, with binaries, `web/`, the checksummed web archive, `VERSION`, `SHA256SUMS` and `release.json`. `current` is an atomically replaced symlink to the active version; `previous` records the preceding install. The executable is installed atomically as `~/.local/bin/protectorate`, preserving `protectorate.previous` on upgrade. The script writes and enables the `protectorate-hub` systemd user unit, and runs `hub tailnet install`. Missing bwrap, tmux, git or a systemd user manager are listed with the package to install; it installs no system packages. Then it prints the next steps: `hub tailnet init`, `protectorate login <harness>` and, when linger is off, the `enable-linger` hint.
+
+`hub serve` defaults `--binary-dir` to `releases/current` and `--web` to `releases/current/web`, so ADD NODE and node updates use verified releases on a fresh install. `--release-repo` defaults to `hotschmoe/protectorate`; `--update-channel` defaults to `stable`. Explicit `--binary-dir` and `--web` remain development overrides. `--release-dir` changes the release root for both installation and the hub.
+
+When upgrading an existing installation, the installer preserves its systemd unit and prints a migration notice for explicit `--web` or `--binary-dir` flags. Remove those flags from `~/.config/systemd/user/protectorate-hub.service` so the release pointer controls installs and the web app; add `--release-dir` if using a custom root, then run `systemctl --user daemon-reload && systemctl --user restart protectorate-hub`. Old `web-*`, `web`, `bin` and `downloads` paths are left for you to reclaim after reviewing them.
 
 ## Build from source
 
@@ -57,7 +61,7 @@ Relay fallback needs no domain or certificate. The hub runs its own DERP relay (
 A browser cannot install software, so the hub serves a one-line installer and the app hands you the line. The hub needs:
 
 - a tailnet (`hub tailnet init`; the `--server-url` must be reachable from the new machine),
-- the builds for every platform: run `make cross` on the hub box and start the hub with `--binary-dir bin` (its own platform is served from its own executable),
+- the current verified GitHub release (the hub installer prepares it; subsequent hub updates fetch all platform builds),
 - a listen address the new machine can reach, for example `hub serve --listen 0.0.0.0:7470` on the LAN or a reverse proxy in front of it. When machines reach it under another name than you open the app with, pass `--public-url http://NAME:7470`.
 
 New app connections use device approval and cannot issue node enrollment keys. On the hub, run `protectorate --token-file ~/.protectorate/token node invite officepc --url http://HUB:7470` (use your custom home's token path when applicable). Choose a lowercase DNS label for the name, then paste the printed Windows, Linux or Termux command on the new machine. The single-use enrollment key expires after an hour; treat it like a password until used. After enrollment, open the approved app's NODES tab to follow the node and inspect any attention message.
@@ -181,11 +185,12 @@ protectorate job test-cross --goos android --goarch arm64 ./...         # all pa
 
 Not verified on a real phone: Android 11+ restricts netlink for apps (tsnet's interface and route discovery may degrade), `/proc/stat` and `/proc/loadavg` may be unreadable (the node reports a CPU warning and drops the load average rather than failing), and battery optimisation or Doze can kill the process or freeze the network even with the wake lock. A node killed that way is shown unreachable until `node serve` runs again. Once it runs again the hub sees it fresh within a poll or two (the node pings the hub on start); no hub restart is needed. Disable battery optimisation for Termux and keep the Termux notification.
 
-## Update nodes
+## Update the hub and nodes
 
 ```
-make cross                                   # on the hub box: bin/protectorate-<os>-<arch>[.exe]
-protectorate hub serve --binary-dir bin      # where the hub finds those builds (default: the directory of its own executable)
+protectorate hub update                     # fetch and verify the latest release on the configured channel
+protectorate hub update --channel dev       # force the rolling development build
+protectorate hub update --version v0.4.2     # select an explicit release tag
 protectorate node ls                         # VERSION column; (!) marks a node that differs from the hub
 protectorate node update <node>              # or: node update --all [--force]
 ```
@@ -194,13 +199,15 @@ Build with `make build` and `make cross` so installs and updates retain the
 Tailscale feature selection. Runtime profiles and the node's default 128 MiB
 soft Go memory limit are documented in [footprint.md](footprint.md).
 
-Nothing updates by itself. `node update` asks the hub (`NodeService.UpdateNode`, owner-only, also behind the app's "Update node" button), which sends one binary per node over the file transfer (zstd where it shrinks, size and SHA-256 checked): its own executable for nodes of its own OS and architecture, the matching `protectorate-<os>-<arch>` file from its `--binary-dir` for the rest. The hub box therefore needs the `make cross` output (or the CI artifacts) in that directory. The node then:
+The hub checks for releases roughly hourly and on demand, using conditional requests. Nothing updates by itself. The overview reports the current version, available version, channel and release notes; Update hub streams download, verification and restart progress. The hub verifies all fleet assets against the release's `SHA256SUMS` before switching `current`, replaces its executable atomically and restarts through the supervisor or with its original arguments. A failed health check rolls back the executable and release pointer; successful updates retain two releases and prune older managed releases. SHA-256 verification fails closed; release signature verification remains a security-audit item.
+
+`node update` asks the hub (`NodeService.UpdateNode`, also behind the app's node update actions), which sends the matching `protectorate-<os>-<arch>` from its current verified release over the file transfer (zstd where it shrinks, size and SHA-256 checked). After updating the hub, run `node update --all` or use Update N nodes in the app to bring the fleet onto that release. Release updates require the owner or a Full device token. Explicit `--binary-dir` remains available for local development builds. The node then:
 
 1. checks size and SHA-256 again, copies the file next to its own binary and runs `<new> version --json` (it must report the node's OS and architecture);
 2. swaps it in and keeps exactly one previous binary: `protectorate.exe.old` / `protectorate.old` next to it, overwritten by the next update. Linux and Termux copy the old one aside and rename the new one over it atomically; Windows cannot overwrite a running exe, so it renames the running exe to `.old` and puts the new one in place;
 3. answers, shuts down and restarts: `systemctl --user restart` for the unit `node install` wrote, `schtasks /Run` for the Windows logon task (after it exits; the task's restart-on-failure is the fallback), `sv restart` for the Termux service, exit status 75 under a supervisor that restarts on failure (a systemd system unit or Windows service), and otherwise by starting itself again from the same path with the same arguments.
 
-The hub streams the progress (sending, verifying, swapping, restarting) and waits up to 3 minutes until the node reports the new version, or reports that it came back on the old one. The new binary is on trial, recorded in `protectorate.exe.update` next to the binary (a marker file that is rewritten, never deleted): the first hub poll that reaches it confirms the update. If the new binary is started twice without the hub reaching it, or four minutes pass without contact, it puts the `.old` binary back (on Windows the failed one stays as `.failed`) and restarts. A node that has no supervisor and whose new binary dies before running any code stays down; that is why `version --json` is run first. The hub's own node is updated by replacing the hub binary and restarting the hub. Updating is owner-only (the `NodeService.ApplyUpdate` and `UpdateNode` RPCs are not offered to scoped tokens or the MCP bridge).
+The hub streams the progress (sending, verifying, swapping, restarting) and waits up to 3 minutes until the node reports the new version, or reports that it came back on the old one. The new binary is on trial, recorded in `protectorate.exe.update` next to the binary (a marker file that is rewritten, never deleted): the first hub poll that reaches it confirms the update. If the new binary is started twice without the hub reaching it, or four minutes pass without contact, it puts the `.old` binary back (on Windows the failed one stays as `.failed`) and restarts. A node that has no supervisor and whose new binary dies before running any code stays down; that is why `version --json` is run first. The hub's own node is updated through `hub update`.
 
 ## Back up and restore the hub
 
@@ -294,6 +301,6 @@ remain separate from authorizing a client device.
 
 ## Versions
 
-The version is the git tag; nothing else defines it. `make version` prints it (`git describe --tags --always --dirty`), and every build takes it from there: `make build` and `make cross` stamp the Go binaries, `make app-build-web`, `make apk`, `make app-build-linux` and `make app-build-windows` pass `--build-name` (the x.y.z of the nearest tag, `0.0.0` without one), `--build-number` (commits on HEAD, so it only grows; `make version-app` prints `name+number`) and `--dart-define=PROTECTORATE_VERSION=<version>` to Flutter. `app/pubspec.yaml` holds the placeholder `0.0.0+0`, which every build overrides. `make check-version` fails if the placeholder changed or a make target, script or CI workflow builds without those flags; `make check` runs it with the rest of the checks. Tag with `git tag vX.Y.Z` and build from a full clone (CI uses `fetch-depth: 0`).
+The version is derived from release tags; nothing else defines it. `make version` prints it (`git describe --tags --match 'v[0-9]*' --always --dirty`), excluding the moving `dev` tag, and every build takes it from there: `make build` and `make cross` stamp the Go binaries, `make app-build-web`, `make apk`, `make app-build-linux` and `make app-build-windows` pass `--build-name` (the x.y.z of the nearest release tag, `0.0.0` without one), `--build-number` (commits on HEAD, so it only grows; `make version-app` prints `name+number`) and `--dart-define=PROTECTORATE_VERSION=<version>` to Flutter. `app/pubspec.yaml` holds the placeholder `0.0.0+0`, which every build overrides. `make check-version` fails if the placeholder changed or a make target, script or CI workflow builds without those flags; `make check` runs it with the rest of the checks. Tag with `git tag vX.Y.Z` and build from a full clone (CI uses `fetch-depth: 0`).
 
 The app shows its own version in the hub list and the hub's in the overview, and lights VERSION SKEW on the overview when it differs from the hub's or any node's does.

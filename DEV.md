@@ -44,12 +44,14 @@ effects exactly-once or snapshot another harness's native session.
 
 ## Release
 
-The version is the git tag (`make version` prints it); nothing else defines it.
+The version comes from release tags (`make version` prints it); nothing else defines it. `git describe` matches `v[0-9]*`, excluding the rolling `dev` tag.
 
-1. On `dev-hotschmoe`, with all checks passing, set `DEFAULT_VERSION` in `install-hub.sh` and the pinned tag in the README install line to the new tag, and commit.
+1. On `dev-hotschmoe`, with all checks passing, set the pinned tag in the README and docs/install.md install lines to the new tag, and commit. The installer selects the latest stable release by default; `--version` pins the installed release.
 2. `git switch master && git merge --ff-only dev-hotschmoe`
 3. `git tag vX.Y.Z` on master, then `git push origin master vX.Y.Z`.
-4. The `release` workflow (`.github/workflows/release.yml`) runs the checks, builds the five binaries (`protectorate-{linux,windows}-{amd64,arm64}[.exe]`, `protectorate-android-arm64`), `protectorate-web-<version>.tar.gz`, the Android APK when it builds (optional), and `SHA256SUMS`, and publishes them as a GitHub Release. It uses only the default `GITHUB_TOKEN`.
+4. The `release` workflow (`.github/workflows/release.yml`) runs the checks, builds the five binaries (`protectorate-{linux,windows}-{amd64,arm64}[.exe]`, `protectorate-android-arm64`), `protectorate-web-<version>.tar.gz`, the Android APK when it builds (optional), `VERSION` and `SHA256SUMS`, and publishes them as a GitHub Release. It uses only the default `GITHUB_TOKEN`.
+
+Every green push to `dev-hotschmoe` publishes the same required assets to a rolling prerelease tagged `dev`, after race, Go/Flutter checks and Windows desktop build finish. The release name and checksummed `VERSION` asset contain `make version`, never the moving tag. Publication is serialized; a delayed older green build cannot replace a newer published build. Stable uses GitHub's latest non-prerelease and never selects `dev`.
 
 ## Install
 
@@ -59,6 +61,6 @@ Hub (Linux x86_64 or aarch64, per user, no sudo; re-run to upgrade):
 curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/vX.Y.Z/install-hub.sh | bash
 ```
 
-Flags go after `bash -s --`: `--version`, `--listen`, `--public-url`, `--home`, `--dry-run`. It verifies every download against `SHA256SUMS`, installs `~/.local/bin/protectorate`, the web client in `~/.local/share/protectorate/web` and the other platforms' builds in `~/.local/share/protectorate/bin`, writes and enables the `protectorate-hub` user unit, and runs `hub tailnet install`. Missing prerequisites (bwrap, tmux, git, a systemd user manager) are listed with package names, never installed. See `docs/install.md`.
+Flags go after `bash -s --`: `--channel stable|dev`, `--version`, `--release-repo`, `--release-dir`, `--listen`, `--public-url`, `--home`, `--dry-run`. It verifies every download against `SHA256SUMS`, installs `~/.local/bin/protectorate`, and puts all platform binaries and `web/` into `${XDG_DATA_HOME:-~/.local/share}/protectorate/releases/<version>/` with an atomic `current` pointer. It writes and enables the `protectorate-hub` user unit and runs `hub tailnet install`. Existing units are preserved; remove old explicit `--web` and `--binary-dir` paths so they follow `current`. Missing prerequisites (bwrap, tmux, git, a systemd user manager) are listed with package names, never installed. See `docs/install.md`.
 
 Nodes: open the hub's web app, NODES, ADD NODE, and paste the line it shows on the new machine.
