@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/mailbox"
 )
 
 // Command is one runnable CLI command, extracted from the cobra tree.
@@ -100,6 +101,7 @@ func RenderAgents(din DocInput) []byte {
 	w("\nTypical loop: read the notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and update the note.\n\n")
 
 	w("## Coordination\n\n")
+	w("%s\n\n", mailbox.ConciseGuidance)
 	w("After sending a request, end your turn. Replies arrive as a new turn automatically. Never sleep-poll or repeatedly check the inbox. For an explicit blocking workflow, use `protectorate msg wait <message-id|thread> --timeout 10m`.\n\n")
 	w("Do not send progress checks for tasks younger than about 10 minutes. Every brief must state a word limit for replies and use real paths from `protectorate sleeve workspaces`. Tell workers 'no reply needed' when none is needed.\n\n")
 	w("## Your token\n\n")

@@ -525,8 +525,8 @@ The coordinator is hub code, not a sleeve, and decides nothing with a model.
   their dependency edges are derived, refreshed on spawn and every minute.
 - **Mailbox:** an append-only JSONL log. Delivery into a chat-mode sleeve is
   an ordinary user message at its next IDLE through the ChatService send path,
-  carrying the commands to reply and ack, so the harness's prompt cache and
-  AGENTS.md are untouched. Unacked messages are re-delivered once, then
+  carrying concise-mail guidance and commands to reply and ack, so the harness's
+  prompt cache and AGENTS.md are untouched. Unacked messages are re-delivered once, then
   escalated to the orchestrator.
 - **Leases:** an opt-in FIFO queue with a claim window and a grant notice.
 - **Notices:** new tags and default-branch advances are read with local git and

@@ -28,6 +28,8 @@ var (
 	ErrNotRecipient = errors.New("not a recipient of this message")
 )
 
+const ConciseGuidance = "Mail: aim for 150 words; lead with the result or blocker. Include only actionable findings and essential evidence; reference a file, commit or note for details. Do not restate the request or prior context. No acknowledgements unless asked or ack-required; use msg ack when only confirmation is needed."
+
 type Kind string
 
 const (

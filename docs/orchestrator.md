@@ -42,6 +42,14 @@ It never sleep-polls, and sends no progress checks for tasks younger than about
 `protectorate sleeve workspaces`; when no reply is needed, it says "no reply
 needed". Explicit blocking workflows can use `protectorate msg wait
 <message-id|thread> --timeout 10m`, backed by a server-side wait.
+
+Envoy and workers aim for 150-word mail: result or blocker first, actionable
+findings and essential evidence only, with file/commit/note references for
+details. Do not repeat requests or context, or acknowledge unless asked or
+ack-required (`msg ack` suffices for confirmation). This guidance is rendered
+in Envoy's instructions and worker mail delivery; see the
+[mail budget rationale](coordination.md#concise-mail-and-budget).
+
 The app's ENVOY tab (the first one) is a dedicated chat with Envoy and a selector for any other chat-mode sleeve. Watch it with `protectorate chat watch envoy`, and answer its approval requests
 with `chat respond`. There is no terminal mode for Envoy.
 
