@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/message.pb.dart';
@@ -15,7 +14,52 @@ import '../vfd/lamp.dart';
 import 'chat_screen.dart';
 import 'messages_tab.dart';
 
-const orchestratorSpawnCommand = 'protectorate orchestrator spawn';
+// The harnesses Envoy can run on; UNSPECIFIED lets the hub pick by quota.
+const _envoyHarnesses = [
+  Harness.HARNESS_UNSPECIFIED,
+  Harness.HARNESS_CLAUDE,
+  Harness.HARNESS_CODEX,
+  Harness.HARNESS_GROK,
+  Harness.HARNESS_PI,
+];
+
+String _harnessLabel(Harness h) => h == Harness.HARNESS_UNSPECIFIED
+    ? 'auto'
+    : h.name.replaceFirst('HARNESS_', '').toLowerCase();
+
+class _HarnessPicker extends StatelessWidget {
+  const _HarnessPicker({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final Harness value;
+  final void Function(Harness) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    return DropdownButton<Harness>(
+      value: value,
+      underline: const SizedBox.shrink(),
+      onChanged: (v) {
+        if (v != null) onChanged(v);
+      },
+      items: [
+        for (final h in _envoyHarnesses)
+          DropdownMenuItem(
+            key: ValueKey('harness-option-${_harnessLabel(h)}'),
+            value: h,
+            child: Text(
+              _harnessLabel(h).toUpperCase(),
+              style: t.data(t.p.emph),
+            ),
+          ),
+      ],
+    );
+  }
+}
 
 // The always-open chat with the orchestrator. It talks to Envoy unless the
 // owner picks another chat sleeve; terminal sleeves have no chat to show.
@@ -99,6 +143,99 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     }
   }
 
+  Future<void> _startEnvoy(Harness harness) async {
+    await widget.client.sleeves.spawnEnvoy(SpawnEnvoyRequest(harness: harness));
+    await _refresh();
+  }
+
+  void _toast(Object e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+  }
+
+  Future<void> _respawn(Sleeve current) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('RESPAWN ENVOY'),
+        content: const Text(
+          'This stops Envoy and starts a fresh session on the same harness. '
+          'Its conversation is not carried over and the prompt cache has to '
+          'be rebuilt, which costs tokens on the next message.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('respawn-cancel'),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            key: const ValueKey('respawn-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('RESPAWN'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.client.sleeves.spawnEnvoy(
+        SpawnEnvoyRequest(harness: current.harness),
+      );
+      await _refresh();
+    } on Object catch (e) {
+      _toast(e);
+    }
+  }
+
+  Future<void> _resleeve(Sleeve current) async {
+    var to = Harness.HARNESS_UNSPECIFIED;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('RESLEEVE ENVOY'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Moves Envoy to another harness with a handoff summary. The '
+                'new harness starts a new session, so its prompt cache is '
+                'cold on the first message.',
+              ),
+              _HarnessPicker(
+                key: const ValueKey('resleeve-harness'),
+                value: to,
+                onChanged: (h) => setState(() => to = h),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              key: const ValueKey('resleeve-confirm'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('RESLEEVE'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.client.sleeves.resleeveSleeve(
+        ResleeveSleeveRequest(name: current.name, to: to),
+      );
+      await _refresh();
+    } on Object catch (e) {
+      _toast(e);
+    }
+  }
+
   // Envoy first, then the other chat sleeves by name.
   List<Sleeve> get _chatSleeves {
     final out = _sleeves
@@ -163,6 +300,20 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
                   key: ValueKey('${current.name}/${current.harness.value}'),
                   client: widget.client,
                   sleeve: current,
+                  actions: current.name == orchestratorSleeve
+                      ? [
+                          ChatAction(
+                            id: 'respawn',
+                            label: 'RESPAWN',
+                            run: () => _respawn(current!),
+                          ),
+                          ChatAction(
+                            id: 'resleeve',
+                            label: 'RESLEEVE',
+                            run: () => _resleeve(current!),
+                          ),
+                        ]
+                      : const [],
                 )
               : _loading
               ? const SizedBox.shrink()
@@ -170,6 +321,7 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
                   name: widget.selected,
                   error: _error,
                   onRetry: _refresh,
+                  onStart: _startEnvoy,
                 ),
         ),
       ],
@@ -307,20 +459,47 @@ class _Selector extends StatelessWidget {
   }
 }
 
-class _NotRunning extends StatelessWidget {
+class _NotRunning extends StatefulWidget {
   const _NotRunning({
     required this.name,
     required this.error,
     required this.onRetry,
+    required this.onStart,
   });
 
   final String name;
   final Object? error;
   final VoidCallback onRetry;
+  final Future<void> Function(Harness) onStart;
+
+  @override
+  State<_NotRunning> createState() => _NotRunningState();
+}
+
+class _NotRunningState extends State<_NotRunning> {
+  Harness _harness = Harness.HARNESS_UNSPECIFIED;
+  bool _starting = false;
+  Object? _startError;
+
+  Future<void> _start() async {
+    setState(() {
+      _starting = true;
+      _startError = null;
+    });
+    try {
+      await widget.onStart(_harness);
+    } on Object catch (e) {
+      if (mounted) setState(() => _startError = e);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
+    final name = widget.name;
+    final error = widget.error;
     final envoy = name == orchestratorSleeve;
     return Center(
       child: SingleChildScrollView(
@@ -335,7 +514,7 @@ class _NotRunning extends StatelessWidget {
                 error != null
                     ? 'CANNOT LIST SLEEVES'
                     : envoy
-                    ? 'THE ORCHESTRATOR IS NOT RUNNING'
+                    ? 'ENVOY IS NOT RUNNING'
                     : 'SLEEVE ${name.toUpperCase()} IS NOT RUNNING',
                 key: const ValueKey('orchestrator-empty'),
                 style: t.legend(t.p.warn),
@@ -345,36 +524,43 @@ class _NotRunning extends StatelessWidget {
                 Text('$error', style: t.body())
               else if (envoy) ...[
                 Text(
-                  'Envoy is an ordinary chat sleeve named envoy. Start it with the '
-                  'owner token on the hub machine:',
+                  'Envoy is the orchestrator: an ordinary chat sleeve that '
+                  'drives the hub through the CLI. Start it on a harness, or '
+                  'let the hub pick the one with the most spare quota.',
                   style: t.body(),
                 ),
                 const SizedBox(height: Tokens.gap),
                 Row(
                   children: [
-                    Expanded(
-                      child: SelectableText(
-                        orchestratorSpawnCommand,
-                        key: const ValueKey('spawn-command'),
-                        style: t.data(t.p.emph),
-                      ),
+                    Text('HARNESS', style: t.legend()),
+                    const SizedBox(width: Tokens.gapL),
+                    _HarnessPicker(
+                      key: const ValueKey('start-harness'),
+                      value: _harness,
+                      onChanged: (h) => setState(() => _harness = h),
                     ),
-                    IconButton(
-                      key: const ValueKey('copy-spawn-command'),
-                      tooltip: 'Copy command',
-                      icon: const Icon(Icons.copy, size: 18),
-                      onPressed: () => Clipboard.setData(
-                        const ClipboardData(text: orchestratorSpawnCommand),
-                      ),
+                    const Spacer(),
+                    FilledButton(
+                      key: const ValueKey('start-envoy'),
+                      onPressed: _starting ? null : _start,
+                      child: const Text('START ENVOY'),
                     ),
                   ],
                 ),
+                if (_startError != null) ...[
+                  const SizedBox(height: Tokens.gap),
+                  Text(
+                    '$_startError',
+                    key: const ValueKey('start-error'),
+                    style: t.body(t.p.warn),
+                  ),
+                ],
               ] else
                 Text('Pick another sleeve above.', style: t.body()),
               const SizedBox(height: Tokens.gap),
               OutlinedButton(
                 key: const ValueKey('orchestrator-retry'),
-                onPressed: onRetry,
+                onPressed: widget.onRetry,
                 child: const Text('REFRESH'),
               ),
             ],

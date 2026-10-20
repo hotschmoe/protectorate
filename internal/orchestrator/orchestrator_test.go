@@ -76,9 +76,8 @@ func TestDefaultScopesDropDestructive(t *testing.T) {
 
 func fixtureInput() DocInput {
 	return DocInput{
-		Harness: "claude",
-		Hub:     "http://127.0.0.1:7470",
-		Token:   TokenSummary{Name: TokenName, Scopes: []string{"backlog_create_note", "events", "read", "sleeve_spawn_sleeve"}},
+		Hub:   "http://127.0.0.1:7470",
+		Token: TokenSummary{Name: TokenName, Scopes: []string{"backlog_create_note", "events", "read", "sleeve_spawn_sleeve"}},
 		Tools: []Tool{
 			{Name: "sleeve_spawn_sleeve", Description: "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is a directory."},
 			{Name: "sleeve_kill_sleeve", Description: "KillSleeve stops a sleeve.", Destructive: true},
@@ -432,7 +431,12 @@ func TestSpawnContextIsCacheStable(t *testing.T) {
 	changed := opts(home, tools)
 	changed.Harness = "codex"
 	spawn(changed)
+	if string(read("AGENTS.md")) != string(agents) {
+		t.Error("AGENTS.md depends on the harness, so a resleeve or a harness change busts the cache")
+	}
+	changed.Scopes = []string{"read"}
+	spawn(changed)
 	if string(read("AGENTS.md")) == string(agents) {
-		t.Error("AGENTS.md ignored a harness change")
+		t.Error("AGENTS.md ignored a scope change")
 	}
 }

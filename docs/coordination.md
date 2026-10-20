@@ -109,6 +109,18 @@ protectorate msg threads --sleeve api
   grant.
 - A recipient in **terminal mode**, and the owner, get no injection; they read
   `msg inbox`.
+- **Envoy queues.** Envoy is one long conversation, so a notice per turn would
+  keep it busy and keep its cache warm at a price. Messages addressed to it
+  (`orchestrator`) are not injected: their ack timer starts when they are
+  addressed and they wait in a queue (still readable with `msg inbox`). The
+  owner's next message to Envoy, from the app or `chat send`, goes out with
+  the queue prepended as one block (`Mailbox, queued while you were idle (N):`,
+  the messages, then `From the owner:` and the text), and the queued messages
+  count as delivered. Only two things start a turn on their own: the hub's
+  escalation notice, and the re-delivery of an ack-required message that went
+  unacked for the timeout. If Envoy's harness is not running (a hub restart,
+  an exit), such a message resumes its native session, with the same context
+  files and so the same cache prefix; a failed start is retried once a minute.
 - A **project address** resolves to the sleeves working on the project now
   (excluding the sender). With none live the message waits, and a `request`
   also becomes a note tagged with the project (`<sender> asks: ...`, source

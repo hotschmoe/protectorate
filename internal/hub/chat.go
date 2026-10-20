@@ -584,6 +584,10 @@ func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner bool
 	if busy && !sess.Caps().Steer {
 		return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("a turn is running and this harness cannot take a message during one; interrupt it first"))
 	}
+	commit := func() {}
+	if from == ownerName && s.name == sleeve.OrchestratorName && s.m.h.coord != nil {
+		text, commit = s.m.h.coord.rideAlong(text)
+	}
 	sctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	if err := sess.Send(sctx, text); err != nil {
@@ -592,6 +596,7 @@ func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner bool
 		}
 		return 0, connect.NewError(connect.CodeInternal, err)
 	}
+	commit()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seq, err := s.log.Append(&pb.ChatEvent{Body: &pb.ChatEvent_User{User: &pb.UserMessage{Text: text, From: from}}})

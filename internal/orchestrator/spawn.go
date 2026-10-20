@@ -122,7 +122,7 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 		return fail(err)
 	}
 	doc := RenderAgents(DocInput{
-		Harness: res.Harness, Hub: o.HubURL,
+		Hub:      o.HubURL,
 		Token:    TokenSummary{Name: res.Token.Name, Scopes: res.Token.Scopes},
 		Commands: o.Commands, Tools: o.Tools,
 	})

@@ -52,7 +52,6 @@ var Workflow = []struct{ Command, Purpose string }{
 
 // DocInput is everything AGENTS.md is generated from.
 type DocInput struct {
-	Harness  string
 	Hub      string
 	Token    TokenSummary
 	Commands []Command
@@ -82,7 +81,7 @@ func RenderAgents(din DocInput) []byte {
 	w("Put your own standing notes in `NOTES.md` in this directory and read it at the start of a session.\n\n")
 
 	w("## Role\n\n")
-	w("You are running as the %s harness in a sleeve named `envoy`, an isolated sandbox on the hub machine.\n", din.Harness)
+	w("You are running in a sleeve named `envoy`, an isolated sandbox on the hub machine. The hub picks the harness and may move you to another one (a resleeve); this file does not name it, so it stays the same when that happens.\n")
 	w("You oversee the other sleeves (harness sessions in their own workspaces), read subscription quota, pick which harness should do which work, and read and edit the owner's notes (`protectorate backlog ...`).\n\n")
 	w("- Act only through the `protectorate` CLI against the hub at `%s`. Your token is already configured (`PROTECTORATE_TOKEN_FILE`); never print, copy or move it.\n", din.Hub)
 	w("- Use `--json` whenever you parse output.\n")

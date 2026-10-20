@@ -665,3 +665,118 @@ func TestDeskEndedNotice(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvoyMailQueue(t *testing.T) {
+	tests := []struct {
+		name string
+		// run sends something to Envoy and returns the user messages Envoy
+		// should have after one delivery pass.
+		run     func(r *mailRig)
+		restart bool
+		want    int
+		queued  int
+	}{
+		{
+			name: "a note waits", want: 0, queued: 1,
+			run: func(r *mailRig) { r.post(r.as(r.name), "orchestrator", "fyi: build is green") },
+		},
+		{
+			name: "an unacked-so-far request waits", want: 0, queued: 1,
+			run: func(r *mailRig) {
+				r.post(r.as(r.name), "orchestrator", "please look", func(q *pb.MessageServiceSendRequest) { q.AckRequired = proto.Bool(true) })
+			},
+		},
+		{
+			name: "an escalation starts a turn", want: 1, queued: 0,
+			run: func(r *mailRig) {
+				if _, err := r.h.coord.send(hubName, sendArgs{To: sleeve.OrchestratorName, Direct: true, Body: "x never acked", Kind: mailbox.Notice, RequestID: escalationPrefix + "m1"}); err != nil {
+					r.t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "an escalation wakes Envoy after a hub restart", want: 1, queued: 0, restart: true,
+			run: func(r *mailRig) {
+				if _, err := r.h.coord.send(hubName, sendArgs{To: sleeve.OrchestratorName, Direct: true, Body: "x never acked", Kind: mailbox.Notice, RequestID: escalationPrefix + "m2"}); err != nil {
+					r.t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newMailRig(t)
+			r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
+			r.spawnNamed(sleeve.OrchestratorName, pb.SleeveMode_SLEEVE_MODE_CHAT, "")
+			r.waitIdle(sleeve.OrchestratorName)
+			if tt.restart {
+				r.h.chat.remove(sleeve.OrchestratorName)
+			}
+			tt.run(r)
+			r.pass()
+			if tt.want > 0 {
+				r.waitIdle(sleeve.OrchestratorName)
+			}
+			if got := len(r.users(sleeve.OrchestratorName)); got != tt.want {
+				t.Fatalf("user messages after the pass = %d, want %d", got, tt.want)
+			}
+			if got := len(r.h.coord.mail.Queued(sleeve.OrchestratorName)); got != tt.queued {
+				t.Fatalf("queued = %d, want %d", got, tt.queued)
+			}
+		})
+	}
+}
+
+func TestEnvoyQueueRidesAlongWithOwner(t *testing.T) {
+	r := newMailRig(t)
+	r.h.AckTimeout = 30 * time.Minute
+	r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
+	r.spawnNamed(sleeve.OrchestratorName, pb.SleeveMode_SLEEVE_MODE_CHAT, "")
+	r.waitIdle(sleeve.OrchestratorName)
+
+	note := r.post(r.as(r.name), "orchestrator", "fyi: build is green")
+	ask := r.post(r.as(r.name), "orchestrator", "please look", func(q *pb.MessageServiceSendRequest) { q.AckRequired = proto.Bool(true) })
+	r.pass()
+	if n := len(r.users(sleeve.OrchestratorName)); n != 0 {
+		t.Fatalf("queued messages started a turn: %d", n)
+	}
+
+	send := func(text string) {
+		t.Helper()
+		if _, err := r.chat.Send(r.ctx, connect.NewRequest(&pb.SendRequest{Sleeve: sleeve.OrchestratorName, Text: text})); err != nil {
+			t.Fatal(err)
+		}
+		r.waitIdle(sleeve.OrchestratorName)
+	}
+	send("what is going on?")
+	users := r.users(sleeve.OrchestratorName)
+	if len(users) != 1 || users[0].from != "owner" {
+		t.Fatalf("users = %v", users)
+	}
+	text := users[0].text
+	for _, want := range []string{"queued while you were idle (2)", "fyi: build is green", "please look", note.Message.Id, ask.Message.Id} {
+		if !strings.Contains(text, want) {
+			t.Errorf("owner message lacks %q:\n%s", want, text)
+		}
+	}
+	if !strings.HasSuffix(text, "From the owner:\nwhat is going on?") {
+		t.Errorf("owner text is not last:\n%s", text)
+	}
+	if n := len(r.h.coord.mail.Queued(sleeve.OrchestratorName)); n != 0 {
+		t.Fatalf("%d messages still queued after riding along", n)
+	}
+
+	send("and now?")
+	if users := r.users(sleeve.OrchestratorName); len(users) != 2 || strings.Contains(users[1].text, "queued") {
+		t.Fatalf("the block was sent twice: %v", users)
+	}
+
+	// an ack-required message that stays unacked after riding along is
+	// still reminded, and the reminder starts a turn on its own
+	r.clock.advance(31 * time.Minute)
+	r.pass()
+	r.waitIdle(sleeve.OrchestratorName)
+	if users := r.users(sleeve.OrchestratorName); len(users) != 3 || !strings.Contains(users[2].text, "reminder") {
+		t.Fatalf("overdue reminder missing: %v", users)
+	}
+}

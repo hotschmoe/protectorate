@@ -104,7 +104,7 @@ abstract final class SleeveService {
   /// token, mints a new one, writes the token file and the generated context
   /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
   /// is byte-identical across respawns unless the CLI, the tool catalog, the
-  /// hub URL, the harness or the scopes change, so a resumed session keeps its
+  /// hub URL, or the scopes change, so a resumed session keeps its
   /// prompt-cache prefix. Only the owner token may call it, and the token it
   /// mints never holds it.
   static const spawnEnvoy = connect.Spec(

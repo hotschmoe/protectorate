@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/chat.pb.dart';
@@ -153,6 +155,56 @@ class LocalSummaryBadge extends StatelessWidget {
         label: 'LOCAL SUMMARY',
         tone: Tone.warn,
       ),
+    );
+  }
+}
+
+// Whether the provider's prompt cache is still warm, so the owner knows when a
+// message is cheap. Claude reports when the cache runs out.
+class CacheLamp extends StatefulWidget {
+  const CacheLamp({super.key, required this.expires, this.clock});
+
+  final DateTime? expires;
+  final DateTime Function()? clock;
+
+  @override
+  State<CacheLamp> createState() => _CacheLampState();
+}
+
+class _CacheLampState extends State<CacheLamp> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = (widget.clock ?? DateTime.now)();
+    final left = widget.expires?.difference(now);
+    if (left == null || left <= Duration.zero) {
+      return const LampLegend(
+        key: ValueKey('cache-lamp'),
+        label: 'CACHE COLD',
+        tone: Tone.dim,
+        on: false,
+      );
+    }
+    final mins = left.inMinutes;
+    return LampLegend(
+      key: const ValueKey('cache-lamp'),
+      label: 'CACHE WARM ${mins < 1 ? '<1m' : '${mins}m'}',
+      tone: Tone.ok,
     );
   }
 }

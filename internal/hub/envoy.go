@@ -41,6 +41,23 @@ type EnvoyConfig struct {
 // and before Handler or Serve.
 func (h *Hub) SetEnvoy(c EnvoyConfig) { h.envoy = &c }
 
+// StartEnvoyIfMissing starts Envoy on harness when the hub has no record of
+// it. An existing record is left alone, running or not: its next message
+// resumes its session, so a boot never costs a prompt cache by itself.
+func (h *Hub) StartEnvoyIfMissing(ctx context.Context, harness pb.Harness) error {
+	if h.sleeves == nil {
+		return nil
+	}
+	if _, err := h.sleeves.Get(orchestrator.SleeveName); err == nil {
+		return nil
+	}
+	owner := auth.WithPrincipal(ctx, &auth.Principal{Owner: true})
+	if _, err := h.SpawnEnvoy(owner, connect.NewRequest(&pb.SpawnEnvoyRequest{Harness: harness})); err != nil {
+		return fmt.Errorf("start envoy: %w", err)
+	}
+	return nil
+}
+
 type envoyState struct {
 	mu sync.Mutex
 }

@@ -53,7 +53,7 @@ exact prefix, context files included. So the hub keeps that prefix still:
 
 - `AGENTS.md` has no timestamp and says nothing about the token's id or
   expiry. It is byte-identical across respawns unless the CLI, the tool
-  catalog, the hub URL, the harness or the scopes change, and it is not even
+  catalog, the hub URL or the scopes change (the harness is not named, so a resleeve keeps it too), and it is not even
   rewritten (mtime kept) when nothing changed.
 - `hosts.md` changes whenever a node does, so it is never part of the loaded
   context: `AGENTS.md` only mentions it and Envoy reads it on demand. The hub
@@ -137,6 +137,17 @@ holes until it is the hub. Envoy keeps its sandbox and gets only a revocable,
 expiring, audited token; the sandbox holds no harness credentials or SSH keys.
 Envoy can still spend quota by spawning sleeves, so the spawn scope is the thing
 to watch in the audit log.
+
+## Always available
+
+Envoy's record outlives its harness. After a hub restart or a harness exit
+nothing is restarted on a timer: the next owner message, or an escalation,
+reopens the same native session (`--resume`) with the same AGENTS.md, so the
+provider's cache prefix still matches while it is warm. Nothing is compacted
+automatically. `hub serve --start-envoy auto|claude|codex|grok|pi` starts
+Envoy at boot only when the hub has no Envoy at all; it is off by default,
+because starting happens from the app. Low-priority mail waits for the owner's
+next message instead of starting turns ([coordination.md](coordination.md#delivery)).
 
 ## Renaming from Poe
 

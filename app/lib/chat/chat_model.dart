@@ -82,6 +82,7 @@ class ChatTranscript {
   ChatState reported = ChatState.CHAT_STATE_UNSPECIFIED;
   int contextTokens = 0;
   int contextWindow = 0;
+  DateTime? cacheExpires;
 
   Iterable<ApprovalItem> get pendingApprovals =>
       _approvals.values.where((a) => !a.resolved);
@@ -100,6 +101,7 @@ class ChatTranscript {
     reported = s.state;
     contextTokens = s.contextTokens.toInt();
     contextWindow = s.contextWindow.toInt();
+    cacheExpires = s.hasCacheExpiresAt() ? s.cacheExpiresAt.toDateTime() : null;
   }
 
   // The after_seq for the next Watch. Text deltas share their message's seq,
@@ -159,6 +161,9 @@ class ChatTranscript {
       case ChatEvent_Body.usage:
         contextTokens = e.usage.contextTokens.toInt();
         contextWindow = e.usage.contextWindow.toInt();
+        cacheExpires = e.usage.hasCacheExpiresAt()
+            ? e.usage.cacheExpiresAt.toDateTime()
+            : null;
       case ChatEvent_Body.settled:
         break;
       case ChatEvent_Body.compaction:

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../chat/badges.dart';
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
+import '../mail/thread_view.dart' show orchestratorSleeve;
 import '../nodes/node_view.dart';
 import '../theme/tokens.dart';
 import '../vfd/meter.dart';
@@ -136,6 +137,12 @@ class SleeveCard extends StatelessWidget {
                         if (isLocalModel(sleeve)) const LocalModelBadge(),
                         if (summarizedLocally(sleeve))
                           const LocalSummaryBadge(),
+                        if (sleeve.name == orchestratorSleeve)
+                          Text(
+                            'ENVOY',
+                            key: const ValueKey('envoy-badge'),
+                            style: t.legend(t.p.emph),
+                          ),
                         Text(chatMode ? 'CHAT' : 'TERMINAL', style: t.legend()),
                       ],
                     ),
