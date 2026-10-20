@@ -226,7 +226,7 @@ func identify(who whoIsFunc, allowed ...string) func(*http.Request) (string, err
 	return func(r *http.Request) (string, error) {
 		res, err := who(r.Context(), r.RemoteAddr)
 		if err != nil {
-			return "", fmt.Errorf("%w: identify %s: %v", ErrForbidden, r.RemoteAddr, err)
+			return "", fmt.Errorf("%w: identify %s: %w", ErrForbidden, r.RemoteAddr, err)
 		}
 		if res == nil || res.Node == nil {
 			return "", fmt.Errorf("%w: %s is not a tagged node", ErrForbidden, r.RemoteAddr)

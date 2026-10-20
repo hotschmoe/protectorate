@@ -235,7 +235,7 @@ func (winDesk) Windows() ([]Window, error) {
 
 func sendInputs(first unsafe.Pointer, n int, size uintptr) error {
 	if r, _, e := pSendInput.Call(uintptr(n), uintptr(first), size); int(r) != n {
-		return fmt.Errorf("SendInput delivered %d of %d events (the foreground window may belong to a higher-privileged program): %v", r, n, e)
+		return fmt.Errorf("SendInput delivered %d of %d events (the foreground window may belong to a higher-privileged program): %w", r, n, e)
 	}
 	return nil
 }
@@ -349,7 +349,7 @@ func (winDesk) Run(program string, args []string) (uint32, error) {
 	}
 	cmdline, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{path}, args...)))
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrInvalid, err)
+		return 0, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	si := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{}))}
 	var pi windows.ProcessInformation

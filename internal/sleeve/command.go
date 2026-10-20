@@ -94,10 +94,10 @@ func (m *Manager) CatalogOptions() (driver.Options, error) {
 	auth := m.cfg.authDir(Codex)
 	fi, err := os.Stat(auth)
 	if err != nil {
-		return driver.Options{}, fmt.Errorf("Codex auth directory unavailable (run protectorate login codex on the hub): %w", err)
+		return driver.Options{}, fmt.Errorf("codex auth directory unavailable (run protectorate login codex on the hub): %w", err)
 	}
 	if !fi.IsDir() {
-		return driver.Options{}, fmt.Errorf("%w: Codex auth path is not a directory", ErrInvalid)
+		return driver.Options{}, fmt.Errorf("%w: codex auth path is not a directory", ErrInvalid)
 	}
 	codexHome := filepath.Join(m.cfg.UserHome, ".codex")
 	links := append(append([]Link(nil), bin.Symlinks...), Link{Path: filepath.Join(codexHome, "auth.json"), Target: filepath.Join(auth, "auth.json")})
@@ -146,7 +146,7 @@ func (c Config) gitArgv(name, dir string, args []string) ([]string, error) {
 			continue
 		}
 		if err := c.CheckWorkspace(name, d); err != nil {
-			return nil, fmt.Errorf("%w: the repository of %s is at %s, which is not readable: %v", ErrInvalid, dir, d, err)
+			return nil, fmt.Errorf("%w: the repository of %s is at %s, which is not readable: %w", ErrInvalid, dir, d, err)
 		}
 		binds = append(binds, d)
 	}

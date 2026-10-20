@@ -779,7 +779,7 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 		}
 		real, err := filepath.EvalSymlinks(ws)
 		if err != nil {
-			return "", fmt.Errorf("%w: workspace: %v", ErrInvalid, err)
+			return "", fmt.Errorf("%w: workspace: %w", ErrInvalid, err)
 		}
 		if fi, err := os.Stat(real); err != nil || !fi.IsDir() {
 			return "", fmt.Errorf("%w: workspace %s is not a directory", ErrInvalid, real)

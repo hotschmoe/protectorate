@@ -151,7 +151,7 @@ func (s *piSession) Compact(ctx context.Context) (Compaction, error) {
 	if err != nil {
 		s.manualCompact.Store(false)
 		if strings.Contains(err.Error(), "Nothing to compact") {
-			err = fmt.Errorf("%w: %v", ErrNothingToCompact, err)
+			err = fmt.Errorf("%w: %w", ErrNothingToCompact, err)
 		}
 		s.resolveCompact(err)
 		r := <-ch

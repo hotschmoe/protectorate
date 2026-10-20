@@ -86,7 +86,7 @@ func (s *sandbox) trial() error {
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("sandbox trial failed: %v: %s", err, strings.TrimSpace(out.String()))
+		return fmt.Errorf("sandbox trial failed: %w: %s", err, strings.TrimSpace(out.String()))
 	}
 	return nil
 }

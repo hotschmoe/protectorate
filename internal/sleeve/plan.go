@@ -179,7 +179,7 @@ func (c Config) bindChain(p string) (Binary, error) {
 		dir := filepath.Dir(hop)
 		fi, err := os.Lstat(hop)
 		if err != nil {
-			return Binary{}, fmt.Errorf("%w: %s: %v", ErrUnavailable, p, err)
+			return Binary{}, fmt.Errorf("%w: %s: %w", ErrUnavailable, p, err)
 		}
 		isLink := fi.Mode()&os.ModeSymlink != 0
 		switch {
@@ -191,7 +191,7 @@ func (c Config) bindChain(p string) (Binary, error) {
 		case isLink:
 			t, err := os.Readlink(hop)
 			if err != nil {
-				return Binary{}, fmt.Errorf("%w: %s: %v", ErrUnavailable, p, err)
+				return Binary{}, fmt.Errorf("%w: %s: %w", ErrUnavailable, p, err)
 			}
 			b.Symlinks = append(b.Symlinks, Link{Path: hop, Target: t})
 		default:
@@ -205,7 +205,7 @@ func (c Config) bindChain(p string) (Binary, error) {
 		}
 		t, err := os.Readlink(hop)
 		if err != nil {
-			return Binary{}, fmt.Errorf("%w: %s: %v", ErrUnavailable, p, err)
+			return Binary{}, fmt.Errorf("%w: %s: %w", ErrUnavailable, p, err)
 		}
 		if !filepath.IsAbs(t) {
 			t = filepath.Join(dir, t)
