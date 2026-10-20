@@ -125,8 +125,8 @@ func TestSleeveIdleReapHTTP(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); r.h.coord.Run(ctx) }()
 	t.Cleanup(func() { cancel(); <-done })
-	waitFor(t, "idle sleeve removal", func() bool {
-		_, err := r.sl.GetSleeve(r.ctx, connect.NewRequest(&pb.GetSleeveRequest{Name: r.name}))
-		return connect.CodeOf(err) == connect.CodeNotFound
+	waitFor(t, "idle sleeve stopped with retained disk record", func() bool {
+		res, err := r.sl.GetSleeve(r.ctx, connect.NewRequest(&pb.GetSleeveRequest{Name: r.name}))
+		return err == nil && res.Msg.Sleeve.Killed && res.Msg.Sleeve.State == pb.SleeveState_SLEEVE_STATE_EXITED
 	})
 }

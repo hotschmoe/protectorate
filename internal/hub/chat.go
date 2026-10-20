@@ -101,6 +101,9 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	if err != nil {
 		return nil, sleeveErr(err)
 	}
+	if info.Killed {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s was killed; respawn it before opening chat", name))
+	}
 	if info.Mode != sleeve.ModeChat {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s runs in terminal mode, which has no chat", name))
 	}

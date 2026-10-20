@@ -120,8 +120,8 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   }
 
   /// KillSleeve stops a sleeve's harness and every process in its sandbox and
-  /// forgets the sleeve. The workspace and the sleeve's home directory are kept
-  /// on disk.
+  /// retains its exited record. The workspace and the sleeve's home directory
+  /// are kept on disk unless drop_caches removes regenerable caches.
   Future<protectoratev1sleeve.KillSleeveResponse> killSleeve(
     protectoratev1sleeve.KillSleeveRequest input, {
     connect.Headers? headers,
@@ -192,6 +192,24 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.SleeveService.spawnEnvoy,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// PruneSleeves inventories disk and removes eligible data only with yes.
+  Future<protectoratev1sleeve.PruneSleevesResponse> pruneSleeves(
+    protectoratev1sleeve.PruneSleevesRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.pruneSleeves,
       input,
       signal: signal,
       headers: headers,

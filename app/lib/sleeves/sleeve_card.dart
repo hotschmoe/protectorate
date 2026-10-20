@@ -177,6 +177,10 @@ class SleeveCard extends StatelessWidget {
                         width: null,
                       ),
                     ],
+                    Text(
+                      'home ${formatBytes(u.homeDiskBytes.toInt())}  cache ${formatBytes(u.cacheDiskBytes.toInt())}  rest ${formatBytes((u.homeDiskBytes - u.cacheDiskBytes).toInt())}  Go ${formatBytes(u.goBuildCacheDiskBytes.toInt())}',
+                      style: t.small(),
+                    ),
                     if (running) ...[
                       const SizedBox(height: 4),
                       MeterRow(

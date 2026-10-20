@@ -50,7 +50,7 @@ protectorate hub serve            # the engine, runs as a systemd service on the
 protectorate node serve           # node agent on any machine (joins the tailnet)
 protectorate node join <token>    # enroll a machine
 protectorate quota                # every other subcommand is a CLI client of the hub API
-protectorate sleeve ls|workspaces|browse|spawn|show|kill
+protectorate sleeve ls|workspaces|browse|spawn|show|kill|prune
 protectorate session ls|new|attach|capture|respawn|kill
 protectorate api call <Method> '<json>'   # generic escape hatch
 ```
@@ -340,6 +340,16 @@ Design:
 - `--exit-after-idle <duration>` removes a chat sleeve through the normal kill
   path after continuous IDLE with no pending or queued mail. It defaults off,
   resets on activity or pending mail, and preserves the workspace and home.
+- Kill retains an exited record (`killed`) for disk visibility; respawn
+  replaces it. The existing five-minute disk sampler measures homes as well
+  as workspaces, including killed and pre-upgrade leftover homes. Home usage
+  separates allowlisted regenerable caches from persistent harness data.
+  Owner-only, audited `sleeve prune` inventories homes and hub clones, with
+  deletion requiring `--yes`; `sleeve kill --drop-caches` removes only caches
+  after stopping. Running sleeves and their mounts are always kept. Clone
+  deletion requires clean staged/worktree/untracked state and all local tips
+  verified against a timed origin fetch. Git runs only against trusted
+  temporary metadata, never agent-written config. See [disk](docs/sleeves.md#disk).
 - Known gap: bwrap shares the host network, so two sleeves' dev servers can
   collide on ports. Docker covers per-sleeve networking if that becomes a hard
   requirement.

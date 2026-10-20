@@ -256,14 +256,14 @@ func TestSleeveLifecycle(t *testing.T) {
 		if _, err := r.sess.Get(ctx, SessionName(n)); !errors.Is(err, session.ErrNotFound) {
 			t.Errorf("session %s after kill: %v", n, err)
 		}
-		if _, err := r.m.Get(n); !errors.Is(err, ErrNotFound) {
-			t.Errorf("get after kill: %v", err)
+		if info, err := r.m.Get(n); err != nil || !info.Killed || info.State != Exited {
+			t.Errorf("get after kill: %+v, %v", info, err)
 		}
 	}
 	if _, err := os.Stat(aWS); err != nil {
 		t.Errorf("workspace gone after kill: %v", err)
 	}
-	if err := r.m.Kill(ctx, aName); !errors.Is(err, ErrNotFound) {
+	if err := r.m.Kill(ctx, aName); err != nil {
 		t.Errorf("second kill = %v", err)
 	}
 }
@@ -419,7 +419,7 @@ func TestKillRestoresRecordWhenSaveFails(t *testing.T) {
 	if err := r.m.Kill(context.Background(), info.Name); err != nil {
 		t.Fatalf("second Kill: %v", err)
 	}
-	if _, err := r.m.Get(info.Name); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get after Kill = %v", err)
+	if got, err := r.m.Get(info.Name); err != nil || !got.Killed || got.State != Exited {
+		t.Fatalf("Get after Kill = %+v, %v", got, err)
 	}
 }
