@@ -4,6 +4,7 @@ package sleeve
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -101,8 +102,7 @@ type Config struct {
 	ToolDirs []string // existing directories bound read-only at the same path
 	PathDirs []string // directories searched for harnesses and used as $PATH
 	TasksMax int
-	// UnitPrefix starts every scope name. Tests set their own so a real hub on
-	// the same user manager never sees their scopes.
+	// UnitPrefix isolates scopes belonging to the resolved state home.
 	UnitPrefix string
 	// CgroupRoot is the cgroup directory that holds the user's scopes.
 	CgroupRoot string
@@ -160,11 +160,23 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	if uh, err = filepath.EvalSymlinks(uh); err != nil {
 		return Config{}, fmt.Errorf("resolve user home: %w", err)
 	}
+	home, err = filepath.Abs(home)
+	if err != nil {
+		return Config{}, fmt.Errorf("make state directory absolute: %w", err)
+	}
 	home, err = filepath.EvalSymlinks(home)
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve state directory: %w", err)
 	}
 	c := Config{Home: home, UserHome: uh, TasksMax: 4096, UnitPrefix: DefaultUnitPrefix}
+	defaultHome := filepath.Join(uh, ".protectorate")
+	if resolved, err := filepath.EvalSymlinks(defaultHome); err == nil {
+		defaultHome = resolved
+	}
+	if home != defaultHome {
+		sum := sha256.Sum256([]byte(home))
+		c.UnitPrefix = fmt.Sprintf("prot-%x-sleeve-", sum[:6])
+	}
 	for _, d := range credentialDirs {
 		if r, err := filepath.EvalSymlinks(filepath.Join(uh, d)); err == nil {
 			c.Protected = append(c.Protected, r)

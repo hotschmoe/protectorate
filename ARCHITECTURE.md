@@ -619,3 +619,17 @@ spikes/                  # experiments; each has a README with findings
 | 2 | Docker vs bubblewrap vs systemd-run vs Firecracker: startup time, overhead, PID isolation, limits, ergonomics | Sleeve runtime |
 | 3 | Per CLI, how is the credential stored and written? Does sharing it survive the CLI's save pattern? | Credential sharing |
 | 4 | Connect-RPC vs plain JSON-RPC: friction for Go, Dart and MCP | API style (sanity check) |
+
+## Sleeve scope namespaces
+
+The default resolved `~/.protectorate` home retains `prot-sleeve-<name>`
+scopes. Every other resolved state home uses
+`prot-<first 12 hex SHA-256 digits of home>-sleeve-<name>`. Symlink aliases
+share a namespace; independent homes cannot discover, adopt or kill each
+other's scopes. The custom prefix does not start with the default prefix,
+so the default hub also ignores custom-home scopes.
+
+Before upgrading a hub using a custom state home, stop its sleeves through
+that hub's existing CLI (`PROTECTORATE_HOME=/path/to/custom-home protectorate --hub URL sleeve kill NAME` for each
+running sleeve), then restart the upgraded hub and respawn those sleeves.
+The default home needs no migration. Do not rename live systemd scopes.
