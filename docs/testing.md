@@ -63,6 +63,8 @@ skips them. `TestBinaryNestedRuntime` starts a real nested-enabled sleeve and
 runs the selected production binary's runtime scenarios inside it, failing if
 the inner run skips. It also verifies actual memory OOM, CPU throttling, hidden
 parent state, persisted opt-in, unchanged outer limits and cgroup cleanup.
+Private test homes retain the selected bwrap binary, and the nested scenario
+asserts its version so a newer user-installed bwrap reaches the inner runtime.
 This host e2e remains unverified in the original non-delegated development
 sleeve; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
 

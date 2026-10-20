@@ -162,3 +162,14 @@ Design references: [systemd cgroup delegation](https://systemd.io/CGROUP_DELEGAT
 and [bwrap 0.8 namespace options](https://github.com/containers/bubblewrap/blob/v0.8.0/bubblewrap.c).
 The namespace probes in the original non-delegated development sleeve passed
 with bwrap 0.8.0; the writable cgroup path must be verified by the host e2e.
+
+The follow-up probes also passed with bwrap 0.13.1 selected from PATH inside
+that same sleeve: nested user, PID and cgroup namespaces, tmux, and two stacked
+`--tmp-overlay` layers. Child overlay writes stayed out of the parent layer,
+and parent writes stayed out of the original lower directory. No relaxed
+security flags were needed. These overlay capabilities do not supply cgroup
+delegation; the hidden ancestor limits and private subtree remain necessary.
+The binary e2e harness copies the selected bwrap into each private HOME and
+checks its version inside the nested sleeve, so a user-installed binary is
+not replaced silently by the system binary. See the
+[bwrap 0.13.1 implementation](https://github.com/containers/bubblewrap/blob/v0.13.1/bubblewrap.c).

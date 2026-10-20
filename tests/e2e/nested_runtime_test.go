@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,6 +24,10 @@ func TestBinaryNestedRuntime(t *testing.T) {
 		return
 	}
 	workspace := filepath.Join(c.root, "nested-project")
+	selectedVersion, err := exec.CommandContext(c.ctx, "bwrap", "--version").Output()
+	if err != nil {
+		t.Fatalf("read selected bwrap version: %v", err)
+	}
 	if err := os.Mkdir(workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +55,7 @@ func TestBinaryNestedRuntime(t *testing.T) {
 	}
 	script := `
 set +e
+bwrap --version > nested.bwrap-version
 env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN PROT_E2E=1 PROT_E2E_NESTED_CHILD=1 PROT_E2E_BINARY="$PWD/protectorate" ./runtime.test -test.run '^TestBinaryNestedRuntime$' -test.v > nested.log 2>&1
 status=$?
 printf '%s\n' "$status" > nested.status
@@ -86,6 +92,9 @@ exec sleep 600
 		}
 		t.Logf("runtime suite inside nested sleeve:\n%s", log)
 		break
+	}
+	if actual, err := os.ReadFile(filepath.Join(workspace, "nested.bwrap-version")); err != nil || strings.TrimSpace(string(actual)) != strings.TrimSpace(string(selectedVersion)) {
+		t.Fatalf("nested bwrap changed: selected=%s actual=%s error=%v", selectedVersion, actual, err)
 	}
 	cfg, err := sleeve.DefaultConfig(c.home, []string{})
 	if err != nil {
