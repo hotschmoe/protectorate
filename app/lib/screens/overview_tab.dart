@@ -124,6 +124,23 @@ class _OverviewTabState extends State<OverviewTab> {
     }
   }
 
+  void _openQuota() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Quota')),
+          body: SafeArea(
+            child: QuotaTab(
+              client: widget.client,
+              feed: widget.feed,
+              now: widget.now,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _open(NodeStatus s) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -179,7 +196,19 @@ class _OverviewTabState extends State<OverviewTab> {
         );
         final quota = Panel(
           legend: 'SUBSCRIPTIONS',
-          child: _QuotaSummary(quotas: quotas, error: _quotaError, now: _now()),
+          child: Semantics(
+            button: true,
+            label: 'Open quota',
+            child: InkWell(
+              key: const ValueKey('open-quota'),
+              onTap: _openQuota,
+              child: _QuotaSummary(
+                quotas: quotas,
+                error: _quotaError,
+                now: _now(),
+              ),
+            ),
+          ),
         );
         final events = _EventLog(feed: _feed);
         Widget column(List<Widget> ws) => Column(

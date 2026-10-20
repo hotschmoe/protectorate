@@ -13,13 +13,13 @@ void main() {
     test('web fragment link', () {
       final r = parsePairing(
         Uri.parse(
-          'https://hub.example:7470/#/pair?name=my%20hub%26&token=t0k&tab=quota',
+          'https://hub.example:7470/#/pair?name=my%20hub%26&token=t0k&tab=notes',
         ),
       )!;
       expect(r.baseUrl, 'https://hub.example:7470');
       expect(r.name, 'my hub&');
       expect(r.token, 't0k');
-      expect(r.tab, 'quota');
+      expect(r.tab, 'notes');
       expect(r.autoConfirm, isFalse);
     });
 

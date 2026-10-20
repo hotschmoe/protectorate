@@ -1284,14 +1284,7 @@ void main() {
       final phone = w == 412;
       final size = Size(w.toDouble(), phone ? 1200 : 860);
 
-      for (final tab in [
-        'overview',
-        'nodes',
-        'quota',
-        'sleeves',
-        'messages',
-        'backlog',
-      ]) {
+      for (final tab in ['overview', 'sleeves', 'nodes', 'notes', 'mail']) {
         testWidgets('$tab $tag', (tester) async {
           tester.view.physicalSize = size;
           tester.view.devicePixelRatio = 1;
@@ -1312,7 +1305,7 @@ void main() {
         final events = StreamController<Event>.broadcast();
         addTearDown(events.close);
         final key = GlobalKey();
-        await _pumpShell(tester, key, b, 'backlog', events);
+        await _pumpShell(tester, key, b, 'notes', events);
         await tester.tap(find.byKey(const ValueKey('note-a2')));
         await tester.pump(const Duration(milliseconds: 100));
         await tester.pump(const Duration(milliseconds: 800));
@@ -1327,7 +1320,7 @@ void main() {
         final events = StreamController<Event>.broadcast();
         addTearDown(events.close);
         final key = GlobalKey();
-        await _pumpShell(tester, key, b, 'messages', events);
+        await _pumpShell(tester, key, b, 'mail', events);
         await tester.tap(find.byKey(const ValueKey('thread-row-t14')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));

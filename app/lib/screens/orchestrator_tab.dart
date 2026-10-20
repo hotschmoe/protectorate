@@ -4,13 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../gen/protectorate/v1/chat.pb.dart';
+import '../gen/protectorate/v1/message.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../mail/thread_view.dart';
 import '../sleeves/sleeve_info.dart';
 import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
 import 'chat_screen.dart';
+import 'messages_tab.dart';
 
 const orchestratorSpawnCommand = 'protectorate orchestrator spawn';
 
@@ -23,12 +26,16 @@ class OrchestratorTab extends StatefulWidget {
     required this.feed,
     required this.selected,
     required this.onSelect,
+    required this.mail,
+    required this.onMail,
   });
 
   final HubClient client;
   final EventFeed feed;
   final String selected;
   final void Function(String name) onSelect;
+  final bool mail;
+  final void Function(bool mail) onMail;
 
   @override
   State<OrchestratorTab> createState() => _OrchestratorTabState();
@@ -40,21 +47,29 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
   bool _loading = true;
   StreamSubscription<dynamic>? _sub;
   Timer? _poll;
+  Timer? _mailDebounce;
+  int _unread = 0;
 
   @override
   void initState() {
     super.initState();
     _sub = widget.feed.incoming.listen((e) {
       if (e.kind.startsWith('sleeve.')) _refresh();
+      if (isMailEvent(e)) {
+        _mailDebounce?.cancel();
+        _mailDebounce = Timer(const Duration(milliseconds: 300), _refreshMail);
+      }
     });
     _poll = Timer.periodic(const Duration(seconds: 10), (_) => _refresh());
     _refresh();
+    _refreshMail();
   }
 
   @override
   void dispose() {
     _sub?.cancel();
     _poll?.cancel();
+    _mailDebounce?.cancel();
     super.dispose();
   }
 
@@ -74,6 +89,16 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     }
   }
 
+  Future<void> _refreshMail() async {
+    try {
+      final r = await widget.client.messages.listThreads(ListThreadsRequest());
+      final n = r.threads.fold<int>(0, (n, th) => n + th.unread);
+      if (mounted) setState(() => _unread = n);
+    } on Object {
+      return;
+    }
+  }
+
   // Poe first, then the other chat sleeves by name.
   List<Sleeve> get _chatSleeves {
     final out = _sleeves
@@ -89,6 +114,27 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ModeSwitch(
+          mail: widget.mail,
+          unread: _unread,
+          onChanged: (m) {
+            widget.onMail(m);
+            if (!m) _refreshMail();
+          },
+        ),
+        Expanded(
+          child: widget.mail
+              ? MessagesTab(client: widget.client, feed: widget.feed)
+              : _chat(context),
+        ),
+      ],
+    );
+  }
+
+  Widget _chat(BuildContext context) {
     final chat = _chatSleeves;
     Sleeve? current;
     for (final s in chat) {
@@ -127,6 +173,71 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _ModeSwitch extends StatelessWidget {
+  const _ModeSwitch({
+    required this.mail,
+    required this.unread,
+    required this.onChanged,
+  });
+
+  final bool mail;
+  final int unread;
+  final void Function(bool mail) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Tokens.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Tokens.gapL,
+        vertical: Tokens.gap,
+      ),
+      decoration: BoxDecoration(
+        color: t.p.frame,
+        border: Border(bottom: BorderSide(color: t.p.bezel)),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: Tokens.contentMaxWidth),
+          child: Row(
+            children: [
+              SegmentedButton<bool>(
+                key: const ValueKey('mode-switch'),
+                showSelectedIcon: false,
+                segments: [
+                  const ButtonSegment(
+                    value: false,
+                    label: Text('CHAT', key: ValueKey('mode-chat')),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('MAIL', key: ValueKey('mode-mail')),
+                        if (unread > 0) ...[
+                          const SizedBox(width: 8),
+                          LampLegend(
+                            key: const ValueKey('mail-unread'),
+                            label: '$unread',
+                            tone: Tone.info,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+                selected: {mail},
+                onSelectionChanged: (v) => onChanged(v.first),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
