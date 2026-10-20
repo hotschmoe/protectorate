@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var cacheDirs = []string{".cache/go-build", ".cache/go-mod", ".cache/pub", ".cache/flutter"}
+var cacheDirs = []string{".cache/go-build", ".cache/go-mod", ".cache/pub", ".cache/flutter", ".cache/overlays"}
 
 func (m *Manager) discoverHomes() {
 	if dirs, err := os.ReadDir(filepath.Join(m.cfg.Home, "sleeves")); err == nil {
@@ -54,7 +54,7 @@ func homeSize(ctx context.Context, home string) (total, caches, goBuild uint64, 
 		for _, cache := range cacheDirs {
 			if rel == cache || strings.HasPrefix(rel, cache+string(filepath.Separator)) {
 				caches += n
-				if cache == cacheDirs[0] {
+				if cache == cacheDirs[0] || within(rel, ".cache/overlays/go-build") {
 					goBuild += n
 				}
 				break

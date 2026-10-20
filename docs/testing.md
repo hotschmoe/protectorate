@@ -101,7 +101,10 @@ It verifies home/cache/rest accounting, text and JSON dry runs, cache-only
 cleanup, whole-home cleanup, owner-only cache dropping and audit records.
 Clean published clones are removed; unpublished branches, staged work,
 untracked files and edits hidden by assume-unchanged are kept. Running homes,
-owner workspaces and auth/session/config files survive cache cleanup. Clone
+owner workspaces and auth/session/config files survive cache cleanup. Overlay
+upper/work bytes count as cache usage, with Go overlay bytes included in the
+Go total; prune and kill remove sleeve overlays while preserving host lower
+directories, even when linked from an overlay upper directory. Clone
 and origin fsmonitor/filter/upload-pack programs must never execute.
 
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
@@ -199,7 +202,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
-| tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache cleanup, running-data protection and owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
+| tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache/overlay cleanup, host-lower and running-data protection, owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
 
 ## Deleted files
 

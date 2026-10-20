@@ -78,9 +78,19 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 		git("-C", path, "config", "diff.trap.command", "touch "+marker)
 	}
 	home := func(name string) string { return filepath.Join(c.home, "sleeves", name, "home") }
+	lower := filepath.Join(c.root, "host-cache-lower")
+	write(filepath.Join(lower, "valuable"), "keep host cache lower")
 	for _, name := range []string{"stopped", "active", "leftover", "drop"} {
 		for _, cache := range []string{"go-build", "go-mod", "pub", "flutter"} {
 			write(filepath.Join(home(name), ".cache", cache, "data"), "cache data")
+		}
+		for _, cache := range []string{"flutter", "pub-hosted", "pub-hosted-hashes", "pub-git", "pub-global_packages", "go-build"} {
+			for _, part := range []string{"upper", "work"} {
+				write(filepath.Join(home(name), ".cache", "overlays", cache, part, "data"), "overlay data")
+			}
+		}
+		if err := os.Symlink(lower, filepath.Join(home(name), ".cache", "overlays", "go-build", "upper", "host-lower")); err != nil {
+			t.Fatal(err)
 		}
 		write(filepath.Join(home(name), ".codex", "sessions", "history"), "keep session")
 		write(filepath.Join(home(name), ".codex", "auth.json"), "keep auth")
@@ -117,7 +127,7 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 		return protojson.Unmarshal([]byte(out), &stopped) == nil && stopped.GetSleeve().GetUsage().GetHomeDiskBytes() > 0
 	})
 	u := stopped.Sleeve.Usage
-	if !stopped.Sleeve.Killed || u.CacheDiskBytes != 40 || u.GoBuildCacheDiskBytes != 10 || u.HomeDiskBytes-u.CacheDiskBytes != 32 {
+	if !stopped.Sleeve.Killed || u.CacheDiskBytes != 184 || u.GoBuildCacheDiskBytes != 34 || u.HomeDiskBytes-u.CacheDiskBytes != 32 {
 		t.Fatalf("killed home/cache/rest accounting: %v", &stopped)
 	}
 	c.rejectedCLI("killed", "chat", "send", "stopped", "must not restart a killed sleeve")
@@ -144,9 +154,13 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 		}
 	}
 	dry := prune("--caches", "--workspaces", "--running")
+	overlays := false
 	for _, row := range dry.Entries {
 		if row.Removed {
 			t.Fatalf("dry run removed data: %v", row)
+		}
+		if row.Path == filepath.Join(home("stopped"), ".cache", "overlays") {
+			overlays = row.Kind == "cache" && row.Eligible && row.Bytes == 144
 		}
 		if row.Kind == "workspace" {
 			want := row.Sleeve == "clean" || row.Sleeve == "local-source"
@@ -155,11 +169,15 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 			}
 		}
 	}
+	if !overlays {
+		t.Fatalf("dry run did not select only sleeve overlay bytes: %v", dry)
+	}
 	if out := c.cli("sleeve", "prune", "--caches", "--workspaces"); !strings.Contains(out, "would remove") || !strings.Contains(out, "unpushed") || !strings.Contains(out, "Dry run") {
 		t.Fatalf("dry-run decisions: %s", out)
 	}
 	assertExists(clean, true)
 	assertExists(filepath.Join(home("stopped"), ".cache", "go-build", "data"), true)
+	assertExists(filepath.Join(home("stopped"), ".cache", "overlays", "go-build", "upper", "data"), true)
 	owner := c.token
 	c.token = c.call("TokenService", "CreateToken", map[string]any{"name": "sleeve:active", "scopes": []string{"read", "sleeve_*"}})["secret"].(string)
 	for _, request := range []struct {
@@ -176,20 +194,25 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 	c.token = owner
 	c.cli("sleeve", "kill", "drop", "--drop-caches")
 	assertExists(filepath.Join(home("drop"), ".cache", "go-build"), false)
+	assertExists(filepath.Join(home("drop"), ".cache", "overlays"), false)
+	assertExists(filepath.Join(lower, "valuable"), true)
 	assertExists(filepath.Join(home("drop"), ".codex", "sessions", "history"), true)
 	prune("--caches", "--workspaces", "--running", "--yes")
-	for _, path := range []string{clean, local, filepath.Join(home("stopped"), ".cache", "go-mod"), filepath.Join(home("leftover"), ".cache", "pub")} {
+	for _, path := range []string{clean, local, filepath.Join(home("stopped"), ".cache", "go-mod"), filepath.Join(home("leftover"), ".cache", "pub"), filepath.Join(home("stopped"), ".cache", "overlays"), filepath.Join(home("leftover"), ".cache", "overlays")} {
 		assertExists(path, false)
 	}
 	for _, path := range []string{unpushed, dirty, untracked, staged, mounted, filepath.Join(outside, "valuable"), filepath.Join(outside, "go-build", "valuable"), filepath.Join(home("active"), ".cache", "go-build", "data"), filepath.Join(home("stopped"), ".codex", "auth.json"), filepath.Join(home("stopped"), ".codex", "sessions", "history"), filepath.Join(home("stopped"), ".config", "settings")} {
 		assertExists(path, true)
 	}
 	assertExists(marker, false)
+	assertExists(filepath.Join(home("active"), ".cache", "overlays", "go-build", "upper", "data"), true)
+	assertExists(filepath.Join(lower, "valuable"), true)
 	prune("--homes", "--yes")
 	assertExists(home("stopped"), false)
 	assertExists(home("leftover"), false)
 	assertExists(home("active"), true)
 	assertExists(filepath.Join(outside, "go-build", "valuable"), true)
+	assertExists(filepath.Join(lower, "valuable"), true)
 	audit := c.cli("audit", "tail", "--json")
 	ok := map[string]bool{}
 	for _, line := range strings.Split(strings.TrimSpace(audit), "\n") {

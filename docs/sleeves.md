@@ -107,8 +107,12 @@ until respawn. Old leftover homes without records appear as killed sleeves
 with unknown harness/workspace. Unknown cache directories count as remaining
 data, never as safe-to-drop caches.
 
-The cache allowlist is `$HOME/.cache/go-build`, `.cache/go-mod`, `.cache/pub`
-and `.cache/flutter` (the copied Flutter `bin/cache`). Harness auth, sessions,
+The cache allowlist is `$HOME/.cache/go-build`, `.cache/go-mod`, `.cache/pub`,
+`.cache/flutter` (the copied Flutter `bin/cache`) and `.cache/overlays`.
+Overlay bytes include each cache's sleeve-local `upper` and `work` directories;
+`.cache/overlays/go-build` also contributes to the Go build cache total. Host
+lower directories are outside the allowlist and are never followed through
+symlinks during accounting or cleanup. Harness auth, sessions,
 history and config are preserved by cache cleanup. No harness cache directory
 is currently declared safe to drop. Shared provider credentials are outside
 these homes and are never candidates. Downloaded modules may be read-only;
