@@ -14,6 +14,13 @@ import (
 )
 
 const protocolPeer = `#!/bin/sh
+if [ -n "$PROTECTORATE_E2E_BASE" ]; then
+ git fetch base 2>/dev/null || exit 11
+ if (printf denied > "$PROTECTORATE_E2E_BASE/.git/write-probe") 2>/dev/null; then exit 12; fi
+ test ! -s "$PROTECTORATE_E2E_BASE/.git/config" || exit 13
+ test ! -e "$PROTECTORATE_E2E_BASE/tracked" || exit 14
+ printf 'fetched read-only base' > dispatch-proof
+fi
 sid=e2e-session
 previous=
 for arg in "$@"; do

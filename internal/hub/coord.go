@@ -35,6 +35,7 @@ type coordinator struct {
 	passMu sync.Mutex
 	// envoyNext is when a stopped Envoy may be woken again; guarded by passMu.
 	envoyNext time.Time
+	bases     map[string]baseChange
 }
 
 // EnableCoordination turns on DirectoryService and MessageService, keeping
@@ -106,6 +107,7 @@ func (c *coordinator) Run(ctx context.Context) {
 		case <-passTick.C:
 		case <-c.wake:
 		}
+		c.checkBases(ctx)
 		c.pass(ctx)
 		c.reapIdle(ctx)
 	}

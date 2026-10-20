@@ -22,6 +22,7 @@ const (
 // Chat is the persisted chat summary of a sleeve. State holds the hub's
 // chat state name; the sleeve layer does not interpret it.
 type Chat struct {
+	Starting     bool             `json:"starting,omitempty"`
 	State        string           `json:"state,omitempty"`
 	SessionID    string           `json:"session_id,omitempty"`
 	Model        string           `json:"model,omitempty"`

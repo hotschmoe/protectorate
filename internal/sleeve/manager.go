@@ -42,12 +42,15 @@ type Usage struct {
 
 // Info is one sleeve. Everything but Usage is persisted in sleeves.json.
 type Info struct {
-	Name      string    `json:"name"`
-	Harness   Harness   `json:"harness"`
-	Workspace string    `json:"workspace"`
-	Session   string    `json:"session"`
-	Created   time.Time `json:"created"`
-	State     State     `json:"state"`
+	BaseRepo   string    `json:"base_repo,omitempty"`
+	BaseBranch string    `json:"base_branch,omitempty"`
+	BaseTip    string    `json:"base_tip,omitempty"`
+	Name       string    `json:"name"`
+	Harness    Harness   `json:"harness"`
+	Workspace  string    `json:"workspace"`
+	Session    string    `json:"session"`
+	Created    time.Time `json:"created"`
+	State      State     `json:"state"`
 	// Parent is the identity that spawned the sleeve; ParentID its token id.
 	Parent        string        `json:"parent,omitempty"`
 	ParentID      string        `json:"parent_id,omitempty"`
@@ -83,6 +86,10 @@ type Info struct {
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
 
 type SpawnRequest struct {
+	Base          *Info
+	Branch        string
+	NewBranch     string
+	Brief         string
 	Parent        string
 	ParentID      string
 	ReadOnly      []Mount
@@ -302,6 +309,17 @@ func (m *Manager) validateSpawn(req SpawnRequest) (SpawnRequest, error) {
 	if err != nil {
 		return SpawnRequest{}, err
 	}
+	if req.Brief != "" && mode != ModeChat {
+		return SpawnRequest{}, fmt.Errorf("%w: brief requires chat mode", ErrInvalid)
+	}
+	if req.Brief != "" && strings.TrimSpace(req.Brief) == "" {
+		return SpawnRequest{}, fmt.Errorf("%w: brief is empty", ErrInvalid)
+	}
+	for _, branch := range []string{req.Branch, req.NewBranch} {
+		if branch != "" && !validBranch(branch) {
+			return SpawnRequest{}, fmt.Errorf("%w: invalid branch %q", ErrInvalid, branch)
+		}
+	}
 	if req.ExitAfterIdle < 0 || (req.ExitAfterIdle > 0 && mode != ModeChat) {
 		return SpawnRequest{}, fmt.Errorf("%w: exit-after-idle requires chat mode and a nonnegative duration", ErrInvalid)
 	}
@@ -344,10 +362,20 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, fmt.Errorf("%w: scope %s is still running", ErrExists, m.cfg.UnitName(req.Name))
 	}
 
-	ws, err := m.resolveWorkspace(ctx, req.Name, req.Workspace)
+	var base Info
+	if req.Base != nil {
+		base = *req.Base
+	}
+	ws, err := m.resolveWorkspace(ctx, req, &base)
 	if err != nil {
 		return Info{}, err
 	}
+	if req.Base == nil && prev != nil && ws == prev.Workspace {
+		m.mu.Lock()
+		base.BaseRepo, base.BaseBranch, base.BaseTip = prev.BaseRepo, prev.BaseBranch, prev.BaseTip
+		m.mu.Unlock()
+	}
+	req.Base = &base
 	launch, err := m.planSpawn(req, ws)
 	if err != nil {
 		return Info{}, err
@@ -366,6 +394,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	}
 
 	info := Info{
+		BaseRepo: base.BaseRepo, BaseBranch: base.BaseBranch, BaseTip: base.BaseTip,
 		Parent: req.Parent, ParentID: req.ParentID,
 		ReadOnly: req.ReadOnly, ExitAfterIdle: req.ExitAfterIdle,
 		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
@@ -377,7 +406,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		info.Session = SessionName(req.Name)
 	}
 	if mode == ModeChat {
-		info.Chat = &Chat{Requested: req.Selection}
+		info.Chat = &Chat{Requested: req.Selection, Starting: true}
 	}
 	e := &entry{Info: info}
 	if err := m.installSleeve(e, prev); err != nil {
@@ -404,7 +433,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if mode != ModeChat {
 		fields["session"] = info.Session
 	}
-	m.opts.Emit("sleeve.spawned", req.Name, fields)
+	if mode != ModeChat {
+		m.opts.Emit("sleeve.spawned", req.Name, fields)
+	}
 	return out, nil
 }
 
@@ -449,7 +480,9 @@ func (m *Manager) planSpawn(req SpawnRequest, workspace string) (Launch, error) 
 		args = terminalArgs(req.Harness, args)
 	}
 	return m.cfg.Plan(Spec{
-		Name: req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
+		BaseRepo: req.Base.BaseRepo,
+		BaseTip:  req.Base.BaseTip,
+		Name:     req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
 		Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly,
 	}, bin)
 }
@@ -773,13 +806,14 @@ var scpURL = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:`)
 
 func isGitURL(s string) bool { return strings.Contains(s, "://") || scpURL.MatchString(s) }
 
-// resolveWorkspace returns the absolute directory to mount, cloning a git
-// URL into $home/workspaces/<name> first.
-func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string, error) {
+func (m *Manager) resolveWorkspace(ctx context.Context, req SpawnRequest, base *Info) (string, error) {
+	name, ws := req.Name, req.Workspace
 	if ws == "" {
 		return "", fmt.Errorf("%w: workspace is required", ErrInvalid)
 	}
-	if !isGitURL(ws) {
+	local := !isGitURL(ws)
+	origin := ""
+	if local {
 		if !filepath.IsAbs(ws) {
 			return "", fmt.Errorf("%w: workspace %q must be an absolute path or a git URL", ErrInvalid, ws)
 		}
@@ -793,13 +827,49 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 		if err := m.cfg.CheckWorkspace(name, real); err != nil {
 			return "", err
 		}
-		return real, nil
+		if req.Branch == "" && req.NewBranch == "" {
+			return real, nil
+		}
+		dirs, err := m.cfg.baseMounts(real)
+		if err != nil {
+			return "", err
+		}
+		origin, base.BaseBranch = gitDetails(real)
+		origin = gitOrigin(dirs[len(dirs)-1].Source)
+		if req.Branch != "" {
+			base.BaseBranch = req.Branch
+		} else if base.BaseBranch == "" {
+			if b, err := os.ReadFile(filepath.Join(dirs[0].Source, "HEAD")); err == nil {
+				if ref, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "ref: refs/heads/"); ok {
+					base.BaseBranch = ref
+				}
+			}
+		}
+		if !validBranch(base.BaseBranch) {
+			return "", fmt.Errorf("%w: local source has no current branch; specify --branch", ErrInvalid)
+		}
+		base.BaseRepo = real
+		base.BaseTip, err = BranchTip(real, base.BaseBranch)
+		if err != nil {
+			return "", err
+		}
+		req.Branch = base.BaseBranch
+		ws = real
 	}
 	if strings.HasPrefix(ws, "-") {
 		return "", fmt.Errorf("%w: invalid git URL", ErrInvalid)
 	}
 	dest := filepath.Join(m.cfg.workspacesDir(), name)
+	if err := m.cfg.CheckWorkspace(name, dest); err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(dest); err == nil && real != dest {
+		return "", fmt.Errorf("%w: clone destination must not be a symlink", ErrInvalid)
+	}
 	if _, err := os.Stat(filepath.Join(dest, ".git")); err == nil {
+		if req.Branch != "" || req.NewBranch != "" {
+			return "", fmt.Errorf("%w: branch dispatch requires a fresh workspace; %s already exists", ErrExists, dest)
+		}
 		return dest, nil
 	}
 	if ents, err := os.ReadDir(dest); err == nil && len(ents) > 0 {
@@ -808,14 +878,66 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return "", fmt.Errorf("create workspaces dir: %w", err)
 	}
+	if real, err := filepath.EvalSymlinks(filepath.Dir(dest)); err != nil || real != filepath.Dir(dest) {
+		return "", fmt.Errorf("%w: workspaces directory must not be a symlink", ErrInvalid)
+	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", "clone", "--quiet", "--", ws, dest)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:git:file")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%w: git clone %s: %s", ErrInvalid, ws, strings.TrimSpace(stderr.String()))
+	run := func(args ...string) error {
+		cmd := exec.CommandContext(cctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "init.templateDir="}, args...)...)
+		cmd.Dir = m.cfg.Home
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:git:file")
+		if args[0] != "clone" {
+			cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%w: git %s: %w: %s", ErrInvalid, args[0], err, strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	}
+	args := []string{"clone", "--quiet", "--no-checkout", "--no-hardlinks", "--dissociate"}
+	if req.Branch != "" {
+		args = append(args, "--branch", req.Branch)
+	}
+	if err := run(append(args, "--", ws, dest)...); err != nil {
+		return "", err
+	}
+	if local {
+		dirs, err := m.cfg.baseMounts(ws)
+		if err != nil {
+			return "", err
+		}
+		if err := run("-C", dest, "remote", "rename", "origin", "base"); err != nil {
+			return "", err
+		}
+		if err := run("-C", dest, "remote", "set-url", "base", dirs[0].Target); err != nil {
+			return "", err
+		}
+		if origin != "" {
+			if err := run("-C", dest, "remote", "add", "origin", origin); err != nil {
+				return "", err
+			}
+		}
+	} else {
+		if err := run("-C", dest, "remote", "set-url", "origin", stripCredentials(ws)); err != nil {
+			return "", err
+		}
+	}
+	if req.NewBranch != "" {
+		if err := run("-C", dest, "switch", "--quiet", "-c", req.NewBranch); err != nil {
+			return "", err
+		}
+	} else {
+		if branch := WorkspaceBranch(dest); branch != "" {
+			if _, err := BranchTip(dest, branch); err != nil {
+				return dest, nil
+			}
+		}
+		if err := run("-C", dest, "checkout", "--quiet"); err != nil {
+			return "", err
+		}
 	}
 	return dest, nil
 }

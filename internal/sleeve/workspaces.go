@@ -248,9 +248,13 @@ func gitDetails(dir string) (remote, branch string) {
 			branch = ref
 		}
 	}
+	return gitOrigin(gd), branch
+}
+
+func gitOrigin(gd string) string {
 	f, err := os.Open(filepath.Join(gd, "config"))
 	if err != nil {
-		return "", branch
+		return ""
 	}
 	defer f.Close()
 	in := false
@@ -262,10 +266,10 @@ func gitDetails(dir string) (remote, branch string) {
 			continue
 		}
 		if k, v, ok := strings.Cut(line, "="); ok && in && strings.EqualFold(strings.TrimSpace(k), "url") {
-			return stripCredentials(strings.TrimSpace(v)), branch
+			return stripCredentials(strings.TrimSpace(v))
 		}
 	}
-	return "", branch
+	return ""
 }
 
 // stripCredentials drops the user info of an http(s) remote so a token

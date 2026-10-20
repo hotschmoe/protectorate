@@ -114,7 +114,7 @@ func (h *Hub) summarizers(from sleeve.Harness) []sleeve.Harness {
 }
 
 func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness, interrupt bool, wait time.Duration, selection driver.Selection) (sleeve.Info, error) {
-	cs, err := h.chat.get(info.Name, false)
+	cs, err := h.chat.get(info.Name, false, false)
 	if err != nil {
 		return sleeve.Info{}, err
 	}
@@ -177,7 +177,7 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err := h.sleeves.SetHandoff(info.Name, rec); err != nil {
 		log.Printf("resleeve %s: record handoff: %v", info.Name, err)
 	}
-	ns, err := h.chat.get(info.Name, false)
+	ns, err := h.chat.get(info.Name, false, false)
 	if err == nil {
 		ns.note(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Handoff{Handoff: handoffToProto(&rec)} })
 	}
@@ -271,6 +271,7 @@ func (h *Hub) replaceHarness(ctx context.Context, info sleeve.Info, to sleeve.Ha
 	}
 	h.dropIdentity(info.Name, "")
 	return h.spawn(ctx, sleeve.SpawnRequest{
+		Base:   &info,
 		Parent: info.Parent, ParentID: info.ParentID,
 		ReadOnly: info.ReadOnly, ExitAfterIdle: info.ExitAfterIdle,
 		Name: info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,

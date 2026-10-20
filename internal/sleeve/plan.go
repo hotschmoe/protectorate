@@ -15,6 +15,8 @@ import (
 
 // Spec is a validated request to run a harness.
 type Spec struct {
+	BaseRepo  string
+	BaseTip   string
 	Name      string
 	Harness   Harness
 	Args      []string
@@ -333,6 +335,8 @@ func checkEnv(env map[string]string) error {
 // read-only, known secret files masked, and only the binds named here
 // writable. Sleeves and node jobs are both boxes.
 type Box struct {
+	EmptyDirs      []string
+	Masks          []string
 	Mounts         []Mount
 	WritableMounts []Mount
 
@@ -400,6 +404,12 @@ func (c Config) BoxArgv(b Box) []string {
 	}
 	for _, m := range b.WritableMounts {
 		argv = append(argv, "--bind", m.Source, m.Target)
+	}
+	for _, p := range b.Masks {
+		argv = append(argv, "--ro-bind", "/dev/null", p)
+	}
+	for _, p := range b.EmptyDirs {
+		argv = append(argv, "--tmpfs", p)
 	}
 	argv = append(argv, "--chdir", b.Chdir, "--clearenv")
 	for _, kv := range b.Env {
@@ -484,6 +494,32 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		return Launch{}, err
 	}
 	lay := c.layout(spec.Name, spec.Harness, spec.Workspace)
+	var masks []string
+	var emptyDirs []string
+	if spec.BaseRepo != "" {
+		base, err := c.baseMounts(spec.BaseRepo)
+		if err != nil {
+			return Launch{}, err
+		}
+		mounts = append(mounts, base...)
+		for _, m := range base {
+			if fi, err := os.Stat(filepath.Join(m.Target, "logs")); err == nil && fi.IsDir() {
+				emptyDirs = append(emptyDirs, filepath.Join(m.Target, "logs"))
+			}
+			for _, f := range []string{"config", "config.worktree", "FETCH_HEAD"} {
+				p := filepath.Join(m.Target, f)
+				if _, err := os.Lstat(p); err == nil {
+					if f == "config" && len(spec.BaseTip) == 64 {
+						safe := filepath.Join(c.sleeveHome(spec.Name), ".cache/base-sha256.gitconfig")
+						lay.Seeds = append(lay.Seeds, Seed{safe, "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectFormat = sha256\n"})
+						mounts = append(mounts, Mount{Source: safe, Target: p})
+						continue
+					}
+					masks = append(masks, p)
+				}
+			}
+		}
+	}
 	unit := c.UnitName(spec.Name)
 	var callerEnv [][2]string
 	for _, k := range slices.Sorted(maps.Keys(spec.Env)) {
@@ -497,7 +533,9 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		command = append(command, spec.Args...)
 	}
 	argv := c.BoxArgv(Box{
-		Unit: unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
+		EmptyDirs: emptyDirs,
+		Masks:     masks,
+		Unit:      unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
 		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
 		Mounts:         mounts,
 		WritableMounts: lay.CacheCopies,

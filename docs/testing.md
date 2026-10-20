@@ -120,7 +120,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=61, KEEP-FUZZ=5; total=66. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -190,6 +190,8 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/dispatch_test.go | TestBinaryBranchDispatch | Real CLI branch dispatch, atomic brief replay, credential-stripped remotes, jailed fetch and source write denial, packed refs, coalesced notices, restart dedupe and own-advance suppression | host runtime required | KEEP-E2E | deterministic Claude protocol peer; requires systemd user manager and bwrap |
+| tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
 
 ## Deleted files
 

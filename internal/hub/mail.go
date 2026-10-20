@@ -284,7 +284,7 @@ func (c *coordinator) idle(name string) (*chatSleeve, bool) {
 	if err != nil || info.State != sleeve.Running || info.Mode != sleeve.ModeChat {
 		return nil, false
 	}
-	s, err := c.h.chat.get(name, false)
+	s, err := c.h.chat.get(name, false, false)
 	if err != nil {
 		return nil, false
 	}
