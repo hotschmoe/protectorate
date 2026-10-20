@@ -5,7 +5,7 @@
 On Linux (x86_64, aarch64), as the user that will run the hub; no sudo, nothing is deleted, re-running upgrades:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.2.1/install-hub.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.3.0/install-hub.sh | bash
 ```
 
 Pass flags with `bash -s -- --listen 0.0.0.0:7470 --public-url http://NAME:7470`; also `--version TAG`, `--home DIR`, `--dry-run` (downloads and verifies into a temporary directory, installs nothing). The script downloads the release's `SHA256SUMS`, the binary for this machine, `protectorate-web-<version>.tar.gz` and the other platforms' builds, and checks each against the sums. It installs `~/.local/bin/protectorate`, the web client into `~/.local/share/protectorate/web-<version>` (with `web` a symlink to it), the other builds into `~/.local/share/protectorate/bin`, writes and enables the `protectorate-hub` systemd user unit (an existing unit is kept as it is), and runs `hub tailnet install`. Missing bwrap, tmux, git or a systemd user manager are listed with the package to install; it installs no system packages. Then it prints the next steps: `hub tailnet init`, `protectorate login <harness>` and, when linger is off, the `enable-linger` hint.
