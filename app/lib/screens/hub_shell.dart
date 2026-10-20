@@ -128,14 +128,17 @@ class _HubShellState extends State<HubShell> {
           PageRouteBuilder<void>(
             transitionDuration: Duration.zero,
             reverseTransitionDuration: Duration.zero,
-            pageBuilder: (_, _, _) => NodeDetailScreen(
-              hub: widget.hub,
-              client: _client,
-              feed: _feed,
-              name: node,
-              history: _history,
-              versions: _versions,
-              phone: usesPhoneShell,
+            pageBuilder: (_, _, _) => ListenableBuilder(
+              listenable: _revision,
+              builder: (_, _) => NodeDetailScreen(
+                hub: widget.hub,
+                client: _client,
+                feed: _feed,
+                name: node,
+                history: _history,
+                versions: _versions,
+                phone: usesPhoneShell,
+              ),
             ),
           ),
         );
