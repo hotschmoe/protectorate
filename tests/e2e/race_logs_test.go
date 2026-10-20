@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -59,6 +60,10 @@ func (c *cluster) checkRaceLogs() {
 	c.owner.Helper()
 	err := filepath.WalkDir(c.root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
+			// overlayfs creates its work/work directory without permissions.
+			if errors.Is(err, fs.ErrPermission) && entry != nil && entry.IsDir() && entry.Name() == "work" {
+				return fs.SkipDir
+			}
 			return fmt.Errorf("visit process logs: %w", err)
 		}
 		if !entry.Type().IsRegular() {

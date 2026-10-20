@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -55,6 +56,7 @@ func sleeveCacheScenario(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	flutter := filepath.Join(c.root, "development/flutter")
+	c.env = append(c.env, "PROTECTORATE_FLUTTER_SDK="+flutter)
 	pub := filepath.Join(c.root, ".pub-cache")
 	cache := filepath.Join(c.root, ".cache/go-build")
 	ws := filepath.Join(c.root, "cache-workspace")
@@ -231,6 +233,10 @@ exec sleep 60`},
 		}
 		var size int64
 		if err := filepath.WalkDir(filepath.Join(home, ".cache/overlays"), func(p string, d fs.DirEntry, err error) error {
+			// overlayfs creates work/work without permissions; it holds no data.
+			if errors.Is(err, fs.ErrPermission) && d != nil && d.IsDir() && d.Name() == "work" {
+				return fs.SkipDir
+			}
 			if err == nil && d.Type().IsRegular() {
 				fi, err := d.Info()
 				if err != nil {
