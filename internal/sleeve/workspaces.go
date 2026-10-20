@@ -2,12 +2,134 @@ package sleeve
 
 import (
 	"bufio"
+	"context"
+	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+type Directory struct {
+	Name, Path, Branch, Remote, Reason, RequiredName string
+	IsGit, Acceptable                                bool
+}
+
+func WorkspaceBranch(dir string) string {
+	_, branch := gitDetails(dir)
+	return branch
+}
+
+func (m *Manager) Browse(ctx context.Context, path string) (dirs []Directory, resolved, parent string, truncated bool, err error) {
+	inside := func(p string) bool {
+		for _, root := range m.cfg.WorkspaceRoots {
+			if within(p, root) {
+				return true
+			}
+		}
+		return false
+	}
+	entry := func(p, name string) Directory {
+		d := Directory{Name: name, Path: p}
+		if within(p, m.cfg.workspacesDir()) && p != m.cfg.workspacesDir() {
+			rel, _ := filepath.Rel(m.cfg.workspacesDir(), p)
+			d.RequiredName = strings.Split(rel, string(filepath.Separator))[0]
+		}
+		if e := m.cfg.CheckWorkspace(cmpName("browser", d.RequiredName), p); e != nil {
+			d.Reason = e.Error()
+		} else {
+			d.Acceptable = true
+		}
+		if fi, e := os.Stat(filepath.Join(p, ".git")); e == nil {
+			d.IsGit = fi.IsDir() || fi.Mode().IsRegular()
+		}
+		d.Remote, d.Branch = gitDetails(p)
+		return d
+	}
+	if path == "" {
+		for _, root := range m.cfg.WorkspaceRoots {
+			if err = ctx.Err(); err != nil {
+				return
+			}
+			real, e := filepath.EvalSymlinks(root)
+			if e != nil || real != root {
+				continue
+			}
+			if len(dirs) == 500 {
+				truncated = true
+				break
+			}
+			dirs = append(dirs, entry(root, filepath.Base(root)))
+		}
+		return
+	}
+	if !filepath.IsAbs(path) {
+		err = fmt.Errorf("%w: browse path must be absolute", ErrInvalid)
+		return
+	}
+	resolved, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		err = fmt.Errorf("%w: resolve browse path: %v", ErrInvalid, err)
+		return
+	}
+	if !inside(resolved) {
+		err = fmt.Errorf("%w: browse path is outside workspace roots", ErrInvalid)
+		return
+	}
+	parent = filepath.Dir(resolved)
+	if !inside(parent) {
+		parent = ""
+	}
+	for _, root := range m.cfg.WorkspaceRoots {
+		if resolved == root {
+			parent = ""
+			break
+		}
+	}
+	f, e := os.Open(resolved)
+	if e != nil {
+		err = fmt.Errorf("open browse directory: %w", e)
+		return
+	}
+	defer f.Close()
+	// Bound scanning as well as results, including directories with mostly files.
+	for scanned := 0; scanned < 10000; scanned++ {
+		if err = ctx.Err(); err != nil {
+			return
+		}
+		ents, readErr := f.ReadDir(1)
+		if len(ents) == 0 {
+			if readErr != nil && readErr != io.EOF {
+				err = fmt.Errorf("read browse directory: %w", readErr)
+			}
+			break
+		}
+		if scanned == 9999 {
+			truncated = true
+		}
+		e := ents[0]
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		p, eerr := filepath.EvalSymlinks(filepath.Join(resolved, e.Name()))
+		if eerr != nil || !inside(p) {
+			continue
+		}
+		fi, eerr := os.Stat(p)
+		if eerr != nil || !fi.IsDir() {
+			continue
+		}
+		if len(dirs) == 500 {
+			truncated = true
+			break
+		}
+		dirs = append(dirs, entry(p, e.Name()))
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+	return
+}
 
 // Workspace is a directory Spawn would accept as an existing workspace.
 type Workspace struct {

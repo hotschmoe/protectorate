@@ -124,6 +124,15 @@ never follow redirects.
 
 ## Entry points
 
+`SleeveService.BrowseWorkspaces` requires `read` or its explicit tool scope
+(`sleeve_browse_workspaces`); the owner and owner-paired devices can call it.
+As with the existing per-sleeve chat/session read restrictions, the handler
+also checks the authenticated identity: `sleeve:<name>` tokens are always
+denied, including root listing, even if granted `read` or `sleeve_*`.
+Other scoped callers, including Envoy, follow their scopes. Granting browsing
+to a non-sleeve token exposes names, paths and git metadata beneath the
+configured browser roots. It does not execute repository programs.
+
 | Entry point | Check |
 |-------------|-------|
 | Connect unary and server-streaming RPCs | interceptor: authenticate, then scope for the procedure |

@@ -1,5 +1,28 @@
 # Sleeve development environments
 
+Start in an existing directory with `protectorate sleeve browse --json` to
+list the hub's browser roots, then `protectorate sleeve browse /absolute/root`
+to list its subdirectories. Pass the selected path to
+`protectorate sleeve spawn worker --workspace /absolute/checkout --harness codex`.
+The directory is edited in place. The app's NEW SLEEVE dialog offers the same
+browser alongside known workspaces, a typed absolute path and a clone URL.
+
+Configure roots with repeatable `hub serve --workspace-root DIR`. Without the
+flag, the owner's `~/github` is the sole root when it exists; otherwise there
+are no roots. Explicit roots replace that default. Roots must exist and are
+resolved at startup. Browsing resolves symlinks and refuses paths outside the
+roots, skips hidden entries and files, and returns at most 500 directories
+(scanning at most 10,000 entries), with a truncation flag when a limit is hit.
+Escaping symlinks are omitted. Each entry includes git details and the
+workspace safety check's rejection reason. Rejected parents can still be
+opened to reach acceptable children; they cannot be selected as workspaces.
+Roots limit discovery, not the existing typed-path Spawn authority.
+
+`sleeve ls`, `sleeve show` and the SLEEVES cards show the current workspace
+branch, refreshed at read time. Git details are read directly from `.git`
+files without executing git on the hub. Worktrees and non-git directories
+have an empty branch; detached checkouts also have no branch name.
+
 Discover available workspaces and reference directories with
 `protectorate sleeve workspaces --json`. Entries with `readOnly: true` are
 reference directories suitable for `--ro`:

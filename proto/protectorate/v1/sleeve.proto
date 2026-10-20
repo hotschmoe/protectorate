@@ -43,6 +43,13 @@ service SleeveService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // BrowseWorkspaces lists configured roots when path is empty, otherwise
+  // subdirectories of path. Resolved paths must stay inside a configured root.
+  // Sleeve identity tokens cannot call this RPC, even with read scope.
+  rpc BrowseWorkspaces(BrowseWorkspacesRequest) returns (BrowseWorkspacesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // GetSleeve returns one sleeve with its latest resource usage.
   rpc GetSleeve(GetSleeveRequest) returns (GetSleeveResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -171,6 +178,31 @@ message Sleeve {
   string parent = 20;
   repeated ReadOnlyMount read_only = 18;
   google.protobuf.Duration exit_after_idle = 19;
+  // Current branch read from .git files; empty for non-git and worktrees.
+  string git_branch = 21;
+}
+
+message BrowseWorkspacesRequest {
+  string path = 1;
+}
+
+message WorkspaceDirectory {
+  string name = 1;
+  string path = 2;
+  bool is_git = 3;
+  string git_branch = 4;
+  string git_remote = 5;
+  bool acceptable = 6;
+  string reason = 7;
+  string required_name = 8;
+}
+
+message BrowseWorkspacesResponse {
+  string path = 1;
+  // Empty at a root; clients return to the root list from there.
+  string parent = 2;
+  repeated WorkspaceDirectory directories = 3;
+  bool truncated = 4;
 }
 
 message ReadOnlyMount {

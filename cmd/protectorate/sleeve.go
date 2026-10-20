@@ -23,7 +23,7 @@ import (
 )
 
 // attachSleeves wires SleeveService into h and recovers persisted sleeves.
-func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs []string) error {
+func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspaceRoots []string) error {
 	home, err := hub.Home()
 	if err != nil {
 		return err
@@ -36,6 +36,32 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs []string) 
 		return err
 	}
 	cfg.ReferenceDirs = refDirs
+	if workspaceRoots == nil {
+		if ownerHome, err := os.UserHomeDir(); err == nil {
+			p := filepath.Join(ownerHome, "github")
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				workspaceRoots = []string{p}
+			}
+		}
+	}
+	for _, root := range workspaceRoots {
+		real, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return fmt.Errorf("resolve workspace root %q: %w", root, err)
+		}
+		real, err = filepath.Abs(real)
+		if err != nil {
+			return fmt.Errorf("absolute workspace root %q: %w", root, err)
+		}
+		fi, err := os.Stat(real)
+		if err != nil {
+			return fmt.Errorf("stat workspace root %q: %w", root, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("workspace root %q is not a directory", root)
+		}
+		cfg.WorkspaceRoots = append(cfg.WorkspaceRoots, real)
+	}
 	if exe, err := os.Executable(); err == nil {
 		if err := cfg.AddBinaryDir(exe); err != nil {
 			log.Printf("sleeves will not have the protectorate CLI: %v", err)
@@ -59,7 +85,7 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 
 func sleeveCmd(o *opts) *command {
 	c := &command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
-	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
+	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveBrowseCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
 
@@ -267,11 +293,11 @@ func sleeveLsCmd(o *opts) *command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT")
+				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
 				for _, s := range res.Msg.Sleeves {
 					u := s.Usage
-					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
-						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace, s.Parent)
+					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
+						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace, s.Parent, s.GitBranch)
 				}
 			})
 		},
@@ -313,6 +339,37 @@ clone, can also be given to spawn.`,
 	}
 }
 
+func sleeveBrowseCmd(o *opts) *command {
+	return &command{
+		Use: "browse [PATH]", Short: "Browse workspace directories on the hub",
+		Long: "List the hub's configured workspace roots, or the subdirectories of PATH.\nPaths refer to the hub. Select an acceptable path for 'sleeve spawn --workspace'.\nHidden directories are skipped; large listings report truncation.",
+		Args: maximumArgs(1),
+		RunE: func(cmd *command, args []string) error {
+			cl, err := sleeveClient(o)
+			if err != nil {
+				return err
+			}
+			req := &pb.BrowseWorkspacesRequest{}
+			if len(args) > 0 {
+				req.Path = args[0]
+			}
+			res, err := cl.BrowseWorkspaces(cmd.Context(), connect.NewRequest(req))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintln(w, "NAME\tGIT\tBRANCH\tREMOTE\tACCEPTABLE\tREASON\tPATH")
+				for _, d := range res.Msg.Directories {
+					fmt.Fprintf(w, "%s\t%t\t%s\t%s\t%t\t%s\t%s\n", d.Name, d.IsGit, d.GitBranch, d.GitRemote, d.Acceptable, d.Reason, d.Path)
+				}
+				if res.Msg.Truncated {
+					fmt.Fprintln(w, "Listing truncated")
+				}
+			})
+		},
+	}
+}
+
 func sleeveShowCmd(o *opts) *command {
 	return &command{
 		Use:   "show <name>",
@@ -340,6 +397,7 @@ func sleeveShowCmd(o *opts) *command {
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
 				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
+				fmt.Fprintf(w, "branch\t%s\n", s.GitBranch)
 				fmt.Fprintf(w, "parent\t%s\n", s.Parent)
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {

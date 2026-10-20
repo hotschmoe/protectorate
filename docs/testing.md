@@ -88,6 +88,13 @@ and filesystem path confinement. Namespace fuzzing checks canonical/symlink
 home equivalence, independent-home separation and exclusion from the default
 scope prefix.
 
+`TestBinaryWorkspaceBrowser` drives a real temporary hub and CLI through
+default and explicit roots, drill-down, hidden/file filtering, symlink escape
+refusal, result truncation, rejected-workspace reasons, credential-stripped
+origins, paired-device acceptance and sleeve-identity denial. A persisted
+exited sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
+text and JSON, without needing the host user manager.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -113,7 +120,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=58, KEEP-FUZZ=5; total=63. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -182,6 +189,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestNodeRestartRecovery | Node Restart Recovery | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
+| tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
 
 ## Deleted files
 

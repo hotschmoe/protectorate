@@ -155,10 +155,9 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 				t.Fatal(err)
 			}
 			pretty.WriteByte('\n')
-			// SHA-256 of the pre-migration internal/mcpbridge/testdata/tools.golden.json.
-			const goldenHash = "99a11f0f816524adef1a222a39f89e4cc6174c3b9c72768dc94b1a0e71899210"
+			const goldenHash = "24665b43c16e9d258738d33f0baf0a19d5e0d96b82d2875fb74b1d5c8b53173d"
 			if got := fmt.Sprintf("%x", sha256.Sum256(pretty.Bytes())); got != goldenHash {
-				t.Fatalf("tools/list differs byte-for-byte from original golden: %s", got)
+				t.Fatalf("tools/list differs byte-for-byte from expected catalog: %s", got)
 			}
 			peer.send(3, "tools/call", map[string]any{"_meta": meta, "name": "hub_get_status", "arguments": map[string]any{}})
 			assertCLIMCPStatus(t, peer.read())

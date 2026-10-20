@@ -27,6 +27,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $4.ListSleevesRequest request);
   $async.Future<$4.ListWorkspacesResponse> listWorkspaces(
       $pb.ServerContext ctx, $4.ListWorkspacesRequest request);
+  $async.Future<$4.BrowseWorkspacesResponse> browseWorkspaces(
+      $pb.ServerContext ctx, $4.BrowseWorkspacesRequest request);
   $async.Future<$4.GetSleeveResponse> getSleeve(
       $pb.ServerContext ctx, $4.GetSleeveRequest request);
   $async.Future<$4.KillSleeveResponse> killSleeve(
@@ -44,6 +46,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return $4.ListSleevesRequest();
       case 'ListWorkspaces':
         return $4.ListWorkspacesRequest();
+      case 'BrowseWorkspaces':
+        return $4.BrowseWorkspacesRequest();
       case 'GetSleeve':
         return $4.GetSleeveRequest();
       case 'KillSleeve':
@@ -66,6 +70,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return listSleeves(ctx, request as $4.ListSleevesRequest);
       case 'ListWorkspaces':
         return listWorkspaces(ctx, request as $4.ListWorkspacesRequest);
+      case 'BrowseWorkspaces':
+        return browseWorkspaces(ctx, request as $4.BrowseWorkspacesRequest);
       case 'GetSleeve':
         return getSleeve(ctx, request as $4.GetSleeveRequest);
       case 'KillSleeve':

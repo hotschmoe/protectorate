@@ -155,7 +155,7 @@ func hubCmd() *command {
 	var nodeInterval, ackTimeout time.Duration
 	var nodeTokenFile, backupDir string
 	var backupEvery time.Duration
-	var watch, toolDirs, refDirs []string
+	var watch, toolDirs, refDirs, workspaceRoots []string
 	var orchestratorGrants bool
 	var startEnvoy string
 	serve := &command{
@@ -221,7 +221,7 @@ func hubCmd() *command {
 			if err := attachNodes(h, nodeInterval, nodeTok, watch, ts.Client, ts.Peers); err != nil {
 				return err
 			}
-			if err := attachSleeves(ctx, h, toolDirs, refDirs); err != nil {
+			if err := attachSleeves(ctx, h, toolDirs, refDirs, workspaceRoots); err != nil {
 				return err
 			}
 			tools, err := toolDocs()
@@ -264,6 +264,7 @@ func hubCmd() *command {
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringSliceVar(&refDirs, "sleeve-reference-dir", nil, "directory offered read-only to sleeves by 'sleeve workspaces' (repeatable), besides each workspace's references/")
+	serve.Flags().StringSliceVar(&workspaceRoots, "workspace-root", nil, "directory browser root (repeatable; defaults to ~/github when it exists)")
 	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
 	serve.Flags().DurationVar(&quotaInterval, "quota-interval", 5*time.Minute, "how often to poll provider quotas")

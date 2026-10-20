@@ -89,6 +89,7 @@ TestTailnetEndToEnd
 TestNodeRestartRecovery
 TestDERPRelay
 TestBinaryClusterRestartAndRestore
+TestBinaryWorkspaceBrowser
 """.split())
 DELETE = set()
 
