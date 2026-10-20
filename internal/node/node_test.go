@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -143,14 +141,14 @@ func TestNegotiateAPI(t *testing.T) {
 func TestCPUBusyPercent(t *testing.T) {
 	tests := []struct {
 		name      string
-		prev, cur cpu.TimesStat
+		prev, cur cpuTimes
 		want      float64
 	}{
-		{"half busy", cpu.TimesStat{User: 10, Idle: 10}, cpu.TimesStat{User: 20, Idle: 20}, 50},
-		{"iowait is idle", cpu.TimesStat{}, cpu.TimesStat{User: 10, Iowait: 10}, 50},
-		{"no elapsed", cpu.TimesStat{User: 5}, cpu.TimesStat{User: 5}, 0},
-		{"counter reset", cpu.TimesStat{User: 100, Idle: 100}, cpu.TimesStat{User: 1, Idle: 1}, 0},
-		{"all busy", cpu.TimesStat{}, cpu.TimesStat{System: 10}, 100},
+		{"half busy", cpuTimes{User: 10, Idle: 10}, cpuTimes{User: 20, Idle: 20}, 50},
+		{"iowait is idle", cpuTimes{}, cpuTimes{User: 10, Iowait: 10}, 50},
+		{"no elapsed", cpuTimes{User: 5}, cpuTimes{User: 5}, 0},
+		{"counter reset", cpuTimes{User: 100, Idle: 100}, cpuTimes{User: 1, Idle: 1}, 0},
+		{"all busy", cpuTimes{}, cpuTimes{System: 10}, 100},
 	}
 	for _, tt := range tests {
 		if got := cpuBusyPercent(tt.prev, tt.cur); got != tt.want {
@@ -177,7 +175,7 @@ func TestKeepPartition(t *testing.T) {
 		{"iso9660", "/media/cd", false},
 	}
 	for _, tt := range tests {
-		if got := keepPartition(disk.PartitionStat{Fstype: tt.fstype, Mountpoint: tt.mount}); got != tt.want {
+		if got := keepPartition(partition{Fstype: tt.fstype, Mountpoint: tt.mount}); got != tt.want {
 			t.Errorf("keepPartition(%s %s) = %v, want %v", tt.fstype, tt.mount, got, tt.want)
 		}
 	}
@@ -444,7 +442,7 @@ func TestFSProberBlockedMount(t *testing.T) {
 	calls := map[string]int{}
 	pr := newFSProber()
 	pr.timeout = 20 * time.Millisecond
-	pr.run = func(ctx context.Context, p disk.PartitionStat) fsResult {
+	pr.run = func(ctx context.Context, p partition) fsResult {
 		mu.Lock()
 		calls[p.Mountpoint]++
 		mu.Unlock()
@@ -453,8 +451,8 @@ func TestFSProberBlockedMount(t *testing.T) {
 		}
 		return fsResult{fs: &pb.FilesystemMetrics{Mount: p.Mountpoint}}
 	}
-	dead := disk.PartitionStat{Mountpoint: "/dead"}
-	live := disk.PartitionStat{Mountpoint: "/live"}
+	dead := partition{Mountpoint: "/dead"}
+	live := partition{Mountpoint: "/live"}
 	ctx := context.Background()
 
 	if r := pr.probe(ctx, dead); r.err == nil || !strings.Contains(r.err.Error(), "timed out") {
