@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hotschmoe/protectorate/internal/fsutil"
+	"github.com/hotschmoe/protectorate/internal/headscaledb"
 )
 
 // Supervisor runs headscale as a child process and restarts it with backoff.
@@ -69,19 +70,70 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	cfgPath := filepath.Join(Dir(s.Home), "headscale.yaml")
 	backoff := backoffMin
 	for ctx.Err() == nil {
-		cmd := exec.CommandContext(ctx, bin, "serve", "-c", cfgPath)
+		requested, err := headscaledb.Requested(s.Home)
+		if err != nil {
+			return fmt.Errorf("check backup request: %w", err)
+		}
+		if requested {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(100 * time.Millisecond):
+			}
+			continue
+		}
+		gate, err := headscaledb.Lock(ctx, s.Home, headscaledb.Database)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		runCtx, cancel := context.WithCancel(ctx)
+		cmd := exec.CommandContext(runCtx, bin, "serve", "-c", cfgPath)
 		cmd.Stdout, cmd.Stderr = logFile, logFile
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 		cmd.WaitDelay = stop
 		start := time.Now()
-		err := cmd.Start()
+		err = cmd.Start()
+		paused := false
 		if err == nil {
 			s.logf("headscale started (pid %d)", cmd.Process.Pid)
-			err = cmd.Wait()
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			tick := time.NewTicker(100 * time.Millisecond)
+		wait:
+			for {
+				select {
+				case err = <-done:
+					break wait
+				case <-runCtx.Done():
+					err = <-done
+					break wait
+				case <-tick.C:
+					requested, checkErr := headscaledb.Requested(s.Home)
+					if checkErr != nil {
+						s.logf("check backup request: %v", checkErr)
+					}
+					if requested {
+						paused = true
+						cancel()
+						err = <-done
+						break wait
+					}
+				}
+			}
+			tick.Stop()
 		}
+		cancel()
+		gate.Close()
 		if ctx.Err() != nil {
 			s.logf("headscale stopped")
 			return nil
+		}
+		if paused {
+			s.logf("headscale stopped for backup")
+			continue
 		}
 		if time.Since(start) >= healthyRun {
 			backoff = backoffMin

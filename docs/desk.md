@@ -302,7 +302,7 @@ installed the node says so on stderr and keeps that assumption. Screen
 states count too: a locked screen, or an agent that is not in the logged-in
 user's session, is unavailable.
 
-**What the hub does.** It stores the policy (`desk-policies.yaml` in the hub
+**What the hub does.** It stores the policy (`desk-policies.json` in the hub
 home) and sends it to the node, which also keeps a copy (`desk-policy.json`
 in its home) for restarts. `desk:<node>`, explicit or automatic, is refused
 with the node's reason while it is unavailable. For nodes with a policy the hub

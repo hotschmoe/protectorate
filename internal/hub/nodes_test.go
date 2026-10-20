@@ -113,16 +113,16 @@ func TestInventoryLoadErrors(t *testing.T) {
 		wantErr       bool
 	}{
 		{"empty file", "", false},
-		{"corrupt", "nodes: [unterminated", true},
-		{"unknown field", "nodes:\n  - name: a\n    addr: x\n    bogus: 1\n", true},
-		{"invalid tier", "nodes:\n  - name: a\n    addr: x\n    tier: root\n", true},
-		{"duplicate", "nodes:\n  - {name: a, addr: x}\n  - {name: a, addr: y}\n", true},
-		{"hub name", "nodes:\n  - {name: hubhost, addr: x}\n", true},
+		{"corrupt", `{"nodes": [unterminated`, true},
+		{"unknown field", `{"nodes":[{"name":"a","addr":"x","bogus":1}]}`, true},
+		{"invalid tier", `{"nodes":[{"name":"a","addr":"x","tier":"root"}]}`, true},
+		{"duplicate", `{"nodes":[{"name":"a","addr":"x"},{"name":"a","addr":"y"}]}`, true},
+		{"hub name", `{"nodes":[{"name":"hubhost","addr":"x"}]}`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "nodes.yaml"), []byte(tt.content), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "nodes.json"), []byte(tt.content), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			_, err := OpenInventory(dir, testSelf)
@@ -130,7 +130,7 @@ func TestInventoryLoadErrors(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 			if tt.wantErr {
-				raw, _ := os.ReadFile(filepath.Join(dir, "nodes.yaml"))
+				raw, _ := os.ReadFile(filepath.Join(dir, "nodes.json"))
 				if string(raw) != tt.content {
 					t.Fatal("a rejected file must not be rewritten")
 				}
@@ -698,7 +698,7 @@ func TestNodeTokenNotSentOnRedirect(t *testing.T) {
 }
 
 func TestMigrateTiers(t *testing.T) {
-	const old = "nodes:\n  - name: kidsbox\n    addr: kidsbox\n    tier: family\n  - name: agentworld\n    addr: agentworld\n    tier: server\n  - name: newer\n    addr: newer\n    tier: shared\n"
+	const old = `{"nodes":[{"name":"kidsbox","addr":"kidsbox","tier":"family"},{"name":"agentworld","addr":"agentworld","tier":"server"},{"name":"newer","addr":"newer","tier":"shared"}]}`
 	tests := []struct {
 		name        string
 		content     string
@@ -707,15 +707,15 @@ func TestMigrateTiers(t *testing.T) {
 		wantErr     string
 	}{
 		{"renames and keeps a copy", old, false, []TierChange{{"kidsbox", "family", "care"}, {"agentworld", "server", "shared"}}, ""},
-		{"already migrated", "nodes:\n  - name: a\n    addr: a\n    tier: care\n", false, nil, ""},
+		{"already migrated", `{"nodes":[{"name":"a","addr":"a","tier":"care"}]}`, false, nil, ""},
 		{"no inventory", "", false, nil, ""},
 		{"never overwrites an earlier copy", old, true, nil, "keep a copy"},
-		{"corrupt file", "nodes: [", false, nil, "parse"},
+		{"corrupt file", `{"nodes": [`, false, nil, "parse"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			path := filepath.Join(dir, "nodes.yaml")
+			path := filepath.Join(dir, "nodes.json")
 			if tt.content != "" {
 				writeFile(t, path, []byte(tt.content), 0o600)
 				if _, err := OpenInventory(dir, testSelf); tt.wantChanges != nil && (!errors.Is(err, ErrRetiredTiers) || !strings.Contains(err.Error(), "protectorate node migrate-tiers")) {
@@ -731,7 +731,7 @@ func TestMigrateTiers(t *testing.T) {
 					t.Fatalf("err = %v, want %q", err, tt.wantErr)
 				}
 				if b, _ := os.ReadFile(path); string(b) != tt.content {
-					t.Fatalf("a failed migration changed nodes.yaml:\n%s", b)
+					t.Fatalf("a failed migration changed nodes.json:\n%s", b)
 				}
 				return
 			}

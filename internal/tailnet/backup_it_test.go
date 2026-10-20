@@ -47,6 +47,9 @@ func TestBackupRestoreWithLiveHeadscale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := svc.Admin.WaitReady(ctx); err != nil {
+		t.Fatalf("headscale did not resume after backup: %v", err)
+	}
 	cert, err := os.ReadFile(filepath.Join(home, "tailnet", "derp_cert.pem"))
 	if err != nil {
 		t.Fatal(err)

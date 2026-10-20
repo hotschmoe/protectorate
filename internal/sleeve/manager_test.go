@@ -221,12 +221,12 @@ func TestSleeveLifecycle(t *testing.T) {
 		t.Errorf("duplicate spawn err = %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(r.cfg.Home, "sleeves.yaml"))
+	raw, err := os.ReadFile(filepath.Join(r.cfg.Home, "sleeves.json"))
 	if err != nil || !strings.Contains(string(raw), aName) {
-		t.Errorf("sleeves.yaml = %q, %v", raw, err)
+		t.Errorf("sleeves.json = %q, %v", raw, err)
 	}
 
-	// hub restart: a fresh manager recovers both from yaml, tmux and scopes
+	// hub restart: a fresh manager recovers both from JSON, tmux and scopes
 	r.open(t)
 	if i, err := r.m.Get(aName); err != nil || i.State != Running || i.Usage.MemCurrent == 0 {
 		t.Fatalf("recovered a = %+v, %v", i, err)
@@ -439,7 +439,7 @@ func TestKillRestoresRecordWhenSaveFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	good := r.m.path
-	r.m.path = filepath.Join(blocker, "sleeves.yaml")
+	r.m.path = filepath.Join(blocker, "sleeves.json")
 	if err := r.m.Kill(context.Background(), info.Name); err == nil {
 		t.Fatal("Kill succeeded with an unwritable store")
 	}

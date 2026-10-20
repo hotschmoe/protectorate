@@ -218,7 +218,7 @@ func TestFileTransferThroughHub(t *testing.T) {
 
 func TestFileScopesAndAudit(t *testing.T) {
 	e := newJobEnv(t, 1)
-	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestFileScopesAndAudit(t *testing.T) {
 
 func TestDeskAutoLease(t *testing.T) {
 	e := newJobEnv(t, 1)
-	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

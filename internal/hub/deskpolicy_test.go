@@ -117,7 +117,7 @@ func TestDeskPolicyFlow(t *testing.T) {
 }
 
 func TestDeskPolicyPersistence(t *testing.T) {
-	path := t.TempDir() + "/desk-policies.yaml"
+	path := t.TempDir() + "/desk-policies.json"
 	p, err := openDeskPolicies(path)
 	if err != nil {
 		t.Fatal(err)

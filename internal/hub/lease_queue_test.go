@@ -25,7 +25,7 @@ func busyChoose(node string) chooseFunc {
 
 func queueTable(t *testing.T) (*LeaseTable, *clock, *[]ticketRecord) {
 	t.Helper()
-	tb, clk, _ := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
+	tb, clk, _ := newTable(t, filepath.Join(t.TempDir(), "leases.json"))
 	var granted []ticketRecord
 	tb.onGrant = func(q ticketRecord, _ *pb.Lease) { granted = append(granted, q) }
 	return tb, clk, &granted
@@ -169,7 +169,7 @@ func TestLeaseQueueResourcesAreIndependent(t *testing.T) {
 }
 
 func TestLeaseQueueCancelPersistAndExpire(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "leases.yaml")
+	path := filepath.Join(t.TempDir(), "leases.json")
 	tb, clk, evs := newTable(t, path)
 	a, _ := tb.Acquire("a", 48*time.Hour/2, busyChoose("win"))
 	b, _ := tb.AcquireWait(ticketFor("b", 0, time.Hour), busyChoose("win"))
@@ -201,7 +201,7 @@ func TestLeaseQueueCancelPersistAndExpire(t *testing.T) {
 	}
 
 	// a ticket that can never be granted is dropped after a day
-	tb2, clk2, evs2 := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
+	tb2, clk2, evs2 := newTable(t, filepath.Join(t.TempDir(), "leases.json"))
 	if _, err := tb2.Acquire("a", maxLeaseTTL, busyChoose("win")); err != nil {
 		t.Fatal(err)
 	}

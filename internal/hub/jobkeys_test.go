@@ -254,7 +254,7 @@ func TestExpiredLeaseIsReselectable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tb, clk, _ := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
+			tb, clk, _ := newTable(t, filepath.Join(t.TempDir(), "leases.json"))
 			choose := func(blocked func(string, *int) *pb.Lease) (string, *int, error) {
 				return pickNode(statuses, sel, func(string) int { return 0 }, blocked, nil)
 			}

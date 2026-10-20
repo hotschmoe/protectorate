@@ -30,7 +30,7 @@ reachability groups (`tag:pool-X`), which is a different thing.
 
 **(built)** The tiers were named `server|family` until 2026-10-20 and every
 node was enrolled as `server`. They are now `shared|care` everywhere: the
-inventory (`nodes.yaml`, `hosts.md`), the tailnet tags `tag:tier-shared|care`
+inventory (`nodes.json`, `hosts.md`), the tailnet tags `tag:tier-shared|care`
 (the policy owns only these), `node invite --tier`, `node add --tier`, the
 `allow_care` request fields and `--allow-care` flags, `node show`, and the
 app. `protectorate node tier <name> shared|care` (owner only,
@@ -368,7 +368,7 @@ read-only calls:
 ## Rollout
 
 1. Stop the hub and run `protectorate node migrate-tiers` on the hub machine:
-   it copies `nodes.yaml` to `nodes.yaml.pre-tiers` (refusing if that copy
+   it copies `nodes.json` to `nodes.json.pre-tiers` (refusing if that copy
    exists), rewrites `server` to `shared` and `family` to `care` atomically,
    regenerates `hosts.md` and prints the `node tier` commands for step 3. A
    new hub started on the old file refuses to load and names this command.

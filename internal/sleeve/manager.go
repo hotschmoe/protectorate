@@ -3,6 +3,7 @@ package sleeve
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -14,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
@@ -41,44 +40,44 @@ type Usage struct {
 	DiskSampled time.Time
 }
 
-// Info is one sleeve. Everything but Usage is persisted in sleeves.yaml.
+// Info is one sleeve. Everything but Usage is persisted in sleeves.json.
 type Info struct {
-	Parent        string        `yaml:"parent,omitempty"`
-	ParentID      string        `yaml:"parent_id,omitempty"`
-	ReadOnly      []Mount       `yaml:"read_only,omitempty"`
-	ExitAfterIdle time.Duration `yaml:"exit_after_idle,omitempty"`
-
-	Name      string    `yaml:"name"`
-	Harness   Harness   `yaml:"harness"`
-	Workspace string    `yaml:"workspace"`
-	Session   string    `yaml:"session"`
-	Created   time.Time `yaml:"created"`
-	State     State     `yaml:"state"`
+	Name      string    `json:"name"`
+	Harness   Harness   `json:"harness"`
+	Workspace string    `json:"workspace"`
+	Session   string    `json:"session"`
+	Created   time.Time `json:"created"`
+	State     State     `json:"state"`
+	// Parent is the identity that spawned the sleeve; ParentID its token id.
+	Parent        string        `json:"parent,omitempty"`
+	ParentID      string        `json:"parent_id,omitempty"`
+	ReadOnly      []Mount       `json:"read_only,omitempty"`
+	ExitAfterIdle time.Duration `json:"exit_after_idle,omitempty"`
 	// Mode is how the harness runs. A record without one is a terminal
 	// sleeve from before modes existed.
-	Mode Mode `yaml:"mode,omitempty"`
+	Mode Mode `json:"mode,omitempty"`
 	// Chat is set for sleeves in chat mode.
-	Chat *Chat `yaml:"chat,omitempty"`
+	Chat *Chat `json:"chat,omitempty"`
 	// Supervised chat sleeves run the harness in its asking permission mode.
-	Supervised bool `yaml:"supervised,omitempty"`
+	Supervised bool `json:"supervised,omitempty"`
 	// Handoff is set when a resleeve produced this sleeve's harness.
-	Handoff *Handoff `yaml:"handoff,omitempty"`
+	Handoff *Handoff `json:"handoff,omitempty"`
 	// Helper names the hub-internal job of a short-lived sleeve (such as a
 	// handoff summary); the directory and the mailbox leave such sleeves out.
-	Helper string    `yaml:"helper,omitempty"`
-	CPU    uint32    `yaml:"cpu_percent,omitempty"`
-	Memory uint64    `yaml:"memory_bytes,omitempty"`
-	Args   []string  `yaml:"args,omitempty"`
-	Exited time.Time `yaml:"exited,omitempty"`
+	Helper string    `json:"helper,omitempty"`
+	CPU    uint32    `json:"cpu_percent,omitempty"`
+	Memory uint64    `json:"memory_bytes,omitempty"`
+	Args   []string  `json:"args,omitempty"`
+	Exited time.Time `json:"exited,omitempty"`
 	// ExitCode is nil when the exit status is unknown (the session was
 	// killed outside the hub). It is 128+ExitSignal when a signal ended the
 	// harness.
-	ExitCode   *int `yaml:"exit_code,omitempty"`
-	ExitSignal int  `yaml:"exit_signal,omitempty"`
+	ExitCode   *int `json:"exit_code,omitempty"`
+	ExitSignal int  `json:"exit_signal,omitempty"`
 	// OOMKilled is set when the harness exited with status 137 after the
 	// kernel OOM killer fired in its cgroup.
-	OOMKilled bool  `yaml:"oom_killed,omitempty"`
-	Usage     Usage `yaml:"-"`
+	OOMKilled bool  `json:"oom_killed,omitempty"`
+	Usage     Usage `json:"-"`
 }
 
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
@@ -142,10 +141,10 @@ type Manager struct {
 }
 
 type fileFormat struct {
-	Sleeves []Info `yaml:"sleeves"`
+	Sleeves []Info `json:"sleeves"`
 }
 
-// Open loads $home/sleeves.yaml and reconciles it with the live tmux
+// Open loads $home/sleeves.json and reconciles it with the live tmux
 // sessions and scopes.
 func Open(ctx context.Context, opts Options) (*Manager, error) {
 	if opts.UsageInterval <= 0 {
@@ -164,17 +163,17 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 		opts.Emit = func(string, string, map[string]any) {}
 	}
 	m := &Manager{
-		opts: opts, cfg: opts.Config, path: filepath.Join(opts.Config.Home, "sleeves.yaml"),
+		opts: opts, cfg: opts.Config, path: filepath.Join(opts.Config.Home, "sleeves.json"),
 		sleeves: map[string]*entry{}, pending: map[string]chan struct{}{}, runCtx: context.Background(),
 	}
 	raw, err := os.ReadFile(m.path)
 	switch {
 	case os.IsNotExist(err):
 	case err != nil:
-		return nil, fmt.Errorf("read sleeves.yaml: %w", err)
+		return nil, fmt.Errorf("read sleeves.json: %w", err)
 	default:
 		var f fileFormat
-		if err := yaml.Unmarshal(raw, &f); err != nil {
+		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", m.path, err)
 		}
 		for _, s := range f.Sleeves {
@@ -211,7 +210,7 @@ func (m *Manager) saveLocked() error {
 		list = append(list, e.Info)
 	}
 	sort.Slice(list, func(a, b int) bool { return list[a].Name < list[b].Name })
-	raw, err := yaml.Marshal(fileFormat{Sleeves: list})
+	raw, err := json.MarshalIndent(fileFormat{Sleeves: list}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode sleeves: %w", err)
 	}

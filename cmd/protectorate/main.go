@@ -188,7 +188,7 @@ func hubCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			store, err := auth.OpenStore(filepath.Join(home, "tokens.yaml"))
+			store, err := auth.OpenStore(filepath.Join(home, "tokens.json"))
 			if err != nil {
 				return err
 			}

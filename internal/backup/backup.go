@@ -3,16 +3,15 @@
 //
 // The hub keeps running while a snapshot is taken. Every file it writes is
 // either replaced atomically or append-only with torn-tail recovery, so each
-// copied file is consistent on its own; headscale's SQLite database is copied
-// with VACUUM INTO, which reads a consistent snapshot without stopping
-// headscale or blocking its writers.
+// copied file is consistent on its own. The supervisor stops headscale while
+// its database and WAL are copied, then restarts it before archiving begins.
 //
 // The archive holds the files below and, last, MANIFEST.json with the size and
 // SHA-256 of every file. A sidecar <archive>.sha256 holds the digest of the
 // archive itself. Nothing is ever deleted: old backups stay until you remove
 // them.
 //
-//	token, tokens.yaml, nodes.yaml, sleeves.yaml, leases.yaml, desk-policies.yaml,
+//	token, tokens.json, nodes.json, sleeves.json, leases.json, desk-policies.json,
 //	desk-use.json, directory.json, mailbox.jsonl, backlog.md, audit/, ca/,
 //	tailnet/ (db.sqlite as a snapshot, config, DERP certificate and keys, noise
 //	key, tsnet state; not logs, sockets, headscale.yaml, policy.json, derpmap.json
@@ -29,7 +28,7 @@ import (
 	"archive/tar"
 	"context"
 	"crypto/sha256"
-	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,15 +42,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hotschmoe/protectorate/internal/headscaledb"
 	"github.com/klauspost/compress/zstd"
-	_ "modernc.org/sqlite"
 )
 
 const (
 	// ManifestName is the last entry of every archive.
 	ManifestName = "MANIFEST.json"
 	// FormatVersion is bumped when the archive layout changes.
-	FormatVersion = 1
+	FormatVersion = 2
 
 	dbPath      = "tailnet/db.sqlite"
 	archivePre  = "protectorate-hub-"
@@ -91,8 +90,18 @@ type Options struct {
 type source struct {
 	rel  string
 	path string
-	// snapshot says the file is a SQLite database to copy with VACUUM INTO.
-	snapshot bool
+}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }
 
 // Create writes a new archive into opts.Dir and returns its path. The archive
@@ -113,10 +122,22 @@ func Create(ctx context.Context, opts Options) (string, error) {
 	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
+	dbDir, err := snapshotDB(ctx, home, opts.Dir)
+	if err != nil {
+		return "", fmt.Errorf("snapshot headscale: %w", err)
+	}
+	defer os.RemoveAll(dbDir)
 	srcs, err := plan(home)
 	if err != nil {
 		return "", fmt.Errorf("list state files: %w", err)
 	}
+	for _, name := range []string{"db.sqlite", "db.sqlite-wal"} {
+		p := filepath.Join(dbDir, name)
+		if _, err := os.Stat(p); err == nil {
+			srcs = append(srcs, source{rel: "tailnet/" + name, path: p})
+		}
+	}
+	sort.Slice(srcs, func(i, j int) bool { return srcs[i].rel < srcs[j].rel })
 	created := now().UTC()
 	final := filepath.Join(opts.Dir, archivePre+created.Format(stampLayout)+archiveExt)
 	if _, err := os.Stat(final); err == nil {
@@ -147,7 +168,7 @@ func Create(ctx context.Context, opts Options) (string, error) {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		f, err := addFile(ctx, tw, s, opts.Dir)
+		f, err := addFile(ctx, tw, s)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -192,7 +213,7 @@ func plan(home string) ([]source, error) {
 	add := func(rel string) {
 		out = append(out, source{rel: rel, path: filepath.Join(home, filepath.FromSlash(rel))})
 	}
-	for _, f := range []string{"token", "tokens.yaml", "nodes.yaml", "sleeves.yaml", "leases.yaml", "desk-policies.yaml", "desk-use.json", "directory.json", "mailbox.jsonl", "backlog.md", "jobs/request-ids.jsonl"} {
+	for _, f := range []string{"token", "tokens.json", "nodes.json", "sleeves.json", "leases.json", "desk-policies.json", "desk-use.json", "directory.json", "mailbox.jsonl", "backlog.md", "jobs/request-ids.jsonl"} {
 		if fi, err := os.Lstat(filepath.Join(home, filepath.FromSlash(f))); err == nil && fi.Mode().IsRegular() {
 			add(f)
 		}
@@ -237,9 +258,6 @@ func plan(home string) ([]source, error) {
 	if err := walk("sleeves", keepChat); err != nil {
 		return nil, err
 	}
-	if _, err := os.Lstat(filepath.Join(home, filepath.FromSlash(dbPath))); err == nil {
-		out = append(out, source{rel: dbPath, path: filepath.Join(home, filepath.FromSlash(dbPath)), snapshot: true})
-	}
 	sort.Slice(out, func(i, j int) bool { return out[i].rel < out[j].rel })
 	return out, nil
 }
@@ -251,7 +269,7 @@ func keepTailnet(rel string) bool {
 		return false
 	}
 	switch name {
-	case "headscale.sock", "headscale.yaml", "policy.json", "derpmap.json", "apikey":
+	case "headscale.sock", "headscale.yaml", "policy.json", "derpmap.json", "apikey", headscaledb.Request, headscaledb.Database:
 		return false
 	}
 	return true
@@ -280,16 +298,8 @@ func writeEntry(tw *tar.Writer, name string, mode int64, data []byte) error {
 // addFile writes one source into the archive and returns its manifest entry.
 // A file that grows while it is copied is archived as the prefix of the size
 // it had when the copy started.
-func addFile(ctx context.Context, tw *tar.Writer, s source, tmpDir string) (File, error) {
+func addFile(ctx context.Context, tw *tar.Writer, s source) (File, error) {
 	p := s.path
-	if s.snapshot {
-		tmp, err := snapshotDB(ctx, s.path, tmpDir)
-		if err != nil {
-			return File{}, err
-		}
-		defer os.Remove(tmp)
-		p = tmp
-	}
 	f, err := os.Open(p)
 	if err != nil {
 		return File{}, err
@@ -300,50 +310,83 @@ func addFile(ctx context.Context, tw *tar.Writer, s source, tmpDir string) (File
 		return File{}, err
 	}
 	mode := fi.Mode().Perm()
-	if s.snapshot {
-		mode = 0o600
-	}
 	size := fi.Size()
 	if err := tw.WriteHeader(&tar.Header{Name: s.rel, Mode: int64(mode), Size: size, ModTime: fi.ModTime(), Typeflag: tar.TypeReg}); err != nil {
 		return File{}, err
 	}
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tw, h), io.LimitReader(f, size)); err != nil {
+	if _, err := io.Copy(io.MultiWriter(tw, h), io.LimitReader(&contextReader{ctx: ctx, r: f}, size)); err != nil {
 		return File{}, err
 	}
 	return File{Path: s.rel, Size: size, SHA256: hex.EncodeToString(h.Sum(nil)), Mode: uint32(mode)}, nil
 }
 
-// snapshotDB copies the SQLite database at src into a new file in dir with
-// VACUUM INTO and returns its path.
-func snapshotDB(ctx context.Context, src, dir string) (string, error) {
-	tmp, err := os.CreateTemp(dir, ".backup-db-*.sqlite")
+// snapshotDB holds the request until the supervisor has reaped headscale and
+// released the database lock. WAL recovery rebuilds SHM when headscale starts.
+func snapshotDB(ctx context.Context, home, dir string) (string, error) {
+	request, err := headscaledb.Lock(ctx, home, headscaledb.Request)
 	if err != nil {
 		return "", err
 	}
-	name := tmp.Name()
-	tmp.Close()
-	// VACUUM INTO needs a target that does not exist
-	if err := os.Remove(name); err != nil {
-		return "", err
-	}
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(src)+"?_pragma=busy_timeout(30000)")
+	defer request.Close()
+	gate, err := headscaledb.Lock(ctx, home, headscaledb.Database)
 	if err != nil {
 		return "", err
 	}
-	defer db.Close()
-	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", name); err != nil {
-		os.Remove(name)
-		return "", fmt.Errorf("copy sqlite database: %w", err)
+	defer gate.Close()
+	tmp, err := os.MkdirTemp(dir, ".backup-db-")
+	if err != nil {
+		return "", fmt.Errorf("create database snapshot directory: %w", err)
 	}
-	return name, nil
+	ok := false
+	defer func() {
+		if !ok {
+			os.RemoveAll(tmp)
+		}
+	}()
+	for _, name := range []string{"db.sqlite", "db.sqlite-wal"} {
+		src, err := os.Open(filepath.Join(home, "tailnet", name))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("open %s: %w", name, err)
+		}
+		dst, err := os.OpenFile(filepath.Join(tmp, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			src.Close()
+			return "", fmt.Errorf("create %s snapshot: %w", name, err)
+		}
+		_, err = io.Copy(dst, &contextReader{ctx: ctx, r: src})
+		src.Close()
+		closeErr := dst.Close()
+		if err != nil {
+			return "", fmt.Errorf("copy %s: %w", name, err)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close %s snapshot: %w", name, closeErr)
+		}
+	}
+	db := filepath.Join(tmp, "db.sqlite")
+	if _, err := os.Stat(db); err == nil {
+		if err := checkDB(ctx, db); err != nil {
+			return "", fmt.Errorf("validate database snapshot: %w", err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("stat database snapshot: %w", err)
+	} else if _, err := os.Stat(filepath.Join(tmp, "db.sqlite-wal")); err == nil {
+		return "", fmt.Errorf("headscale WAL exists without a database")
+	}
+	ok = true
+	return tmp, nil
 }
 
 // Restore unpacks archive into home, which must be empty or not exist. The
 // archive is verified end to end (the sidecar digest when present, then the
 // manifest: every file's size and SHA-256, and no entry the manifest does not
 // list) before anything is written, and the restored SQLite database is
-// integrity-checked afterwards.
+// checked for a valid SQLite header and page alignment afterwards. Headscale
+// performs WAL recovery when it opens the restored database.
 func Restore(ctx context.Context, archive, home string) (*Manifest, error) {
 	if entries, err := os.ReadDir(home); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%s is not empty; restore only into an empty home", home)
@@ -514,31 +557,34 @@ func extract(home string, h *tar.Header, r io.Reader) error {
 }
 
 func checkDB(ctx context.Context, p string) error {
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(p))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f, err := os.Open(p)
 	if err != nil {
-		return err
+		return fmt.Errorf("open database: %w", err)
 	}
-	defer db.Close()
-	rows, err := db.QueryContext(ctx, "PRAGMA integrity_check")
+	defer f.Close()
+	var header [100]byte
+	if _, err := io.ReadFull(f, header[:]); err != nil {
+		return fmt.Errorf("read SQLite header: %w", err)
+	}
+	if string(header[:16]) != "SQLite format 3\x00" {
+		return fmt.Errorf("invalid SQLite header")
+	}
+	pageSize := int64(binary.BigEndian.Uint16(header[16:18]))
+	if pageSize == 1 {
+		pageSize = 65536
+	}
+	fi, err := f.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("stat database: %w", err)
 	}
-	defer rows.Close()
-	var problems []string
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err != nil {
-			return err
-		}
-		if line != "ok" {
-			problems = append(problems, line)
-		}
+	if pageSize < 512 || pageSize > 65536 || pageSize&(pageSize-1) != 0 || fi.Size() < pageSize || fi.Size()%pageSize != 0 {
+		return fmt.Errorf("invalid SQLite page size %d or file size %d", pageSize, fi.Size())
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if len(problems) > 0 {
-		return fmt.Errorf("integrity check failed: %s", strings.Join(problems, "; "))
+	if header[18] < 1 || header[18] > 2 || header[19] < 1 || header[19] > 2 || header[21] != 64 || header[22] != 32 || header[23] != 32 {
+		return fmt.Errorf("invalid SQLite format fields")
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package hub
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
-	"gopkg.in/yaml.v3"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
@@ -40,10 +40,10 @@ const (
 )
 
 type deskPolicyRecord struct {
-	Window    string        `yaml:"window"`
-	Idle      time.Duration `yaml:"idle"`
-	Timezone  string        `yaml:"timezone,omitempty"`
-	LockAfter bool          `yaml:"lock_after,omitempty"`
+	Window    string        `json:"window"`
+	Idle      time.Duration `json:"idle"`
+	Timezone  string        `json:"timezone,omitempty"`
+	LockAfter bool          `json:"lock_after,omitempty"`
 }
 
 func (r deskPolicyRecord) proto() *pb.DeskPolicy {
@@ -58,7 +58,7 @@ type deskPolicies struct {
 }
 
 type deskPolicyFile struct {
-	Nodes map[string]deskPolicyRecord `yaml:"nodes"`
+	Nodes map[string]deskPolicyRecord `json:"nodes"`
 }
 
 func openDeskPolicies(path string) (*deskPolicies, error) {
@@ -71,8 +71,8 @@ func openDeskPolicies(path string) (*deskPolicies, error) {
 		return nil, fmt.Errorf("read desk policies: %w", err)
 	}
 	var f deskPolicyFile
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -104,7 +104,7 @@ func (p *deskPolicies) set(name string, pol *pb.DeskPolicy) error {
 	} else {
 		p.m[name] = deskPolicyRecord{Window: pol.Window, Idle: pol.Idle.AsDuration(), Timezone: pol.Timezone, LockAfter: pol.LockAfter}
 	}
-	raw, err := yaml.Marshal(deskPolicyFile{Nodes: p.m})
+	raw, err := json.MarshalIndent(deskPolicyFile{Nodes: p.m}, "", "  ")
 	if err == nil {
 		if err = os.MkdirAll(filepath.Dir(p.path), 0o700); err == nil {
 			err = fsutil.WriteFile(p.path, raw, 0o600)

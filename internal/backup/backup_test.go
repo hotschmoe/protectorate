@@ -4,11 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -31,18 +31,17 @@ func write(t *testing.T, home, rel, content string, mode os.FileMode) {
 }
 
 // fixtureHome builds a state directory with files that belong in a backup and
-// files that must stay out, and a live WAL-mode SQLite database with an open
-// writer, like headscale's.
-func fixtureHome(t *testing.T) (home string, db *sql.DB) {
+// files that must stay out, and a stopped WAL-mode SQLite database.
+func fixtureHome(t *testing.T) (home string, dbFile string) {
 	t.Helper()
 	home = t.TempDir()
 	for rel, content := range map[string]string{
 		"token":                                           "secret-token\n",
-		"tokens.yaml":                                     "tokens: []\n",
-		"nodes.yaml":                                      "nodes: []\n",
-		"sleeves.yaml":                                    "sleeves: []\n",
-		"leases.yaml":                                     "leases: []\n",
-		"desk-policies.yaml":                              "{}\n",
+		"tokens.json":                                     "{\"tokens\": []}\n",
+		"nodes.json":                                      "{\"nodes\": []}\n",
+		"sleeves.json":                                    "{\"sleeves\": []}\n",
+		"leases.json":                                     "{\"leases\": []}\n",
+		"desk-policies.json":                              "{}\n",
 		"desk-use.json":                                   "{}\n",
 		"mailbox.jsonl":                                   "{\"m\":1}\n{\"m\":2}\n",
 		"audit/2026-10-20.jsonl":                          "{}\n",
@@ -73,45 +72,27 @@ func fixtureHome(t *testing.T) (home string, db *sql.DB) {
 		}
 		write(t, home, rel, content, mode)
 	}
-	dbFile := filepath.Join(home, "tailnet", "db.sqlite")
-	db, err := sql.Open("sqlite", "file:"+dbFile+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)")
+	dbFile = filepath.Join(home, "tailnet", "db.sqlite")
+	pythonSQLite(t, dbFile, `db.execute("PRAGMA journal_mode=WAL"); db.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, name TEXT)"); db.executemany("INSERT INTO nodes (name) VALUES (?)", [("alpha",),("beta",)]); db.commit()`)
+	return home, dbFile
+}
+
+func pythonSQLite(t *testing.T, dbFile, script string) string {
+	t.Helper()
+	python, err := exec.LookPath("python3")
 	if err != nil {
-		t.Fatal(err)
+		t.Skip("SQLite fixture requires python3")
 	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec("CREATE TABLE nodes (id INTEGER PRIMARY KEY, name TEXT)"); err != nil {
-		t.Fatal(err)
+	out, err := exec.Command(python, "-c", "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); "+script, dbFile).CombinedOutput()
+	if err != nil {
+		t.Fatalf("SQLite fixture: %v: %s", err, out)
 	}
-	for _, n := range []string{"alpha", "beta"} {
-		if _, err := db.Exec("INSERT INTO nodes (name) VALUES (?)", n); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return home, db
+	return strings.TrimSpace(string(out))
 }
 
 func nodeNames(t *testing.T, dbFile string) []string {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+dbFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	rows, err := db.Query("SELECT name FROM nodes ORDER BY id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, n)
-	}
-	return out
+	return strings.Split(pythonSQLite(t, dbFile, `assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"; print("\n".join(r[0] for r in db.execute("SELECT name FROM nodes ORDER BY id")))`), "\n")
 }
 
 func listFiles(t *testing.T, root string) []string {
@@ -134,27 +115,10 @@ func listFiles(t *testing.T, root string) []string {
 	return out
 }
 
-func TestRoundTripWhileDatabaseIsBusy(t *testing.T) {
-	home, db := fixtureHome(t)
-	stop := make(chan struct{})
-	writerDone := make(chan struct{})
-	go func() {
-		defer close(writerDone)
-		for i := 0; ; i++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if _, err := db.Exec("INSERT INTO nodes (name) VALUES (?)", "busy"); err != nil {
-				return
-			}
-		}
-	}()
+func TestRoundTripStoppedDatabase(t *testing.T) {
+	home, _ := fixtureHome(t)
 	dest := t.TempDir()
 	file, err := Create(context.Background(), Options{Home: home, Dir: dest, Version: "v-test", Now: func() time.Time { return time.Date(2026, 10, 20, 9, 30, 0, 0, time.UTC) }})
-	close(stop)
-	<-writerDone
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,13 +144,13 @@ func TestRoundTripWhileDatabaseIsBusy(t *testing.T) {
 	}
 	want := []string{
 		"audit/2026-10-20.jsonl",
-		"desk-policies.yaml", "desk-use.json",
+		"desk-policies.json", "desk-use.json",
 		"jobs/20261020-010101-aaaaaaaa/job.json", "jobs/20261020-010101-aaaaaaaa/job.log", "jobs/request-ids.jsonl",
-		"leases.yaml", "mailbox.jsonl", "nodes.yaml",
-		"sleeves.yaml", "sleeves/api/chat.jsonl", "sleeves/api/chat.jsonl.request-ids",
+		"leases.json", "mailbox.jsonl", "nodes.json",
+		"sleeves.json", "sleeves/api/chat.jsonl", "sleeves/api/chat.jsonl.request-ids",
 		"tailnet/config.json", "tailnet/db.sqlite", "tailnet/derp_cert.pem", "tailnet/derp_private.key", "tailnet/noise_private.key",
 		"tailnet/tsnet-hub/tailscaled.state",
-		"token", "tokens.yaml",
+		"token", "tokens.json",
 	}
 	got := listFiles(t, restored)
 	got = removeAll(got, "tailnet/db.sqlite-shm", "tailnet/db.sqlite-wal")
@@ -317,18 +281,18 @@ func TestRestoreRejectsBadArchives(t *testing.T) {
 	}{
 		{"a changed byte", func(t *testing.T) string {
 			return rewrite(t, good, func(n string, b []byte) (string, []byte, bool) {
-				if n == "tokens.yaml" {
+				if n == "tokens.json" {
 					return n, append(b[:len(b)-2:len(b)-2], 'X', '\n'), true
 				}
 				return same(n, b)
 			})
 		}, "does not match the manifest"},
 		{"a missing file", func(t *testing.T) string {
-			return rewrite(t, good, func(n string, b []byte) (string, []byte, bool) { return n, b, n != "tokens.yaml" })
+			return rewrite(t, good, func(n string, b []byte) (string, []byte, bool) { return n, b, n != "tokens.json" })
 		}, "manifest lists"},
 		{"an extra file", func(t *testing.T) string {
 			return rewrite(t, good, func(n string, b []byte) (string, []byte, bool) {
-				if n == "tokens.yaml" {
+				if n == "tokens.json" {
 					return "extra", b, true
 				}
 				return same(n, b)
@@ -339,7 +303,7 @@ func TestRestoreRejectsBadArchives(t *testing.T) {
 		}, "no manifest"},
 		{"a path that escapes the home", func(t *testing.T) string {
 			return rewrite(t, good, func(n string, b []byte) (string, []byte, bool) {
-				if n == "tokens.yaml" {
+				if n == "tokens.json" {
 					return "../evil", b, true
 				}
 				return same(n, b)

@@ -24,8 +24,8 @@ type Spec struct {
 }
 
 type Mount struct {
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
+	Source string `json:"source"`
+	Target string `json:"target"`
 }
 
 func (c Config) ResolveMounts(mounts []Mount) ([]Mount, error) {

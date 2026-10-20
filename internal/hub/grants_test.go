@@ -31,7 +31,7 @@ type grantEnv struct {
 func newGrantEnv(t *testing.T) *grantEnv {
 	t.Helper()
 	e := newJobEnv(t, 1)
-	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

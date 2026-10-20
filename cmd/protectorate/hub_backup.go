@@ -17,9 +17,9 @@ func hubBackupCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "backup",
 		Short: "Snapshot the hub's state directory into a timestamped tar.zst",
-		Long: `Writes protectorate-hub-<time>.tar.zst and a .sha256 sidecar. The hub and
-headscale keep running: headscale's database is copied with SQLite's own
-consistent snapshot. Old backups are never deleted; prune them yourself.
+		Long: `Writes protectorate-hub-<time>.tar.zst and a .sha256 sidecar. The hub keeps
+running. Its supervisor briefly stops headscale while copying the database and
+WAL, then restarts it. Old backups are never deleted; prune them yourself.
 
 Included: tokens, nodes, sleeves, leases, desk policies and counts, mailbox,
 chat logs, job records and logs, request ids, audit log, directory, backlog and
@@ -55,7 +55,8 @@ func hubRestoreCmd() *cobra.Command {
 		Short: "Restore a hub backup into an empty state directory",
 		Long: `Verifies the archive (its .sha256 sidecar if present, then the manifest: every
 file's size and SHA-256) before writing anything, unpacks it into DIR, which must
-be empty or missing, and integrity-checks the restored headscale database. Stop
+be empty or missing, and checks the restored database's SQLite header and page
+alignment. Headscale recovers its WAL and validates the database on start. Stop
 the hub first, then start it with PROTECTORATE_HOME=DIR. Run
 'hub tailnet install' and 'protectorate login' again on a new machine.`,
 		Args: cobra.ExactArgs(1),

@@ -182,7 +182,7 @@ window (2 minutes), and sends the sleeve a `notice` saying so. `lease renew
 <id>` with no `--ttl` claims it for the ttl originally asked for; unclaimed it
 expires and passes to the next ticket. `lease release <ticket>` leaves the
 queue; tickets older than a day are dropped. The queue is kept in
-`leases.yaml` and survives restarts. Events: `lease.queued`, `lease.granted`,
+`leases.json` and survives restarts. Events: `lease.queued`, `lease.granted`,
 `lease.dropped`. Agents never negotiate hardware between themselves.
 
 ## Dependency notices

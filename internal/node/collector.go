@@ -12,11 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/host"
-	"github.com/shirou/gopsutil/v4/load"
-	"github.com/shirou/gopsutil/v4/mem"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -67,7 +62,7 @@ type Collector struct {
 	lastAt    time.Time
 
 	cpuMu   sync.Mutex
-	cpuPrev *cpu.TimesStat
+	cpuPrev *cpuTimes
 
 	// accel state is guarded by collectMu; the inventory is redone after
 	// SlowInterval.
@@ -157,10 +152,9 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 		go func() { defer wg.Done(); f() }()
 	}
 	run(func() {
-		info, err := host.InfoWithContext(ctx)
+		info, err := hostInfo(ctx)
 		if err != nil {
 			warn("host", err)
-			return
 		}
 		mu.Lock()
 		m.Platform = strings.TrimSpace(info.Platform + " " + info.PlatformVersion)
@@ -229,7 +223,7 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 func (c *Collector) cpuMetrics(ctx context.Context) (*pb.CpuMetrics, error) {
 	cm := &pb.CpuMetrics{LogicalCores: int32(runtime.NumCPU())}
 	if runtime.GOOS != "windows" {
-		if avg, err := load.AvgWithContext(ctx); err == nil {
+		if avg, err := loadAverage(ctx); err == nil {
 			cm.Load1, cm.Load5, cm.Load15 = &avg.Load1, &avg.Load5, &avg.Load15
 		}
 	}
@@ -261,7 +255,7 @@ func (c *Collector) cpuUsage(ctx context.Context) (float64, error) {
 	c.cpuMu.Lock()
 	defer c.cpuMu.Unlock()
 	if c.cpuPrev == nil {
-		t, err := cpu.TimesWithContext(ctx, false)
+		t, err := readCPUTimes(ctx)
 		if err != nil || len(t) == 0 {
 			return 0, fmt.Errorf("read cpu times: %w", firstErr(err))
 		}
@@ -272,7 +266,7 @@ func (c *Collector) cpuUsage(ctx context.Context) (float64, error) {
 			return 0, ctx.Err()
 		}
 	}
-	t, err := cpu.TimesWithContext(ctx, false)
+	t, err := readCPUTimes(ctx)
 	if err != nil || len(t) == 0 {
 		return 0, fmt.Errorf("read cpu times: %w", firstErr(err))
 	}
@@ -288,8 +282,8 @@ func firstErr(err error) error {
 	return fmt.Errorf("no data")
 }
 
-func cpuBusyPercent(prev, cur cpu.TimesStat) float64 {
-	idle := func(t cpu.TimesStat) float64 { return t.Idle + t.Iowait }
+func cpuBusyPercent(prev, cur cpuTimes) float64 {
+	idle := func(t cpuTimes) float64 { return t.Idle + t.Iowait }
 	total := cur.Total() - prev.Total()
 	if total <= 0 {
 		return 0
@@ -308,7 +302,7 @@ func clampPercent(p float64) float64 {
 }
 
 func memMetrics(ctx context.Context) (*pb.MemoryMetrics, error) {
-	vm, err := mem.VirtualMemoryWithContext(ctx)
+	vm, err := readMemory(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read memory: %w", err)
 	}
@@ -317,7 +311,7 @@ func memMetrics(ctx context.Context) (*pb.MemoryMetrics, error) {
 		mm.UsedBytes = vm.Total - vm.Available
 		mm.UsedPercent = float64(mm.UsedBytes) / float64(vm.Total) * 100
 	}
-	if sw, err := mem.SwapMemoryWithContext(ctx); err == nil && sw.Total > 0 {
+	if sw, err := readSwap(ctx); err == nil && sw.Total > 0 {
 		mm.SwapTotalBytes, mm.SwapUsedBytes = sw.Total, sw.Used
 		mm.SwapUsedPercent = clampPercent(float64(sw.Used) / float64(sw.Total) * 100)
 	}
@@ -334,7 +328,7 @@ var pseudoFS = map[string]bool{
 }
 
 // keepPartition reports whether a mount is a real, user-visible filesystem.
-func keepPartition(p disk.PartitionStat) bool {
+func keepPartition(p partition) bool {
 	if p.Fstype == "" || (pseudoFS[strings.ToLower(p.Fstype)] && !(p.Fstype == "overlay" && p.Mountpoint == "/")) {
 		return false
 	}
@@ -377,7 +371,7 @@ const fsProbeTimeout = 5 * time.Second
 // mount whose probe is still outstanding is reported stale instead of
 // spawning another goroutine behind it.
 type fsProber struct {
-	run     func(ctx context.Context, p disk.PartitionStat) fsResult
+	run     func(ctx context.Context, p partition) fsResult
 	timeout time.Duration
 
 	mu          sync.Mutex
@@ -388,7 +382,7 @@ func newFSProber() *fsProber {
 	return &fsProber{run: statFilesystem, timeout: fsProbeTimeout, outstanding: map[string]bool{}}
 }
 
-func (f *fsProber) probe(ctx context.Context, p disk.PartitionStat) fsResult {
+func (f *fsProber) probe(ctx context.Context, p partition) fsResult {
 	f.mu.Lock()
 	if f.outstanding[p.Mountpoint] {
 		f.mu.Unlock()
@@ -415,11 +409,11 @@ func (f *fsProber) probe(ctx context.Context, p disk.PartitionStat) fsResult {
 	}
 }
 
-func statFilesystem(ctx context.Context, p disk.PartitionStat) fsResult {
+func statFilesystem(ctx context.Context, p partition) fsResult {
 	if fi, err := os.Stat(p.Mountpoint); err == nil && !fi.IsDir() {
 		return fsResult{}
 	}
-	u, err := disk.UsageWithContext(ctx, p.Mountpoint)
+	u, err := diskUsage(ctx, p.Mountpoint)
 	if err != nil {
 		return fsResult{err: fmt.Errorf("%s: %w", p.Mountpoint, err)}
 	}
@@ -435,11 +429,11 @@ type fsKey struct {
 }
 
 func filesystemMetrics(ctx context.Context, pr *fsProber) ([]*pb.FilesystemMetrics, []error) {
-	parts, err := disk.PartitionsWithContext(ctx, true)
+	parts, err := partitions(ctx)
 	if err != nil {
 		parts = nil
 	}
-	var cands []disk.PartitionStat
+	var cands []partition
 	for _, p := range parts {
 		if keepPartition(p) {
 			cands = append(cands, p)
@@ -450,7 +444,7 @@ func filesystemMetrics(ctx context.Context, pr *fsProber) ([]*pb.FilesystemMetri
 		if runtime.GOOS == "windows" {
 			root = os.Getenv("SystemDrive") + `\`
 		}
-		cands = []disk.PartitionStat{{Mountpoint: root, Device: root, Fstype: "unknown"}}
+		cands = []partition{{Mountpoint: root, Device: root, Fstype: "unknown"}}
 	}
 
 	results := make([]fsResult, len(cands))

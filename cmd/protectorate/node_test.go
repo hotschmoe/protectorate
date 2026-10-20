@@ -376,7 +376,7 @@ func TestNoSecretFlags(t *testing.T) {
 func TestNodeMigrateTiers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("PROTECTORATE_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "nodes.yaml"), []byte("nodes:\n  - name: kidsbox\n    addr: kidsbox\n    tier: family\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "nodes.json"), []byte(`{"nodes":[{"name":"kidsbox","addr":"kidsbox","tier":"family"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	root := newRoot()
@@ -386,7 +386,7 @@ func TestNodeMigrateTiers(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"kidsbox: family -> care", "protectorate node tier kidsbox care", "nodes.yaml.pre-tiers"} {
+	for _, want := range []string{"kidsbox: family -> care", "protectorate node tier kidsbox care", "nodes.json.pre-tiers"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}

@@ -7,8 +7,8 @@ import (
 
 // Empty values leave native defaults in control. Values are native catalog IDs.
 type Selection struct {
-	Model  string `json:"model,omitempty" yaml:"model,omitempty"`
-	Effort string `json:"effort,omitempty" yaml:"effort,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 type Model struct {
