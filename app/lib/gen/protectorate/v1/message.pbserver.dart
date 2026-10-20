@@ -31,6 +31,8 @@ abstract class MessageServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $1.ReplyRequest request);
   $async.Future<$1.ThreadResponse> thread(
       $pb.ServerContext ctx, $1.ThreadRequest request);
+  $async.Future<$1.ListThreadsResponse> listThreads(
+      $pb.ServerContext ctx, $1.ListThreadsRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -44,6 +46,8 @@ abstract class MessageServiceBase extends $pb.GeneratedService {
         return $1.ReplyRequest();
       case 'Thread':
         return $1.ThreadRequest();
+      case 'ListThreads':
+        return $1.ListThreadsRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -62,6 +66,8 @@ abstract class MessageServiceBase extends $pb.GeneratedService {
         return reply(ctx, request as $1.ReplyRequest);
       case 'Thread':
         return thread(ctx, request as $1.ThreadRequest);
+      case 'ListThreads':
+        return listThreads(ctx, request as $1.ListThreadsRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

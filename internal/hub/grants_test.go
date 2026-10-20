@@ -172,12 +172,12 @@ func TestAdminJobs(t *testing.T) {
 		})
 	}
 
-	entries, err := auth.Tail(g.auditDir, 1000)
+	page, err := auth.ReadPage(g.auditDir, auth.Query{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var adminLine, readLine bool
-	for _, en := range entries {
+	for _, en := range page.Entries {
 		if en.Task != "update kids machine" {
 			continue
 		}
@@ -189,6 +189,6 @@ func TestAdminJobs(t *testing.T) {
 		}
 	}
 	if !adminLine || !readLine {
-		t.Fatalf("grant use not audited with its task (admin %v, read %v): %+v", adminLine, readLine, entries)
+		t.Fatalf("grant use not audited with its task (admin %v, read %v): %+v", adminLine, readLine, page.Entries)
 	}
 }

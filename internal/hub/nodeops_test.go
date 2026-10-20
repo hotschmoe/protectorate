@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -429,6 +430,13 @@ func TestDeskLeaseRule(t *testing.T) {
 	if err != nil || shot.Msg.Width != 4 || shot.Msg.Height != 3 || !bytes.HasPrefix(shot.Msg.Png, []byte("\x89PNG")) {
 		t.Fatalf("screenshot without lease: %v %v", shot, err)
 	}
+	small, err := dc.Screenshot(ctx, connect.NewRequest(&pb.ScreenshotRequest{Target: target(""), MaxWidth: 2}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := png.DecodeConfig(bytes.NewReader(small.Msg.Png)); err != nil || cfg.Width != 2 || small.Msg.Width != 4 || small.Msg.Height != 3 {
+		t.Fatalf("scaled screenshot = %+v %v, screen %dx%d", cfg, err, small.Msg.Width, small.Msg.Height)
+	}
 	fg, err := dc.Foreground(ctx, connect.NewRequest(&pb.ForegroundRequest{Target: target("")}))
 	if err != nil || fg.Msg.Integrity != "system" || !fg.Msg.Blocks || fg.Msg.Process != "consent.exe" {
 		t.Errorf("foreground = %v, %v", fg, err)
@@ -494,7 +502,7 @@ func TestDeskLeaseRule(t *testing.T) {
 	if err != nil || run.Msg.Pid != 7 {
 		t.Fatalf("run: %v %v", run, err)
 	}
-	want := []string{"screenshot", "foreground", "windows", "click", "type hi", "key", "move", "run calc.exe"}
+	want := []string{"screenshot", "screenshot", "foreground", "windows", "click", "type hi", "key", "move", "run calc.exe"}
 	if got := e.peerDesk.got(); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("peer desk calls = %v, want %v (denied commands must not reach the node)", got, want)
 	}

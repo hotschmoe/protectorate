@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"connectrpc.com/connect"
@@ -218,12 +219,12 @@ func auditCmd(o *opts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entries, err := auth.Tail(filepath.Join(home, "audit"), n)
+			page, err := auth.ReadPage(filepath.Join(home, "audit"), auth.Query{Limit: n})
 			if err != nil {
 				return err
 			}
 			w := cmd.OutOrStdout()
-			for _, e := range entries {
+			for _, e := range slices.Backward(page.Entries) {
 				if o.json {
 					b, _ := auth.MarshalEntry(e)
 					fmt.Fprintf(w, "%s\n", b)

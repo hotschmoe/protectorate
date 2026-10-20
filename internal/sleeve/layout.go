@@ -32,12 +32,19 @@ const claudeSeed = "{\"hasCompletedOnboarding\":true}\n"
 // and sandbox; the user's config.toml, with its trust and model, is not copied.
 const codexSeed = "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n"
 
+// profileSeed keeps the sleeve's PATH in login shells: /etc/profile resets
+// PATH, and harnesses such as Codex run every command through `bash -lc`.
+const profileSeed = "# Written by the protectorate hub: login shells keep the sleeve's PATH.\n" +
+	"if [ -n \"$" + sleevePathEnv + "\" ]; then PATH=\"$" + sleevePathEnv + "\"; export PATH; fi\n"
+
+const sleevePathEnv = "PROTECTORATE_SLEEVE_PATH"
+
 // layout paths on the host live under the sleeve's home; the same paths
 // relative to $HOME are what the harness sees.
 func (c Config) layout(name string, h Harness) Layout {
 	host := func(rel string) string { return filepath.Join(c.sleeveHome(name), rel) }
 	inside := func(rel string) string { return filepath.Join(c.UserHome, rel) }
-	l := Layout{Dirs: []string{c.sleeveHome(name)}}
+	l := Layout{Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
 	auth := c.authDir(h)
 	shared := func() {
 		l.Dirs = append(l.Dirs, auth)

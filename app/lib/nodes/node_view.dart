@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/job.pb.dart';
+import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 
 String formatBytes(num bytes) {
@@ -96,6 +98,21 @@ GpuSummary? summarizeGpus(NodeMetrics m) {
 
 double? knownPercent(double v) => v >= 0 ? v : null;
 
+// Why each GPU of a node is busy, by GPU index: the hub's judgement from the
+// node's recent polls (NodeStatus.busy_gpus, docs/node-work.md "Busy GPUs").
+Map<int, String> gpuBusy(NodeStatus s) => {
+  for (final b in s.busyGpus) b.index: b.reason,
+};
+
+// Who holds a lease on each GPU of a node, by GPU index.
+Map<int, String> gpuHolders(Iterable<Lease> leases, String node) => {
+  for (final l in leases)
+    if (l.node == node &&
+        l.hasGpuIndex() &&
+        l.state == LeaseState.LEASE_STATE_UNSPECIFIED)
+      l.gpuIndex: l.holder,
+};
+
 // One GPU: name, integrated or discrete and driver, then a utilization meter
 // when the device reports one and a VRAM meter for dedicated memory.
 class GpuLines extends StatelessWidget {
@@ -104,11 +121,17 @@ class GpuLines extends StatelessWidget {
     required this.gpu,
     this.dim = false,
     this.detail = false,
+    this.holder = '',
+    this.busy = '',
   });
 
   final GpuMetrics gpu;
   final bool dim;
   final bool detail;
+  // holder is who leases this GPU, when anyone does.
+  final String holder;
+  // busy is why the hub counts this GPU as busy, empty when it does not.
+  final String busy;
 
   @override
   Widget build(BuildContext context) {
@@ -145,6 +168,33 @@ class GpuLines extends StatelessWidget {
             ),
             overflow: TextOverflow.ellipsis,
           ),
+          if (busy.isNotEmpty || holder.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (busy.isNotEmpty) ...[
+                    Annunciator(
+                      key: ValueKey('gpu-busy-${g.index}'),
+                      label: 'BUSY',
+                      tone: Tone.warn,
+                      lit: !dim,
+                    ),
+                    Text(busy, style: t.small()),
+                  ],
+                  if (holder.isNotEmpty)
+                    Annunciator(
+                      key: ValueKey('gpu-holder-${g.index}'),
+                      label: 'LEASED BY $holder',
+                      tone: Tone.info,
+                      lit: !dim,
+                    ),
+                ],
+              ),
+            ),
           if (util != null)
             MeterRow(
               key: ValueKey('gpu-util-${g.index}'),
@@ -350,9 +400,6 @@ List<AlertBadge> alertBadges(NodeStatus s) {
       default:
         if (a.message.isNotEmpty) out.add(AlertBadge(a.message, false));
     }
-  }
-  for (final b in s.busyGpus) {
-    out.add(AlertBadge('GPU${b.index} BUSY', false));
   }
   return out;
 }

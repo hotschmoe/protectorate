@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// AuditService reads the hub's audit log (docs/auth.md): every mutating call
+// and terminal attach, with who made it and how it ended. Only the owner
+// token may call it.
+service AuditService {
+  option (protectorate.v1.owner_only) = true;
+
+  // ListAuditEntries returns entries newest first, one page at a time. A page
+  // reads a bounded part of the log, so a filter that matches rarely can come
+  // back short, or empty, with a next_page_token to continue.
+  rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message ListAuditEntriesRequest {
+  // limit is the page size: 0 means 50, at most 500.
+  int32 limit = 1;
+  // page_token is a previous response's next_page_token; empty starts at the
+  // newest entry.
+  string page_token = 2;
+  // actor, procedure and subject keep entries whose field contains this text,
+  // ignoring case.
+  string actor = 3;
+  string procedure = 4;
+  string subject = 5;
+  // outcome keeps entries with this outcome: "ok", "denied" or "error".
+  string outcome = 6;
+}
+
+message ListAuditEntriesResponse {
+  // entries are newest first.
+  repeated AuditEntry entries = 1;
+  // next_page_token continues with older entries; empty at the start of the
+  // log.
+  string next_page_token = 2;
+}
+
+// AuditEntry is one audit line. Secrets and request bodies are never logged.
+message AuditEntry {
+  google.protobuf.Timestamp time = 1;
+  // actor is "owner", "token:<name>" or "unauthenticated".
+  string actor = 2;
+  string token_id = 3;
+  // tailnet is the WhoIs identity of a tailnet caller.
+  string tailnet = 4;
+  // procedure is the Connect procedure, or the terminal path.
+  string procedure = 5;
+  // subject is the request's name or id, nothing else from the body.
+  string subject = 6;
+  // outcome is "ok", "denied" or "error"; code is the Connect code.
+  string outcome = 7;
+  string code = 8;
+  // task is the task of the admin grant that made the call.
+  string task = 9;
+  // detail is what the handler added, such as a job's node and mode.
+  string detail = 10;
+}

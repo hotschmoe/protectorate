@@ -45,6 +45,7 @@ var Workflow = []struct{ Command, Purpose string }{
 	{"backlog show", "read one note in full"},
 	{"sleeve ls", "running sleeves with CPU, memory and workspace"},
 	{"sleeve spawn", "start a harness in an isolated workspace"},
+	{"sleeve resleeve", "move a sleeve to another harness with a hub-written handoff (no confirmation needed)"},
 	{"session capture", "read what a sleeve's pane shows right now"},
 	{"backlog edit", "update a note, e.g. --append or --body, when the owner asks"},
 	{"events", "stream hub events as they happen"},
@@ -87,6 +88,7 @@ func RenderAgents(din DocInput) []byte {
 	w("- Never run a destructive action (killing a sleeve or session, removing a node, anything irreversible) without the user's explicit approval in this conversation, even if your token would allow it. Ask first and say what it will affect.\n")
 	w("- Do not try to widen your own permissions or work around a `permission_denied`. Report it to the user instead.\n")
 	w("- Start work only with `protectorate sleeve spawn`, which runs in a sandbox. Raw sessions run outside any sandbox and are not granted to you.\n")
+	w("- When a chat sleeve's subscription runs low, move it with `protectorate sleeve resleeve <name> --to auto`; no confirmation is needed. The hub writes the handoff and tells the new harness to read it. Terminal and shell sleeves cannot be resleeved.\n")
 	w("- Unknown or stale quota is not spare capacity. Prefer fresh data; run `protectorate quota suggest --refresh` when in doubt.\n")
 	w("- Work donated to public repositories lands in a review inbox (a branch on a fork plus a summary). Nothing public goes out without the user's approval.\n")
 	w("- This sandbox holds no SSH keys or harness credentials. `hosts.md` lists the user's machines for reference only.\n\n")
@@ -165,11 +167,12 @@ func firstSentence(s string, limit int) string {
 
 // DefaultGrants are the tool globs Poe is given; destructive tools matched by
 // them are dropped, so a new kill-style RPC is never granted by accident.
+// message_* lets Poe answer the escalations the mailbox sends it.
 // session_* is deliberately absent: session creation starts host processes
 // outside any sandbox. Poe starts work only through sandboxed sleeves.
 // grant_admin works only on a hub started with --orchestrator-admin-grants,
 // and only for shared nodes.
-var DefaultGrants = []string{"backlog_*", "lease_*", "sleeve_spawn_sleeve", "grant_admin"}
+var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "grant_admin"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of

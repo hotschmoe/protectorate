@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -73,4 +76,91 @@ func (m *Manager) Command(name string) (func(bin string, args []string) ([]strin
 		l, err := m.cfg.launch(info, args)
 		return l.Argv, err
 	}, nil
+}
+
+const gitTimeout = 20 * time.Second
+
+// Git runs a read-only git command on the named sleeve's workspace in a
+// throwaway sandbox: no network, no home, nothing writable but a tmpfs, the
+// workspace (and a linked worktree's repository) bound read-only. A
+// workspace is written by a sandboxed agent, and its repository config can
+// name programs git runs (filters, textconv, fsmonitor, signature helpers);
+// in here they can neither read the user's files nor change anything.
+func (m *Manager) Git(ctx context.Context, name, dir string, args ...string) (string, error) {
+	argv, err := m.cfg.gitArgv(name, dir, args)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = []string{"PATH=/usr/bin:/bin"}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
+func (c Config) gitArgv(name, dir string, args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("%w: git needs a command", ErrInvalid)
+	}
+	if err := c.CheckWorkspace(name, dir); err != nil {
+		return nil, err
+	}
+	binds := []string{dir}
+	for _, d := range linkedGitDirs(dir) {
+		if within(d, dir) {
+			continue
+		}
+		if err := c.CheckWorkspace(name, d); err != nil {
+			return nil, fmt.Errorf("%w: the repository of %s is at %s, which is not readable: %v", ErrInvalid, dir, d, err)
+		}
+		binds = append(binds, d)
+	}
+	argv := []string{"bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--tmpfs", "/"}
+	argv = append(argv, c.System...)
+	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
+	for _, d := range binds {
+		argv = append(argv, "--ro-bind", d, d)
+	}
+	argv = append(argv, "--chdir", dir, "--clearenv",
+		"--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp", "--setenv", "LANG", "C.UTF-8",
+		"--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_OPTIONAL_LOCKS", "0", "--setenv", "GIT_TERMINAL_PROMPT", "0",
+		"--", "git", "--no-pager", "-c", "safe.directory=*", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+		"-c", "core.pager=cat", "-c", "diff.external=")
+	return append(argv, args...), nil
+}
+
+// linkedGitDirs returns the git and common directory a workspace's .git file
+// points to (a linked worktree or a submodule), resolved, or nothing.
+func linkedGitDirs(dir string) []string {
+	raw, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return nil
+	}
+	gd, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir:")
+	if !ok {
+		return nil
+	}
+	gd = strings.TrimSpace(gd)
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(dir, gd)
+	}
+	var out []string
+	if r, err := filepath.EvalSymlinks(gd); err == nil {
+		out = append(out, r)
+		if c, err := os.ReadFile(filepath.Join(r, "commondir")); err == nil {
+			cd := strings.TrimSpace(string(c))
+			if !filepath.IsAbs(cd) {
+				cd = filepath.Join(r, cd)
+			}
+			if rc, err := filepath.EvalSymlinks(cd); err == nil {
+				out = append(out, rc)
+			}
+		}
+	}
+	return out
 }

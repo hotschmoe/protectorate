@@ -67,13 +67,14 @@ const ScreenshotRequest$json = {
       '6': '.protectorate.v1.DeskTarget',
       '10': 'target'
     },
+    {'1': 'max_width', '3': 2, '4': 1, '5': 5, '10': 'maxWidth'},
   ],
 };
 
 /// Descriptor for `ScreenshotRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List screenshotRequestDescriptor = $convert.base64Decode(
     'ChFTY3JlZW5zaG90UmVxdWVzdBIzCgZ0YXJnZXQYASABKAsyGy5wcm90ZWN0b3JhdGUudjEuRG'
-    'Vza1RhcmdldFIGdGFyZ2V0');
+    'Vza1RhcmdldFIGdGFyZ2V0EhsKCW1heF93aWR0aBgCIAEoBVIIbWF4V2lkdGg=');
 
 @$core.Deprecated('Use screenshotResponseDescriptor instead')
 const ScreenshotResponse$json = {

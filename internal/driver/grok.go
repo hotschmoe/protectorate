@@ -73,7 +73,7 @@ func openGrok(ctx context.Context, cwd, sessionID string, opts Options) (Session
 	}
 	s.setID(sessionID)
 	gate := "/always-approve off"
-	if opts.Sandboxed {
+	if opts.Autonomous {
 		gate = "/always-approve on"
 	}
 	wait, err := s.startPrompt(gate)

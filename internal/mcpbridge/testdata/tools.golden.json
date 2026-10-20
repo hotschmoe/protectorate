@@ -439,6 +439,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "maxWidth": {
+          "description": "max_width scales the image down, keeping its aspect ratio, to at most this many pixels wide, for viewing over a slow link; 0 keeps full size. Input coordinates stay screen pixels: scale by width / the PNG's width.",
+          "type": "integer"
+        },
         "target": {
           "additionalProperties": false,
           "properties": {
@@ -954,6 +958,10 @@
           "description": "peek lists without marking read.",
           "type": "boolean"
         },
+        "threadId": {
+          "description": "thread_id keeps only the messages of this thread.",
+          "type": "string"
+        },
         "unreadOnly": {
           "description": "unread_only leaves out messages already injected, shown or acked.",
           "type": "boolean"
@@ -962,6 +970,33 @@
       "type": "object"
     },
     "name": "message_inbox"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListThreads summarizes threads, most recently active first: who takes part, the last message, and what is still open. Unread counts are the caller's own.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "limit is the most threads returned: 0 means 100, at most 500.",
+          "type": "integer"
+        },
+        "project": {
+          "description": "project keeps the threads addressed to or sent from this project (id, \"owner/repo\" or bare name, as in DirectoryService.GetProject).",
+          "type": "string"
+        },
+        "sleeve": {
+          "description": "sleeve keeps the threads this sleeve sent to or received in.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_list_threads"
   },
   {
     "annotations": {
@@ -1350,6 +1385,46 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
+    "description": "ResleeveSleeve moves a chat sleeve to another harness on the same workspace, under the same name, without asking the outgoing harness anything. The hub takes the chat over (no other sender can start a turn), waits for it to be IDLE (interrupting a turn that runs past wait), composes facts in code (git status, diff --stat, recent commits, backlog and mail, the last user messages and the final assistant message from the outgoing harness's own transcript), has a separate model write a Goal/State/Unfinished/Next/Gotchas summary (the subscription with the most spare quota other than the outgoing harness, else pi with the local LLM), overwrites \u003cworkspace\u003e/.protectorate/HANDOFF.md (kept out of git through .git/info/exclude, archived under the hub's state directory), replaces the harness and sends it one plain user message naming the handoff. The summary runs while the outgoing turn winds down. The old native session stays on disk for a later resume. If the new harness cannot start, the old one is respawned on its own session. Announced as \"sleeve.resleeved\"; a summary by the fallback model, or none, also emits \"resleeve.warning\".",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "interrupt": {
+          "description": "interrupt cancels a running turn at once instead of waiting for it.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "to": {
+          "description": "to is the new harness. UNSPECIFIED means auto: the top recommendation of QuotaService.Suggest other than the current harness.",
+          "enum": [
+            "HARNESS_UNSPECIFIED",
+            "HARNESS_CLAUDE",
+            "HARNESS_CODEX",
+            "HARNESS_GROK",
+            "HARNESS_PI",
+            "HARNESS_SHELL"
+          ],
+          "type": "string"
+        },
+        "wait": {
+          "description": "wait bounds how long a running turn may continue before it is interrupted. Default 5 minutes.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_resleeve_sleeve"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
     "description": "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is an existing directory (bound read-write at the same path) or a git URL cloned into the hub's workspaces directory. Respawning the name of an exited sleeve reuses its home directory and workspace and replaces its kept session.",
     "inputSchema": {
       "additionalProperties": false,
@@ -1404,6 +1479,10 @@
         "name": {
           "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",
           "type": "string"
+        },
+        "supervised": {
+          "description": "supervised runs a chat sleeve's harness in its asking permission mode instead of autonomous: Claude --permission-mode default, Codex approvalPolicy untrusted with its workspace-write sandbox, Grok /always-approve off. pi has no gate and ignores it.",
+          "type": "boolean"
         },
         "workspace": {
           "description": "workspace is an absolute directory path on the hub, or a git URL to clone.",

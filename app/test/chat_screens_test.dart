@@ -16,11 +16,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
     as pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/audit.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/audit.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/backlog.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/desk.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/desk.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/directory.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/directory.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/message.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/message.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/lease.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/lease.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/quota.connect.spec.dart';
@@ -43,7 +53,9 @@ import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
 import 'package:protectorate/nodes/add_node.dart';
 import 'package:protectorate/nodes/remove_node.dart';
 import 'package:protectorate/nodes/version_skew.dart';
+import 'package:protectorate/screens/audit_screen.dart';
 import 'package:protectorate/screens/chat_screen.dart';
+import 'package:protectorate/screens/desk_screen.dart';
 import 'package:protectorate/screens/sleeves_screen.dart';
 import 'package:protectorate/theme/tokens.dart';
 
@@ -160,6 +172,92 @@ Stream<ChatEvent> _transcript() async* {
     ),
   );
   await Completer<void>().future;
+}
+
+List<int> _desktopPng = const [];
+
+// A plausible Windows desktop at the size a phone would ask for.
+Future<List<int>> _paintDesktop() async {
+  const w = 1280.0, h = 720.0;
+  final rec = ui.PictureRecorder();
+  final c = Canvas(rec);
+  final p = Paint();
+  p.shader = ui.Gradient.linear(Offset.zero, const Offset(w, h), [
+    const Color(0xFF0B3D6E),
+    const Color(0xFF1C6EA4),
+  ]);
+  c.drawRect(const Rect.fromLTWH(0, 0, w, h), p);
+  p.shader = null;
+  void window(Rect r, String title, Color bar, {bool lines = true}) {
+    c.drawRect(
+      r.shift(const Offset(0, 4)),
+      Paint()..color = const Color(0x55000000),
+    );
+    c.drawRect(r, Paint()..color = const Color(0xFFF3F3F3));
+    c.drawRect(Rect.fromLTWH(r.left, r.top, r.width, 28), Paint()..color = bar);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: const TextStyle(
+          fontFamily: monoFamily,
+          fontSize: 13,
+          color: Color(0xFF202020),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(c, Offset(r.left + 10, r.top + 7));
+    if (!lines) return;
+    for (var i = 0; i < 9; i++) {
+      c.drawRect(
+        Rect.fromLTWH(
+          r.left + 16,
+          r.top + 48 + i * 22,
+          r.width * (0.4 + (i * 37 % 50) / 100),
+          9,
+        ),
+        Paint()..color = const Color(0xFFCFD6DE),
+      );
+    }
+  }
+
+  window(
+    const Rect.fromLTWH(70, 60, 820, 520),
+    'ArchiCAD 27 - office-tower.pln',
+    const Color(0xFFE6E6E6),
+    lines: false,
+  );
+  final plan = Paint()
+    ..color = const Color(0xFF2B5D8A)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2;
+  c.drawRect(const Rect.fromLTWH(150, 140, 420, 320), plan);
+  c.drawRect(const Rect.fromLTWH(150, 140, 180, 140), plan);
+  c.drawRect(const Rect.fromLTWH(330, 280, 240, 180), plan);
+  c.drawLine(const Offset(150, 360), const Offset(330, 360), plan);
+  c.drawRect(
+    const Rect.fromLTWH(610, 140, 250, 400),
+    Paint()..color = const Color(0xFFE9ECEF),
+  );
+  window(
+    const Rect.fromLTWH(760, 220, 460, 330),
+    'ENERCALC - Beam B-12',
+    const Color(0xFFDCE7F3),
+  );
+  c.drawRect(
+    const Rect.fromLTWH(0, h - 44, w, 44),
+    Paint()..color = const Color(0xFF1F1F1F),
+  );
+  for (var i = 0; i < 6; i++) {
+    c.drawRect(
+      Rect.fromLTWH(w / 2 - 150 + i * 52, h - 36, 28, 28),
+      Paint()
+        ..color = i == 2 ? const Color(0xFF6CB4EE) : const Color(0xFF9AA4AE),
+    );
+  }
+  final img = await rec.endRecording().toImage(w.toInt(), h.toInt());
+  final data = await img.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
 }
 
 Future<void> _loadFonts() async {
@@ -453,6 +551,23 @@ List<NodeStatus> _fleet(int i) => [
     node: NodeInfo(name: 'win-desk', address: '100.64.0.4:7475'),
     freshness: NodeFreshness.NODE_FRESHNESS_STALE,
     age: _dur(const Duration(minutes: 2)),
+    desk: DeskState(
+      available: true,
+      reason: DeskReason.DESK_REASON_AVAILABLE,
+      detail: 'inside the window 19:00-07:00, no physical input for 1h12m',
+      lastInput: _ago(const Duration(hours: 1, minutes: 12)),
+      policy: DeskPolicy(
+        window: '19:00-07:00',
+        idle: _dur(const Duration(minutes: 15)),
+        lockAfter: true,
+      ),
+    ),
+    deskHolder: 'auto:token:sleeve:cad',
+    deskInputs: [
+      DeskUse(caller: 'token:sleeve:cad', count: 214),
+      DeskUse(caller: 'token:sleeve:research', count: 18),
+      DeskUse(caller: 'owner', count: 3),
+    ],
     metrics: NodeMetrics(
       os: 'windows',
       arch: 'amd64',
@@ -587,6 +702,203 @@ final _logEvents = [
   ('msg.delivered', 'refactor', 2),
 ];
 
+MailMessage _mail(
+  String id,
+  String thread,
+  String from,
+  String to,
+  String body,
+  int minutes, {
+  MessageKind kind = MessageKind.MESSAGE_KIND_NOTE,
+  bool ack = false,
+  List<MailDelivery> deliveries = const [],
+  bool escalated = false,
+  String note = '',
+}) => MailMessage(
+  id: id,
+  threadId: thread,
+  from: from,
+  to: to,
+  body: body,
+  kind: kind,
+  ackRequired: ack,
+  createdAt: _ago(Duration(minutes: minutes)),
+  deliveries: deliveries,
+  escalatedAt: escalated ? _ago(Duration(minutes: minutes - 62)) : null,
+  noteId: note,
+);
+
+MailDelivery _dl(String r, {int? delivered, int? read, int? acked}) =>
+    MailDelivery(
+      recipient: r,
+      deliveredAt: delivered == null
+          ? null
+          : _ago(Duration(minutes: delivered)),
+      readAt: read == null ? null : _ago(Duration(minutes: read)),
+      ackedAt: acked == null ? null : _ago(Duration(minutes: acked)),
+    );
+
+final _schemaThread = [
+  _mail(
+    'm40',
+    't14',
+    'auth-fix',
+    'owner',
+    'May I bump the session schema to v2? The refresh token moves into its own table.\n'
+        'refactor still reads v1, so its tests will fail until it migrates.',
+    26,
+    kind: MessageKind.MESSAGE_KIND_REQUEST,
+    ack: true,
+    deliveries: [_dl('owner')],
+  ),
+  _mail(
+    'm41',
+    't14',
+    'auth-fix',
+    'refactor',
+    'Heads up: session schema v2 is coming. Columns refresh_token and '
+        'refresh_expires move to session_refresh.',
+    24,
+    deliveries: [_dl('refactor', delivered: 23, acked: 19)],
+  ),
+  _mail(
+    'm42',
+    't14',
+    'refactor',
+    'auth-fix',
+    'Fine by me once v2 is tagged. I will migrate the store in the same branch.',
+    18,
+    deliveries: [_dl('auth-fix', delivered: 17)],
+  ),
+];
+
+List<ThreadSummary> _threads() => [
+  ThreadSummary(
+    threadId: 't14',
+    participants: ['auth-fix', 'owner', 'refactor'],
+    messageCount: 3,
+    last: _schemaThread.last,
+    unread: 1,
+    openAcks: 1,
+    projects: ['github.com/hotschmoe/protectorate'],
+  ),
+  ThreadSummary(
+    threadId: 't12',
+    participants: ['research', 'project:github.com/acme/web'],
+    messageCount: 1,
+    last: _mail(
+      'm37',
+      't12',
+      'research',
+      'project:acme/web',
+      'Please export the chart palette as a package; I need it for the quota report.',
+      95,
+      kind: MessageKind.MESSAGE_KIND_REQUEST,
+      ack: true,
+      escalated: true,
+      note: 'n7',
+    ),
+    openAcks: 1,
+    escalated: 1,
+    projects: ['github.com/acme/web'],
+  ),
+  ThreadSummary(
+    threadId: 't11',
+    participants: ['hub', 'refactor'],
+    messageCount: 1,
+    last: _mail(
+      'm35',
+      't11',
+      'hub',
+      'refactor',
+      'Upstream release: acme/lib tag v0.3.0 (3f1c2ab), previous tag v0.2.4.',
+      140,
+      kind: MessageKind.MESSAGE_KIND_NOTICE,
+    ),
+  ),
+  ThreadSummary(
+    threadId: 't9',
+    participants: ['poe', 'scratch'],
+    messageCount: 4,
+    last: _mail(
+      'm31',
+      't9',
+      'scratch',
+      'poe',
+      'Benchmarks done: qwen3:8b at 41 tok/s on the 4090, results in bench/.',
+      300,
+    ),
+  ),
+];
+
+final _auditLog = [
+  ('owner', '', 'NodeService/SetDeskPolicy', 'win-desk', 'ok', '', 1),
+  ('token:sleeve:cad', '', 'DeskService/Click', 'win-desk', 'ok', '', 3),
+  ('token:sleeve:cad', '', 'DeskService/Type', 'win-desk', 'ok', '', 3),
+  (
+    'token:pixel',
+    'pixel.tail0b1c.ts.net',
+    'SessionService/CreateSession',
+    'scratch',
+    'denied',
+    'permission_denied',
+    9,
+  ),
+  ('token:sleeve:auth-fix', '', 'MessageService/Send', '', 'ok', '', 26),
+  (
+    'owner',
+    'laptop.tail0b1c.ts.net',
+    'SleeveService/SpawnSleeve',
+    'research',
+    'ok',
+    '',
+    48,
+  ),
+  (
+    'token:sleeve:refactor',
+    '',
+    'LeaseService/AcquireLease',
+    '',
+    'error',
+    'failed_precondition',
+    61,
+  ),
+  (
+    'unauthenticated',
+    '',
+    'SessionService/KillSession',
+    'work',
+    'denied',
+    'unauthenticated',
+    95,
+  ),
+  ('owner', '', 'NodeService/UpdateNode', 'arc', 'ok', '', 130),
+  (
+    'token:pixel',
+    'pixel.tail0b1c.ts.net',
+    '/ws/terminal/work',
+    'work',
+    'ok',
+    '',
+    200,
+  ),
+  ('owner', '', 'TokenService/CreateToken', 'pixel', 'ok', '', 1500),
+];
+
+List<AuditEntry> _audit() => [
+  for (final (actor, tailnet, proc, subject, outcome, code, minutes)
+      in _auditLog)
+    AuditEntry(
+      time: _ago(Duration(minutes: minutes)),
+      actor: actor,
+      tailnet: tailnet,
+      procedure: proc.startsWith('/') ? proc : '/protectorate.v1.$proc',
+      subject: subject,
+      outcome: outcome,
+      code: code,
+    ),
+];
+
 // A hub with every service the shell reads; each node poll moves the
 // readings so the history graphs fill.
 Transport _hubTransport(StreamController<Event> events) {
@@ -641,6 +953,96 @@ Transport _hubTransport(StreamController<Event> events) {
       .unary(
         SessionService.capturePane,
         (CapturePaneRequest r, ctx) => CapturePaneResponse(text: _pane),
+      )
+      .unary(
+        MessageService.listThreads,
+        (ListThreadsRequest r, ctx) => ListThreadsResponse(threads: _threads()),
+      )
+      .unary(
+        MessageService.thread,
+        (ThreadRequest r, ctx) => ThreadResponse(messages: _schemaThread),
+      )
+      .unary(MessageService.inbox, (InboxRequest r, ctx) => InboxResponse())
+      .unary(
+        LeaseService.listLeases,
+        (ListLeasesRequest r, ctx) => ListLeasesResponse(
+          leases: [
+            Lease(
+              resource: 'forge:gpu0',
+              node: 'forge',
+              gpuIndex: 0,
+              holder: 'scratch',
+            ),
+          ],
+        ),
+      )
+      .unary(
+        AuditService.listAuditEntries,
+        (ListAuditEntriesRequest r, ctx) => ListAuditEntriesResponse(
+          entries: _audit(),
+          nextPageToken: 'audit-2026-10.jsonl:120',
+        ),
+      )
+      .unary(
+        DeskService.screenshot,
+        (ScreenshotRequest r, ctx) =>
+            ScreenshotResponse(png: _desktopPng, width: 2560, height: 1440),
+      )
+      .unary(
+        DeskService.listWindows,
+        (ListWindowsRequest r, ctx) => ListWindowsResponse(
+          windows: [
+            DeskWindow(
+              title: 'ArchiCAD 27 - office-tower.pln',
+              x: 140,
+              y: 120,
+              width: 1640,
+              height: 1040,
+              pid: 6120,
+            ),
+            DeskWindow(
+              title: 'ENERCALC - Beam B-12',
+              x: 1520,
+              y: 440,
+              width: 920,
+              height: 660,
+              pid: 4410,
+            ),
+            DeskWindow(title: 'Outlook', pid: 3312, minimized: true),
+            DeskWindow(
+              title: 'Program Manager',
+              width: 2560,
+              height: 1440,
+              pid: 980,
+            ),
+          ],
+        ),
+      )
+      .unary(
+        DeskService.foreground,
+        (ForegroundRequest r, ctx) => ForegroundResponse(
+          title: 'ENERCALC - Beam B-12',
+          pid: 4410,
+          process: 'enercalc.exe',
+          integrity: 'medium',
+          agentIntegrity: 'medium',
+        ),
+      )
+      .unary(
+        DirectoryService.listProjects,
+        (ListProjectsRequest r, ctx) => ListProjectsResponse(
+          projects: [
+            DirectoryProject(
+              id: 'github.com/hotschmoe/protectorate',
+              display: 'hotschmoe/protectorate',
+              owners: [
+                ProjectOwner(sleeve: 'auth-fix'),
+                ProjectOwner(sleeve: 'refactor'),
+              ],
+            ),
+            DirectoryProject(id: 'github.com/acme/web', display: 'acme/web'),
+          ],
+        ),
       )
       .unary(
         BacklogService.listNotes,
@@ -882,7 +1284,14 @@ void main() {
       final phone = w == 412;
       final size = Size(w.toDouble(), phone ? 1200 : 860);
 
-      for (final tab in ['overview', 'nodes', 'quota', 'sessions', 'backlog']) {
+      for (final tab in [
+        'overview',
+        'nodes',
+        'quota',
+        'sessions',
+        'messages',
+        'backlog',
+      ]) {
         testWidgets('$tab $tag', (tester) async {
           tester.view.physicalSize = size;
           tester.view.devicePixelRatio = 1;
@@ -908,6 +1317,85 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
         await tester.pump(const Duration(milliseconds: 800));
         await _shoot(tester, key, 'notes-editor-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('thread $tag', (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await _pumpShell(tester, key, b, 'messages', events);
+        await tester.tap(find.byKey(const ValueKey('thread-row-t14')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await _shoot(tester, key, 'thread-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('desk $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 2300 : 1100);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        if (_desktopPng.isEmpty) {
+          _desktopPng = (await tester.runAsync(_paintDesktop))!;
+        }
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final feed = EventFeed(() => events.stream)..start();
+        addTearDown(feed.dispose);
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: DeskScreen(
+                client: HubClient.withTransport(_hubTransport(events)),
+                feed: feed,
+                name: 'win-desk',
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        await tester.runAsync(
+          () => precacheImage(
+            MemoryImage(Uint8List.fromList(_desktopPng)),
+            tester.element(find.byType(Scaffold)),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'desk-$tag');
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('audit $tag', (tester) async {
+        tester.view.physicalSize = Size(w.toDouble(), phone ? 1700 : 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final events = StreamController<Event>.broadcast();
+        addTearDown(events.close);
+        final key = GlobalKey();
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: key,
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: appTheme(b),
+              home: AuditScreen(
+                client: HubClient.withTransport(_hubTransport(events)),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await _shoot(tester, key, 'audit-$tag');
         await tester.pumpWidget(const SizedBox());
       });
 

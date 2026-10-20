@@ -140,11 +140,15 @@ busy. A job or lease that names the node or the GPU explicitly is refused
 with who holds it, and the caller is told to ask: a sleeve sends a request
 to the orchestrator or the owner (mailbox, `docs/coordination.md`), and the
 decision to free the GPUs is made by a person, never by the scheduler.
+The app lights a BUSY annunciator on each such GPU in node cards and detail
+(half or more of its VRAM held, or 80 % load) and names the GPU's lease
+holder when there is one.
 
 **(built)** The hub judges each GPU from the node's own figures over its
 recent polls (`internal/hub/gpubusy.go`) and lists the busy ones in
-`NodeStatus.busy_gpus` (`node show` prints `gpu N busy`, the app a `GPUn
-BUSY` badge). A GPU is busy when:
+`NodeStatus.busy_gpus` (`node show` prints `gpu N busy`; the app's
+`gpuBusy` reads it, lighting BUSY with the reason on that GPU's lines). A GPU
+is busy when:
 
 - more than half its VRAM is in use (the main signal where the driver
   reports use: nvidia-smi, rocm-smi, amdgpu, Windows PDH, xpu-smi), or

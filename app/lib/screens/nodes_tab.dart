@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/events.pb.dart';
+import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
@@ -54,6 +55,7 @@ class NodesTab extends StatefulWidget {
 
 class _NodesTabState extends State<NodesTab> {
   List<NodeStatus> _nodes = const [];
+  List<Lease> _leases = const [];
   DateTime _receivedAt = DateTime.now();
   Object? _error;
   bool _loading = true;
@@ -70,7 +72,9 @@ class _NodesTabState extends State<NodesTab> {
   void initState() {
     super.initState();
     _sub = widget.feed.incoming.listen((e) {
-      if (!nodeEventKinds.contains(e.kind)) return;
+      if (!nodeEventKinds.contains(e.kind) && !e.kind.startsWith('lease.')) {
+        return;
+      }
       _debounce?.cancel();
       _debounce = Timer(const Duration(milliseconds: 300), _refresh);
     });
@@ -91,6 +95,7 @@ class _NodesTabState extends State<NodesTab> {
   }
 
   Future<void> _refresh() async {
+    unawaited(_loadLeases());
     try {
       final r = await widget.client.node.listNodes(ListNodesRequest());
       _history.recordAll(r.nodes);
@@ -105,6 +110,16 @@ class _NodesTabState extends State<NodesTab> {
       if (mounted) setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // Leases only name GPU holders; without them the cards still show busy.
+  Future<void> _loadLeases() async {
+    try {
+      final r = await widget.client.leases.listLeases(ListLeasesRequest());
+      if (mounted) setState(() => _leases = r.leases);
+    } on Object {
+      return;
     }
   }
 
@@ -196,6 +211,7 @@ class _NodesTabState extends State<NodesTab> {
                                   status: s,
                                   age: statusAge(s, _receivedAt, _now()),
                                   cpuHistory: _history.cpu(s.node.name),
+                                  gpuHolders: gpuHolders(_leases, s.node.name),
                                   hubVersion: widget.versions.hub,
                                   onTap: () => _open(s),
                                 ),
@@ -280,6 +296,8 @@ List<Widget> nodeMeters(
   NodeMetrics m, {
   required bool dim,
   bool detail = false,
+  Map<int, String> gpuHolders = const {},
+  Map<int, String> gpuBusy = const {},
 }) {
   final rows = <Widget>[
     MeterRow(
@@ -327,7 +345,15 @@ List<Widget> nodeMeters(
     );
   }
   for (final g in m.gpus) {
-    rows.add(GpuLines(key: ValueKey('gpu-${g.index}'), gpu: g, dim: dim));
+    rows.add(
+      GpuLines(
+        key: ValueKey('gpu-${g.index}'),
+        gpu: g,
+        dim: dim,
+        holder: gpuHolders[g.index] ?? '',
+        busy: gpuBusy[g.index] ?? '',
+      ),
+    );
   }
   for (final (i, n) in m.npus.indexed) {
     rows.add(NpuLines(key: ValueKey('npu-$i'), npu: n, index: i, dim: dim));
@@ -343,9 +369,11 @@ class NodeCard extends StatelessWidget {
     required this.onTap,
     this.cpuHistory = const [],
     this.hubVersion = '',
+    this.gpuHolders = const {},
   });
 
   final String hubVersion;
+  final Map<int, String> gpuHolders;
   final NodeStatus status;
   final Duration age;
   final VoidCallback onTap;
@@ -439,7 +467,12 @@ class NodeCard extends StatelessWidget {
           else if (m == null)
             Text('No metrics yet.', style: t.small())
           else ...[
-            ...nodeMeters(m, dim: stale),
+            ...nodeMeters(
+              m,
+              dim: stale,
+              gpuHolders: gpuHolders,
+              gpuBusy: gpuBusy(status),
+            ),
             if (cpuHistory.length > 1) ...[
               const SizedBox(height: 8),
               Row(

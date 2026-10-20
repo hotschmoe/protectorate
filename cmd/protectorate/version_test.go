@@ -48,10 +48,10 @@ func TestVersionDerivation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := []string{"VERSION=" + tt.version, "BUILD_NUMBER=77"}
-			if got, err := runIn(t, root, env, "make", "-s", "version-app"); err != nil || got != tt.want {
+			if got, err := runIn(t, root, env, "make", "-s", "--no-print-directory", "version-app"); err != nil || got != tt.want {
 				t.Errorf("version-app = %q, %v; want %q", got, err, tt.want)
 			}
-			if got, err := runIn(t, root, env, "make", "-s", "version"); err != nil || got != tt.version {
+			if got, err := runIn(t, root, env, "make", "-s", "--no-print-directory", "version"); err != nil || got != tt.version {
 				t.Errorf("version = %q, %v; want %q", got, err, tt.version)
 			}
 		})

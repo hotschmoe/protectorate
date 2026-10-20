@@ -15,6 +15,8 @@ import 'dart:core' as $core;
 
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
+import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
+    as $2;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
@@ -292,6 +294,8 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.bool? oomKilled,
     $1.SleeveMode? mode,
     $1.ChatStatus? chat,
+    $core.bool? supervised,
+    $1.Handoff? handoff,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -309,6 +313,8 @@ class Sleeve extends $pb.GeneratedMessage {
     if (oomKilled != null) result.oomKilled = oomKilled;
     if (mode != null) result.mode = mode;
     if (chat != null) result.chat = chat;
+    if (supervised != null) result.supervised = supervised;
+    if (handoff != null) result.handoff = handoff;
     return result;
   }
 
@@ -349,6 +355,9 @@ class Sleeve extends $pb.GeneratedMessage {
         enumValues: $1.SleeveMode.values)
     ..aOM<$1.ChatStatus>(15, _omitFieldNames ? '' : 'chat',
         subBuilder: $1.ChatStatus.$_createMessage)
+    ..aOB(16, _omitFieldNames ? '' : 'supervised')
+    ..aOM<$1.Handoff>(17, _omitFieldNames ? '' : 'handoff',
+        subBuilder: $1.Handoff.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -519,6 +528,31 @@ class Sleeve extends $pb.GeneratedMessage {
   void clearChat() => $_clearField(15);
   @$pb.TagNumber(15)
   $1.ChatStatus ensureChat() => $_ensure(14);
+
+  /// supervised chat sleeves run the harness in its asking permission mode:
+  /// approvals arrive as ApprovalRequest events, answered with
+  /// ChatService.Respond. Unsupervised sleeves run autonomous (the sandbox is
+  /// the boundary).
+  @$pb.TagNumber(16)
+  $core.bool get supervised => $_getBF(15);
+  @$pb.TagNumber(16)
+  set supervised($core.bool value) => $_setBool(15, value);
+  @$pb.TagNumber(16)
+  $core.bool hasSupervised() => $_has(15);
+  @$pb.TagNumber(16)
+  void clearSupervised() => $_clearField(16);
+
+  /// handoff is set when a resleeve produced this sleeve's harness.
+  @$pb.TagNumber(17)
+  $1.Handoff get handoff => $_getN(16);
+  @$pb.TagNumber(17)
+  set handoff($1.Handoff value) => $_setField(17, value);
+  @$pb.TagNumber(17)
+  $core.bool hasHandoff() => $_has(16);
+  @$pb.TagNumber(17)
+  void clearHandoff() => $_clearField(17);
+  @$pb.TagNumber(17)
+  $1.Handoff ensureHandoff() => $_ensure(16);
 }
 
 class SpawnSleeveRequest extends $pb.GeneratedMessage {
@@ -530,6 +564,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     SleeveLimits? limits,
     $core.Iterable<$core.MapEntry<$core.String, $core.String>>? env,
     $1.SleeveMode? mode,
+    $core.bool? supervised,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -539,6 +574,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (limits != null) result.limits = limits;
     if (env != null) result.env.addEntries(env);
     if (mode != null) result.mode = mode;
+    if (supervised != null) result.supervised = supervised;
     return result;
   }
 
@@ -570,6 +606,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
         packageName: const $pb.PackageName('protectorate.v1'))
     ..aE<$1.SleeveMode>(7, _omitFieldNames ? '' : 'mode',
         enumValues: $1.SleeveMode.values)
+    ..aOB(8, _omitFieldNames ? '' : 'supervised')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -650,6 +687,19 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   $core.bool hasMode() => $_has(6);
   @$pb.TagNumber(7)
   void clearMode() => $_clearField(7);
+
+  /// supervised runs a chat sleeve's harness in its asking permission mode
+  /// instead of autonomous: Claude --permission-mode default, Codex
+  /// approvalPolicy untrusted with its workspace-write sandbox, Grok
+  /// /always-approve off. pi has no gate and ignores it.
+  @$pb.TagNumber(8)
+  $core.bool get supervised => $_getBF(7);
+  @$pb.TagNumber(8)
+  set supervised($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasSupervised() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearSupervised() => $_clearField(8);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -1029,6 +1079,175 @@ class KillSleeveResponse extends $pb.GeneratedMessage {
   static KillSleeveResponse? _defaultInstance;
 }
 
+class ResleeveSleeveRequest extends $pb.GeneratedMessage {
+  factory ResleeveSleeveRequest({
+    $core.String? name,
+    Harness? to,
+    $core.bool? interrupt,
+    $2.Duration? wait,
+  }) {
+    final result = ResleeveSleeveRequest._();
+    if (name != null) result.name = name;
+    if (to != null) result.to = to;
+    if (interrupt != null) result.interrupt = interrupt;
+    if (wait != null) result.wait = wait;
+    return result;
+  }
+
+  ResleeveSleeveRequest._();
+
+  factory ResleeveSleeveRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ResleeveSleeveRequest()..mergeFromBuffer(data, registry);
+  factory ResleeveSleeveRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ResleeveSleeveRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ResleeveSleeveRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ResleeveSleeveRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aE<Harness>(2, _omitFieldNames ? '' : 'to', enumValues: Harness.values)
+    ..aOB(3, _omitFieldNames ? '' : 'interrupt')
+    ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'wait',
+        subBuilder: $2.Duration.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ResleeveSleeveRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ResleeveSleeveRequest copyWith(
+          void Function(ResleeveSleeveRequest) updates) =>
+      super.copyWith((message) => updates(message as ResleeveSleeveRequest))
+          as ResleeveSleeveRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ResleeveSleeveRequest() / ResleeveSleeveRequest.new instead')
+  static ResleeveSleeveRequest create() => ResleeveSleeveRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ResleeveSleeveRequest._();
+  @$core.override
+  ResleeveSleeveRequest createEmptyInstance() => ResleeveSleeveRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ResleeveSleeveRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ResleeveSleeveRequest>(
+          ResleeveSleeveRequest.$_createMessage);
+  static ResleeveSleeveRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  /// to is the new harness. UNSPECIFIED means auto: the top recommendation
+  /// of QuotaService.Suggest other than the current harness.
+  @$pb.TagNumber(2)
+  Harness get to => $_getN(1);
+  @$pb.TagNumber(2)
+  set to(Harness value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTo() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTo() => $_clearField(2);
+
+  /// interrupt cancels a running turn at once instead of waiting for it.
+  @$pb.TagNumber(3)
+  $core.bool get interrupt => $_getBF(2);
+  @$pb.TagNumber(3)
+  set interrupt($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasInterrupt() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearInterrupt() => $_clearField(3);
+
+  /// wait bounds how long a running turn may continue before it is
+  /// interrupted. Default 5 minutes.
+  @$pb.TagNumber(4)
+  $2.Duration get wait => $_getN(3);
+  @$pb.TagNumber(4)
+  set wait($2.Duration value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasWait() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearWait() => $_clearField(4);
+  @$pb.TagNumber(4)
+  $2.Duration ensureWait() => $_ensure(3);
+}
+
+class ResleeveSleeveResponse extends $pb.GeneratedMessage {
+  factory ResleeveSleeveResponse({
+    Sleeve? sleeve,
+  }) {
+    final result = ResleeveSleeveResponse._();
+    if (sleeve != null) result.sleeve = sleeve;
+    return result;
+  }
+
+  ResleeveSleeveResponse._();
+
+  factory ResleeveSleeveResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ResleeveSleeveResponse()..mergeFromBuffer(data, registry);
+  factory ResleeveSleeveResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ResleeveSleeveResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ResleeveSleeveResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ResleeveSleeveResponse.$_createMessage)
+    ..aOM<Sleeve>(1, _omitFieldNames ? '' : 'sleeve',
+        subBuilder: Sleeve.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ResleeveSleeveResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ResleeveSleeveResponse copyWith(
+          void Function(ResleeveSleeveResponse) updates) =>
+      super.copyWith((message) => updates(message as ResleeveSleeveResponse))
+          as ResleeveSleeveResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ResleeveSleeveResponse() / ResleeveSleeveResponse.new instead')
+  static ResleeveSleeveResponse create() => ResleeveSleeveResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ResleeveSleeveResponse._();
+  @$core.override
+  ResleeveSleeveResponse createEmptyInstance() => ResleeveSleeveResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ResleeveSleeveResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ResleeveSleeveResponse>(
+          ResleeveSleeveResponse.$_createMessage);
+  static ResleeveSleeveResponse? _defaultInstance;
+
+  /// sleeve is the sleeve on its new harness; sleeve.handoff says how the
+  /// handoff was made.
+  @$pb.TagNumber(1)
+  Sleeve get sleeve => $_getN(0);
+  @$pb.TagNumber(1)
+  set sleeve(Sleeve value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Sleeve ensureSleeve() => $_ensure(0);
+}
+
 /// SleeveService manages sleeves on the hub machine: one workspace plus one
 /// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
 /// memory limits. In chat mode (the default for agent harnesses) the harness
@@ -1072,6 +1291,28 @@ class SleeveServiceApi {
           $pb.ClientContext? ctx, KillSleeveRequest request) =>
       _client.invoke<KillSleeveResponse>(
           ctx, 'SleeveService', 'KillSleeve', request, KillSleeveResponse());
+
+  /// ResleeveSleeve moves a chat sleeve to another harness on the same
+  /// workspace, under the same name, without asking the outgoing harness
+  /// anything. The hub takes the chat over (no other sender can start a
+  /// turn), waits for it to be IDLE (interrupting a turn that runs past wait),
+  /// composes facts in code (git status, diff --stat, recent commits, backlog
+  /// and mail, the last user messages and the final assistant message from
+  /// the outgoing harness's own transcript), has a separate model write a
+  /// Goal/State/Unfinished/Next/Gotchas summary (the subscription with the
+  /// most spare quota other than the outgoing harness, else pi with the local
+  /// LLM), overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git
+  /// through .git/info/exclude, archived under the hub's state directory),
+  /// replaces the harness and sends it one plain user message naming the
+  /// handoff. The summary runs while the outgoing turn winds down. The old
+  /// native session stays on disk for a later resume. If the new harness
+  /// cannot start, the old one is respawned on its own session. Announced as
+  /// "sleeve.resleeved"; a summary by the fallback model, or none, also emits
+  /// "resleeve.warning".
+  $async.Future<ResleeveSleeveResponse> resleeveSleeve(
+          $pb.ClientContext? ctx, ResleeveSleeveRequest request) =>
+      _client.invoke<ResleeveSleeveResponse>(ctx, 'SleeveService',
+          'ResleeveSleeve', request, ResleeveSleeveResponse());
 }
 
 const $core.bool _omitFieldNames =

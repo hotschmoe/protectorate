@@ -248,7 +248,9 @@ type InboxRequest struct {
 	// peek lists without marking read.
 	Peek bool `protobuf:"varint,2,opt,name=peek,proto3" json:"peek,omitempty"`
 	// as reads another mailbox; only the owner may.
-	As            string `protobuf:"bytes,3,opt,name=as,proto3" json:"as,omitempty"`
+	As string `protobuf:"bytes,3,opt,name=as,proto3" json:"as,omitempty"`
+	// thread_id keeps only the messages of this thread.
+	ThreadId      string `protobuf:"bytes,4,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -300,6 +302,13 @@ func (x *InboxRequest) GetPeek() bool {
 func (x *InboxRequest) GetAs() string {
 	if x != nil {
 		return x.As
+	}
+	return ""
+}
+
+func (x *InboxRequest) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
 	}
 	return ""
 }
@@ -637,6 +646,225 @@ func (x *ThreadResponse) GetMessages() []*MailMessage {
 	return nil
 }
 
+type ListThreadsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// sleeve keeps the threads this sleeve sent to or received in.
+	Sleeve string `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	// project keeps the threads addressed to or sent from this project (id,
+	// "owner/repo" or bare name, as in DirectoryService.GetProject).
+	Project string `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
+	// limit is the most threads returned: 0 means 100, at most 500.
+	Limit         int32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListThreadsRequest) Reset() {
+	*x = ListThreadsRequest{}
+	mi := &file_protectorate_v1_message_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListThreadsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListThreadsRequest) ProtoMessage() {}
+
+func (x *ListThreadsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_message_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListThreadsRequest.ProtoReflect.Descriptor instead.
+func (*ListThreadsRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListThreadsRequest) GetSleeve() string {
+	if x != nil {
+		return x.Sleeve
+	}
+	return ""
+}
+
+func (x *ListThreadsRequest) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *ListThreadsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListThreadsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Threads       []*ThreadSummary       `protobuf:"bytes,1,rep,name=threads,proto3" json:"threads,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListThreadsResponse) Reset() {
+	*x = ListThreadsResponse{}
+	mi := &file_protectorate_v1_message_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListThreadsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListThreadsResponse) ProtoMessage() {}
+
+func (x *ListThreadsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_message_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListThreadsResponse.ProtoReflect.Descriptor instead.
+func (*ListThreadsResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListThreadsResponse) GetThreads() []*ThreadSummary {
+	if x != nil {
+		return x.Threads
+	}
+	return nil
+}
+
+// ThreadSummary is one thread at a glance.
+type ThreadSummary struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	ThreadId string                 `protobuf:"bytes,1,opt,name=thread_id,json=threadId,proto3" json:"thread_id,omitempty"`
+	// participants are the senders and recipients, in order of first
+	// appearance. A message still waiting for a project's sleeves adds its
+	// address ("project:<id>").
+	Participants []string `protobuf:"bytes,2,rep,name=participants,proto3" json:"participants,omitempty"`
+	MessageCount uint32   `protobuf:"varint,3,opt,name=message_count,json=messageCount,proto3" json:"message_count,omitempty"`
+	// last is the most recent message.
+	Last *MailMessage `protobuf:"bytes,4,opt,name=last,proto3" json:"last,omitempty"`
+	// unread counts messages to the caller it has not been shown, read or
+	// acked.
+	Unread uint32 `protobuf:"varint,5,opt,name=unread,proto3" json:"unread,omitempty"`
+	// open_acks counts messages that require an ack no recipient has given.
+	OpenAcks uint32 `protobuf:"varint,6,opt,name=open_acks,json=openAcks,proto3" json:"open_acks,omitempty"`
+	// escalated counts escalated messages no recipient has acked yet.
+	Escalated uint32 `protobuf:"varint,7,opt,name=escalated,proto3" json:"escalated,omitempty"`
+	// projects are the ids of the projects the thread was addressed to or sent
+	// from.
+	Projects      []string `protobuf:"bytes,8,rep,name=projects,proto3" json:"projects,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThreadSummary) Reset() {
+	*x = ThreadSummary{}
+	mi := &file_protectorate_v1_message_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThreadSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThreadSummary) ProtoMessage() {}
+
+func (x *ThreadSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_message_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThreadSummary.ProtoReflect.Descriptor instead.
+func (*ThreadSummary) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ThreadSummary) GetThreadId() string {
+	if x != nil {
+		return x.ThreadId
+	}
+	return ""
+}
+
+func (x *ThreadSummary) GetParticipants() []string {
+	if x != nil {
+		return x.Participants
+	}
+	return nil
+}
+
+func (x *ThreadSummary) GetMessageCount() uint32 {
+	if x != nil {
+		return x.MessageCount
+	}
+	return 0
+}
+
+func (x *ThreadSummary) GetLast() *MailMessage {
+	if x != nil {
+		return x.Last
+	}
+	return nil
+}
+
+func (x *ThreadSummary) GetUnread() uint32 {
+	if x != nil {
+		return x.Unread
+	}
+	return 0
+}
+
+func (x *ThreadSummary) GetOpenAcks() uint32 {
+	if x != nil {
+		return x.OpenAcks
+	}
+	return 0
+}
+
+func (x *ThreadSummary) GetEscalated() uint32 {
+	if x != nil {
+		return x.Escalated
+	}
+	return 0
+}
+
+func (x *ThreadSummary) GetProjects() []string {
+	if x != nil {
+		return x.Projects
+	}
+	return nil
+}
+
 // MailMessage is one message with each recipient's delivery state.
 type MailMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -661,7 +889,7 @@ type MailMessage struct {
 
 func (x *MailMessage) Reset() {
 	*x = MailMessage{}
-	mi := &file_protectorate_v1_message_proto_msgTypes[10]
+	mi := &file_protectorate_v1_message_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -673,7 +901,7 @@ func (x *MailMessage) String() string {
 func (*MailMessage) ProtoMessage() {}
 
 func (x *MailMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_message_proto_msgTypes[10]
+	mi := &file_protectorate_v1_message_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -686,7 +914,7 @@ func (x *MailMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MailMessage.ProtoReflect.Descriptor instead.
 func (*MailMessage) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{10}
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MailMessage) GetId() string {
@@ -788,7 +1016,7 @@ type MailDelivery struct {
 
 func (x *MailDelivery) Reset() {
 	*x = MailDelivery{}
-	mi := &file_protectorate_v1_message_proto_msgTypes[11]
+	mi := &file_protectorate_v1_message_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -800,7 +1028,7 @@ func (x *MailDelivery) String() string {
 func (*MailDelivery) ProtoMessage() {}
 
 func (x *MailDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_message_proto_msgTypes[11]
+	mi := &file_protectorate_v1_message_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -813,7 +1041,7 @@ func (x *MailDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MailDelivery.ProtoReflect.Descriptor instead.
 func (*MailDelivery) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{11}
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *MailDelivery) GetRecipient() string {
@@ -869,12 +1097,13 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\amessage\x18\x01 \x01(\v2\x1c.protectorate.v1.MailMessageR\amessage\x12\x1c\n" +
 	"\tduplicate\x18\x02 \x01(\bR\tduplicate\x12\x18\n" +
 	"\awaiting\x18\x03 \x01(\bR\awaiting\x12\x17\n" +
-	"\anote_id\x18\x04 \x01(\tR\x06noteId\"S\n" +
+	"\anote_id\x18\x04 \x01(\tR\x06noteId\"p\n" +
 	"\fInboxRequest\x12\x1f\n" +
 	"\vunread_only\x18\x01 \x01(\bR\n" +
 	"unreadOnly\x12\x12\n" +
 	"\x04peek\x18\x02 \x01(\bR\x04peek\x12\x0e\n" +
-	"\x02as\x18\x03 \x01(\tR\x02as\"I\n" +
+	"\x02as\x18\x03 \x01(\tR\x02as\x12\x1b\n" +
+	"\tthread_id\x18\x04 \x01(\tR\bthreadId\"I\n" +
 	"\rInboxResponse\x128\n" +
 	"\bmessages\x18\x01 \x03(\v2\x1c.protectorate.v1.MailMessageR\bmessages\",\n" +
 	"\n" +
@@ -893,7 +1122,22 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\rThreadRequest\x12\x1b\n" +
 	"\tthread_id\x18\x01 \x01(\tR\bthreadId\"J\n" +
 	"\x0eThreadResponse\x128\n" +
-	"\bmessages\x18\x01 \x03(\v2\x1c.protectorate.v1.MailMessageR\bmessages\"\xb4\x03\n" +
+	"\bmessages\x18\x01 \x03(\v2\x1c.protectorate.v1.MailMessageR\bmessages\"\\\n" +
+	"\x12ListThreadsRequest\x12\x16\n" +
+	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x12\x18\n" +
+	"\aproject\x18\x02 \x01(\tR\aproject\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"O\n" +
+	"\x13ListThreadsResponse\x128\n" +
+	"\athreads\x18\x01 \x03(\v2\x1e.protectorate.v1.ThreadSummaryR\athreads\"\x96\x02\n" +
+	"\rThreadSummary\x12\x1b\n" +
+	"\tthread_id\x18\x01 \x01(\tR\bthreadId\x12\"\n" +
+	"\fparticipants\x18\x02 \x03(\tR\fparticipants\x12#\n" +
+	"\rmessage_count\x18\x03 \x01(\rR\fmessageCount\x120\n" +
+	"\x04last\x18\x04 \x01(\v2\x1c.protectorate.v1.MailMessageR\x04last\x12\x16\n" +
+	"\x06unread\x18\x05 \x01(\rR\x06unread\x12\x1b\n" +
+	"\topen_acks\x18\x06 \x01(\rR\bopenAcks\x12\x1c\n" +
+	"\tescalated\x18\a \x01(\rR\tescalated\x12\x1a\n" +
+	"\bprojects\x18\b \x03(\tR\bprojects\"\xb4\x03\n" +
 	"\vMailMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tthread_id\x18\x02 \x01(\tR\bthreadId\x12\x12\n" +
@@ -921,13 +1165,14 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\x18MESSAGE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11MESSAGE_KIND_NOTE\x10\x01\x12\x18\n" +
 	"\x14MESSAGE_KIND_REQUEST\x10\x02\x12\x17\n" +
-	"\x13MESSAGE_KIND_NOTICE\x10\x032\x93\x03\n" +
+	"\x13MESSAGE_KIND_NOTICE\x10\x032\xf2\x03\n" +
 	"\x0eMessageService\x12_\n" +
 	"\x04Send\x12*.protectorate.v1.MessageServiceSendRequest\x1a+.protectorate.v1.MessageServiceSendResponse\x12F\n" +
 	"\x05Inbox\x12\x1d.protectorate.v1.InboxRequest\x1a\x1e.protectorate.v1.InboxResponse\x12@\n" +
 	"\x03Ack\x12\x1b.protectorate.v1.AckRequest\x1a\x1c.protectorate.v1.AckResponse\x12F\n" +
 	"\x05Reply\x12\x1d.protectorate.v1.ReplyRequest\x1a\x1e.protectorate.v1.ReplyResponse\x12N\n" +
-	"\x06Thread\x12\x1e.protectorate.v1.ThreadRequest\x1a\x1f.protectorate.v1.ThreadResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\x06Thread\x12\x1e.protectorate.v1.ThreadRequest\x1a\x1f.protectorate.v1.ThreadResponse\"\x03\x90\x02\x01\x12]\n" +
+	"\vListThreads\x12#.protectorate.v1.ListThreadsRequest\x1a$.protectorate.v1.ListThreadsResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_message_proto_rawDescOnce sync.Once
@@ -942,7 +1187,7 @@ func file_protectorate_v1_message_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_message_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protectorate_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_protectorate_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_protectorate_v1_message_proto_goTypes = []any{
 	(MessageKind)(0),                   // 0: protectorate.v1.MessageKind
 	(*MessageServiceSendRequest)(nil),  // 1: protectorate.v1.MessageServiceSendRequest
@@ -955,39 +1200,46 @@ var file_protectorate_v1_message_proto_goTypes = []any{
 	(*ReplyResponse)(nil),              // 8: protectorate.v1.ReplyResponse
 	(*ThreadRequest)(nil),              // 9: protectorate.v1.ThreadRequest
 	(*ThreadResponse)(nil),             // 10: protectorate.v1.ThreadResponse
-	(*MailMessage)(nil),                // 11: protectorate.v1.MailMessage
-	(*MailDelivery)(nil),               // 12: protectorate.v1.MailDelivery
-	(*timestamppb.Timestamp)(nil),      // 13: google.protobuf.Timestamp
+	(*ListThreadsRequest)(nil),         // 11: protectorate.v1.ListThreadsRequest
+	(*ListThreadsResponse)(nil),        // 12: protectorate.v1.ListThreadsResponse
+	(*ThreadSummary)(nil),              // 13: protectorate.v1.ThreadSummary
+	(*MailMessage)(nil),                // 14: protectorate.v1.MailMessage
+	(*MailDelivery)(nil),               // 15: protectorate.v1.MailDelivery
+	(*timestamppb.Timestamp)(nil),      // 16: google.protobuf.Timestamp
 }
 var file_protectorate_v1_message_proto_depIdxs = []int32{
 	0,  // 0: protectorate.v1.MessageServiceSendRequest.kind:type_name -> protectorate.v1.MessageKind
-	11, // 1: protectorate.v1.MessageServiceSendResponse.message:type_name -> protectorate.v1.MailMessage
-	11, // 2: protectorate.v1.InboxResponse.messages:type_name -> protectorate.v1.MailMessage
-	11, // 3: protectorate.v1.AckResponse.message:type_name -> protectorate.v1.MailMessage
-	11, // 4: protectorate.v1.ReplyResponse.message:type_name -> protectorate.v1.MailMessage
-	11, // 5: protectorate.v1.ThreadResponse.messages:type_name -> protectorate.v1.MailMessage
-	0,  // 6: protectorate.v1.MailMessage.kind:type_name -> protectorate.v1.MessageKind
-	13, // 7: protectorate.v1.MailMessage.created_at:type_name -> google.protobuf.Timestamp
-	12, // 8: protectorate.v1.MailMessage.deliveries:type_name -> protectorate.v1.MailDelivery
-	13, // 9: protectorate.v1.MailMessage.escalated_at:type_name -> google.protobuf.Timestamp
-	13, // 10: protectorate.v1.MailDelivery.delivered_at:type_name -> google.protobuf.Timestamp
-	13, // 11: protectorate.v1.MailDelivery.read_at:type_name -> google.protobuf.Timestamp
-	13, // 12: protectorate.v1.MailDelivery.acked_at:type_name -> google.protobuf.Timestamp
-	1,  // 13: protectorate.v1.MessageService.Send:input_type -> protectorate.v1.MessageServiceSendRequest
-	3,  // 14: protectorate.v1.MessageService.Inbox:input_type -> protectorate.v1.InboxRequest
-	5,  // 15: protectorate.v1.MessageService.Ack:input_type -> protectorate.v1.AckRequest
-	7,  // 16: protectorate.v1.MessageService.Reply:input_type -> protectorate.v1.ReplyRequest
-	9,  // 17: protectorate.v1.MessageService.Thread:input_type -> protectorate.v1.ThreadRequest
-	2,  // 18: protectorate.v1.MessageService.Send:output_type -> protectorate.v1.MessageServiceSendResponse
-	4,  // 19: protectorate.v1.MessageService.Inbox:output_type -> protectorate.v1.InboxResponse
-	6,  // 20: protectorate.v1.MessageService.Ack:output_type -> protectorate.v1.AckResponse
-	8,  // 21: protectorate.v1.MessageService.Reply:output_type -> protectorate.v1.ReplyResponse
-	10, // 22: protectorate.v1.MessageService.Thread:output_type -> protectorate.v1.ThreadResponse
-	18, // [18:23] is the sub-list for method output_type
-	13, // [13:18] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	14, // 1: protectorate.v1.MessageServiceSendResponse.message:type_name -> protectorate.v1.MailMessage
+	14, // 2: protectorate.v1.InboxResponse.messages:type_name -> protectorate.v1.MailMessage
+	14, // 3: protectorate.v1.AckResponse.message:type_name -> protectorate.v1.MailMessage
+	14, // 4: protectorate.v1.ReplyResponse.message:type_name -> protectorate.v1.MailMessage
+	14, // 5: protectorate.v1.ThreadResponse.messages:type_name -> protectorate.v1.MailMessage
+	13, // 6: protectorate.v1.ListThreadsResponse.threads:type_name -> protectorate.v1.ThreadSummary
+	14, // 7: protectorate.v1.ThreadSummary.last:type_name -> protectorate.v1.MailMessage
+	0,  // 8: protectorate.v1.MailMessage.kind:type_name -> protectorate.v1.MessageKind
+	16, // 9: protectorate.v1.MailMessage.created_at:type_name -> google.protobuf.Timestamp
+	15, // 10: protectorate.v1.MailMessage.deliveries:type_name -> protectorate.v1.MailDelivery
+	16, // 11: protectorate.v1.MailMessage.escalated_at:type_name -> google.protobuf.Timestamp
+	16, // 12: protectorate.v1.MailDelivery.delivered_at:type_name -> google.protobuf.Timestamp
+	16, // 13: protectorate.v1.MailDelivery.read_at:type_name -> google.protobuf.Timestamp
+	16, // 14: protectorate.v1.MailDelivery.acked_at:type_name -> google.protobuf.Timestamp
+	1,  // 15: protectorate.v1.MessageService.Send:input_type -> protectorate.v1.MessageServiceSendRequest
+	3,  // 16: protectorate.v1.MessageService.Inbox:input_type -> protectorate.v1.InboxRequest
+	5,  // 17: protectorate.v1.MessageService.Ack:input_type -> protectorate.v1.AckRequest
+	7,  // 18: protectorate.v1.MessageService.Reply:input_type -> protectorate.v1.ReplyRequest
+	9,  // 19: protectorate.v1.MessageService.Thread:input_type -> protectorate.v1.ThreadRequest
+	11, // 20: protectorate.v1.MessageService.ListThreads:input_type -> protectorate.v1.ListThreadsRequest
+	2,  // 21: protectorate.v1.MessageService.Send:output_type -> protectorate.v1.MessageServiceSendResponse
+	4,  // 22: protectorate.v1.MessageService.Inbox:output_type -> protectorate.v1.InboxResponse
+	6,  // 23: protectorate.v1.MessageService.Ack:output_type -> protectorate.v1.AckResponse
+	8,  // 24: protectorate.v1.MessageService.Reply:output_type -> protectorate.v1.ReplyResponse
+	10, // 25: protectorate.v1.MessageService.Thread:output_type -> protectorate.v1.ThreadResponse
+	12, // 26: protectorate.v1.MessageService.ListThreads:output_type -> protectorate.v1.ListThreadsResponse
+	21, // [21:27] is the sub-list for method output_type
+	15, // [15:21] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_message_proto_init() }
@@ -1002,7 +1254,7 @@ func file_protectorate_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_message_proto_rawDesc), len(file_protectorate_v1_message_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

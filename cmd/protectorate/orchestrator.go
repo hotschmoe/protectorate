@@ -119,8 +119,9 @@ AGENTS.md, CLAUDE.md and hosts.md from the live CLI, MCP catalog and node
 inventory, and starts the harness. --harness auto takes the top of
 'quota suggest'.
 
-Default scopes: read, events and the non-destructive backlog_* and
-sleeve_spawn_sleeve tools (never session creation: it runs outside the sandbox), named explicitly. --scopes replaces them;
+Default scopes: read, events and the non-destructive backlog_*, lease_*,
+message_*, sleeve_spawn_sleeve and sleeve_resleeve_sleeve tools (never session
+creation: it runs outside the sandbox), named explicitly. --scopes replaces them;
 --add-scopes extends them, e.g. --add-scopes sleeve_kill_sleeve to allow kill.
 Run with the owner token on the hub machine.`,
 		Args: cobra.NoArgs,

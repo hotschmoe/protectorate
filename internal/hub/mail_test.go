@@ -422,7 +422,7 @@ func TestMailEscalation(t *testing.T) {
 				return false
 			})
 			if tt.withPoe {
-				box, _ := r.h.coord.mail.Inbox(sleeve.OrchestratorName, false, true)
+				box, _ := r.h.coord.mail.Inbox(sleeve.OrchestratorName, "", false, true)
 				if len(box) != 1 || box[0].From != "hub" || box[0].Kind != mailbox.Notice || box[0].Thread != sent.Message.ThreadId || !strings.Contains(box[0].Body, id) {
 					t.Fatalf("poe's inbox = %+v", box)
 				}
@@ -583,5 +583,68 @@ func TestMailRequestAcksByDefault(t *testing.T) {
 				t.Fatalf("ack_required = %v, want %v", res.Message.AckRequired, tt.want)
 			}
 		})
+	}
+}
+
+func TestMailListThreads(t *testing.T) {
+	r := newMailRig(t)
+	r.spawnNamed("alice", pb.SleeveMode_SLEEVE_MODE_TERMINAL, "")
+	r.spawnNamed("bob", pb.SleeveMode_SLEEVE_MODE_TERMINAL, "")
+	alice := r.as("alice")
+	toOwner := r.post(alice, "owner", "need a decision", func(q *pb.MessageServiceSendRequest) { q.Kind = pb.MessageKind_MESSAGE_KIND_REQUEST })
+	r.post(alice, "bob", "fyi")
+	r.post(r.owner, "bob", "and you?", func(q *pb.MessageServiceSendRequest) { q.ThreadId = toOwner.Message.ThreadId })
+
+	list := func(q *pb.ListThreadsRequest) []*pb.ThreadSummary {
+		t.Helper()
+		res, err := r.owner.ListThreads(r.ctx, connect.NewRequest(q))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Msg.Threads
+	}
+	tests := []struct {
+		name string
+		req  *pb.ListThreadsRequest
+		want []string
+	}{
+		{"all, newest first", &pb.ListThreadsRequest{}, []string{toOwner.Message.ThreadId, "t2"}},
+		{"by sleeve", &pb.ListThreadsRequest{Sleeve: "bob"}, []string{toOwner.Message.ThreadId, "t2"}},
+		{"by sleeve with one thread", &pb.ListThreadsRequest{Sleeve: "owner"}, []string{toOwner.Message.ThreadId}},
+		{"limit", &pb.ListThreadsRequest{Limit: 1}, []string{toOwner.Message.ThreadId}},
+		{"unknown sleeve", &pb.ListThreadsRequest{Sleeve: "carol"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, th := range list(tt.req) {
+				got = append(got, th.ThreadId)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("threads = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	th := list(&pb.ListThreadsRequest{})[0]
+	if th.MessageCount != 2 || th.Unread != 1 || th.OpenAcks != 1 || th.Last.Body != "and you?" || strings.Join(th.Participants, ",") != "alice,owner,bob" {
+		t.Fatalf("summary = %v", th)
+	}
+	if _, err := r.owner.ListThreads(r.ctx, connect.NewRequest(&pb.ListThreadsRequest{Project: "nothing"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("unknown project: %v", err)
+	}
+	if _, err := r.owner.ListThreads(r.ctx, connect.NewRequest(&pb.ListThreadsRequest{Limit: -1})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("negative limit: %v", err)
+	}
+
+	in, err := r.owner.Inbox(r.ctx, connect.NewRequest(&pb.InboxRequest{ThreadId: "t2"}))
+	if err != nil || len(in.Msg.Messages) != 0 {
+		t.Fatalf("owner inbox of a thread without mail to the owner: %v %v", in, err)
+	}
+	in, err = r.owner.Inbox(r.ctx, connect.NewRequest(&pb.InboxRequest{ThreadId: toOwner.Message.ThreadId}))
+	if err != nil || len(in.Msg.Messages) != 1 {
+		t.Fatalf("owner inbox of the thread: %v %v", in, err)
+	}
+	if th := list(&pb.ListThreadsRequest{})[0]; th.Unread != 0 || th.OpenAcks != 1 {
+		t.Fatalf("reading the thread must clear unread and keep the ack open: %v", th)
 	}
 }

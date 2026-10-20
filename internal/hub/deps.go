@@ -81,7 +81,7 @@ func (c *coordinator) announce(ctx context.Context, v directory.View, ws string,
 		if len(liveOwners(d, "")) > 0 {
 			_, err := c.send(hubName, sendArgs{
 				To: projectPrefix + d.ID, Body: body, Kind: mailbox.Notice, RequestID: depRequestID(v.ID, key, d.ID),
-				ReplyVia: projectPrefix + v.ID,
+				ReplyVia: c.projectAddress(v),
 			})
 			if err != nil {
 				log.Printf("coordination: notify %s of %s: %v", d.ID, key, err)
@@ -90,6 +90,15 @@ func (c *coordinator) announce(ctx context.Context, v directory.View, ws string,
 		}
 		c.fileRelease(v, d, ch, e.Via, body)
 	}
+}
+
+// projectAddress is the shortest address of a project: its display name
+// when that resolves to it alone, else its id (a path:<dir> id is long).
+func (c *coordinator) projectAddress(v directory.View) string {
+	if got, err := c.dir.Get(v.Display); err == nil && got.ID == v.ID {
+		return projectPrefix + v.Display
+	}
+	return projectPrefix + v.ID
 }
 
 func depRequestID(upstream, key, downstream string) string {

@@ -460,6 +460,56 @@ class CompactionMarker extends StatelessWidget {
   }
 }
 
+class HandoffMarker extends StatelessWidget {
+  const HandoffMarker({super.key, required this.item});
+
+  final HandoffItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = item.handoff;
+    final t = Tokens.of(context);
+    final by = h.summarizerHarness.isEmpty
+        ? 'NO SUMMARY'
+        : h.summarizerLocal
+        ? 'SUMMARIZED BY LOCAL MODEL'
+        : 'SUMMARIZED BY ${h.summarizerHarness.toUpperCase()}';
+    final tone = h.summarizerLocal || h.summarizerHarness.isEmpty
+        ? t.p.warn
+        : t.p.info;
+    return Tooltip(
+      message: h.summarizerHarness.isEmpty
+          ? 'Handoff with facts only: ${h.summaryError}'
+          : 'Handoff ${h.path}, summary by ${h.summarizerHarness} '
+                    '${h.summarizerProvider} ${h.summarizerModel}'
+                .trim(),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(height: 1, color: tone.withValues(alpha: 0.4)),
+          ),
+          Flexible(
+            flex: 6,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                'RESLEEVED ${h.fromHarness.toUpperCase()} TO '
+                '${h.toHarness.toUpperCase()} ($by)',
+                key: const ValueKey('handoff-marker'),
+                textAlign: TextAlign.center,
+                style: t.legend(tone),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Container(height: 1, color: tone.withValues(alpha: 0.4)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ErrorRow extends StatelessWidget {
   const ErrorRow({super.key, required this.item});
 
@@ -482,4 +532,5 @@ Widget buildChatItem(
   ),
   CompactionItem() => CompactionMarker(item: item),
   ErrorItem() => ErrorRow(item: item),
+  HandoffItem() => HandoffMarker(item: item),
 };

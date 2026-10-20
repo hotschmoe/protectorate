@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"strings"
 )
@@ -135,6 +136,60 @@ func EncodePNG(img *image.RGBA) ([]byte, error) {
 		return nil, fmt.Errorf("encode png: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// Downscale returns img at most maxWidth pixels wide, keeping its aspect
+// ratio, each pixel the average of the source pixels it covers. An image no
+// wider, or a maxWidth of 0, comes back as is.
+func Downscale(img *image.RGBA, maxWidth int) *image.RGBA {
+	b := img.Bounds()
+	sw, sh := b.Dx(), b.Dy()
+	if maxWidth <= 0 || sw <= maxWidth || sh == 0 {
+		return img
+	}
+	dw := maxWidth
+	dh := max(1, (sh*dw+sw/2)/sw)
+	out := image.NewRGBA(image.Rect(0, 0, dw, dh))
+	for y := range dh {
+		y0, y1 := y*sh/dh, max((y+1)*sh/dh, y*sh/dh+1)
+		for x := range dw {
+			x0, x1 := x*sw/dw, max((x+1)*sw/dw, x*sw/dw+1)
+			var r, g, bl, a, n uint32
+			for sy := y0; sy < y1; sy++ {
+				for sx := x0; sx < x1; sx++ {
+					i := img.PixOffset(b.Min.X+sx, b.Min.Y+sy)
+					p := img.Pix[i : i+4]
+					r, g, bl, a = r+uint32(p[0]), g+uint32(p[1]), bl+uint32(p[2]), a+uint32(p[3])
+					n++
+				}
+			}
+			o := out.PixOffset(x, y)
+			out.Pix[o], out.Pix[o+1], out.Pix[o+2], out.Pix[o+3] = uint8(r/n), uint8(g/n), uint8(bl/n), uint8(a/n)
+		}
+	}
+	return out
+}
+
+// DownscalePNG scales an encoded screenshot as Downscale does, re-encoding it
+// only when it was wider than maxWidth.
+func DownscalePNG(b []byte, maxWidth int) ([]byte, error) {
+	cfg, err := png.DecodeConfig(bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("read png size: %w", err)
+	}
+	if maxWidth <= 0 || cfg.Width <= maxWidth {
+		return b, nil
+	}
+	src, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("decode png: %w", err)
+	}
+	rgba, ok := src.(*image.RGBA)
+	if !ok || rgba.Bounds().Min != (image.Point{}) {
+		rgba = image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
+		draw.Draw(rgba, rgba.Bounds(), src, src.Bounds().Min, draw.Src)
+	}
+	return EncodePNG(Downscale(rgba, maxWidth))
 }
 
 // ParseButton accepts "", "left", "right" or "middle".

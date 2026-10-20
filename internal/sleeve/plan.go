@@ -249,7 +249,7 @@ func (c Config) CheckBind(ws string) error {
 var reserved = map[string]bool{
 	"HOME": true, "PATH": true, "TERM": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true,
 	"COLORTERM": true, "CLAUDE_CONFIG_DIR": true, "CLAUDE_SECURESTORAGE_CONFIG_DIR": true, "CODEX_HOME": true,
-	"GROK_HOME": true, "PI_CODING_AGENT_DIR": true, "PI_CODING_AGENT_SESSION_DIR": true,
+	"GROK_HOME": true, "PI_CODING_AGENT_DIR": true, "PI_CODING_AGENT_SESSION_DIR": true, sleevePathEnv: true,
 }
 
 func checkEnv(env map[string]string) error {
@@ -371,6 +371,7 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	env := [][2]string{
 		{"HOME", c.UserHome},
 		{"PATH", strings.Join(c.PathDirs, ":")},
+		{sleevePathEnv, strings.Join(c.PathDirs, ":")},
 		{"USER", c.User},
 		{"LOGNAME", c.User},
 		{"SHELL", "/bin/bash"},

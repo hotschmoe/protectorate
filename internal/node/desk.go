@@ -43,11 +43,11 @@ func (d *Desk) Do(_ context.Context, req *pb.DeskActionRequest) (*pb.DeskActionR
 		if err != nil {
 			return nil, deskErr(err)
 		}
-		b, err := desk.EncodePNG(img)
+		r := img.Bounds()
+		b, err := desk.EncodePNG(desk.Downscale(img, int(a.Screenshot.GetMaxWidth())))
 		if err != nil {
 			return nil, deskErr(err)
 		}
-		r := img.Bounds()
 		return &pb.DeskActionResponse{Result: &pb.DeskActionResponse_Screenshot{Screenshot: &pb.ScreenshotResponse{Png: b, Width: int32(r.Dx()), Height: int32(r.Dy())}}}, nil
 	case *pb.DeskActionRequest_ListWindows:
 		if err := d.D.Ready(); err != nil {

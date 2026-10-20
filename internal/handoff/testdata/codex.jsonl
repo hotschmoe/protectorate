@@ -1,0 +1,8 @@
+{"type":"session_meta","payload":{"id":"x"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>p</permissions instructions>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/w</cwd>\n</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"add a Foo function to lib"}]}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"ok"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Added Foo."}]}}
+{"type":"event_msg","payload":{"type":"task_complete"}}

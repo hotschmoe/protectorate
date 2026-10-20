@@ -53,6 +53,12 @@ class ErrorItem extends ChatItem {
   final String text;
 }
 
+// Where a resleeve replaced the harness; what follows comes from the new one.
+class HandoffItem extends ChatItem {
+  HandoffItem(super.seq, this.handoff);
+  final Handoff handoff;
+}
+
 // Lower enum value means higher priority; UNSPECIFIED never wins.
 ChatState resolveState(Iterable<ChatState> candidates) {
   var best = ChatState.CHAT_STATE_UNSPECIFIED;
@@ -170,6 +176,8 @@ class ChatTranscript {
         items.add(ErrorItem(seq, e.error.text));
       case ChatEvent_Body.state:
         reported = e.state.state;
+      case ChatEvent_Body.handoff:
+        items.add(HandoffItem(seq, e.handoff));
       case ChatEvent_Body.notSet:
         break;
     }

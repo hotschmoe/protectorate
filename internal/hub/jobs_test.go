@@ -61,6 +61,13 @@ type jobEnv struct {
 // loopback and waits until both are fresh.
 func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	t.Helper()
+	return newJobEnvSandbox(t, peerSlots, false)
+}
+
+// newJobEnvSandbox is newJobEnv; with sandbox the peer probes the host and
+// runs its jobs in bwrap when the host can.
+func newJobEnvSandbox(t *testing.T, peerSlots int, sandbox bool) *jobEnv {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("PROTECTORATE_HOME", home)
 	remote, err := node.NewJobs(filepath.Join(t.TempDir(), "peer-jobs"), peerSlots)
@@ -73,7 +80,11 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	}
 	// "root" elevation runs the command unchanged, so admin jobs run as the
 	// test user and never call sudo.
-	remote.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Admin: "root"} }
+	if sandbox {
+		remote.Home = t.TempDir()
+	} else {
+		remote.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Admin: "root"} }
+	}
 	local.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Note: "no admin jobs: test"} }
 	peerFiles, err := node.NewFiles(filepath.Join(t.TempDir(), "peer-files"), false)
 	if err != nil {
@@ -627,6 +638,30 @@ func TestJobSurvivesHubRestart(t *testing.T) {
 	}
 }
 
+// TestSandboxedJobSurvivesHubRestart runs a job in the peer's bwrap sandbox
+// and restarts the hub under it: the agent's job runner owns the sandbox, so
+// the job goes on and the new hub reattaches to it.
+func TestSandboxedJobSurvivesHubRestart(t *testing.T) {
+	e := newJobEnvSandbox(t, 1, true)
+	if iso := e.remote.Isolation(); iso.Sandbox != "bwrap" {
+		t.Skipf("no sandbox on this host: %s", iso.Note)
+	}
+	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"sh", "-c", "echo up; sleep 2; echo down; exit 3"}, Limits: &pb.JobLimits{MemoryBytes: 256 << 20}})
+	waitUntil(t, 10*time.Second, "first output", func() bool { return strings.Contains(e.logOf(t, j.Id), "up") })
+	e.restart(t)
+	if got := e.get(t, j.Id); terminal(got.State) {
+		t.Fatalf("job ended with the hub: %v", got)
+	}
+	var last *pb.Job
+	waitUntil(t, 20*time.Second, "job end", func() bool {
+		last = e.get(t, j.Id)
+		return terminal(last.State)
+	})
+	if last.ExitCode != 3 || e.logOf(t, j.Id) != "up\ndown\n" || last.Isolation != "bwrap, memory 256 MiB" || last.Mode != pb.JobMode_JOB_MODE_SANDBOXED {
+		t.Fatalf("after restart: exit %d isolation %q mode %v log %q", last.ExitCode, last.Isolation, last.Mode, e.logOf(t, j.Id))
+	}
+}
+
 func TestRecoveredJobCanBeCanceled(t *testing.T) {
 	e := newJobEnv(t, 1)
 	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:up", "sleep:300")})
@@ -833,12 +868,12 @@ func TestJobAndLeaseScopesAndAudit(t *testing.T) {
 		})
 	}
 
-	entries, err := auth.Tail(auditDir, 1000)
+	page, err := auth.ReadPage(auditDir, auth.Query{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
-	for _, en := range entries {
+	for _, en := range page.Entries {
 		seen[en.Procedure[strings.LastIndex(en.Procedure, "/")+1:]] = true
 	}
 	for _, m := range []string{"SubmitJob", "CancelJob", "AcquireLease", "RenewLease", "ReleaseLease"} {

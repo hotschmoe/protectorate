@@ -99,9 +99,11 @@ class DeskTarget extends $pb.GeneratedMessage {
 class ScreenshotRequest extends $pb.GeneratedMessage {
   factory ScreenshotRequest({
     DeskTarget? target,
+    $core.int? maxWidth,
   }) {
     final result = ScreenshotRequest._();
     if (target != null) result.target = target;
+    if (maxWidth != null) result.maxWidth = maxWidth;
     return result;
   }
 
@@ -121,6 +123,7 @@ class ScreenshotRequest extends $pb.GeneratedMessage {
       createEmptyInstance: ScreenshotRequest.$_createMessage)
     ..aOM<DeskTarget>(1, _omitFieldNames ? '' : 'target',
         subBuilder: DeskTarget.$_createMessage)
+    ..aI(2, _omitFieldNames ? '' : 'maxWidth')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -155,6 +158,18 @@ class ScreenshotRequest extends $pb.GeneratedMessage {
   void clearTarget() => $_clearField(1);
   @$pb.TagNumber(1)
   DeskTarget ensureTarget() => $_ensure(0);
+
+  /// max_width scales the image down, keeping its aspect ratio, to at most this
+  /// many pixels wide, for viewing over a slow link; 0 keeps full size. Input
+  /// coordinates stay screen pixels: scale by width / the PNG's width.
+  @$pb.TagNumber(2)
+  $core.int get maxWidth => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set maxWidth($core.int value) => $_setSignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasMaxWidth() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearMaxWidth() => $_clearField(2);
 }
 
 class ScreenshotResponse extends $pb.GeneratedMessage {
@@ -221,6 +236,8 @@ class ScreenshotResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearPng() => $_clearField(1);
 
+  /// width and height are the virtual screen's size in pixels, the coordinate
+  /// space of input commands; the PNG is smaller when max_width scaled it.
   @$pb.TagNumber(2)
   $core.int get width => $_getIZ(1);
   @$pb.TagNumber(2)

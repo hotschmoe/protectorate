@@ -2,6 +2,7 @@ package sleeve
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -182,5 +183,39 @@ func TestCodexConfigSeed(t *testing.T) {
 	}
 	if got := mustRead(t, filepath.Join(c.sleeveHome("s"), ".codex/config.toml")); got != codexSeed {
 		t.Errorf("codex seed = %q", got)
+	}
+}
+
+func TestProfileKeepsSleevePathInLoginShells(t *testing.T) {
+	linuxHost(t)
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not installed")
+	}
+	home := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".profile"), profileSeed)
+	tests := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"sleeve path wins over /etc/profile", []string{sleevePathEnv + "=/opt/tools/bin:/usr/bin:/bin"}, "/opt/tools/bin:/usr/bin:/bin"},
+		{"without it the system default stays", nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bash, "-lc", `printf %s "$PATH"`)
+			cmd.Env = append([]string{"HOME=" + home, "PATH=/usr/bin:/bin"}, tc.env...)
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want != "" && string(out) != tc.want {
+				t.Fatalf("PATH = %q, want %q", out, tc.want)
+			}
+			if tc.want == "" && strings.Contains(string(out), "/opt/tools") {
+				t.Fatalf("PATH = %q", out)
+			}
+		})
 	}
 }

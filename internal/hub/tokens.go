@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"connectrpc.com/connect"
@@ -56,4 +57,48 @@ func toProtoToken(t auth.Token) *pb.TokenInfo {
 		CreatedAt: timestamppb.New(t.Created), ExpiresAt: ts(t.Expires),
 		LastUsedAt: ts(t.LastUsed), RevokedAt: ts(t.RevokedAt), Task: t.Task, MintedBy: t.MintedBy,
 	}
+}
+
+const (
+	defaultAuditPage = 50
+	maxAuditPage     = 500
+)
+
+var auditOutcomes = map[string]bool{"": true, auth.OutcomeOK: true, auth.OutcomeDenied: true, auth.OutcomeError: true}
+
+func (h *Hub) ListAuditEntries(_ context.Context, req *connect.Request[pb.ListAuditEntriesRequest]) (*connect.Response[pb.ListAuditEntriesResponse], error) {
+	m := req.Msg
+	limit := int(m.Limit)
+	switch {
+	case limit < 0:
+		return nil, invalid("limit must not be negative")
+	case limit == 0:
+		limit = defaultAuditPage
+	case limit > maxAuditPage:
+		limit = maxAuditPage
+	}
+	if !auditOutcomes[m.Outcome] {
+		return nil, invalid("outcome %q is not ok, denied or error", m.Outcome)
+	}
+	res := &pb.ListAuditEntriesResponse{}
+	if h.authz == nil {
+		return connect.NewResponse(res), nil
+	}
+	page, err := h.authz.Audit.Page(auth.Query{
+		Limit: limit, Before: m.PageToken, Actor: m.Actor, Procedure: m.Procedure, Subject: m.Subject, Outcome: m.Outcome,
+	})
+	switch {
+	case errors.Is(err, auth.ErrCursor):
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	case err != nil:
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read audit log: %w", err))
+	}
+	for _, e := range page.Entries {
+		res.Entries = append(res.Entries, &pb.AuditEntry{
+			Time: timestamppb.New(e.Time), Actor: e.Actor, TokenId: e.TokenID, Tailnet: e.Tailnet,
+			Procedure: e.Procedure, Subject: e.Subject, Outcome: e.Outcome, Code: e.Code, Task: e.Task, Detail: e.Detail,
+		})
+	}
+	res.NextPageToken = page.Next
+	return connect.NewResponse(res), nil
 }

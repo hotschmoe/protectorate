@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../nodes/add_node.dart';
+import '../nodes/desk_view.dart';
 import '../nodes/node_update.dart';
 import '../nodes/remove_node.dart';
 import '../nodes/node_view.dart';
@@ -15,6 +17,7 @@ import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
+import 'desk_screen.dart';
 import 'nodes_tab.dart';
 import 'sleeves_screen.dart';
 
@@ -44,6 +47,7 @@ class NodeDetailScreen extends StatefulWidget {
 
 class _NodeDetailScreenState extends State<NodeDetailScreen> {
   NodeStatus? _status;
+  List<Lease> _leases = const [];
   DateTime _receivedAt = DateTime.now();
   Object? _error;
   StreamSubscription<dynamic>? _sub;
@@ -60,6 +64,8 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
     _sub = widget.feed.incoming.listen((e) {
       if (nodeEventKinds.contains(e.kind) && e.subject == widget.name) {
         _refresh();
+      } else if (e.kind.startsWith('lease.')) {
+        _loadLeases();
       }
     });
     _poll = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
@@ -77,7 +83,17 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
     super.dispose();
   }
 
+  Future<void> _loadLeases() async {
+    try {
+      final r = await widget.client.leases.listLeases(ListLeasesRequest());
+      if (mounted) setState(() => _leases = r.leases);
+    } on Object {
+      return;
+    }
+  }
+
   Future<void> _refresh() async {
+    unawaited(_loadLeases());
     try {
       final s = await widget.client.node.getNode(
         GetNodeRequest(name: widget.name),
@@ -133,6 +149,7 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
               cpuHistory: _history.cpu(widget.name),
               memHistory: _history.mem(widget.name),
               versions: widget.versions,
+              gpuHolders: gpuHolders(_leases, widget.name),
               onUpdate: s.node.local
                   ? null
                   : () => showNodeUpdate(
@@ -153,6 +170,16 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
                       onChanged: _refresh,
                     )
                   : null,
+              onOpenDesk: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => DeskScreen(
+                    client: widget.client,
+                    feed: widget.feed,
+                    name: widget.name,
+                    now: widget.now,
+                  ),
+                ),
+              ),
               onManageSleeves: s.node.local
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -282,6 +309,8 @@ class NodeDetail extends StatelessWidget {
     this.onRemove,
     this.onReissue,
     this.onUpdate,
+    this.onOpenDesk,
+    this.gpuHolders = const {},
     this.versions = const Versions(),
     this.cpuHistory = const [],
     this.memHistory = const [],
@@ -291,6 +320,8 @@ class NodeDetail extends StatelessWidget {
   final VoidCallback? onRemove;
   final VoidCallback? onReissue;
   final VoidCallback? onUpdate;
+  final VoidCallback? onOpenDesk;
+  final Map<int, String> gpuHolders;
   final Versions versions;
   final NodeStatus status;
   final Duration age;
@@ -359,6 +390,8 @@ class NodeDetail extends StatelessWidget {
         ),
       if (onRemove != null || onReissue != null)
         _ManagePanel(status: status, onRemove: onRemove, onReissue: onReissue),
+      if (isWindowsNode(status) && !status.node.invited)
+        DeskPanel(status: status, now: now, onOpen: down ? null : onOpenDesk),
       if (down)
         NoteStrip(
           m == null
@@ -378,6 +411,7 @@ class NodeDetail extends StatelessWidget {
       left.addAll([
         _HostPanel(
           m: m,
+          busy: gpuBusy(status),
           dim: dim,
           cpuHistory: cpuHistory,
           memHistory: memHistory,
@@ -464,6 +498,8 @@ class NodeDetail extends StatelessWidget {
                         gpu: g,
                         dim: dim,
                         detail: true,
+                        holder: gpuHolders[g.index] ?? '',
+                        busy: gpuBusy(status)[g.index] ?? '',
                       ),
                   ],
                 ),
@@ -607,12 +643,14 @@ class NodeDetail extends StatelessWidget {
 class _HostPanel extends StatelessWidget {
   const _HostPanel({
     required this.m,
+    required this.busy,
     required this.dim,
     required this.cpuHistory,
     required this.memHistory,
   });
 
   final NodeMetrics m;
+  final Map<int, String> busy;
   final bool dim;
   final List<double?> cpuHistory;
   final List<double?> memHistory;
@@ -715,7 +753,7 @@ class _HostPanel extends StatelessWidget {
                 ],
               ),
             ),
-          ...nodeMeters(m, dim: dim, detail: true),
+          ...nodeMeters(m, dim: dim, detail: true, gpuBusy: busy),
           if (cpuHistory.length > 1) hist('CPU', cpuHistory),
           if (memHistory.length > 1) hist('MEM', memHistory),
         ],

@@ -284,6 +284,7 @@ type ChatEvent struct {
 	//	*ChatEvent_Compaction
 	//	*ChatEvent_Error
 	//	*ChatEvent_State
+	//	*ChatEvent_Handoff
 	Body          isChatEvent_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -439,6 +440,15 @@ func (x *ChatEvent) GetState() *StateChange {
 	return nil
 }
 
+func (x *ChatEvent) GetHandoff() *Handoff {
+	if x != nil {
+		if x, ok := x.Body.(*ChatEvent_Handoff); ok {
+			return x.Handoff
+		}
+	}
+	return nil
+}
+
 type isChatEvent_Body interface {
 	isChatEvent_Body()
 }
@@ -487,6 +497,12 @@ type ChatEvent_State struct {
 	State *StateChange `protobuf:"bytes,20,opt,name=state,proto3,oneof"`
 }
 
+type ChatEvent_Handoff struct {
+	// handoff marks where a resleeve replaced the harness; the events after
+	// it come from the new one.
+	Handoff *Handoff `protobuf:"bytes,21,opt,name=handoff,proto3,oneof"`
+}
+
 func (*ChatEvent_User) isChatEvent_Body() {}
 
 func (*ChatEvent_Text) isChatEvent_Body() {}
@@ -508,6 +524,8 @@ func (*ChatEvent_Compaction) isChatEvent_Body() {}
 func (*ChatEvent_Error) isChatEvent_Body() {}
 
 func (*ChatEvent_State) isChatEvent_Body() {}
+
+func (*ChatEvent_Handoff) isChatEvent_Body() {}
 
 type UserMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1163,6 +1181,141 @@ func (x *StateChange) GetState() ChatState {
 	return ChatState_CHAT_STATE_UNSPECIFIED
 }
 
+// Handoff describes one resleeve: which harness gave way to which, and who
+// wrote the summary in the handoff file. Harness names are claude, codex,
+// grok and pi.
+type Handoff struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	FromHarness string                 `protobuf:"bytes,1,opt,name=from_harness,json=fromHarness,proto3" json:"from_harness,omitempty"`
+	// from_session_id is the outgoing harness's native session, kept on disk
+	// for a later resume.
+	FromSessionId string `protobuf:"bytes,2,opt,name=from_session_id,json=fromSessionId,proto3" json:"from_session_id,omitempty"`
+	ToHarness     string `protobuf:"bytes,3,opt,name=to_harness,json=toHarness,proto3" json:"to_harness,omitempty"`
+	// summarizer_harness is empty when no summary was written; summary_error
+	// then says why, and the handoff holds the facts only.
+	SummarizerHarness  string `protobuf:"bytes,4,opt,name=summarizer_harness,json=summarizerHarness,proto3" json:"summarizer_harness,omitempty"`
+	SummarizerModel    string `protobuf:"bytes,5,opt,name=summarizer_model,json=summarizerModel,proto3" json:"summarizer_model,omitempty"`
+	SummarizerProvider string `protobuf:"bytes,6,opt,name=summarizer_provider,json=summarizerProvider,proto3" json:"summarizer_provider,omitempty"`
+	// summarizer_local is true when the summary came from a model served by
+	// the user's own machine or network (the fallback when no subscription
+	// has spare quota): show "summarized by local model".
+	SummarizerLocal bool   `protobuf:"varint,7,opt,name=summarizer_local,json=summarizerLocal,proto3" json:"summarizer_local,omitempty"`
+	SummaryError    string `protobuf:"bytes,8,opt,name=summary_error,json=summaryError,proto3" json:"summary_error,omitempty"`
+	// path is the handoff file in the workspace; archive_path the hub's copy.
+	Path          string                 `protobuf:"bytes,9,opt,name=path,proto3" json:"path,omitempty"`
+	ArchivePath   string                 `protobuf:"bytes,10,opt,name=archive_path,json=archivePath,proto3" json:"archive_path,omitempty"`
+	At            *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=at,proto3" json:"at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Handoff) Reset() {
+	*x = Handoff{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Handoff) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Handoff) ProtoMessage() {}
+
+func (x *Handoff) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Handoff.ProtoReflect.Descriptor instead.
+func (*Handoff) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *Handoff) GetFromHarness() string {
+	if x != nil {
+		return x.FromHarness
+	}
+	return ""
+}
+
+func (x *Handoff) GetFromSessionId() string {
+	if x != nil {
+		return x.FromSessionId
+	}
+	return ""
+}
+
+func (x *Handoff) GetToHarness() string {
+	if x != nil {
+		return x.ToHarness
+	}
+	return ""
+}
+
+func (x *Handoff) GetSummarizerHarness() string {
+	if x != nil {
+		return x.SummarizerHarness
+	}
+	return ""
+}
+
+func (x *Handoff) GetSummarizerModel() string {
+	if x != nil {
+		return x.SummarizerModel
+	}
+	return ""
+}
+
+func (x *Handoff) GetSummarizerProvider() string {
+	if x != nil {
+		return x.SummarizerProvider
+	}
+	return ""
+}
+
+func (x *Handoff) GetSummarizerLocal() bool {
+	if x != nil {
+		return x.SummarizerLocal
+	}
+	return false
+}
+
+func (x *Handoff) GetSummaryError() string {
+	if x != nil {
+		return x.SummaryError
+	}
+	return ""
+}
+
+func (x *Handoff) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *Handoff) GetArchivePath() string {
+	if x != nil {
+		return x.ArchivePath
+	}
+	return ""
+}
+
+func (x *Handoff) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
 type WatchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sleeve        string                 `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
@@ -1173,7 +1326,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1185,7 +1338,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1198,7 +1351,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{13}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *WatchRequest) GetSleeve() string {
@@ -1226,7 +1379,7 @@ type SendRequest struct {
 
 func (x *SendRequest) Reset() {
 	*x = SendRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1238,7 +1391,7 @@ func (x *SendRequest) String() string {
 func (*SendRequest) ProtoMessage() {}
 
 func (x *SendRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1251,7 +1404,7 @@ func (x *SendRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendRequest.ProtoReflect.Descriptor instead.
 func (*SendRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{14}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SendRequest) GetSleeve() string {
@@ -1285,7 +1438,7 @@ type SendResponse struct {
 
 func (x *SendResponse) Reset() {
 	*x = SendResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1297,7 +1450,7 @@ func (x *SendResponse) String() string {
 func (*SendResponse) ProtoMessage() {}
 
 func (x *SendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1310,7 +1463,7 @@ func (x *SendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendResponse.ProtoReflect.Descriptor instead.
 func (*SendResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{15}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SendResponse) GetSeq() uint64 {
@@ -1329,7 +1482,7 @@ type InterruptRequest struct {
 
 func (x *InterruptRequest) Reset() {
 	*x = InterruptRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1341,7 +1494,7 @@ func (x *InterruptRequest) String() string {
 func (*InterruptRequest) ProtoMessage() {}
 
 func (x *InterruptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1354,7 +1507,7 @@ func (x *InterruptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptRequest.ProtoReflect.Descriptor instead.
 func (*InterruptRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{16}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *InterruptRequest) GetSleeve() string {
@@ -1372,7 +1525,7 @@ type InterruptResponse struct {
 
 func (x *InterruptResponse) Reset() {
 	*x = InterruptResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1384,7 +1537,7 @@ func (x *InterruptResponse) String() string {
 func (*InterruptResponse) ProtoMessage() {}
 
 func (x *InterruptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1397,7 +1550,7 @@ func (x *InterruptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptResponse.ProtoReflect.Descriptor instead.
 func (*InterruptResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{17}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{18}
 }
 
 type RespondRequest struct {
@@ -1412,7 +1565,7 @@ type RespondRequest struct {
 
 func (x *RespondRequest) Reset() {
 	*x = RespondRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1424,7 +1577,7 @@ func (x *RespondRequest) String() string {
 func (*RespondRequest) ProtoMessage() {}
 
 func (x *RespondRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1437,7 +1590,7 @@ func (x *RespondRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondRequest.ProtoReflect.Descriptor instead.
 func (*RespondRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{18}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RespondRequest) GetSleeve() string {
@@ -1476,7 +1629,7 @@ type RespondResponse struct {
 
 func (x *RespondResponse) Reset() {
 	*x = RespondResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1488,7 +1641,7 @@ func (x *RespondResponse) String() string {
 func (*RespondResponse) ProtoMessage() {}
 
 func (x *RespondResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1501,7 +1654,7 @@ func (x *RespondResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondResponse.ProtoReflect.Descriptor instead.
 func (*RespondResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{19}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{20}
 }
 
 type CompactRequest struct {
@@ -1513,7 +1666,7 @@ type CompactRequest struct {
 
 func (x *CompactRequest) Reset() {
 	*x = CompactRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1525,7 +1678,7 @@ func (x *CompactRequest) String() string {
 func (*CompactRequest) ProtoMessage() {}
 
 func (x *CompactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1538,7 +1691,7 @@ func (x *CompactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactRequest.ProtoReflect.Descriptor instead.
 func (*CompactRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{20}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CompactRequest) GetSleeve() string {
@@ -1557,7 +1710,7 @@ type CompactResponse struct {
 
 func (x *CompactResponse) Reset() {
 	*x = CompactResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1569,7 +1722,7 @@ func (x *CompactResponse) String() string {
 func (*CompactResponse) ProtoMessage() {}
 
 func (x *CompactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1582,7 +1735,7 @@ func (x *CompactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactResponse.ProtoReflect.Descriptor instead.
 func (*CompactResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{21}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CompactResponse) GetCompaction() *Compaction {
@@ -1610,7 +1763,7 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12\x1f\n" +
 	"\vlocal_model\x18\n" +
 	" \x01(\bR\n" +
-	"localModel\"\xe4\x05\n" +
+	"localModel\"\x9a\x06\n" +
 	"\tChatEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x122\n" +
@@ -1628,7 +1781,8 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"compaction\x18\x12 \x01(\v2\x1b.protectorate.v1.CompactionH\x00R\n" +
 	"compaction\x122\n" +
 	"\x05error\x18\x13 \x01(\v2\x1a.protectorate.v1.ChatErrorH\x00R\x05error\x124\n" +
-	"\x05state\x18\x14 \x01(\v2\x1c.protectorate.v1.StateChangeH\x00R\x05stateB\x06\n" +
+	"\x05state\x18\x14 \x01(\v2\x1c.protectorate.v1.StateChangeH\x00R\x05state\x124\n" +
+	"\ahandoff\x18\x15 \x01(\v2\x18.protectorate.v1.HandoffH\x00R\ahandoffB\x06\n" +
 	"\x04body\"5\n" +
 	"\vUserMessage\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
@@ -1677,7 +1831,21 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\tChatError\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"?\n" +
 	"\vStateChange\x120\n" +
-	"\x05state\x18\x01 \x01(\x0e2\x1a.protectorate.v1.ChatStateR\x05state\"C\n" +
+	"\x05state\x18\x01 \x01(\x0e2\x1a.protectorate.v1.ChatStateR\x05state\"\xb1\x03\n" +
+	"\aHandoff\x12!\n" +
+	"\ffrom_harness\x18\x01 \x01(\tR\vfromHarness\x12&\n" +
+	"\x0ffrom_session_id\x18\x02 \x01(\tR\rfromSessionId\x12\x1d\n" +
+	"\n" +
+	"to_harness\x18\x03 \x01(\tR\ttoHarness\x12-\n" +
+	"\x12summarizer_harness\x18\x04 \x01(\tR\x11summarizerHarness\x12)\n" +
+	"\x10summarizer_model\x18\x05 \x01(\tR\x0fsummarizerModel\x12/\n" +
+	"\x13summarizer_provider\x18\x06 \x01(\tR\x12summarizerProvider\x12)\n" +
+	"\x10summarizer_local\x18\a \x01(\bR\x0fsummarizerLocal\x12#\n" +
+	"\rsummary_error\x18\b \x01(\tR\fsummaryError\x12\x12\n" +
+	"\x04path\x18\t \x01(\tR\x04path\x12!\n" +
+	"\farchive_path\x18\n" +
+	" \x01(\tR\varchivePath\x12*\n" +
+	"\x02at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"C\n" +
 	"\fWatchRequest\x12\x16\n" +
 	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x12\x1b\n" +
 	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\"X\n" +
@@ -1737,7 +1905,7 @@ func file_protectorate_v1_chat_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_protectorate_v1_chat_proto_goTypes = []any{
 	(SleeveMode)(0),               // 0: protectorate.v1.SleeveMode
 	(ChatState)(0),                // 1: protectorate.v1.ChatState
@@ -1754,22 +1922,23 @@ var file_protectorate_v1_chat_proto_goTypes = []any{
 	(*Compaction)(nil),            // 12: protectorate.v1.Compaction
 	(*ChatError)(nil),             // 13: protectorate.v1.ChatError
 	(*StateChange)(nil),           // 14: protectorate.v1.StateChange
-	(*WatchRequest)(nil),          // 15: protectorate.v1.WatchRequest
-	(*SendRequest)(nil),           // 16: protectorate.v1.SendRequest
-	(*SendResponse)(nil),          // 17: protectorate.v1.SendResponse
-	(*InterruptRequest)(nil),      // 18: protectorate.v1.InterruptRequest
-	(*InterruptResponse)(nil),     // 19: protectorate.v1.InterruptResponse
-	(*RespondRequest)(nil),        // 20: protectorate.v1.RespondRequest
-	(*RespondResponse)(nil),       // 21: protectorate.v1.RespondResponse
-	(*CompactRequest)(nil),        // 22: protectorate.v1.CompactRequest
-	(*CompactResponse)(nil),       // 23: protectorate.v1.CompactResponse
-	(*timestamppb.Timestamp)(nil), // 24: google.protobuf.Timestamp
+	(*Handoff)(nil),               // 15: protectorate.v1.Handoff
+	(*WatchRequest)(nil),          // 16: protectorate.v1.WatchRequest
+	(*SendRequest)(nil),           // 17: protectorate.v1.SendRequest
+	(*SendResponse)(nil),          // 18: protectorate.v1.SendResponse
+	(*InterruptRequest)(nil),      // 19: protectorate.v1.InterruptRequest
+	(*InterruptResponse)(nil),     // 20: protectorate.v1.InterruptResponse
+	(*RespondRequest)(nil),        // 21: protectorate.v1.RespondRequest
+	(*RespondResponse)(nil),       // 22: protectorate.v1.RespondResponse
+	(*CompactRequest)(nil),        // 23: protectorate.v1.CompactRequest
+	(*CompactResponse)(nil),       // 24: protectorate.v1.CompactResponse
+	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
 }
 var file_protectorate_v1_chat_proto_depIdxs = []int32{
 	1,  // 0: protectorate.v1.ChatStatus.state:type_name -> protectorate.v1.ChatState
-	24, // 1: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
-	24, // 2: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
-	24, // 3: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
+	25, // 1: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
+	25, // 2: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
+	25, // 3: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
 	4,  // 4: protectorate.v1.ChatEvent.user:type_name -> protectorate.v1.UserMessage
 	5,  // 5: protectorate.v1.ChatEvent.text:type_name -> protectorate.v1.AssistantText
 	6,  // 6: protectorate.v1.ChatEvent.tool_call:type_name -> protectorate.v1.ToolCall
@@ -1781,24 +1950,26 @@ var file_protectorate_v1_chat_proto_depIdxs = []int32{
 	12, // 12: protectorate.v1.ChatEvent.compaction:type_name -> protectorate.v1.Compaction
 	13, // 13: protectorate.v1.ChatEvent.error:type_name -> protectorate.v1.ChatError
 	14, // 14: protectorate.v1.ChatEvent.state:type_name -> protectorate.v1.StateChange
-	24, // 15: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 16: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
-	12, // 17: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
-	15, // 18: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
-	16, // 19: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
-	18, // 20: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
-	20, // 21: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
-	22, // 22: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
-	3,  // 23: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
-	17, // 24: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
-	19, // 25: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
-	21, // 26: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
-	23, // 27: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
-	23, // [23:28] is the sub-list for method output_type
-	18, // [18:23] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	15, // 15: protectorate.v1.ChatEvent.handoff:type_name -> protectorate.v1.Handoff
+	25, // 16: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 17: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
+	25, // 18: protectorate.v1.Handoff.at:type_name -> google.protobuf.Timestamp
+	12, // 19: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
+	16, // 20: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
+	17, // 21: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
+	19, // 22: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
+	21, // 23: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
+	23, // 24: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
+	3,  // 25: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
+	18, // 26: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
+	20, // 27: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
+	22, // 28: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
+	24, // 29: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
+	25, // [25:30] is the sub-list for method output_type
+	20, // [20:25] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_chat_proto_init() }
@@ -1818,6 +1989,7 @@ func file_protectorate_v1_chat_proto_init() {
 		(*ChatEvent_Compaction)(nil),
 		(*ChatEvent_Error)(nil),
 		(*ChatEvent_State)(nil),
+		(*ChatEvent_Handoff)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1825,7 +1997,7 @@ func file_protectorate_v1_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_chat_proto_rawDesc), len(file_protectorate_v1_chat_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

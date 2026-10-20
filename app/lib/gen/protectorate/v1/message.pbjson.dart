@@ -105,13 +105,15 @@ const InboxRequest$json = {
     {'1': 'unread_only', '3': 1, '4': 1, '5': 8, '10': 'unreadOnly'},
     {'1': 'peek', '3': 2, '4': 1, '5': 8, '10': 'peek'},
     {'1': 'as', '3': 3, '4': 1, '5': 9, '10': 'as'},
+    {'1': 'thread_id', '3': 4, '4': 1, '5': 9, '10': 'threadId'},
   ],
 };
 
 /// Descriptor for `InboxRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List inboxRequestDescriptor = $convert.base64Decode(
     'CgxJbmJveFJlcXVlc3QSHwoLdW5yZWFkX29ubHkYASABKAhSCnVucmVhZE9ubHkSEgoEcGVlax'
-    'gCIAEoCFIEcGVlaxIOCgJhcxgDIAEoCVICYXM=');
+    'gCIAEoCFIEcGVlaxIOCgJhcxgDIAEoCVICYXMSGwoJdGhyZWFkX2lkGAQgASgJUgh0aHJlYWRJ'
+    'ZA==');
 
 @$core.Deprecated('Use inboxResponseDescriptor instead')
 const InboxResponse$json = {
@@ -232,6 +234,72 @@ const ThreadResponse$json = {
 final $typed_data.Uint8List threadResponseDescriptor = $convert.base64Decode(
     'Cg5UaHJlYWRSZXNwb25zZRI4CghtZXNzYWdlcxgBIAMoCzIcLnByb3RlY3RvcmF0ZS52MS5NYW'
     'lsTWVzc2FnZVIIbWVzc2FnZXM=');
+
+@$core.Deprecated('Use listThreadsRequestDescriptor instead')
+const ListThreadsRequest$json = {
+  '1': 'ListThreadsRequest',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {'1': 'project', '3': 2, '4': 1, '5': 9, '10': 'project'},
+    {'1': 'limit', '3': 3, '4': 1, '5': 5, '10': 'limit'},
+  ],
+};
+
+/// Descriptor for `ListThreadsRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listThreadsRequestDescriptor = $convert.base64Decode(
+    'ChJMaXN0VGhyZWFkc1JlcXVlc3QSFgoGc2xlZXZlGAEgASgJUgZzbGVldmUSGAoHcHJvamVjdB'
+    'gCIAEoCVIHcHJvamVjdBIUCgVsaW1pdBgDIAEoBVIFbGltaXQ=');
+
+@$core.Deprecated('Use listThreadsResponseDescriptor instead')
+const ListThreadsResponse$json = {
+  '1': 'ListThreadsResponse',
+  '2': [
+    {
+      '1': 'threads',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.ThreadSummary',
+      '10': 'threads'
+    },
+  ],
+};
+
+/// Descriptor for `ListThreadsResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listThreadsResponseDescriptor = $convert.base64Decode(
+    'ChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjgKB3RocmVhZHMYASADKAsyHi5wcm90ZWN0b3JhdGUudj'
+    'EuVGhyZWFkU3VtbWFyeVIHdGhyZWFkcw==');
+
+@$core.Deprecated('Use threadSummaryDescriptor instead')
+const ThreadSummary$json = {
+  '1': 'ThreadSummary',
+  '2': [
+    {'1': 'thread_id', '3': 1, '4': 1, '5': 9, '10': 'threadId'},
+    {'1': 'participants', '3': 2, '4': 3, '5': 9, '10': 'participants'},
+    {'1': 'message_count', '3': 3, '4': 1, '5': 13, '10': 'messageCount'},
+    {
+      '1': 'last',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.MailMessage',
+      '10': 'last'
+    },
+    {'1': 'unread', '3': 5, '4': 1, '5': 13, '10': 'unread'},
+    {'1': 'open_acks', '3': 6, '4': 1, '5': 13, '10': 'openAcks'},
+    {'1': 'escalated', '3': 7, '4': 1, '5': 13, '10': 'escalated'},
+    {'1': 'projects', '3': 8, '4': 3, '5': 9, '10': 'projects'},
+  ],
+};
+
+/// Descriptor for `ThreadSummary`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List threadSummaryDescriptor = $convert.base64Decode(
+    'Cg1UaHJlYWRTdW1tYXJ5EhsKCXRocmVhZF9pZBgBIAEoCVIIdGhyZWFkSWQSIgoMcGFydGljaX'
+    'BhbnRzGAIgAygJUgxwYXJ0aWNpcGFudHMSIwoNbWVzc2FnZV9jb3VudBgDIAEoDVIMbWVzc2Fn'
+    'ZUNvdW50EjAKBGxhc3QYBCABKAsyHC5wcm90ZWN0b3JhdGUudjEuTWFpbE1lc3NhZ2VSBGxhc3'
+    'QSFgoGdW5yZWFkGAUgASgNUgZ1bnJlYWQSGwoJb3Blbl9hY2tzGAYgASgNUghvcGVuQWNrcxIc'
+    'Cgllc2NhbGF0ZWQYByABKA1SCWVzY2FsYXRlZBIaCghwcm9qZWN0cxgIIAMoCVIIcHJvamVjdH'
+    'M=');
 
 @$core.Deprecated('Use mailMessageDescriptor instead')
 const MailMessage$json = {
@@ -361,6 +429,12 @@ const $core.Map<$core.String, $core.dynamic> MessageServiceBase$json = {
       '3': '.protectorate.v1.ThreadResponse',
       '4': {'34': 1},
     },
+    {
+      '1': 'ListThreads',
+      '2': '.protectorate.v1.ListThreadsRequest',
+      '3': '.protectorate.v1.ListThreadsResponse',
+      '4': {'34': 1},
+    },
   ],
 };
 
@@ -381,6 +455,9 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ReplyResponse': ReplyResponse$json,
   '.protectorate.v1.ThreadRequest': ThreadRequest$json,
   '.protectorate.v1.ThreadResponse': ThreadResponse$json,
+  '.protectorate.v1.ListThreadsRequest': ListThreadsRequest$json,
+  '.protectorate.v1.ListThreadsResponse': ListThreadsResponse$json,
+  '.protectorate.v1.ThreadSummary': ThreadSummary$json,
 };
 
 /// Descriptor for `MessageService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -392,4 +469,5 @@ final $typed_data.Uint8List messageServiceDescriptor = $convert.base64Decode(
     'HC5wcm90ZWN0b3JhdGUudjEuQWNrUmVzcG9uc2USRgoFUmVwbHkSHS5wcm90ZWN0b3JhdGUudj'
     'EuUmVwbHlSZXF1ZXN0Gh4ucHJvdGVjdG9yYXRlLnYxLlJlcGx5UmVzcG9uc2USTgoGVGhyZWFk'
     'Eh4ucHJvdGVjdG9yYXRlLnYxLlRocmVhZFJlcXVlc3QaHy5wcm90ZWN0b3JhdGUudjEuVGhyZW'
-    'FkUmVzcG9uc2UiA5ACAQ==');
+    'FkUmVzcG9uc2UiA5ACARJdCgtMaXN0VGhyZWFkcxIjLnByb3RlY3RvcmF0ZS52MS5MaXN0VGhy'
+    'ZWFkc1JlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuTGlzdFRocmVhZHNSZXNwb25zZSIDkAIB');
