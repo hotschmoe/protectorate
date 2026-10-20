@@ -18,7 +18,9 @@ import "sleeve.connect.spec.dart" as specs;
 extension type SleeveServiceClient (connect.Transport _transport) {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
-  /// a git URL cloned into the hub's workspaces directory. Respawning the name
+  /// a git URL cloned into the hub's workspaces directory. Branch options clone
+  /// local checkouts too; brief is delivered as the first chat message.
+  /// Respawning the name
   /// of an exited sleeve reuses its home directory and workspace and replaces
   /// its kept session.
   Future<protectoratev1sleeve.SpawnSleeveResponse> spawnSleeve(

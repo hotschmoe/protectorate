@@ -7,6 +7,44 @@ to list its subdirectories. Pass the selected path to
 The directory is edited in place. The app's NEW SLEEVE dialog offers the same
 browser alongside known workspaces, a typed absolute path and a clone URL.
 
+## Dispatching onto a branch
+
+```sh
+protectorate sleeve spawn worker --workspace /absolute/checkout \
+  --branch dev-hotschmoe --new-branch feat/task --brief task.md --harness codex
+```
+
+Branch options create a fresh clone under the hub's workspaces directory;
+the source checkout is never edited. `--branch` selects the starting branch.
+Without it, `--new-branch` starts from a local checkout's current branch, or
+a URL's default branch. A URL always clones; a local directory without either
+branch option retains the edit-in-place behavior. Branch dispatch refuses an
+existing destination rather than switching a workspace containing earlier work.
+To respawn an exited sleeve, select its existing clone without branch flags;
+its base record is retained. Killing a sleeve removes its record.
+
+For a local source, `origin` uses its credential-stripped origin URL (and is
+absent if the source has no origin). The `base` remote points at its Git
+directory, available read-only inside the sandbox at the same host path.
+Linked worktrees include their common Git directory. Source configs, fetch
+metadata and reflogs are masked; the source working files are not exposed.
+The CLI reads `--brief FILE` on the caller's machine and sends its text with
+the spawn request. It becomes the first chat message before spawn succeeds;
+delivery failure stops the sleeve. Briefs require chat mode. The app offers
+the same branch fields and an optional brief text field.
+
+The sleeve's base repository, branch and last observed tip survive restarts
+and resleeves and appear in `sleeve show` and `sleeve ls --json`. The hub polls
+loose and packed refs every second. After two seconds of quiet (at most ten
+seconds for a continuous burst), an advance produces one mailbox notice with
+up to ten commit subjects and `git fetch base && git rebase base/BRANCH`.
+Advances already in the sleeve's own history do not notify it. Rewinds and
+branch deletion do not generate notices. The hub reads history in a read-only
+sandbox; it never runs source repository programs on the host.
+
+Existing sleeves gain no base automatically. Restart the upgraded hub and
+dispatch new sleeves with branch options; no persisted-state conversion is needed.
+
 Configure roots with repeatable `hub serve --workspace-root DIR`. Without the
 flag, the owner's `~/github` is the sole root when it exists; otherwise there
 are no roots. Explicit roots replace that default. Roots must exist and are

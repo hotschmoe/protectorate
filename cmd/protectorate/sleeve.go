@@ -130,6 +130,7 @@ var sleeveModes = map[string]pb.SleeveMode{
 func sleeveSpawnCmd(o *opts) *command {
 	sel := &pb.ModelSelection{}
 	var workspace, harness, mem, mode string
+	var branch, newBranch, briefFile string
 	var cpu uint32
 	var env []string
 	var supervised bool
@@ -195,11 +196,26 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 				return err
 			}
 			var mounts []*pb.ReadOnlyMount
+			brief := ""
+			if briefFile != "" {
+				if mode == "terminal" || h == pb.Harness_HARNESS_SHELL {
+					return errors.New("--brief requires chat mode")
+				}
+				raw, err := os.ReadFile(briefFile)
+				if err != nil {
+					return fmt.Errorf("read brief: %w", err)
+				}
+				brief = string(raw)
+				if strings.TrimSpace(brief) == "" {
+					return errors.New("brief is empty")
+				}
+			}
 			for _, value := range readOnly {
 				source, target, _ := strings.Cut(value, ":")
 				mounts = append(mounts, &pb.ReadOnlyMount{Source: source, Target: target})
 			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
+				Branch: branch, NewBranch: newBranch, Brief: brief,
 				ReadOnly: mounts, ExitAfterIdle: durationpb.New(exitAfterIdle),
 				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode, Selection: optionalSelection(sel),
 				Supervised: supervised,
@@ -218,6 +234,9 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 		},
 	}
 	c.Flags().StringVar(&workspace, "workspace", "", "directory on the hub, or git URL to clone")
+	c.Flags().StringVar(&branch, "branch", "", "branch to clone (local default: current branch; URL default: default branch)")
+	c.Flags().StringVar(&newBranch, "new-branch", "", "create this branch in a fresh clone from --branch or the source branch")
+	c.Flags().StringVar(&briefFile, "brief", "", "file containing the first chat message (read by this CLI; chat mode only)")
 	c.Flags().StringArrayVar(&readOnly, "ro", nil, "read-only host directory[:sandbox directory] (repeatable; default same path)")
 	c.Flags().DurationVar(&exitAfterIdle, "exit-after-idle", 0, "kill chat sleeve after idle with no pending mail (0 disables)")
 	selectionFlags(c, sel)
@@ -408,6 +427,9 @@ func sleeveShowCmd(o *opts) *command {
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
 				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
 				fmt.Fprintf(w, "branch\t%s\n", s.GitBranch)
+				if s.BaseRepo != "" {
+					fmt.Fprintf(w, "base repo\t%s\nbase branch\t%s\nbase tip\t%s\n", s.BaseRepo, s.BaseBranch, s.BaseTip)
+				}
 				fmt.Fprintf(w, "parent\t%s\n", s.Parent)
 				fmt.Fprintf(w, "mode\t%s\n", strings.ToLower(strings.TrimPrefix(s.Mode.String(), "SLEEVE_MODE_")))
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))

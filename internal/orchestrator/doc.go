@@ -91,6 +91,7 @@ func RenderAgents(din DocInput) []byte {
 	w("- Never run a destructive action (killing a sleeve or session, removing a node, anything irreversible) without the user's explicit approval in this conversation, even if your token would allow it. Ask first and say what it will affect.\n")
 	w("- Do not try to widen your own permissions or work around a `permission_denied`. Report it to the user instead.\n")
 	w("- Start work only with `protectorate sleeve spawn`, which runs in a sandbox. Raw sessions run outside any sandbox and are not granted to you.\n")
+	w("- Dispatch with `protectorate sleeve spawn <name> --workspace <hub checkout or git URL> --branch <base> --new-branch <feature> --brief <local file> --harness <harness>`. The brief is the first chat message; branch flags create a separate clone. Base notices include the fetch and rebase command.\n")
 	w("- When a chat sleeve's subscription runs low, move it with `protectorate sleeve resleeve <name> --to auto`; no confirmation is needed. The hub writes the handoff and tells the new harness to read it. Terminal and shell sleeves cannot be resleeved.\n")
 	w("- Unknown or stale quota is not spare capacity. Prefer fresh data; run `protectorate quota suggest --refresh` when in doubt.\n")
 	w("- Work donated to public repositories lands in a review inbox (a branch on a fork plus a summary). Nothing public goes out without the user's approval.\n")

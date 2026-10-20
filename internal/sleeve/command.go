@@ -50,6 +50,8 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 		return Launch{}, err
 	}
 	launch, err := c.Plan(Spec{
+		BaseRepo: info.BaseRepo,
+		BaseTip:  info.BaseTip,
 		ReadOnly: info.ReadOnly,
 		Name:     info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
 	}, bin)

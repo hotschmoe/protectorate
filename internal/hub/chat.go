@@ -97,13 +97,16 @@ type chatSleeve struct {
 
 // get returns the chat state of a sleeve, creating it on first use. fresh
 // starts a new log, moving a previous sleeve's aside.
-func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
+func (m *chatManager) get(name string, fresh, allowStarting bool) (*chatSleeve, error) {
 	info, err := m.h.sleeves.Get(name)
 	if err != nil {
 		return nil, sleeveErr(err)
 	}
 	if info.Mode != sleeve.ModeChat {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s runs in terminal mode, which has no chat", name))
+	}
+	if info.Chat != nil && info.Chat.Starting && !allowStarting {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the sleeve is starting; wait for spawn to finish"))
 	}
 	if info.Helper != "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s is the hub's own (%s) and has no chat", name, info.Helper))
@@ -139,6 +142,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	s := &chatSleeve{m: m, name: name, log: lg, approvals: map[string]bool{}, keys: sendKeys{entries: map[string]*sendEntry{}}}
 	s.keys.restore(keys, saved)
 	if c := info.Chat; c != nil {
+		s.hubOwned = c.Starting
 		s.sessionID, s.model, s.context, s.window = c.SessionID, c.Model, c.Context, c.Window
 		s.provider, s.local = c.Provider, c.LocalModel
 		s.effort, s.requested, s.defaults = c.Effort, c.Requested, c.Defaults
@@ -177,10 +181,17 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 // instead of on first use.
 func (m *chatManager) recover() {
 	for _, info := range m.h.sleeves.List() {
+		if info.Chat != nil && info.Chat.Starting {
+			if err := m.h.sleeves.Kill(context.Background(), info.Name); err != nil {
+				log.Printf("chat %s: remove interrupted spawn: %v", info.Name, err)
+			}
+			m.h.dropIdentity(info.Name, "")
+			continue
+		}
 		if info.Mode != sleeve.ModeChat || info.Chat == nil || info.Chat.State == "" || info.Chat.State == pb.ChatState_CHAT_STATE_IDLE.String() {
 			continue
 		}
-		if _, err := m.get(info.Name, false); err != nil {
+		if _, err := m.get(info.Name, false, false); err != nil {
 			log.Printf("chat %s: recover state: %v", info.Name, err)
 		}
 	}
@@ -190,17 +201,27 @@ func (m *chatManager) recover() {
 // harness that cannot start fails the spawn. fresh moves an earlier sleeve's
 // log of the same name aside; otherwise the log continues. hold keeps the
 // chat the hub's until giveBack, so no other sender gets in first.
-func (m *chatManager) start(ctx context.Context, name string, fresh, hold bool) error {
-	s, err := m.get(name, fresh)
+func (m *chatManager) start(ctx context.Context, name string, fresh, hold bool, brief string) error {
+	s, err := m.get(name, fresh, true)
 	if err != nil {
 		return err
 	}
-	if hold {
+	if hold || brief != "" {
 		s.takeOver()
 	}
 	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	return s.ensureOpen(ctx)
+	err = s.ensureOpen(ctx)
+	s.opMu.Unlock()
+	if err == nil && brief != "" {
+		_, err = s.sendAsOwner(ctx, brief)
+	}
+	if err == nil {
+		_, err = m.h.sleeves.SetChat(name, func(c *sleeve.Chat) { c.Starting = false })
+	}
+	if !hold {
+		s.giveBack()
+	}
+	return err
 }
 
 // remove closes a sleeve's driver and log before the sleeve is killed.
@@ -818,7 +839,7 @@ func (c chatService) sleeve(name string) (*chatSleeve, error) {
 	if c.h.chat == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("sleeves are not enabled on this hub"))
 	}
-	return c.h.chat.get(name, false)
+	return c.h.chat.get(name, false, false)
 }
 
 func actor(ctx context.Context) string {

@@ -125,6 +125,7 @@ func handoffToProto(h *sleeve.Handoff) *pb.Handoff {
 
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
+		BaseRepo: i.BaseRepo, BaseBranch: i.BaseBranch, BaseTip: i.BaseTip,
 		Parent:     i.Parent,
 		Name:       i.Name,
 		Harness:    harnessToProto[i.Harness],
@@ -207,6 +208,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; start it with the owner token via `protectorate orchestrator spawn` or START ENVOY in the app", m.Name))
 	}
 	r := sleeve.SpawnRequest{
+		Branch: m.Branch, NewBranch: m.NewBranch, Brief: m.Brief,
 		Selection: selectionFromProto(m.Selection),
 		Name:      m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
@@ -265,6 +267,7 @@ type spawnOpts struct {
 // spawn starts a sleeve with its own identity token and, in chat mode, its
 // driver, undoing all of it if any step fails.
 func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sleeve.Info, error) {
+	start := time.Now()
 	// the orchestrator carries its own token, minted by `orchestrator spawn`
 	var identity auth.Token
 	var secret string
@@ -310,7 +313,7 @@ func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sl
 				log.Printf("sleeve %s: record session to resume: %v", info.Name, err)
 			}
 		}
-		if err := h.chat.start(ctx, info.Name, !o.keepLog, o.hold); err != nil {
+		if err := h.chat.start(ctx, info.Name, !o.keepLog, o.hold, r.Brief); err != nil {
 			h.chat.remove(info.Name)
 			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
 				log.Printf("sleeve %s: kill after failed chat start: %v", info.Name, kerr)
@@ -319,6 +322,13 @@ func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sl
 			return sleeve.Info{}, err
 		}
 		info, _ = h.sleeves.Get(info.Name)
+		payload, err := structpb.NewStruct(map[string]any{
+			"harness": string(info.Harness), "workspace": info.Workspace, "mode": string(info.Mode),
+			"spawn_ms": float64(time.Since(start).Milliseconds()),
+		})
+		if err == nil {
+			h.emit("sleeve.spawned", info.Name, payload)
+		}
 	}
 	h.scanSessions(ctx)
 	h.pokeCoord()

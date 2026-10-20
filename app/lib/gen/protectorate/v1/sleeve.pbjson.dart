@@ -234,6 +234,9 @@ const Sleeve$json = {
       '10': 'exitAfterIdle'
     },
     {'1': 'git_branch', '3': 21, '4': 1, '5': 9, '10': 'gitBranch'},
+    {'1': 'base_repo', '3': 22, '4': 1, '5': 9, '10': 'baseRepo'},
+    {'1': 'base_branch', '3': 23, '4': 1, '5': 9, '10': 'baseBranch'},
+    {'1': 'base_tip', '3': 24, '4': 1, '5': 9, '10': 'baseTip'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -258,7 +261,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'gUIAEoCVIGcGFyZW50EjsKCXJlYWRfb25seRgSIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5SZWFk'
     'T25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYEyABKAsyGS5nb29nbGUucH'
     'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSHQoKZ2l0X2JyYW5jaBgVIAEoCVIJZ2l0'
-    'QnJhbmNoQgwKCl9leGl0X2NvZGU=');
+    'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
+    'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXBCDAoKX2V4aXRfY29kZQ==');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -399,6 +403,9 @@ const SpawnSleeveRequest$json = {
       '6': '.google.protobuf.Duration',
       '10': 'exitAfterIdle'
     },
+    {'1': 'branch', '3': 12, '4': 1, '5': 9, '10': 'branch'},
+    {'1': 'new_branch', '3': 13, '4': 1, '5': 9, '10': 'newBranch'},
+    {'1': 'brief', '3': 14, '4': 1, '5': 9, '10': 'brief'},
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -424,8 +431,9 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'dXBlcnZpc2VkEj0KCXNlbGVjdGlvbhgJIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbG'
     'VjdGlvblIJc2VsZWN0aW9uEjsKCXJlYWRfb25seRgKIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5S'
     'ZWFkT25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYCyABKAsyGS5nb29nbG'
-    'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUaNgoIRW52RW50cnkSEAoDa2V5GAEg'
-    'ASgJUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AQ==');
+    'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSFgoGYnJhbmNoGAwgASgJUgZicmFu'
+    'Y2gSHQoKbmV3X2JyYW5jaBgNIAEoCVIJbmV3QnJhbmNoEhQKBWJyaWVmGA4gASgJUgVicmllZh'
+    'o2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIUCgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {
