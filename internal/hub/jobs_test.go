@@ -231,7 +231,10 @@ func onNode(name string) *pb.JobTarget {
 func TestMain(m *testing.M) {
 	jobtest.Run()
 	jobtest.QuietGit()
-	os.Exit(m.Run())
+	done := jobtest.PrivateTmux()
+	code := m.Run()
+	done()
+	os.Exit(code)
 }
 
 func gitIn(t *testing.T, dir string, args ...string) string {

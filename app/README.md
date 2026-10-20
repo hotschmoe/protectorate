@@ -51,4 +51,4 @@ Native handling uses the `app_links` package. Android registers an intent filter
 
 - `flutter build apk` fails on linux/arm64 hosts: the Android SDK CMake/NDK binaries are x86_64 only. Build Android on an x86_64 host.
 - Hub tokens are stored in shared_preferences (plain text on disk).
-- The terminal uses the bundled DejaVu Sans Mono (`assets/fonts`, Bitstream Vera/DejaVu license) because web canvas text cannot use system fonts.
+- The terminal uses the bundled JetBrains Mono (`assets/fonts`, OFL) because web canvas text cannot use system fonts.

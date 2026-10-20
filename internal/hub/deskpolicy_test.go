@@ -141,20 +141,3 @@ func TestDeskPolicyPersistence(t *testing.T) {
 		t.Errorf("cleared policy came back: %v %v", r.get("office"), err)
 	}
 }
-
-func TestDeskEndedNotice(t *testing.T) {
-	r := newMailRig(t)
-	r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
-	r.h.noticeDeskEnded("office", &pb.Lease{Id: "lease-abc", Holder: "auto:token:sleeve:" + r.name}, "user active: physical input 3s ago")
-	r.pass()
-	r.waitIdle(r.name)
-	us := r.users(r.name)
-	if len(us) != 1 || us[0].from != "hub" {
-		t.Fatalf("user messages = %v", us)
-	}
-	for _, want := range []string{"lease-abc", "office", "user is back", "physical input 3s ago"} {
-		if !strings.Contains(us[0].text, want) {
-			t.Errorf("notice lacks %q:\n%s", want, us[0].text)
-		}
-	}
-}

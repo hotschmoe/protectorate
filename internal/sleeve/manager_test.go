@@ -16,8 +16,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hotschmoe/protectorate/internal/jobtest"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
+
+func TestMain(m *testing.M) {
+	done := jobtest.PrivateTmux()
+	code := m.Run()
+	done()
+	os.Exit(code)
+}
 
 type recorder struct {
 	mu     sync.Mutex

@@ -13,7 +13,16 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/jobtest"
 )
+
+func TestMain(m *testing.M) {
+	done := jobtest.PrivateTmux()
+	code := m.Run()
+	done()
+	os.Exit(code)
+}
 
 func TestValidName(t *testing.T) {
 	tests := []struct {

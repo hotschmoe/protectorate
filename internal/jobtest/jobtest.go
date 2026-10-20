@@ -177,6 +177,30 @@ func run(steps []string) int {
 	return 0
 }
 
+// PrivateTmux points every tmux the tests start, directly or through the code
+// under test, at a fresh socket directory, so test servers never share
+// /tmp/tmux-UID with real ones. tmux leaves its socket file behind when a
+// server exits; the returned func, called after m.Run, kills any server still
+// there and removes the directory. The directory is under /tmp because a
+// socket path must fit in sun_path.
+func PrivateTmux() func() {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return func() {}
+	}
+	dir, err := os.MkdirTemp("/tmp", "ptmux-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("TMUX_TMPDIR", dir)
+	return func() {
+		socks, _ := filepath.Glob(filepath.Join(dir, "tmux-*", "*"))
+		for _, s := range socks {
+			exec.Command("tmux", "-S", s, "kill-server").Run()
+		}
+		os.RemoveAll(dir)
+	}
+}
+
 // QuietGit turns off git's background auto-maintenance for every git process
 // the tests start, directly or through the code under test. Newer git runs it
 // detached after fetch, and it can still be writing into a repository when
