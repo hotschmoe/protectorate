@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:xterm/xterm.dart';
+import 'package:xterm2/xterm.dart';
 
 import '../gen/protectorate/v1/session.pb.dart';
 import '../hubs/hub_client.dart';
