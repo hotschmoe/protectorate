@@ -7,26 +7,48 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
-func (c *cluster) runtimeScenario(t *testing.T) {
+func (c *cluster) requireRuntime(t *testing.T) {
 	t.Helper()
-	previous := c.t
-	defer func() { c.t = previous }()
-	c.t = t
-	for _, tool := range []string{"bwrap", "systemd-run", "tmux", "git"} {
+	for _, tool := range []string{"bwrap", "tmux", "git"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skipf("sleeve isolation scenario requires %s: %v", tool, err)
 		}
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "systemd-run", "--user", "--scope", "--quiet", "true").CombinedOutput(); err != nil {
-		t.Skipf("sleeve isolation requires a working systemd user manager: %v: %s", err, out)
+	cfg, err := sleeve.DefaultConfig(c.home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Preflight(); err != nil {
+		if os.Getenv("PROT_E2E_NESTED_CHILD") == "1" {
+			t.Fatalf("nested runtime preflight: %v", err)
+		}
+		t.Skipf("sleeve isolation runtime unavailable: %v", err)
+	}
+	if cfg.CgroupRoot != sleeve.DelegatedCgroupRoot {
+		if out, err := exec.CommandContext(ctx, "systemd-run", "--user", "--scope", "--quiet", "true").CombinedOutput(); err != nil {
+			t.Skipf("sleeve isolation requires a working systemd user manager: %v: %s", err, out)
+		}
 	}
 	if out, err := exec.CommandContext(ctx, "bwrap", "--ro-bind", "/", "/", "--unshare-user", "--", "true").CombinedOutput(); err != nil {
+		if os.Getenv("PROT_E2E_NESTED_CHILD") == "1" {
+			t.Fatalf("nested bwrap: %v: %s", err, out)
+		}
 		t.Skipf("sleeve isolation requires nested user namespaces: %v: %s", err, out)
 	}
+}
+
+func (c *cluster) runtimeScenario(t *testing.T) {
+	t.Helper()
+	previous := c.t
+	defer func() { c.t = previous }()
+	c.t = t
+	c.requireRuntime(t)
 	workspace := filepath.Join(c.root, "project")
 	if err := os.MkdirAll(workspace, 0700); err != nil {
 		t.Fatal(err)

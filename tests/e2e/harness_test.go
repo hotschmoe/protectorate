@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 type process struct {
@@ -37,18 +39,26 @@ type cluster struct {
 
 func newCluster(t *testing.T) *cluster {
 	t.Helper()
-	if os.Getenv("PROT_E2E") != "1" {
-		t.Skip("real binary scenarios: set PROT_E2E=1 (optionally PROT_E2E_BINARY=/absolute/protectorate)")
-	}
+	binary := testenv.E2E(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	c := &cluster{t: t, owner: t, ctx: ctx, root: t.TempDir(), client: &http.Client{Timeout: 30 * time.Second}}
+	t.Cleanup(c.checkRaceLogs)
 	c.home = filepath.Join(c.root, "hub")
 	binDir := filepath.Join(c.root, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c.binary = os.Getenv("PROT_E2E_BINARY")
+	if selected, err := exec.LookPath("bwrap"); err == nil {
+		b, err := os.ReadFile(selected)
+		if err != nil {
+			t.Fatalf("read selected bwrap %s: %v", selected, err)
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "bwrap"), b, 0700); err != nil {
+			t.Fatalf("copy selected bwrap into private home: %v", err)
+		}
+	}
+	c.binary = binary
 	if c.binary == "" {
 		c.binary = filepath.Join(binDir, "protectorate")
 		cmd := exec.CommandContext(ctx, "go", "build", "-p", "2", "-o", c.binary, "../../cmd/protectorate")
@@ -80,7 +90,11 @@ func newCluster(t *testing.T) *cluster {
 	runCtx, runCancel := context.WithTimeout(t.Context(), 75*time.Second)
 	t.Cleanup(runCancel)
 	c.ctx = runCtx
-	c.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	c.env = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	c.env = append(c.env, c.raceEnv("CLI-helper"))
+	if dir := os.Getenv("GOCOVERDIR"); dir != "" {
+		c.env = append(c.env, "GOCOVERDIR="+dir)
+	}
 	tmuxDir := filepath.Join(c.root, "tmux")
 	if err := os.Mkdir(tmuxDir, 0700); err != nil {
 		t.Fatal(err)
@@ -89,6 +103,7 @@ func newCluster(t *testing.T) *cluster {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		c.checkTmuxRaces(ctx)
 		cmd := exec.CommandContext(ctx, "tmux", "-L", "e2e-"+filepath.Base(c.root), "kill-server")
 		cmd.Env = c.env
 		_ = cmd.Run()
@@ -137,12 +152,19 @@ func loopback(t *testing.T) string {
 }
 func (c *cluster) start(name string, env []string, args ...string) *process {
 	c.t.Helper()
+	// Test contexts cancel before cleanup; stop must reap graceful exits first.
+	ctx := context.WithoutCancel(c.ctx)
+	if deadline, ok := c.ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		c.owner.Cleanup(cancel)
+	}
 	f, err := os.CreateTemp(c.root, name+"-*.log")
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	p := &process{cmd: exec.CommandContext(c.ctx, c.binary, args...), done: make(chan error, 1), log: f}
-	p.cmd.Env = env
+	p := &process{cmd: exec.CommandContext(ctx, c.binary, args...), done: make(chan error, 1), log: f}
+	p.cmd.Env = append(append([]string(nil), env...), c.raceEnv(name))
 	p.cmd.Stdout = f
 	p.cmd.Stderr = f
 	if err := p.cmd.Start(); err != nil {
@@ -177,8 +199,9 @@ func (c *cluster) stop(p *process) {
 		<-p.done
 	}
 }
-func (c *cluster) boot() {
-	c.hub = c.start("hub", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "100ms", "--tmux-socket", "e2e-"+filepath.Base(c.root))
+func (c *cluster) boot(extra ...string) {
+	args := []string{"hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-" + filepath.Base(c.root)}
+	c.hub = c.start("hub", c.env, append(args, extra...)...)
 	c.eventually(func() bool {
 		b, e := os.ReadFile(filepath.Join(c.home, "token"))
 		c.token = strings.TrimSpace(string(b))
@@ -244,7 +267,7 @@ func (c *cluster) cli(args ...string) string {
 	c.t.Helper()
 	cmd := exec.CommandContext(c.ctx, c.binary, append([]string{"--hub", c.url}, args...)...)
 	cmd.Env = c.env
-	out, err := cmd.CombinedOutput()
+	out, err := c.commandOutput(cmd)
 	if err != nil {
 		c.t.Fatalf("CLI %v: %v\n%s", args, err, out)
 	}

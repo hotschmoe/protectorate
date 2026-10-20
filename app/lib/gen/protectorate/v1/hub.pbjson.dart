@@ -72,6 +72,31 @@ const GetSleeveRuntimeResponse$json = {
     {'1': 'overlays', '3': 3, '4': 1, '5': 8, '10': 'overlays'},
     {'1': 'go_build_cache', '3': 4, '4': 1, '5': 9, '10': 'goBuildCache'},
     {'1': 'go_build_lower', '3': 5, '4': 1, '5': 9, '10': 'goBuildLower'},
+    {'1': 'snapshot_bytes', '3': 6, '4': 1, '5': 4, '10': 'snapshotBytes'},
+    {'1': 'snapshot_entries', '3': 7, '4': 1, '5': 4, '10': 'snapshotEntries'},
+    {
+      '1': 'snapshot_prepared_at',
+      '3': 8,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'snapshotPreparedAt'
+    },
+    {
+      '1': 'snapshot_preparing',
+      '3': 9,
+      '4': 1,
+      '5': 8,
+      '10': 'snapshotPreparing'
+    },
+    {'1': 'snapshot_error', '3': 10, '4': 1, '5': 9, '10': 'snapshotError'},
+    {
+      '1': 'snapshot_limit_bytes',
+      '3': 11,
+      '4': 1,
+      '5': 4,
+      '10': 'snapshotLimitBytes'
+    },
   ],
 };
 
@@ -80,7 +105,12 @@ final $typed_data.Uint8List getSleeveRuntimeResponseDescriptor = $convert.base64
     'ChhHZXRTbGVldmVSdW50aW1lUmVzcG9uc2USHQoKYndyYXBfcGF0aBgBIAEoCVIJYndyYXBQYX'
     'RoEiMKDWJ3cmFwX3ZlcnNpb24YAiABKAlSDGJ3cmFwVmVyc2lvbhIaCghvdmVybGF5cxgDIAEo'
     'CFIIb3ZlcmxheXMSJAoOZ29fYnVpbGRfY2FjaGUYBCABKAlSDGdvQnVpbGRDYWNoZRIkCg5nb1'
-    '9idWlsZF9sb3dlchgFIAEoCVIMZ29CdWlsZExvd2Vy');
+    '9idWlsZF9sb3dlchgFIAEoCVIMZ29CdWlsZExvd2VyEiUKDnNuYXBzaG90X2J5dGVzGAYgASgE'
+    'Ug1zbmFwc2hvdEJ5dGVzEikKEHNuYXBzaG90X2VudHJpZXMYByABKARSD3NuYXBzaG90RW50cm'
+    'llcxJMChRzbmFwc2hvdF9wcmVwYXJlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1l'
+    'c3RhbXBSEnNuYXBzaG90UHJlcGFyZWRBdBItChJzbmFwc2hvdF9wcmVwYXJpbmcYCSABKAhSEX'
+    'NuYXBzaG90UHJlcGFyaW5nEiUKDnNuYXBzaG90X2Vycm9yGAogASgJUg1zbmFwc2hvdEVycm9y'
+    'EjAKFHNuYXBzaG90X2xpbWl0X2J5dGVzGAsgASgEUhJzbmFwc2hvdExpbWl0Qnl0ZXM=');
 
 const $core.Map<$core.String, $core.dynamic> HubServiceBase$json = {
   '1': 'HubService',

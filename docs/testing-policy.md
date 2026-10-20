@@ -88,6 +88,13 @@ and filesystem path confinement. Namespace fuzzing checks canonical/symlink
 home equivalence, independent-home separation and exclusion from the default
 scope prefix.
 
+`TestBinaryWorkspaceBrowser` drives a real temporary hub and CLI through
+default and explicit roots, drill-down, hidden/file filtering, symlink escape
+refusal, result truncation, rejected-workspace reasons, credential-stripped
+origins, paired-device acceptance and sleeve-identity denial. A persisted
+exited sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
+text and JSON, without needing the host user manager.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -104,6 +111,101 @@ full enrollment/service lifecycle, display consent, real provider quota,
 two-harness handoff and Flutter real-hub UI flows remain outside the measured
 loopback lane. The deleted unit tests are not claimed as replacement evidence
 for those flows. The coordinator must run host/runtime and tailnet lanes.
+
+## Coverage of the real binary
+
+Run `make e2e-cover` to build the tagged binary with Go statement
+instrumentation and run `tests/e2e` against it. Each run keeps a fresh
+`bin/e2e-cover/run.*/` directory containing the binary, raw `data/`,
+`tests.log`, per-package `packages.txt`, `coverage.out` and
+`functions.txt`. It prints per-package percentages and exits unsuccessfully
+when the scenarios fail. Profiles from different runs are never merged.
+
+The harness forwards `GOCOVERDIR` only when set and reaps processes before
+canceling their private deadline contexts, so graceful hub/node exits write
+their counters. It polls nodes every second: the previous 100 ms interval
+implied a 200 ms stale window and rejected healthy nodes under instrumentation.
+Forced kills cannot write final counters. These profiles measure binary
+execution, excluding fuzz campaigns and the in-package host/driver scenarios.
+
+| Area | Behavioral scenarios | Remaining known gaps |
+|---|---|---|
+| Authorization | `TestBinaryStreamAuthorizationAndRevocation`, `TestBinaryNodeCredentialBoundaries`, Cluster security | Terminal host/readonly input distinctions |
+| Jobs and cancellation | `TestBinaryJobCancellationAndIdempotency`, `TestBinaryArtifactJobAndReplay`, Cluster restart/git | CLI signal during submit, lost-node deadline, execution contention |
+| Destructive node operations | `TestBinaryNodeDrainAndRemoval` | Actual uninstall and tailnet revocation |
+| Persistence and migration | `TestBinaryStateMigrationAndPolicyRestart`, Cluster backup/replay | Interrupted atomic writes, journal truncation |
+| Transfer integrity | `TestBinaryTransferFailureAtomicity`, `FuzzTransferArchive` | Transfer expiry and ZIP parser fuzzing |
+| MCP parsing | `TestBinaryCLIAndMCP`, `FuzzMCPRequest`, `FuzzMCPArguments` | Most per-tool effects are asserted through RPC |
+| Generated services | `TestBinaryGeneratedServiceExecution` | Target OS boot/registration/uninstall |
+| Mail/chat/runtime | Existing host HTTP and official protocol scenarios | Real sleeves/two-harness handoff skip here |
+| Enrollment/desktop/UI | Optional tailnet/runtime lanes | Physical desktop, real providers, Flutter real-hub flows |
+
+[The complete coverage map](e2e-coverage-map.md) accounts for every RPC,
+CLI command, all 55 MCP tools, persisted files and the risky deleted-test
+behaviors. Help/catalog enumeration and authorization-only probes are marked
+separately from successful operations. Features owned by the wave-4 sleeves
+remain excluded.
+
+The three new fuzz targets run seeds in `make test`. Mutation campaigns:
+
+```sh
+go test ./internal/mcpbridge -run '^$' -fuzz '^FuzzMCPRequest$' -fuzztime=10s -parallel=2
+go test ./internal/mcpbridge -run '^$' -fuzz '^FuzzMCPArguments$' -fuzztime=10s -parallel=2
+go test ./internal/xfer -run '^$' -fuzz '^FuzzTransferArchive$' -fuzztime=10s -parallel=2
+```
+
+Measured on 2026-10-21 in the two-core sleeve, using the same production
+source at `38c346d` and the corrected harness for both runs. Before runs the
+three pre-existing binary scenarios; after includes eight new scenarios.
+All scenarios passed (40.474s before, 34.729s after; these are coverage
+snapshots, not comparable performance benchmarks).
+Host runtime subscenarios skipped; the optional tailnet lane was not run.
+Fuzz coverage is separate.
+
+| Package (module prefix omitted) | Before | After |
+|---|---:|---:|
+| cmd/protectorate | 33.5% | 36.7% |
+| gen/protectorate/v1 | 24.5% | 26.0% |
+| gen/protectorate/v1/protectoratev1connect | 55.4% | 58.1% |
+| internal/auth | 66.3% | 67.2% |
+| internal/backlog | 0.4% | 0.4% |
+| internal/backup | 59.5% | 59.5% |
+| internal/chatlog | 0.0% | 0.0% |
+| internal/codec | 66.7% | 66.7% |
+| internal/desk | 1.0% | 14.6% |
+| internal/diagnostics | 100.0% | 100.0% |
+| internal/directory | 6.8% | 6.8% |
+| internal/driver | 0.1% | 0.1% |
+| internal/fsutil | 65.0% | 65.0% |
+| internal/handoff | 0.0% | 0.0% |
+| internal/headscaledb | 50.0% | 50.0% |
+| internal/hub | 40.0% | 45.6% |
+| internal/keylog | 69.6% | 69.6% |
+| internal/mailbox | 48.9% | 42.1% |
+| internal/mcpbridge | 62.4% | 62.4% |
+| internal/node | 46.6% | 51.2% |
+| internal/orchestrator | 0.0% | 0.0% |
+| internal/quota | 10.6% | 10.6% |
+| internal/session | 47.5% | 47.5% |
+| internal/sleeve | 23.9% | 23.9% |
+| internal/svcgen | 0.0% | 12.3% |
+| internal/tailnet | 1.1% | 1.1% |
+| internal/xfer | 37.0% | 77.3% |
+
+Cancellation timing affects some counters: the final MCP wait cancellation
+reached the client before the hub's mailbox Wait method, explaining the lower
+mailbox percentage. These are observed profiles, not coverage thresholds.
+
+Function profiles confirmed previously unreached paths now execute:
+node job cancellation 64.3%, ZIP extraction 69.6%, tier migration 78.4%,
+node draining 78.6% and generated Termux run scripts 90.9%. Driver/chat/handoff
+gaps need separate process or host lanes. Optional
+service-manager enrollment and physical desktop flows remain unmeasured.
+
+Mutation campaigns passed: MCP requests 34,164 executions in five seconds,
+MCP arguments 31,759 in five seconds, transfer archives 19 in ten seconds.
+The archive target performs real filesystem staging/sync/cleanup and is much
+slower; its seven seed archives also run on every commit.
 
 Regenerate the inventory with `python3 scripts/test-inventory.py --go-results
 /tmp/protectorate-tests.json` after collecting tagged `go test -json ./...`

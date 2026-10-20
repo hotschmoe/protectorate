@@ -236,6 +236,12 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
     $core.bool? overlays,
     $core.String? goBuildCache,
     $core.String? goBuildLower,
+    $fixnum.Int64? snapshotBytes,
+    $fixnum.Int64? snapshotEntries,
+    $0.Timestamp? snapshotPreparedAt,
+    $core.bool? snapshotPreparing,
+    $core.String? snapshotError,
+    $fixnum.Int64? snapshotLimitBytes,
   }) {
     final result = GetSleeveRuntimeResponse._();
     if (bwrapPath != null) result.bwrapPath = bwrapPath;
@@ -243,6 +249,14 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
     if (overlays != null) result.overlays = overlays;
     if (goBuildCache != null) result.goBuildCache = goBuildCache;
     if (goBuildLower != null) result.goBuildLower = goBuildLower;
+    if (snapshotBytes != null) result.snapshotBytes = snapshotBytes;
+    if (snapshotEntries != null) result.snapshotEntries = snapshotEntries;
+    if (snapshotPreparedAt != null)
+      result.snapshotPreparedAt = snapshotPreparedAt;
+    if (snapshotPreparing != null) result.snapshotPreparing = snapshotPreparing;
+    if (snapshotError != null) result.snapshotError = snapshotError;
+    if (snapshotLimitBytes != null)
+      result.snapshotLimitBytes = snapshotLimitBytes;
     return result;
   }
 
@@ -265,6 +279,19 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
     ..aOB(3, _omitFieldNames ? '' : 'overlays')
     ..aOS(4, _omitFieldNames ? '' : 'goBuildCache')
     ..aOS(5, _omitFieldNames ? '' : 'goBuildLower')
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'snapshotBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        7, _omitFieldNames ? '' : 'snapshotEntries', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOM<$0.Timestamp>(8, _omitFieldNames ? '' : 'snapshotPreparedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOB(9, _omitFieldNames ? '' : 'snapshotPreparing')
+    ..aOS(10, _omitFieldNames ? '' : 'snapshotError')
+    ..a<$fixnum.Int64>(
+        11, _omitFieldNames ? '' : 'snapshotLimitBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -336,6 +363,62 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
   $core.bool hasGoBuildLower() => $_has(4);
   @$pb.TagNumber(5)
   void clearGoBuildLower() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get snapshotBytes => $_getI64(5);
+  @$pb.TagNumber(6)
+  set snapshotBytes($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasSnapshotBytes() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearSnapshotBytes() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  $fixnum.Int64 get snapshotEntries => $_getI64(6);
+  @$pb.TagNumber(7)
+  set snapshotEntries($fixnum.Int64 value) => $_setInt64(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasSnapshotEntries() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearSnapshotEntries() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $0.Timestamp get snapshotPreparedAt => $_getN(7);
+  @$pb.TagNumber(8)
+  set snapshotPreparedAt($0.Timestamp value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasSnapshotPreparedAt() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearSnapshotPreparedAt() => $_clearField(8);
+  @$pb.TagNumber(8)
+  $0.Timestamp ensureSnapshotPreparedAt() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  $core.bool get snapshotPreparing => $_getBF(8);
+  @$pb.TagNumber(9)
+  set snapshotPreparing($core.bool value) => $_setBool(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasSnapshotPreparing() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearSnapshotPreparing() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.String get snapshotError => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set snapshotError($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasSnapshotError() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearSnapshotError() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $fixnum.Int64 get snapshotLimitBytes => $_getI64(10);
+  @$pb.TagNumber(11)
+  set snapshotLimitBytes($fixnum.Int64 value) => $_setInt64(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasSnapshotLimitBytes() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearSnapshotLimitBytes() => $_clearField(11);
 }
 
 /// HubService reports on the hub process itself.

@@ -15,13 +15,17 @@ import (
 
 // Spec is a validated request to run a harness.
 type Spec struct {
-	Name      string
-	Harness   Harness
-	Args      []string
-	Workspace string // absolute, symlinks resolved
-	Env       map[string]string
-	Limits    Limits
-	ReadOnly  []Mount
+	BaseRepo        string
+	BaseTip         string
+	Name            string
+	Harness         Harness
+	Args            []string
+	Workspace       string // absolute, symlinks resolved
+	Env             map[string]string
+	Limits          Limits
+	ReadOnly        []Mount
+	Nested          bool
+	GoCacheSnapshot string
 }
 
 type Mount struct {
@@ -328,11 +332,12 @@ func checkEnv(env map[string]string) error {
 	return nil
 }
 
-// Box is one bwrap sandbox in a systemd user scope: a PID, IPC and UTS
+// Box is one bwrap sandbox in a bounded cgroup: a PID, IPC and UTS
 // namespace on a fresh root with the system directories and the tool dirs
 // read-only, known secret files masked, and only the binds named here
 // writable. Sleeves and node jobs are both boxes.
 type Box struct {
+	EmptyDirs      []string
 	Mounts         []Mount
 	WritableMounts []Mount
 	Overlays       []Overlay
@@ -340,6 +345,7 @@ type Box struct {
 	Unit     string
 	Hostname string
 	Limits   Limits
+	Nested   bool
 	// Home is the host directory bound read-write at the user's home.
 	Home string
 	// RO, ROFiles and Symlinks add read-only directories, files and
@@ -359,7 +365,7 @@ type Box struct {
 	Command []string
 }
 
-// BoxArgv is the systemd-run and bwrap argv of b. It has no side effects;
+// BoxArgv is the cgroup launcher and bwrap argv of b. It has no side effects;
 // the caller validates the binds (CheckBind) and the limits.
 func (c Config) BoxArgv(b Box) []string {
 	argv := []string{"systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + b.Unit}
@@ -369,10 +375,21 @@ func (c Config) BoxArgv(b Box) []string {
 	if p := b.Limits.CPUPercent; p != 0 {
 		argv = append(argv, "-p", "CPUQuota="+strconv.FormatUint(uint64(p), 10)+"%")
 	}
-	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue", "--")
+	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue")
+	if b.Nested {
+		argv = append(argv, "-p", "Delegate=yes")
+	}
+	argv = append(argv, "--")
+	if c.delegated {
+		argv = nil
+	}
+	prefix := argv
 
-	argv = append(argv, c.bwrap(), "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
-		"--hostname", b.Hostname, "--tmpfs", "/")
+	argv = []string{c.bwrap(), "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
+		"--hostname", b.Hostname, "--tmpfs", "/"}
+	if c.delegated && !b.Nested {
+		argv = append(argv, "--unshare-cgroup")
+	}
 	argv = append(argv, c.System...)
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp")
 	if b.Home == "" {
@@ -405,6 +422,12 @@ func (c Config) BoxArgv(b Box) []string {
 	for _, m := range b.Overlays {
 		argv = append(argv, "--overlay-src", m.Lower, "--overlay", m.Upper, m.Work, m.Target)
 	}
+	for _, p := range b.EmptyDirs {
+		argv = append(argv, "--tmpfs", p)
+	}
+	if b.Nested {
+		argv = append(argv, "--bind", filepath.Join(c.CgroupRoot, b.Unit+".scope", "delegated"), DelegatedCgroupRoot)
+	}
 	argv = append(argv, "--chdir", b.Chdir, "--clearenv")
 	for _, kv := range b.Env {
 		argv = append(argv, "--setenv", kv[0], kv[1])
@@ -412,7 +435,8 @@ func (c Config) BoxArgv(b Box) []string {
 	if b.EnvFD {
 		argv = append(argv, "--args", "3")
 	}
-	return append(append(argv, "--"), b.Command...)
+	argv = append(append(argv, "--"), b.Command...)
+	return append(prefix, c.scopeArgv(b, argv)...)
 }
 
 // SetenvArgs encodes env as bwrap --setenv arguments in the NUL-separated
@@ -425,7 +449,7 @@ func SetenvArgs(env [][2]string) []byte {
 	return out
 }
 
-// Plan builds the systemd-run and bwrap command for spec. It has no side
+// Plan builds the cgroup launcher and bwrap command for spec. It has no side
 // effects; Layout.Apply prepares the host directories it refers to.
 func (c Config) validateSpec(spec Spec) ([]Mount, error) {
 	if err := ValidName(spec.Name); err != nil {
@@ -433,6 +457,9 @@ func (c Config) validateSpec(spec Spec) ([]Mount, error) {
 	}
 	if err := spec.Limits.Validate(); err != nil {
 		return nil, err
+	}
+	if spec.Nested && (spec.Limits.CPUPercent == 0 || spec.Limits.MemoryBytes == 0) {
+		return nil, fmt.Errorf("%w: nested sleeves require CPU and memory limits", ErrInvalid)
 	}
 	if err := checkEnv(spec.Env); err != nil {
 		return nil, err
@@ -487,7 +514,39 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	if err != nil {
 		return Launch{}, err
 	}
-	lay := c.layout(spec.Name, spec.Harness, spec.Workspace)
+	lay := c.layout(spec.Name, spec.Harness, spec.Workspace, spec.GoCacheSnapshot)
+	var emptyDirs []string
+	if spec.BaseRepo != "" {
+		// Mask sources live in the hub-owned sleeve directory, outside the
+		// writable home, and are regular files: binds are mounted nodev.
+		empty := filepath.Join(c.sleeveDir(spec.Name), "base-empty")
+		lay.Seeds = append(lay.Seeds, Seed{empty, ""})
+		base, err := c.baseMounts(spec.BaseRepo)
+		if err != nil {
+			return Launch{}, err
+		}
+		mounts = append(mounts, base...)
+		for _, m := range base {
+			if fi, err := os.Stat(filepath.Join(m.Target, "logs")); err == nil && fi.IsDir() {
+				emptyDirs = append(emptyDirs, filepath.Join(m.Target, "logs"))
+			}
+			for _, f := range []string{"config", "config.worktree", "FETCH_HEAD"} {
+				p := filepath.Join(m.Target, f)
+				if _, err := os.Lstat(p); err == nil {
+					if f == "config" && len(spec.BaseTip) == 64 {
+						safe := filepath.Join(c.sleeveDir(spec.Name), "base-sha256.gitconfig")
+						lay.Seeds = append(lay.Seeds, Seed{safe, "[core]\nrepositoryformatversion = 1\n[extensions]\nobjectFormat = sha256\n"})
+						mounts = append(mounts, Mount{Source: safe, Target: p})
+						continue
+					}
+					mounts = append(mounts, Mount{Source: empty, Target: p})
+				}
+			}
+		}
+	}
+	if err := lay.validate(); err != nil {
+		return Launch{}, err
+	}
 	unit := c.UnitName(spec.Name)
 	var callerEnv [][2]string
 	for _, k := range slices.Sorted(maps.Keys(spec.Env)) {
@@ -501,8 +560,10 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		command = append(command, spec.Args...)
 	}
 	argv := c.BoxArgv(Box{
-		Unit: unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
-		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
+		EmptyDirs: emptyDirs,
+		Unit:      unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
+		Nested: spec.Nested,
+		RO:     bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
 		Mounts:         append(mounts, lay.ReadOnly...),
 		WritableMounts: lay.CacheCopies,
 		Overlays:       lay.Overlays,

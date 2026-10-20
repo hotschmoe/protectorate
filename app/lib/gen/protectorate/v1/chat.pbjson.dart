@@ -15,6 +15,8 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
+    as $1;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
@@ -53,6 +55,38 @@ final $typed_data.Uint8List chatStateDescriptor = $convert.base64Decode(
     'dBSVRJTkdfQVBQUk9WQUwQARIWChJDSEFUX1NUQVRFX1dPUktJTkcQAhIZChVDSEFUX1NUQVRF'
     'X0NPTVBBQ1RJTkcQAxITCg9DSEFUX1NUQVRFX0lETEUQBBIVChFDSEFUX1NUQVRFX0ZBSUxFRB'
     'AFEhUKEUNIQVRfU1RBVEVfRVhJVEVEEAY=');
+
+@$core.Deprecated('Use reportStatusDescriptor instead')
+const ReportStatus$json = {
+  '1': 'ReportStatus',
+  '2': [
+    {'1': 'REPORT_STATUS_UNSPECIFIED', '2': 0},
+    {'1': 'REPORT_STATUS_COMPLETE', '2': 1},
+    {'1': 'REPORT_STATUS_PARTIAL', '2': 2},
+    {'1': 'REPORT_STATUS_BLOCKED', '2': 3},
+  ],
+};
+
+/// Descriptor for `ReportStatus`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List reportStatusDescriptor = $convert.base64Decode(
+    'CgxSZXBvcnRTdGF0dXMSHQoZUkVQT1JUX1NUQVRVU19VTlNQRUNJRklFRBAAEhoKFlJFUE9SVF'
+    '9TVEFUVVNfQ09NUExFVEUQARIZChVSRVBPUlRfU1RBVFVTX1BBUlRJQUwQAhIZChVSRVBPUlRf'
+    'U1RBVFVTX0JMT0NLRUQQAw==');
+
+@$core.Deprecated('Use waitUntilDescriptor instead')
+const WaitUntil$json = {
+  '1': 'WaitUntil',
+  '2': [
+    {'1': 'WAIT_UNTIL_UNSPECIFIED', '2': 0},
+    {'1': 'WAIT_UNTIL_IDLE', '2': 1},
+    {'1': 'WAIT_UNTIL_REPORT', '2': 2},
+  ],
+};
+
+/// Descriptor for `WaitUntil`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List waitUntilDescriptor = $convert.base64Decode(
+    'CglXYWl0VW50aWwSGgoWV0FJVF9VTlRJTF9VTlNQRUNJRklFRBAAEhMKD1dBSVRfVU5USUxfSU'
+    'RMRRABEhUKEVdBSVRfVU5USUxfUkVQT1JUEAI=');
 
 @$core.Deprecated('Use modelSelectionDescriptor instead')
 const ModelSelection$json = {
@@ -399,6 +433,15 @@ const ChatEvent$json = {
       '9': 0,
       '10': 'settings'
     },
+    {
+      '1': 'report',
+      '3': 23,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.SleeveResult',
+      '9': 0,
+      '10': 'report'
+    },
   ],
   '8': [
     {'1': 'body'},
@@ -422,7 +465,8 @@ final $typed_data.Uint8List chatEventDescriptor = $convert.base64Decode(
     'cm9ySABSBWVycm9yEjQKBXN0YXRlGBQgASgLMhwucHJvdGVjdG9yYXRlLnYxLlN0YXRlQ2hhbm'
     'dlSABSBXN0YXRlEjQKB2hhbmRvZmYYFSABKAsyGC5wcm90ZWN0b3JhdGUudjEuSGFuZG9mZkgA'
     'UgdoYW5kb2ZmEjwKCHNldHRpbmdzGBYgASgLMh4ucHJvdGVjdG9yYXRlLnYxLk1vZGVsU2V0dG'
-    'luZ3NIAFIIc2V0dGluZ3NCBgoEYm9keQ==');
+    'luZ3NIAFIIc2V0dGluZ3MSNwoGcmVwb3J0GBcgASgLMh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2'
+    'ZVJlc3VsdEgAUgZyZXBvcnRCBgoEYm9keQ==');
 
 @$core.Deprecated('Use userMessageDescriptor instead')
 const UserMessage$json = {
@@ -777,6 +821,133 @@ final $typed_data.Uint8List compactResponseDescriptor = $convert.base64Decode(
     'Cg9Db21wYWN0UmVzcG9uc2USOwoKY29tcGFjdGlvbhgBIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
     '5Db21wYWN0aW9uUgpjb21wYWN0aW9u');
 
+@$core.Deprecated('Use sleeveResultDescriptor instead')
+const SleeveResult$json = {
+  '1': 'SleeveResult',
+  '2': [
+    {
+      '1': 'status',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.ReportStatus',
+      '10': 'status'
+    },
+    {'1': 'summary', '3': 2, '4': 1, '5': 9, '10': 'summary'},
+    {
+      '1': 'time',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'time'
+    },
+    {'1': 'chat_seq', '3': 4, '4': 1, '5': 4, '10': 'chatSeq'},
+    {'1': 'brief_seq', '3': 5, '4': 1, '5': 4, '10': 'briefSeq'},
+  ],
+};
+
+/// Descriptor for `SleeveResult`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List sleeveResultDescriptor = $convert.base64Decode(
+    'CgxTbGVldmVSZXN1bHQSNQoGc3RhdHVzGAEgASgOMh0ucHJvdGVjdG9yYXRlLnYxLlJlcG9ydF'
+    'N0YXR1c1IGc3RhdHVzEhgKB3N1bW1hcnkYAiABKAlSB3N1bW1hcnkSLgoEdGltZRgDIAEoCzIa'
+    'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSBHRpbWUSGQoIY2hhdF9zZXEYBCABKARSB2NoYX'
+    'RTZXESGwoJYnJpZWZfc2VxGAUgASgEUghicmllZlNlcQ==');
+
+@$core.Deprecated('Use reportRequestDescriptor instead')
+const ReportRequest$json = {
+  '1': 'ReportRequest',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {
+      '1': 'status',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.ReportStatus',
+      '10': 'status'
+    },
+    {'1': 'summary', '3': 3, '4': 1, '5': 9, '10': 'summary'},
+  ],
+};
+
+/// Descriptor for `ReportRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List reportRequestDescriptor = $convert.base64Decode(
+    'Cg1SZXBvcnRSZXF1ZXN0EhYKBnNsZWV2ZRgBIAEoCVIGc2xlZXZlEjUKBnN0YXR1cxgCIAEoDj'
+    'IdLnByb3RlY3RvcmF0ZS52MS5SZXBvcnRTdGF0dXNSBnN0YXR1cxIYCgdzdW1tYXJ5GAMgASgJ'
+    'UgdzdW1tYXJ5');
+
+@$core.Deprecated('Use reportResponseDescriptor instead')
+const ReportResponse$json = {
+  '1': 'ReportResponse',
+  '2': [
+    {
+      '1': 'result',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.SleeveResult',
+      '10': 'result'
+    },
+  ],
+};
+
+/// Descriptor for `ReportResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List reportResponseDescriptor = $convert.base64Decode(
+    'Cg5SZXBvcnRSZXNwb25zZRI1CgZyZXN1bHQYASABKAsyHS5wcm90ZWN0b3JhdGUudjEuU2xlZX'
+    'ZlUmVzdWx0UgZyZXN1bHQ=');
+
+@$core.Deprecated('Use waitRequestDescriptor instead')
+const WaitRequest$json = {
+  '1': 'WaitRequest',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {
+      '1': 'until',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.WaitUntil',
+      '10': 'until'
+    },
+    {
+      '1': 'timeout',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'timeout'
+    },
+  ],
+};
+
+/// Descriptor for `WaitRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List waitRequestDescriptor = $convert.base64Decode(
+    'CgtXYWl0UmVxdWVzdBIWCgZzbGVldmUYASABKAlSBnNsZWV2ZRIwCgV1bnRpbBgCIAEoDjIaLn'
+    'Byb3RlY3RvcmF0ZS52MS5XYWl0VW50aWxSBXVudGlsEjMKB3RpbWVvdXQYAyABKAsyGS5nb29n'
+    'bGUucHJvdG9idWYuRHVyYXRpb25SB3RpbWVvdXQ=');
+
+@$core.Deprecated('Use waitResponseDescriptor instead')
+const WaitResponse$json = {
+  '1': 'WaitResponse',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {
+      '1': 'result',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.SleeveResult',
+      '10': 'result'
+    },
+  ],
+};
+
+/// Descriptor for `WaitResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List waitResponseDescriptor = $convert.base64Decode(
+    'CgxXYWl0UmVzcG9uc2USFgoGc2xlZXZlGAEgASgJUgZzbGVldmUSNQoGcmVzdWx0GAIgASgLMh'
+    '0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0');
+
 const $core.Map<$core.String, $core.dynamic> ChatServiceBase$json = {
   '1': 'ChatService',
   '2': [
@@ -818,6 +989,17 @@ const $core.Map<$core.String, $core.dynamic> ChatServiceBase$json = {
       '2': '.protectorate.v1.SetSelectionRequest',
       '3': '.protectorate.v1.SetSelectionResponse'
     },
+    {
+      '1': 'Report',
+      '2': '.protectorate.v1.ReportRequest',
+      '3': '.protectorate.v1.ReportResponse'
+    },
+    {
+      '1': 'Wait',
+      '2': '.protectorate.v1.WaitRequest',
+      '3': '.protectorate.v1.WaitResponse',
+      '4': {'34': 1},
+    },
   ],
 };
 
@@ -841,6 +1023,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.Handoff': Handoff$json,
   '.protectorate.v1.ModelSettings': ModelSettings$json,
   '.protectorate.v1.ModelSelection': ModelSelection$json,
+  '.protectorate.v1.SleeveResult': SleeveResult$json,
   '.protectorate.v1.SendRequest': SendRequest$json,
   '.protectorate.v1.SendResponse': SendResponse$json,
   '.protectorate.v1.InterruptRequest': InterruptRequest$json,
@@ -855,6 +1038,11 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SetSelectionRequest': SetSelectionRequest$json,
   '.protectorate.v1.SetSelectionResponse': SetSelectionResponse$json,
   '.protectorate.v1.ChatStatus': ChatStatus$json,
+  '.protectorate.v1.ReportRequest': ReportRequest$json,
+  '.protectorate.v1.ReportResponse': ReportResponse$json,
+  '.protectorate.v1.WaitRequest': WaitRequest$json,
+  '.google.protobuf.Duration': $1.Duration$json,
+  '.protectorate.v1.WaitResponse': WaitResponse$json,
 };
 
 /// Descriptor for `ChatService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -869,4 +1057,7 @@ final $typed_data.Uint8List chatServiceDescriptor = $convert.base64Decode(
     'RSZXNwb25zZRJaCgpMaXN0TW9kZWxzEiIucHJvdGVjdG9yYXRlLnYxLkxpc3RNb2RlbHNSZXF1'
     'ZXN0GiMucHJvdGVjdG9yYXRlLnYxLkxpc3RNb2RlbHNSZXNwb25zZSIDkAIBElsKDFNldFNlbG'
     'VjdGlvbhIkLnByb3RlY3RvcmF0ZS52MS5TZXRTZWxlY3Rpb25SZXF1ZXN0GiUucHJvdGVjdG9y'
-    'YXRlLnYxLlNldFNlbGVjdGlvblJlc3BvbnNl');
+    'YXRlLnYxLlNldFNlbGVjdGlvblJlc3BvbnNlEkkKBlJlcG9ydBIeLnByb3RlY3RvcmF0ZS52MS'
+    '5SZXBvcnRSZXF1ZXN0Gh8ucHJvdGVjdG9yYXRlLnYxLlJlcG9ydFJlc3BvbnNlEkgKBFdhaXQS'
+    'HC5wcm90ZWN0b3JhdGUudjEuV2FpdFJlcXVlc3QaHS5wcm90ZWN0b3JhdGUudjEuV2FpdFJlc3'
+    'BvbnNlIgOQAgE=');

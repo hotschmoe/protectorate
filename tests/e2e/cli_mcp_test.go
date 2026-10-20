@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +39,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 			visited[key] = true
 			cmd := exec.CommandContext(c.ctx, c.binary, append(slices.Clone(path), "--help")...)
 			cmd.Env = c.env
-			out, err := cmd.CombinedOutput()
+			out, err := c.commandOutput(cmd)
 			if err != nil {
 				t.Fatalf("%s --help: %v\n%s", key, err, out)
 			}
@@ -48,7 +49,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 			}
 			cmd = exec.CommandContext(c.ctx, c.binary, append([]string{"help"}, path...)...)
 			cmd.Env = c.env
-			viaHelp, err := cmd.CombinedOutput()
+			viaHelp, err := c.commandOutput(cmd)
 			if err != nil {
 				t.Fatalf("help %s: %v\n%s", key, err, viaHelp)
 			}
@@ -108,7 +109,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 		for _, args := range [][]string{{"unknown-command"}, {"node", "unknown-command"}, {"status", "--unknown"}, {"job", "test-cross"}, {"lease", "acquire", "--ttl", "invalid"}} {
 			cmd := exec.CommandContext(c.ctx, c.binary, args...)
 			cmd.Env = c.env
-			out, err := cmd.CombinedOutput()
+			out, err := c.commandOutput(cmd)
 			var exit *exec.ExitError
 			if !errors.As(err, &exit) || exit.ExitCode() != 1 || !bytes.Contains(out, []byte("Usage:")) || !bytes.Contains(out, []byte("error:")) {
 				t.Fatalf("invalid invocation %v: %v\n%s", args, err, out)
@@ -116,7 +117,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 		}
 		cmd := exec.CommandContext(c.ctx, c.binary, "job", "run", "--hub", c.url, "--on", "peer", "--env", "CSV=a,b", "-e", "LITERAL=--json", "--timeout", "10s", "--", "sh", "-c", `printf '%s|%s|%s' "$CSV" "$LITERAL" "$1"; exit 7`, "sh", "--hub=passthrough")
 		cmd.Env = c.env
-		out, err := cmd.CombinedOutput()
+		out, err := c.commandOutput(cmd)
 		var exit *exec.ExitError
 		if !errors.As(err, &exit) || exit.ExitCode() != 7 || !bytes.Contains(out, []byte("a,b|--json|--hub=passthrough")) {
 			t.Fatalf("repeatable env, shorthand, duration, passthrough and exit status: %v\n%s", err, out)
@@ -150,6 +151,21 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 			}
 			if err := json.Unmarshal(listed.Result, &tools); err != nil {
 				t.Fatal(err)
+			}
+			var catalog struct {
+				Tools json.RawMessage `json:"tools"`
+			}
+			if err := json.Unmarshal(listed.Result, &catalog); err != nil {
+				t.Fatal(err)
+			}
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, catalog.Tools, "", "  "); err != nil {
+				t.Fatal(err)
+			}
+			pretty.WriteByte('\n')
+			const goldenHash = "427efe9fa8c55d81ab33d29b86ad67bfd91c78e8151401a2734a588703d7a65f"
+			if got := fmt.Sprintf("%x", sha256.Sum256(pretty.Bytes())); got != goldenHash {
+				t.Fatalf("tools/list differs byte-for-byte from expected catalog: %s", got)
 			}
 			found := map[string]bool{}
 			for _, tool := range tools.Tools {

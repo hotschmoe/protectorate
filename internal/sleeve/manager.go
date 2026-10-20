@@ -29,35 +29,43 @@ const (
 )
 
 type Usage struct {
-	CPUPercent  float64
-	CPUSeconds  float64
-	MemCurrent  uint64
-	MemPeak     uint64
-	Pids        uint64
-	OOMKills    uint64
-	DiskBytes   uint64
-	Sampled     time.Time
-	DiskSampled time.Time
+	CPUPercent        float64
+	CPUSeconds        float64
+	MemCurrent        uint64
+	MemPeak           uint64
+	Pids              uint64
+	OOMKills          uint64
+	DiskBytes         uint64
+	HomeBytes         uint64
+	CacheBytes        uint64
+	GoBuildCacheBytes uint64
+	Sampled           time.Time
+	DiskSampled       time.Time
 }
 
 // Info is one sleeve. Everything but Usage is persisted in sleeves.json.
 type Info struct {
-	Name      string    `json:"name"`
-	Harness   Harness   `json:"harness"`
-	Workspace string    `json:"workspace"`
-	Session   string    `json:"session"`
-	Created   time.Time `json:"created"`
-	State     State     `json:"state"`
+	BaseRepo   string    `json:"base_repo,omitempty"`
+	BaseBranch string    `json:"base_branch,omitempty"`
+	BaseTip    string    `json:"base_tip,omitempty"`
+	Name       string    `json:"name"`
+	Harness    Harness   `json:"harness"`
+	Workspace  string    `json:"workspace"`
+	Session    string    `json:"session"`
+	Created    time.Time `json:"created"`
+	State      State     `json:"state"`
 	// Parent is the identity that spawned the sleeve; ParentID its token id.
 	Parent        string        `json:"parent,omitempty"`
 	ParentID      string        `json:"parent_id,omitempty"`
 	ReadOnly      []Mount       `json:"read_only,omitempty"`
 	ExitAfterIdle time.Duration `json:"exit_after_idle,omitempty"`
+	Nested        bool          `json:"nested,omitempty"`
 	// Mode is how the harness runs. A record without one is a terminal
 	// sleeve from before modes existed.
 	Mode Mode `json:"mode,omitempty"`
 	// Chat is set for sleeves in chat mode.
-	Chat *Chat `json:"chat,omitempty"`
+	Chat   *Chat   `json:"chat,omitempty"`
+	Result *Result `json:"result,omitempty"`
 	// Supervised chat sleeves run the harness in its asking permission mode.
 	Supervised bool `json:"supervised,omitempty"`
 	// Handoff is set when a resleeve produced this sleeve's harness.
@@ -77,24 +85,31 @@ type Info struct {
 	// OOMKilled is set when the harness exited with status 137 after the
 	// kernel OOM killer fired in its cgroup.
 	OOMKilled bool  `json:"oom_killed,omitempty"`
+	Killed    bool  `json:"killed,omitempty"`
 	Usage     Usage `json:"-"`
 }
 
 func (i Info) Limits() Limits { return Limits{CPUPercent: i.CPU, MemoryBytes: i.Memory} }
 
 type SpawnRequest struct {
+	Base          *Info
+	Branch        string
+	NewBranch     string
+	Brief         string
 	Parent        string
 	ParentID      string
 	ReadOnly      []Mount
 	ExitAfterIdle time.Duration
+	Nested        bool
 
-	Selection driver.Selection
-	Name      string
-	Workspace string // absolute directory or git URL
-	Harness   Harness
-	Args      []string
-	Limits    Limits
-	Env       map[string]string
+	Selection      driver.Selection
+	EffortFallback bool
+	Name           string
+	Workspace      string // absolute directory or git URL
+	Harness        Harness
+	Args           []string
+	Limits         Limits
+	Env            map[string]string
 	// Mode defaults to chat for agent harnesses and terminal for shell.
 	Mode Mode
 	// Supervised applies to chat mode only.
@@ -168,6 +183,7 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 		opts: opts, cfg: opts.Config, path: filepath.Join(opts.Config.Home, "sleeves.json"),
 		sleeves: map[string]*entry{}, pending: map[string]chan struct{}{}, runCtx: context.Background(),
 	}
+	m.initGoCaches()
 	raw, err := os.ReadFile(m.path)
 	switch {
 	case os.IsNotExist(err):
@@ -183,11 +199,13 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 		}
 	}
 	if errors.Is(m.cfg.Preflight(), ErrUnsupported) {
+		m.discoverHomes()
 		return m, nil
 	}
 	if err := m.renameRecord(ctx, previousOrchestratorName, OrchestratorName); err != nil {
 		log.Printf("migrate orchestrator sleeve: %v", err)
 	}
+	m.discoverHomes()
 	if err := m.Reconcile(ctx); err != nil {
 		return nil, err
 	}
@@ -300,9 +318,30 @@ func (m *Manager) validateSpawn(req SpawnRequest) (SpawnRequest, error) {
 	if err := req.Limits.Validate(); err != nil {
 		return SpawnRequest{}, err
 	}
+	if req.Nested {
+		if req.Limits.CPUPercent == 0 || req.Limits.MemoryBytes == 0 {
+			return SpawnRequest{}, fmt.Errorf("%w: nested sleeves require CPU and memory limits", ErrInvalid)
+		}
+		for _, binary := range []string{"unshare", "flock"} {
+			if _, err := exec.LookPath(binary); err != nil {
+				return SpawnRequest{}, fmt.Errorf("%w: nested sleeves require %s: %w", ErrUnavailable, binary, err)
+			}
+		}
+	}
 	mode, err := resolveMode(req.Harness, req.Mode, req.Args)
 	if err != nil {
 		return SpawnRequest{}, err
+	}
+	if req.Brief != "" && mode != ModeChat {
+		return SpawnRequest{}, fmt.Errorf("%w: brief requires chat mode", ErrInvalid)
+	}
+	if req.Brief != "" && strings.TrimSpace(req.Brief) == "" {
+		return SpawnRequest{}, fmt.Errorf("%w: brief is empty", ErrInvalid)
+	}
+	for _, branch := range []string{req.Branch, req.NewBranch} {
+		if branch != "" && !validBranch(branch) {
+			return SpawnRequest{}, fmt.Errorf("%w: invalid branch %q", ErrInvalid, branch)
+		}
 	}
 	if req.ExitAfterIdle < 0 || (req.ExitAfterIdle > 0 && mode != ModeChat) {
 		return SpawnRequest{}, fmt.Errorf("%w: exit-after-idle requires chat mode and a nonnegative duration", ErrInvalid)
@@ -346,10 +385,20 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		return Info{}, fmt.Errorf("%w: scope %s is still running", ErrExists, m.cfg.UnitName(req.Name))
 	}
 
-	ws, err := m.resolveWorkspace(ctx, req.Name, req.Workspace)
+	var base Info
+	if req.Base != nil {
+		base = *req.Base
+	}
+	ws, err := m.resolveWorkspace(ctx, req, &base)
 	if err != nil {
 		return Info{}, err
 	}
+	if req.Base == nil && prev != nil && ws == prev.Workspace {
+		m.mu.Lock()
+		base.BaseRepo, base.BaseBranch, base.BaseTip = prev.BaseRepo, prev.BaseBranch, prev.BaseTip
+		m.mu.Unlock()
+	}
+	req.Base = &base
 	launch, err := m.planSpawn(req, ws)
 	if err != nil {
 		return Info{}, err
@@ -368,9 +417,11 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	}
 
 	info := Info{
+		BaseRepo: base.BaseRepo, BaseBranch: base.BaseBranch, BaseTip: base.BaseTip,
 		Parent: req.Parent, ParentID: req.ParentID,
 		ReadOnly: req.ReadOnly, ExitAfterIdle: req.ExitAfterIdle,
-		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
+		Nested: req.Nested,
+		Name:   req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
 		CPU: req.Limits.CPUPercent, Memory: req.Limits.MemoryBytes, Args: req.Args,
 		Supervised: req.Supervised, Helper: req.Helper,
@@ -379,7 +430,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		info.Session = SessionName(req.Name)
 	}
 	if mode == ModeChat {
-		info.Chat = &Chat{Requested: req.Selection}
+		info.Chat = &Chat{Requested: req.Selection, EffortFallback: req.EffortFallback, Starting: true}
 	}
 	e := &entry{Info: info}
 	if err := m.installSleeve(e, prev); err != nil {
@@ -406,7 +457,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if mode != ModeChat {
 		fields["session"] = info.Session
 	}
-	m.opts.Emit("sleeve.spawned", req.Name, fields)
+	if mode != ModeChat {
+		m.opts.Emit("sleeve.spawned", req.Name, fields)
+	}
 	return out, nil
 }
 
@@ -451,8 +504,12 @@ func (m *Manager) planSpawn(req SpawnRequest, workspace string) (Launch, error) 
 		args = terminalArgs(req.Harness, args)
 	}
 	return m.cfg.Plan(Spec{
-		Name: req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
+		GoCacheSnapshot: m.cfg.pinGoCache(req.Name),
+		BaseRepo:        req.Base.BaseRepo,
+		BaseTip:         req.Base.BaseTip,
+		Name:            req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
 		Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly,
+		Nested: req.Nested,
 	}, bin)
 }
 
@@ -514,7 +571,7 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 	}
 }
 
-// Kill stops the sleeve's processes and forgets it. Its workspace and home
+// Kill stops the sleeve's processes and retains its record. Its workspace and home
 // directory stay on disk.
 func (m *Manager) Kill(ctx context.Context, name string) error {
 	if err := m.reserve(ctx, name); err != nil {
@@ -542,10 +599,15 @@ func (m *Manager) Kill(ctx context.Context, name string) error {
 	}
 	m.mu.Lock()
 	wasRunning := e.State == Running
-	delete(m.sleeves, name)
+	previous := e.Info
+	e.State, e.Killed, e.Session, e.Chat = Exited, true, "", nil
+	if e.Exited.IsZero() {
+		e.Exited = time.Now()
+	}
+	e.Usage.CPUPercent, e.Usage.Pids = 0, 0
 	err := m.saveLocked()
 	if err != nil {
-		m.sleeves[name] = e
+		e.Info = previous
 	}
 	m.mu.Unlock()
 	if wasRunning {
@@ -660,6 +722,12 @@ func (m *Manager) Run(ctx context.Context) {
 	m.mu.Lock()
 	m.runCtx = ctx
 	m.mu.Unlock()
+	cacheDone := make(chan struct{})
+	go func() {
+		defer close(cacheDone)
+		m.cfg.goCaches.run(ctx)
+	}()
+	defer func() { <-cacheDone }()
 	tick := time.NewTicker(m.opts.UsageInterval)
 	defer tick.Stop()
 	oomTick := time.NewTicker(m.opts.OOMInterval)
@@ -702,10 +770,9 @@ func (m *Manager) sample() {
 	defer m.mu.Unlock()
 	var due []*entry
 	for _, e := range m.sleeves {
-		if e.State != Running {
-			continue
+		if e.State == Running {
+			m.sampleLocked(e, now)
 		}
-		m.sampleLocked(e, now)
 		if now.Sub(e.Usage.DiskSampled) >= m.opts.DiskInterval {
 			due = append(due, e)
 		}
@@ -760,14 +827,25 @@ func (m *Manager) measureDisk(ctx context.Context, list []*entry) {
 		ws := e.Workspace
 		m.mu.Unlock()
 		n, err := dirSize(ctx, ws)
+		home, caches, goBuild, homeErr := homeSize(ctx, m.cfg.sleeveHome(e.Name))
 		if ctx.Err() != nil {
 			return
 		}
 		m.mu.Lock()
+		e.Usage.DiskSampled = time.Now()
 		if err == nil {
-			e.Usage.DiskBytes, e.Usage.DiskSampled = n, time.Now()
+			e.Usage.DiskBytes = n
+		}
+		if homeErr == nil {
+			e.Usage.HomeBytes, e.Usage.CacheBytes, e.Usage.GoBuildCacheBytes = home, caches, goBuild
 		}
 		m.mu.Unlock()
+		if err != nil {
+			log.Printf("sleeve %s: measure workspace disk: %v", e.Name, err)
+		}
+		if homeErr != nil {
+			log.Printf("sleeve %s: measure home disk: %v", e.Name, homeErr)
+		}
 	}
 }
 
@@ -775,13 +853,14 @@ var scpURL = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:`)
 
 func isGitURL(s string) bool { return strings.Contains(s, "://") || scpURL.MatchString(s) }
 
-// resolveWorkspace returns the absolute directory to mount, cloning a git
-// URL into $home/workspaces/<name> first.
-func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string, error) {
+func (m *Manager) resolveWorkspace(ctx context.Context, req SpawnRequest, base *Info) (string, error) {
+	name, ws := req.Name, req.Workspace
 	if ws == "" {
 		return "", fmt.Errorf("%w: workspace is required", ErrInvalid)
 	}
-	if !isGitURL(ws) {
+	local := !isGitURL(ws)
+	origin := ""
+	if local {
 		if !filepath.IsAbs(ws) {
 			return "", fmt.Errorf("%w: workspace %q must be an absolute path or a git URL", ErrInvalid, ws)
 		}
@@ -795,13 +874,49 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 		if err := m.cfg.CheckWorkspace(name, real); err != nil {
 			return "", err
 		}
-		return real, nil
+		if req.Branch == "" && req.NewBranch == "" {
+			return real, nil
+		}
+		dirs, err := m.cfg.baseMounts(real)
+		if err != nil {
+			return "", err
+		}
+		origin, base.BaseBranch = gitDetails(real)
+		origin = gitOrigin(dirs[len(dirs)-1].Source)
+		if req.Branch != "" {
+			base.BaseBranch = req.Branch
+		} else if base.BaseBranch == "" {
+			if b, err := os.ReadFile(filepath.Join(dirs[0].Source, "HEAD")); err == nil {
+				if ref, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "ref: refs/heads/"); ok {
+					base.BaseBranch = ref
+				}
+			}
+		}
+		if !validBranch(base.BaseBranch) {
+			return "", fmt.Errorf("%w: local source has no current branch; specify --branch", ErrInvalid)
+		}
+		base.BaseRepo = real
+		base.BaseTip, err = BranchTip(real, base.BaseBranch)
+		if err != nil {
+			return "", err
+		}
+		req.Branch = base.BaseBranch
+		ws = real
 	}
 	if strings.HasPrefix(ws, "-") {
 		return "", fmt.Errorf("%w: invalid git URL", ErrInvalid)
 	}
 	dest := filepath.Join(m.cfg.workspacesDir(), name)
+	if err := m.cfg.CheckWorkspace(name, dest); err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(dest); err == nil && real != dest {
+		return "", fmt.Errorf("%w: clone destination must not be a symlink", ErrInvalid)
+	}
 	if _, err := os.Stat(filepath.Join(dest, ".git")); err == nil {
+		if req.Branch != "" || req.NewBranch != "" {
+			return "", fmt.Errorf("%w: branch dispatch requires a fresh workspace; %s already exists", ErrExists, dest)
+		}
 		return dest, nil
 	}
 	if ents, err := os.ReadDir(dest); err == nil && len(ents) > 0 {
@@ -810,14 +925,66 @@ func (m *Manager) resolveWorkspace(ctx context.Context, name, ws string) (string
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return "", fmt.Errorf("create workspaces dir: %w", err)
 	}
+	if real, err := filepath.EvalSymlinks(filepath.Dir(dest)); err != nil || real != filepath.Dir(dest) {
+		return "", fmt.Errorf("%w: workspaces directory must not be a symlink", ErrInvalid)
+	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", "clone", "--quiet", "--", ws, dest)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:git:file")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%w: git clone %s: %s", ErrInvalid, ws, strings.TrimSpace(stderr.String()))
+	run := func(args ...string) error {
+		cmd := exec.CommandContext(cctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "init.templateDir="}, args...)...)
+		cmd.Dir = m.cfg.Home
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:http:ssh:git:file")
+		if args[0] != "clone" {
+			cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%w: git %s: %w: %s", ErrInvalid, args[0], err, strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	}
+	args := []string{"clone", "--quiet", "--no-checkout", "--no-hardlinks", "--dissociate"}
+	if req.Branch != "" {
+		args = append(args, "--branch", req.Branch)
+	}
+	if err := run(append(args, "--", ws, dest)...); err != nil {
+		return "", err
+	}
+	if local {
+		dirs, err := m.cfg.baseMounts(ws)
+		if err != nil {
+			return "", err
+		}
+		if err := run("-C", dest, "remote", "rename", "origin", "base"); err != nil {
+			return "", err
+		}
+		if err := run("-C", dest, "remote", "set-url", "base", dirs[0].Target); err != nil {
+			return "", err
+		}
+		if origin != "" {
+			if err := run("-C", dest, "remote", "add", "origin", origin); err != nil {
+				return "", err
+			}
+		}
+	} else {
+		if err := run("-C", dest, "remote", "set-url", "origin", stripCredentials(ws)); err != nil {
+			return "", err
+		}
+	}
+	if req.NewBranch != "" {
+		if err := run("-C", dest, "switch", "--quiet", "-c", req.NewBranch); err != nil {
+			return "", err
+		}
+	} else {
+		if branch := WorkspaceBranch(dest); branch != "" {
+			if _, err := BranchTip(dest, branch); err != nil {
+				return dest, nil
+			}
+		}
+		if err := run("-C", dest, "checkout", "--quiet"); err != nil {
+			return "", err
+		}
 	}
 	return dest, nil
 }

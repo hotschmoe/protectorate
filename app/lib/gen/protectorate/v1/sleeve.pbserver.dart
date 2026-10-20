@@ -37,6 +37,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $4.ResleeveSleeveRequest request);
   $async.Future<$4.SpawnEnvoyResponse> spawnEnvoy(
       $pb.ServerContext ctx, $4.SpawnEnvoyRequest request);
+  $async.Future<$4.PruneSleevesResponse> pruneSleeves(
+      $pb.ServerContext ctx, $4.PruneSleevesRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -56,6 +58,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return $4.ResleeveSleeveRequest();
       case 'SpawnEnvoy':
         return $4.SpawnEnvoyRequest();
+      case 'PruneSleeves':
+        return $4.PruneSleevesRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -80,6 +84,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return resleeveSleeve(ctx, request as $4.ResleeveSleeveRequest);
       case 'SpawnEnvoy':
         return spawnEnvoy(ctx, request as $4.SpawnEnvoyRequest);
+      case 'PruneSleeves':
+        return pruneSleeves(ctx, request as $4.PruneSleevesRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/hotschmoe/protectorate/internal/session"
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 type recorder struct {
@@ -51,6 +52,7 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	testenv.E2E(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	home := t.TempDir()
 	cfg, err := DefaultConfig(home, nil)
@@ -128,7 +130,19 @@ func readFile(path string) string {
 
 func scopePids(t *testing.T, c Config, name string) []string {
 	t.Helper()
-	return strings.Fields(readFile(filepath.Join(c.scopeDir(name), "cgroup.procs")))
+	var pids []string
+	if err := filepath.WalkDir(c.scopeDir(name), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			pids = append(pids, strings.Fields(readFile(filepath.Join(path, "cgroup.procs")))...)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return pids
 }
 
 func alive(pid string) bool {
@@ -256,14 +270,14 @@ func TestSleeveLifecycle(t *testing.T) {
 		if _, err := r.sess.Get(ctx, SessionName(n)); !errors.Is(err, session.ErrNotFound) {
 			t.Errorf("session %s after kill: %v", n, err)
 		}
-		if _, err := r.m.Get(n); !errors.Is(err, ErrNotFound) {
-			t.Errorf("get after kill: %v", err)
+		if info, err := r.m.Get(n); err != nil || !info.Killed || info.State != Exited {
+			t.Errorf("get after kill: %+v, %v", info, err)
 		}
 	}
 	if _, err := os.Stat(aWS); err != nil {
 		t.Errorf("workspace gone after kill: %v", err)
 	}
-	if err := r.m.Kill(ctx, aName); !errors.Is(err, ErrNotFound) {
+	if err := r.m.Kill(ctx, aName); err != nil {
 		t.Errorf("second kill = %v", err)
 	}
 }
@@ -419,7 +433,7 @@ func TestKillRestoresRecordWhenSaveFails(t *testing.T) {
 	if err := r.m.Kill(context.Background(), info.Name); err != nil {
 		t.Fatalf("second Kill: %v", err)
 	}
-	if _, err := r.m.Get(info.Name); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get after Kill = %v", err)
+	if got, err := r.m.Get(info.Name); err != nil || !got.Killed || got.State != Exited {
+		t.Fatalf("Get after Kill = %+v, %v", got, err)
 	}
 }

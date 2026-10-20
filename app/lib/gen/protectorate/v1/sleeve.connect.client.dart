@@ -18,7 +18,9 @@ import "sleeve.connect.spec.dart" as specs;
 extension type SleeveServiceClient (connect.Transport _transport) {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
-  /// a git URL cloned into the hub's workspaces directory. Respawning the name
+  /// a git URL cloned into the hub's workspaces directory. Branch options clone
+  /// local checkouts too; brief is delivered as the first chat message.
+  /// Respawning the name
   /// of an exited sleeve reuses its home directory and workspace and replaces
   /// its kept session.
   Future<protectoratev1sleeve.SpawnSleeveResponse> spawnSleeve(
@@ -120,8 +122,8 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   }
 
   /// KillSleeve stops a sleeve's harness and every process in its sandbox and
-  /// forgets the sleeve. The workspace and the sleeve's home directory are kept
-  /// on disk.
+  /// retains its exited record. The workspace and the sleeve's home directory
+  /// are kept on disk unless drop_caches removes regenerable caches.
   Future<protectoratev1sleeve.KillSleeveResponse> killSleeve(
     protectoratev1sleeve.KillSleeveRequest input, {
     connect.Headers? headers,
@@ -192,6 +194,24 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.SleeveService.spawnEnvoy,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// PruneSleeves inventories disk and removes eligible data only with yes.
+  Future<protectoratev1sleeve.PruneSleevesResponse> pruneSleeves(
+    protectoratev1sleeve.PruneSleevesRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.pruneSleeves,
       input,
       signal: signal,
       headers: headers,

@@ -25,7 +25,7 @@ func chatClient(o *opts) (protectoratev1connect.ChatServiceClient, error) {
 
 func chatCmd(o *opts) *command {
 	c := &command{Use: "chat", Short: "Talk to a sleeve in chat mode"}
-	c.AddCommand(chatWatchCmd(o), chatSendCmd(o), chatInterruptCmd(o), chatRespondCmd(o), chatCompactCmd(o), chatModelsCmd(o), chatSettingsCmd(o))
+	c.AddCommand(chatWatchCmd(o), chatWaitCmd(o), chatSendCmd(o), chatInterruptCmd(o), chatRespondCmd(o), chatCompactCmd(o), chatModelsCmd(o), chatSettingsCmd(o))
 	return c
 }
 
@@ -233,6 +233,8 @@ func (r *chatRenderer) render(w io.Writer, ev *pb.ChatEvent) {
 		kind, detail = "state", strings.ToLower(strings.TrimPrefix(b.State.State.String(), "CHAT_STATE_"))
 	case *pb.ChatEvent_Settings:
 		kind, detail = "settings", fmt.Sprintf("model=%s effort=%s", b.Settings.GetEffective().GetModel(), b.Settings.GetEffective().GetEffort())
+	case *pb.ChatEvent_Report:
+		kind, detail = "report", reportStatusLabel(b.Report.Status)+": "+b.Report.Summary
 	default:
 		return
 	}

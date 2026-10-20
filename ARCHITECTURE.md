@@ -50,7 +50,7 @@ protectorate hub serve            # the engine, runs as a systemd service on the
 protectorate node serve           # node agent on any machine (joins the tailnet)
 protectorate node join <token>    # enroll a machine
 protectorate quota                # every other subcommand is a CLI client of the hub API
-protectorate sleeve ls|workspaces|browse|spawn|show|kill
+protectorate sleeve ls|workspaces|browse|spawn|show|kill|prune
 protectorate session ls|new|attach|capture|respawn|kill
 protectorate api call <Method> '<json>'   # generic escape hatch
 ```
@@ -325,8 +325,10 @@ Design:
     PATH, or `~/development/flutter`. Its SDK and the global Pub executable
     directories are read-only. With overlay-capable bwrap, Flutter and Pub
     caches use host lowers and persistent private upper/work directories.
-    Older bwrap copies caches for Dart workspaces. GOCACHE overlays an immutable
-    shared snapshot of the discovered owner cache, avoiding live-lower mutation;
+    Older bwrap copies caches for Dart workspaces. GOCACHE overlays bounded
+    generations prepared in the background: output hardlinks, copied action
+    indexes and separate private uppers per generation. Mounted generations
+    survive refresh and pruning; failed hardlinks leave Go caches private.
     GOMODCACHE stays private with the discovered host download cache as a
     read-only file proxy. Startup costs and lower-layer coherence are documented
     in [sleeves](docs/sleeves.md);
@@ -343,6 +345,22 @@ Design:
 - `--exit-after-idle <duration>` removes a chat sleeve through the normal kill
   path after continuous IDLE with no pending or queued mail. It defaults off,
   resets on activity or pending mail, and preserves the workspace and home.
+- Kill retains an exited record (`killed`) for disk visibility; respawn
+  replaces it. The existing five-minute disk sampler measures homes as well
+  as workspaces, including killed and pre-upgrade leftover homes. Home usage
+  separates allowlisted regenerable caches from persistent harness data.
+  Owner-only, audited `sleeve prune` inventories homes and hub clones, with
+  deletion requiring `--yes`; `sleeve kill --drop-caches` removes only caches
+  after stopping. Running sleeves and their mounts are always kept. Clone
+  deletion requires clean staged/worktree/untracked state and all local tips
+  verified against a timed origin fetch. Git runs only against trusted
+  temporary metadata, never agent-written config. See [disk](docs/sleeves.md#disk).
+- `--nested` delegates a cgroup subtree below the scope's CPU, memory and pid
+  ceilings. Nested hubs use child cgroups and nested bwrap instead of the host
+  user manager. Only the subtree is mounted, with its own cgroup namespace;
+  the outer limits and other sleeves' state remain inaccessible. The flag
+  requires finite CPU/memory limits and persists across restart and resleeve.
+  See [runtime development](docs/sleeves.md#running-runtime-tests-inside-a-sleeve).
 - Known gap: bwrap shares the host network, so two sleeves' dev servers can
   collide on ports. Docker covers per-sleeve networking if that becomes a hard
   requirement.

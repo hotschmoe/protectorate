@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -17,9 +16,6 @@ import (
 )
 
 func TestBinarySleeveCaches(t *testing.T) {
-	if os.Getenv("PROT_E2E") != "1" {
-		t.Skip("real binary scenarios: set PROT_E2E=1")
-	}
 	for _, mode := range []string{"overlay", "copy"} {
 		t.Run(mode, func(t *testing.T) { sleeveCacheScenario(t, mode) })
 	}
@@ -108,12 +104,16 @@ func sleeveCacheScenario(t *testing.T, mode string) {
 	}
 	var lower, frozen, cacheEntry string
 	if wantOverlay {
-		lower = runtime["goBuildLower"].(string)
-		if _, err := os.Stat(filepath.Join(lower, "00", filepath.Base(badOutput)+".invalid")); err != nil {
-			t.Fatalf("snapshot published an unchecked cached output: %v", err)
+		c.eventually(func() bool {
+			runtime = c.call("HubService", "GetSleeveRuntime", map[string]any{})
+			lower, _ = runtime["goBuildLower"].(string)
+			return lower != "" && runtime["snapshotPreparing"] != true
+		})
+		if _, err := os.Stat(filepath.Join(lower, "00", filepath.Base(badOutput))); !os.IsNotExist(err) {
+			t.Fatalf("snapshot imported an unreferenced output: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(lower, "01", filepath.Base(badExecutable)+".invalid")); err != nil {
-			t.Fatalf("snapshot published an unchecked executable directory: %v", err)
+		if _, err := os.Stat(filepath.Join(lower, "01", filepath.Base(badExecutable))); !os.IsNotExist(err) {
+			t.Fatalf("snapshot imported an unreferenced executable directory: %v", err)
 		}
 		frozen = cacheDigest(t, c.home, []string{lower})
 		changed := false
@@ -122,12 +122,19 @@ func sleeveCacheScenario(t *testing.T, mode string) {
 				return err
 			}
 			if !changed && d.Type().IsRegular() && strings.HasSuffix(d.Name(), "-d") && p != badOutput {
-				changed = true
-				cacheEntry, err = filepath.Rel(cache, p)
+				rel, err := filepath.Rel(cache, p)
 				if err != nil {
 					return err
 				}
-				return os.WriteFile(p, []byte("owner replaced this cached output after snapshot"), 0600)
+				if fi, err := os.Stat(filepath.Join(lower, rel)); os.IsNotExist(err) {
+					return nil
+				} else if err != nil {
+					return err
+				} else if source, err := os.Stat(p); err != nil || !os.SameFile(fi, source) {
+					return fmt.Errorf("snapshot output is not hardlinked: %v", err)
+				}
+				changed, cacheEntry = true, rel
+				return os.Remove(p)
 			}
 			return nil
 		}); err != nil {
@@ -137,17 +144,11 @@ func sleeveCacheScenario(t *testing.T, mode string) {
 			t.Fatal("owner warm cache contained no output to replace")
 		}
 		before = cacheDigest(t, c.root, []string{flutter, pub, cache})
-		c.stop(c.hub)
-		c.boot()
 		if cacheDigest(t, c.home, []string{lower}) != frozen {
-			t.Fatal("hub restart modified the published Go lower")
+			t.Fatal("owner trim changed the published Go lower")
 		}
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
-	defer cancel()
-	if out, err := exec.CommandContext(ctx, "systemd-run", "--user", "--scope", "--quiet", "true").CombinedOutput(); err != nil {
-		t.Skipf("snapshot/capabilities checked; sleeve runtime requires a systemd user manager: %v: %s", err, out)
-	}
+	c.requireRuntime(t)
 	for _, dir := range []string{cache, filepath.Join(flutter, "bin/cache"), flutter, pub} {
 		if status := c.rpc("SleeveService", "SpawnSleeve", map[string]any{
 			"name": "cache-escape", "harness": "HARNESS_SHELL", "workspace": dir,
@@ -225,7 +226,7 @@ exec sleep 60`},
 		if err != nil || string(data) != "private" {
 			t.Fatalf("Flutter delta missing: %q: %v", data, err)
 		}
-		if data, err := os.ReadFile(filepath.Join(home, ".cache/overlays/go-build/upper", cacheEntry)); err != nil || string(data) != "poisoned" {
+		if data, err := os.ReadFile(filepath.Join(home, ".cache/overlays/go-build", filepath.Base(filepath.Dir(lower)), "upper", cacheEntry)); err != nil || string(data) != "poisoned" {
 			t.Fatalf("Go cache poison did not stay in private upper: %q: %v", data, err)
 		}
 		var size int64
@@ -272,7 +273,7 @@ exec sleep 60`},
 	if status := c.rpc("SleeveService", "SpawnSleeve", map[string]any{
 		"name": "cache-probe", "harness": "HARNESS_SHELL", "workspace": ws,
 		"args": []string{"true"},
-	}, nil); status != 500 {
+	}, nil); status != 400 {
 		t.Fatalf("cache source symlink escaped the sleeve home: HTTP %d", status)
 	}
 	if after := cacheDigest(t, c.root, []string{flutter, pub, cache}); before != after {

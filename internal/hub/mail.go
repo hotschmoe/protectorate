@@ -284,7 +284,7 @@ func (c *coordinator) idle(name string) (*chatSleeve, bool) {
 	if err != nil || info.State != sleeve.Running || info.Mode != sleeve.ModeChat {
 		return nil, false
 	}
-	s, err := c.h.chat.get(name, false)
+	s, err := c.h.chat.get(name, false, false)
 	if err != nil {
 		return nil, false
 	}
@@ -585,6 +585,9 @@ func (s messageService) Inbox(ctx context.Context, req *connect.Request[pb.Inbox
 	}
 	res := &pb.InboxResponse{}
 	for _, m := range msgs {
+		if !req.Msg.Peek && m.Deliveries[who].Read == nil {
+			s.c.event("msg.read", m, map[string]any{"recipient": who})
+		}
 		res.Messages = append(res.Messages, mailToProto(m))
 	}
 	return connect.NewResponse(res), nil

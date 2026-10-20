@@ -23,7 +23,7 @@ import (
 )
 
 // attachSleeves wires SleeveService into h and recovers persisted sleeves.
-func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspaceRoots []string) error {
+func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspaceRoots []string, goCacheMax uint64) error {
 	home, err := hub.Home()
 	if err != nil {
 		return err
@@ -35,9 +35,7 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspace
 	if err != nil {
 		return err
 	}
-	if err := cfg.PrepareCaches(ctx); err != nil {
-		return err
-	}
+	cfg.GoCacheMaxBytes = goCacheMax
 	cfg.ReferenceDirs = refDirs
 	if workspaceRoots == nil {
 		if ownerHome, err := os.UserHomeDir(); err == nil {
@@ -88,7 +86,7 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 
 func sleeveCmd(o *opts) *command {
 	c := &command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
-	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveBrowseCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
+	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveBrowseCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleevePruneCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
 
@@ -133,9 +131,11 @@ var sleeveModes = map[string]pb.SleeveMode{
 func sleeveSpawnCmd(o *opts) *command {
 	sel := &pb.ModelSelection{}
 	var workspace, harness, mem, mode string
+	var branch, newBranch, briefFile string
 	var cpu uint32
 	var env []string
 	var supervised bool
+	var nested bool
 	var readOnly []string
 	var exitAfterIdle time.Duration
 	c := &command{
@@ -198,14 +198,30 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 				return err
 			}
 			var mounts []*pb.ReadOnlyMount
+			brief := ""
+			if briefFile != "" {
+				if mode == "terminal" || h == pb.Harness_HARNESS_SHELL {
+					return errors.New("--brief requires chat mode")
+				}
+				raw, err := os.ReadFile(briefFile)
+				if err != nil {
+					return fmt.Errorf("read brief: %w", err)
+				}
+				brief = string(raw)
+				if strings.TrimSpace(brief) == "" {
+					return errors.New("brief is empty")
+				}
+			}
 			for _, value := range readOnly {
 				source, target, _ := strings.Cut(value, ":")
 				mounts = append(mounts, &pb.ReadOnlyMount{Source: source, Target: target})
 			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
+				Branch: branch, NewBranch: newBranch, Brief: brief,
 				ReadOnly: mounts, ExitAfterIdle: durationpb.New(exitAfterIdle),
 				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode, Selection: optionalSelection(sel),
 				Supervised: supervised,
+				Nested:     nested,
 			}))
 			if err != nil {
 				return err
@@ -221,6 +237,9 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 		},
 	}
 	c.Flags().StringVar(&workspace, "workspace", "", "directory on the hub, or git URL to clone")
+	c.Flags().StringVar(&branch, "branch", "", "branch to clone (local default: current branch; URL default: default branch)")
+	c.Flags().StringVar(&newBranch, "new-branch", "", "create this branch in a fresh clone from --branch or the source branch")
+	c.Flags().StringVar(&briefFile, "brief", "", "file containing the first chat message (read by this CLI; chat mode only)")
 	c.Flags().StringArrayVar(&readOnly, "ro", nil, "read-only host directory[:sandbox directory] (repeatable; default same path)")
 	c.Flags().DurationVar(&exitAfterIdle, "exit-after-idle", 0, "kill chat sleeve after idle with no pending mail (0 disables)")
 	selectionFlags(c, sel)
@@ -230,6 +249,7 @@ removes a chat sleeve after five minutes idle with no pending mail (default off)
 	c.Flags().StringArrayVar(&env, "env", nil, "environment variable K=V (repeatable)")
 	c.Flags().StringVar(&mode, "mode", "", "chat or terminal (default: chat for agent harnesses, terminal for shell)")
 	c.Flags().BoolVar(&supervised, "supervised", false, "chat mode: the harness asks before acting (answer with chat respond)")
+	c.Flags().BoolVar(&nested, "nested", false, "allow sandboxed child sleeves within these CPU and memory limits (requires --cpu and --mem)")
 	return c
 }
 
@@ -259,6 +279,9 @@ func exitLabel(s *pb.Sleeve) string {
 }
 
 func sleeveRowState(s *pb.Sleeve) string {
+	if s.Killed {
+		return "killed"
+	}
 	if s.State == pb.SleeveState_SLEEVE_STATE_RUNNING || s.ExitCode == nil {
 		return sleeveStateLabel(s.State)
 	}
@@ -296,11 +319,21 @@ func sleeveLsCmd(o *opts) *command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
+				fmt.Fprintln(w, "NAME\tHARNESS\tMODEL\tEFFORT\tSTATE\tCPU\tMEM\tPEAK\tHOME\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
 				for _, s := range res.Msg.Sleeves {
 					u := s.Usage
-					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
-						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace, s.Parent, s.GitBranch)
+					model, effort := "-", "-"
+					if s.Chat != nil {
+						model, effort = s.Chat.Model, s.Chat.ReasoningEffort
+						if model == "" {
+							model = "unknown"
+						}
+						if effort == "" {
+							effort = "unknown"
+						}
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), model, effort, sleeveRowState(s),
+						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), fmtBytes(u.HomeDiskBytes), limitLabel(s.Limits), s.Workspace, s.Parent, s.GitBranch)
 				}
 			})
 		},
@@ -399,20 +432,44 @@ func sleeveShowCmd(o *opts) *command {
 				}
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
+				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s), s.Workspace, s.Session)
 				fmt.Fprintf(w, "branch\t%s\n", s.GitBranch)
+				if s.BaseRepo != "" {
+					fmt.Fprintf(w, "base repo\t%s\nbase branch\t%s\nbase tip\t%s\n", s.BaseRepo, s.BaseBranch, s.BaseTip)
+				}
 				fmt.Fprintf(w, "parent\t%s\n", s.Parent)
+				fmt.Fprintf(w, "mode\t%s\n", strings.ToLower(strings.TrimPrefix(s.Mode.String(), "SLEEVE_MODE_")))
+				if s.Result != nil {
+					fmt.Fprintf(w, "report\t%s (chat seq %d, %s)\n%s\n", reportStatusLabel(s.Result.Status), s.Result.ChatSeq, s.Result.Time.AsTime().Format(time.RFC3339), s.Result.Summary)
+				}
+				fmt.Fprintf(w, "nested\t%t\n", s.Nested)
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {
 					fmt.Fprintf(w, "exited\t%s\n", s.ExitedAt.AsTime().Local().Format(time.RFC3339))
+				}
+				if s.State == pb.SleeveState_SLEEVE_STATE_EXITED {
 					fmt.Fprintf(w, "exit\t%s\n", exitLabel(s))
+					fmt.Fprintf(w, "exit signal\t%d\noom killed\t%t\n", s.ExitSignal, s.OomKilled)
 				}
 				fmt.Fprintf(w, "args\t%s\nlimits\t%s\n", strings.Join(s.Args, " "), limitLabel(s.Limits))
+				fmt.Fprintf(w, "exit after idle\t%s\n", s.ExitAfterIdle.AsDuration())
+				for _, mount := range s.ReadOnly {
+					fmt.Fprintf(w, "read-only mount\t%s -> %s\n", mount.Source, mount.Target)
+				}
 				if s.Supervised {
 					fmt.Fprintln(w, "supervised\tyes (the harness asks; answer with chat respond)")
+				} else {
+					fmt.Fprintln(w, "supervised\tno")
 				}
 				if s.Chat != nil {
 					printSelection(w, s.Chat)
+					fmt.Fprintf(w, "chat state\t%s\nharness session\t%s\nprovider\t%s\nlocal model\t%t\ncontext tokens\t%d/%d\nlast sequence\t%d\n", s.Chat.State, s.Chat.HarnessSessionId, s.Chat.Provider, s.Chat.LocalModel, s.Chat.ContextTokens, s.Chat.ContextWindow, s.Chat.LastSeq)
+					if s.Chat.CacheExpiresAt != nil {
+						fmt.Fprintf(w, "cache expires\t%s\n", s.Chat.CacheExpiresAt.AsTime().Local().Format(time.RFC3339))
+					}
+					if s.Chat.LastActivityAt != nil {
+						fmt.Fprintf(w, "last activity\t%s\n", s.Chat.LastActivityAt.AsTime().Local().Format(time.RFC3339))
+					}
 				}
 				if s.Handoff != nil {
 					printHandoff(w, s.Handoff)
@@ -420,6 +477,13 @@ func sleeveShowCmd(o *opts) *command {
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))
+				fmt.Fprintf(w, "home disk\t%s (cache %s, rest %s)\ngo build cache\t%s\n", fmtBytes(u.HomeDiskBytes), fmtBytes(u.CacheDiskBytes), fmtBytes(u.HomeDiskBytes-u.CacheDiskBytes), fmtBytes(u.GoBuildCacheDiskBytes))
+				if u.SampledAt != nil {
+					fmt.Fprintf(w, "usage sampled\t%s\n", u.SampledAt.AsTime().Local().Format(time.RFC3339))
+				}
+				if u.DiskSampledAt != nil {
+					fmt.Fprintf(w, "disk sampled\t%s\n", u.DiskSampledAt.AsTime().Local().Format(time.RFC3339))
+				}
 				if tail != "" {
 					fmt.Fprintf(w, "\nlast %d lines of output:\n%s\n", showTailLines, tail)
 				} else if s.State == pb.SleeveState_SLEEVE_STATE_EXITED {
@@ -431,7 +495,8 @@ func sleeveShowCmd(o *opts) *command {
 }
 
 func sleeveKillCmd(o *opts) *command {
-	return &command{
+	var dropCaches bool
+	c := &command{
 		Use:   "kill <name>",
 		Short: "Stop a sleeve and its processes; the workspace is kept",
 		Args:  exactArgs(1),
@@ -440,13 +505,53 @@ func sleeveKillCmd(o *opts) *command {
 			if err != nil {
 				return err
 			}
-			res, err := cl.KillSleeve(cmd.Context(), connect.NewRequest(&pb.KillSleeveRequest{Name: args[0]}))
+			res, err := cl.KillSleeve(cmd.Context(), connect.NewRequest(&pb.KillSleeveRequest{Name: args[0], DropCaches: dropCaches}))
 			if err != nil {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "killed\t%s\n", args[0]) })
 		},
 	}
+	c.Flags().BoolVar(&dropCaches, "drop-caches", false, "owner only: drop regenerable home caches after stopping")
+	return c
+}
+
+func sleevePruneCmd(o *opts) *command {
+	r := &pb.PruneSleevesRequest{}
+	c := &command{
+		Use: "prune", Short: "Inventory unused sleeve disk; remove only with --yes (owner only)", Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
+			cl, err := sleeveClient(o)
+			if err != nil {
+				return err
+			}
+			res, err := cl.PruneSleeves(cmd.Context(), connect.NewRequest(r))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintln(w, "SLEEVE\tKIND\tSIZE\tACTION\tPATH\tREASON")
+				for _, e := range res.Msg.Entries {
+					action := "keep"
+					if e.Removed {
+						action = "removed"
+					} else if e.Eligible {
+						action = "would remove"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Sleeve, e.Kind, fmtBytes(e.Bytes), action, e.Path, e.Reason)
+				}
+				if !r.Yes {
+					fmt.Fprintln(w, "Dry run; pass --yes to remove eligible entries.")
+				}
+			})
+		},
+	}
+	c.Flags().BoolVar(&r.Yes, "yes", false, "remove eligible entries (default: dry run)")
+	c.Flags().BoolVar(&r.Caches, "caches", false, "drop regenerable caches (default when no category selected)")
+	c.Flags().BoolVar(&r.Homes, "homes", false, "remove whole non-running homes, including sessions and config")
+	c.Flags().BoolVar(&r.Workspaces, "workspaces", false, "remove clean hub clones with all local work verified outside the clone")
+	c.Flags().BoolVar(&r.Running, "running", false, "include running sleeves in inventory; their data is always kept")
+	return c
 }
 
 func sleeveAttachCmd(o *opts) *command {
@@ -550,5 +655,8 @@ func printHandoff(w io.Writer, h *pb.Handoff) {
 	fmt.Fprintf(w, "handoff\t%s\n", h.Path)
 	if h.ArchivePath != "" {
 		fmt.Fprintf(w, "archive\t%s\n", h.ArchivePath)
+	}
+	if h.SummarizerHarness != "" && h.SummaryError != "" {
+		fmt.Fprintf(w, "summary error\t%s\n", h.SummaryError)
 	}
 }

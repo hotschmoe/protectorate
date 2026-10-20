@@ -9,6 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            Makefile
+      - name: Race detector, fuzz seeds and binary end-to-end tests
+        run: make test-race
+
   check:
     runs-on: ubuntu-latest
     steps:

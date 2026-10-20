@@ -40,8 +40,9 @@ TAILSCALE_TAGS := \
 	ts_omit_unixsocketidentity ts_omit_useexitnode ts_omit_usermetrics ts_omit_useroutes \
 	ts_omit_wakeonlan ts_omit_webbrowser ts_omit_webclient
 TARGETS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 android/arm64
+E2E_COVER_BINARY ?= bin/protectorate-cover
 
-.PHONY: gen check-gen build build-tags test vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check
+.PHONY: gen check-gen build build-tags test test-race e2e-cover e2e-cover-build vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check
 
 gen:
 	buf lint
@@ -59,8 +60,19 @@ test: build
 	go vet -tags '$(TAILSCALE_TAGS)' ./...
 	env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN PROT_E2E=1 PROT_E2E_BINARY='$(CURDIR)/bin/protectorate' go test -count=1 -tags '$(TAILSCALE_TAGS)' ./...
 
+test-race:
+	@compiler="$$(go env CC)"; command -v "$${compiler%% *}" >/dev/null 2>&1 || { echo "test-race requires a C compiler (CGO_ENABLED=1); install one or set CC (currently $$compiler)" >&2; exit 1; }
+	CGO_ENABLED=1 go build -race -trimpath -tags '$(TAILSCALE_TAGS)' -ldflags '$(LDFLAGS)' -o bin/protectorate-race ./cmd/protectorate
+	env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN CGO_ENABLED=1 GORACE='halt_on_error=1 atexit_sleep_ms=0' PROT_E2E=1 PROT_E2E_BINARY='$(CURDIR)/bin/protectorate-race' go test -race -count=1 -tags '$(TAILSCALE_TAGS)' ./...
+
 build-tags:
 	@echo '$(TAILSCALE_TAGS)'
+
+e2e-cover:
+	@TAILSCALE_TAGS='$(TAILSCALE_TAGS)' MAKE='$(MAKE)' sh scripts/e2e-cover.sh
+
+e2e-cover-build:
+	go build -cover -covermode=atomic -tags '$(TAILSCALE_TAGS)' -ldflags '$(LDFLAGS)' -o '$(E2E_COVER_BINARY)' ./cmd/protectorate
 
 cross:
 	@for t in $(TARGETS); do \

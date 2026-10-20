@@ -178,6 +178,9 @@ func (l *Log) Append(ev *pb.ChatEvent) (uint64, error) {
 	if ev.Time == nil {
 		ev.Time = timestamppb.Now()
 	}
+	if r := ev.GetReport(); r != nil {
+		r.ChatSeq, r.Time = ev.Seq, ev.Time
+	}
 	if err := l.persistLocked(ev); err != nil {
 		return 0, err
 	}

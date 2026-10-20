@@ -533,10 +533,11 @@ func validateManifest(m *Manifest, seen map[string]File) error {
 		got, ok := seen[want.Path]
 		switch {
 		case !ok:
-			return fmt.Errorf("manifest lists %q, which is not in the archive", want.Path)
-		case got.Size != want.Size || got.SHA256 != want.SHA256:
-			return fmt.Errorf("%s does not match the manifest (size %d, sha256 %s; manifest says %d, %s)", want.Path, got.Size, got.SHA256, want.Size, want.SHA256)
+			return fmt.Errorf("manifest lists missing or duplicate file %q", want.Path)
+		case got.Size != want.Size || got.SHA256 != want.SHA256 || got.Mode != want.Mode:
+			return fmt.Errorf("%s does not match the manifest (size %d, sha256 %s, mode %04o; manifest says %d, %s, %04o)", want.Path, got.Size, got.SHA256, got.Mode, want.Size, want.SHA256, want.Mode)
 		}
+		delete(seen, want.Path)
 	}
 	return nil
 }

@@ -20,7 +20,9 @@ abstract final class SleeveService {
 
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
-  /// a git URL cloned into the hub's workspaces directory. Respawning the name
+  /// a git URL cloned into the hub's workspaces directory. Branch options clone
+  /// local checkouts too; brief is delivered as the first chat message.
+  /// Respawning the name
   /// of an exited sleeve reuses its home directory and workspace and replaces
   /// its kept session.
   static const spawnSleeve = connect.Spec(
@@ -76,8 +78,8 @@ abstract final class SleeveService {
   );
 
   /// KillSleeve stops a sleeve's harness and every process in its sandbox and
-  /// forgets the sleeve. The workspace and the sleeve's home directory are kept
-  /// on disk.
+  /// retains its exited record. The workspace and the sleeve's home directory
+  /// are kept on disk unless drop_caches removes regenerable caches.
   static const killSleeve = connect.Spec(
     '/$name/KillSleeve',
     connect.StreamType.unary,
@@ -124,5 +126,13 @@ abstract final class SleeveService {
     connect.StreamType.unary,
     protectoratev1sleeve.SpawnEnvoyRequest.new,
     protectoratev1sleeve.SpawnEnvoyResponse.new,
+  );
+
+  /// PruneSleeves inventories disk and removes eligible data only with yes.
+  static const pruneSleeves = connect.Spec(
+    '/$name/PruneSleeves',
+    connect.StreamType.unary,
+    protectoratev1sleeve.PruneSleevesRequest.new,
+    protectoratev1sleeve.PruneSleevesResponse.new,
   );
 }

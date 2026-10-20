@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,8 +50,11 @@ func (h *Hub) GetSleeveRuntime(context.Context, *connect.Request[pb.GetSleeveRun
 		c := h.sleeves.Runtime()
 		r.BwrapPath, r.BwrapVersion, r.Overlays = c.BwrapPath, c.BwrapVersion, c.Overlays
 		r.GoBuildCache = c.GoCache
-		if c.Overlays && c.GoCache != "" {
-			r.GoBuildLower = filepath.Join(c.Home, "cache", "go-build-lower")
+		cache := h.sleeves.GoCacheStatus()
+		r.GoBuildLower, r.SnapshotBytes, r.SnapshotEntries = cache.Lower, cache.Bytes, cache.Entries
+		r.SnapshotPreparing, r.SnapshotError, r.SnapshotLimitBytes = cache.Preparing, cache.Error, cache.LimitBytes
+		if !cache.Prepared.IsZero() {
+			r.SnapshotPreparedAt = timestamppb.New(cache.Prepared)
 		}
 	}
 	return connect.NewResponse(r), nil
@@ -113,6 +115,8 @@ func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
 		ContextTokens:    c.Context,
 		ContextWindow:    c.Window,
 		LastSeq:          c.LastSeq,
+		Provider:         c.Provider,
+		LocalModel:       c.LocalModel,
 	}
 	if !c.CacheExpires.IsZero() {
 		s.CacheExpiresAt = timestamppb.New(c.CacheExpires)
@@ -137,7 +141,9 @@ func handoffToProto(h *sleeve.Handoff) *pb.Handoff {
 
 func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 	s := &pb.Sleeve{
+		BaseRepo: i.BaseRepo, BaseBranch: i.BaseBranch, BaseTip: i.BaseTip,
 		Parent:     i.Parent,
+		Killed:     i.Killed,
 		Name:       i.Name,
 		Harness:    harnessToProto[i.Harness],
 		Workspace:  i.Workspace,
@@ -148,17 +154,22 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Mode:       modeToProto(i.Mode),
 		Chat:       chatToProto(i.Chat),
 		Supervised: i.Supervised,
+		Nested:     i.Nested,
 		Handoff:    handoffToProto(i.Handoff),
+		Result:     resultToProto(i.Result),
 		Limits:     &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
 		State:      pb.SleeveState_SLEEVE_STATE_RUNNING,
 		Usage: &pb.SleeveUsage{
-			CpuPercent:         i.Usage.CPUPercent,
-			CpuSeconds:         i.Usage.CPUSeconds,
-			MemoryCurrentBytes: i.Usage.MemCurrent,
-			MemoryPeakBytes:    i.Usage.MemPeak,
-			Pids:               uint32(i.Usage.Pids),
-			OomKills:           i.Usage.OOMKills,
-			WorkspaceDiskBytes: i.Usage.DiskBytes,
+			CpuPercent:            i.Usage.CPUPercent,
+			CpuSeconds:            i.Usage.CPUSeconds,
+			MemoryCurrentBytes:    i.Usage.MemCurrent,
+			MemoryPeakBytes:       i.Usage.MemPeak,
+			Pids:                  uint32(i.Usage.Pids),
+			OomKills:              i.Usage.OOMKills,
+			WorkspaceDiskBytes:    i.Usage.DiskBytes,
+			HomeDiskBytes:         i.Usage.HomeBytes,
+			CacheDiskBytes:        i.Usage.CacheBytes,
+			GoBuildCacheDiskBytes: i.Usage.GoBuildCacheBytes,
 		},
 	}
 	s.ExitAfterIdle = durationpb.New(i.ExitAfterIdle)
@@ -219,9 +230,11 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; start it with the owner token via `protectorate orchestrator spawn` or START ENVOY in the app", m.Name))
 	}
 	r := sleeve.SpawnRequest{
+		Branch: m.Branch, NewBranch: m.NewBranch, Brief: m.Brief,
 		Selection: selectionFromProto(m.Selection),
 		Name:      m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
+		Nested: m.Nested,
 	}
 	if p := auth.PrincipalFrom(ctx); p != nil {
 		r.Parent, r.ParentID = "token:"+p.Name, p.ID
@@ -246,8 +259,11 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
 	}
+	if r.Mode != sleeve.ModeTerminal {
+		r.Selection, r.EffortFallback = h.spawnSelection(driver.Harness(r.Harness), r.Selection)
+	}
 	if !spawningEnvoy(ctx) {
-		if err := h.validateSelection(ctx, driver.Harness(r.Harness), r.Selection); err != nil {
+		if err := h.validateSpawnSelection(ctx, driver.Harness(r.Harness), r.Selection, r.EffortFallback); err != nil {
 			return nil, err
 		}
 	}
@@ -259,8 +275,9 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 }
 
 type spawnOpts struct {
-	selection driver.Selection
-	defaults  driver.Selection
+	selection      driver.Selection
+	defaults       driver.Selection
+	effortFallback bool
 	// keepLog continues the sleeve's chat log instead of moving it aside.
 	keepLog bool
 	// resume is a native session id the chat driver resumes instead of
@@ -273,6 +290,7 @@ type spawnOpts struct {
 // spawn starts a sleeve with its own identity token and, in chat mode, its
 // driver, undoing all of it if any step fails.
 func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sleeve.Info, error) {
+	start := time.Now()
 	// the orchestrator carries its own token, minted by `orchestrator spawn`
 	var identity auth.Token
 	var secret string
@@ -318,7 +336,7 @@ func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sl
 				log.Printf("sleeve %s: record session to resume: %v", info.Name, err)
 			}
 		}
-		if err := h.chat.start(ctx, info.Name, !o.keepLog, o.hold); err != nil {
+		if err := h.chat.start(ctx, info.Name, !o.keepLog, o.hold, r.Brief); err != nil {
 			h.chat.remove(info.Name)
 			if kerr := h.sleeves.Kill(context.WithoutCancel(ctx), info.Name); kerr != nil {
 				log.Printf("sleeve %s: kill after failed chat start: %v", info.Name, kerr)
@@ -327,6 +345,13 @@ func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sl
 			return sleeve.Info{}, err
 		}
 		info, _ = h.sleeves.Get(info.Name)
+		payload, err := structpb.NewStruct(map[string]any{
+			"harness": string(info.Harness), "workspace": info.Workspace, "mode": string(info.Mode),
+			"spawn_ms": float64(time.Since(start).Milliseconds()),
+		})
+		if err == nil {
+			h.emit("sleeve.spawned", info.Name, payload)
+		}
 	}
 	h.scanSessions(ctx)
 	h.pokeCoord()
@@ -386,8 +411,7 @@ func (c *coordinator) reapIdle(ctx context.Context) {
 			continue
 		}
 		s.mu.Lock()
-		pending := len(c.mail.Pending()[info.Name]) > 0
-		idle := s.state == pb.ChatState_CHAT_STATE_IDLE && !s.hubOwned && !pending
+		idle := c.h.chatIdleLocked(s)
 		if !idle {
 			s.idleSince = time.Time{}
 		} else if s.idleSince.IsZero() {
@@ -417,11 +441,23 @@ func (h *Hub) GetSleeve(_ context.Context, req *connect.Request[pb.GetSleeveRequ
 }
 
 func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeveRequest]) (*connect.Response[pb.KillSleeveResponse], error) {
+	if req.Msg.DropCaches {
+		p := auth.PrincipalFrom(ctx)
+		if p == nil || !p.Owner {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("dropping caches requires the owner token"))
+		}
+	}
 	h.chat.remove(req.Msg.Name)
 	if err := h.sleeves.Kill(ctx, req.Msg.Name); err != nil {
 		return nil, sleeveErr(err)
 	}
 	h.dropIdentity(req.Msg.Name, "")
+	h.emit("sleeve.killed", req.Msg.Name, nil)
+	if req.Msg.DropCaches {
+		if err := h.sleeves.DropCaches(ctx, req.Msg.Name); err != nil {
+			return nil, sleeveErr(err)
+		}
+	}
 	h.scanSessions(ctx)
 	h.pokeCoord()
 	return connect.NewResponse(&pb.KillSleeveResponse{}), nil
@@ -434,6 +470,9 @@ func (h *Hub) ownsSleeve(p *auth.Principal, msg any) bool {
 	var name string
 	switch r := msg.(type) {
 	case *pb.KillSleeveRequest:
+		if r.DropCaches {
+			return false
+		}
 		name = r.Name
 	default:
 		return false
@@ -448,4 +487,17 @@ func (h *Hub) ownsSleeve(p *auth.Principal, msg any) bool {
 	return info.ParentID != "" && info.ParentID == p.ID ||
 		info.Parent == sleeve.OrchestratorName && p.Name == sleeve.OrchestratorTokenName ||
 		info.Parent == p.Name && strings.HasPrefix(p.Name, sleeveTokenPrefix)
+}
+
+func (h *Hub) PruneSleeves(ctx context.Context, req *connect.Request[pb.PruneSleevesRequest]) (*connect.Response[pb.PruneSleevesResponse], error) {
+	r := req.Msg
+	entries, err := h.sleeves.Prune(ctx, sleeve.PruneOptions{Yes: r.Yes, Caches: r.Caches, Homes: r.Homes, Workspaces: r.Workspaces, Running: r.Running})
+	if err != nil {
+		return nil, sleeveErr(err)
+	}
+	res := &pb.PruneSleevesResponse{}
+	for _, e := range entries {
+		res.Entries = append(res.Entries, &pb.SleeveDiskEntry{Sleeve: e.Sleeve, Path: e.Path, Kind: e.Kind, Bytes: e.Bytes, Eligible: e.Eligible, Removed: e.Removed, Reason: e.Reason})
+	}
+	return connect.NewResponse(res), nil
 }

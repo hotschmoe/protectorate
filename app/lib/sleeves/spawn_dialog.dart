@@ -65,6 +65,9 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
   final _text = TextEditingController();
   final _cpu = TextEditingController();
   final _mem = TextEditingController();
+  final _branch = TextEditingController();
+  final _newBranch = TextEditingController();
+  final _brief = TextEditingController();
   Harness _harness = Harness.HARNESS_CLAUDE;
   ModelSelection _selection = ModelSelection();
   late _Source _source;
@@ -88,6 +91,9 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
     _text.dispose();
     _cpu.dispose();
     _mem.dispose();
+    _branch.dispose();
+    _newBranch.dispose();
+    _brief.dispose();
     super.dispose();
   }
 
@@ -148,6 +154,9 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
       SpawnSleeveRequest(
         name: _name.text.trim(),
         workspace: _workspace,
+        branch: _branch.text.trim(),
+        newBranch: _newBranch.text.trim(),
+        brief: _harness == Harness.HARNESS_SHELL ? '' : _brief.text,
         harness: _harness,
         selection: _selection,
         limits: SleeveLimits(cpuPercent: cpu, memoryBytes: Int64(memMb) << 20),
@@ -424,6 +433,31 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
                 harness: _harness,
                 selection: _selection,
                 onChanged: (value) => setState(() => _selection = value),
+              ),
+              TextFormField(
+                key: const ValueKey('sleeve-branch'),
+                controller: _branch,
+                decoration: const InputDecoration(
+                  labelText: 'Base branch (optional)',
+                  helperText: 'Branch fields create a separate clone',
+                ),
+              ),
+              TextFormField(
+                key: const ValueKey('sleeve-new-branch'),
+                controller: _newBranch,
+                decoration: const InputDecoration(
+                  labelText: 'New branch (optional)',
+                ),
+              ),
+              TextFormField(
+                key: const ValueKey('sleeve-brief'),
+                controller: _brief,
+                minLines: 3,
+                maxLines: 8,
+                enabled: _harness != Harness.HARNESS_SHELL,
+                decoration: const InputDecoration(
+                  labelText: 'Brief (optional, chat only)',
+                ),
               ),
               TextFormField(
                 key: const ValueKey('sleeve-cpu'),

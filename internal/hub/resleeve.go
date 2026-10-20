@@ -55,26 +55,33 @@ func (h *Hub) ResleeveSleeve(ctx context.Context, req *connect.Request[pb.Reslee
 		return nil, err
 	}
 	selection := driver.Selection{}
+	effortFallback := false
 	if info.Chat != nil && to == info.Harness {
 		selection = info.Chat.Requested
+		effortFallback = info.Chat.EffortFallback
 	}
 	if m.Selection != nil {
 		selection = selectionFromProto(m.Selection)
+		effortFallback = false
 	}
 	if m.NativeDefaults {
 		selection = driver.Selection{}
+		effortFallback = false
 	}
-	if to != info.Harness && info.Chat != nil && info.Chat.Requested != (driver.Selection{}) && m.Selection == nil && !m.NativeDefaults {
+	if to != info.Harness && info.Chat != nil && (info.Chat.Requested.Model != "" || info.Chat.Requested.Effort != "" && !info.Chat.EffortFallback) && m.Selection == nil && !m.NativeDefaults {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("choose target selection or explicitly use native defaults when changing harnesses"))
 	}
-	if err := h.validateSelection(ctx, driver.Harness(to), selection); err != nil {
+	if !m.NativeDefaults && selection.Effort == "" {
+		selection, effortFallback = h.spawnSelection(driver.Harness(to), selection)
+	}
+	if err := h.validateSpawnSelection(ctx, driver.Harness(to), selection, effortFallback); err != nil {
 		return nil, err
 	}
 	wait := defaultResleeveWait
 	if m.Wait != nil && m.Wait.AsDuration() > 0 {
 		wait = m.Wait.AsDuration()
 	}
-	out, err := h.resleeve(ctx, info, to, m.Interrupt, wait, selection)
+	out, err := h.resleeve(ctx, info, to, m.Interrupt, wait, selection, effortFallback)
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +120,8 @@ func (h *Hub) summarizers(from sleeve.Harness) []sleeve.Harness {
 	return append(out, sleeve.Pi)
 }
 
-func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness, interrupt bool, wait time.Duration, selection driver.Selection) (sleeve.Info, error) {
-	cs, err := h.chat.get(info.Name, false)
+func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness, interrupt bool, wait time.Duration, selection driver.Selection, effortFallback bool) (sleeve.Info, error) {
+	cs, err := h.chat.get(info.Name, false, false)
 	if err != nil {
 		return sleeve.Info{}, err
 	}
@@ -164,7 +171,7 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err != nil {
 		log.Printf("resleeve %s: read env: %v", info.Name, err)
 	}
-	out, err := h.switchHarness(bg, info, to, env, selection, facts.SessionID)
+	out, err := h.switchHarness(bg, info, to, env, selection, effortFallback, facts.SessionID)
 	if err != nil {
 		return sleeve.Info{}, err
 	}
@@ -177,7 +184,7 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err := h.sleeves.SetHandoff(info.Name, rec); err != nil {
 		log.Printf("resleeve %s: record handoff: %v", info.Name, err)
 	}
-	ns, err := h.chat.get(info.Name, false)
+	ns, err := h.chat.get(info.Name, false, false)
 	if err == nil {
 		ns.note(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Handoff{Handoff: handoffToProto(&rec)} })
 	}
@@ -213,16 +220,18 @@ func (h *Hub) writeHandoff(info sleeve.Info, to sleeve.Harness, facts handoff.Fa
 	return path, archive, nil
 }
 
-func (h *Hub) switchHarness(ctx context.Context, info sleeve.Info, to sleeve.Harness, env map[string]string, selection driver.Selection, resume string) (sleeve.Info, error) {
-	out, err := h.replaceHarness(ctx, info, to, env, spawnOpts{keepLog: true, hold: true, selection: selection})
+func (h *Hub) switchHarness(ctx context.Context, info sleeve.Info, to sleeve.Harness, env map[string]string, selection driver.Selection, effortFallback bool, resume string) (sleeve.Info, error) {
+	out, err := h.replaceHarness(ctx, info, to, env, spawnOpts{keepLog: true, hold: true, selection: selection, effortFallback: effortFallback})
 	if err == nil {
 		return out, nil
 	}
 	original, defaults := driver.Selection{}, driver.Selection{}
+	originalFallback := false
 	if info.Chat != nil {
 		original, defaults = info.Chat.Requested, info.Chat.Defaults
+		originalFallback = info.Chat.EffortFallback
 	}
-	if _, rerr := h.replaceHarness(ctx, info, info.Harness, env, spawnOpts{keepLog: true, resume: resume, selection: original, defaults: defaults}); rerr != nil {
+	if _, rerr := h.replaceHarness(ctx, info, info.Harness, env, spawnOpts{keepLog: true, resume: resume, selection: original, defaults: defaults, effortFallback: originalFallback}); rerr != nil {
 		return sleeve.Info{}, connect.NewError(connect.CodeInternal, fmt.Errorf("start %s: %v; restoring %s also failed: %w", to, err, info.Harness, rerr))
 	}
 	return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("start %s: %w; %s is back on its own session", to, err, info.Harness))
@@ -266,17 +275,43 @@ func (h *Hub) emitMap(kind, subject string, payload map[string]any) {
 // name, workspace and limits on harness to, continuing its chat log.
 func (h *Hub) replaceHarness(ctx context.Context, info sleeve.Info, to sleeve.Harness, env map[string]string, o spawnOpts) (sleeve.Info, error) {
 	h.chat.remove(info.Name)
+	latest, err := h.sleeves.Get(info.Name)
+	if err == nil {
+		info = latest
+	}
 	if err := h.sleeves.Kill(ctx, info.Name); err != nil && !errors.Is(err, sleeve.ErrNotFound) {
 		return sleeve.Info{}, fmt.Errorf("stop %s: %w", info.Harness, err)
 	}
 	h.dropIdentity(info.Name, "")
-	return h.spawn(ctx, sleeve.SpawnRequest{
+	out, err := h.spawn(ctx, sleeve.SpawnRequest{
+		Base:   &info,
 		Parent: info.Parent, ParentID: info.ParentID,
 		ReadOnly: info.ReadOnly, ExitAfterIdle: info.ExitAfterIdle,
-		Name: info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
+		Nested: info.Nested,
+		Name:   info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
 		Limits: info.Limits(), Env: env, Supervised: info.Supervised,
-		Selection: o.selection,
+		Selection: o.selection, EffortFallback: o.effortFallback,
 	}, o)
+	if err != nil {
+		return sleeve.Info{}, err
+	}
+	if info.Chat != nil {
+		s, err := h.chat.get(info.Name, false, true)
+		if err != nil {
+			return sleeve.Info{}, err
+		}
+		s.mu.Lock()
+		s.briefSeq = info.Chat.BriefSeq
+		err = s.persistLocked(true)
+		s.mu.Unlock()
+		if err != nil {
+			return sleeve.Info{}, fmt.Errorf("restore brief after resleeve: %w", err)
+		}
+	}
+	if err := h.sleeves.SetResult(info.Name, info.Result); err != nil {
+		return sleeve.Info{}, fmt.Errorf("restore result after resleeve: %w", err)
+	}
+	return out, nil
 }
 
 // quiesce returns once the chat is idle. A turn that runs past wait, or any

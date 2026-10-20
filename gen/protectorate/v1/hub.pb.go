@@ -181,14 +181,20 @@ func (*GetSleeveRuntimeRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetSleeveRuntimeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BwrapPath     string                 `protobuf:"bytes,1,opt,name=bwrap_path,json=bwrapPath,proto3" json:"bwrap_path,omitempty"`
-	BwrapVersion  string                 `protobuf:"bytes,2,opt,name=bwrap_version,json=bwrapVersion,proto3" json:"bwrap_version,omitempty"`
-	Overlays      bool                   `protobuf:"varint,3,opt,name=overlays,proto3" json:"overlays,omitempty"`
-	GoBuildCache  string                 `protobuf:"bytes,4,opt,name=go_build_cache,json=goBuildCache,proto3" json:"go_build_cache,omitempty"`
-	GoBuildLower  string                 `protobuf:"bytes,5,opt,name=go_build_lower,json=goBuildLower,proto3" json:"go_build_lower,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	BwrapPath          string                 `protobuf:"bytes,1,opt,name=bwrap_path,json=bwrapPath,proto3" json:"bwrap_path,omitempty"`
+	BwrapVersion       string                 `protobuf:"bytes,2,opt,name=bwrap_version,json=bwrapVersion,proto3" json:"bwrap_version,omitempty"`
+	Overlays           bool                   `protobuf:"varint,3,opt,name=overlays,proto3" json:"overlays,omitempty"`
+	GoBuildCache       string                 `protobuf:"bytes,4,opt,name=go_build_cache,json=goBuildCache,proto3" json:"go_build_cache,omitempty"`
+	GoBuildLower       string                 `protobuf:"bytes,5,opt,name=go_build_lower,json=goBuildLower,proto3" json:"go_build_lower,omitempty"`
+	SnapshotBytes      uint64                 `protobuf:"varint,6,opt,name=snapshot_bytes,json=snapshotBytes,proto3" json:"snapshot_bytes,omitempty"`
+	SnapshotEntries    uint64                 `protobuf:"varint,7,opt,name=snapshot_entries,json=snapshotEntries,proto3" json:"snapshot_entries,omitempty"`
+	SnapshotPreparedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=snapshot_prepared_at,json=snapshotPreparedAt,proto3" json:"snapshot_prepared_at,omitempty"`
+	SnapshotPreparing  bool                   `protobuf:"varint,9,opt,name=snapshot_preparing,json=snapshotPreparing,proto3" json:"snapshot_preparing,omitempty"`
+	SnapshotError      string                 `protobuf:"bytes,10,opt,name=snapshot_error,json=snapshotError,proto3" json:"snapshot_error,omitempty"`
+	SnapshotLimitBytes uint64                 `protobuf:"varint,11,opt,name=snapshot_limit_bytes,json=snapshotLimitBytes,proto3" json:"snapshot_limit_bytes,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetSleeveRuntimeResponse) Reset() {
@@ -256,6 +262,48 @@ func (x *GetSleeveRuntimeResponse) GetGoBuildLower() string {
 	return ""
 }
 
+func (x *GetSleeveRuntimeResponse) GetSnapshotBytes() uint64 {
+	if x != nil {
+		return x.SnapshotBytes
+	}
+	return 0
+}
+
+func (x *GetSleeveRuntimeResponse) GetSnapshotEntries() uint64 {
+	if x != nil {
+		return x.SnapshotEntries
+	}
+	return 0
+}
+
+func (x *GetSleeveRuntimeResponse) GetSnapshotPreparedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SnapshotPreparedAt
+	}
+	return nil
+}
+
+func (x *GetSleeveRuntimeResponse) GetSnapshotPreparing() bool {
+	if x != nil {
+		return x.SnapshotPreparing
+	}
+	return false
+}
+
+func (x *GetSleeveRuntimeResponse) GetSnapshotError() string {
+	if x != nil {
+		return x.SnapshotError
+	}
+	return ""
+}
+
+func (x *GetSleeveRuntimeResponse) GetSnapshotLimitBytes() uint64 {
+	if x != nil {
+		return x.SnapshotLimitBytes
+	}
+	return 0
+}
+
 var File_protectorate_v1_hub_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_hub_proto_rawDesc = "" +
@@ -270,14 +318,21 @@ const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"\x0euptime_seconds\x18\x05 \x01(\x03R\ruptimeSeconds\x129\n" +
 	"\n" +
 	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"\x19\n" +
-	"\x17GetSleeveRuntimeRequest\"\xc6\x01\n" +
+	"\x17GetSleeveRuntimeRequest\"\xee\x03\n" +
 	"\x18GetSleeveRuntimeResponse\x12\x1d\n" +
 	"\n" +
 	"bwrap_path\x18\x01 \x01(\tR\tbwrapPath\x12#\n" +
 	"\rbwrap_version\x18\x02 \x01(\tR\fbwrapVersion\x12\x1a\n" +
 	"\boverlays\x18\x03 \x01(\bR\boverlays\x12$\n" +
 	"\x0ego_build_cache\x18\x04 \x01(\tR\fgoBuildCache\x12$\n" +
-	"\x0ego_build_lower\x18\x05 \x01(\tR\fgoBuildLower2\xd3\x01\n" +
+	"\x0ego_build_lower\x18\x05 \x01(\tR\fgoBuildLower\x12%\n" +
+	"\x0esnapshot_bytes\x18\x06 \x01(\x04R\rsnapshotBytes\x12)\n" +
+	"\x10snapshot_entries\x18\a \x01(\x04R\x0fsnapshotEntries\x12L\n" +
+	"\x14snapshot_prepared_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x12snapshotPreparedAt\x12-\n" +
+	"\x12snapshot_preparing\x18\t \x01(\bR\x11snapshotPreparing\x12%\n" +
+	"\x0esnapshot_error\x18\n" +
+	" \x01(\tR\rsnapshotError\x120\n" +
+	"\x14snapshot_limit_bytes\x18\v \x01(\x04R\x12snapshotLimitBytes2\xd3\x01\n" +
 	"\n" +
 	"HubService\x12W\n" +
 	"\tGetStatus\x12!.protectorate.v1.GetStatusRequest\x1a\".protectorate.v1.GetStatusResponse\"\x03\x90\x02\x01\x12l\n" +
@@ -305,15 +360,16 @@ var file_protectorate_v1_hub_proto_goTypes = []any{
 }
 var file_protectorate_v1_hub_proto_depIdxs = []int32{
 	4, // 0: protectorate.v1.GetStatusResponse.started_at:type_name -> google.protobuf.Timestamp
-	0, // 1: protectorate.v1.HubService.GetStatus:input_type -> protectorate.v1.GetStatusRequest
-	2, // 2: protectorate.v1.HubService.GetSleeveRuntime:input_type -> protectorate.v1.GetSleeveRuntimeRequest
-	1, // 3: protectorate.v1.HubService.GetStatus:output_type -> protectorate.v1.GetStatusResponse
-	3, // 4: protectorate.v1.HubService.GetSleeveRuntime:output_type -> protectorate.v1.GetSleeveRuntimeResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	4, // 1: protectorate.v1.GetSleeveRuntimeResponse.snapshot_prepared_at:type_name -> google.protobuf.Timestamp
+	0, // 2: protectorate.v1.HubService.GetStatus:input_type -> protectorate.v1.GetStatusRequest
+	2, // 3: protectorate.v1.HubService.GetSleeveRuntime:input_type -> protectorate.v1.GetSleeveRuntimeRequest
+	1, // 4: protectorate.v1.HubService.GetStatus:output_type -> protectorate.v1.GetStatusResponse
+	3, // 5: protectorate.v1.HubService.GetSleeveRuntime:output_type -> protectorate.v1.GetSleeveRuntimeResponse
+	4, // [4:6] is the sub-list for method output_type
+	2, // [2:4] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_hub_proto_init() }

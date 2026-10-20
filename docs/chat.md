@@ -14,7 +14,63 @@ protectorate chat send alice "run the tests"
 protectorate chat interrupt alice
 protectorate chat respond alice <approval-id> --allow
 protectorate chat compact alice
+protectorate chat wait alice --until idle --timeout 10m
+protectorate chat wait alice bob --until report --timeout 30m
 ```
+
+## Results and completion
+
+Finish every brief from inside its sleeve with a marked result:
+
+```sh
+protectorate report --status complete --summary-file result.md
+printf '%s\n' 'Implementation is partial; host validation remains.' | protectorate report --status partial -
+protectorate report --status blocked --summary-file blocker.md
+```
+
+Statuses are `complete`, `partial` and `blocked`. Use `partial` whenever work
+remains, including validation that the brief requires. The UTF-8 summary is
+optional and limited to 32 KiB, like a mail body; `--summary-file -` also reads
+stdin. Only the sleeve's own identity may report. The owner and other sleeves
+cannot submit a result on its behalf. Terminal sleeves can report too, and
+`chat watch` exposes their report history without starting a chat driver.
+
+Each submission records its status, summary, timestamp and chat sequence in
+history. A later report replaces the current result while preserving every
+earlier report in history. `sleeve show`, `sleeve ls --json` and the app's
+sleeve card expose the latest result; tap its REPORT button to read the summary.
+Results persist across hub restarts. A new accepted `chat send` starts a brief
+and clears the current result. Mail delivery and its extra turns leave the
+current result intact, including across resleeves. A fresh spawn starts without
+a result.
+
+`chat wait` waits on the hub's event bus without polling. Its default condition
+is `--until idle`: the chat must be idle, outside a resleeve takeover, with no
+pending or queued mail, exactly as `--exit-after-idle` requires. `--until report`
+accepts any marked status and prints its summary; callers must inspect partial
+and blocked results before deciding the work is done. An already satisfied
+condition returns immediately. Several names wait concurrently and print each
+result as it arrives, returning success only after all qualify. `--json` emits
+one `WaitResponse` per sleeve. A timeout, sleeve exit, failure or removal before
+the condition is met exits nonzero. `--timeout 0` (the CLI default) waits until
+interrupted. Idle waits require chat mode.
+
+The unary `ChatService.Wait` RPC uses the same event-driven wait and is exposed
+to Envoy and MCP as the read-only `chat_wait` tool. Its `until` is
+`WAIT_UNTIL_IDLE` or `WAIT_UNTIL_REPORT`; `timeout` is a protobuf duration,
+defaulting to ten minutes when omitted and waiting until cancellation when
+explicitly zero. For example, MCP arguments
+`{"sleeve":"alice","until":"WAIT_UNTIL_REPORT","timeout":"1800s"}`
+return the sleeve name and its result. Cancellation ends the subscription.
+
+`protectorate events` already carries `chat.state` and `sleeve.exited`;
+`sleeve.report` adds the status, summary, time and chat/brief sequences, and
+`sleeve.brief` announces that a new brief cleared a result. Use `events --json`
+for payloads. `sleeve.killed` announces a kill independently of whether its
+record is retained; a stored result still satisfies a report wait after exit.
+This remains the single owner event stream.
+Mailbox reads also emit `msg.read`, so idle waits wake when pending mail is
+read without starting a harness turn.
 
 ## Workspaces
 
@@ -99,13 +155,22 @@ In the app, Codex creation forms have native selectors, and an idle chat's
 menu has MODEL AND EFFORT. Effective model and effort appear in the chat header
 and sleeve information. Other harnesses explain that controls are unavailable.
 
-`--model`/`--effort` replace the complete requested selection. An omitted model
-uses the native session's original model; an explicit model with omitted effort
-uses that model's advertised default effort. `--native-defaults` restores both
-defaults captured before the first override. With no selection at creation the
-driver sends no override. Requested, effective and captured default settings are
-persisted separately. Native model rerouting updates the effective model and
-leaves effort unknown when the harness does not report it.
+At creation, an omitted effort uses `hub serve --sleeve-effort LEVEL`, which
+defaults to `high`, including for Envoy and resleeves onto Codex. An explicit
+effort wins. Set `--sleeve-effort=''` to leave native defaults in control. If
+the chosen model does not advertise the hub's default effort, the hub logs
+the fallback and uses the native effort while retaining the requested effort.
+Other harnesses and terminal sleeves keep their native behavior. Existing
+chats retain their persisted selection across hub restarts.
+
+Between turns, `chat settings --model`/`--effort` replace the complete requested
+selection. An omitted model uses the native session's original model; an
+explicit model with omitted effort uses that model's advertised default effort.
+`--native-defaults` restores both defaults captured before the first override.
+Requested, effective and captured default settings are persisted separately.
+Native model rerouting updates the effective model and leaves effort unknown
+when the harness does not report it. `sleeve ls` includes effective model and
+effort columns; `sleeve show` includes requested and native settings as well.
 
 Updates require an idle chat with no pending approval, compaction or resleeve.
 Codex uses native `thread/settings/update` without a turn or restart,
@@ -130,9 +195,11 @@ and replayable settings events separate requested/effective values;
 `ChatStatus.reasoning_effort` reports the effective effort.
 
 Resleeving preserves the request on the same harness. When moving a selected
-chat to another harness, explicitly choose target `--model`/`--effort` or
+chat with explicit selection to another harness, choose target `--model`/`--effort` or
 `--native-defaults`; there is no automatic vendor mapping. The API fields are
-`ResleeveSleeveRequest.selection` and `native_defaults`. See
+`ResleeveSleeveRequest.selection` and `native_defaults`. A hub-applied effort
+alone does not require an explicit choice when changing harnesses;
+`--native-defaults` deliberately bypasses the hub effort default. See
 [delegation](coordination.md#delegation) for native tasks versus sleeves.
 
 Catalog discovery before creation runs in a temporary-home sandbox with the

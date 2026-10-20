@@ -22,19 +22,53 @@ const (
 // Chat is the persisted chat summary of a sleeve. State holds the hub's
 // chat state name; the sleeve layer does not interpret it.
 type Chat struct {
-	State        string           `json:"state,omitempty"`
-	SessionID    string           `json:"session_id,omitempty"`
-	Model        string           `json:"model,omitempty"`
-	Effort       string           `json:"effort,omitempty"`
-	Requested    driver.Selection `json:"requested,omitempty"`
-	Defaults     driver.Selection `json:"native_defaults,omitempty"`
-	Provider     string           `json:"provider,omitempty"`
-	LocalModel   bool             `json:"local_model,omitempty"`
-	Context      uint64           `json:"context_tokens,omitempty"`
-	Window       uint64           `json:"context_window,omitempty"`
-	CacheExpires time.Time        `json:"cache_expires,omitempty"`
-	LastSeq      uint64           `json:"last_seq,omitempty"`
-	LastActivity time.Time        `json:"last_activity,omitempty"`
+	Starting       bool             `json:"starting,omitempty"`
+	State          string           `json:"state,omitempty"`
+	SessionID      string           `json:"session_id,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	Effort         string           `json:"effort,omitempty"`
+	Requested      driver.Selection `json:"requested,omitempty"`
+	Defaults       driver.Selection `json:"native_defaults,omitempty"`
+	EffortFallback bool             `json:"effort_fallback,omitempty"`
+	Provider       string           `json:"provider,omitempty"`
+	LocalModel     bool             `json:"local_model,omitempty"`
+	Context        uint64           `json:"context_tokens,omitempty"`
+	Window         uint64           `json:"context_window,omitempty"`
+	CacheExpires   time.Time        `json:"cache_expires,omitempty"`
+	LastSeq        uint64           `json:"last_seq,omitempty"`
+	LastActivity   time.Time        `json:"last_activity,omitempty"`
+	BriefSeq       uint64           `json:"brief_seq,omitempty"`
+}
+
+type Result struct {
+	Status   string    `json:"status"`
+	Summary  string    `json:"summary"`
+	Time     time.Time `json:"time"`
+	ChatSeq  uint64    `json:"chat_seq"`
+	BriefSeq uint64    `json:"brief_seq"`
+}
+
+func (m *Manager) SetResult(name string, result *Result) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e := m.sleeves[name]
+	if e == nil {
+		return ErrNotFound
+	}
+	previous := e.Result
+	previousChat := e.Chat
+	e.Result = result
+	if result != nil && e.Mode == ModeChat && e.Chat != nil && result.ChatSeq > e.Chat.LastSeq {
+		c := *e.Chat
+		c.LastSeq, c.LastActivity = result.ChatSeq, result.Time
+		e.Chat = &c
+	}
+	if err := m.saveLocked(); err != nil {
+		e.Result = previous
+		e.Chat = previousChat
+		return fmt.Errorf("persist sleeve result: %w", err)
+	}
+	return nil
 }
 
 func resolveMode(h Harness, m Mode, args []string) (Mode, error) {

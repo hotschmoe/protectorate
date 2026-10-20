@@ -22,6 +22,7 @@ import (
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 // fakeClaude speaks enough of Claude's stream-json protocol for the chat
@@ -88,6 +89,7 @@ type chatRig struct {
 
 func newChatRig(t *testing.T) *chatRig {
 	t.Helper()
+	testenv.E2E(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	bin := t.TempDir()
 	for _, h := range []string{"claude", "codex", "grok", "pi"} {
@@ -98,9 +100,6 @@ func newChatRig(t *testing.T) *chatRig {
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	home := t.TempDir()
 	t.Setenv("PROTECTORATE_HOME", home)
-	for _, key := range []string{"PROTECTORATE_TOKEN_FILE", "PROTECTORATE_HUB", "PROTECTORATE_TOKEN"} {
-		t.Setenv(key, "")
-	}
 	cfg, err := sleeve.DefaultConfig(home, []string{bin})
 	if err != nil {
 		t.Fatal(err)
@@ -115,16 +114,20 @@ func newChatRig(t *testing.T) *chatRig {
 	h.Sessions = session.New(sock)
 	h.SessionPoll = 20 * time.Millisecond
 	name := fmt.Sprintf("chat%d", time.Now().UnixNano()%1000000)
-	t.Cleanup(func() {
-		exec.Command("systemctl", "--user", "kill", "--signal=SIGKILL", cfg.UnitName(name)+".scope").Run()
-		exec.Command("tmux", "-L", sock, "kill-server").Run()
-	})
 	opts := h.SleeveOptions(cfg)
 	opts.UsageInterval = 100 * time.Millisecond
 	m, err := sleeve.Open(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, info := range m.List() {
+			_ = m.Kill(ctx, info.Name)
+		}
+		exec.CommandContext(ctx, "tmux", "-L", sock, "kill-server").Run()
+	})
 	h.SetSleeves(m)
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(srv.Close)
@@ -398,7 +401,7 @@ func TestChatEndToEnd(t *testing.T) {
 	if err := <-live.done; err != nil {
 		t.Fatalf("watch after kill ended with %v", err)
 	}
-	if _, err := r.send("dead", ""); code(err) != connect.CodeNotFound {
+	if _, err := r.send("dead", ""); code(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("send to killed sleeve: %v", err)
 	}
 }

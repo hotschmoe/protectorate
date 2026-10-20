@@ -3,6 +3,7 @@ package sleeve
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -21,6 +22,9 @@ func (c Config) scopeDir(name string) string {
 }
 
 func (c Config) scopeAlive(name string) bool {
+	if c.delegated {
+		return cgroupPopulated(c.scopeDir(name))
+	}
 	_, err := os.Stat(c.scopeDir(name))
 	return err == nil
 }
@@ -28,8 +32,7 @@ func (c Config) scopeAlive(name string) bool {
 // scopeRunning is true once the scope holds a process; the cgroup appears
 // slightly before systemd-run moves itself in.
 func (c Config) scopeRunning(name string) bool {
-	b, err := os.ReadFile(filepath.Join(c.scopeDir(name), "cgroup.procs"))
-	return err == nil && len(bytes.TrimSpace(b)) > 0
+	return cgroupPopulated(c.scopeDir(name))
 }
 
 // scopeNames lists the sleeve scopes currently in the cgroup tree.
@@ -51,13 +54,28 @@ func (c Config) Preflight() error {
 	if runtime.GOOS != "linux" {
 		return ErrUnsupported
 	}
-	for _, b := range []string{c.bwrap(), "systemd-run", "systemctl"} {
+	binaries := []string{c.bwrap(), "systemd-run", "systemctl"}
+	if c.delegated {
+		binaries = []string{c.bwrap(), "unshare", "flock"}
+		b, err := os.ReadFile(filepath.Join(c.CgroupRoot, "cgroup.subtree_control"))
+		if err != nil {
+			return fmt.Errorf("%w: read delegated controllers: %w", ErrUnavailable, err)
+		}
+		for _, controller := range []string{"cpu", "memory", "pids"} {
+			if !contains(strings.Fields(string(b)), controller) {
+				return fmt.Errorf("%w: delegated %s controller is unavailable", ErrUnavailable, controller)
+			}
+		}
+	}
+	for _, b := range binaries {
 		if _, err := exec.LookPath(b); err != nil {
 			return fmt.Errorf("%w: %s not found in PATH", ErrUnavailable, b)
 		}
 	}
-	if fi, err := os.Stat(filepath.Dir(c.CgroupRoot)); err != nil || !fi.IsDir() {
-		return fmt.Errorf("%w: no systemd user manager cgroup at %s", ErrUnavailable, filepath.Dir(c.CgroupRoot))
+	if !c.delegated {
+		if fi, err := os.Stat(filepath.Dir(c.CgroupRoot)); err != nil || !fi.IsDir() {
+			return fmt.Errorf("%w: no systemd user manager cgroup at %s", ErrUnavailable, filepath.Dir(c.CgroupRoot))
+		}
 	}
 	return nil
 }
@@ -120,6 +138,9 @@ func (c Config) readOOMKills(name string) (uint64, bool) {
 // killScope sends SIGKILL to every process in the scope and waits for the
 // cgroup to disappear.
 func (c Config) killScope(ctx context.Context, name string) error {
+	if c.delegated {
+		return c.killChildScope(ctx, name)
+	}
 	if !c.scopeAlive(name) {
 		return nil
 	}
@@ -163,12 +184,23 @@ func dirSize(ctx context.Context, dir string) (uint64, error) {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err != nil || !d.Type().IsRegular() {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		if fi, err := d.Info(); err == nil {
-			total += uint64(fi.Size())
+		if err != nil {
+			return err
 		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		fi, err := d.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		total += uint64(fi.Size())
 		return nil
 	})
 	return total, err

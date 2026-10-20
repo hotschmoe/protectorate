@@ -13,10 +13,11 @@ import "chat.connect.spec.dart" as specs;
 /// so any number of clients can watch and a reconnecting client resumes from
 /// the last seq it saw. The harness's own session store stays the full record;
 /// the log is the view. A sleeve is in chat mode for life, or in terminal mode
-/// and then has no chat.
+/// and then has only self-reported result events in this log.
 extension type ChatServiceClient (connect.Transport _transport) {
   /// Watch replays the sleeve's events after after_seq, then streams new ones
-  /// until the client disconnects or the sleeve is killed.
+  /// until the client disconnects or the sleeve is killed. Terminal sleeves
+  /// expose their result history without starting a headless harness.
   Stream<protectoratev1chat.ChatEvent> watch(
     protectoratev1chat.WatchRequest input, {
     connect.Headers? headers,
@@ -140,6 +141,45 @@ extension type ChatServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.ChatService.setSelection,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// Report replaces this sleeve's result for its current brief. Only the
+  /// sleeve's own identity token may report, never the owner or another sleeve.
+  Future<protectoratev1chat.ReportResponse> report(
+    protectoratev1chat.ReportRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.ChatService.report,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// Wait blocks on hub events until a sleeve is idle without pending mail,
+  /// or has reported for its current brief. Exits and timeouts fail the call.
+  /// Available as the read-only MCP tool chat_wait; no polling is needed.
+  Future<protectoratev1chat.WaitResponse> wait(
+    protectoratev1chat.WaitRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.ChatService.wait,
       input,
       signal: signal,
       headers: headers,

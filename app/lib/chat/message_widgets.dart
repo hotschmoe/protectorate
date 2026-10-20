@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/chat.pb.dart';
 import '../sleeves/sleeve_info.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
@@ -533,4 +534,10 @@ Widget buildChatItem(
   CompactionItem() => CompactionMarker(item: item),
   ErrorItem() => ErrorRow(item: item),
   HandoffItem() => HandoffMarker(item: item),
+  ReportItem() => NoteStrip(
+    'REPORT ${item.result.status.name.replaceFirst('REPORT_STATUS_', '')}\n${item.result.summary}',
+    tone: item.result.status == ReportStatus.REPORT_STATUS_COMPLETE
+        ? Tone.info
+        : Tone.warn,
+  ),
 };

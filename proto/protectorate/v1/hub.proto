@@ -39,4 +39,10 @@ message GetSleeveRuntimeResponse {
   bool overlays = 3;
   string go_build_cache = 4;
   string go_build_lower = 5;
+  uint64 snapshot_bytes = 6;
+  uint64 snapshot_entries = 7;
+  google.protobuf.Timestamp snapshot_prepared_at = 8;
+  bool snapshot_preparing = 9;
+  string snapshot_error = 10;
+  uint64 snapshot_limit_bytes = 11;
 }

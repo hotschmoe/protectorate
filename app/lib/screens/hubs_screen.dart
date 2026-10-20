@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../hubs/hub_client.dart';
+import '../hubs/connection.dart';
 import '../hubs/hub_profile.dart';
 import '../version.dart';
 import '../theme/tokens.dart';
@@ -20,7 +21,8 @@ class HubsScreen extends StatelessWidget {
   Future<void> _edit(BuildContext context, [HubProfile? existing]) async {
     final result = await showDialog<HubProfile>(
       context: context,
-      builder: (_) => _HubDialog(existing: existing),
+      builder: (_) =>
+          _HubDialog(existing: existing, clientFactory: clientFactory),
     );
     if (result != null) await store.upsert(result);
   }
@@ -187,9 +189,10 @@ class HubsScreen extends StatelessWidget {
 }
 
 class _HubDialog extends StatefulWidget {
-  const _HubDialog({this.existing});
+  const _HubDialog({this.existing, required this.clientFactory});
 
   final HubProfile? existing;
+  final HubClient Function(HubProfile) clientFactory;
 
   @override
   State<_HubDialog> createState() => _HubDialogState();
@@ -202,6 +205,8 @@ class _HubDialogState extends State<_HubDialog> {
     text: widget.existing?.baseUrl ?? 'http://',
   );
   late final _token = TextEditingController(text: widget.existing?.token);
+  bool _saving = false;
+  Object? _error;
 
   @override
   void dispose() {
@@ -211,22 +216,35 @@ class _HubDialogState extends State<_HubDialog> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     var url = _url.text.trim();
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
-    Navigator.of(context).pop(
-      HubProfile(
-        id:
-            widget.existing?.id ??
-            DateTime.now().microsecondsSinceEpoch.toString(),
-        name: _name.text.trim(),
-        baseUrl: url,
-        token: _token.text.trim(),
-      ),
+    final profile = HubProfile(
+      id:
+          widget.existing?.id ??
+          DateTime.now().microsecondsSinceEpoch.toString(),
+      name: _name.text.trim(),
+      baseUrl: url,
+      token: _token.text.trim(),
     );
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await probeHub(widget.clientFactory(profile).hub, profile.baseUrl);
+      if (mounted) Navigator.of(context).pop(profile);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error;
+          _saving = false;
+        });
+      }
+    }
   }
 
   @override
@@ -235,29 +253,35 @@ class _HubDialogState extends State<_HubDialog> {
       title: Text(widget.existing == null ? 'Add hub' : 'Edit hub'),
       content: Form(
         key: _form,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              key: const ValueKey('hub-name'),
-              controller: _name,
-              decoration: const InputDecoration(labelText: 'Name'),
-              validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
-            ),
-            TextFormField(
-              key: const ValueKey('hub-url'),
-              controller: _url,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(labelText: 'Base URL'),
-              validator: (v) => validateBaseUrl(v ?? ''),
-            ),
-            TextFormField(
-              key: const ValueKey('hub-token'),
-              controller: _token,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Token'),
-            ),
-          ],
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const ValueKey('hub-name'),
+                controller: _name,
+                enabled: !_saving,
+                decoration: const InputDecoration(labelText: 'Name'),
+                validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                key: const ValueKey('hub-url'),
+                controller: _url,
+                enabled: !_saving,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(labelText: 'Base URL'),
+                validator: (v) => validateBaseUrl(v ?? ''),
+              ),
+              TextFormField(
+                key: const ValueKey('hub-token'),
+                controller: _token,
+                enabled: !_saving,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Token'),
+              ),
+              if (_error != null) Text('$_error'),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -267,8 +291,8 @@ class _HubDialogState extends State<_HubDialog> {
         ),
         FilledButton(
           key: const ValueKey('hub-save'),
-          onPressed: _save,
-          child: const Text('SAVE'),
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'CHECKING' : 'SAVE'),
         ),
       ],
     );

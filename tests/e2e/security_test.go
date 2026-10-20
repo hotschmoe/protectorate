@@ -123,7 +123,13 @@ func (c *cluster) securityScenario(t *testing.T) {
 		})
 		c.token = tc.token
 		var direct map[string]any
-		if s := c.rpc("JobService", "SubmitJob", map[string]any{"target": map[string]any{"node": "peer"}, "command": []string{"true"}}, &direct); s != tc.want {
+		var s int
+		c.eventually(func() bool {
+			direct = nil
+			s = c.rpc("JobService", "SubmitJob", map[string]any{"target": map[string]any{"node": "peer"}, "command": []string{"true"}}, &direct)
+			return s != 400 || !strings.Contains(fmt.Sprint(direct["message"]), "node peer is unreachable")
+		})
+		if s != tc.want {
 			t.Fatalf("care %s: %d want=%d", tc.name, s, tc.want)
 		}
 		if tc.want == 200 {

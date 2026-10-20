@@ -26,6 +26,7 @@ func printSelection(w io.Writer, c *pb.ChatStatus) {
 		return s
 	}
 	fmt.Fprintf(w, "model\t%s\neffort\t%s\nrequested model\t%s\nrequested effort\t%s\n", value(c.GetModel(), "unknown"), value(c.GetReasoningEffort(), "unknown"), value(c.GetSettings().GetRequested().GetModel(), "native default"), value(c.GetSettings().GetRequested().GetEffort(), "native default"))
+	fmt.Fprintf(w, "native model\t%s\nnative effort\t%s\n", value(c.GetSettings().GetNativeDefaults().GetModel(), "unknown"), value(c.GetSettings().GetNativeDefaults().GetEffort(), "unknown"))
 }
 func chatModelsCmd(o *opts) *command {
 	var harness string

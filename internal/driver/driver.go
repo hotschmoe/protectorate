@@ -187,6 +187,8 @@ type Session interface {
 type Options struct {
 	Selection Selection
 	Defaults  Selection
+	// EffortFallback allows a hub-default effort to fall back to native defaults.
+	EffortFallback bool
 	// Bin overrides the harness executable (stdio harnesses).
 	Bin string
 	// Env entries are appended to the process environment.

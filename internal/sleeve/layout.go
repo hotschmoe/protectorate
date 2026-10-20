@@ -14,7 +14,7 @@ import (
 // ARCHITECTURE.md: shared auth directories bound read-write at their host
 // path, per-sleeve config directories inside the sleeve's home.
 type Layout struct {
-	Home        string
+	home        string
 	CacheCopies []Mount
 	Overlays    []Overlay
 	ReadOnly    []Mount
@@ -49,10 +49,10 @@ const sleevePathEnv = "PROTECTORATE_SLEEVE_PATH"
 // layout paths on the host live under the sleeve's home; the same paths
 // relative to $HOME are what the harness sees. Older bwrap versions copy
 // SDK and Pub caches only for Dart workspaces or previously seeded sleeves.
-func (c Config) layout(name string, h Harness, workspace string) Layout {
+func (c Config) layout(name string, h Harness, workspace, goSnapshot string) Layout {
 	host := func(rel string) string { return filepath.Join(c.sleeveHome(name), rel) }
 	inside := func(rel string) string { return filepath.Join(c.UserHome, rel) }
-	l := Layout{Home: c.sleeveHome(name), Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
+	l := Layout{home: c.sleeveHome(name), Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
 	dart := !c.Overlays && dartWorkspace(workspace)
 	cacheCopy := func(m Mount) {
 		if _, err := os.Stat(m.Source); dart || err == nil {
@@ -69,10 +69,9 @@ func (c Config) layout(name string, h Harness, workspace string) Layout {
 		l.Overlays = append(l.Overlays, Overlay{Lower: lower, Upper: upper, Work: work, Target: target})
 	}
 	l.Dirs = append(l.Dirs, host(".cache/pub"), host(".cache/go-mod"))
-	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")})
-	if c.Overlays {
-		overlay("go-build", c.goCacheLower(), inside(".cache/go-build"))
-		l.Env = append(l.Env, [2]string{"GOCACHE", inside(".cache/go-build")})
+	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")}, [2]string{"GOCACHE", inside(".cache/go-build")})
+	if c.Overlays && goSnapshot != "" {
+		overlay("go-build/"+filepath.Base(filepath.Dir(goSnapshot)), goSnapshot, inside(".cache/go-build"))
 	}
 	if fi, err := os.Stat(filepath.Join(c.GoModCache, "cache/download")); c.GoModCache != "" && err == nil && fi.IsDir() {
 		proxy := filepath.Join(c.GoModCache, "cache/download")
@@ -156,21 +155,55 @@ func dartWorkspace(dir string) bool {
 	return len(m) > 0
 }
 
+// The sleeve can replace paths below its mounted home between launches.
+// Managed directories must never follow its symlinks on the host.
+func (l Layout) validate() error {
+	paths := append([]string(nil), l.Dirs...)
+	for _, m := range l.CacheCopies {
+		paths = append(paths, m.Source)
+	}
+	for _, s := range l.Seeds {
+		paths = append(paths, filepath.Dir(s.Path))
+	}
+	for _, link := range l.Links {
+		paths = append(paths, filepath.Dir(link.Path))
+	}
+	for _, p := range paths {
+		for within(p, l.home) {
+			fi, err := os.Lstat(p)
+			if err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("inspect sleeve directory %s: %w", p, err)
+			}
+			if err == nil && !fi.IsDir() {
+				return fmt.Errorf("%w: sleeve directory %s must be a directory without symlinks", ErrInvalid, p)
+			}
+			if p == l.home {
+				break
+			}
+			p = filepath.Dir(p)
+		}
+	}
+	return nil
+}
+
 // Apply creates the directories, symlinks and seed files. It is idempotent
-// and never deletes: a file that is in the way of a symlink is renamed aside.
+// and preserves existing files: a file in the way of a symlink is renamed aside.
 func (l Layout) Apply(ctx context.Context) error {
+	if err := l.validate(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	if err := os.MkdirAll(l.Home, 0700); err != nil {
+	if err := os.MkdirAll(l.home, 0700); err != nil {
 		return fmt.Errorf("create sleeve home: %w", err)
 	}
-	root, err := os.OpenRoot(l.Home)
+	root, err := os.OpenRoot(l.home)
 	if err != nil {
 		return fmt.Errorf("open sleeve home: %w", err)
 	}
 	defer root.Close()
 	for _, m := range l.CacheCopies {
-		rel, err := filepath.Rel(l.Home, m.Source)
+		rel, err := filepath.Rel(l.home, m.Source)
 		if err != nil {
 			return fmt.Errorf("locate private tool cache: %w", err)
 		}
@@ -186,6 +219,7 @@ func (l Layout) Apply(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create tool cache staging directory: %w", err)
 		}
+		defer os.RemoveAll(stage)
 		cmd := exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", "--", m.Target+"/.", stage)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("seed sleeve tool cache: %w: %s", err, out)
@@ -196,9 +230,9 @@ func (l Layout) Apply(ctx context.Context) error {
 	}
 	for _, d := range l.Dirs {
 		var err error
-		if within(d, l.Home) {
+		if within(d, l.home) {
 			var rel string
-			rel, err = filepath.Rel(l.Home, d)
+			rel, err = filepath.Rel(l.home, d)
 			if err == nil {
 				err = root.MkdirAll(rel, 0700)
 			}

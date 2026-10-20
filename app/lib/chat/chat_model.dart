@@ -53,6 +53,11 @@ class ErrorItem extends ChatItem {
   final String text;
 }
 
+class ReportItem extends ChatItem {
+  ReportItem(super.seq, this.result);
+  final SleeveResult result;
+}
+
 // Where a resleeve replaced the harness; what follows comes from the new one.
 class HandoffItem extends ChatItem {
   HandoffItem(super.seq, this.handoff);
@@ -194,6 +199,8 @@ class ChatTranscript {
         items.add(HandoffItem(seq, e.handoff));
       case ChatEvent_Body.settings:
         settings = e.settings;
+      case ChatEvent_Body.report:
+        items.add(ReportItem(seq, e.report));
       case ChatEvent_Body.notSet:
         break;
     }

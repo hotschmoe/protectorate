@@ -28,7 +28,7 @@ var (
 	ErrNotRecipient = errors.New("not a recipient of this message")
 )
 
-const ConciseGuidance = "Mail: aim for 150 words; lead with the result or blocker. Include only actionable findings and essential evidence; reference a file, commit or note for details. Do not restate the request or prior context. No acknowledgements unless asked or ack-required; use msg ack when only confirmation is needed."
+const ConciseGuidance = "Mail: aim for 150 words; lead with the result or blocker. Include only actionable findings and essential evidence; reference a file, commit or note for details. Do not restate the request or prior context. No acknowledgements unless asked or ack-required; use msg ack when only confirmation is needed. Finish every brief with protectorate report --status complete|partial|blocked --summary-file F; use partial honestly when work remains."
 
 const SubagentGuidance = "Use the harness's own subagents for parallel subtasks inside one workspace. Ask for another sleeve when the work needs its own branch, resource limits or isolation."
 

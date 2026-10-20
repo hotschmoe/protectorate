@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hubs/hub_client.dart';
+import 'hubs/connection.dart';
 import 'hubs/hub_profile.dart';
 import 'hubs/pairing.dart';
 import 'screens/hub_shell.dart';
@@ -99,16 +100,25 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
     final existing = widget.store.hubs
         .where((h) => h.baseUrl == req.baseUrl)
         .firstOrNull;
-    final ok =
-        (_e2eAutoConfirm && req.autoConfirm) ||
-        await confirmPairing(nav.context, req, update: existing != null);
-    if (!ok || !nav.mounted) return;
     final profile = HubProfile(
       id: existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
       name: req.name,
       baseUrl: req.baseUrl,
       token: req.token,
     );
+    Future<void> probe() => probeHub(_factory(profile).hub, profile.baseUrl);
+    if (_e2eAutoConfirm && req.autoConfirm) {
+      await probe();
+    } else {
+      final ok = await confirmPairing(
+        nav.context,
+        req,
+        update: existing != null,
+        probe: probe,
+      );
+      if (!ok) return;
+    }
+    if (!nav.mounted) return;
     await widget.store.upsert(profile);
     if (!nav.mounted) return;
     unawaited(

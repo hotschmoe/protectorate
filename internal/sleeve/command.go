@@ -49,15 +49,20 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 	if err != nil {
 		return Launch{}, err
 	}
+	if !c.waitGone(context.Background(), info.Name, 5*time.Second) {
+		return Launch{}, fmt.Errorf("%w: sleeve %s scope is still running", ErrUnavailable, info.Name)
+	}
 	launch, err := c.Plan(Spec{
-		ReadOnly: info.ReadOnly,
-		Name:     info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
+		GoCacheSnapshot: c.pinGoCache(info.Name),
+		BaseRepo:        info.BaseRepo,
+		BaseTip:         info.BaseTip,
+		ReadOnly:        info.ReadOnly,
+		Nested:          info.Nested,
+		Name:            info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
 	}, bin)
 	if err != nil {
 		return Launch{}, err
 	}
-	// systemd-run refuses a unit name that is still being torn down.
-	c.waitGone(context.Background(), info.Name, 5*time.Second)
 	if err := launch.Layout.Apply(context.Background()); err != nil {
 		return Launch{}, fmt.Errorf("prepare sleeve layout: %w", err)
 	}
@@ -68,13 +73,16 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 }
 
 // Command returns the argv builder for a driver.Options.Command that runs
-// the named sleeve's harness inside its sandbox and systemd scope, with the
+// the named sleeve's harness inside its sandbox and cgroup, with the
 // same mounts, credentials and limits the terminal path uses. The harness
 // executable the driver names is replaced by the one Locate finds.
 func (m *Manager) Command(name string) (func(bin string, args []string) ([]string, error), error) {
 	info, err := m.Get(name)
 	if err != nil {
 		return nil, err
+	}
+	if info.Killed {
+		return nil, fmt.Errorf("%w: sleeve %s was killed; respawn it before starting a harness", ErrInvalid, name)
 	}
 	return func(_ string, args []string) ([]string, error) {
 		l, err := m.cfg.launch(info, args)

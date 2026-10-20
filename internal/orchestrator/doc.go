@@ -45,6 +45,7 @@ var Workflow = []struct{ Command, Purpose string }{
 	{"backlog show", "read one note in full"},
 	{"sleeve ls", "running sleeves with CPU, memory and workspace"},
 	{"sleeve spawn", "start a harness in an isolated workspace"},
+	{"chat wait", "wait with --until report for sleeve results without polling; partial and blocked mean work remains"},
 	{"sleeve resleeve", "move a sleeve to another harness with a hub-written handoff (no confirmation needed)"},
 	{"session capture", "read what a sleeve's pane shows right now"},
 	{"backlog edit", "update a note, e.g. --append or --body, when the owner asks"},
@@ -91,6 +92,7 @@ func RenderAgents(din DocInput) []byte {
 	w("- Never run a destructive action (killing a sleeve or session, removing a node, anything irreversible) without the user's explicit approval in this conversation, even if your token would allow it. Ask first and say what it will affect.\n")
 	w("- Do not try to widen your own permissions or work around a `permission_denied`. Report it to the user instead.\n")
 	w("- Start work only with `protectorate sleeve spawn`, which runs in a sandbox. Raw sessions run outside any sandbox and are not granted to you.\n")
+	w("- Dispatch with `protectorate sleeve spawn <name> --workspace <hub checkout or git URL> --branch <base> --new-branch <feature> --brief <local file> --harness <harness>`. The brief is the first chat message; branch flags create a separate clone. Base notices include the fetch and rebase command.\n")
 	w("- When a chat sleeve's subscription runs low, move it with `protectorate sleeve resleeve <name> --to auto`; no confirmation is needed. The hub writes the handoff and tells the new harness to read it. Terminal and shell sleeves cannot be resleeved.\n")
 	w("- Unknown or stale quota is not spare capacity. Prefer fresh data; run `protectorate quota suggest --refresh` when in doubt.\n")
 	w("- Work donated to public repositories lands in a review inbox (a branch on a fork plus a summary). Nothing public goes out without the user's approval.\n")
@@ -100,7 +102,7 @@ func RenderAgents(din DocInput) []byte {
 	for _, s := range Workflow {
 		w("- `protectorate %s`: %s\n", s.Command, s.Purpose)
 	}
-	w("\nTypical loop: read the open notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and close completed work with `protectorate backlog done <id> --resolution TEXT`. Workers can close notes with their sleeve tokens too. Leave incomplete work open. MCP equivalents are `backlog_list_notes` (open by default, state=done or all for history) and `backlog_update_note` with id, state=done and resolution.\n\n")
+	w("\nTypical loop: read the open notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, wait with `chat wait <name> --until report`, then report back. Partial and blocked results mean work remains: leave the note open. Close completed work with `protectorate backlog done <id> --resolution TEXT`; workers can close notes with their sleeve tokens too. MCP equivalents are `backlog_list_notes` (open by default, state=done or all for history) and `backlog_update_note` with id, state=done and resolution.\n\n")
 
 	w("## Coordination\n\n")
 	w("%s\n\n", mailbox.ConciseGuidance)
@@ -180,7 +182,7 @@ func firstSentence(s string, limit int) string {
 // outside any sandbox. Envoy starts work only through sandboxed sleeves.
 // grant_admin works only on a hub started with --orchestrator-admin-grants,
 // and only for shared nodes.
-var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "grant_admin"}
+var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "chat_report", "grant_admin"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of

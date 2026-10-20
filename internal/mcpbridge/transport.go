@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 const maxMessage = 16 << 20
@@ -111,14 +112,21 @@ func (s *session) notify(req request) {
 	}
 }
 
-func (s *session) begin(ctx context.Context, req request) (context.Context, func(), bool) {
+const maxPendingRequests = 128
+
+func (s *session) begin(ctx context.Context, req request) (context.Context, func(), *response) {
 	ctx, cancel := context.WithCancel(ctx)
 	key := requestKey(req.ID)
 	s.mu.Lock()
 	if _, ok := s.pending[key]; ok {
 		s.mu.Unlock()
 		cancel()
-		return nil, nil, false
+		return nil, nil, failure(req.ID, -32600, "duplicate request id")
+	}
+	if len(s.pending) >= maxPendingRequests {
+		s.mu.Unlock()
+		cancel()
+		return nil, nil, failure(req.ID, -32000, "too many requests in progress")
 	}
 	s.pending[key] = cancel
 	s.mu.Unlock()
@@ -127,7 +135,7 @@ func (s *session) begin(ctx context.Context, req request) (context.Context, func
 		s.mu.Lock()
 		delete(s.pending, key)
 		s.mu.Unlock()
-	}, true
+	}, nil
 }
 
 func (s *Server) dispatch(ctx context.Context, ss *session, req request) (res *response) {
@@ -361,9 +369,9 @@ func (s *Server) Run(ctx context.Context, in io.ReadCloser, out io.Writer) error
 				ss.notify(req)
 				continue
 			}
-			callCtx, finish, ok := ss.begin(ctx, req)
-			if !ok {
-				send(failure(req.ID, -32600, "duplicate request id"))
+			callCtx, finish, invalid := ss.begin(ctx, req)
+			if invalid != nil {
+				send(invalid)
 				continue
 			}
 			if req.Method != "tools/call" && req.Method != "subscriptions/listen" {
@@ -379,9 +387,14 @@ func (s *Server) Run(ctx context.Context, in io.ReadCloser, out io.Writer) error
 
 type httpSession struct {
 	*session
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx      context.Context
+	cancel   context.CancelFunc
+	lastUsed time.Time
+	active   int
 }
+
+const maxHTTPSessions = 128
+const httpSessionIdle = time.Hour
 
 func (s *Server) httpHandler() http.Handler {
 	var mu sync.Mutex
@@ -389,8 +402,26 @@ func (s *Server) httpHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("Mcp-Session-Id")
 		mu.Lock()
+		now := time.Now()
+		for key, candidate := range sessions {
+			if candidate.active == 0 && now.Sub(candidate.lastUsed) >= httpSessionIdle {
+				delete(sessions, key)
+				candidate.cancel()
+			}
+		}
 		ss := sessions[id]
+		if ss != nil {
+			ss.active++
+		}
 		mu.Unlock()
+		if ss != nil {
+			defer func(existing *httpSession) {
+				mu.Lock()
+				existing.active--
+				existing.lastUsed = time.Now()
+				mu.Unlock()
+			}(ss)
+		}
 		if id != "" && ss == nil {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
@@ -440,6 +471,8 @@ func (s *Server) httpHandler() http.Handler {
 			return
 		}
 		req, res := parseRequest(raw)
+		created := false
+		retained := false
 		if res == nil && ss == nil {
 			if req.Method != "initialize" && req.Method != "server/discover" {
 				http.Error(w, "session id required", http.StatusBadRequest)
@@ -447,10 +480,13 @@ func (s *Server) httpHandler() http.Handler {
 			}
 			sessionCtx, cancel := context.WithCancel(context.Background())
 			ss = &httpSession{session: newSession(), ctx: sessionCtx, cancel: cancel}
+			created = true
+			defer func() {
+				if !retained {
+					cancel()
+				}
+			}()
 			ss.legacyHTTP = true
-			if req.Method == "server/discover" {
-				defer cancel()
-			}
 			var secret [24]byte
 			if _, err := rand.Read(secret[:]); err != nil {
 				cancel()
@@ -469,20 +505,27 @@ func (s *Server) httpHandler() http.Handler {
 			stop := context.AfterFunc(ss.ctx, cancel)
 			defer stop()
 			defer cancel()
-			callCtx, finish, ok := ss.begin(ctx, req)
-			if !ok {
-				res = failure(req.ID, -32600, "duplicate request id")
+			callCtx, finish, invalid := ss.begin(ctx, req)
+			if invalid != nil {
+				res = invalid
 			} else {
 				res = s.dispatch(callCtx, ss.session, req)
 				finish()
 			}
 			if req.Method == "initialize" && res.Error == nil {
-				mu.Lock()
-				sessions[id] = ss
-				mu.Unlock()
+				if created {
+					mu.Lock()
+					if len(sessions) >= maxHTTPSessions {
+						mu.Unlock()
+						http.Error(w, "too many MCP sessions; close an existing session and retry", http.StatusServiceUnavailable)
+						return
+					}
+					ss.lastUsed = time.Now()
+					sessions[id] = ss
+					retained = true
+					mu.Unlock()
+				}
 				w.Header().Set("Mcp-Session-Id", id)
-			} else if req.Method == "initialize" {
-				ss.cancel()
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
