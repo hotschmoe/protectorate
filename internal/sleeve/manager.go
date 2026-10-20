@@ -482,7 +482,11 @@ func (m *Manager) start(ctx context.Context, launch Launch, info Info) error {
 					ErrUnavailable, exitLabel(s), strings.Join(launch.Argv, " "), session.Tail(tail, 20)))
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case <-time.After(scopePollInterval):
+		}
 	}
 }
 

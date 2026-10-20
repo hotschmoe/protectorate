@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const scopePollInterval = 10 * time.Millisecond
+
 func (c Config) scopeDir(name string) string {
 	return filepath.Join(c.CgroupRoot, c.UnitName(name)+".scope")
 }
@@ -145,7 +147,11 @@ func (c Config) waitGone(ctx context.Context, name string, d time.Duration) bool
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return false
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(scopePollInterval):
+		}
 	}
 	return true
 }
