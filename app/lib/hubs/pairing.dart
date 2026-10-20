@@ -7,20 +7,16 @@ class PairingRequest {
   const PairingRequest({
     required this.baseUrl,
     required this.name,
-    required this.token,
     this.tab,
     this.session,
     this.node,
-    this.autoConfirm = false,
   });
 
   final String baseUrl;
   final String name;
-  final String token;
   final String? tab;
   final String? session;
   final String? node;
-  final bool autoConfirm;
 }
 
 String _trimSlashes(String url) {
@@ -33,21 +29,19 @@ String _trimSlashes(String url) {
 
 PairingRequest? _fromQuery(Map<String, String> q, String baseUrl) {
   final base = _trimSlashes(baseUrl);
+  if (q.containsKey('token')) return null;
   if (validateBaseUrl(base) != null) return null;
   final name = (q['name'] ?? '').trim();
   return PairingRequest(
     baseUrl: base,
     name: name.isEmpty ? Uri.parse(base).host : name,
-    token: q['token'] ?? '',
     tab: q['tab'],
     session: q['session'],
     node: q['node'],
-    autoConfirm: q['confirm'] == 'auto',
   );
 }
 
-/// Parses `<origin>/#/pair?name=..&token=..` (web) and
-/// `protectorate://pair?url=..&name=..&token=..` (native) links.
+/// Parses URL-only web and native connection links.
 PairingRequest? parsePairing(Uri uri) {
   if (uri.scheme == 'protectorate') {
     if (uri.host != 'pair') return null;
@@ -65,5 +59,5 @@ PairingRequest? parsePairing(Uri uri) {
   } on FormatException {
     return null;
   }
-  return _fromQuery(q, uri.origin);
+  return _fromQuery(q, q['url'] ?? uri.origin);
 }

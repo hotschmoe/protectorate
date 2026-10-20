@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hubs/hub_client.dart';
-import 'hubs/connection.dart';
 import 'hubs/hub_profile.dart';
 import 'hubs/pairing.dart';
 import 'screens/hub_shell.dart';
@@ -15,8 +14,6 @@ import 'screens/hubs_screen.dart';
 import 'screens/pair_dialog.dart';
 import 'theme/tokens.dart';
 import 'vfd/panel.dart';
-
-const _e2eAutoConfirm = bool.fromEnvironment('E2E_AUTOCONFIRM');
 
 class DeepLinks {
   const DeepLinks({this.initial, this.stream = const Stream.empty()});
@@ -100,26 +97,16 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
     final existing = widget.store.hubs
         .where((h) => h.baseUrl == req.baseUrl)
         .firstOrNull;
-    final profile = HubProfile(
-      id: existing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
-      name: req.name,
-      baseUrl: req.baseUrl,
-      token: req.token,
-    );
-    Future<void> probe() => probeHub(_factory(profile).hub, profile.baseUrl);
-    if (_e2eAutoConfirm && req.autoConfirm) {
-      await probe();
-    } else {
-      final ok = await confirmPairing(
-        nav.context,
-        req,
-        update: existing != null,
-        probe: probe,
-      );
-      if (!ok) return;
-    }
-    if (!nav.mounted) return;
-    await widget.store.upsert(profile);
+    final profile = existing != null && existing.token.isNotEmpty
+        ? existing
+        : await connectHub(
+            nav.context,
+            clientFactory: _factory,
+            save: widget.store.upsert,
+            existing: existing,
+            baseUrl: req.baseUrl,
+          );
+    if (profile == null) return;
     if (!nav.mounted) return;
     unawaited(
       nav.push(

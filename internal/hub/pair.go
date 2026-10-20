@@ -9,26 +9,22 @@ import (
 	"rsc.io/qr"
 )
 
-// PairLinks are the two forms of a pairing link. The web link keeps the
-// credential in the URL fragment so browsers never send it to a server.
+// PairLinks are the two forms of a connection link, containing only the hub URL.
 type PairLinks struct {
 	Web    string
 	Scheme string
 }
 
-// NewPairLinks builds pairing links for a hub. The credential is a scoped,
-// expiring device token minted by `protectorate pair`, never the owner token.
-func NewPairLinks(baseURL, name, token string) (PairLinks, error) {
+func NewPairLinks(baseURL string) (PairLinks, error) {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return PairLinks{}, fmt.Errorf("pair url must be http:// or https://, got %q", baseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return PairLinks{}, fmt.Errorf("pair URL must be http:// or https:// without credentials, query or fragment")
 	}
 	base := u.String()
-	web := url.Values{"name": {name}, "token": {token}}
-	app := url.Values{"url": {base}, "name": {name}, "token": {token}}
+	query := url.Values{"url": {base}}
 	return PairLinks{
-		Web:    base + "/#/pair?" + web.Encode(),
-		Scheme: "protectorate://pair?" + app.Encode(),
+		Web:    base + "/#/pair?" + query.Encode(),
+		Scheme: "protectorate://pair?" + query.Encode(),
 	}, nil
 }
 

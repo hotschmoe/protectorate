@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -54,8 +53,8 @@ const (
 )
 
 // token resolves the bearer secret: --token-file, then env
-// PROTECTORATE_TOKEN_FILE, then env PROTECTORATE_TOKEN, then the owner token
-// file of a hub on this machine.
+// PROTECTORATE_TOKEN_FILE, then env PROTECTORATE_TOKEN, then a saved device
+// token for this hub, then the owner token file of a hub on this machine.
 func (o *opts) token() (string, error) {
 	file := o.tokenFile
 	if file == "" {
@@ -74,6 +73,9 @@ func (o *opts) token() (string, error) {
 	}
 	if v := strings.TrimSpace(os.Getenv(tokenEnv)); v != "" {
 		return v, nil
+	}
+	if tok, err := o.savedDeviceToken(); err != nil || tok != "" {
+		return tok, err
 	}
 	return hub.ReadToken()
 }
@@ -111,10 +113,10 @@ func newRoot() *command {
 		hubDefault = v
 	}
 	root.PersistentFlags().StringVar(&o.hubURL, "hub", hubDefault, "hub URL (env PROTECTORATE_HUB)")
-	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: this machine's owner token)")
+	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: saved device credential, then this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), grantCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), reportCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), devicesCmd(o), tokenCmd(o), grantCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), reportCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(o), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
 	return root
 }
 
@@ -457,39 +459,24 @@ func versionCmd(o *opts) *command {
 }
 
 func pairCmd(o *opts) *command {
-	var pubURL, name string
-	var appQR, hostShell bool
-	ttl := deviceTTL
+	var pubURL string
+	var appQR bool
 	c := &command{
 		Use:   "pair",
 		Short: "Print a pairing link and QR code for adding this hub on another device",
 		Args:  noArgs,
 		RunE: func(cmd *command, _ []string) error {
-			cl, err := o.tokenClient()
-			if err != nil {
-				return err
-			}
 			if pubURL == "" {
 				pubURL = o.hubURL
 			}
-			if name == "" {
-				name, _ = os.Hostname()
-			}
-			scopes := deviceScopes
-			if hostShell {
-				scopes = append(append([]string(nil), deviceScopes...), auth.ScopeTerminalHost)
-			}
-			res, err := cl.CreateToken(cmd.Context(), connect.NewRequest(&pb.CreateTokenRequest{
-				Name: "pair: " + name, Scopes: scopes, Ttl: durationpb.New(ttl),
-			}))
-			if err != nil {
-				return fmt.Errorf("mint device token (needs the owner token): %w", err)
-			}
-			links, err := hub.NewPairLinks(pubURL, name, res.Msg.Secret)
+			links, err := hub.NewPairLinks(pubURL)
 			if err != nil {
 				return err
 			}
 			w := cmd.OutOrStdout()
+			if o.json {
+				return json.NewEncoder(w).Encode(map[string]string{"web": links.Web, "app": links.Scheme})
+			}
 			qrText := links.Web
 			if appQR {
 				qrText = links.Scheme
@@ -498,16 +485,12 @@ func pairCmd(o *opts) *command {
 				return err
 			}
 			fmt.Fprintf(w, "\nweb:  %s\napp:  %s\n", links.Web, links.Scheme)
-			fmt.Fprintln(w, "\nThe links contain a device token (id "+res.Msg.Token.Id+", scopes "+strings.Join(res.Msg.Token.Scopes, ", ")+", expires "+fmtStamp(res.Msg.Token.ExpiresAt, "never")+").")
-			fmt.Fprintln(w, "Treat them like a password; revoke with `protectorate token revoke "+res.Msg.Token.Id+"`.")
+			fmt.Fprintln(w, "\nOpen the link, connect, then approve the matching code on a trusted device.")
 			return nil
 		},
 	}
 	c.Flags().StringVar(&pubURL, "url", "", "public base URL the other device can reach (default --hub)")
-	c.Flags().StringVar(&name, "name", "", "label for the hub (default hostname)")
-	c.Flags().DurationVar(&ttl, "ttl", deviceTTL, "lifetime of the device token; 0 never expires")
 	c.Flags().BoolVar(&appQR, "app", false, "encode the protectorate:// link for the native app instead of the web link")
-	c.Flags().BoolVar(&hostShell, "host-shell", false, "also grant terminal:host, read-write typing into sessions outside a sleeve sandbox (shell access as the hub user)")
 	return c
 }
 

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../hubs/hub_client.dart';
-import '../hubs/connection.dart';
 import '../hubs/hub_profile.dart';
 import '../version.dart';
 import '../theme/tokens.dart';
 import '../vfd/panel.dart';
 import 'hub_shell.dart';
+import 'pair_dialog.dart';
 
 class HubsScreen extends StatelessWidget {
   const HubsScreen({
@@ -19,12 +19,13 @@ class HubsScreen extends StatelessWidget {
   final HubClient Function(HubProfile) clientFactory;
 
   Future<void> _edit(BuildContext context, [HubProfile? existing]) async {
-    final result = await showDialog<HubProfile>(
-      context: context,
-      builder: (_) =>
-          _HubDialog(existing: existing, clientFactory: clientFactory),
+    final connected = await connectHub(
+      context,
+      existing: existing,
+      clientFactory: clientFactory,
+      save: store.upsert,
     );
-    if (result != null) await store.upsert(result);
+    if (connected != null && context.mounted) _open(context, connected);
   }
 
   void _open(BuildContext context, HubProfile hub) =>
@@ -75,7 +76,7 @@ class HubsScreen extends StatelessWidget {
                                 Text('NO HUBS', style: t.legend()),
                                 const SizedBox(height: 8),
                                 Text(
-                                  'No hubs yet. Add one, or scan the QR code from protectorate pair.',
+                                  'Enter your hub URL, or scan the QR from protectorate pair. A trusted device approves your connection.',
                                   textAlign: TextAlign.center,
                                   style: t.small(),
                                 ),
@@ -98,14 +99,15 @@ class HubsScreen extends StatelessWidget {
                     maxWidth: Tokens.contentMaxWidth,
                   ),
                   child: Panel(
-                    legend: 'PAIRING',
+                    legend: 'CONNECT',
                     trailing: Text('APP $appVersion', style: t.legend()),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'On the hub, run the command below and scan its QR '
-                          'code, or open the link it prints on this device.',
+                          'code, or open its link on this device. Compare the '
+                          'code shown here with the approval request on a trusted device.',
                           style: t.small(),
                         ),
                         const SizedBox(height: 10),
@@ -173,8 +175,8 @@ class HubsScreen extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Edit',
-            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Reconnect',
+            icon: const Icon(Icons.link),
             onPressed: () => _edit(context, hub),
           ),
           IconButton(
@@ -186,115 +188,4 @@ class HubsScreen extends StatelessWidget {
       ),
     ),
   );
-}
-
-class _HubDialog extends StatefulWidget {
-  const _HubDialog({this.existing, required this.clientFactory});
-
-  final HubProfile? existing;
-  final HubClient Function(HubProfile) clientFactory;
-
-  @override
-  State<_HubDialog> createState() => _HubDialogState();
-}
-
-class _HubDialogState extends State<_HubDialog> {
-  final _form = GlobalKey<FormState>();
-  late final _name = TextEditingController(text: widget.existing?.name);
-  late final _url = TextEditingController(
-    text: widget.existing?.baseUrl ?? 'http://',
-  );
-  late final _token = TextEditingController(text: widget.existing?.token);
-  bool _saving = false;
-  Object? _error;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _url.dispose();
-    _token.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (!_form.currentState!.validate()) return;
-    var url = _url.text.trim();
-    while (url.endsWith('/')) {
-      url = url.substring(0, url.length - 1);
-    }
-    final profile = HubProfile(
-      id:
-          widget.existing?.id ??
-          DateTime.now().microsecondsSinceEpoch.toString(),
-      name: _name.text.trim(),
-      baseUrl: url,
-      token: _token.text.trim(),
-    );
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await probeHub(widget.clientFactory(profile).hub, profile.baseUrl);
-      if (mounted) Navigator.of(context).pop(profile);
-    } on Object catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = error;
-          _saving = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'Add hub' : 'Edit hub'),
-      content: Form(
-        key: _form,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                key: const ValueKey('hub-name'),
-                controller: _name,
-                enabled: !_saving,
-                decoration: const InputDecoration(labelText: 'Name'),
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                key: const ValueKey('hub-url'),
-                controller: _url,
-                enabled: !_saving,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(labelText: 'Base URL'),
-                validator: (v) => validateBaseUrl(v ?? ''),
-              ),
-              TextFormField(
-                key: const ValueKey('hub-token'),
-                controller: _token,
-                enabled: !_saving,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Token'),
-              ),
-              if (_error != null) Text('$_error'),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('CANCEL'),
-        ),
-        FilledButton(
-          key: const ValueKey('hub-save'),
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'CHECKING' : 'SAVE'),
-        ),
-      ],
-    );
-  }
 }

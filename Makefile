@@ -16,7 +16,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 BUILD_NAME ?= $(or $(shell printf '%s' '$(VERSION)' | sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'),0.0.0)
 BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 APP_VERSION_FLAGS := --build-name=$(BUILD_NAME) --build-number=$(BUILD_NUMBER) --dart-define=PROTECTORATE_VERSION=$(VERSION)
-# APP_FLAGS adds flutter build flags, e.g. --dart-define=E2E_AUTOCONFIRM=true.
+# APP_FLAGS adds flutter build flags.
 APP_FLAGS ?=
 LDFLAGS := -s -w -X main.version=$(VERSION)
 # Keep tsnet transport, DNS, NAT traversal, Android integration and system roots.

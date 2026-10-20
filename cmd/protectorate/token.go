@@ -19,12 +19,6 @@ import (
 	"github.com/hotschmoe/protectorate/internal/orchestrator"
 )
 
-// deviceScopes and deviceTTL are what `pair` grants a paired phone or browser;
-// --host-shell adds terminal:host.
-var deviceScopes = []string{"read", "terminal", "events", "session_*", "sleeve_*", "chat_*", "backlog_*"}
-
-const deviceTTL = 90 * 24 * time.Hour
-
 func (o *opts) tokenClient() (protectoratev1connect.TokenServiceClient, error) {
 	hc, err := o.httpClient()
 	if err != nil {

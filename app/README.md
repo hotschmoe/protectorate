@@ -80,14 +80,14 @@ or reimplementing it.
 
 ## Pairing
 
-`protectorate pair [--url <public base url>] [--name <label>] [--app]` on the hub machine prints a QR code and two links:
+`protectorate pair [--url <LAN base url>] [--app]` on the hub machine prints a QR code and links containing only the hub URL:
 
-- web: `<base>/#/pair?name=..&token=..` (served by `hub serve --web`; the token stays in the URL fragment and is never sent to a server)
-- app: `protectorate://pair?url=<base>&name=..&token=..`
+- web: `<base>/#/pair?url=<encoded base>` (served by `hub serve --web`)
+- app: `protectorate://pair?url=<encoded base>`
 
-Either link opens a confirm dialog with the hub name and URL; confirming saves the profile and opens it. Optional `tab=orchestrator|mail|overview|sleeves|nodes|notes`, `session=<name>` (a raw tmux session to open) and `node=<name>` parameters pick the landing screen. The `confirm=auto` parameter skips the dialog only in builds made with `--dart-define=E2E_AUTOCONFIRM=true` (used by `scripts/e2e-screens.sh`).
+Either link opens the connect dialog with the hub URL filled in. You can also enter the URL under ADD HUB. Bare addresses default to HTTPS; specify `http://` for a hub without TLS and include `:7470` when using its default LAN port. Name this device, press CONNECT, then compare the large code with the request on a trusted device before approving. For the first device, run `protectorate devices approve <code>` on the hub. Denied or expired requests have a TRY AGAIN button. No link can bypass approval or carry a token; old token links are rejected.
 
-The credential in the link is a scoped device token, not the owner token. `pair` mints it through `TokenService` (so it needs the owner token) with scopes `read`, `events`, `terminal`, `session_*`, `sleeve_*`, `chat_*` and `backlog_*`, a 90 day lifetime (`--ttl` changes it) and the label `pair: <name>`. It cannot manage tokens or touch nodes. A lost phone is handled with `protectorate token revoke <id>`; `pair` prints the id. The app should treat `permission_denied` as "this device lacks that scope", and `unauthenticated` as "expired or revoked, pair again".
+Approval issues a long-lived Full device token, including device approval and revocation but excluding owner-only operations. The Devices screen shows platform, approver and last use, and supports rename and revoke. Revocation closes live streams immediately. Existing paired device profiles continue to work. Optional tokenless `tab`, `session` and `node` parameters still select a screen when the hub is already connected.
 
 Native handling uses the `app_links` package. Android registers an intent filter for `protectorate://pair` in `AndroidManifest.xml`. Untested: Android (no device or SDK here), Windows/Linux/macOS scheme registration (the OS must launch the app with the URL; no installer registers the scheme yet), iOS (not scaffolded).
 
