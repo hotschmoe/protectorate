@@ -12,6 +12,7 @@ import '../nodes/add_node.dart';
 import '../nodes/node_view.dart';
 import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
+import '../updates/fleet_update_card.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
@@ -169,6 +170,15 @@ class _NodesTabState extends State<NodesTab> {
               ),
             ],
           ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Tokens.gap,
+            Tokens.gap,
+            Tokens.gap,
+            0,
+          ),
+          child: FleetUpdateCard(client: widget.client, feed: widget.feed),
         ),
         if (_error != null)
           Padding(

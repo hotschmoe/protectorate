@@ -14,6 +14,7 @@ import '../gen/protectorate/v1/lease.connect.client.dart';
 import '../gen/protectorate/v1/message.connect.client.dart';
 import '../gen/protectorate/v1/node.connect.client.dart';
 import '../gen/protectorate/v1/quota.connect.client.dart';
+import '../gen/protectorate/v1/release.connect.client.dart';
 import '../gen/protectorate/v1/session.connect.client.dart';
 import '../gen/protectorate/v1/sleeve.connect.client.dart';
 import 'hub_profile.dart';
@@ -45,6 +46,7 @@ class HubClient {
       events = EventServiceClient(transport),
       node = NodeServiceClient(transport),
       quota = QuotaServiceClient(transport),
+      releases = ReleaseServiceClient(transport),
       sessions = SessionServiceClient(transport),
       sleeves = SleeveServiceClient(transport),
       backlog = BacklogServiceClient(transport),
@@ -60,6 +62,7 @@ class HubClient {
   final EventServiceClient events;
   final NodeServiceClient node;
   final QuotaServiceClient quota;
+  final ReleaseServiceClient releases;
   final SessionServiceClient sessions;
   final SleeveServiceClient sleeves;
   final BacklogServiceClient backlog;

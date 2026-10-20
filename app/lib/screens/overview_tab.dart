@@ -12,6 +12,7 @@ import '../hubs/hub_profile.dart';
 import '../nodes/node_view.dart';
 import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
+import '../updates/hub_update_card.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
@@ -228,6 +229,7 @@ class _OverviewTabState extends State<OverviewTab> {
               child: wide
                   ? column([
                       status,
+                      HubUpdateCard(client: widget.client, feed: widget.feed),
                       board,
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -238,7 +240,13 @@ class _OverviewTabState extends State<OverviewTab> {
                         ],
                       ),
                     ])
-                  : column([status, board, quota, events]),
+                  : column([
+                      status,
+                      HubUpdateCard(client: widget.client, feed: widget.feed),
+                      board,
+                      quota,
+                      events,
+                    ]),
             ),
           ),
         );
