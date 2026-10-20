@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -160,6 +161,7 @@ func hubCmd() *command {
 	var watch, toolDirs, refDirs, workspaceRoots []string
 	var orchestratorGrants bool
 	var startEnvoy, sleeveEffort, goCacheMax string
+	var trustedProxies []string
 	serve := &command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -201,6 +203,13 @@ func hubCmd() *command {
 			defer store.Flush()
 			h := hub.New(version, tok)
 			h.SleeveEffort = sleeveEffort
+			for _, p := range trustedProxies {
+				ip, err := netip.ParseAddr(p)
+				if err != nil {
+					return fmt.Errorf("--trusted-proxy %q: %w", p, err)
+				}
+				h.TrustedProxies = append(h.TrustedProxies, ip.Unmap())
+			}
 			h.SelfURL = hub.LocalURL(l.Addr())
 			h.AckTimeout = ackTimeout
 			h.SetAuth(auth.New(tok, store, audit))
@@ -271,6 +280,7 @@ func hubCmd() *command {
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringSliceVar(&refDirs, "sleeve-reference-dir", nil, "directory offered read-only to sleeves by 'sleeve workspaces' (repeatable), besides each workspace's references/")
+	serve.Flags().StringSliceVar(&trustedProxies, "trusted-proxy", nil, "reverse proxy IP address whose X-Forwarded-For names the client, e.g. a Traefik host (repeatable; default none)")
 	serve.Flags().StringVar(&sleeveEffort, "sleeve-effort", "high", "default requested reasoning effort for supported chat harnesses (empty uses native default; unsupported levels fall back to native default)")
 	serve.Flags().StringVar(&goCacheMax, "sleeve-go-cache-max", "20G", "maximum logical bytes per shared Go cache snapshot (0 disables sharing; recent entries imported newest first in background)")
 	serve.Flags().StringSliceVar(&workspaceRoots, "workspace-root", nil, "directory browser root (repeatable; defaults to ~/github when it exists)")

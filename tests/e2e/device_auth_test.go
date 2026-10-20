@@ -346,6 +346,14 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 	if !strings.Contains(audit, "token:officepc") || !strings.Contains(audit, "unauthenticated") {
 		t.Fatal("audit omitted device or unauthenticated actors")
 	}
+	c.stop(c.hub)
+	c.boot("--trusted-proxy", "127.0.0.2")
+	// Through a trusted proxy the forwarded address is the client, so the
+	// non-LAN 192.0.2.123 is refused; the direct loopback peer is still allowed.
+	if refused := devicePeer(c, "127.0.0.2").rpc("StartDeviceAuth", "", map[string]any{"name": "via-proxy", "platform": "linux-desktop"}, 403); !strings.Contains(fmt.Sprint(refused["message"]), "LAN only") {
+		t.Fatalf("trusted proxy's forwarded client address not applied: %v", refused)
+	}
+	peer.rpc("StartDeviceAuth", "", map[string]any{"name": "direct", "platform": "linux-desktop"}, 200)
 }
 
 func deviceCLIApproval(t *testing.T, c *cluster, peer deviceAuthPeer) {

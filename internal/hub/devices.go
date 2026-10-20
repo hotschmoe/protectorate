@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,14 +49,14 @@ func publicDeviceProcedure(procedure string) bool {
 	return procedure == protectoratev1connect.DeviceServiceStartDeviceAuthProcedure || procedure == protectoratev1connect.DeviceServicePollDeviceAuthProcedure
 }
 
-func deviceSourceIP(r *http.Request) netip.Addr {
+func deviceSourceIP(r *http.Request, trusted []netip.Addr) netip.Addr {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	ip, _ := netip.ParseAddr(host)
 	ip = ip.Unmap()
-	if ip == netip.MustParseAddr("192.168.10.50") {
+	if slices.Contains(trusted, ip) {
 		parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 		if forwarded, err := netip.ParseAddr(strings.TrimSpace(parts[len(parts)-1])); err == nil {
 			return forwarded.Unmap()
@@ -67,7 +68,7 @@ func deviceSourceIP(r *http.Request) netip.Addr {
 func (h *Hub) withDeviceIP(next http.Handler) http.Handler {
 	errorWriter := connect.NewErrorWriter()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), deviceIPKey{}, deviceSourceIP(r))
+		ctx := context.WithValue(r.Context(), deviceIPKey{}, deviceSourceIP(r, h.TrustedProxies))
 		if publicDeviceProcedure(r.URL.Path) {
 			ctx = auth.WithNote(ctx)
 			if err := h.admitDevice(ctx, r.URL.Path == protectoratev1connect.DeviceServicePollDeviceAuthProcedure); err != nil {

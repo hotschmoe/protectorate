@@ -290,9 +290,10 @@ its actor. Events announce changes without exposing request metadata; trusted
 devices fetch the pending list for the banner. Neither events nor audit
 records expose a device code or token secret.
 
-The requesting IP comes from the TCP peer. Only when that peer is the known
-Traefik address `192.168.10.50` does the hub use the rightmost address in its
-`X-Forwarded-For` header. Headers received directly from other peers are
+The requesting IP comes from the TCP peer. Only when that peer is listed
+with `hub serve --trusted-proxy ADDR` (repeatable; none by default), for
+example the Traefik host in front of the hub, does the hub use the rightmost
+address in its `X-Forwarded-For` header. Headers received directly from other peers are
 ignored, so a caller cannot
 evade per-IP limits or falsify the approval banner by supplying that header.
 Keep Traefik configured to replace untrusted forwarded headers.

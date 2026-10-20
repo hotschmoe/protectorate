@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -42,6 +43,9 @@ type Hub struct {
 	// SleeveEffort is the requested effort for new selection-capable chats;
 	// empty leaves the harness's native default in control.
 	SleeveEffort string
+	// TrustedProxies are reverse proxy addresses whose X-Forwarded-For names
+	// the client for device authorization limits and records.
+	TrustedProxies []netip.Addr
 	// AckTimeout is how long an ack_required message may stay unacked before
 	// it is re-delivered, and again before it is escalated; 0 means 30m.
 	AckTimeout time.Duration
