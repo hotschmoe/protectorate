@@ -136,7 +136,7 @@ try {
       startupFailureTriggered: window.screenshotStorageFailure === true,
       startupErrors: elements.filter(el => /^Could not start Protectorate(?: |$)/.test(label(el)) || label(el).includes(${JSON.stringify(startupFailureMessage)}))
         .map(el => ({ label: label(el), ...bounds(el) })),
-      nodeDetails: elements.filter(el => ['HUB', ${JSON.stringify(detailNode)}, ${JSON.stringify(detailVersion || '')}].includes(label(el)))
+      nodeDetails: elements.filter(el => ['HUB', ${JSON.stringify(detailNode)}, ${JSON.stringify(detailVersion || '')}].includes(label(el)) || /^VERSION(?: |$)/.test(label(el)))
         .map(el => ({ label: label(el), ...bounds(el) })),
       active: { tag: active?.tagName, value: active?.value, readOnly: active?.readOnly },
     };
@@ -197,9 +197,10 @@ try {
     const visible = (item, state) => item.width > 0 && item.height > 0 && item.x >= 0 && item.x + item.width <= state.viewport.width && item.y >= 0 && item.y + item.height <= state.viewport.height;
     await waitFor('node detail and current hub version row', state =>
       state.nodeDetails.some(item => item.label === detailNode && visible(item, state)) &&
-      state.nodeDetails.some(label => label.label === 'HUB' && visible(label, state) &&
-        state.nodeDetails.some(value => value.label === detailVersion && visible(value, state) && value.x >= label.x + label.width &&
-          Math.abs(value.y + value.height / 2 - label.y - label.height / 2) < 8)));
+      (state.nodeDetails.some(item => /^VERSION(?: |$)/.test(item.label) && item.label.endsWith(` HUB ${detailVersion}`) && visible(item, state)) ||
+        state.nodeDetails.some(label => label.label === 'HUB' && visible(label, state) &&
+          state.nodeDetails.some(value => value.label === detailVersion && visible(value, state) && value.x >= label.x + label.width &&
+            Math.abs(value.y + value.height / 2 - label.y - label.height / 2) < 8))));
   } else if (interaction === 'nodes' || interaction === 'updates') {
     await selectTab('NODES');
     await delay(1000);
