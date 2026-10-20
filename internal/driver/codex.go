@@ -302,38 +302,40 @@ func (s *codexSession) Close() error {
 	return nil
 }
 
+type codexNote struct {
+	ThreadID string `json:"threadId"`
+	ItemID   string `json:"itemId"`
+	Delta    string `json:"delta"`
+	Turn     struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	} `json:"turn"`
+	Item struct {
+		Type             string `json:"type"`
+		ID               string `json:"id"`
+		Command          string `json:"command"`
+		Tool             string `json:"tool"`
+		AggregatedOutput string `json:"aggregatedOutput"`
+		ExitCode         *int   `json:"exitCode"`
+		Status           string `json:"status"`
+	} `json:"item"`
+	Usage struct {
+		Last struct {
+			In         int64 `json:"inputTokens"`
+			Out        int64 `json:"outputTokens"`
+			Cached     int64 `json:"cachedInputTokens"`
+			CacheWrite int64 `json:"cacheWriteInputTokens"`
+			Total      int64 `json:"totalTokens"`
+		} `json:"last"`
+		Window int64 `json:"modelContextWindow"`
+	} `json:"tokenUsage"`
+}
+
 func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
-	var p struct {
-		ThreadID string `json:"threadId"`
-		ItemID   string `json:"itemId"`
-		Delta    string `json:"delta"`
-		Turn     struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
-			Error  *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		} `json:"turn"`
-		Item struct {
-			Type             string `json:"type"`
-			ID               string `json:"id"`
-			Command          string `json:"command"`
-			Tool             string `json:"tool"`
-			AggregatedOutput string `json:"aggregatedOutput"`
-			ExitCode         *int   `json:"exitCode"`
-			Status           string `json:"status"`
-		} `json:"item"`
-		Usage struct {
-			Last struct {
-				In         int64 `json:"inputTokens"`
-				Out        int64 `json:"outputTokens"`
-				Cached     int64 `json:"cachedInputTokens"`
-				CacheWrite int64 `json:"cacheWriteInputTokens"`
-				Total      int64 `json:"totalTokens"`
-			} `json:"last"`
-			Window int64 `json:"modelContextWindow"`
-		} `json:"tokenUsage"`
-	}
+	var p codexNote
 	if json.Unmarshal(params, &p) != nil {
 		return
 	}
@@ -343,118 +345,137 @@ func (s *codexSession) onNote(method string, params, raw json.RawMessage) {
 	raw = append([]byte(nil), raw...)
 	switch method {
 	case "thread/settings/updated":
-		var changed struct {
-			Settings Selection `json:"threadSettings"`
-		}
-		if json.Unmarshal(params, &changed) != nil || changed.Settings.Model == "" {
-			return
-		}
-		s.tmu.Lock()
-		s.model, s.selection.Effective = changed.Settings.Model, changed.Settings
-		waiting, state := s.settingsWait, s.selection
-		s.tmu.Unlock()
-		if waiting != nil {
-			select {
-			case waiting <- changed.Settings:
-			default:
-			}
-		} else {
-			s.emit(Event{Kind: KindSelection, Selection: &state, Raw: raw})
-		}
+		s.onSettings(params, raw)
 	case "model/rerouted":
-		var routed struct {
-			Model string `json:"toModel"`
-		}
-		if json.Unmarshal(params, &routed) == nil && routed.Model != "" {
-			s.tmu.Lock()
-			s.model = routed.Model
-			s.selection.Effective = Selection{Model: routed.Model}
-			state := s.selection
-			s.tmu.Unlock()
-			s.emit(Event{Kind: KindSelection, Selection: &state, Raw: raw})
-		}
+		s.onRerouted(params, raw)
 	case "turn/started":
 		s.setTurn(p.Turn.ID)
 	case "item/agentMessage/delta":
-		if p.Delta != "" {
-			s.emit(Event{Kind: KindText, Text: p.Delta, MessageID: p.ItemID})
-		}
+		s.emitText(p.ItemID, p.Delta, false, nil)
 	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
-		if p.Delta != "" {
-			s.emit(Event{Kind: KindText, Text: p.Delta, MessageID: p.ItemID, Thinking: true})
-		}
+		s.emitText(p.ItemID, p.Delta, true, nil)
 	case "item/started":
-		switch p.Item.Type {
-		case "userMessage", "agentMessage", "reasoning":
-		case "contextCompaction":
-			s.tmu.Lock()
-			s.compactPost = 0
-			s.tmu.Unlock()
-		default:
-			name, input := p.Item.Type, json.RawMessage(nil)
-			if p.Item.Command != "" {
-				input, _ = json.Marshal(map[string]string{"command": p.Item.Command})
-			}
-			if p.Item.Tool != "" {
-				name = p.Item.Tool
-			}
-			s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: p.Item.ID, Name: name, Input: input}, Raw: raw})
-		}
+		s.onItemStarted(p, raw)
 	case "item/completed":
-		switch p.Item.Type {
-		case "commandExecution":
-			failed := p.Item.Status == "failed" || p.Item.ExitCode != nil && *p.Item.ExitCode != 0
-			ev := toolResult(p.Item.ID, p.Item.AggregatedOutput, failed)
-			ev.Raw = raw
-			s.emit(ev)
-		case "contextCompaction":
-			s.tmu.Lock()
-			c := Compaction{TokensBefore: s.ctxTokens, TokensAfter: s.compactPost, Native: !s.compactPending()}
-			s.ctxTokens = s.compactPost
-			s.tmu.Unlock()
-			s.noteBoundary(c)
-			s.emit(Event{Kind: KindCompaction, Compaction: &c, Raw: raw})
-		}
+		s.onItemCompleted(p, raw)
 	case "thread/tokenUsage/updated":
-		u := p.Usage.Last
-		s.tmu.Lock()
-		s.compactPost = u.Total
-		s.tmu.Unlock()
-		if u.In == 0 {
-			return
-		}
-		s.tmu.Lock()
-		s.ctxTokens = u.In
-		model := s.model
-		s.tmu.Unlock()
-		s.emit(Event{Kind: KindUsage, Usage: &Usage{
-			ContextTokens: u.In, ContextWindow: p.Usage.Window, InputTokens: u.In - u.Cached, OutputTokens: u.Out,
-			CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite, Model: model, Provider: "openai",
-		}})
+		s.onUsage(p)
 	case "turn/completed":
-		s.setTurn("")
-		stop := "end_turn"
-		var terr error
-		switch p.Turn.Status {
-		case "interrupted":
-			stop = "cancelled"
-		case "failed":
-			stop = "error"
-			msg := "turn failed"
-			if p.Turn.Error != nil {
-				msg = p.Turn.Error.Message
-			}
-			terr = errors.New(msg)
-			if !s.compactPending() {
-				s.emit(Event{Kind: KindError, Text: msg, Raw: raw})
-			}
-		}
-		if s.compactPending() {
-			s.resolveCompact(terr)
-			return
-		}
-		s.settle(stop, raw)
+		s.onTurnCompleted(p, raw)
 	}
+}
+
+func (s *codexSession) onSettings(params, raw json.RawMessage) {
+	var changed struct {
+		Settings Selection `json:"threadSettings"`
+	}
+	if json.Unmarshal(params, &changed) != nil || changed.Settings.Model == "" {
+		return
+	}
+	s.tmu.Lock()
+	s.model, s.selection.Effective = changed.Settings.Model, changed.Settings
+	waiting, state := s.settingsWait, s.selection
+	s.tmu.Unlock()
+	if waiting == nil {
+		s.emit(Event{Kind: KindSelection, Selection: &state, Raw: raw})
+		return
+	}
+	select {
+	case waiting <- changed.Settings:
+	default:
+	}
+}
+
+func (s *codexSession) onRerouted(params, raw json.RawMessage) {
+	var routed struct {
+		Model string `json:"toModel"`
+	}
+	if json.Unmarshal(params, &routed) != nil || routed.Model == "" {
+		return
+	}
+	s.tmu.Lock()
+	s.model = routed.Model
+	s.selection.Effective = Selection{Model: routed.Model}
+	state := s.selection
+	s.tmu.Unlock()
+	s.emit(Event{Kind: KindSelection, Selection: &state, Raw: raw})
+}
+
+func (s *codexSession) onItemStarted(p codexNote, raw []byte) {
+	switch p.Item.Type {
+	case "userMessage", "agentMessage", "reasoning":
+	case "contextCompaction":
+		s.tmu.Lock()
+		s.compactPost = 0
+		s.tmu.Unlock()
+	default:
+		name, input := p.Item.Type, json.RawMessage(nil)
+		if p.Item.Command != "" {
+			input, _ = json.Marshal(map[string]string{"command": p.Item.Command})
+		}
+		if p.Item.Tool != "" {
+			name = p.Item.Tool
+		}
+		s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: p.Item.ID, Name: name, Input: input}, Raw: raw})
+	}
+}
+
+func (s *codexSession) onItemCompleted(p codexNote, raw []byte) {
+	switch p.Item.Type {
+	case "commandExecution":
+		failed := p.Item.Status == "failed" || p.Item.ExitCode != nil && *p.Item.ExitCode != 0
+		s.emitToolResult(p.Item.ID, p.Item.AggregatedOutput, failed, raw)
+	case "contextCompaction":
+		s.tmu.Lock()
+		c := Compaction{TokensBefore: s.ctxTokens, TokensAfter: s.compactPost, Native: !s.compactPending()}
+		s.ctxTokens = s.compactPost
+		s.tmu.Unlock()
+		s.noteBoundary(c)
+		s.emit(Event{Kind: KindCompaction, Compaction: &c, Raw: raw})
+	}
+}
+
+func (s *codexSession) onUsage(p codexNote) {
+	u := p.Usage.Last
+	s.tmu.Lock()
+	s.compactPost = u.Total
+	s.tmu.Unlock()
+	if u.In == 0 {
+		return
+	}
+	s.tmu.Lock()
+	s.ctxTokens = u.In
+	model := s.model
+	s.tmu.Unlock()
+	s.emit(Event{Kind: KindUsage, Usage: &Usage{
+		ContextTokens: u.In, ContextWindow: p.Usage.Window, InputTokens: u.In - u.Cached, OutputTokens: u.Out,
+		CacheReadTokens: u.Cached, CacheWriteTokens: u.CacheWrite, Model: model, Provider: "openai",
+	}})
+}
+
+func (s *codexSession) onTurnCompleted(p codexNote, raw []byte) {
+	s.setTurn("")
+	stop := "end_turn"
+	var terr error
+	switch p.Turn.Status {
+	case "interrupted":
+		stop = "cancelled"
+	case "failed":
+		stop = "error"
+		msg := "turn failed"
+		if p.Turn.Error != nil {
+			msg = p.Turn.Error.Message
+		}
+		terr = errors.New(msg)
+		if !s.compactPending() {
+			s.emit(Event{Kind: KindError, Text: msg, Raw: raw})
+		}
+	}
+	if s.compactPending() {
+		s.resolveCompact(terr)
+		return
+	}
+	s.settle(stop, raw)
 }
 
 var errCodexUnsupported = errors.New("request not supported by driver")

@@ -175,57 +175,46 @@ func (s *piSession) Close() error {
 	return s.closeProc(s.p)
 }
 
-func (s *piSession) handle(raw []byte) {
-	var m struct {
-		ID      string          `json:"id"`
-		Type    string          `json:"type"`
-		Command string          `json:"command"`
-		Success bool            `json:"success"`
-		Error   string          `json:"error"`
-		Aborted bool            `json:"aborted"`
-		Name    string          `json:"toolName"`
-		CallID  string          `json:"toolCallId"`
-		Args    json.RawMessage `json:"args"`
-		IsError bool            `json:"isError"`
-		Result  json.RawMessage `json:"result"`
-		Message struct {
-			Role     string `json:"role"`
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
-			Usage    *struct {
-				Input      int64 `json:"input"`
-				Output     int64 `json:"output"`
-				CacheRead  int64 `json:"cacheRead"`
-				CacheWrite int64 `json:"cacheWrite"`
-				TotalToken int64 `json:"totalTokens"`
-			} `json:"usage"`
-		} `json:"message"`
+type piMessage struct {
+	ID      string          `json:"id"`
+	Type    string          `json:"type"`
+	Command string          `json:"command"`
+	Success bool            `json:"success"`
+	Error   string          `json:"error"`
+	Aborted bool            `json:"aborted"`
+	Name    string          `json:"toolName"`
+	CallID  string          `json:"toolCallId"`
+	Args    json.RawMessage `json:"args"`
+	IsError bool            `json:"isError"`
+	Result  json.RawMessage `json:"result"`
+	Message struct {
+		Role     string `json:"role"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Usage    *struct {
+			Input      int64 `json:"input"`
+			Output     int64 `json:"output"`
+			CacheRead  int64 `json:"cacheRead"`
+			CacheWrite int64 `json:"cacheWrite"`
+			TotalToken int64 `json:"totalTokens"`
+		} `json:"usage"`
+	} `json:"message"`
 
-		Delta struct {
-			Type  string `json:"type"`
-			Delta string `json:"delta"`
-		} `json:"assistantMessageEvent"`
-	}
+	Delta struct {
+		Type  string `json:"type"`
+		Delta string `json:"delta"`
+	} `json:"assistantMessageEvent"`
+}
+
+func (s *piSession) handle(raw []byte) {
+	var m piMessage
 	if json.Unmarshal(raw, &m) != nil {
 		return
 	}
 	raw = append([]byte(nil), raw...)
 	switch m.Type {
 	case "response":
-		s.wmu.Lock()
-		ch := s.wait[m.ID]
-		delete(s.wait, m.ID)
-		s.wmu.Unlock()
-		if ch != nil {
-			ch <- raw
-			return
-		}
-		if !m.Success {
-			s.emit(Event{Kind: KindError, Text: fmt.Sprintf("pi %s failed: %s", m.Command, m.Error), Raw: raw})
-			if m.Command == "prompt" {
-				s.settle("error", raw)
-			}
-		}
+		s.onResponse(m, raw)
 	case "message_start":
 		if m.Message.Role == "assistant" {
 			s.msgSeq++
@@ -233,45 +222,19 @@ func (s *piSession) handle(raw []byte) {
 	case "message_update":
 		id := "pi-" + strconv.Itoa(s.msgSeq)
 		switch {
-		case m.Delta.Type == "text_delta" && m.Delta.Delta != "":
-			s.emit(Event{Kind: KindText, Text: m.Delta.Delta, MessageID: id})
-		case m.Delta.Type == "thinking_delta" && m.Delta.Delta != "":
-			s.emit(Event{Kind: KindText, Text: m.Delta.Delta, MessageID: id, Thinking: true})
+		case m.Delta.Type == "text_delta":
+			s.emitText(id, m.Delta.Delta, false, nil)
+		case m.Delta.Type == "thinking_delta":
+			s.emitText(id, m.Delta.Delta, true, nil)
 		}
 	case "message_end":
-		if m.Message.Role != "assistant" {
-			return
-		}
-		if m.Message.Model != "" {
-			s.model = m.Message.Model
-		}
-		if m.Message.Provider != "" && m.Message.Provider != s.provider {
-			s.provider, s.baseURL = m.Message.Provider, ""
-		}
-		if u := m.Message.Usage; u != nil && u.TotalToken > 0 {
-			s.emit(Event{Kind: KindUsage, Usage: &Usage{
-				ContextTokens: u.TotalToken, ContextWindow: s.window, InputTokens: u.Input, OutputTokens: u.Output,
-				CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite, Model: s.model,
-				Provider: s.provider, BaseURL: s.baseURL,
-			}})
-		}
+		s.onMessageEnd(m)
 	case "tool_execution_start":
 		s.emit(Event{Kind: KindToolCall, Tool: &ToolCall{ID: m.CallID, Name: m.Name, Input: m.Args}, Raw: raw})
 	case "tool_execution_end":
-		ev := toolResult(m.CallID, piText(m.Result), m.IsError)
-		ev.Raw = raw
-		s.emit(ev)
+		s.emitToolResult(m.CallID, piText(m.Result), m.IsError, raw)
 	case "compaction_end":
-		manual := s.manualCompact.Swap(false)
-		var r struct {
-			Before int64 `json:"tokensBefore"`
-			After  int64 `json:"estimatedTokensAfter"`
-		}
-		if len(m.Result) == 0 || json.Unmarshal(m.Result, &r) != nil {
-			return
-		}
-		c := Compaction{TokensBefore: r.Before, TokensAfter: r.After, Native: !manual}
-		s.emit(Event{Kind: KindCompaction, Compaction: &c, Raw: raw})
+		s.onCompaction(m.Result, raw)
 	case "agent_settled":
 		stop := "end_turn"
 		if m.Aborted {
@@ -279,6 +242,55 @@ func (s *piSession) handle(raw []byte) {
 		}
 		s.settle(stop, raw)
 	}
+}
+
+func (s *piSession) onResponse(m piMessage, raw []byte) {
+	s.wmu.Lock()
+	ch := s.wait[m.ID]
+	delete(s.wait, m.ID)
+	s.wmu.Unlock()
+	if ch != nil {
+		ch <- raw
+		return
+	}
+	if !m.Success {
+		s.emit(Event{Kind: KindError, Text: fmt.Sprintf("pi %s failed: %s", m.Command, m.Error), Raw: raw})
+		if m.Command == "prompt" {
+			s.settle("error", raw)
+		}
+	}
+}
+
+func (s *piSession) onMessageEnd(m piMessage) {
+	if m.Message.Role != "assistant" {
+		return
+	}
+	if m.Message.Model != "" {
+		s.model = m.Message.Model
+	}
+	if m.Message.Provider != "" && m.Message.Provider != s.provider {
+		s.provider, s.baseURL = m.Message.Provider, ""
+	}
+	if u := m.Message.Usage; u != nil && u.TotalToken > 0 {
+		s.emit(Event{Kind: KindUsage, Usage: &Usage{
+			ContextTokens: u.TotalToken, ContextWindow: s.window, InputTokens: u.Input, OutputTokens: u.Output,
+			CacheReadTokens: u.CacheRead, CacheWriteTokens: u.CacheWrite, Model: s.model,
+			Provider: s.provider, BaseURL: s.baseURL,
+		}})
+	}
+}
+
+func (s *piSession) onCompaction(result json.RawMessage, raw []byte) {
+	manual := s.manualCompact.Swap(false)
+	var r struct {
+		Before int64 `json:"tokensBefore"`
+		After  int64 `json:"estimatedTokensAfter"`
+	}
+	if len(result) == 0 || json.Unmarshal(result, &r) != nil {
+		return
+	}
+	c := Compaction{TokensBefore: r.Before, TokensAfter: r.After, Native: !manual}
+	s.emit(Event{Kind: KindCompaction, Compaction: &c, Raw: raw})
 }
 
 // piText flattens a tool result's content blocks to text.
