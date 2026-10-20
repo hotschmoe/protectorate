@@ -112,6 +112,101 @@ two-harness handoff and Flutter real-hub UI flows remain outside the measured
 loopback lane. The deleted unit tests are not claimed as replacement evidence
 for those flows. The coordinator must run host/runtime and tailnet lanes.
 
+## Coverage of the real binary
+
+Run `make e2e-cover` to build the tagged binary with Go statement
+instrumentation and run `tests/e2e` against it. Each run keeps a fresh
+`bin/e2e-cover/run.*/` directory containing the binary, raw `data/`,
+`tests.log`, per-package `packages.txt`, `coverage.out` and
+`functions.txt`. It prints per-package percentages and exits unsuccessfully
+when the scenarios fail. Profiles from different runs are never merged.
+
+The harness forwards `GOCOVERDIR` only when set and reaps processes before
+canceling their private deadline contexts, so graceful hub/node exits write
+their counters. It polls nodes every second: the previous 100 ms interval
+implied a 200 ms stale window and rejected healthy nodes under instrumentation.
+Forced kills cannot write final counters. These profiles measure binary
+execution, excluding fuzz campaigns and the in-package host/driver scenarios.
+
+| Area | Behavioral scenarios | Remaining known gaps |
+|---|---|---|
+| Authorization | `TestBinaryStreamAuthorizationAndRevocation`, `TestBinaryNodeCredentialBoundaries`, Cluster security | Terminal host/readonly input distinctions |
+| Jobs and cancellation | `TestBinaryJobCancellationAndIdempotency`, `TestBinaryArtifactJobAndReplay`, Cluster restart/git | CLI signal during submit, lost-node deadline, execution contention |
+| Destructive node operations | `TestBinaryNodeDrainAndRemoval` | Actual uninstall and tailnet revocation |
+| Persistence and migration | `TestBinaryStateMigrationAndPolicyRestart`, Cluster backup/replay | Interrupted atomic writes, journal truncation |
+| Transfer integrity | `TestBinaryTransferFailureAtomicity`, `FuzzTransferArchive` | Transfer expiry and ZIP parser fuzzing |
+| MCP parsing | `TestBinaryCLIAndMCP`, `FuzzMCPRequest`, `FuzzMCPArguments` | Most per-tool effects are asserted through RPC |
+| Generated services | `TestBinaryGeneratedServiceExecution` | Target OS boot/registration/uninstall |
+| Mail/chat/runtime | Existing host HTTP and official protocol scenarios | Real sleeves/two-harness handoff skip here |
+| Enrollment/desktop/UI | Optional tailnet/runtime lanes | Physical desktop, real providers, Flutter real-hub flows |
+
+[The complete coverage map](e2e-coverage-map.md) accounts for every RPC,
+CLI command, all 55 MCP tools, persisted files and the risky deleted-test
+behaviors. Help/catalog enumeration and authorization-only probes are marked
+separately from successful operations. Features owned by the wave-4 sleeves
+remain excluded.
+
+The three new fuzz targets run seeds in `make test`. Mutation campaigns:
+
+```sh
+go test ./internal/mcpbridge -run '^$' -fuzz '^FuzzMCPRequest$' -fuzztime=10s -parallel=2
+go test ./internal/mcpbridge -run '^$' -fuzz '^FuzzMCPArguments$' -fuzztime=10s -parallel=2
+go test ./internal/xfer -run '^$' -fuzz '^FuzzTransferArchive$' -fuzztime=10s -parallel=2
+```
+
+Measured on 2026-10-21 in the two-core sleeve, using the same production
+source at `38c346d` and the corrected harness for both runs. Before runs the
+three pre-existing binary scenarios; after includes eight new scenarios.
+All scenarios passed (40.474s before, 34.729s after; these are coverage
+snapshots, not comparable performance benchmarks).
+Host runtime subscenarios skipped; the optional tailnet lane was not run.
+Fuzz coverage is separate.
+
+| Package (module prefix omitted) | Before | After |
+|---|---:|---:|
+| cmd/protectorate | 33.5% | 36.7% |
+| gen/protectorate/v1 | 24.5% | 26.0% |
+| gen/protectorate/v1/protectoratev1connect | 55.4% | 58.1% |
+| internal/auth | 66.3% | 67.2% |
+| internal/backlog | 0.4% | 0.4% |
+| internal/backup | 59.5% | 59.5% |
+| internal/chatlog | 0.0% | 0.0% |
+| internal/codec | 66.7% | 66.7% |
+| internal/desk | 1.0% | 14.6% |
+| internal/diagnostics | 100.0% | 100.0% |
+| internal/directory | 6.8% | 6.8% |
+| internal/driver | 0.1% | 0.1% |
+| internal/fsutil | 65.0% | 65.0% |
+| internal/handoff | 0.0% | 0.0% |
+| internal/headscaledb | 50.0% | 50.0% |
+| internal/hub | 40.0% | 45.6% |
+| internal/keylog | 69.6% | 69.6% |
+| internal/mailbox | 48.9% | 42.1% |
+| internal/mcpbridge | 62.4% | 62.4% |
+| internal/node | 46.6% | 51.2% |
+| internal/orchestrator | 0.0% | 0.0% |
+| internal/quota | 10.6% | 10.6% |
+| internal/session | 47.5% | 47.5% |
+| internal/sleeve | 23.9% | 23.9% |
+| internal/svcgen | 0.0% | 12.3% |
+| internal/tailnet | 1.1% | 1.1% |
+| internal/xfer | 37.0% | 77.3% |
+
+Cancellation timing affects some counters: the final MCP wait cancellation
+reached the client before the hub's mailbox Wait method, explaining the lower
+mailbox percentage. These are observed profiles, not coverage thresholds.
+
+Function profiles confirmed previously unreached paths now execute:
+node job cancellation 64.3%, ZIP extraction 69.6%, tier migration 78.4%,
+node draining 78.6% and generated Termux run scripts 90.9%. Driver/chat/handoff
+gaps need separate process or host lanes. Optional
+service-manager enrollment and physical desktop flows remain unmeasured.
+
+Mutation campaigns passed: MCP requests 34,164 executions in five seconds,
+MCP arguments 31,759 in five seconds, transfer archives 19 in ten seconds.
+The archive target performs real filesystem staging/sync/cleanup and is much
+slower; its seven seed archives also run on every commit.
+
 Regenerate the inventory with `python3 scripts/test-inventory.py --go-results
 /tmp/protectorate-tests.json` after collecting tagged `go test -json ./...`
 with the same PROT_E2E environment. The explicit KEEP list makes newly added
@@ -120,7 +215,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=68, KEEP-FUZZ=8; total=76. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -190,6 +285,18 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/cli_mcp_test.go | TestBinaryCLIAndMCP | Binary CLI parsing, official MCP transports, filtering, authorization and cancellation | unmeasured | KEEP-E2E | existing scenario previously missing from this inventory |
+| tests/e2e/artifact_job_test.go | TestBinaryArtifactJobAndReplay | Directory/file artifact execution, workdir confinement, binary output, executable modes, env redaction and restart replay | unmeasured | KEEP-E2E | replaces deleted artifact-source job coverage |
+| tests/e2e/job_cancellation_test.go | TestBinaryJobCancellationAndIdempotency | Concurrent submits, persisted pre-submit cancel, failed retry, process-tree kill, timeout and capacity recovery | unmeasured | KEEP-E2E | replaces deleted job/request-key cancellation coverage |
+| tests/e2e/node_credentials_test.go | TestBinaryNodeCredentialBoundaries | Redirect credential confinement, care file refusal and explicitly granted read | unmeasured | KEEP-E2E | replaces deleted node redirect and care transfer coverage |
+| tests/e2e/node_removal_test.go | TestBinaryNodeDrainAndRemoval | Refused/aborted drain, placement exclusion, cancellation, held/queued lease cleanup and persistent removal | unmeasured | KEEP-E2E | destructive node lifecycle |
+| tests/e2e/service_execution_test.go | TestBinaryGeneratedServiceExecution | Generate/refuse overwrite/execute/restart a real node service with literal quoted paths | unmeasured | KEEP-E2E | replaces text-only service generator assertions with execution |
+| tests/e2e/state_migration_test.go | TestBinaryStateMigrationAndPolicyRestart | Tier migration, backup protection, desktop policy safety/persistence/clear and lease expiry | unmeasured | KEEP-E2E | replaces deleted migration and policy persistence coverage |
+| tests/e2e/stream_authorization_test.go | TestBinaryStreamAuthorizationAndRevocation | Real event delivery, every hub stream denial, every node bearer gate and revoked restart | unmeasured | KEEP-E2E | closes streaming methods omitted by unary authorization matrix |
+| tests/e2e/transfer_integrity_test.go | TestBinaryTransferFailureAtomicity | Digest/size/framing refusal, atomic overwrite, malicious archives, cleanup, directory modes and recovery | unmeasured | KEEP-E2E | replaces deleted transfer protocol/integrity coverage |
+| internal/mcpbridge/transport_fuzz_test.go | FuzzMCPRequest | Untrusted JSON-RPC envelope and request identity | unmeasured | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
+| internal/mcpbridge/transport_fuzz_test.go | FuzzMCPArguments | Strict protobuf JSON arguments for jobs, transfers and leases | unmeasured | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
+| internal/xfer/archive_fuzz_test.go | FuzzTransferArchive | Tar extraction confinement, failure atomicity and staging cleanup | unmeasured | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
 
 ## Deleted files
 
