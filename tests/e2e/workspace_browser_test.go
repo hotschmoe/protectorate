@@ -13,6 +13,9 @@ import (
 )
 
 func TestBinaryWorkspaceBrowser(t *testing.T) {
+	t.Setenv("PROTECTORATE_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-sleeve-token"))
+	t.Setenv("PROTECTORATE_HUB", "http://127.0.0.1:1")
+	t.Setenv("PROTECTORATE_TOKEN", "inherited-sleeve-token")
 	c := newCluster(t)
 	if roots := c.call("SleeveService", "BrowseWorkspaces", map[string]any{}); len(roots) != 0 {
 		t.Fatalf("roots without ~/github: %v", roots)
@@ -47,12 +50,31 @@ func TestBinaryWorkspaceBrowser(t *testing.T) {
 		}
 	}
 	// An exited sleeve exercises list/get without requiring a host user manager.
-	record, err := json.Marshal(map[string]any{"sleeves": []any{map[string]any{"name": "browser", "harness": "shell", "workspace": repo, "state": "exited", "created": "2026-01-01T00:00:00Z"}}})
+	record, err := json.Marshal(map[string]any{"sleeves": []any{map[string]any{
+		"name": "browser", "harness": "codex", "mode": "chat", "workspace": repo, "state": "exited", "created": "2026-01-01T00:00:00Z",
+		"read_only": []any{map[string]any{"source": other, "target": "/reference"}}, "exit_after_idle": 300000000000,
+		"chat": map[string]any{
+			"state": "CHAT_STATE_IDLE", "session_id": "browser-session", "model": "browser-model", "effort": "high",
+			"requested": map[string]any{"effort": "high"}, "native_defaults": map[string]any{"model": "browser-native", "effort": "low"},
+			"provider": "openai", "local_model": true, "context_tokens": 123, "context_window": 1000,
+			"last_seq": 7, "cache_expires": "2026-01-01T01:00:00Z", "last_activity": "2026-01-01T00:01:00Z",
+		},
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(filepath.Join(c.home, "sleeves.json"), string(record))
 	c.boot()
+	show := c.cli("sleeve", "show", "browser")
+	for _, value := range []string{"read-only mount", other + " -> /reference", "exit after idle", "5m0s", "mode", "chat", "CHAT_STATE_IDLE", "browser-session", "browser-model", "high", "browser-native", "low", "openai", "local model", "true", "123/1000", "last sequence", "7", "cache expires", "last activity"} {
+		if !strings.Contains(show, value) {
+			t.Fatalf("sleeve show missing %q: %s", value, show)
+		}
+	}
+	rows := strings.Split(strings.TrimSpace(c.cli("sleeve", "ls")), "\n")
+	if len(rows) != 2 || !strings.Contains(rows[0], "MODEL") || !strings.Contains(rows[0], "EFFORT") || !strings.Contains(rows[1], "browser-model") || !strings.Contains(rows[1], "high") {
+		t.Fatalf("sleeve ls missing model/effort: %v", rows)
+	}
 	browse := func(path string) *pb.BrowseWorkspacesResponse {
 		t.Helper()
 		var res pb.BrowseWorkspacesResponse

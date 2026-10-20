@@ -12,6 +12,20 @@ Generated code must be byte-identical everywhere, so the generators are pinned, 
 
 Checks before every commit and before every merge: `make test` (tagged vet, fuzz seeds and real-binary end-to-end scenarios), `gofmt -l cmd internal` printing nothing, `make check-gen`, `make cross`, `make app-check`, `make check-version`. `make check` runs them all. `make test` builds the tagged binary first, clears inherited hub credentials and enables `PROT_E2E=1`; `make app-check` runs Flutter analysis. Optional tailnet and host runtime lanes are documented in docs/testing.md. CI runs the same on pushes to `master` and `dev-hotschmoe` and on pull requests.
 
+## Coordinating sleeves
+
+Give each sleeve a branch and a complete brief with acceptance checks. Land
+shared proto and persisted-state changes first, then rebase dependent branches;
+for parallel schema work, reserve field numbers per branch before dispatch.
+Commit schema changes together with `make gen` output.
+
+Choose a merge order from those dependencies, merge one branch at a time with
+`--no-ff`, and check the combined result. Run `make check` on the host before
+merging each branch. Runtime scenarios that need systemd user scopes must run
+on the host; a sleeve's skipped scenarios do not establish that the runtime
+passes. Read each sleeve's report for completed work, skipped checks and gaps
+before accepting it.
+
 ## Research references and access
 
 `archive/` and `references/` are read-only research material, not the current
