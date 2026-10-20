@@ -342,7 +342,9 @@ type Sleeve struct {
 	ReadOnly      []*ReadOnlyMount     `protobuf:"bytes,18,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	ExitAfterIdle *durationpb.Duration `protobuf:"bytes,19,opt,name=exit_after_idle,json=exitAfterIdle,proto3" json:"exit_after_idle,omitempty"`
 	// Current branch read from .git files; empty for non-git and worktrees.
-	GitBranch     string `protobuf:"bytes,21,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
+	GitBranch string `protobuf:"bytes,21,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
+	// Allows sandboxed child sleeves within this sleeve's resource limits.
+	Nested        bool `protobuf:"varint,30,opt,name=nested,proto3" json:"nested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -522,6 +524,13 @@ func (x *Sleeve) GetGitBranch() string {
 		return x.GitBranch
 	}
 	return ""
+}
+
+func (x *Sleeve) GetNested() bool {
+	if x != nil {
+		return x.Nested
+	}
+	return false
 }
 
 type BrowseWorkspacesRequest struct {
@@ -813,6 +822,8 @@ type SpawnSleeveRequest struct {
 	ReadOnly  []*ReadOnlyMount `protobuf:"bytes,10,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	// Zero disables automatic removal. Applies only to chat sleeves.
 	ExitAfterIdle *durationpb.Duration `protobuf:"bytes,11,opt,name=exit_after_idle,json=exitAfterIdle,proto3" json:"exit_after_idle,omitempty"`
+	// Delegates a private cgroup subtree; requires CPU and memory limits.
+	Nested        bool `protobuf:"varint,17,opt,name=nested,proto3" json:"nested,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -922,6 +933,13 @@ func (x *SpawnSleeveRequest) GetExitAfterIdle() *durationpb.Duration {
 		return x.ExitAfterIdle
 	}
 	return nil
+}
+
+func (x *SpawnSleeveRequest) GetNested() bool {
+	if x != nil {
+		return x.Nested
+	}
+	return false
 }
 
 type SpawnSleeveResponse struct {
@@ -1724,7 +1742,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\x8c\a\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xa4\a\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -1753,7 +1771,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tread_only\x18\x12 \x03(\v2\x1e.protectorate.v1.ReadOnlyMountR\breadOnly\x12A\n" +
 	"\x0fexit_after_idle\x18\x13 \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x12\x1d\n" +
 	"\n" +
-	"git_branch\x18\x15 \x01(\tR\tgitBranchB\f\n" +
+	"git_branch\x18\x15 \x01(\tR\tgitBranch\x12\x16\n" +
+	"\x06nested\x18\x1e \x01(\bR\x06nestedB\f\n" +
 	"\n" +
 	"_exit_code\"-\n" +
 	"\x17BrowseWorkspacesRequest\x12\x12\n" +
@@ -1778,7 +1797,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"?\n" +
 	"\rReadOnlyMount\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x16\n" +
-	"\x06target\x18\x02 \x01(\tR\x06target\"\xcd\x04\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\"\xe5\x04\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
@@ -1793,7 +1812,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tselection\x18\t \x01(\v2\x1f.protectorate.v1.ModelSelectionR\tselection\x12;\n" +
 	"\tread_only\x18\n" +
 	" \x03(\v2\x1e.protectorate.v1.ReadOnlyMountR\breadOnly\x12A\n" +
-	"\x0fexit_after_idle\x18\v \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x1a6\n" +
+	"\x0fexit_after_idle\x18\v \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x12\x16\n" +
+	"\x06nested\x18\x11 \x01(\bR\x06nested\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +

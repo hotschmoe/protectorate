@@ -57,6 +57,15 @@ including resume, approvals, interruption, usage, tools, selection, compaction,
 process exit and ownership. Sleeve scenarios retain real cgroup limits,
 lifecycle, warm git clone, toolchain/cache and jailed repository execution.
 
+A sleeve spawned with `--nested --cpu 200 --mem 5G` runs these runtime lanes
+through private delegated cgroups and nested bwrap. A normal sleeve still
+skips them. `TestBinaryNestedRuntime` starts a real nested-enabled sleeve and
+runs the selected production binary's runtime scenarios inside it, failing if
+the inner run skips. It also verifies actual memory OOM, CPU throttling, hidden
+parent state, persisted opt-in, unchanged outer limits and cgroup cleanup.
+This host e2e remains unverified in the original non-delegated development
+sleeve; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
+
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
 A forced kill can leave a server within its private directory; it cannot leave
@@ -120,7 +129,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=60, KEEP-FUZZ=5; total=65. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -190,6 +199,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | host verification pending | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
 
 ## Deleted files
 

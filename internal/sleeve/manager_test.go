@@ -128,7 +128,19 @@ func readFile(path string) string {
 
 func scopePids(t *testing.T, c Config, name string) []string {
 	t.Helper()
-	return strings.Fields(readFile(filepath.Join(c.scopeDir(name), "cgroup.procs")))
+	var pids []string
+	if err := filepath.WalkDir(c.scopeDir(name), func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			pids = append(pids, strings.Fields(readFile(filepath.Join(path, "cgroup.procs")))...)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return pids
 }
 
 func alive(pid string) bool {

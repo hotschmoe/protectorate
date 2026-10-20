@@ -53,6 +53,7 @@ type Info struct {
 	ParentID      string        `json:"parent_id,omitempty"`
 	ReadOnly      []Mount       `json:"read_only,omitempty"`
 	ExitAfterIdle time.Duration `json:"exit_after_idle,omitempty"`
+	Nested        bool          `json:"nested,omitempty"`
 	// Mode is how the harness runs. A record without one is a terminal
 	// sleeve from before modes existed.
 	Mode Mode `json:"mode,omitempty"`
@@ -87,6 +88,7 @@ type SpawnRequest struct {
 	ParentID      string
 	ReadOnly      []Mount
 	ExitAfterIdle time.Duration
+	Nested        bool
 
 	Selection driver.Selection
 	Name      string
@@ -298,6 +300,16 @@ func (m *Manager) validateSpawn(req SpawnRequest) (SpawnRequest, error) {
 	if err := req.Limits.Validate(); err != nil {
 		return SpawnRequest{}, err
 	}
+	if req.Nested {
+		if req.Limits.CPUPercent == 0 || req.Limits.MemoryBytes == 0 {
+			return SpawnRequest{}, fmt.Errorf("%w: nested sleeves require CPU and memory limits", ErrInvalid)
+		}
+		for _, binary := range []string{"unshare", "flock"} {
+			if _, err := exec.LookPath(binary); err != nil {
+				return SpawnRequest{}, fmt.Errorf("%w: nested sleeves require %s: %w", ErrUnavailable, binary, err)
+			}
+		}
+	}
 	mode, err := resolveMode(req.Harness, req.Mode, req.Args)
 	if err != nil {
 		return SpawnRequest{}, err
@@ -368,7 +380,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	info := Info{
 		Parent: req.Parent, ParentID: req.ParentID,
 		ReadOnly: req.ReadOnly, ExitAfterIdle: req.ExitAfterIdle,
-		Name: req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
+		Nested: req.Nested,
+		Name:   req.Name, Harness: req.Harness, Workspace: ws, Mode: mode,
 		Created: time.Now().UTC().Truncate(time.Second), State: Running,
 		CPU: req.Limits.CPUPercent, Memory: req.Limits.MemoryBytes, Args: req.Args,
 		Supervised: req.Supervised, Helper: req.Helper,
@@ -451,6 +464,7 @@ func (m *Manager) planSpawn(req SpawnRequest, workspace string) (Launch, error) 
 	return m.cfg.Plan(Spec{
 		Name: req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
 		Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly,
+		Nested: req.Nested,
 	}, bin)
 }
 

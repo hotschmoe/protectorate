@@ -340,6 +340,12 @@ Design:
 - `--exit-after-idle <duration>` removes a chat sleeve through the normal kill
   path after continuous IDLE with no pending or queued mail. It defaults off,
   resets on activity or pending mail, and preserves the workspace and home.
+- `--nested` delegates a cgroup subtree below the scope's CPU, memory and pid
+  ceilings. Nested hubs use child cgroups and nested bwrap instead of the host
+  user manager. Only the subtree is mounted, with its own cgroup namespace;
+  the outer limits and other sleeves' state remain inaccessible. The flag
+  requires finite CPU/memory limits and persists across restart and resleeve.
+  See [runtime development](docs/sleeves.md#running-runtime-tests-inside-a-sleeve).
 - Known gap: bwrap shares the host network, so two sleeves' dev servers can
   collide on ports. Docker covers per-sleeve networking if that becomes a hard
   requirement.

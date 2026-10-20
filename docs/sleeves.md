@@ -94,3 +94,71 @@ the updated hub and respawn existing sleeves to opt into mounts or idle removal.
 ```sh
 systemctl --user restart protectorate-hub
 ```
+
+## Running runtime tests inside a sleeve
+
+Opt in when spawning a development sleeve:
+
+```sh
+protectorate sleeve spawn runtime-dev --workspace /absolute/checkout \
+  --harness codex --nested --cpu 200 --mem 5G
+```
+
+`--nested` requires explicit CPU and memory limits. The option is persisted,
+reported by `sleeve show` and the API's `nested` field, and retained across hub
+restarts and resleeves. Existing sleeves need to be respawned with the flag;
+there is no state conversion. Ordinary sleeves retain their existing profile.
+The host needs cgroup v2 with delegated cpu, memory and pids controllers,
+unprivileged user namespaces, bwrap 0.8 or newer, and util-linux `unshare` and
+`flock` (plus GNU coreutils and findutils).
+Missing delegation or namespace support fails the launch; it never falls back
+to running a command outside the sandbox.
+
+Inside the new sleeve, build and run against its own checkout:
+
+```sh
+mkdir -p "$HOME/.cache/protectorate-tests"
+TMPDIR="$HOME/.cache/protectorate-tests" make test
+env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN \
+  PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
+  go test -count=1 -v ./tests/e2e -run '^TestBinaryNestedRuntime$'
+```
+
+Using the sleeve home for test temporary files keeps SDK-copy fixtures on
+disk. The sandbox's `/tmp` is tmpfs and its contents count toward the memory
+limit.
+
+The runtime automatically discovers the private cgroup mount at
+`/run/protectorate/cgroup`. It creates child cgroups there and runs nested
+bwrap without the host systemd user manager or its bus. Each child gets the
+usual fresh filesystem, PID, IPC and UTS namespaces, its own home and hub
+state, and a private cgroup namespace. Nested-enabled children may delegate
+again; children without the flag receive no cgroup mount and root their cgroup
+namespace in a leaf below their hidden resource limits. This also confines a
+child that mounts a new cgroup filesystem, without relying on `nsdelegate`.
+Network access follows the parent's existing shared network profile.
+
+The outer systemd scope uses `Delegate=yes`. Its CPU, memory, swap and pid
+ceilings remain outside the sandbox. Only a `delegated/` child is mounted
+writable, and the cgroup namespace is rooted there. A `run/` leaf holds the
+parent workload so controllers can be enabled on the otherwise empty
+delegation root. Subprocesses enter their child cgroup after limits are
+installed and before nested bwrap executes their command. Raising a visible
+child limit cannot raise the hidden ancestor's limit. The outer scope also
+bounds delegation to 256 descendant cgroups and 16 levels. Killing a scope
+kills its entire descendant tree; child launch supervisors reap empty cgroups.
+
+The sleeve's test runner executes inside bwrap, with the kernel enforcing
+hierarchical limits and namespace confinement. The host test
+`TestBinaryNestedRuntime` copies the selected production binary and the e2e
+runner into a temporary workspace, starts a real `--nested` sleeve, and runs
+the runtime scenario there. It checks persisted opt-in, ownership, restart,
+chat, hidden parent state, actual memory OOM and CPU throttling, unchanged
+outer limits, and descendant cleanup. The same test can run inside an already
+nested-enabled sleeve and exercises another sandbox level.
+
+Design references: [systemd cgroup delegation](https://systemd.io/CGROUP_DELEGATION/),
+[Linux 6.6 cgroup v2 delegation and namespaces](https://www.kernel.org/doc/html/v6.6/admin-guide/cgroup-v2.html),
+and [bwrap 0.8 namespace options](https://github.com/containers/bubblewrap/blob/v0.8.0/bubblewrap.c).
+The namespace probes in the original non-delegated development sleeve passed
+with bwrap 0.8.0; the writable cgroup path must be verified by the host e2e.

@@ -234,6 +234,7 @@ const Sleeve$json = {
       '10': 'exitAfterIdle'
     },
     {'1': 'git_branch', '3': 21, '4': 1, '5': 9, '10': 'gitBranch'},
+    {'1': 'nested', '3': 30, '4': 1, '5': 8, '10': 'nested'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -258,7 +259,7 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'gUIAEoCVIGcGFyZW50EjsKCXJlYWRfb25seRgSIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5SZWFk'
     'T25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYEyABKAsyGS5nb29nbGUucH'
     'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSHQoKZ2l0X2JyYW5jaBgVIAEoCVIJZ2l0'
-    'QnJhbmNoQgwKCl9leGl0X2NvZGU=');
+    'QnJhbmNoEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkQgwKCl9leGl0X2NvZGU=');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -399,6 +400,7 @@ const SpawnSleeveRequest$json = {
       '6': '.google.protobuf.Duration',
       '10': 'exitAfterIdle'
     },
+    {'1': 'nested', '3': 17, '4': 1, '5': 8, '10': 'nested'},
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -424,8 +426,9 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'dXBlcnZpc2VkEj0KCXNlbGVjdGlvbhgJIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbG'
     'VjdGlvblIJc2VsZWN0aW9uEjsKCXJlYWRfb25seRgKIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5S'
     'ZWFkT25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYCyABKAsyGS5nb29nbG'
-    'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUaNgoIRW52RW50cnkSEAoDa2V5GAEg'
-    'ASgJUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AQ==');
+    'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSFgoGbmVzdGVkGBEgASgIUgZuZXN0'
+    'ZWQaNgoIRW52RW50cnkSEAoDa2V5GAEgASgJUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOg'
+    'I4AQ==');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {

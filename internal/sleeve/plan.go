@@ -22,6 +22,7 @@ type Spec struct {
 	Env       map[string]string
 	Limits    Limits
 	ReadOnly  []Mount
+	Nested    bool
 }
 
 type Mount struct {
@@ -328,7 +329,7 @@ func checkEnv(env map[string]string) error {
 	return nil
 }
 
-// Box is one bwrap sandbox in a systemd user scope: a PID, IPC and UTS
+// Box is one bwrap sandbox in a bounded cgroup: a PID, IPC and UTS
 // namespace on a fresh root with the system directories and the tool dirs
 // read-only, known secret files masked, and only the binds named here
 // writable. Sleeves and node jobs are both boxes.
@@ -339,6 +340,7 @@ type Box struct {
 	Unit     string
 	Hostname string
 	Limits   Limits
+	Nested   bool
 	// Home is the host directory bound read-write at the user's home.
 	Home string
 	// RO, ROFiles and Symlinks add read-only directories, files and
@@ -358,7 +360,7 @@ type Box struct {
 	Command []string
 }
 
-// BoxArgv is the systemd-run and bwrap argv of b. It has no side effects;
+// BoxArgv is the cgroup launcher and bwrap argv of b. It has no side effects;
 // the caller validates the binds (CheckBind) and the limits.
 func (c Config) BoxArgv(b Box) []string {
 	argv := []string{"systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + b.Unit}
@@ -368,10 +370,21 @@ func (c Config) BoxArgv(b Box) []string {
 	if p := b.Limits.CPUPercent; p != 0 {
 		argv = append(argv, "-p", "CPUQuota="+strconv.FormatUint(uint64(p), 10)+"%")
 	}
-	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue", "--")
+	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue")
+	if b.Nested {
+		argv = append(argv, "-p", "Delegate=yes")
+	}
+	argv = append(argv, "--")
+	if c.delegated {
+		argv = nil
+	}
+	prefix := argv
 
-	argv = append(argv, "bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
-		"--hostname", b.Hostname, "--tmpfs", "/")
+	argv = []string{"bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
+		"--hostname", b.Hostname, "--tmpfs", "/"}
+	if c.delegated && !b.Nested {
+		argv = append(argv, "--unshare-cgroup")
+	}
 	argv = append(argv, c.System...)
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp")
 	if b.Home == "" {
@@ -401,6 +414,9 @@ func (c Config) BoxArgv(b Box) []string {
 	for _, m := range b.WritableMounts {
 		argv = append(argv, "--bind", m.Source, m.Target)
 	}
+	if b.Nested {
+		argv = append(argv, "--bind", filepath.Join(c.CgroupRoot, b.Unit+".scope", "delegated"), DelegatedCgroupRoot)
+	}
 	argv = append(argv, "--chdir", b.Chdir, "--clearenv")
 	for _, kv := range b.Env {
 		argv = append(argv, "--setenv", kv[0], kv[1])
@@ -408,7 +424,8 @@ func (c Config) BoxArgv(b Box) []string {
 	if b.EnvFD {
 		argv = append(argv, "--args", "3")
 	}
-	return append(append(argv, "--"), b.Command...)
+	argv = append(append(argv, "--"), b.Command...)
+	return append(prefix, c.scopeArgv(b, argv)...)
 }
 
 // SetenvArgs encodes env as bwrap --setenv arguments in the NUL-separated
@@ -421,7 +438,7 @@ func SetenvArgs(env [][2]string) []byte {
 	return out
 }
 
-// Plan builds the systemd-run and bwrap command for spec. It has no side
+// Plan builds the cgroup launcher and bwrap command for spec. It has no side
 // effects; Layout.Apply prepares the host directories it refers to.
 func (c Config) validateSpec(spec Spec) ([]Mount, error) {
 	if err := ValidName(spec.Name); err != nil {
@@ -429,6 +446,9 @@ func (c Config) validateSpec(spec Spec) ([]Mount, error) {
 	}
 	if err := spec.Limits.Validate(); err != nil {
 		return nil, err
+	}
+	if spec.Nested && (spec.Limits.CPUPercent == 0 || spec.Limits.MemoryBytes == 0) {
+		return nil, fmt.Errorf("%w: nested sleeves require CPU and memory limits", ErrInvalid)
 	}
 	if err := checkEnv(spec.Env); err != nil {
 		return nil, err
@@ -498,7 +518,8 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	}
 	argv := c.BoxArgv(Box{
 		Unit: unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
-		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
+		Nested: spec.Nested,
+		RO:     bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
 		Mounts:         mounts,
 		WritableMounts: lay.CacheCopies,
 		RW:             append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,

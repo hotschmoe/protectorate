@@ -134,6 +134,7 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Mode:       modeToProto(i.Mode),
 		Chat:       chatToProto(i.Chat),
 		Supervised: i.Supervised,
+		Nested:     i.Nested,
 		Handoff:    handoffToProto(i.Handoff),
 		Limits:     &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
 		State:      pb.SleeveState_SLEEVE_STATE_RUNNING,
@@ -208,6 +209,7 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		Selection: selectionFromProto(m.Selection),
 		Name:      m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
+		Nested: m.Nested,
 	}
 	if p := auth.PrincipalFrom(ctx); p != nil {
 		r.Parent, r.ParentID = "token:"+p.Name, p.ID

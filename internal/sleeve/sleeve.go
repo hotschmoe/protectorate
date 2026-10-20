@@ -1,5 +1,5 @@
 // Package sleeve runs one harness in one workspace inside a bubblewrap
-// sandbox in a systemd user scope, as a tmux session on the hub. Linux only.
+// sandbox in a systemd user scope or delegated cgroup subtree. Linux only.
 package sleeve
 
 import (
@@ -104,8 +104,9 @@ type Config struct {
 	TasksMax int
 	// UnitPrefix isolates scopes belonging to the resolved state home.
 	UnitPrefix string
-	// CgroupRoot is the cgroup directory that holds the user's scopes.
+	// CgroupRoot holds the user's scopes or delegated child scopes.
 	CgroupRoot string
+	delegated  bool
 	// Protected are extra resolved paths that must never be mounted or used
 	// as a workspace, such as the targets of symlinked credential dirs.
 	Protected []string
@@ -192,6 +193,9 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	c.System = SystemMounts()
 	c.CgroupRoot = filepath.Join("/sys/fs/cgroup/user.slice", fmt.Sprintf("user-%d.slice", os.Getuid()),
 		fmt.Sprintf("user@%d.service", os.Getuid()), "app.slice")
+	if _, err := os.Stat(filepath.Join(DelegatedCgroupRoot, "cgroup.controllers")); err == nil {
+		c.CgroupRoot, c.delegated = DelegatedCgroupRoot, true
+	}
 
 	c.ToolDirs, err = discoverToolDirs(uh, toolDirs)
 	if err != nil {

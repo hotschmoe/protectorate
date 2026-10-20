@@ -180,6 +180,8 @@ message Sleeve {
   google.protobuf.Duration exit_after_idle = 19;
   // Current branch read from .git files; empty for non-git and worktrees.
   string git_branch = 21;
+  // Allows sandboxed child sleeves within this sleeve's resource limits.
+  bool nested = 30;
 }
 
 message BrowseWorkspacesRequest {
@@ -233,6 +235,8 @@ message SpawnSleeveRequest {
   repeated ReadOnlyMount read_only = 10;
   // Zero disables automatic removal. Applies only to chat sleeves.
   google.protobuf.Duration exit_after_idle = 11;
+  // Delegates a private cgroup subtree; requires CPU and memory limits.
+  bool nested = 17;
 }
 
 message SpawnSleeveResponse {

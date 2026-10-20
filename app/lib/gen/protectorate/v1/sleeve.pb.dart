@@ -301,6 +301,7 @@ class Sleeve extends $pb.GeneratedMessage {
     $2.Duration? exitAfterIdle,
     $core.String? parent,
     $core.String? gitBranch,
+    $core.bool? nested,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -324,6 +325,7 @@ class Sleeve extends $pb.GeneratedMessage {
     if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
     if (parent != null) result.parent = parent;
     if (gitBranch != null) result.gitBranch = gitBranch;
+    if (nested != null) result.nested = nested;
     return result;
   }
 
@@ -373,6 +375,7 @@ class Sleeve extends $pb.GeneratedMessage {
         subBuilder: $2.Duration.$_createMessage)
     ..aOS(20, _omitFieldNames ? '' : 'parent')
     ..aOS(21, _omitFieldNames ? '' : 'gitBranch')
+    ..aOB(30, _omitFieldNames ? '' : 'nested')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -602,6 +605,16 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasGitBranch() => $_has(20);
   @$pb.TagNumber(21)
   void clearGitBranch() => $_clearField(21);
+
+  /// Allows sandboxed child sleeves within this sleeve's resource limits.
+  @$pb.TagNumber(30)
+  $core.bool get nested => $_getBF(21);
+  @$pb.TagNumber(30)
+  set nested($core.bool value) => $_setBool(21, value);
+  @$pb.TagNumber(30)
+  $core.bool hasNested() => $_has(21);
+  @$pb.TagNumber(30)
+  void clearNested() => $_clearField(30);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {
@@ -983,6 +996,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $1.ModelSelection? selection,
     $core.Iterable<ReadOnlyMount>? readOnly,
     $2.Duration? exitAfterIdle,
+    $core.bool? nested,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -996,6 +1010,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (selection != null) result.selection = selection;
     if (readOnly != null) result.readOnly.addAll(readOnly);
     if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
+    if (nested != null) result.nested = nested;
     return result;
   }
 
@@ -1034,6 +1049,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
         subBuilder: ReadOnlyMount.$_createMessage)
     ..aOM<$2.Duration>(11, _omitFieldNames ? '' : 'exitAfterIdle',
         subBuilder: $2.Duration.$_createMessage)
+    ..aOB(17, _omitFieldNames ? '' : 'nested')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1154,6 +1170,16 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   void clearExitAfterIdle() => $_clearField(11);
   @$pb.TagNumber(11)
   $2.Duration ensureExitAfterIdle() => $_ensure(10);
+
+  /// Delegates a private cgroup subtree; requires CPU and memory limits.
+  @$pb.TagNumber(17)
+  $core.bool get nested => $_getBF(11);
+  @$pb.TagNumber(17)
+  set nested($core.bool value) => $_setBool(11, value);
+  @$pb.TagNumber(17)
+  $core.bool hasNested() => $_has(11);
+  @$pb.TagNumber(17)
+  void clearNested() => $_clearField(17);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
