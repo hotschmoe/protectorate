@@ -8,7 +8,7 @@ import "protectorate/v1/options.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
-// TokenService issues and revokes scoped API tokens. Only the owner token (the
+// TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
 // one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
 service TokenService {
   option (protectorate.v1.owner_only) = true;
@@ -16,6 +16,9 @@ service TokenService {
   // CreateToken issues a scoped token. The secret is returned once and only
   // its SHA-256 hash is stored, so it cannot be recovered later.
   rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
+
+  // UpdateTokenScopes changes grants without rotating the secret.
+  rpc UpdateTokenScopes(UpdateTokenScopesRequest) returns (UpdateTokenScopesResponse);
 
   // ListTokens returns every issued token, including revoked and expired
   // ones, without secrets.
@@ -107,5 +110,16 @@ message RevokeTokenRequest {
 }
 
 message RevokeTokenResponse {
+  TokenInfo token = 1;
+}
+
+message UpdateTokenScopesRequest {
+  // id is an exact token ID or an unambiguous active token name.
+  string id = 1;
+  repeated string add = 2;
+  repeated string remove = 3;
+}
+
+message UpdateTokenScopesResponse {
   TokenInfo token = 1;
 }

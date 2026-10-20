@@ -39,6 +39,27 @@ scope that would have admitted the call. Comparisons are constant time.
 Default deny: a token has exactly the scopes it was created with, and nothing
 is implied (`read` does not include `events`; no glob includes the terminal).
 
+The owner can change an existing token through `TokenService.UpdateTokenScopes`
+or `protectorate token scopes <id|name> --add read --remove events`. Names must
+identify exactly one active token; use its ID when names overlap. Additions and
+removals are exact scope strings, removals win when both name the same scope,
+and removing every scope is allowed. The ID, secret, expiry and running sleeve
+stay unchanged. The next authenticated request uses the new scopes; an existing
+stream keeps its admission. Revoked and expired tokens cannot be changed.
+Scope updates cannot add `node_admin:` grants; continue to use `grant admin`.
+Each update is audited with the token ID and the before/after scopes.
+
+Each newly spawned sleeve records its authenticated parent in `sleeves.yaml`:
+`owner`, `envoy`, `sleeve:<name>`, or `token:<name>`, together with the
+parent token ID. `sleeve ls`, `sleeve show` and the API expose the parent label.
+A parent may kill its children without `sleeve_kill_sleeve`; other callers
+still need the existing global kill scope. Envoy and sleeve identities retain
+this right across identity-token renewal or resleeving. Arbitrary tokens are
+matched by ID. The ownership exception never admits killing `envoy`, including
+Envoy killing itself. Global scopes and the reserved-name rules are unchanged.
+Existing records without a parent gain no ownership rights; their creator is
+unknown and is not guessed during migration.
+
 | Scope | Grants |
 |-------|--------|
 | `read` | every RPC marked `NO_SIDE_EFFECTS`, derived from the proto descriptors, so new read RPCs are covered automatically |
@@ -155,6 +176,7 @@ Limits to keep in mind:
 protectorate token create phone --scope read --scope terminal --scope 'session_*' --ttl 720h
 protectorate token ls
 protectorate token revoke <id>
+protectorate token scopes <id|name> --add sleeve_spawn_sleeve --remove events
 protectorate audit tail -n 50
 ```
 
@@ -163,6 +185,11 @@ Every command takes the token from `--token-file`, then env
 works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
 mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `chat_*`, `backlog_*`,
 90 days) instead of embedding the owner token.
+
+Run `python3 scripts/e2e-scopes.py ./bin/protectorate --require-runtime` on a
+Linux host with tmux, bwrap and a systemd user manager to verify ownership and
+scope changes against a real temporary hub. Without `--require-runtime`, it
+still verifies scope changes, persistence and audit when sleeves are unavailable.
 
 ## Shared node token
 

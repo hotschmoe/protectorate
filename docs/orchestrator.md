@@ -9,6 +9,7 @@ harness is untouched: it only finds normal project context files and a CLI.
 ```
 protectorate orchestrator spawn [--harness auto|claude|codex|grok|pi] [--scopes a,b] [--add-scopes c]
 protectorate orchestrator status
+protectorate orchestrator scopes --add chat_send --remove events
 protectorate quota suggest [--for small|medium|large]
 ```
 
@@ -50,8 +51,8 @@ is required. This feature does not require restarting the hub or Envoy.
 
 `AGENTS.md` holds the role, the working loop, the token's name and scopes, a table
 of every hub tool with whether this token may call it, and the CLI reference
-walked from the cobra command tree. It is rebuilt on every spawn, so it cannot
-go stale; put standing notes in `NOTES.md` next to it. Claude Code reads
+walked from the cobra command tree. It is rebuilt on every spawn; put standing
+notes in `NOTES.md` next to it. Claude Code reads
 `CLAUDE.md`; Codex, Grok and pi read `AGENTS.md`. `hosts.md` is the hub's node
 inventory.
 
@@ -113,33 +114,43 @@ A denied call fails with `permission_denied` and is written to the audit log
 tells Envoy to ask the user before any destructive action, even one its token
 would allow. That is a convention for the model; the token is the enforcement.
 
-## Widening it
+## Changing scopes in place
 
 ```
-protectorate orchestrator spawn --add-scopes sleeve_kill_sleeve     # allow kill
-protectorate orchestrator spawn --scopes read,events,backlog_create_note   # replace the defaults
+protectorate orchestrator scopes --add sleeve_kill_sleeve
+protectorate orchestrator scopes --remove sleeve_kill_sleeve
+protectorate token scopes sleeve:worker --add sleeve_spawn_sleeve
 ```
 
 Run these commands with owner authentication (see [auth.md](auth.md)); Envoy
-cannot widen its own token. This is a creation/respawn option, not a hub
-configuration switch. An existing Envoy is stopped and recreated, and its old
-tokens are revoked. `--harness` defaults to `auto`; specify the desired harness
-when preserving that choice matters.
+cannot change its own scopes. `TokenService.UpdateTokenScopes` changes the
+existing token's grants without rotating its secret or restarting Envoy. The
+next request uses the new scopes; existing streams retain their admission.
+Every change is audited with its before/after scopes. `orchestrator scopes`
+selects the newest active Envoy token, including during the renewal grace
+period. Older grace-period tokens keep their own grants until revoked.
 
 `--add-scopes` extends the defaults, or the explicit `--scopes` list; it does
 not extend the running token's custom grants. To preserve custom grants, supply
 their complete list with `--scopes` and add the new scope with `--add-scopes`.
-Scopes use tool names (see [auth.md](auth.md)). The owner-only API is
+These flags still apply when creating or explicitly respawning Envoy.
+Scopes use tool names (see [auth.md](auth.md)). The owner-only spawn API is
 `SleeveService/SpawnEnvoy`, with `SpawnEnvoyRequest.scopes`, `add_scopes`,
-`harness` and `ttl`. There is no public in-place scope-update operation;
-automatic renewal keeps the existing scopes. No hub restart is needed.
+`harness` and `ttl`. Automatic renewal keeps the updated scopes, including an
+empty set. No hub restart is needed. In-place updates leave `AGENTS.md` alone
+to preserve its prompt prefix; its spawn-time scope table may be stale. The
+API is authoritative; `orchestrator status` shows the current grants.
 
 Envoy can assign work with `msg send <sleeve> ...`; the mailbox delivers it
 into chat according to [delivery rules](coordination.md#delivery). Direct
 `chat send`, interrupt and approval responses need additional chat scopes,
 which Envoy does not receive by default. `terminal` permits typing into sleeve
 terminal sessions; host sessions need `terminal:host` or the owner token.
-Neither terminal grant is needed for mailbox assignments. An explicit
+Neither terminal grant is needed for mailbox assignments. Envoy can kill a
+sleeve it spawned without a global kill grant. The hub records `parent: envoy`
+on new workers and exposes it in `sleeve ls` and `sleeve show`. This ownership
+right survives Envoy token renewal, cannot kill Envoy itself, and grants no
+rights over older workers whose records lack a parent. An explicit
 `sleeve_kill_sleeve` grant permits killing sleeves generally, not only children.
 
 ## External bridges are the same mechanism

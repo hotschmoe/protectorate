@@ -255,11 +255,11 @@ func sleeveLsCmd(o *opts) *cobra.Command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE")
+				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT")
 				for _, s := range res.Msg.Sleeves {
 					u := s.Usage
-					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
-						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace)
+					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
+						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace, s.Parent)
 				}
 			})
 		},
@@ -327,6 +327,7 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
 				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
+				fmt.Fprintf(w, "parent\t%s\n", s.Parent)
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {
 					fmt.Fprintf(w, "exited\t%s\n", s.ExitedAt.AsTime().Local().Format(time.RFC3339))

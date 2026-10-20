@@ -336,7 +336,9 @@ type Sleeve struct {
 	// the boundary).
 	Supervised bool `protobuf:"varint,16,opt,name=supervised,proto3" json:"supervised,omitempty"`
 	// handoff is set when a resleeve produced this sleeve's harness.
-	Handoff       *Handoff `protobuf:"bytes,17,opt,name=handoff,proto3" json:"handoff,omitempty"`
+	Handoff *Handoff `protobuf:"bytes,17,opt,name=handoff,proto3" json:"handoff,omitempty"`
+	// parent is the authenticated identity that spawned this sleeve.
+	Parent        string `protobuf:"bytes,18,opt,name=parent,proto3" json:"parent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -488,6 +490,13 @@ func (x *Sleeve) GetHandoff() *Handoff {
 		return x.Handoff
 	}
 	return nil
+}
+
+func (x *Sleeve) GetParent() string {
+	if x != nil {
+		return x.Parent
+	}
+	return ""
 }
 
 type SpawnSleeveRequest struct {
@@ -1399,7 +1408,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xd5\x05\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xed\x05\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -1423,7 +1432,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\n" +
 	"supervised\x18\x10 \x01(\bR\n" +
 	"supervised\x122\n" +
-	"\ahandoff\x18\x11 \x01(\v2\x18.protectorate.v1.HandoffR\ahandoffB\f\n" +
+	"\ahandoff\x18\x11 \x01(\v2\x18.protectorate.v1.HandoffR\ahandoff\x12\x16\n" +
+	"\x06parent\x18\x12 \x01(\tR\x06parentB\f\n" +
 	"\n" +
 	"_exit_code\"\xcd\x03\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +
