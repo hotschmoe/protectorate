@@ -606,6 +606,37 @@ func TestPollRecoversFromDeadPooledConnection(t *testing.T) {
 	}
 }
 
+func TestPollAllKeepsNodeAddedMidRound(t *testing.T) {
+	inv, err := OpenInventory(t.TempDir(), testSelf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := inv.Add(&pb.NodeInfo{Name: "first", Address: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+		NodeOptions{Interval: time.Hour})
+	m.fetchRemote = func(ctx context.Context, n *pb.NodeInfo) (*pb.NodeMetrics, error) {
+		if n.Name == "first" {
+			late, err := inv.Add(&pb.NodeInfo{Name: "late", Address: "late"})
+			if err != nil {
+				t.Error(err)
+				return &pb.NodeMetrics{}, nil
+			}
+			m.pollOne(ctx, late)
+		}
+		return &pb.NodeMetrics{}, nil
+	}
+	m.pollAll(context.Background())
+	s, err := m.Status("late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Freshness != pb.NodeFreshness_NODE_FRESHNESS_FRESH {
+		t.Fatalf("node added mid-round lost its first poll: %v, %q", s.Freshness, s.Error)
+	}
+}
+
 func TestValidNodeAddr(t *testing.T) {
 	tests := []struct {
 		addr string
