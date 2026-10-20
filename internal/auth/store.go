@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -39,12 +40,17 @@ type Token struct {
 	LastUsed  *time.Time `json:"last_used,omitempty"`
 	RevokedAt *time.Time `json:"revoked,omitempty"`
 	// Task and MintedBy are set on an admin grant.
-	Task     string `json:"task,omitempty"`
-	MintedBy string `json:"minted_by,omitempty"`
+	Task       string     `json:"task,omitempty"`
+	MintedBy   string     `json:"minted_by,omitempty"`
+	Device     bool       `json:"device,omitempty"`
+	Platform   string     `json:"platform,omitempty"`
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+	ApprovedBy string     `json:"approved_by,omitempty"`
 }
 
 type tokenFile struct {
-	Tokens []Token `json:"tokens"`
+	Tokens         []Token      `json:"tokens"`
+	DeviceRequests []DeviceAuth `json:"device_requests,omitempty"`
 }
 
 // Store holds issued tokens in a JSON file, rewritten atomically with mode
@@ -56,6 +62,8 @@ type Store struct {
 	mu        sync.Mutex
 	tokens    []Token
 	lastFlush time.Time
+	requests  []DeviceAuth
+	streams   map[string]map[*int]context.CancelFunc
 }
 
 // OpenStore loads path, treating a missing file as empty.
@@ -73,6 +81,20 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	s.tokens = f.Tokens
+	s.requests = f.DeviceRequests
+	changed := false
+	for i := range s.tokens {
+		if pairedToken(s.tokens[i]) && !s.tokens[i].Device {
+			s.tokens[i].Device = true
+			s.tokens[i].Scopes = []string{ScopeFull}
+			changed = true
+		}
+	}
+	if changed {
+		if err := s.writeLocked(); err != nil {
+			return nil, fmt.Errorf("migrate paired devices: %w", err)
+		}
+	}
 	return s, nil
 }
 
@@ -230,6 +252,9 @@ func (s *Store) Revoke(id string, now time.Time) (Token, error) {
 			s.tokens[i].RevokedAt = nil
 			return Token{}, err
 		}
+		for _, cancel := range s.streams[id] {
+			cancel()
+		}
 		return s.tokens[i].clone(), nil
 	}
 	return Token{}, ErrUnknownToken
@@ -261,6 +286,9 @@ func (s *Store) UpdateScopes(id string, add, remove []string, now time.Time) (To
 		return Token{}, nil, ErrUnknownToken
 	}
 	t := s.tokens[idx]
+	if t.IsDevice() {
+		return Token{}, nil, errors.New("devices have Full access; revoke the device to remove access")
+	}
 	if t.RevokedAt != nil {
 		return Token{}, nil, ErrRevoked
 	}
@@ -335,7 +363,7 @@ func (s *Store) writeLocked() error {
 	if s.path == "" {
 		return nil
 	}
-	b, err := json.MarshalIndent(tokenFile{Tokens: s.tokens}, "", "  ")
+	b, err := json.MarshalIndent(tokenFile{Tokens: s.tokens, DeviceRequests: s.requests}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode tokens: %w", err)
 	}

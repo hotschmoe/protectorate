@@ -173,10 +173,12 @@ if [ -n "$CACHE_ENTRY" ]; then printf poisoned > "$GOCACHE/$CACHE_ENTRY"; fi
 touch verified
 exec sleep 60
 `
+	probe := filepath.Join(ws, "cache-probe.sh")
 	spawn := func() {
+		write(probe, []byte(script))
 		c.call("SleeveService", "SpawnSleeve", map[string]any{
 			"name": "cache-probe", "harness": "HARNESS_SHELL", "workspace": ws,
-			"args":   []string{"bash", "-c", script},
+			"args":   []string{"bash", probe},
 			"limits": map[string]any{"cpuPercent": 200},
 			"env":    map[string]string{"FLUTTER_CACHE": filepath.Join(flutter, "bin/cache"), "GOCACHE": filepath.Join(c.root, ".cache/go-build"), "GOROOT": filepath.Join(c.root, ".local/go"), "CACHE_ENTRY": cacheEntry},
 		})
@@ -201,15 +203,17 @@ exec sleep 60
 	}
 	if wantOverlay {
 		t.Cleanup(func() { c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "cache-reader"}, nil) })
-		c.call("SleeveService", "SpawnSleeve", map[string]any{
-			"name": "cache-reader", "harness": "HARNESS_SHELL", "workspace": ws,
-			"args": []string{"bash", "-c", `set -eu
+		readerProbe := filepath.Join(ws, "cache-reader.sh")
+		write(readerProbe, []byte(`set -eu
 test ! -e "$FLUTTER_CACHE/created"
 test ! -e "$PUB_CACHE/git/created"
 test "$(sha256sum "$GOCACHE/$CACHE_ENTRY" | cut -d ' ' -f 1)" = "$CACHE_HASH"
 touch reader-verified
-exec sleep 60`},
-			"env": map[string]string{"FLUTTER_CACHE": filepath.Join(flutter, "bin/cache"), "CACHE_ENTRY": cacheEntry, "CACHE_HASH": filepath.Base(cacheEntry)[:64]},
+exec sleep 60`))
+		c.call("SleeveService", "SpawnSleeve", map[string]any{
+			"name": "cache-reader", "harness": "HARNESS_SHELL", "workspace": ws,
+			"args": []string{"bash", readerProbe},
+			"env":  map[string]string{"FLUTTER_CACHE": filepath.Join(flutter, "bin/cache"), "CACHE_ENTRY": cacheEntry, "CACHE_HASH": filepath.Base(cacheEntry)[:64]},
 		})
 		c.eventually(func() bool { _, err := os.Stat(filepath.Join(ws, "reader-verified")); return err == nil })
 		c.call("SleeveService", "KillSleeve", map[string]any{"name": "cache-reader"})

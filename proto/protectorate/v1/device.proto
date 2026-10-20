@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+import "protectorate/v1/token.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+// DeviceService connects new clients through approval by a trusted device.
+service DeviceService {
+  // StartDeviceAuth is unauthenticated and rate limited on the LAN.
+  rpc StartDeviceAuth(StartDeviceAuthRequest) returns (StartDeviceAuthResponse);
+  // PollDeviceAuth delivers a fresh token only once after approval.
+  rpc PollDeviceAuth(PollDeviceAuthRequest) returns (PollDeviceAuthResponse);
+  rpc ListDeviceAuth(ListDeviceAuthRequest) returns (ListDeviceAuthResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ApproveDeviceAuth(ApproveDeviceAuthRequest) returns (ApproveDeviceAuthResponse);
+  rpc DenyDeviceAuth(DenyDeviceAuthRequest) returns (DenyDeviceAuthResponse);
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc RevokeDevice(RevokeDeviceRequest) returns (RevokeDeviceResponse);
+  rpc RenameDevice(RenameDeviceRequest) returns (RenameDeviceResponse);
+}
+
+message StartDeviceAuthRequest {
+  string name = 1;
+  string platform = 2;
+}
+message StartDeviceAuthResponse {
+  string device_code = 1;
+  string user_code = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  int32 interval = 4;
+}
+message PollDeviceAuthRequest {
+  string device_code = 1;
+}
+message PollDeviceAuthResponse {
+  // status is pending, slow_down, approved, denied, expired or consumed.
+  string status = 1;
+  int32 interval = 2;
+  string secret = 3;
+  TokenInfo token = 4;
+}
+message DeviceAuthInfo {
+  string user_code = 1;
+  string name = 2;
+  string platform = 3;
+  string requesting_ip = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+message ListDeviceAuthRequest {}
+message ListDeviceAuthResponse {
+  repeated DeviceAuthInfo requests = 1;
+}
+message ApproveDeviceAuthRequest {
+  string user_code = 1;
+}
+message ApproveDeviceAuthResponse {}
+message DenyDeviceAuthRequest {
+  string user_code = 1;
+}
+message DenyDeviceAuthResponse {}
+message ListDevicesRequest {}
+message ListDevicesResponse {
+  repeated TokenInfo devices = 1;
+}
+message RevokeDeviceRequest {
+  string id = 1;
+}
+message RevokeDeviceResponse {
+  TokenInfo token = 1;
+}
+message RenameDeviceRequest {
+  string id = 1;
+  string name = 2;
+}
+message RenameDeviceResponse {
+  TokenInfo token = 1;
+}

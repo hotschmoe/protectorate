@@ -203,6 +203,9 @@ class TokenInfo extends $pb.GeneratedMessage {
     $1.Timestamp? revokedAt,
     $core.String? task,
     $core.String? mintedBy,
+    $core.String? platform,
+    $1.Timestamp? approvedAt,
+    $core.String? approvedBy,
   }) {
     final result = TokenInfo._();
     if (id != null) result.id = id;
@@ -214,6 +217,9 @@ class TokenInfo extends $pb.GeneratedMessage {
     if (revokedAt != null) result.revokedAt = revokedAt;
     if (task != null) result.task = task;
     if (mintedBy != null) result.mintedBy = mintedBy;
+    if (platform != null) result.platform = platform;
+    if (approvedAt != null) result.approvedAt = approvedAt;
+    if (approvedBy != null) result.approvedBy = approvedBy;
     return result;
   }
 
@@ -244,6 +250,10 @@ class TokenInfo extends $pb.GeneratedMessage {
         subBuilder: $1.Timestamp.$_createMessage)
     ..aOS(8, _omitFieldNames ? '' : 'task')
     ..aOS(9, _omitFieldNames ? '' : 'mintedBy')
+    ..aOS(10, _omitFieldNames ? '' : 'platform')
+    ..aOM<$1.Timestamp>(11, _omitFieldNames ? '' : 'approvedAt',
+        subBuilder: $1.Timestamp.$_createMessage)
+    ..aOS(12, _omitFieldNames ? '' : 'approvedBy')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -359,6 +369,35 @@ class TokenInfo extends $pb.GeneratedMessage {
   $core.bool hasMintedBy() => $_has(8);
   @$pb.TagNumber(9)
   void clearMintedBy() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.String get platform => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set platform($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasPlatform() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearPlatform() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $1.Timestamp get approvedAt => $_getN(10);
+  @$pb.TagNumber(11)
+  set approvedAt($1.Timestamp value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasApprovedAt() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearApprovedAt() => $_clearField(11);
+  @$pb.TagNumber(11)
+  $1.Timestamp ensureApprovedAt() => $_ensure(10);
+
+  @$pb.TagNumber(12)
+  $core.String get approvedBy => $_getSZ(11);
+  @$pb.TagNumber(12)
+  set approvedBy($core.String value) => $_setString(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasApprovedBy() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearApprovedBy() => $_clearField(12);
 }
 
 class CreateTokenRequest extends $pb.GeneratedMessage {

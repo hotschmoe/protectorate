@@ -68,8 +68,8 @@ bool unreadByOwner(MailMessage m) {
 
 String mailFailure(Object e) {
   if (e is ConnectException && e.code == Code.permissionDenied) {
-    return 'Sending, replying and acking need the owner token. '
-        'This device can read threads only.';
+    return 'Mailbox access was denied. Sending, replying and acknowledging '
+        'messages need trusted Full access to this hub.';
   }
   return '$e';
 }

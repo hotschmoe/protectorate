@@ -14,13 +14,17 @@ import (
 
 var loginHarnesses = []sleeve.Harness{sleeve.Claude, sleeve.Codex, sleeve.Grok, sleeve.Pi}
 
-func loginCmd() *command {
-	var home string
+func loginCmd(o *opts) *command {
+	var home, name, platform string
 	var status bool
 	c := &command{
-		Use:   "login <claude|codex|grok|pi> [-- login args...]",
-		Short: "Log a harness in once on the hub so every sleeve shares the credential",
-		Long: `Run on the hub machine. Runs the harness's own login flow in this terminal
+		Use:   "login [claude|codex|grok|pi] [-- login args...]",
+		Short: "Connect this device to a hub, or log a harness in on the hub",
+		Long: `With no harness, connect this CLI to --hub through device approval. Match the
+displayed code on a trusted device, or run devices approve <code> on the hub.
+The device credential is stored privately for that hub; the owner token is untouched.
+
+With a harness, run on the hub machine. Runs the harness's own login flow in this terminal
 with the environment that stores its credential in $PROTECTORATE_HOME/auth/<harness>,
 the directory every sleeve of that harness reads. Nothing is copied or printed.
 Arguments after -- go to the harness's login command (codex login -- --device-auth).
@@ -28,6 +32,12 @@ pi has no login command: it starts pi; type /login, then exit.
 --status lists which harnesses have a credential (file presence only).`,
 		Args: arbitraryArgs,
 		RunE: func(cmd *command, args []string) error {
+			if len(args) == 0 && !status {
+				return runDeviceLogin(cmd, o, home, name, platform)
+			}
+			if name != "" || platform != "" {
+				return errors.New("--name and --platform apply only to device login")
+			}
 			cfg, err := loginConfig(home)
 			if err != nil {
 				return err
@@ -54,6 +64,8 @@ pi has no login command: it starts pi; type /login, then exit.
 	}
 	c.Flags().StringVar(&home, "home", "", "PROTECTORATE_HOME (default: resolved state dir)")
 	c.Flags().BoolVar(&status, "status", false, "list which harnesses are logged in")
+	c.Flags().StringVar(&name, "name", "", "device name (default hostname)")
+	c.Flags().StringVar(&platform, "platform", "", "device platform (default operating system and architecture)")
 	return c
 }
 

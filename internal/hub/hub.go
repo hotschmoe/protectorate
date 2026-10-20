@@ -55,15 +55,16 @@ type Hub struct {
 	UpdateTimeout time.Duration
 	updatePoll    time.Duration
 
-	authz   *auth.Authorizer
-	started time.Time
-	seq     atomic.Uint64
-	quota   *QuotaCache
-	nodes   *NodeMonitor
-	leases  *LeaseTable
-	jobs    *JobManager
-	local   nodeOps
-	events  eventBus
+	authz       *auth.Authorizer
+	started     time.Time
+	seq         atomic.Uint64
+	quota       *QuotaCache
+	nodes       *NodeMonitor
+	leases      *LeaseTable
+	jobs        *JobManager
+	local       nodeOps
+	events      eventBus
+	deviceRates deviceLimiter
 
 	deskPol   *deskPolicies
 	deskMu    sync.Mutex
@@ -249,6 +250,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTokenServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewDeviceServiceHandler(h, opts, connect.WithReadMaxBytes(4096)))
 	mux.Handle(protectoratev1connect.NewGrantServiceHandler(grantService{h}, opts))
 	mux.Handle(protectoratev1connect.NewAuditServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTailnetServiceHandler(tailnetService{h}, opts))
@@ -276,7 +278,7 @@ func (h *Hub) Handler() http.Handler {
 	if h.WebDir != "" {
 		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
 	}
-	return withRequestBase(mux)
+	return withRequestBase(h.withDeviceIP(mux))
 }
 
 // tailnetHandler admits only callers identify accepts (tailnet WhoIs), then
@@ -363,7 +365,7 @@ func startWorker(ctx context.Context, run func(context.Context)) func() {
 }
 
 func (h *Hub) startWorkers(ctx context.Context) func() {
-	stops := []func(){startWorker(ctx, h.quota.Run), startWorker(ctx, h.WatchSessions)}
+	stops := []func(){startWorker(ctx, h.quota.Run), startWorker(ctx, h.WatchSessions), startWorker(ctx, h.sweepDeviceAuth)}
 	if h.chat != nil {
 		stops = append(stops, h.chat.shutdown)
 	}
@@ -464,6 +466,14 @@ func bearerToken(header http.Header) string {
 // admit authenticates and authorizes one call, auditing mutations and every
 // call an admin grant makes. finish must be called with the call's result.
 func (i authInterceptor) admit(ctx context.Context, procedure string, header http.Header, msg any) (context.Context, func(error), error) {
+	ctx = auth.WithNote(ctx)
+	if publicDeviceProcedure(procedure) {
+		return ctx, func(callErr error) {
+			if procedure == protectoratev1connect.DeviceServiceStartDeviceAuthProcedure {
+				i.a.Record(ctx, nil, procedure, "", callErr, resultCode(callErr))
+			}
+		}, nil
+	}
 	m, known := i.a.Method(procedure)
 	audited := !known || m.Mutating()
 	subject := auth.Subject(msg)
@@ -471,7 +481,6 @@ func (i authInterceptor) admit(ctx context.Context, procedure string, header htt
 	if p != nil && p.Task != "" {
 		audited = true
 	}
-	ctx = auth.WithNote(ctx)
 	if err == nil {
 		err = i.a.AuthorizeProcedure(p, procedure)
 		if err != nil && procedure == protectoratev1connect.SleeveServiceKillSleeveProcedure && i.h != nil && i.h.ownsSleeve(p, msg) {
@@ -544,7 +553,13 @@ func (i authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc)
 		if err != nil {
 			return err
 		}
+		parent := ctx
+		ctx, stop := i.a.Store().WatchToken(ctx, auth.PrincipalFrom(ctx).ID)
+		defer stop()
 		err = next(ctx, conn)
+		if ctx.Err() != nil && parent.Err() == nil {
+			err = connect.NewError(connect.CodeUnauthenticated, errors.New("token revoked"))
+		}
 		finish(err)
 		return err
 	}

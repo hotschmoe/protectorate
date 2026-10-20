@@ -65,7 +65,7 @@ int _stageIndex(NodeSetupProgress p) {
 
 String inviteError(Object e) {
   if (e is ConnectException && e.code == Code.permissionDenied) {
-    return 'Adding nodes needs the hub\'s owner token. Edit this hub and paste the owner token (on the hub: cat ~/.protectorate/token).';
+    return 'Adding nodes is owner-only. On the hub, run protectorate node invite <name>, then follow its install instructions on the new machine.';
   }
   if (e is ConnectException) return e.message;
   return '$e';

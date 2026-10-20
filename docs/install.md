@@ -52,7 +52,7 @@ protectorate login --status               # logged in / missing, from file prese
 
 Relay fallback needs no domain or certificate. The hub runs its own DERP relay (TCP 7483, TLS with a self-signed certificate it generates in `tailnet/`) and STUN (UDP 3478). Clients trust the relay by the certificate hash carried in the DERP map, so nothing is installed on nodes or phones. Open TCP 7483 and UDP 3478 on the hub for anything outside the LAN; the `--server-url` host must be an address or name those clients can reach. Upgrading from a config without `derp_listen` needs no change (it defaults to `0.0.0.0:7483`); restart the hub. The stock Tailscale app needs a version that understands the `sha256-raw:` pin (current releases do).
 
-## Add a node from the web app
+## Add a node
 
 A browser cannot install software, so the hub serves a one-line installer and the app hands you the line. The hub needs:
 
@@ -60,7 +60,7 @@ A browser cannot install software, so the hub serves a one-line installer and th
 - the builds for every platform: run `make cross` on the hub box and start the hub with `--binary-dir bin` (its own platform is served from its own executable),
 - a listen address the new machine can reach, for example `hub serve --listen 0.0.0.0:7470` on the LAN or a reverse proxy in front of it. When machines reach it under another name than you open the app with, pass `--public-url http://NAME:7470`.
 
-Open the web app on the new machine (or anywhere), with the hub entered under the owner token (`cat ~/.protectorate/token` on the hub; a paired device token cannot add or remove nodes). On the NODES tab press ADD NODE, type a name (a lowercase DNS label: a-z, 0-9 and `-`), check the machine type (preselected from the browser's platform: WINDOWS, LINUX or TERMUX) and press CREATE INVITE. The dialog shows the line to paste, with COPY (and a QR code on a phone), and a SETUP panel that follows the node live: INVITED (key issued), JOINED (the machine enrolled in the tailnet), FIRST METRICS (the hub reached the agent), READY. When something needs fixing the panel turns to ATTENTION and says what, for example an agent of another version than the hub's, or a Windows agent that is not in the interactive desktop session. The lines hold a single-use key that expires after an hour; treat them like a password until used.
+New app connections use device approval and cannot issue node enrollment keys. On the hub, run `protectorate --token-file ~/.protectorate/token node invite officepc --url http://HUB:7470` (use your custom home's token path when applicable). Choose a lowercase DNS label for the name, then paste the printed Windows, Linux or Termux command on the new machine. The single-use enrollment key expires after an hour; treat it like a password until used. After enrollment, open the approved app's NODES tab to follow the node and inspect any attention message.
 
 ```
 # Windows: a normal PowerShell (Windows PowerShell 5.1 or pwsh 7), not "Run as administrator"
@@ -230,15 +230,57 @@ Targets: any directory, including a share mounted on the hub box (NFS, SMB). The
 
 ## Phone client
 
-```
-protectorate client invite --name phone      # follow the printed Tailscale app steps
-protectorate client register <key>           # for the app's registration key
-protectorate pair --app                      # QR for the native app; without --app, the web link
-```
+Connect the phone to the same LAN as the hub. Device approval is LAN-only
+until the security audit; keep the hub off the public Internet.
+
+1. Install and open the native app, or open the hub's web client in the phone
+   browser. On the hub, `protectorate pair --app` displays a native-app link
+   and QR; `protectorate pair` displays the web link. These contain the hub
+   URL, never a credential.
+2. Scan the QR or choose ADD HUB and enter its URL, for example
+   `http://192.168.10.44:7470`. URLs without a scheme default to HTTPS; for a
+   plain HTTP LAN hub enter `http://` explicitly. If a bare LAN address does
+   not connect, use the suggested `:7470` port.
+3. Connect and keep the large approval code visible. On an already trusted
+   app, check that the banner's device name, platform, IP and code match,
+   then choose APPROVE. For the first phone, run
+   `protectorate devices approve CODE` on the hub. DENY refuses the request.
+4. The phone connects automatically after approval. A code expires after ten
+   minutes; RETRY creates a fresh request. If the hub cannot be reached,
+   check the URL, port and LAN connection, then retry.
+
+Use DEVICES on any trusted app, or `protectorate devices ls`, to review
+last use. Rename a device for a clearer label or revoke it when lost or no
+longer needed. Revocation also closes its active streams. Existing paired
+devices continue to work; old links containing a token must be replaced by a
+new URL-only link and a fresh approval.
+
+Tailnet client enrollment (`protectorate client invite --name phone`, then
+`protectorate client register KEY`) remains a separate network setup step;
+it does not replace device approval or authorize exposing the hub publicly.
 
 ## Desktop client (Windows)
 
-CI builds the native Windows app on every push (artifact `desktop-windows` of the `ci` run) and releases attach it as `protectorate-desktop-windows-x64-<version>.zip`. Unzip anywhere and run `protectorate.exe`; it needs no installer. Add the hub with its URL (for example `http://192.168.10.44:7470` on the LAN, or the tailnet name) and a token: the owner token, or a device token from `protectorate pair` (the pairing link's `token=` value). The machine must reach the hub's listen address; a node's agent already does, so the same URL works there.
+CI builds the native Windows app on every push (artifact `desktop-windows` of
+the `ci` run) and releases attach it as
+`protectorate-desktop-windows-x64-<version>.zip`. Unzip anywhere and run
+`protectorate.exe`; it needs no installer.
+
+1. Choose ADD HUB and enter the reachable LAN URL, for example
+   `http://192.168.10.44:7470`, or open the URL-only link from
+   `protectorate pair --app`. Enter `http://` explicitly for a plain HTTP hub;
+   the default scheme is HTTPS.
+2. Choose CONNECT and compare the displayed code with the approval banner on
+   a trusted phone or desktop. Approve the matching request there, or run
+   `protectorate devices approve CODE` on the hub using its owner token.
+3. The desktop saves its own Full device token and opens the hub. No owner
+   token needs to be pasted. Review, rename or revoke it through DEVICES.
+
+For a CLI on another machine, run
+`protectorate login --hub URL --name officepc --platform windows-cli`, approve
+the displayed code on a trusted device, then use normal commands against the
+same hub. Harness logins on the hub (`protectorate login codex`, for example)
+remain separate from authorizing a client device.
 
 ## Troubleshooting the tailnet
 

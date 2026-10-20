@@ -90,6 +90,9 @@ func (c *cluster) securityScenario(t *testing.T) {
 			methods := service.Methods()
 			for j := 0; j < methods.Len(); j++ {
 				method := methods.Get(j)
+				if service.Name() == "DeviceService" && (method.Name() == "StartDeviceAuth" || method.Name() == "PollDeviceAuth") {
+					continue
+				}
 				if method.IsStreamingClient() || method.IsStreamingServer() {
 					continue
 				}

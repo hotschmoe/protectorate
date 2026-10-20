@@ -379,16 +379,18 @@ limit.
 Inside the new sleeve, build and run against its own checkout:
 
 ```sh
-mkdir -p "$HOME/.cache/protectorate-tests"
-TMPDIR="$HOME/.cache/protectorate-tests" make test
+mkdir -p "$HOME/t"
+TMPDIR="$HOME/t" make test
 env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN \
-  PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
+  TMPDIR="$HOME/t" PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
   go test -count=1 -v ./tests/e2e -run '^TestBinaryNestedRuntime$'
 ```
 
 Using the sleeve home for test temporary files keeps SDK-copy fixtures on
 disk. The sandbox's `/tmp` is tmpfs and its contents count toward the memory
-limit.
+limit. Keep the physical temporary-directory path short: tmux canonicalizes
+it before constructing Unix socket paths, so a long path can fail with
+`no tmux server running`; a shorter symlink does not avoid that limit.
 
 The runtime automatically discovers the private cgroup mount at
 `/run/protectorate/cgroup`. It creates child cgroups there and runs nested

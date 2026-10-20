@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the web app, runs a throwaway hub with demo data, and screenshots
 # every main screen with headless Chromium at phone and desktop sizes.
-# Output: e2e-out/ (gitignored). Needs go, flutter, tmux, chromium.
+# Output: e2e-out/ (gitignored). Needs go, flutter, tmux, chromium, Node 22+.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -11,16 +11,19 @@ chromium=${CHROMIUM:-chromium}
 work=$(mktemp -d)
 sock=prot-e2e-$RANDOM$RANDOM
 export PROTECTORATE_HOME=$work/home PROTECTORATE_TMUX_SOCKET=$sock PROTECTORATE_HUB=http://127.0.0.1:$port
+unset PROTECTORATE_TOKEN PROTECTORATE_TOKEN_FILE PROTECTORATE_NODE_TOKEN
 mkdir -p "$out" "$PROTECTORATE_HOME"
 
 hub_pid=
+login_pid=
 cleanup() {
+  [ -n "$login_pid" ] && kill "$login_pid" 2>/dev/null || true
   [ -n "$hub_pid" ] && kill "$hub_pid" 2>/dev/null || true
   tmux -L "$sock" kill-server 2>/dev/null || true
 }
 trap cleanup EXIT
 
-(make -C "$root" app-build-web APP_FLAGS=--dart-define=E2E_AUTOCONFIRM=true >"$work/flutter.log" 2>&1) \
+(make -C "$root" app-build-web >"$work/flutter.log" 2>&1) \
   || { tail -30 "$work/flutter.log"; exit 1; }
 make -C "$root" build >/dev/null
 bin=$root/bin/protectorate
@@ -43,16 +46,27 @@ done
 node_name=$("$bin" node ls 2>/dev/null | awk 'NR>1 && $1 != "ghost" {gsub(/\*/, "", $1); print $1; exit}')
 sleep 8
 
-web=$("$bin" pair --url "http://127.0.0.1:$port" --name "demo hub" | sed -n 's/^web: *//p')
+web=$("$bin" pair --url "http://127.0.0.1:$port" | sed -n 's/^web: *//p')
+PROTECTORATE_HOME="$work/client" "$bin" login --hub "$PROTECTORATE_HUB" --name screenshot-browser --platform web --json >"$work/login.jsonl" 2>"$work/login.log" &
+login_pid=$!
+code=
+for _ in $(seq 100); do
+  code=$(node -e 'try { process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8").split("\n")[0]).userCode || ""); } catch {}' "$work/login.jsonl")
+  [ -z "$code" ] || break
+  sleep 0.1
+done
+[ -n "$code" ] || { cat "$work/login.log"; exit 1; }
+"$bin" devices approve "$code" >/dev/null
+wait "$login_pid"
+login_pid=
+credential=$(node -e 'const path = require("node:path"); const hash = require("node:crypto").createHash("sha256").update(process.argv[2]).digest("hex"); process.stdout.write(path.join(process.argv[1], "clients", hash + ".token"));' "$work/client" "$PROTECTORATE_HUB")
 
 shot() {
-  local name=$1 size=$2 url=$3 theme=${4:-light} profile scheme=()
+  local name=$1 size=$2 url=$3 theme=${4:-light} connected=${5:-false} profile
   [ -z "${E2E_ONLY:-}" ] || [[ $name == $E2E_ONLY ]] || return 0
-  [ "$theme" = dark ] && scheme=(--blink-settings=preferredColorScheme=0)
   profile=$(mktemp -d "$work/chrome.XXXXXX")
-  "$chromium" --headless=new --disable-gpu --no-sandbox --user-data-dir="$profile" \
-    "${scheme[@]}" --window-size="$size" --virtual-time-budget=20000 \
-    --screenshot="$out/$name-${size%%,*}${theme/light/}.png" "$url" >/dev/null 2>&1
+  node "$root/scripts/e2e-screens.mjs" "$chromium" "$profile" "$size" "$url" "$theme" \
+    "$out/$name-${size%%,*}${theme/light/}.png" "$PROTECTORATE_HUB" "$credential" "$connected"
 }
 
 for size in 412,860 1280,800; do
@@ -60,11 +74,11 @@ for size in 412,860 1280,800; do
     shot hubs-empty "$size" "http://127.0.0.1:$port/" "$theme"
     shot pair-confirm "$size" "$web" "$theme"
     for tab in overview sleeves nodes notes mail; do
-      shot "$tab" "$size" "$web&confirm=auto&tab=$tab" "$theme"
+      shot "$tab" "$size" "$web&tab=$tab" "$theme" true
     done
-    shot node-detail "$size" "$web&confirm=auto&tab=nodes&node=$node_name" "$theme"
-    shot node-ghost "$size" "$web&confirm=auto&tab=nodes&node=ghost" "$theme"
-    shot terminal "$size" "$web&confirm=auto&tab=sleeves&session=demo" "$theme"
+    shot node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true
+    shot node-ghost "$size" "$web&tab=nodes&node=ghost" "$theme" true
+    shot terminal "$size" "$web&tab=sleeves&session=demo" "$theme" true
   done
 done
 echo "screenshots in $out"

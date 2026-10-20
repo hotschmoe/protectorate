@@ -484,16 +484,23 @@ func renderMessage(m mailbox.Message, project string, reminder bool) string {
 // messageService is the MessageService handler.
 type messageService struct{ c *coordinator }
 
-func identity(ctx context.Context) string { return senderOf(auth.PrincipalFrom(ctx)) }
+func identity(ctx context.Context) string {
+	p := auth.PrincipalFrom(ctx)
+	if p != nil && p.Device {
+		return ownerName
+	}
+	return senderOf(p)
+}
 
 // actingAs returns the mailbox a call works on: the caller's own, or, for the
 // owner only, the one named by as.
 func actingAs(ctx context.Context, as string) (string, error) {
 	self := identity(ctx)
+	p := auth.PrincipalFrom(ctx)
 	switch {
 	case as == "" || as == self:
 		return self, nil
-	case self == ownerName:
+	case p != nil && p.Owner:
 		return as, nil
 	}
 	return "", connect.NewError(connect.CodePermissionDenied, errors.New("only the owner may act as another mailbox"))

@@ -112,10 +112,11 @@ class HubStore extends ChangeNotifier {
   }
 
   Future<void> _save() async {
-    await _prefs.setString(
+    final saved = await _prefs.setString(
       _key,
       jsonEncode([for (final h in _hubs) h.toJson()]),
     );
+    if (!saved) throw StateError('Could not save hub connection');
     notifyListeners();
   }
 }

@@ -359,12 +359,14 @@ func (m *Manager) Create(ctx context.Context, o CreateOptions) (Session, error) 
 		}
 	}
 	args = append(args, ";", "set-option", "-w", "-t", target(o.Name), "remain-on-exit", "on")
-	if len(o.Command) > 0 {
-		raw, _ := json.Marshal(o.Command)
-		args = append(args, ";", "set-option", "-t", target(o.Name), commandOption, base64.RawURLEncoding.EncodeToString(raw))
-	}
 	if _, err := m.run(ctx, args...); err != nil {
 		return Session{}, fmt.Errorf("create session %q: %w", o.Name, err)
+	}
+	if len(o.Command) > 0 {
+		raw, _ := json.Marshal(o.Command)
+		if _, err := m.run(ctx, "set-option", "-t", target(o.Name), commandOption, base64.RawURLEncoding.EncodeToString(raw)); err != nil {
+			return Session{}, fmt.Errorf("record session %q command: %w", o.Name, err)
+		}
 	}
 	return m.Get(ctx, o.Name)
 }

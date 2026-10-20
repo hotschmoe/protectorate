@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:connectrpc/connect.dart';
@@ -7,27 +8,31 @@ import 'package:connectrpc/protocol/connect.dart' as protocol;
 
 import 'package:protectorate/gen/protectorate/v1/hub.connect.client.dart';
 import 'package:protectorate/gen/protectorate/v1/hub.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/device.connect.client.dart';
+import 'package:protectorate/gen/protectorate/v1/device.pb.dart';
 import 'package:protectorate/hubs/connection.dart';
+import 'package:protectorate/hubs/device_auth.dart';
 
 Future<void> main(List<String> args) async {
   final baseUrl = args[0];
   final token = args[1];
   final http = io.HttpClient()..connectionTimeout = const Duration(seconds: 8);
   try {
-    HubServiceClient client(String url, String bearer) => HubServiceClient(
-      protocol.Transport(
-        baseUrl: url,
-        codec: const JsonCodec(),
-        httpClient: hubHttpClient(url, client: rpcio.createHttpClient(http)),
-        interceptors: [
-          <I extends Object, O extends Object>(AnyFn<I, O> next) =>
-              (Request<I, O> request) {
-                request.headers.set('authorization', ['Bearer $bearer']);
-                return next(request);
-              },
-        ],
-      ),
-    );
+    protocol.Transport transport(String url, String bearer) =>
+        protocol.Transport(
+          baseUrl: url,
+          codec: const JsonCodec(),
+          httpClient: hubHttpClient(url, client: rpcio.createHttpClient(http)),
+          interceptors: [
+            <I extends Object, O extends Object>(AnyFn<I, O> next) =>
+                (Request<I, O> request) {
+                  request.headers.set('authorization', ['Bearer $bearer']);
+                  return next(request);
+                },
+          ],
+        );
+    HubServiceClient client(String url, String bearer) =>
+        HubServiceClient(transport(url, bearer));
     void check(bool condition, String message) {
       if (!condition) throw StateError(message);
     }
@@ -111,8 +116,101 @@ Future<void> main(List<String> args) async {
       await stalled.close(force: true);
       await subscription.cancel();
     }
+
+    final publicDevice = DeviceServiceClient(transport(baseUrl, ''));
+    final ownerDevice = DeviceServiceClient(transport(baseUrl, token));
+    final started = Completer<StartDeviceAuthResponse>();
+    final approvalSignal = CancelableSignal();
+    var delivered = false;
+    final authorization =
+        authorizeDevice(
+          publicDevice,
+          name: 'Dart desktop',
+          platform: 'linux',
+          signal: approvalSignal,
+          onStarted: started.complete,
+        ).then((secret) {
+          delivered = true;
+          return secret;
+        });
+    final pending = await started.future;
+    await Future<void>.delayed(Duration(seconds: pending.interval + 1));
+    check(!delivered, 'Dart device connected without approval');
+    await ownerDevice.approveDeviceAuth(
+      ApproveDeviceAuthRequest(userCode: pending.userCode),
+    );
+    final secret = await authorization;
+    approvalSignal.cancel();
+    await probeHub(client(baseUrl, secret), baseUrl);
+    final replay = await publicDevice.pollDeviceAuth(
+      PollDeviceAuthRequest(deviceCode: pending.deviceCode),
+    );
+    check(
+      replay.status == 'consumed' && replay.secret.isEmpty,
+      'Dart device secret was delivered more than once',
+    );
+    final trustedDevice = DeviceServiceClient(transport(baseUrl, secret));
+    final listed = await trustedDevice.listDevices(ListDevicesRequest());
+    check(
+      listed.devices.any(
+        (device) => device.name == 'Dart desktop' && device.platform == 'linux',
+      ),
+      'approved Dart device missing from Devices',
+    );
+
+    final deniedStarted = Completer<StartDeviceAuthResponse>();
+    final deniedSignal = CancelableSignal();
+    final denial =
+        authorizeDevice(
+          publicDevice,
+          name: 'Dart denied device',
+          platform: 'web',
+          signal: deniedSignal,
+          onStarted: deniedStarted.complete,
+        ).then<String>(
+          (_) => throw StateError('Dart connected a denied device'),
+          onError: (Object error) {
+            check(
+              error is DeviceAuthException && error.status == 'denied',
+              'Dart lost denial reason: $error',
+            );
+            return '';
+          },
+        );
+    final denied = await deniedStarted.future;
+    await trustedDevice.denyDeviceAuth(
+      DenyDeviceAuthRequest(userCode: denied.userCode),
+    );
+    await denial;
+    deniedSignal.cancel();
+
+    final canceledStarted = Completer<StartDeviceAuthResponse>();
+    final canceledSignal = CancelableSignal();
+    final cancellation =
+        authorizeDevice(
+          publicDevice,
+          name: 'Dart canceled device',
+          platform: 'web',
+          signal: canceledSignal,
+          onStarted: canceledStarted.complete,
+        ).then<String>(
+          (_) => throw StateError('Dart connected after cancel'),
+          onError: (Object error) {
+            check(
+              error is ConnectException && error.code == Code.canceled,
+              'Dart lost cancellation: $error',
+            );
+            return '';
+          },
+        );
+    final canceled = await canceledStarted.future;
+    canceledSignal.cancel();
+    await cancellation.timeout(const Duration(seconds: 1));
+    await trustedDevice.denyDeviceAuth(
+      DenyDeviceAuthRequest(userCode: canceled.userCode),
+    );
     io.stdout.writeln(
-      'Hub probe, token refusal, destination errors and timeout passed.',
+      'Hub probe, token refusal, destination errors, timeout and Dart device approval, single delivery, denial and cancellation passed.',
     );
   } finally {
     http.close(force: true);

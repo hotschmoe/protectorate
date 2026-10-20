@@ -7,6 +7,7 @@ import '../gen/protectorate/v1/backlog.connect.client.dart';
 import '../gen/protectorate/v1/chat.connect.client.dart';
 import '../gen/protectorate/v1/desk.connect.client.dart';
 import '../gen/protectorate/v1/directory.connect.client.dart';
+import '../gen/protectorate/v1/device.connect.client.dart';
 import '../gen/protectorate/v1/events.connect.client.dart';
 import '../gen/protectorate/v1/hub.connect.client.dart';
 import '../gen/protectorate/v1/lease.connect.client.dart';
@@ -50,6 +51,7 @@ class HubClient {
       chat = ChatServiceClient(transport),
       messages = MessageServiceClient(transport),
       directory = DirectoryServiceClient(transport),
+      devices = DeviceServiceClient(transport),
       desk = DeskServiceClient(transport),
       audit = AuditServiceClient(transport),
       leases = LeaseServiceClient(transport);
@@ -64,6 +66,7 @@ class HubClient {
   final ChatServiceClient chat;
   final MessageServiceClient messages;
   final DirectoryServiceClient directory;
+  final DeviceServiceClient devices;
   final DeskServiceClient desk;
   final AuditServiceClient audit;
   final LeaseServiceClient leases;

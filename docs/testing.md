@@ -56,6 +56,12 @@ interleavings, non-Go/uninstrumented helpers and unreachable child output are
 not covered. Runtime and tailnet scenarios still require their documented host
 prerequisites and opt-in lane; skips inside a sleeve do not verify those paths.
 
+Inside a nested sleeve, use a short disk-backed temporary path such as
+`mkdir -p "$HOME/t"` followed by `TMPDIR="$HOME/t" make check`. Long physical
+paths overflow tmux's Unix socket path limit and can report
+`no tmux server running`; symlinks are canonicalized and do not fix it.
+The short path also keeps large SDK fixtures off the sleeve's tmpfs.
+
 `PROT_E2E=1 go test ./tests/e2e` also works, building one binary if necessary.
 Supply an absolute `PROT_E2E_BINARY` to avoid that build. This is the single
 gate for real-binary/process scenarios in `tests/e2e`, the hub chat/runtime
@@ -86,6 +92,44 @@ authenticated terminal WebSocket replay, node download checksums, staged update
 refusal, replacement/health confirmation and unconfirmed-start rollback.
 Backup checks restore saved jobs/tokens and refuse corrupt, truncated,
 duplicate, traversal, symlink, content-tampered and nonempty destinations.
+
+`TestBinaryDeviceAuthorization` drives unauthenticated device authorization
+against the real hub binary, then uses approved tokens across production
+authorization and event streams. It covers pending and live request events,
+case-insensitive owner approval, device approval, denial, expiry, polling
+slow-down, single delivery of secrets, owner-only operation refusal, scoped
+and unauthenticated approver refusal, existing paired devices, rename,
+revoked credentials across restart and immediate closure of a live
+device stream. It runs a second CLI process with a private empty state home,
+approves its displayed code using `devices approve`, and proves the saved
+login works in a subsequent CLI command. `devices ls`, `deny`, `rename` and
+`revoke` also run as real commands. Audit and event checks reject leaked
+device codes and token secrets.
+Reserved sleeve/orchestrator device names, renaming to a reserved identity and
+changing a device's Full scopes are refused. The device sends to the owner's
+mailbox, the owner sees it, and the device acknowledges it; attempting another
+named mailbox is denied.
+
+`TestBinaryDeviceAuthorizationLimits` binds HTTP clients to distinct loopback
+source IPs to exercise both per-IP and global start/poll limits and the
+100-request pending cap, including malformed-body attempts that must consume
+the start budget. It sends a forged `X-Forwarded-For` header from an
+untrusted peer; the authorization scenario checks the real TCP IP is shown.
+The device authorization clock advances through a private timestamp file
+selected by `PROT_E2E_DEVICE_AUTH_CLOCK_FILE`, accepted only with `PROT_E2E=1`.
+This makes ten-minute expiry and rate-window reset deterministic while all
+requests still traverse the real server. Real CLI polling uses its production
+interval. Run these directly after `make build`:
+
+```sh
+PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
+  go test -count=1 -v ./tests/e2e -run '^TestBinaryDeviceAuthorization'
+```
+
+`TestBinaryAppHubConnection` also runs the Dart client's production
+`authorizeDevice` helper against the real hub: owner approval, one-time secret
+delivery, denial and cancellation, alongside connection probing and useful
+unreachable-hub errors. It requires Dart and resolved app dependencies.
 
 The loopback hub has no tailnet: `/install.sh` must return 503. The production
 installer template is separately run as a real shell process against that
@@ -148,6 +192,20 @@ Private test homes retain the selected bwrap binary, and the nested scenario
 asserts its version so a newer user-installed bwrap reaches the inner runtime.
 This host e2e remains unverified in the original non-delegated development
 sleeve; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
+
+Inside a sleeve, use a short physical disk-backed temporary directory such as
+`TMPDIR="$HOME/t"`; long paths can exceed tmux's Unix socket limit, and tmux
+resolves symlinks before creating its socket. If the inherited Flutter SDK
+cache already uses an overlay, the nested runtime suite would add two more
+layers and exceed Linux's filesystem stacking limit. Copy the visible real SDK
+to a fresh directory on disk (for example,
+`cp -a --reflink=auto /path/to/flutter "$HOME/f7"`, with `f7` absent), then run
+with `PATH="$HOME/f7/bin:$HOME/f7/bin/cache/dart-sdk/bin:$PATH"`. The copied
+cache has a flat backing filesystem, so both tested cache overlays remain
+enabled. On this nested sleeve, the explicit `TestBinaryNestedRuntime` passed
+in 9.550s with that setup, including inner ownership, chat, OOM, CPU throttling,
+hidden limits and cleanup; the original inherited-overlay setup failed with
+`bwrap: Can't make overlay mount ... Invalid argument` at the third layer.
 
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
@@ -447,6 +505,8 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 | tests/e2e/backup_manifest_test.go | TestBinaryBackupManifestCoverage | Real-binary restore rejects duplicate manifest entries hiding altered state and changed file permissions before creating the destination | 1.430s pass | KEEP-E2E | complete manifest verification regression |
 | tests/e2e/quota_cleanup_test.go | TestBinaryQuotaReapsClosedStdoutPeer | Hub polls a synthetic Codex peer that closes stdout and ignores TERM, publishes quota promptly and reaps the process | 4.350s pass | KEEP-E2E | process lifetime, rather than stdout EOF, bounds cleanup |
 | tests/e2e/workspace_metadata_test.go | TestBinaryWorkspaceMetadataIsBounded | Real hub list/browser reads refuse FIFO, oversized and escaping git metadata without hanging or leaking file contents | 1.270s pass | KEEP-E2E | hostile workspace metadata regression |
+| tests/e2e/device_auth_test.go | TestBinaryDeviceAuthorization | Real hub, CLI and streams exercise approval, denial, expiry, migration, metadata, persistence, single secret delivery, mailbox access and revocation | pass | KEEP-E2E | device trust lifecycle and secret redaction |
+| tests/e2e/device_auth_test.go | TestBinaryDeviceAuthorizationLimits | Real TCP source IPs exercise start/poll budgets, malformed requests and pending capacity | pass | KEEP-E2E | unauthenticated endpoint abuse limits |
 
 ## Deleted files
 
