@@ -161,7 +161,7 @@ class Note extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   void clearProject() => $_clearField(7);
 
-  /// source is who created the note: "owner", a sleeve name, "poe" or "hub".
+  /// source is who created the note: "owner", a sleeve name, "envoy" or "hub".
   @$pb.TagNumber(8)
   $core.String get source => $_getSZ(7);
   @$pb.TagNumber(8)

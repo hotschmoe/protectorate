@@ -21,6 +21,7 @@ import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
 import 'chat.pbjson.dart' as $1;
+import 'token.pbjson.dart' as $3;
 
 @$core.Deprecated('Use harnessDescriptor instead')
 const Harness$json = {
@@ -508,6 +509,71 @@ final $typed_data.Uint8List resleeveSleeveResponseDescriptor =
         'ChZSZXNsZWV2ZVNsZWV2ZVJlc3BvbnNlEi8KBnNsZWV2ZRgBIAEoCzIXLnByb3RlY3RvcmF0ZS'
         '52MS5TbGVldmVSBnNsZWV2ZQ==');
 
+@$core.Deprecated('Use spawnEnvoyRequestDescriptor instead')
+const SpawnEnvoyRequest$json = {
+  '1': 'SpawnEnvoyRequest',
+  '2': [
+    {
+      '1': 'harness',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.Harness',
+      '10': 'harness'
+    },
+    {'1': 'scopes', '3': 2, '4': 3, '5': 9, '10': 'scopes'},
+    {'1': 'add_scopes', '3': 3, '4': 3, '5': 9, '10': 'addScopes'},
+    {
+      '1': 'ttl',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'ttl'
+    },
+  ],
+};
+
+/// Descriptor for `SpawnEnvoyRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List spawnEnvoyRequestDescriptor = $convert.base64Decode(
+    'ChFTcGF3bkVudm95UmVxdWVzdBIyCgdoYXJuZXNzGAEgASgOMhgucHJvdGVjdG9yYXRlLnYxLk'
+    'hhcm5lc3NSB2hhcm5lc3MSFgoGc2NvcGVzGAIgAygJUgZzY29wZXMSHQoKYWRkX3Njb3BlcxgD'
+    'IAMoCVIJYWRkU2NvcGVzEisKA3R0bBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbl'
+    'IDdHRs');
+
+@$core.Deprecated('Use spawnEnvoyResponseDescriptor instead')
+const SpawnEnvoyResponse$json = {
+  '1': 'SpawnEnvoyResponse',
+  '2': [
+    {
+      '1': 'sleeve',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Sleeve',
+      '10': 'sleeve'
+    },
+    {
+      '1': 'token',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenInfo',
+      '10': 'token'
+    },
+    {'1': 'workspace', '3': 3, '4': 1, '5': 9, '10': 'workspace'},
+    {'1': 'reason', '3': 4, '4': 1, '5': 9, '10': 'reason'},
+    {'1': 'replaced', '3': 5, '4': 1, '5': 8, '10': 'replaced'},
+  ],
+};
+
+/// Descriptor for `SpawnEnvoyResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List spawnEnvoyResponseDescriptor = $convert.base64Decode(
+    'ChJTcGF3bkVudm95UmVzcG9uc2USLwoGc2xlZXZlGAEgASgLMhcucHJvdGVjdG9yYXRlLnYxLl'
+    'NsZWV2ZVIGc2xlZXZlEjAKBXRva2VuGAIgASgLMhoucHJvdGVjdG9yYXRlLnYxLlRva2VuSW5m'
+    'b1IFdG9rZW4SHAoJd29ya3NwYWNlGAMgASgJUgl3b3Jrc3BhY2USFgoGcmVhc29uGAQgASgJUg'
+    'ZyZWFzb24SGgoIcmVwbGFjZWQYBSABKAhSCHJlcGxhY2Vk');
+
 const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
   '1': 'SleeveService',
   '2': [
@@ -545,6 +611,12 @@ const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
       '2': '.protectorate.v1.ResleeveSleeveRequest',
       '3': '.protectorate.v1.ResleeveSleeveResponse'
     },
+    {
+      '1': 'SpawnEnvoy',
+      '2': '.protectorate.v1.SpawnEnvoyRequest',
+      '3': '.protectorate.v1.SpawnEnvoyResponse',
+      '4': {}
+    },
   ],
 };
 
@@ -573,6 +645,9 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ResleeveSleeveRequest': ResleeveSleeveRequest$json,
   '.google.protobuf.Duration': $2.Duration$json,
   '.protectorate.v1.ResleeveSleeveResponse': ResleeveSleeveResponse$json,
+  '.protectorate.v1.SpawnEnvoyRequest': SpawnEnvoyRequest$json,
+  '.protectorate.v1.SpawnEnvoyResponse': SpawnEnvoyResponse$json,
+  '.protectorate.v1.TokenInfo': $3.TokenInfo$json,
 };
 
 /// Descriptor for `SleeveService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -587,4 +662,6 @@ final $typed_data.Uint8List sleeveServiceDescriptor = $convert.base64Decode(
     'IDkAIBElsKCktpbGxTbGVldmUSIi5wcm90ZWN0b3JhdGUudjEuS2lsbFNsZWV2ZVJlcXVlc3Qa'
     'Iy5wcm90ZWN0b3JhdGUudjEuS2lsbFNsZWV2ZVJlc3BvbnNlIgSItRgBEmEKDlJlc2xlZXZlU2'
     'xlZXZlEiYucHJvdGVjdG9yYXRlLnYxLlJlc2xlZXZlU2xlZXZlUmVxdWVzdBonLnByb3RlY3Rv'
-    'cmF0ZS52MS5SZXNsZWV2ZVNsZWV2ZVJlc3BvbnNl');
+    'cmF0ZS52MS5SZXNsZWV2ZVNsZWV2ZVJlc3BvbnNlElsKClNwYXduRW52b3kSIi5wcm90ZWN0b3'
+    'JhdGUudjEuU3Bhd25FbnZveVJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuU3Bhd25FbnZveVJl'
+    'c3BvbnNlIgSgtRgB');

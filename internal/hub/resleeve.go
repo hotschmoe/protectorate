@@ -39,8 +39,6 @@ func (h *Hub) ResleeveSleeve(ctx context.Context, req *connect.Request[pb.Reslee
 		return nil, sleeveErr(err)
 	}
 	switch {
-	case info.Name == sleeve.OrchestratorName:
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the orchestrator moves harness with `protectorate orchestrator spawn --harness`"))
 	case info.Helper != "":
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s is the hub's own (%s)", info.Name, info.Helper))
 	case info.Mode != sleeve.ModeChat:

@@ -267,7 +267,64 @@ func (c *coordinator) resolveWaiting() {
 	}
 }
 
-// idle reports whether name is a running chat sleeve waiting for input.
+// escalationPrefix starts the request id of the notice the hub sends the
+// orchestrator for a message that stayed unacked.
+const escalationPrefix = "escalate-"
+
+// envoyRetry is how long an urgent message waits before the hub tries again to
+// start an Envoy whose harness is not running.
+const envoyRetry = time.Minute
+
+// holdForEnvoy keeps back what must not start a turn by itself. Envoy is a
+// long conversation whose prompt cache a turn per notice would keep warm
+// at a price, so only the hub's escalations are injected at once. The rest is
+// armed, which starts its ack timer (an ack-required message that goes
+// overdue is re-delivered, and that does start a turn), and waits in the
+// queue for the owner's next message.
+func (c *coordinator) holdForEnvoy(msgs []mailbox.Message) []mailbox.Message {
+	var urgent []mailbox.Message
+	for _, m := range msgs {
+		if m.From == hubName && strings.HasPrefix(m.RequestID, escalationPrefix) {
+			urgent = append(urgent, m)
+			continue
+		}
+		if err := c.mail.Arm(m.ID, sleeve.OrchestratorName); err != nil {
+			log.Printf("mailbox: queue %s for envoy: %v", m.ID, err)
+		}
+	}
+	return urgent
+}
+
+// rideAlong prepends the messages queued for Envoy to the owner's text as one
+// block. commit records them as delivered once the text was sent.
+func (c *coordinator) rideAlong(text string) (string, func()) {
+	queued := c.mail.Queued(sleeve.OrchestratorName)
+	if len(queued) > maxBatch {
+		queued = queued[:maxBatch]
+	}
+	if len(queued) == 0 {
+		return text, func() {}
+	}
+	parts := make([]string, len(queued))
+	for i, m := range queued {
+		parts[i] = renderMessage(m, c.projectLabel(m), false)
+	}
+	block := fmt.Sprintf("Mailbox, queued while you were idle (%d):\n\n%s\n\n---\n\nFrom the owner:\n%s", len(queued), strings.Join(parts, "\n\n---\n\n"), text)
+	return block, func() {
+		for _, m := range queued {
+			if err := c.mail.Deliver(m.ID, sleeve.OrchestratorName); err != nil {
+				log.Printf("mailbox: record delivery of %s to envoy: %v", m.ID, err)
+				continue
+			}
+			c.event("msg.delivered", m, map[string]any{"recipient": sleeve.OrchestratorName})
+		}
+	}
+}
+
+// idle reports whether name is a running chat sleeve waiting for input. Envoy
+// also counts when its harness is not running (exited, or stopped by a hub
+// restart): sending resumes its native session, so an urgent message wakes it
+// with the same context and cache prefix instead of waiting for the owner.
 func (c *coordinator) idle(name string) (*chatSleeve, bool) {
 	info, err := c.h.sleeves.Get(name)
 	if err != nil || info.State != sleeve.Running || info.Mode != sleeve.ModeChat {
@@ -277,7 +334,20 @@ func (c *coordinator) idle(name string) (*chatSleeve, bool) {
 	if err != nil {
 		return nil, false
 	}
-	return s, s.status().State == pb.ChatState_CHAT_STATE_IDLE
+	switch s.status().State {
+	case pb.ChatState_CHAT_STATE_IDLE:
+		return s, true
+	case pb.ChatState_CHAT_STATE_EXITED, pb.ChatState_CHAT_STATE_FAILED:
+		if name != sleeve.OrchestratorName {
+			return s, false
+		}
+		if c.now().Before(c.envoyNext) {
+			return s, false
+		}
+		c.envoyNext = c.now().Add(envoyRetry)
+		return s, true
+	}
+	return s, false
 }
 
 func (c *coordinator) deliver(ctx context.Context) {
@@ -297,6 +367,9 @@ func (c *coordinator) deliver(ctx context.Context) {
 				}
 			}
 		case "chat":
+			if rcpt == sleeve.OrchestratorName {
+				msgs = c.holdForEnvoy(msgs)
+			}
 			if len(msgs) > maxBatch {
 				msgs = msgs[:maxBatch]
 			}
@@ -405,7 +478,7 @@ func (c *coordinator) escalate(m mailbox.Message, rcpt string) {
 	body := fmt.Sprintf("Message %s (thread %s) from %s to %s asked for an ack and %s has not given one after a reminder.\n\nIt said: %s",
 		m.ID, m.Thread, m.From, m.To, rcpt, firstLine(m.Body, 300))
 	if _, err := c.send(hubName, sendArgs{
-		To: sleeve.OrchestratorName, Direct: true, Body: body, Thread: m.Thread, Kind: mailbox.Notice, RequestID: "escalate-" + m.ID,
+		To: sleeve.OrchestratorName, Direct: true, Body: body, Thread: m.Thread, Kind: mailbox.Notice, RequestID: escalationPrefix + m.ID,
 		ReplyVia: rcpt,
 	}); err != nil {
 		log.Printf("mailbox: notify orchestrator of %s: %v", m.ID, err)

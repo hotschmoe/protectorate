@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
+import '../mail/thread_view.dart' show orchestratorSleeve;
 import '../nodes/node_view.dart';
 import '../screens/nodes_tab.dart';
 import '../theme/tokens.dart';
@@ -28,8 +29,13 @@ List<SleeveGroup> groupSleeves(
   String hubName,
 ) {
   final local = nodes.where((n) => n.node.local).firstOrNull;
+  // Envoy is pinned first in the hub's fence; the rest keep the hub's order.
+  final pinned = [
+    ...hubSleeves.where((s) => s.name == orchestratorSleeve),
+    ...hubSleeves.where((s) => s.name != orchestratorSleeve),
+  ];
   final out = [
-    SleeveGroup(local?.node.name ?? hubName, local, hubSleeves),
+    SleeveGroup(local?.node.name ?? hubName, local, pinned),
     for (final n in nodes.where(
       (n) => !n.node.local && n.hasMetrics() && n.metrics.sleeves.isNotEmpty,
     ))

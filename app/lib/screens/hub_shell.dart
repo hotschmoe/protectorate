@@ -32,7 +32,7 @@ class _Destination {
 }
 
 const _destinations = [
-  _Destination('orchestrator', 'POE', Icons.support_agent),
+  _Destination('orchestrator', 'ENVOY', Icons.support_agent),
   _Destination('overview', 'OVERVIEW', Icons.grid_view),
   _Destination('sleeves', 'SLEEVES', Icons.smart_toy_outlined),
   _Destination('nodes', 'NODES', Icons.memory),

@@ -50,6 +50,9 @@ const (
 	// SleeveServiceResleeveSleeveProcedure is the fully-qualified name of the SleeveService's
 	// ResleeveSleeve RPC.
 	SleeveServiceResleeveSleeveProcedure = "/protectorate.v1.SleeveService/ResleeveSleeve"
+	// SleeveServiceSpawnEnvoyProcedure is the fully-qualified name of the SleeveService's SpawnEnvoy
+	// RPC.
+	SleeveServiceSpawnEnvoyProcedure = "/protectorate.v1.SleeveService/SpawnEnvoy"
 )
 
 // SleeveServiceClient is a client for the protectorate.v1.SleeveService service.
@@ -94,6 +97,17 @@ type SleeveServiceClient interface {
 	// "sleeve.resleeved"; a summary by the fallback model, or none, also emits
 	// "resleeve.warning".
 	ResleeveSleeve(context.Context, *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error)
+	// SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
+	// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
+	// token. It picks the harness (the top of QuotaService.Suggest unless one
+	// is given), stops a running Envoy, revokes every earlier orchestrator
+	// token, mints a new one, writes the token file and the generated context
+	// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+	// is byte-identical across respawns unless the CLI, the tool catalog, the
+	// hub URL, or the scopes change, so a resumed session keeps its
+	// prompt-cache prefix. Only the owner token may call it, and the token it
+	// mints never holds it.
+	SpawnEnvoy(context.Context, *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error)
 }
 
 // NewSleeveServiceClient constructs a client for the protectorate.v1.SleeveService service. By
@@ -146,6 +160,12 @@ func NewSleeveServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(sleeveServiceMethods.ByName("ResleeveSleeve")),
 			connect.WithClientOptions(opts...),
 		),
+		spawnEnvoy: connect.NewClient[v1.SpawnEnvoyRequest, v1.SpawnEnvoyResponse](
+			httpClient,
+			baseURL+SleeveServiceSpawnEnvoyProcedure,
+			connect.WithSchema(sleeveServiceMethods.ByName("SpawnEnvoy")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -157,6 +177,7 @@ type sleeveServiceClient struct {
 	getSleeve      *connect.Client[v1.GetSleeveRequest, v1.GetSleeveResponse]
 	killSleeve     *connect.Client[v1.KillSleeveRequest, v1.KillSleeveResponse]
 	resleeveSleeve *connect.Client[v1.ResleeveSleeveRequest, v1.ResleeveSleeveResponse]
+	spawnEnvoy     *connect.Client[v1.SpawnEnvoyRequest, v1.SpawnEnvoyResponse]
 }
 
 // SpawnSleeve calls protectorate.v1.SleeveService.SpawnSleeve.
@@ -187,6 +208,11 @@ func (c *sleeveServiceClient) KillSleeve(ctx context.Context, req *connect.Reque
 // ResleeveSleeve calls protectorate.v1.SleeveService.ResleeveSleeve.
 func (c *sleeveServiceClient) ResleeveSleeve(ctx context.Context, req *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error) {
 	return c.resleeveSleeve.CallUnary(ctx, req)
+}
+
+// SpawnEnvoy calls protectorate.v1.SleeveService.SpawnEnvoy.
+func (c *sleeveServiceClient) SpawnEnvoy(ctx context.Context, req *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error) {
+	return c.spawnEnvoy.CallUnary(ctx, req)
 }
 
 // SleeveServiceHandler is an implementation of the protectorate.v1.SleeveService service.
@@ -231,6 +257,17 @@ type SleeveServiceHandler interface {
 	// "sleeve.resleeved"; a summary by the fallback model, or none, also emits
 	// "resleeve.warning".
 	ResleeveSleeve(context.Context, *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error)
+	// SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
+	// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
+	// token. It picks the harness (the top of QuotaService.Suggest unless one
+	// is given), stops a running Envoy, revokes every earlier orchestrator
+	// token, mints a new one, writes the token file and the generated context
+	// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+	// is byte-identical across respawns unless the CLI, the tool catalog, the
+	// hub URL, or the scopes change, so a resumed session keeps its
+	// prompt-cache prefix. Only the owner token may call it, and the token it
+	// mints never holds it.
+	SpawnEnvoy(context.Context, *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error)
 }
 
 // NewSleeveServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -279,6 +316,12 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(sleeveServiceMethods.ByName("ResleeveSleeve")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sleeveServiceSpawnEnvoyHandler := connect.NewUnaryHandler(
+		SleeveServiceSpawnEnvoyProcedure,
+		svc.SpawnEnvoy,
+		connect.WithSchema(sleeveServiceMethods.ByName("SpawnEnvoy")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.SleeveService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SleeveServiceSpawnSleeveProcedure:
@@ -293,6 +336,8 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 			sleeveServiceKillSleeveHandler.ServeHTTP(w, r)
 		case SleeveServiceResleeveSleeveProcedure:
 			sleeveServiceResleeveSleeveHandler.ServeHTTP(w, r)
+		case SleeveServiceSpawnEnvoyProcedure:
+			sleeveServiceSpawnEnvoyHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -324,4 +369,8 @@ func (UnimplementedSleeveServiceHandler) KillSleeve(context.Context, *connect.Re
 
 func (UnimplementedSleeveServiceHandler) ResleeveSleeve(context.Context, *connect.Request[v1.ResleeveSleeveRequest]) (*connect.Response[v1.ResleeveSleeveResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.ResleeveSleeve is not implemented"))
+}
+
+func (UnimplementedSleeveServiceHandler) SpawnEnvoy(context.Context, *connect.Request[v1.SpawnEnvoyRequest]) (*connect.Response[v1.SpawnEnvoyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.SpawnEnvoy is not implemented"))
 }

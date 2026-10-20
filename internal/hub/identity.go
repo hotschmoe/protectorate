@@ -42,7 +42,7 @@ func LocalURL(addr net.Addr) string {
 }
 
 // senderOf names the authenticated caller for messages: a sleeve token maps
-// to its sleeve, the orchestrator's token to "poe", the owner to "owner".
+// to its sleeve, the orchestrator's token to "envoy", the owner to "owner".
 // Any other token is not a sleeve and is labelled by its name.
 func senderOf(p *auth.Principal) string {
 	switch {

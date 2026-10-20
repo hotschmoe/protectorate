@@ -161,7 +161,7 @@ func TestAdminOn(t *testing.T) {
 	}{
 		{&Principal{Owner: true}, true},
 		{&Principal{Scopes: []string{"node_admin:kidsbox"}, MintedBy: MintedByOwner}, true},
-		{&Principal{Scopes: []string{"node_admin:kidsbox"}, MintedBy: "orchestrator-poe"}, false},
+		{&Principal{Scopes: []string{"node_admin:kidsbox"}, MintedBy: "orchestrator-envoy"}, false},
 		{&Principal{Scopes: []string{"node_admin:other"}, MintedBy: MintedByOwner}, false},
 	}
 	for _, c := range care {

@@ -11,16 +11,16 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
-	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/mcpbridge"
 	"github.com/hotschmoe/protectorate/internal/orchestrator"
 )
 
-// orchestratorHidden are commands Poe's generated CLI reference leaves out:
+// orchestratorHidden are commands Envoy's generated CLI reference leaves out:
 // owner-only administration, node enrollment, and interactive commands an
 // agent cannot drive.
 var orchestratorHidden = map[string]bool{
@@ -79,7 +79,6 @@ func toolDocs() ([]orchestrator.Tool, error) {
 type orchestratorHub struct {
 	protectoratev1connect.TokenServiceClient
 	protectoratev1connect.SleeveServiceClient
-	protectoratev1connect.QuotaServiceClient
 }
 
 func (o *opts) orchestratorHub() (orchestratorHub, error) {
@@ -90,17 +89,17 @@ func (o *opts) orchestratorHub() (orchestratorHub, error) {
 	return orchestratorHub{
 		protectoratev1connect.NewTokenServiceClient(hc, o.hubURL),
 		protectoratev1connect.NewSleeveServiceClient(hc, o.hubURL),
-		protectoratev1connect.NewQuotaServiceClient(hc, o.hubURL),
 	}, nil
 }
 
 func orchestratorCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "orchestrator",
-		Short: "Run Poe, the orchestrator sleeve (owner token, on the hub machine)",
-		Long: `Poe is an ordinary sleeve named "poe" whose workspace is
-$PROTECTORATE_HOME/orchestrator. It holds generated AGENTS.md (and CLAUDE.md),
-hosts.md and a scoped token; its only tool is this CLI. See docs/orchestrator.md.`,
+		Short: "Run Envoy, the orchestrator sleeve (owner token)",
+		Long: `Envoy is an ordinary sleeve named "envoy" whose workspace is
+$PROTECTORATE_HOME/orchestrator on the hub machine. It holds generated AGENTS.md
+(and CLAUDE.md), hosts.md and a scoped token; its only tool is this CLI. The hub
+does the work, so the app's ENVOY tab starts it as well. See docs/orchestrator.md.`,
 	}
 	c.AddCommand(orchestratorSpawnCmd(o), orchestratorStatusCmd(o))
 	return c
@@ -112,64 +111,61 @@ func orchestratorSpawnCmd(o *opts) *cobra.Command {
 	var ttl time.Duration
 	c := &cobra.Command{
 		Use:   "spawn [--harness auto|claude|codex|grok|pi] [--scopes ...]",
-		Short: "Create or respawn the poe sleeve with a fresh scoped token",
-		Long: `Create the sleeve "poe", or stop and recreate it when it already exists.
-Every spawn revokes the previous poe token, mints a new one, regenerates
-AGENTS.md, CLAUDE.md and hosts.md from the live CLI, MCP catalog and node
-inventory, and starts the harness. --harness auto takes the top of
-'quota suggest'.
+		Short: "Create or respawn the envoy sleeve with a fresh scoped token",
+		Long: `Ask the hub to create the sleeve "envoy", or to stop and recreate it when it
+already exists. Every spawn revokes the previous envoy token, mints a new one,
+regenerates AGENTS.md, CLAUDE.md and hosts.md from the live CLI, MCP catalog and
+node inventory, and starts the harness. AGENTS.md is rewritten only when its
+content changes, so a respawn on the same harness, scopes and CLI keeps the
+harness's prompt cache. --harness auto takes the top of 'quota suggest'.
 
 Default scopes: read, events and the non-destructive backlog_*, lease_*,
 message_*, sleeve_spawn_sleeve and sleeve_resleeve_sleeve tools (never session
 creation: it runs outside the sandbox), named explicitly. --scopes replaces them;
 --add-scopes extends them, e.g. --add-scopes sleeve_kill_sleeve to allow kill.
-Run with the owner token on the hub machine.`,
+The hub renews the token before it expires without restarting the harness.
+Needs the owner token.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			home, err := hub.Home()
+			var hv pb.Harness
+			if harness != "" && harness != "auto" {
+				var ok bool
+				if hv, ok = harnessNames[harness]; !ok || hv == pb.Harness_HARNESS_SHELL {
+					return fmt.Errorf("unknown harness %q, want auto, claude, codex, grok or pi", harness)
+				}
+			}
+			sl, err := sleeveClient(o)
 			if err != nil {
 				return err
 			}
-			tools, err := toolDocs()
+			res, err := sl.SpawnEnvoy(cmd.Context(), connect.NewRequest(&pb.SpawnEnvoyRequest{
+				Harness: hv, Scopes: scopes, AddScopes: addScopes, Ttl: durationpb.New(ttl),
+			}))
 			if err != nil {
 				return err
 			}
-			h, err := o.orchestratorHub()
-			if err != nil {
-				return err
-			}
-			sc := scopes
-			if len(sc) == 0 {
-				sc = orchestrator.DefaultScopes(tools)
-			}
-			res, err := orchestrator.Spawn(cmd.Context(), h, orchestrator.Options{
-				Home: home, HubURL: o.hubURL, Harness: harness, Scopes: orchestrator.MergeScopes(sc, addScopes), TTL: ttl,
-				Tools: tools, Commands: commandDocs(cmd.Root()),
-			})
-			if err != nil {
-				return err
-			}
-			return o.out(cmd).print(&pb.SpawnSleeveResponse{Sleeve: res.Sleeve}, func(w io.Writer) {
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				r := res.Msg
 				verb := "spawned"
-				if res.Replaced {
+				if r.Replaced {
 					verb = "respawned"
 				}
-				fmt.Fprintf(w, "%s\t%s\nharness\t%s (%s)\nworkspace\t%s\n", verb, res.Sleeve.Name, res.Harness, res.Reason, res.Workspace)
-				fmt.Fprintf(w, "token\t%s\nscopes\t%s\nchat\tprotectorate chat watch %s\n", res.Token.Id, strings.Join(res.Token.Scopes, ", "), res.Sleeve.Name)
+				fmt.Fprintf(w, "%s\t%s\nharness\t%s (%s)\nworkspace\t%s\n", verb, r.Sleeve.Name, harnessName(r.Sleeve.Harness), r.Reason, r.Workspace)
+				fmt.Fprintf(w, "token\t%s\nscopes\t%s\nchat\tprotectorate chat watch %s\n", r.Token.Id, strings.Join(r.Token.Scopes, ", "), r.Sleeve.Name)
 			})
 		},
 	}
 	c.Flags().StringVar(&harness, "harness", "auto", "auto (top of quota suggest), claude, codex, grok or pi")
 	c.Flags().StringSliceVar(&scopes, "scopes", nil, "replace the default scopes (comma separated or repeated)")
 	c.Flags().StringSliceVar(&addScopes, "add-scopes", nil, "scopes to add to the defaults")
-	c.Flags().DurationVar(&ttl, "ttl", 720*time.Hour, "token lifetime; 0 never expires")
+	c.Flags().DurationVar(&ttl, "ttl", 720*time.Hour, "token lifetime, renewed by the hub; 0 never expires")
 	return c
 }
 
 func orchestratorStatusCmd(o *opts) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show the poe sleeve, its harness and its token",
+		Short: "Show the envoy sleeve, its harness and its token",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			h, err := o.orchestratorHub()

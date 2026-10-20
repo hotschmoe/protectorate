@@ -72,7 +72,7 @@ func TestWorkspaces(t *testing.T) {
 		"other":  {Info: Info{Name: "other", Workspace: outside, State: Exited}},
 		"gone":   {Info: Info{Name: "gone", Workspace: filepath.Join(base, "missing"), State: Running}},
 		"helper": {Info: Info{Name: "helper", Workspace: outside, Helper: "handoff", State: Running}},
-		"poe":    {Info: Info{Name: "poe", Workspace: filepath.Join(home, "orchestrator"), State: Running}},
+		"envoy":  {Info: Info{Name: "envoy", Workspace: filepath.Join(home, "orchestrator"), State: Running}},
 	}}
 	got := m.Workspaces()
 	want := []Workspace{

@@ -160,6 +160,7 @@ func hubCmd() *cobra.Command {
 	var backupEvery time.Duration
 	var watch, toolDirs []string
 	var orchestratorGrants bool
+	var startEnvoy string
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -226,6 +227,23 @@ func hubCmd() *cobra.Command {
 			if err := attachSleeves(ctx, h, toolDirs); err != nil {
 				return err
 			}
+			tools, err := toolDocs()
+			if err != nil {
+				return err
+			}
+			h.SetEnvoy(hub.EnvoyConfig{Commands: commandDocs(cmd.Root()), Tools: tools})
+			if startEnvoy != "" {
+				hv, ok := harnessNames[startEnvoy]
+				if startEnvoy == "auto" {
+					hv, ok = pb.Harness_HARNESS_UNSPECIFIED, true
+				}
+				if !ok || hv == pb.Harness_HARNESS_SHELL {
+					return fmt.Errorf("--start-envoy %q: want auto, claude, codex, grok or pi", startEnvoy)
+				}
+				if err := h.StartEnvoyIfMissing(ctx, hv); err != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), "error:", err)
+				}
+			}
 			if backupDir != "" {
 				bctx, bstop := context.WithCancel(ctx)
 				backups := make(chan struct{})
@@ -259,6 +277,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: ~/.local/share/protectorate/bin when it exists, else the directory of this executable)")
 	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
 	serve.Flags().BoolVar(&orchestratorGrants, "orchestrator-admin-grants", false, "let the orchestrator mint admin grants (job_* and node_admin) for shared nodes; care nodes are granted by the owner only")
+	serve.Flags().StringVar(&startEnvoy, "start-envoy", "", "at boot, start Envoy on this harness (auto, claude, codex, grok or pi) only if the hub has no Envoy yet; off by default, since the app starts it")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
 	c.AddCommand(serve, hubTailnetCmd(), hubBackupCmd(), hubRestoreCmd())
 	return c

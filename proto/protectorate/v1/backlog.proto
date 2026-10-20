@@ -48,7 +48,7 @@ message Note {
   bool pinned = 6;
   // project is an optional tag such as "hotschmoe/protectorate".
   string project = 7;
-  // source is who created the note: "owner", a sleeve name, "poe" or "hub".
+  // source is who created the note: "owner", a sleeve name, "envoy" or "hub".
   string source = 8;
 }
 

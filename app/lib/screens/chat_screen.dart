@@ -76,14 +76,25 @@ class ChatView extends StatefulWidget {
     required this.client,
     required this.sleeve,
     this.onState,
+    this.actions = const [],
   });
 
   final HubClient client;
   final Sleeve sleeve;
+  // Extra entries for the header menu, after COMPACT CONTEXT.
+  final List<ChatAction> actions;
   final void Function(ChatState state, int tokens, int window)? onState;
 
   @override
   State<ChatView> createState() => _ChatViewState();
+}
+
+class ChatAction {
+  const ChatAction({required this.id, required this.label, required this.run});
+
+  final String id;
+  final String label;
+  final VoidCallback run;
 }
 
 class _ChatViewState extends State<ChatView> {
@@ -162,20 +173,31 @@ class _ChatViewState extends State<ChatView> {
               state: _chat.state,
               tokens: tr.contextTokens,
               window: tr.contextWindow,
-              menu: PopupMenuButton<_Menu>(
+              cacheExpires: tr.cacheExpires,
+              menu: PopupMenuButton<Object>(
                 key: const ValueKey('chat-menu'),
                 tooltip: 'Chat actions',
                 icon: Icon(Icons.more_vert, color: t.p.dim),
-                onSelected: (m) => switch (m) {
-                  _Menu.compact => _run(_chat.compact),
+                onSelected: (m) {
+                  if (m == _Menu.compact) {
+                    _run(_chat.compact);
+                  } else if (m is ChatAction) {
+                    m.run();
+                  }
                 },
                 itemBuilder: (_) => [
-                  PopupMenuItem(
+                  PopupMenuItem<Object>(
                     key: const ValueKey('menu-compact'),
                     value: _Menu.compact,
                     enabled: _chat.canCompact,
                     child: const Text('COMPACT CONTEXT'),
                   ),
+                  for (final a in widget.actions)
+                    PopupMenuItem<Object>(
+                      key: ValueKey('menu-${a.id}'),
+                      value: a,
+                      child: Text(a.label),
+                    ),
                 ],
               ),
             ),
@@ -232,6 +254,7 @@ class _Header extends StatelessWidget {
     required this.state,
     required this.tokens,
     required this.window,
+    required this.cacheExpires,
     required this.menu,
   });
 
@@ -240,6 +263,7 @@ class _Header extends StatelessWidget {
   final ChatState state;
   final int tokens;
   final int window;
+  final DateTime? cacheExpires;
   final Widget menu;
 
   @override
@@ -291,10 +315,20 @@ class _Header extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 8, right: 12),
-                child: ContextMeter(
-                  tokens: tokens,
-                  window: window,
-                  width: null,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ContextMeter(
+                        tokens: tokens,
+                        window: window,
+                        width: null,
+                      ),
+                    ),
+                    if (sleeve.harness == Harness.HARNESS_CLAUDE) ...[
+                      const SizedBox(width: Tokens.gapL),
+                      CacheLamp(expires: cacheExpires),
+                    ],
+                  ],
                 ),
               ),
             ],

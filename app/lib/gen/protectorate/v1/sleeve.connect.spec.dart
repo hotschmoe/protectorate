@@ -96,4 +96,21 @@ abstract final class SleeveService {
     protectoratev1sleeve.ResleeveSleeveRequest.new,
     protectoratev1sleeve.ResleeveSleeveResponse.new,
   );
+
+  /// SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
+  /// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
+  /// token. It picks the harness (the top of QuotaService.Suggest unless one
+  /// is given), stops a running Envoy, revokes every earlier orchestrator
+  /// token, mints a new one, writes the token file and the generated context
+  /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+  /// is byte-identical across respawns unless the CLI, the tool catalog, the
+  /// hub URL, or the scopes change, so a resumed session keeps its
+  /// prompt-cache prefix. Only the owner token may call it, and the token it
+  /// mints never holds it.
+  static const spawnEnvoy = connect.Spec(
+    '/$name/SpawnEnvoy',
+    connect.StreamType.unary,
+    protectoratev1sleeve.SpawnEnvoyRequest.new,
+    protectoratev1sleeve.SpawnEnvoyResponse.new,
+  );
 }

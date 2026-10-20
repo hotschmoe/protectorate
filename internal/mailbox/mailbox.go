@@ -546,6 +546,21 @@ func (s *Store) Pending() map[string][]Message {
 	return out
 }
 
+// Queued returns the messages armed for rcpt but never injected into its
+// chat: held back to ride along with the next message to it.
+func (s *Store) Queued(rcpt string) []Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Message
+	for _, id := range s.order {
+		m := s.msgs[id]
+		if d := m.Deliveries[rcpt]; d != nil && d.Delivered == nil && d.Acked == nil && !d.Since.IsZero() {
+			out = append(out, m.clone())
+		}
+	}
+	return out
+}
+
 // Involving returns the ack-required messages still open that name sent or
 // that are addressed to name and unacked by it, oldest first.
 func (s *Store) Involving(name string) []Message {

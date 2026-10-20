@@ -33,6 +33,8 @@ type coordinator struct {
 	wake     chan struct{}
 
 	passMu sync.Mutex
+	// envoyNext is when a stopped Envoy may be woken again; guarded by passMu.
+	envoyNext time.Time
 }
 
 // EnableCoordination turns on DirectoryService and MessageService, keeping

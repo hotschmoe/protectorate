@@ -17,7 +17,7 @@ A note has:
 - `pinned`: pinned notes list first
 - `project`: optional tag, e.g. `hotschmoe/protectorate`
 - `source`: who created it, taken from the caller's identity and never from
-  the request: `owner`, a sleeve name, `poe` (the orchestrator), `hub`, or
+  the request: `owner`, a sleeve name, `envoy` (the orchestrator), `hub`, or
   `token:<name>` for another token
 
 A note needs a title or a body. Lists sort pinned first, then most recently

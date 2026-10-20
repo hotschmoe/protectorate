@@ -296,9 +296,9 @@ Design:
   removed from http(s) remotes. Other paths are not discovered.
 - Mounts:
   - the workspace is read-write. Inside the state directory only the sleeve's
-    own `workspaces/<name>` (or `orchestrator/` for `poe`) is allowed; the
+    own `workspaces/<name>` (or `orchestrator/` for `envoy`) is allowed; the
     state directory, the shared `workspaces/` parent and other sleeves'
-    directories are refused. Only the owner token may spawn the name `poe`.
+    directories are refused. Only the owner token may spawn the name `envoy`, and the hub starts it itself through `SleeveService.SpawnEnvoy`.
     A workspace may neither be inside nor contain a credential dir or another
     secret path (`~/.cargo`, `~/.local/share`, `~/.config`, `~/.docker`,
     `~/.kube`, `~/.netrc`, ...), since it is bound without masks. Home, the
@@ -479,7 +479,7 @@ sleeve stays in the mode it was spawned in.
 
 Setup, scoping and widening: `docs/orchestrator.md`.
 
-- The orchestrator ("Poe") is **a sleeve**, not engine code. Its harness is
+- The orchestrator ("Envoy") is **a sleeve**, not engine code. Its harness is
   whichever subscription has quota left, and its tool is the `protectorate`
   CLI with a scoped hub token.
 - External bridges (MCP for Claude, Grok bot, Dots, Muse) use the same scoped

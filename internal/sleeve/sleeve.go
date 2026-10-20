@@ -111,9 +111,9 @@ type Config struct {
 // Names of the orchestrator sleeve and the state subdirectory that is its
 // workspace and holds its token file.
 const (
-	OrchestratorName = "poe"
+	OrchestratorName = "envoy"
 	// OrchestratorTokenName names the token minted for the orchestrator.
-	OrchestratorTokenName = "orchestrator-poe"
+	OrchestratorTokenName = "orchestrator-envoy"
 	OrchestratorDir       = "orchestrator"
 )
 

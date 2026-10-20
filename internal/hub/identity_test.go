@@ -24,7 +24,7 @@ func TestSenderOf(t *testing.T) {
 		{"no principal", nil, "owner"},
 		{"owner", &auth.Principal{Owner: true, Name: "owner"}, "owner"},
 		{"sleeve", &auth.Principal{Name: "sleeve:api"}, "api"},
-		{"orchestrator", &auth.Principal{Name: "orchestrator-poe"}, "poe"},
+		{"orchestrator", &auth.Principal{Name: "orchestrator-envoy"}, "envoy"},
 		{"other token", &auth.Principal{Name: "pair: phone"}, "token:pair: phone"},
 	}
 	for _, tt := range tests {

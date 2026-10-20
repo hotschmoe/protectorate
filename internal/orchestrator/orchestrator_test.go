@@ -3,8 +3,6 @@ package orchestrator
 import (
 	"context"
 	"flag"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,11 +11,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/auth"
-	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/mcpbridge"
 )
 
@@ -78,11 +76,8 @@ func TestDefaultScopesDropDestructive(t *testing.T) {
 
 func fixtureInput() DocInput {
 	return DocInput{
-		Generated: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC),
-		Harness:   "claude",
-		Hub:       "http://127.0.0.1:7470",
-		Token: TokenSummary{ID: "ab12cd34", Name: TokenName, Expires: "2026-11-18T12:00:00Z",
-			Scopes: []string{"backlog_create_note", "events", "read", "sleeve_spawn_sleeve"}},
+		Hub:   "http://127.0.0.1:7470",
+		Token: TokenSummary{Name: TokenName, Scopes: []string{"backlog_create_note", "events", "read", "sleeve_spawn_sleeve"}},
 		Tools: []Tool{
 			{Name: "sleeve_spawn_sleeve", Description: "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is a directory."},
 			{Name: "sleeve_kill_sleeve", Description: "KillSleeve stops a sleeve.", Destructive: true},
@@ -170,32 +165,64 @@ type testHub struct {
 	protectoratev1connect.QuotaServiceClient
 }
 
+type fakeTokens struct {
+	protectoratev1connect.TokenServiceClient
+	store *auth.Store
+}
+
+func tokenInfo(t auth.Token) *pb.TokenInfo {
+	info := &pb.TokenInfo{Id: t.ID, Name: t.Name, Scopes: t.Scopes, CreatedAt: timestamppb.New(t.Created)}
+	if t.Expires != nil {
+		info.ExpiresAt = timestamppb.New(*t.Expires)
+	}
+	if t.RevokedAt != nil {
+		info.RevokedAt = timestamppb.New(*t.RevokedAt)
+	}
+	return info
+}
+
+func (f fakeTokens) CreateToken(_ context.Context, r *connect.Request[pb.CreateTokenRequest]) (*connect.Response[pb.CreateTokenResponse], error) {
+	t, secret, err := f.store.Create(r.Msg.Name, r.Msg.Scopes, r.Msg.Ttl.AsDuration(), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&pb.CreateTokenResponse{Token: tokenInfo(t), Secret: secret}), nil
+}
+
+func (f fakeTokens) ListTokens(context.Context, *connect.Request[pb.ListTokensRequest]) (*connect.Response[pb.ListTokensResponse], error) {
+	res := &pb.ListTokensResponse{}
+	for _, t := range f.store.List() {
+		res.Tokens = append(res.Tokens, tokenInfo(t))
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f fakeTokens) RevokeToken(_ context.Context, r *connect.Request[pb.RevokeTokenRequest]) (*connect.Response[pb.RevokeTokenResponse], error) {
+	t, err := f.store.Revoke(r.Msg.Id, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&pb.RevokeTokenResponse{Token: tokenInfo(t)}), nil
+}
+
+type fakeQuota struct {
+	protectoratev1connect.QuotaServiceClient
+}
+
+func (fakeQuota) Suggest(context.Context, *connect.Request[pb.SuggestRequest]) (*connect.Response[pb.SuggestResponse], error) {
+	return connect.NewResponse(&pb.SuggestResponse{Suggestions: []*pb.HarnessSuggestion{
+		{Harness: pb.Harness_HARNESS_PI, Recommended: true, Reason: "local LLM via pi: no quota"},
+	}}), nil
+}
+
 func startHub(t *testing.T) (testHub, *auth.Store) {
 	t.Helper()
 	store := auth.NewMemoryStore()
-	h := hub.New("test", "owner")
-	h.SetAuth(auth.New("owner", store, nil))
-	srv := httptest.NewServer(h.Handler())
-	t.Cleanup(srv.Close)
-	hc := &http.Client{Transport: ownerAuth{}}
-	return testHub{
-		protectoratev1connect.NewTokenServiceClient(hc, srv.URL),
-		&fakeSleeves{},
-		protectoratev1connect.NewQuotaServiceClient(hc, srv.URL),
-	}, store
-}
-
-type ownerAuth struct{}
-
-func (ownerAuth) RoundTrip(r *http.Request) (*http.Response, error) {
-	r = r.Clone(r.Context())
-	r.Header.Set("Authorization", "Bearer owner")
-	return http.DefaultTransport.RoundTrip(r)
+	return testHub{fakeTokens{store: store}, &fakeSleeves{}, fakeQuota{}}, store
 }
 
 func opts(home string, tools []Tool) Options {
-	return Options{Home: home, HubURL: "http://127.0.0.1:7470", Harness: "claude", TTL: time.Hour, Tools: tools,
-		Now: func() time.Time { return time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC) }}
+	return Options{Home: home, HubURL: "http://127.0.0.1:7470", Harness: "claude", TTL: time.Hour, Tools: tools}
 }
 
 func activeTokens(store *auth.Store) []auth.Token {
@@ -252,8 +279,8 @@ func TestSpawnMintsAndRevokesOnRespawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(agents), first.Token.Id) || strings.Contains(string(agents), strings.TrimSpace(string(secret1))) {
-		t.Error("AGENTS.md must name the token id and never the secret")
+	if strings.Contains(string(agents), first.Token.Id) || strings.Contains(string(agents), strings.TrimSpace(string(secret1))) {
+		t.Error("AGENTS.md must name neither the token id nor the secret")
 	}
 	if target, err := os.Readlink(filepath.Join(ws, "CLAUDE.md")); err != nil || target != "AGENTS.md" {
 		t.Errorf("CLAUDE.md link = %q, %v", target, err)
@@ -274,7 +301,7 @@ func TestSpawnMintsAndRevokesOnRespawn(t *testing.T) {
 		t.Fatalf("after respawn active tokens = %v (first %s)", act, first.Token.Id)
 	}
 	if _, err := store.Lookup(strings.TrimSpace(string(secret1)), time.Now()); err == nil {
-		t.Error("previous poe token still authenticates after respawn")
+		t.Error("previous envoy token still authenticates after respawn")
 	}
 	secret2, _ := os.ReadFile(tokenPath)
 	if string(secret1) == string(secret2) {
@@ -347,5 +374,69 @@ func TestWriteContextMovesForeignClaudeMdAside(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(aside[0]); string(b) != "mine" {
 		t.Errorf("user's file lost: %q", b)
+	}
+}
+
+func TestSpawnContextIsCacheStable(t *testing.T) {
+	h, _ := startHub(t)
+	home := t.TempDir()
+	ws := filepath.Join(home, DirName)
+	tools := realTools(t)
+	spawn := func(o Options) *Result {
+		t.Helper()
+		res, err := Spawn(context.Background(), h, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	read := func(name string) []byte {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(ws, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	first := spawn(opts(home, tools))
+	agents := read("AGENTS.md")
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(ws, "AGENTS.md"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(home, "hosts.md"), []byte("# Hosts\n\nkidsbox 10.0.0.9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	second := spawn(opts(home, tools))
+	if first.Token.Id == second.Token.Id {
+		t.Fatal("respawn kept the token")
+	}
+	if got := read("AGENTS.md"); string(got) != string(agents) {
+		t.Errorf("AGENTS.md changed across respawns:\n%s\nvs\n%s", agents, got)
+	}
+	fi, err := os.Stat(filepath.Join(ws, "AGENTS.md"))
+	if err != nil || !fi.ModTime().Equal(old) {
+		t.Errorf("AGENTS.md was rewritten although unchanged: %v, %v", fi, err)
+	}
+	if !strings.Contains(string(read("hosts.md")), "kidsbox") {
+		t.Error("hosts.md did not follow the inventory")
+	}
+	if strings.Contains(string(read("AGENTS.md")), "kidsbox") {
+		t.Error("volatile hosts.md content leaked into AGENTS.md")
+	}
+
+	changed := opts(home, tools)
+	changed.Harness = "codex"
+	spawn(changed)
+	if string(read("AGENTS.md")) != string(agents) {
+		t.Error("AGENTS.md depends on the harness, so a resleeve or a harness change busts the cache")
+	}
+	changed.Scopes = []string{"read"}
+	spawn(changed)
+	if string(read("AGENTS.md")) == string(agents) {
+		t.Error("AGENTS.md ignored a scope change")
 	}
 }
