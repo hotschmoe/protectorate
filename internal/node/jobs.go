@@ -34,6 +34,7 @@ const (
 	ChunkSize = 1 << 20
 
 	maxLogBytes       = 64 << 20
+	logReadChunk      = 64 << 10
 	killGrace         = 3 * time.Second
 	waitDelay         = 5 * time.Second
 	uploadIdle        = time.Hour
@@ -535,7 +536,7 @@ func (j *Jobs) Attach(ctx context.Context, id string, offset uint64, send func(*
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	defer f.Close()
-	buf := make([]byte, ChunkSize)
+	var buf []byte
 	sentStarted := false
 	for {
 		r.mu.Lock()
@@ -551,6 +552,9 @@ func (j *Jobs) Attach(ctx context.Context, id string, offset uint64, send func(*
 			}
 		}
 		for offset < size {
+			if buf == nil {
+				buf = make([]byte, logReadChunk)
+			}
 			n, err := f.ReadAt(buf[:min(uint64(len(buf)), size-offset)], int64(offset))
 			if n > 0 {
 				ev := &pb.JobEvent{Event: &pb.JobEvent_Output{Output: &pb.JobOutput{Data: append([]byte(nil), buf[:n]...)}}}

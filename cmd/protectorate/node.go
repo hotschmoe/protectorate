@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -294,6 +295,7 @@ func removePhaseLabel(p pb.RemovePhase) string {
 }
 
 func nodeServeCmd() *cobra.Command {
+	var memoryLimit int64
 	var listen, tokenFile, jobDir, fileRoot, homeDir string
 	var fileUnconfined bool
 	var watch []string
@@ -304,6 +306,12 @@ func nodeServeCmd() *cobra.Command {
 		Short: "Run the node agent",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			if memoryLimit <= 0 {
+				return errors.New("--memory-limit must be positive")
+			}
+			if cmd.Flags().Changed("memory-limit") || os.Getenv("GOMEMLIMIT") == "" {
+				debug.SetMemoryLimit(memoryLimit)
+			}
 			if homeDir != "" {
 				if err := os.Setenv("PROTECTORATE_HOME", homeDir); err != nil {
 					return fmt.Errorf("set home: %w", err)
@@ -391,6 +399,7 @@ func nodeServeCmd() *cobra.Command {
 					return err
 				}
 				a.Authorize = n.AuthorizeHub()
+				a.DebugAuthorize = a.Authorize
 				go n.KeepHubReachable(ctx, func(f string, args ...any) { fmt.Fprintf(cmd.ErrOrStderr(), "tailnet: "+f+"\n", args...) })
 				fmt.Fprintf(cmd.ErrOrStderr(), "node agent %s serving on the tailnet, port %d (hub only)\n", version, node.DefaultPort)
 			} else {
@@ -411,6 +420,7 @@ func nodeServeCmd() *cobra.Command {
 		},
 	}
 	f := c.Flags()
+	f.Int64Var(&memoryLimit, "memory-limit", 128<<20, "soft Go runtime memory limit in bytes; overrides GOMEMLIMIT when explicitly set (excludes child jobs)")
 	f.StringVar(&homeDir, "home", "", "PROTECTORATE_HOME for this agent (default: env, then ~/.protectorate)")
 	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
 	f.StringVar(&tokenFile, "node-token-file", "", "file holding the bearer token the hub must present when not enrolled in a tailnet (or the token itself in env "+nodeTokenEnv+")")

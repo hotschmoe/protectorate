@@ -15,6 +15,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/codec"
+	"github.com/hotschmoe/protectorate/internal/diagnostics"
 )
 
 // DefaultPort is the tailnet port of the node agent.
@@ -30,6 +31,8 @@ const (
 type Agent struct {
 	Collector *Collector
 	Authorize func(*http.Request) error
+	// DebugAuthorize is set only for the tailnet's tag:hub authorizer.
+	DebugAuthorize func(*http.Request) error
 	// Jobs executes hub jobs; nil refuses them.
 	Jobs *Jobs
 	// Files serves file transfers; nil refuses them.
@@ -61,6 +64,7 @@ func TokenAuthorizer(token string) func(*http.Request) error {
 
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("/debug/", diagnostics.Handler(a.DebugAuthorize))
 	mux.Handle(protectoratev1connect.NewNodeAgentServiceHandler(a, connect.WithHandlerOptions(connect.WithCodec(codec.StrictJSON{}))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a.Authorize == nil {
