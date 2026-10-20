@@ -63,7 +63,8 @@ func TestBinaryNodeRepositoryProgramsStayIsolated(t *testing.T) {
 	}
 	t.Run("filters have only job authority", func(t *testing.T) {
 		status := c.call("NodeService", "GetNode", map[string]any{"name": "peer"})
-		if !strings.Contains(fmt.Sprint(status), "bwrap") {
+		// The note explains a missing sandbox and may itself mention bwrap.
+		if !strings.Contains(fmt.Sprint(status), "sandbox:bwrap") {
 			t.Skip("filter confinement requires a node with working bwrap and systemd user manager")
 		}
 		secret := filepath.Join(c.root, "host-secret")
