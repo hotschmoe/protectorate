@@ -186,6 +186,10 @@ protectorate node ls                         # VERSION column; (!) marks a node 
 protectorate node update <node>              # or: node update --all [--force]
 ```
 
+Build with `make build` and `make cross` so installs and updates retain the
+Tailscale feature selection. Runtime profiles and the node's default 128 MiB
+soft Go memory limit are documented in [footprint.md](footprint.md).
+
 Nothing updates by itself. `node update` asks the hub (`NodeService.UpdateNode`, owner-only, also behind the app's "Update node" button), which sends one binary per node over the file transfer (zstd where it shrinks, size and SHA-256 checked): its own executable for nodes of its own OS and architecture, the matching `protectorate-<os>-<arch>` file from its `--binary-dir` for the rest. The hub box therefore needs the `make cross` output (or the CI artifacts) in that directory. The node then:
 
 1. checks size and SHA-256 again, copies the file next to its own binary and runs `<new> version --json` (it must report the node's OS and architecture);

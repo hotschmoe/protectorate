@@ -26,6 +26,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/backlog"
 	"github.com/hotschmoe/protectorate/internal/codec"
+	"github.com/hotschmoe/protectorate/internal/diagnostics"
 	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
@@ -237,6 +238,8 @@ func (h *Hub) Handler() http.Handler {
 		connect.WithCodec(codec.StrictJSON{}),
 	)
 	mux := http.NewServeMux()
+	mux.Handle("/debug/", diagnostics.Handler(h.authorizeDebug))
+	mux.Handle("GET /debug/nodes/{name}/{path...}", diagnostics.Protect(h.authorizeDebug, http.HandlerFunc(h.handleDebugNode)))
 	mux.Handle(protectoratev1connect.NewHubServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewEventServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
