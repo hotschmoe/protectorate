@@ -27,6 +27,11 @@ class Options {
       _omitFieldNames ? '' : 'ownerOnlyRpc',
       50004,
       $pb.PbFieldType.OB);
+  static final deviceAllowed = $pb.Extension<$core.bool>(
+      _omitMessageNames ? '' : 'google.protobuf.MethodOptions',
+      _omitFieldNames ? '' : 'deviceAllowed',
+      50005,
+      $pb.PbFieldType.OB);
   static final nodeLocal = $pb.Extension<$core.bool>(
       _omitMessageNames ? '' : 'google.protobuf.ServiceOptions',
       _omitFieldNames ? '' : 'nodeLocal',
@@ -40,6 +45,7 @@ class Options {
   static void registerAllExtensions($pb.ExtensionRegistry registry) {
     registry.add(destructive);
     registry.add(ownerOnlyRpc);
+    registry.add(deviceAllowed);
     registry.add(nodeLocal);
     registry.add(ownerOnly);
   }

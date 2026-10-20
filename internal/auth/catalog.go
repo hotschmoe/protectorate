@@ -43,6 +43,8 @@ type Method struct {
 	ReadOnly  bool
 	Streaming bool
 	OwnerOnly bool
+	// DeviceAllowed admits Full device tokens to an owner-only method.
+	DeviceAllowed bool
 }
 
 // Mutating reports whether calls are audited: anything that may change state.
@@ -83,6 +85,8 @@ func buildCatalog() (map[string]Method, error) {
 					ReadOnly:  opts.GetIdempotencyLevel() == descriptorpb.MethodOptions_NO_SIDE_EFFECTS,
 					Streaming: m.IsStreamingClient() || m.IsStreamingServer(),
 					OwnerOnly: owner || proto.GetExtension(opts, pb.E_OwnerOnlyRpc).(bool),
+
+					DeviceAllowed: proto.GetExtension(opts, pb.E_DeviceAllowed).(bool),
 				}
 				for _, prev := range out {
 					if prev.Tool == def.Tool {

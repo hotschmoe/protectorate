@@ -4331,7 +4331,7 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"DeskAction\x12\".protectorate.v1.DeskActionRequest\x1a#.protectorate.v1.DeskActionResponse\x12X\n" +
 	"\vApplyUpdate\x12#.protectorate.v1.ApplyUpdateRequest\x1a$.protectorate.v1.ApplyUpdateResponse\x12P\n" +
 	"\fGetDeskState\x12$.protectorate.v1.GetDeskStateRequest\x1a\x1a.protectorate.v1.DeskState\x12R\n" +
-	"\tUninstall\x12!.protectorate.v1.UninstallRequest\x1a\".protectorate.v1.UninstallResponse\x1a\x04\x90\xb5\x18\x012\x94\t\n" +
+	"\tUninstall\x12!.protectorate.v1.UninstallRequest\x1a\".protectorate.v1.UninstallResponse\x1a\x04\x90\xb5\x18\x012\x98\t\n" +
 	"\vNodeService\x12W\n" +
 	"\tListNodes\x12!.protectorate.v1.ListNodesRequest\x1a\".protectorate.v1.ListNodesResponse\"\x03\x90\x02\x01\x12L\n" +
 	"\aGetNode\x12\x1f.protectorate.v1.GetNodeRequest\x1a\x1b.protectorate.v1.NodeStatus\"\x03\x90\x02\x01\x12K\n" +
@@ -4343,9 +4343,9 @@ const file_protectorate_v1_node_proto_rawDesc = "" +
 	"\x0eWatchNodeSetup\x12&.protectorate.v1.WatchNodeSetupRequest\x1a\".protectorate.v1.NodeSetupProgress\"\x03\x90\x02\x010\x01\x12L\n" +
 	"\aPutFile\x12\x1f.protectorate.v1.PutFileRequest\x1a .protectorate.v1.PutFileResponse\x12N\n" +
 	"\aGetFile\x12\x1f.protectorate.v1.GetFileRequest\x1a .protectorate.v1.GetFileResponse0\x01\x12^\n" +
-	"\vApplyUpdate\x12#.protectorate.v1.ApplyUpdateRequest\x1a$.protectorate.v1.ApplyUpdateResponse\"\x04\xa0\xb5\x18\x01\x12]\n" +
+	"\vApplyUpdate\x12#.protectorate.v1.ApplyUpdateRequest\x1a$.protectorate.v1.ApplyUpdateResponse\"\x04\xa0\xb5\x18\x01\x12a\n" +
 	"\n" +
-	"UpdateNode\x12\".protectorate.v1.UpdateNodeRequest\x1a#.protectorate.v1.UpdateNodeProgress\"\x04\xa0\xb5\x18\x010\x01\x12_\n" +
+	"UpdateNode\x12\".protectorate.v1.UpdateNodeRequest\x1a#.protectorate.v1.UpdateNodeProgress\"\b\xa0\xb5\x18\x01\xa8\xb5\x18\x010\x01\x12_\n" +
 	"\rSetDeskPolicy\x12%.protectorate.v1.SetDeskPolicyRequest\x1a!.protectorate.v1.DeskPolicyStatus\"\x04\xa0\xb5\x18\x01\x12Y\n" +
 	"\rGetDeskPolicy\x12%.protectorate.v1.GetDeskPolicyRequest\x1a!.protectorate.v1.DeskPolicyStatus\x12S\n" +
 	"\vSetNodeTier\x12#.protectorate.v1.SetNodeTierRequest\x1a\x19.protectorate.v1.NodeInfo\"\x04\xa0\xb5\x18\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"

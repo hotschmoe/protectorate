@@ -302,10 +302,10 @@ const file_protectorate_v1_release_proto_rawDesc = "" +
 	"\n" +
 	"sent_bytes\x18\x05 \x01(\x04R\tsentBytes\x12\x1f\n" +
 	"\vtotal_bytes\x18\x06 \x01(\x04R\n" +
-	"totalBytes2\xc5\x01\n" +
+	"totalBytes2\xc9\x01\n" +
 	"\x0eReleaseService\x12W\n" +
-	"\fCheckRelease\x12$.protectorate.v1.CheckReleaseRequest\x1a\x1c.protectorate.v1.ReleaseInfo\"\x03\x90\x02\x01\x12Z\n" +
-	"\tUpdateHub\x12!.protectorate.v1.UpdateHubRequest\x1a\".protectorate.v1.UpdateHubProgress\"\x04\xa0\xb5\x18\x010\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\fCheckRelease\x12$.protectorate.v1.CheckReleaseRequest\x1a\x1c.protectorate.v1.ReleaseInfo\"\x03\x90\x02\x01\x12^\n" +
+	"\tUpdateHub\x12!.protectorate.v1.UpdateHubRequest\x1a\".protectorate.v1.UpdateHubProgress\"\b\xa0\xb5\x18\x01\xa8\xb5\x18\x010\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_release_proto_rawDescOnce sync.Once

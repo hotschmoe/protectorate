@@ -14,6 +14,10 @@ extend google.protobuf.MethodOptions {
   // owner_only_rpc marks an RPC only the owner token may call, whatever scopes
   // another token carries. The MCP bridge leaves it out.
   bool owner_only_rpc = 50004;
+
+  // device_allowed admits approved Full device tokens to an owner_only_rpc,
+  // which no scope can grant. Used for updating the hub and nodes from the app.
+  bool device_allowed = 50005;
 }
 
 extend google.protobuf.ServiceOptions {

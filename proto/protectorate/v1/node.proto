@@ -170,6 +170,7 @@ service NodeService {
   // it. The hub's own node cannot be updated this way.
   rpc UpdateNode(UpdateNodeRequest) returns (stream UpdateNodeProgress) {
     option (protectorate.v1.owner_only_rpc) = true;
+    option (protectorate.v1.device_allowed) = true;
   }
 
   // SetDeskPolicy sets or clears (policy unset) when agents may drive a

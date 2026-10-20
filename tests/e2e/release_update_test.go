@@ -223,6 +223,23 @@ func TestBinaryGitHubReleaseUpdates(t *testing.T) {
 	if status["availableVersion"] != next || status["updateChannel"] != "stable" || status["releaseNotesUrl"] != server.server.URL+"/notes/"+next {
 		t.Fatalf("hub did not expose its release availability: %v", status)
 	}
+	// Approved Full devices may update from the app; scoped tokens, even *, may not.
+	owner := c.token
+	devices := devicePeer(c, "127.0.0.1")
+	request := devices.rpc("StartDeviceAuth", "", map[string]any{"name": "updater", "platform": "android"}, 200)
+	devices.rpc("ApproveDeviceAuth", owner, map[string]any{"userCode": request["userCode"]}, 200)
+	device := devices.rpc("PollDeviceAuth", "", map[string]any{"deviceCode": request["deviceCode"]}, 200)["secret"].(string)
+	scoped := c.call("TokenService", "CreateToken", map[string]any{"name": "everything-scoped", "scopes": []string{"*"}})["secret"].(string)
+	for _, tc := range []struct {
+		token string
+		want  bool
+	}{{device, true}, {scoped, false}} {
+		c.token = tc.token
+		if got := c.call("ReleaseService", "CheckRelease", map[string]any{"channel": "stable"})["canUpdate"] == true; got != tc.want {
+			t.Fatalf("canUpdate=%v want %v", got, tc.want)
+		}
+	}
+	c.token = owner
 	server.set(func() { server.corrupt = true })
 	c.rejectedCLI("checksum", "hub", "update")
 	if got := c.call("HubService", "GetStatus", map[string]any{})["version"]; got != initial {

@@ -119,6 +119,6 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 /// Descriptor for `ReleaseService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List releaseServiceDescriptor = $convert.base64Decode(
     'Cg5SZWxlYXNlU2VydmljZRJXCgxDaGVja1JlbGVhc2USJC5wcm90ZWN0b3JhdGUudjEuQ2hlY2'
-    'tSZWxlYXNlUmVxdWVzdBocLnByb3RlY3RvcmF0ZS52MS5SZWxlYXNlSW5mbyIDkAIBEloKCVVw'
+    'tSZWxlYXNlUmVxdWVzdBocLnByb3RlY3RvcmF0ZS52MS5SZWxlYXNlSW5mbyIDkAIBEl4KCVVw'
     'ZGF0ZUh1YhIhLnByb3RlY3RvcmF0ZS52MS5VcGRhdGVIdWJSZXF1ZXN0GiIucHJvdGVjdG9yYX'
-    'RlLnYxLlVwZGF0ZUh1YlByb2dyZXNzIgSgtRgBMAE=');
+    'RlLnYxLlVwZGF0ZUh1YlByb2dyZXNzIgigtRgBqLUYATAB');

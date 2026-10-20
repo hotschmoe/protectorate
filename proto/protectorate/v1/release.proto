@@ -13,6 +13,7 @@ service ReleaseService {
   }
   rpc UpdateHub(UpdateHubRequest) returns (stream UpdateHubProgress) {
     option (protectorate.v1.owner_only_rpc) = true;
+    option (protectorate.v1.device_allowed) = true;
   }
 }
 

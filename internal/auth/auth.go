@@ -182,6 +182,9 @@ func (a *Authorizer) AuthorizeProcedure(p *Principal, procedure string) error {
 		return nil
 	}
 	if m.OwnerOnly {
+		if m.DeviceAllowed && p.Device {
+			return nil
+		}
 		return &DeniedError{Name: p.Name, Need: "owner token (" + m.Tool + " is owner-only)"}
 	}
 	if m.Service == "DeviceService" {

@@ -142,9 +142,10 @@ restarts and completes its health trial independently of the client. The
 stream ends at restart, so clients reconnect and read `GetStatus` to establish
 the resulting running version. See [install.md](install.md#update-the-hub-and-nodes).
 
-The device-authorization integration grants these update actions to approved
-Full device tokens as well as the owner. Scoped tokens, including `*`, do not
-become Full devices by acquiring an update-shaped scope.
+`UpdateHub` and `UpdateNode` also carry `(protectorate.v1.device_allowed)`:
+approved Full device tokens may call them as well as the owner, so the app's
+update buttons work from a paired phone or desktop. Scoped tokens, including
+`*`, cannot, since no scope grants an owner-only RPC.
 
 The terminal is the same hole by another door. Typing into a session that runs
 as the hub user is code execution as that user, so a `terminal` token may
