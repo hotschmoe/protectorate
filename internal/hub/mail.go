@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
@@ -28,7 +29,6 @@ const (
 	orchestratorAddr = "orchestrator"
 	projectPrefix    = "project:"
 	maxBodyBytes     = 32 << 10
-	maxBatch         = 8
 )
 
 // sendArgs is one message to store and route.
@@ -275,55 +275,9 @@ const escalationPrefix = "escalate-"
 // start an Envoy whose harness is not running.
 const envoyRetry = time.Minute
 
-// holdForEnvoy keeps back what must not start a turn by itself. Envoy is a
-// long conversation whose prompt cache a turn per notice would keep warm
-// at a price, so only the hub's escalations are injected at once. The rest is
-// armed, which starts its ack timer (an ack-required message that goes
-// overdue is re-delivered, and that does start a turn), and waits in the
-// queue for the owner's next message.
-func (c *coordinator) holdForEnvoy(msgs []mailbox.Message) []mailbox.Message {
-	var urgent []mailbox.Message
-	for _, m := range msgs {
-		if m.From == hubName && strings.HasPrefix(m.RequestID, escalationPrefix) {
-			urgent = append(urgent, m)
-			continue
-		}
-		if err := c.mail.Arm(m.ID, sleeve.OrchestratorName); err != nil {
-			log.Printf("mailbox: queue %s for envoy: %v", m.ID, err)
-		}
-	}
-	return urgent
-}
-
-// rideAlong prepends the messages queued for Envoy to the owner's text as one
-// block. commit records them as delivered once the text was sent.
-func (c *coordinator) rideAlong(text string) (string, func()) {
-	queued := c.mail.Queued(sleeve.OrchestratorName)
-	if len(queued) > maxBatch {
-		queued = queued[:maxBatch]
-	}
-	if len(queued) == 0 {
-		return text, func() {}
-	}
-	parts := make([]string, len(queued))
-	for i, m := range queued {
-		parts[i] = renderMessage(m, c.projectLabel(m), false)
-	}
-	block := fmt.Sprintf("Mailbox, queued while you were idle (%d):\n\n%s\n\n---\n\nFrom the owner:\n%s", len(queued), strings.Join(parts, "\n\n---\n\n"), text)
-	return block, func() {
-		for _, m := range queued {
-			if err := c.mail.Deliver(m.ID, sleeve.OrchestratorName); err != nil {
-				log.Printf("mailbox: record delivery of %s to envoy: %v", m.ID, err)
-				continue
-			}
-			c.event("msg.delivered", m, map[string]any{"recipient": sleeve.OrchestratorName})
-		}
-	}
-}
-
 // idle reports whether name is a running chat sleeve waiting for input. Envoy
 // also counts when its harness is not running (exited, or stopped by a hub
-// restart): sending resumes its native session, so an urgent message wakes it
+// restart): sending resumes its native session, so pending mail wakes it
 // with the same context and cache prefix instead of waiting for the owner.
 func (c *coordinator) idle(name string) (*chatSleeve, bool) {
 	info, err := c.h.sleeves.Get(name)
@@ -367,11 +321,8 @@ func (c *coordinator) deliver(ctx context.Context) {
 				}
 			}
 		case "chat":
-			if rcpt == sleeve.OrchestratorName {
-				msgs = c.holdForEnvoy(msgs)
-			}
-			if len(msgs) > maxBatch {
-				msgs = msgs[:maxBatch]
+			if len(msgs) > 0 && c.now().Sub(msgs[0].Created) < 2*time.Second {
+				continue
 			}
 			c.inject(ctx, rcpt, msgs, false)
 		}
@@ -390,7 +341,7 @@ func (c *coordinator) inject(ctx context.Context, rcpt string, msgs []mailbox.Me
 	for i, m := range msgs {
 		parts[i], ids[i] = renderMessage(m, c.projectLabel(m), reminder), m.ID
 	}
-	rid := "mailbox-" + strings.Join(ids, "-")
+	rid := fmt.Sprintf("mailbox-%x", sha256.Sum256([]byte(strings.Join(ids, "-"))))
 	if reminder {
 		rid += fmt.Sprintf("-r%d", msgs[0].Deliveries[rcpt].Reminders+1)
 	}
@@ -398,7 +349,7 @@ func (c *coordinator) inject(ctx context.Context, rcpt string, msgs []mailbox.Me
 	if len(msgs) == 1 {
 		from = chatFrom(msgs[0].From)
 	}
-	if _, err := s.send(ctx, from, strings.Join(parts, "\n\n---\n\n"), rid); err != nil {
+	if _, err := s.sendMailbox(ctx, from, strings.Join(parts, "\n\n---\n\n"), rid); err != nil {
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 			log.Printf("mailbox: deliver to %s: %v", rcpt, err)
 		}
@@ -448,6 +399,14 @@ func (c *coordinator) timers(ctx context.Context) {
 		}
 		switch d.Action {
 		case mailbox.ActRemind:
+			if m.Deliveries[d.Rcpt].Read != nil {
+				if err := c.mail.Remind(d.ID, d.Rcpt); err != nil {
+					log.Printf("mailbox: advance read message reminder %s: %v", d.ID, err)
+					continue
+				}
+				c.event("msg.reminded", m, map[string]any{"recipient": d.Rcpt, "read": true})
+				continue
+			}
 			switch c.chatMode(d.Rcpt) {
 			case "chat":
 				c.inject(ctx, d.Rcpt, []mailbox.Message{m}, true)
@@ -541,6 +500,8 @@ func actingAs(ctx context.Context, as string) (string, error) {
 
 func mailErr(err error) error {
 	switch {
+	case errors.Is(err, context.Canceled):
+		return connect.NewError(connect.CodeCanceled, err)
 	case errors.Is(err, mailbox.ErrNotFound):
 		return connect.NewError(connect.CodeNotFound, err)
 	case errors.Is(err, mailbox.ErrNotRecipient):
@@ -611,6 +572,8 @@ func (s messageService) Send(ctx context.Context, req *connect.Request[pb.Messag
 }
 
 func (s messageService) Inbox(ctx context.Context, req *connect.Request[pb.InboxRequest]) (*connect.Response[pb.InboxResponse], error) {
+	s.c.passMu.Lock()
+	defer s.c.passMu.Unlock()
 	who, err := actingAs(ctx, req.Msg.As)
 	if err != nil {
 		return nil, err
@@ -650,6 +613,8 @@ func (s messageService) Ack(ctx context.Context, req *connect.Request[pb.AckRequ
 }
 
 func (s messageService) Reply(ctx context.Context, req *connect.Request[pb.ReplyRequest]) (*connect.Response[pb.ReplyResponse], error) {
+	s.c.passMu.Lock()
+	defer s.c.passMu.Unlock()
 	who := identity(ctx)
 	orig, ok := s.c.mail.Get(req.Msg.Id)
 	switch {
@@ -724,4 +689,27 @@ func (s messageService) ListThreads(ctx context.Context, req *connect.Request[pb
 		})
 	}
 	return connect.NewResponse(res), nil
+}
+
+func (s messageService) Wait(ctx context.Context, req *connect.Request[pb.MessageServiceWaitRequest]) (*connect.Response[pb.MessageServiceWaitResponse], error) {
+	timeout := 10 * time.Minute
+	if req.Msg.Timeout != nil {
+		if err := req.Msg.Timeout.CheckValid(); err != nil {
+			return nil, invalid("invalid timeout")
+		}
+		timeout = req.Msg.Timeout.AsDuration()
+	}
+	if timeout <= 0 || timeout > 24*time.Hour {
+		return nil, invalid("timeout must be positive and at most 24h")
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	m, err := s.c.mail.Wait(ctx, req.Msg.Target, identity(ctx))
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == context.DeadlineExceeded {
+		return connect.NewResponse(&pb.MessageServiceWaitResponse{TimedOut: true}), nil
+	}
+	if err != nil {
+		return nil, mailErr(err)
+	}
+	return connect.NewResponse(&pb.MessageServiceWaitResponse{Message: mailToProto(m)}), nil
 }

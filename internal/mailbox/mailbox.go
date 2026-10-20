@@ -9,6 +9,7 @@ package mailbox
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,6 +110,7 @@ type record struct {
 type Store struct {
 	now func() time.Time
 
+	changed chan struct{}
 	mu      sync.Mutex
 	f       *os.File
 	msgs    map[string]*Message
@@ -131,7 +133,7 @@ func Open(path string, now func() time.Time) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open mailbox: %w", err)
 	}
-	s := &Store{now: now, f: f, msgs: map[string]*Message{}, byReq: map[string]string{}}
+	s := &Store{changed: make(chan struct{}), now: now, f: f, msgs: map[string]*Message{}, byReq: map[string]string{}}
 	if err := s.replay(path); err != nil {
 		f.Close()
 		return nil, err
@@ -185,6 +187,8 @@ func (s *Store) commit(rec record) error {
 		return fmt.Errorf("sync mailbox: %w", err)
 	}
 	s.apply(rec)
+	close(s.changed)
+	s.changed = make(chan struct{})
 	return nil
 }
 
@@ -530,7 +534,8 @@ func (s *Store) Unresolved() []Message {
 }
 
 // Pending returns, per recipient, the messages still to be injected: not yet
-// delivered, not acked, not armed for a timer-only recipient.
+// delivered, not read and not acked. Armed mail also remains pending so a
+// terminal recipient switched to chat can receive it.
 func (s *Store) Pending() map[string][]Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -538,24 +543,9 @@ func (s *Store) Pending() map[string][]Message {
 	for _, id := range s.order {
 		m := s.msgs[id]
 		for r, d := range m.Deliveries {
-			if d.Delivered == nil && d.Acked == nil && d.Since.IsZero() {
+			if d.Delivered == nil && d.Read == nil && d.Acked == nil {
 				out[r] = append(out[r], m.clone())
 			}
-		}
-	}
-	return out
-}
-
-// Queued returns the messages armed for rcpt but never injected into its
-// chat: held back to ride along with the next message to it.
-func (s *Store) Queued(rcpt string) []Message {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []Message
-	for _, id := range s.order {
-		m := s.msgs[id]
-		if d := m.Deliveries[rcpt]; d != nil && d.Delivered == nil && d.Acked == nil && !d.Since.IsZero() {
-			out = append(out, m.clone())
 		}
 	}
 	return out
@@ -643,4 +633,52 @@ func (s *Store) Overdue(timeout time.Duration) []Due {
 		}
 	}
 	return out
+}
+
+// Wait returns a reply or an acknowledged outgoing message, including outcomes
+// already recorded before the call. Subscription and inspection share the lock.
+func (s *Store) Wait(ctx context.Context, target, who string) (Message, error) {
+	for {
+		s.mu.Lock()
+		thread := target
+		original := s.msgs[target]
+		if original != nil {
+			thread = original.Thread
+		}
+		found := false
+		for _, id := range s.order {
+			m := s.msgs[id]
+			if m.Thread != thread {
+				continue
+			}
+			found = true
+			if original != nil && m.ID != target && m.ReplyTo != target {
+				continue
+			}
+			if m.From != who && m.Deliveries[who] != nil && (original == nil || m.ID != target) {
+				out := m.clone()
+				s.mu.Unlock()
+				return out, nil
+			}
+			if m.From == who {
+				for _, d := range m.Deliveries {
+					if d.Acked != nil {
+						out := m.clone()
+						s.mu.Unlock()
+						return out, nil
+					}
+				}
+			}
+		}
+		changed := s.changed
+		s.mu.Unlock()
+		if !found {
+			return Message{}, ErrNotFound
+		}
+		select {
+		case <-ctx.Done():
+			return Message{}, fmt.Errorf("wait for mail: %w", ctx.Err())
+		case <-changed:
+		}
+	}
 }

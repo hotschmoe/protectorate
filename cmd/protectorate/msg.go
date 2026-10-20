@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"io"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -27,10 +29,10 @@ func msgCmd(o *opts) *cobra.Command {
 		Short:   "Send messages between sleeves, projects, the orchestrator and the owner",
 		Long: `The hub's mailbox. The sender is whoever the token says (a sleeve's own token
 names the sleeve). A message to a sleeve in chat mode appears in its chat as a
-user message when the turn in progress ends; a sleeve in terminal mode reads
+user message after a short debounce when idle; a sleeve in terminal mode reads
 'msg inbox'. Addresses: a sleeve name, project:<id-or-name>, orchestrator, owner.`,
 	}
-	c.AddCommand(msgSendCmd(o), msgReplyCmd(o), msgAckCmd(o), msgInboxCmd(o), msgThreadCmd(o), msgThreadsCmd(o))
+	c.AddCommand(msgWaitCmd(o), msgSendCmd(o), msgReplyCmd(o), msgAckCmd(o), msgInboxCmd(o), msgThreadCmd(o), msgThreadsCmd(o))
 	return c
 }
 
@@ -271,4 +273,28 @@ func writeMail(w io.Writer, msgs []*pb.MailMessage) {
 			fmt.Fprintf(w, "\t  %s\n", line)
 		}
 	}
+}
+
+func msgWaitCmd(o *opts) *cobra.Command {
+	var timeout time.Duration
+	c := &cobra.Command{Use: "wait <message-id|thread>", Short: "Wait on the hub for a reply or ack", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cl, err := o.messageClient()
+			if err != nil {
+				return err
+			}
+			res, err := cl.Wait(cmd.Context(), connect.NewRequest(&pb.MessageServiceWaitRequest{Target: args[0], Timeout: durationpb.New(timeout)}))
+			if err != nil {
+				return fmt.Errorf("wait for message: %w", err)
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				if res.Msg.TimedOut {
+					fmt.Fprintln(w, "timed out")
+					return
+				}
+				writeMail(w, []*pb.MailMessage{res.Msg.Message})
+			})
+		}}
+	c.Flags().DurationVar(&timeout, "timeout", 10*time.Minute, "Maximum wait (at most 24h)")
+	return c
 }
