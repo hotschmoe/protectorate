@@ -6,6 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:xterm2/xterm.dart';
 
 import '../hubs/hub_client.dart';
+import '../hubs/connection.dart';
 import '../hubs/hub_profile.dart';
 import '../terminal/compose_box.dart';
 import '../terminal/extra_keys.dart';
@@ -86,11 +87,11 @@ class _TerminalScreenState extends State<TerminalScreen>
         .catchError((Object e) {
           if (!mounted) return;
           setState(() {
-            if (_hostSession && !_readOnly) {
+            if (_hostSession && !_readOnly && '$e'.contains('403')) {
               _status = 'read-write refused';
               _offerReadOnly = true;
             } else {
-              _status = 'failed: $e';
+              _status = hubConnectionMessage(e, widget.hub.baseUrl);
             }
           });
         });
@@ -100,10 +101,14 @@ class _TerminalScreenState extends State<TerminalScreen>
         if (data != null) _terminal.write(_decoder.convert(data));
       },
       onError: (Object e) {
-        if (mounted) setState(() => _status = 'error: $e');
+        if (mounted) {
+          setState(() => _status = hubConnectionMessage(e, widget.hub.baseUrl));
+        }
       },
       onDone: () {
-        if (mounted) setState(() => _status = 'closed');
+        if (mounted && _status == 'connected') {
+          setState(() => _status = 'closed');
+        }
       },
     );
   }

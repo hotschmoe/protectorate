@@ -2,7 +2,6 @@ package node
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -211,9 +210,9 @@ func (j *Jobs) Prepare(ctx context.Context, req *pb.PrepareJobRequest) (*pb.Prep
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
 		return res, nil
 	}
-	_, err := gitOut(ctx, repo, "cat-file", "-e", req.Commit+"^{commit}")
+	_, err := j.gitOut(ctx, repo, repo, "cat-file", "-e", req.Commit+"^{commit}")
 	res.HasCommit = err == nil
-	out, err := gitOut(ctx, repo, "for-each-ref", "--sort=-committerdate", fmt.Sprintf("--count=%d", knownCommits), "--format=%(objectname)", "refs/pc/")
+	out, err := j.gitOut(ctx, repo, repo, "for-each-ref", "--sort=-committerdate", fmt.Sprintf("--count=%d", knownCommits), "--format=%(objectname)", "refs/pc/")
 	if err == nil {
 		res.KnownCommits = strings.Fields(out)
 	}
@@ -644,44 +643,27 @@ func (j *Jobs) checkout(ctx context.Context, req *pb.RunJobRequest, jobDir strin
 		if err := os.MkdirAll(repo, 0o700); err != nil {
 			return "", false, err
 		}
-		if _, err := gitOut(ctx, repo, "init", "--quiet"); err != nil {
+		if _, err := j.gitOut(ctx, repo, jobDir, "init", "--quiet"); err != nil {
 			return "", false, err
 		}
 	}
 	ref := "refs/pc/" + req.Commit
 	if req.BundleUploaded {
 		bundle := filepath.Join(jobDir, "upload")
-		if _, err := gitOut(ctx, repo, "fetch", "--quiet", bundle, "+"+ref+":"+ref); err != nil {
+		if _, err := j.gitOut(ctx, repo, jobDir, "fetch", "--quiet", bundle, "+"+ref+":"+ref); err != nil {
 			return "", false, err
 		}
 	}
-	if _, err := gitOut(ctx, repo, "cat-file", "-e", req.Commit+"^{commit}"); err != nil {
+	if _, err := j.gitOut(ctx, repo, jobDir, "cat-file", "-e", req.Commit+"^{commit}"); err != nil {
 		return "", false, fmt.Errorf("commit %s is not in the node's cache and no bundle was sent", req.Commit)
 	}
-	if _, err := gitOut(ctx, repo, "update-ref", ref, req.Commit); err != nil {
+	if _, err := j.gitOut(ctx, repo, jobDir, "update-ref", ref, req.Commit); err != nil {
 		return "", false, err
 	}
-	if _, err := gitOut(ctx, repo, "checkout", "--quiet", "--force", "--detach", req.Commit); err != nil {
+	if _, err := j.gitOut(ctx, repo, jobDir, "checkout", "--quiet", "--force", "--detach", req.Commit); err != nil {
 		return "", false, err
 	}
 	return repo, reused, nil
-}
-
-// gitOut runs git with settings that keep checkouts byte-identical across
-// platforms and never prompt.
-func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-c", "gc.auto=0"}, args...)...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return "", errors.New("git is not installed on this node")
-		}
-		return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(errb.String()))
-	}
-	return out.String(), nil
 }
 
 // jobEnvKeys are the variables every job gets besides the requested ones.
@@ -886,20 +868,25 @@ func collectArtifacts(workdir string, globs []string, dst string) ([]string, err
 	if len(globs) == 0 {
 		return nil, nil
 	}
-	files, err := matchArtifacts(workdir, globs)
+	root, err := os.OpenRoot(workdir)
+	if err != nil {
+		return nil, fmt.Errorf("open artifact workspace: %w", err)
+	}
+	defer root.Close()
+	files, err := matchArtifacts(root, globs)
 	if err != nil {
 		return nil, err
 	}
 	for _, rel := range files {
-		if err := copyArtifact(filepath.Join(workdir, filepath.FromSlash(rel)), filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+		if err := copyArtifact(root, rel, filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
 			return nil, fmt.Errorf("%s: %w", rel, err)
 		}
 	}
 	return files, nil
 }
 
-func copyArtifact(src, dst string) error {
-	in, err := os.Open(src)
+func copyArtifact(root *os.Root, src, dst string) error {
+	in, err := root.Open(filepath.FromSlash(src))
 	if err != nil {
 		return err
 	}
@@ -907,6 +894,9 @@ func copyArtifact(src, dst string) error {
 	fi, err := in.Stat()
 	if err != nil {
 		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("artifact %s is not a regular file", src)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
@@ -925,8 +915,8 @@ func copyArtifact(src, dst string) error {
 	return os.Chmod(dst, fi.Mode().Perm())
 }
 
-func matchArtifacts(workdir string, globs []string) ([]string, error) {
-	root := os.DirFS(workdir)
+func matchArtifacts(workspace *os.Root, globs []string) ([]string, error) {
+	root := workspace.FS()
 	seen := map[string]bool{}
 	for _, g := range globs {
 		matches, err := fs.Glob(root, g)
@@ -934,7 +924,7 @@ func matchArtifacts(workdir string, globs []string) ([]string, error) {
 			return nil, err
 		}
 		for _, m := range matches {
-			fi, err := os.Lstat(filepath.Join(workdir, filepath.FromSlash(m)))
+			fi, err := workspace.Lstat(filepath.FromSlash(m))
 			if err != nil {
 				continue
 			}

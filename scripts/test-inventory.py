@@ -110,6 +110,12 @@ TestBinarySleeveCacheConfinement
 TestBinaryBackupManifestCoverage
 TestBinaryQuotaReapsClosedStdoutPeer
 TestBinaryWorkspaceMetadataIsBounded
+TestBinaryJobArtifactsStayInWorkspace
+TestBinaryNodeRepositoryProgramsStayIsolated
+TestBinaryMCPRejectedInitializeKeepsSession
+TestBinaryMCPSessionsBoundedAndReusable
+TestBinaryMCPPendingCallsBoundedAndCancelable
+TestBinaryAppHubConnection
 """.split())
 DELETE = set()
 

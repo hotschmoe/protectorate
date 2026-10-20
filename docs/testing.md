@@ -316,12 +316,18 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=77, KEEP-FUZZ=8; total=85. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=83, KEEP-FUZZ=8; total=91. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips, unless explicitly labelled race. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
 | File | Function / callback | Exercises | Runtime | Verdict | Replacement / reason |
 |---|---|---|---|---|---|
+| tests/e2e/node_artifact_security_test.go | TestBinaryJobArtifactsStayInWorkspace | Real node job artifacts: explicit and wildcard symlink-parent escapes refused; regular output retained | Unknown | KEEP-E2E | Prevent host-file disclosure during artifact collection |
+| tests/e2e/node_git_security_test.go | TestBinaryNodeRepositoryProgramsStayIsolated | Warm node checkout rejects job-written hooks; repository filters cannot read host credentials when sandboxing is available | Unknown | KEEP-E2E | Real binary jobs; filter authority subscenario needs bwrap and the user manager |
+| tests/e2e/mcp_sessions_test.go | TestBinaryMCPRejectedInitializeKeepsSession | Rejected HTTP initialization leaves existing hub tools usable | Unknown | KEEP-E2E | Real bridge and hub; no canceled session left in service |
+| tests/e2e/mcp_session_limits_test.go | TestBinaryMCPSessionsBoundedAndReusable | Session admission is bounded; existing tools work at capacity; DELETE releases capacity | Unknown | KEEP-E2E | Real HTTP bridge lifecycle under session churn |
+| tests/e2e/mcp_pending_limits_test.go | TestBinaryMCPPendingCallsBoundedAndCancelable | Pending hub waits are bounded; cancellation and subsequent calls keep working | Unknown | KEEP-E2E | Real stdio bridge and hub mailbox under load |
+| tests/e2e/app_connection_test.go | TestBinaryAppHubConnection | Production Dart hub probe against real binary: valid/invalid tokens, refused connection destination, missing-port guidance and stalled-server timeout | Unknown | KEEP-E2E | Requires Dart and resolved app dependencies (make app-check); no widgets |
 | internal/auth/scopes_fuzz_test.go | FuzzScopeNormalization | Scope Normalization | 0.010s pass | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
 | internal/driver/driver_test.go | TestNewSession | New Session | 0.020s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/driver/driver_test.go | TestEventDetails | Event Details | 0.020s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |

@@ -66,6 +66,9 @@ String? validateBaseUrl(String value) {
       uri.host.isEmpty) {
     return 'Enter an http:// or https:// URL';
   }
+  if (uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment) {
+    return 'Use a base URL without credentials, a query or a fragment';
+  }
   return null;
 }
 
