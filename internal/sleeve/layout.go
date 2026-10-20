@@ -159,7 +159,7 @@ func (l Layout) validate() error {
 }
 
 // Apply creates the directories, symlinks and seed files. It is idempotent
-// and never deletes: a file that is in the way of a symlink is renamed aside.
+// and preserves existing files: a file in the way of a symlink is renamed aside.
 func (l Layout) Apply(ctx context.Context) error {
 	if err := l.validate(); err != nil {
 		return err
@@ -177,6 +177,7 @@ func (l Layout) Apply(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create tool cache staging directory: %w", err)
 		}
+		defer os.RemoveAll(stage)
 		cmd := exec.CommandContext(ctx, "cp", "-a", "--reflink=auto", "--", m.Target+"/.", stage)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("seed sleeve tool cache: %w: %s", err, out)

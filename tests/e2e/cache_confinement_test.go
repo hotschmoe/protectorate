@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -35,6 +36,24 @@ func TestBinarySleeveCacheConfinement(t *testing.T) {
 	}
 	cfg := sleeve.Config{Home: c.home, UserHome: c.root, ToolDirs: []string{sdk, filepath.Join(pub, "global_packages")},
 		System: sleeve.SystemMounts(), PathDirs: []string{"/usr/bin", "/bin"}, TasksMax: 32}
+	t.Run("cancelled seed", func(t *testing.T) {
+		launch, err := cfg.Plan(sleeve.Spec{Name: "cache-cancel", Harness: sleeve.Shell, Workspace: workspace}, sleeve.Binary{Path: "/bin/sh"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(c.ctx)
+		cancel()
+		if err := launch.Layout.Apply(ctx); err == nil {
+			t.Fatal("cancelled cache copy succeeded")
+		}
+		staging, err := filepath.Glob(filepath.Join(c.home, "sleeves", "cache-cancel", "home", ".cache", ".cache-seed-*"))
+		if err != nil || len(staging) != 0 {
+			t.Fatalf("cancelled cache copy left staging directories: %v: %v", staging, err)
+		}
+		if err := launch.Layout.Apply(c.ctx); err != nil {
+			t.Fatalf("retry cache preparation after cancellation: %v", err)
+		}
+	})
 	for _, tc := range []struct{ name, path string }{
 		{"flutter", ".cache/flutter"},
 		{"pub", ".cache/pub/hosted"},
