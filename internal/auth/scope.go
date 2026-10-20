@@ -63,6 +63,7 @@ func AdminOn(scopes []string, node string) bool {
 }
 
 var specialScopes = map[string]bool{
+	ScopeFull: true,
 	ScopeRead: true, ScopeEvents: true, ScopeTerminal: true, ScopeTerminalReadonly: true, ScopeTerminalHost: true,
 }
 
@@ -72,6 +73,9 @@ var specialScopes = map[string]bool{
 // scopes are refused: they exist only on grants (Store.CreateGrant).
 func ValidateScopes(scopes []string) ([]string, error) {
 	for _, s := range scopes {
+		if s == ScopeFull {
+			return nil, errors.New("Full access is issued through device approval")
+		}
 		if _, ok := nodeAdminGlob(s); ok {
 			return nil, fmt.Errorf("scope %q is only issued per task: protectorate grant admin --node <node> --task ...", s)
 		}
@@ -141,6 +145,8 @@ func scopesAllow(scopes []string, m Method) bool {
 	}
 	for _, s := range scopes {
 		switch s {
+		case ScopeFull:
+			return true
 		case ScopeRead:
 			if m.ReadOnly {
 				return true
@@ -164,7 +170,7 @@ func scopesAllow(scopes []string, m Method) bool {
 
 func scopesAllowTerminal(scopes []string, readOnly bool) bool {
 	for _, s := range scopes {
-		if s == ScopeTerminal || s == ScopeTerminalHost || (readOnly && s == ScopeTerminalReadonly) {
+		if s == ScopeFull || s == ScopeTerminal || s == ScopeTerminalHost || (readOnly && s == ScopeTerminalReadonly) {
 			return true
 		}
 	}

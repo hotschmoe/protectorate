@@ -34,6 +34,7 @@ type Principal struct {
 	Scopes   []string
 	Task     string
 	MintedBy string
+	Device   bool
 }
 
 // GetTask is p's grant task, empty for a nil principal.
@@ -155,7 +156,7 @@ func (a *Authorizer) Authenticate(secret string) (*Principal, error) {
 	if err != nil {
 		return nil, ErrUnauthenticated
 	}
-	return &Principal{ID: t.ID, Name: t.Name, Scopes: t.Scopes, Task: t.Task, MintedBy: t.MintedBy}, nil
+	return &Principal{ID: t.ID, Name: t.Name, Scopes: t.Scopes, Task: t.Task, MintedBy: t.MintedBy, Device: t.IsDevice()}, nil
 }
 
 // Method looks up a Connect procedure; unknown procedures are denied.
@@ -183,6 +184,15 @@ func (a *Authorizer) AuthorizeProcedure(p *Principal, procedure string) error {
 	if m.OwnerOnly {
 		return &DeniedError{Name: p.Name, Need: "owner token (" + m.Tool + " is owner-only)"}
 	}
+	if m.Service == "DeviceService" {
+		if p.Device {
+			return nil
+		}
+		return &DeniedError{Name: p.Name, Need: "owner or device token"}
+	}
+	if p.Device {
+		return nil
+	}
 	// Reporting is an identity right; the handler still checks the target.
 	if m.Tool == "chat_report" && strings.HasPrefix(p.Name, "sleeve:") {
 		return nil
@@ -197,7 +207,7 @@ func (a *Authorizer) AuthorizeProcedure(p *Principal, procedure string) error {
 // a session running unsandboxed as the hub's OS user: typing into it is code
 // execution as that user, so read-write needs the owner or terminal:host.
 func (a *Authorizer) AuthorizeTerminal(p *Principal, readOnly, hostShell bool) error {
-	if p.Owner {
+	if p.Owner || p.Device {
 		return nil
 	}
 	if !scopesAllowTerminal(p.Scopes, readOnly) {

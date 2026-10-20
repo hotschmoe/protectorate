@@ -150,7 +150,9 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, stopToken := h.authz.Store().WatchToken(r.Context(), p.ID)
+	defer stopToken()
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	size := &pty.Winsize{Cols: queryUint16(r, "cols", 80), Rows: queryUint16(r, "rows", 24)}

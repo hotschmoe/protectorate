@@ -56,6 +56,7 @@ func toProtoToken(t auth.Token) *pb.TokenInfo {
 		Id: t.ID, Name: t.Name, Scopes: t.Scopes,
 		CreatedAt: timestamppb.New(t.Created), ExpiresAt: ts(t.Expires),
 		LastUsedAt: ts(t.LastUsed), RevokedAt: ts(t.RevokedAt), Task: t.Task, MintedBy: t.MintedBy,
+		Platform: t.Platform, ApprovedAt: ts(t.ApprovedAt), ApprovedBy: t.ApprovedBy,
 	}
 }
 

@@ -14,6 +14,16 @@ terminal, and the tailnet listener. Nothing else reads a token.
   recovered. Each token has id, name, scopes, created, expires (optional),
   last_used (persisted at most about once a minute) and revoked.
 
+- **Device tokens**: approved by the owner or another trusted device through
+  `DeviceService`, named after the connecting device, with platform, approval
+  time and approver recorded on `TokenInfo`. They do not expire. Full access
+  includes ordinary hub operations, terminal access, and approving, renaming
+  and revoking devices; owner-only operations remain reserved to the owner.
+  Previously paired device tokens (historical `pair: ` names and pairing grants)
+  migrate to Full access and appear in
+  DEVICES, preserving their existing expiry. Their unknown approval metadata
+  is not guessed. Revocation cancels the device's open streams immediately.
+
 - **Admin grants**: tokens minted per task by `protectorate grant admin`
   (`GrantService.Admin`): scopes `job_*` and `node_admin:<node>`, default 4h,
   at most 24h, stored with the task and the minter. The owner mints them for
@@ -54,6 +64,9 @@ stay unchanged. The next authenticated request uses the new scopes; an existing
 stream keeps its admission. Revoked and expired tokens cannot be changed.
 Scope updates cannot add `node_admin:` grants; continue to use `grant admin`.
 Each update is audited with the token ID and the before/after scopes.
+Device tokens always have Full access and cannot have their scopes edited;
+revoke a device to remove access. Device names cannot use the reserved
+`envoy`, `orchestrator-envoy` or `sleeve:` identities.
 
 Each newly spawned sleeve records its authenticated parent in `sleeves.json`:
 `owner`, `envoy`, `sleeve:<name>`, or `token:<name>`, together with the
@@ -68,11 +81,13 @@ unknown and is not guessed during migration.
 
 | Scope | Grants |
 |-------|--------|
+| `full` | issued only by device approval; all ordinary hub operations and terminals, plus device management; owner-only operations remain restricted |
 | `read` | every RPC marked `NO_SIDE_EFFECTS`, derived from the proto descriptors, so new read RPCs are covered automatically |
 | `events` | the EventService stream |
 | `terminal` | the WebSocket terminal, read-write or read-only |
 | `terminal:readonly` | the terminal only with `readonly=1` |
 | `terminal:host` | the terminal, also read-write on sessions outside a sleeve sandbox (shell as the hub user) |
+| `full` | approved devices: ordinary hub RPCs, host and sleeve terminals, and device management; owner-only operations remain excluded |
 | `node_admin:<glob>` | only on admin grants (`grant admin`, never `token create`): work on `care` nodes whose name the glob matches when the owner minted the grant, and `job run --admin` there; never an RPC by itself; see [node-work.md](node-work.md) |
 | `<glob>` | `path.Match` glob over tool names |
 
@@ -119,8 +134,9 @@ as the hub user is code execution as that user, so a `terminal` token may
 attach read-write only to `sleeve-*` sessions, which run in the sleeve
 sandbox. Read-write attach to any other session needs the owner token or the
 explicit `terminal:host` scope; any other token gets 403 with a hint to attach
-with `readonly=1`, which still works. `protectorate pair --host-shell` adds
-`terminal:host` for a phone you want to type into host sessions from. `job_submit_job` is likewise shell access (on nodes, not the hub) and
+with `readonly=1`, which still works. Approved device tokens have the `full`
+scope, which also permits typing into host sessions.
+`job_submit_job` is likewise shell access (on nodes, not the hub) and
 stays a deliberate grant.
 
 The hub sends its node token only to an address the owner added: inventory
@@ -155,6 +171,7 @@ configured browser roots. It does not execute repository programs.
 | Entry point | Check |
 |-------------|-------|
 | Connect unary and server-streaming RPCs | interceptor: authenticate, then scope for the procedure |
+| `DeviceService.StartDeviceAuth`, `DeviceService.PollDeviceAuth` | unauthenticated, source-IP and global rate limits |
 | `GET /install.sh`, `GET /install.ps1`, `GET /dl/protectorate-<os>-<arch>[.exe][.sha256]` | none: generated installers and the builds, no secrets; the enrollment key travels in the environment of the command the owner pastes |
 | `GET /ws/terminal/{name}` | bearer header, `token.<value>` subprotocol or `?token=`; needs `terminal` (or `terminal:readonly` with `?readonly=1`) |
 | Tailnet listener | WhoIs first (hub and `tag:client` only, never `tag:node`), then exactly the checks above |
@@ -206,13 +223,79 @@ protectorate token ls
 protectorate token revoke <id>
 protectorate token scopes <id|name> --add sleeve_spawn_sleeve --remove events
 protectorate audit tail -n 50
+protectorate login --hub https://hub.example --name officepc --platform linux-cli
+protectorate devices ls
+protectorate devices approve KJ7-4QX
+protectorate devices deny KJ7-4QX
+protectorate devices rename DEVICE_ID "Office desktop"
+protectorate devices revoke DEVICE_ID
 ```
 
 Every command takes the token from `--token-file`, then env
-`PROTECTORATE_TOKEN`, then the local owner token file, so a scoped token also
-works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
-mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `chat_*`, `backlog_*`,
-90 days) instead of embedding the owner token.
+`PROTECTORATE_TOKEN`, then the saved credential for the selected hub, then the
+local owner token file, so a scoped token also works against a remote hub
+(`--hub` or `PROTECTORATE_HUB`). `protectorate pair` prints a QR code and URL
+containing only the hub URL. It creates no token. Old links carrying `token=`
+are rejected; use a fresh link
+and approve the connecting device. Existing stored paired credentials work
+without reconnecting.
+
+## Device approval
+
+Device authorization is intended for a reachable LAN hub until a security
+audit is complete. Use HTTPS when available; entering an app URL without a
+scheme defaults to HTTPS. A public unauthenticated endpoint does not make Internet
+exposure supported.
+
+1. On the new app, enter or scan the hub URL and connect. For another machine's
+   CLI, run `protectorate login --hub URL --name NAME`. No owner token is
+   copied to that machine.
+2. The new device displays a short code. On an already trusted app, compare
+   the banner's code with the new device, check its name, platform and source
+   IP, then approve or deny. The same operations are available through
+   `protectorate devices approve CODE` and `devices deny CODE`.
+3. For the first device, run the approval command on the hub with its local
+   owner token. A successful poll delivers a fresh device secret exactly once;
+   the client stores it and connects. A denied or expired request needs a new
+   authorization attempt. Requests expire after ten minutes.
+4. Review DEVICES or `protectorate devices ls` for approval metadata and last
+   use. Rename entries to keep the list clear. Revoke a lost device immediately;
+   its existing streams close and subsequent requests fail authentication.
+
+Trusted devices share the owner's mailbox, so phone and desktop can send,
+read and acknowledge the same messages. Their audit actor remains the device
+token. Reading or acknowledging on behalf of another named mailbox still
+requires the actual owner token.
+
+`StartDeviceAuth` returns a high-entropy secret device code, a separate
+case-insensitive user code, expiry and an initial five-second polling interval.
+Only `PollDeviceAuth` receives the device code. Polling returns `pending`,
+`slow_down`, `approved`, `denied`, `expired` or `consumed`; clients must use the
+returned interval, increasing it by five seconds after an early poll. The
+`approved` response includes the device token secret once. Approval consumes
+the user code, and neither listing nor approving a request reveals its secret.
+Arbitrary scoped tokens cannot approve devices, even with `device_*` or `*`.
+Existing paired credentials are recognized at startup by their historical
+`pair: ` name prefix and exact pairing scopes, then migrated to the persisted
+device identity. Manually scoped tokens with other names keep their grants.
+Device names cannot use sleeve or orchestrator identities.
+
+Start is limited to ten requests per source IP and sixty globally per minute;
+polling to 120 per IP and 1,200 globally per minute. At most 100 requests may
+remain pending, and expired entries are swept. These checks apply before
+body decoding and request lookup, including malformed bodies and unknown poll
+codes. User/device codes are compared
+in constant time. Every start, approval, denial and revocation is audited with
+its actor. Events announce changes without exposing request metadata; trusted
+devices fetch the pending list for the banner. Neither events nor audit
+records expose a device code or token secret.
+
+The requesting IP comes from the TCP peer. Only when that peer is the known
+Traefik address `192.168.10.50` does the hub use the rightmost address in its
+`X-Forwarded-For` header. Headers received directly from other peers are
+ignored, so a caller cannot
+evade per-IP limits or falsify the approval banner by supplying that header.
+Keep Traefik configured to replace untrusted forwarded headers.
 
 Run `make test` to verify scope changes, persistence, audit and care-tier
 authorization against a real temporary hub. On Linux with tmux, bwrap and a

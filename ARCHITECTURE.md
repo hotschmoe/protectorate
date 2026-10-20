@@ -597,7 +597,7 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
 ~/.protectorate/
   nodes.json          # inventory (P2)
   leases.json         # live leases and the lease queue (P9)
-  tokens.json         # issued scoped token hashes
+  tokens.json         # scoped/device token hashes and pending device approvals
   sleeves.json        # sleeve records and chat summaries
   desk-policies.json  # per-node desk policies
   directory.json      # projects, packages, last seen refs
