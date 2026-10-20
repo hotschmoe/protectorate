@@ -2,6 +2,7 @@ package quota
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -56,16 +57,6 @@ type agyReport struct {
 			Groups []agyGroup `json:"groups"`
 		} `json:"data"`
 	} `json:"command"`
-}
-
-func first[T comparable](vs ...T) T {
-	var zero T
-	for _, v := range vs {
-		if v != zero {
-			return v
-		}
-	}
-	return zero
 }
 
 func (a *Antigravity) Read(ctx context.Context) (Snapshot, error) {
@@ -124,26 +115,26 @@ func parseAgyReport(data []byte, snap Snapshot) (Snapshot, error) {
 		return snap, fmt.Errorf("%w: agy usage report unsuccessful", ErrUnavailable)
 	}
 	for _, g := range r.Command.Data.Groups {
-		gname := first(g.DisplayName, g.DisplayNameSnake, g.Name)
+		gname := cmp.Or(g.DisplayName, g.DisplayNameSnake, g.Name)
 		for _, b := range g.Buckets {
 			if b.Disabled {
 				continue
 			}
-			frac := first(b.RemainingFraction, b.RemainingSnake)
+			frac := cmp.Or(b.RemainingFraction, b.RemainingSnake)
 			if frac == nil && b.Remaining != nil {
-				frac = first(b.Remaining.F, b.Remaining.FS)
+				frac = cmp.Or(b.Remaining.F, b.Remaining.FS)
 			}
 			if frac == nil {
 				continue
 			}
-			name := first(b.DisplayName, b.DisplayNameSnake, b.Name, b.BucketID, b.BucketIDSnake)
+			name := cmp.Or(b.DisplayName, b.DisplayNameSnake, b.Name, b.BucketID, b.BucketIDSnake)
 			if gname != "" {
 				name = gname + " " + name
 			}
 			snap.Windows = append(snap.Windows, Window{
 				Name:        strings.TrimSpace(name),
 				UsedPercent: clampPercent((1 - *frac) * 100),
-				ResetsAt:    agyTime(first(string(b.ResetTime), string(b.ResetTimeSnake))),
+				ResetsAt:    agyTime(cmp.Or(string(b.ResetTime), string(b.ResetTimeSnake))),
 			})
 		}
 	}

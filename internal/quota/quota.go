@@ -59,9 +59,7 @@ func ReadAll(ctx context.Context, readers []Reader, timeout time.Duration) []Sna
 	out := make([]Snapshot, len(readers))
 	var wg sync.WaitGroup
 	for i, r := range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			rctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			snap, err := safeRead(rctx, r)
@@ -73,7 +71,7 @@ func ReadAll(ctx context.Context, readers []Reader, timeout time.Duration) []Sna
 				snap.Err = err.Error()
 			}
 			out[i] = snap
-		}()
+		})
 	}
 	wg.Wait()
 	return out
