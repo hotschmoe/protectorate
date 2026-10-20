@@ -61,10 +61,18 @@ func (m *mailRig) spawnNamed(name string, mode pb.SleeveMode, ws string) {
 	if ws == "" {
 		ws = m.t.TempDir()
 	}
-	if _, err := m.sl.SpawnSleeve(m.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{
+	req := connect.NewRequest(&pb.SpawnSleeveRequest{
 		Name: name, Workspace: ws, Harness: pb.Harness_HARNESS_CLAUDE, Mode: mode,
 		Limits: &pb.SleeveLimits{CpuPercent: 100, MemoryBytes: 512 << 20},
-	})); err != nil {
+	})
+	var err error
+	if name == sleeve.OrchestratorName {
+		// stands in for SpawnEnvoy without minting its token
+		_, err = m.h.SpawnSleeve(context.WithValue(m.ctx, envoySpawnKey{}, true), req)
+	} else {
+		_, err = m.sl.SpawnSleeve(m.ctx, req)
+	}
+	if err != nil {
 		m.t.Fatal(err)
 	}
 }

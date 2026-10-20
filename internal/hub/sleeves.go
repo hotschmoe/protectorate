@@ -189,11 +189,9 @@ func sleeveErr(err error) error {
 func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSleeveRequest]) (*connect.Response[pb.SpawnSleeveResponse], error) {
 	m := req.Msg
 	// The orchestrator's name owns the orchestrator directory and its token,
-	// so only the owner (through SpawnEnvoy) may claim it.
-	if m.Name == sleeve.OrchestratorName {
-		if p := auth.PrincipalFrom(ctx); p == nil || !p.Owner {
-			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; start it with the owner token via `protectorate orchestrator spawn`", m.Name))
-		}
+	// so only SpawnEnvoy, which mints that token first, may claim it.
+	if m.Name == sleeve.OrchestratorName && !spawningEnvoy(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; start it with the owner token via `protectorate orchestrator spawn` or START ENVOY in the app", m.Name))
 	}
 	r := sleeve.SpawnRequest{
 		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),

@@ -62,6 +62,15 @@ type envoyState struct {
 	mu sync.Mutex
 }
 
+type envoySpawnKey struct{}
+
+// spawningEnvoy reports whether ctx comes from SpawnEnvoy, the only caller
+// allowed to spawn the orchestrator's sleeve.
+func spawningEnvoy(ctx context.Context) bool {
+	v, _ := ctx.Value(envoySpawnKey{}).(bool)
+	return v
+}
+
 func rpcErr(err error) error {
 	var ce *connect.Error
 	if errors.As(err, &ce) {
@@ -101,7 +110,7 @@ func (h *Hub) SpawnEnvoy(ctx context.Context, req *connect.Request[pb.SpawnEnvoy
 
 	h.envoyState.mu.Lock()
 	defer h.envoyState.mu.Unlock()
-	res, err := orchestrator.Spawn(ctx, h, orchestrator.Options{
+	res, err := orchestrator.Spawn(context.WithValue(ctx, envoySpawnKey{}, true), h, orchestrator.Options{
 		Home: h.sleeves.StateDir(), HubURL: h.identityEnv()["PROTECTORATE_HUB"], Harness: harness,
 		Scopes: scopes, TTL: ttl, Tools: h.envoy.Tools, Commands: h.envoy.Commands,
 	})
