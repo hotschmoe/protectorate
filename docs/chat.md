@@ -176,6 +176,12 @@ restart: drivers die with the hub (`--die-with-parent`, no orphans), and the
 next Send resumed Claude's native session after its compaction (it recalled
 the earlier answer; context 24468, consistent with the compacted history).
 
+Verified in the dogfood run (`docs/dogfood-2026-10-20.md`): a real Claude
+approval from a `--supervised` sleeve answered through `Respond`, and two
+resleeves (Claude to Codex while idle, Codex to Claude interrupting a turn),
+whose new harness read the handoff on its first turn.
+
 Not verified: Grok compaction over ACP, Claude cache expiry against the
-subscription TTL, approvals from a real harness (sleeves run autonomous),
-reconnect mid-message from the app against a real stream.
+subscription TTL, approvals from Codex and Grok, reconnect mid-message from
+the app against a real stream, the local-model summary fallback with a real
+pi.
