@@ -35,7 +35,9 @@ bundles and warm worktrees, artifacts, hub restart mid-job and exactly-once
 log replay, diagnostics authorization/profiles, MCP initialize/tools/list/call,
 authenticated terminal WebSocket replay, node download checksums, staged update
 refusal, replacement/health confirmation and unconfirmed-start rollback.
-Backup checks restore saved jobs/tokens and refuse corrupt, truncated,
+Notes exercise create/read/update/delete, optional false/empty updates, pinned
+ordering, project/query filtering and exact records after hub restart and
+backup restore. Backup checks restore saved jobs/tokens/notes and refuse corrupt, truncated,
 duplicate, traversal, symlink, content-tampered and nonempty destinations.
 
 The loopback hub has no tailnet: `/install.sh` must return 503. The production

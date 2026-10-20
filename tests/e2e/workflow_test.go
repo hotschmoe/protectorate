@@ -47,6 +47,7 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 		t.Fatalf("file roundtrip: bytes=%d err=%v", len(got), err)
 	}
 	c.rejectFileEscapes(input)
+	notes := c.noteCRUD()
 	jobRequest := map[string]any{"target": map[string]any{"leaseId": lease["id"]}, "command": []string{"sh", "-c", "printf 'before\\n'; sleep 3; printf 'after\\n'; printf artifact > result.txt"}, "artifactGlobs": []string{"result.txt"}, "requestId": "restart-e2e-0001", "timeout": "30s"}
 	job := c.call("JobService", "SubmitJob", jobRequest)
 	id := job["id"]
@@ -56,6 +57,7 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 	})
 	c.stop(c.hub)
 	c.boot()
+	c.checkNotes(notes)
 	leases := c.call("LeaseService", "ListLeases", map[string]any{})
 	if !strings.Contains(fmt.Sprint(leases), lease["id"].(string)) {
 		t.Fatalf("lease lost across restart: %v", leases)
@@ -122,6 +124,7 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 	c.home = restored
 	c.env = append(c.env, "PROTECTORATE_HOME="+restored)
 	c.boot()
+	c.checkNotes(notes)
 	if v := c.call("JobService", "GetJob", map[string]any{"id": id}); v["state"] != "JOB_STATE_SUCCEEDED" {
 		t.Fatalf("restored job=%v", v)
 	}
