@@ -95,6 +95,15 @@ origins, paired-device acceptance and sleeve-identity denial. A persisted
 exited sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
 text and JSON, without needing the host user manager.
 
+`TestBinarySleeveDiskPrune` boots the real hub with killed, leftover and running
+records and real clones backed by a local bare origin and a local checkout.
+It verifies home/cache/rest accounting, text and JSON dry runs, cache-only
+cleanup, whole-home cleanup, owner-only cache dropping and audit records.
+Clean published clones are removed; unpublished branches, staged work,
+untracked files and edits hidden by assume-unchanged are kept. Running homes,
+owner workspaces and auth/session/config files survive cache cleanup. Clone
+and origin fsmonitor/filter/upload-pack programs must never execute.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -120,7 +129,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=60, KEEP-FUZZ=5; total=65. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -190,6 +199,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache cleanup, running-data protection and owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
 
 ## Deleted files
 

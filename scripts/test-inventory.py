@@ -90,6 +90,7 @@ TestNodeRestartRecovery
 TestDERPRelay
 TestBinaryClusterRestartAndRestore
 TestBinaryWorkspaceBrowser
+TestBinarySleeveDiskPrune
 """.split())
 DELETE = set()
 
