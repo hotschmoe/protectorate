@@ -303,6 +303,28 @@ void main() {
       },
     );
 
+    test('dispose aborts the watch call', () async {
+      AbortSignal? signal;
+      final transport = FakeTransportBuilder().server(ChatService.watch, (
+        WatchRequest r,
+        ctx,
+      ) async* {
+        signal = ctx.signal;
+        yield _state(1, ChatState.CHAT_STATE_IDLE);
+        await Completer<void>().future;
+      }).build();
+      final c = ChatController(
+        client: ChatServiceClient(transport),
+        sleeve: 's',
+      )..start();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      var aborted = false;
+      signal!.future.then((_) => aborted = true);
+      c.dispose();
+      await Future<void>.delayed(Duration.zero);
+      expect(aborted, isTrue);
+    });
+
     test('send retries keep one request_id', () async {
       final ids = <String>[];
       final transport = FakeTransportBuilder().unary(ChatService.send, (

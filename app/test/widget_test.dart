@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connectrpc/connect.dart';
 import 'package:connectrpc/test.dart';
 import 'package:flutter/material.dart';
 import 'package:protobuf/well_known_types/google/protobuf/struct.pb.dart';
@@ -246,7 +247,7 @@ void main() {
   group('event feed', () {
     test('reconnects with backoff after the stream ends', () async {
       var opens = 0;
-      final feed = EventFeed(() {
+      final feed = EventFeed((_) {
         opens++;
         return Stream<Event>.fromIterable([Event(kind: 'k$opens')]);
       }, initialDelay: const Duration(milliseconds: 10))..start();
@@ -257,6 +258,24 @@ void main() {
       expect(feed.backoff(0), const Duration(milliseconds: 10));
       expect(feed.backoff(3), const Duration(milliseconds: 80));
       expect(feed.backoff(30), const Duration(seconds: 30));
+    });
+
+    test('aborts the call on retry and stop', () async {
+      final signals = <AbortSignal>[];
+      final aborted = <int>[];
+      final feed = EventFeed((signal) {
+        final i = signals.length;
+        signals.add(signal);
+        signal.future.then((_) => aborted.add(i));
+        if (i == 0) return Stream<Event>.error(Exception('drop'));
+        return Stream<Event>.fromFuture(Completer<Event>().future);
+      }, initialDelay: const Duration(milliseconds: 5))..start();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(signals.length, 2);
+      expect(aborted, [0]);
+      feed.dispose();
+      await Future<void>.delayed(Duration.zero);
+      expect(aborted, [0, 1]);
     });
   });
 

@@ -69,7 +69,7 @@ Widget _overview(
         (GetQuotaRequest r, ctx) => GetQuotaResponse(),
       )
       .build();
-  final feed = EventFeed(() => e.stream)..start();
+  final feed = EventFeed((_) => e.stream)..start();
   addTearDown(feed.dispose);
   return MaterialApp(
     theme: appTheme(Brightness.dark),

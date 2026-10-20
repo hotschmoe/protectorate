@@ -68,7 +68,7 @@ void main() {
           await Completer<void>().future;
         })
         .build();
-    final feed = EventFeed(() => const Stream.empty());
+    final feed = EventFeed((_) => const Stream.empty());
     var current = selected;
     var mail = false;
     await tester.pumpWidget(

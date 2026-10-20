@@ -43,6 +43,7 @@ class ChatController extends ChangeNotifier {
 
   int _attempt = 0;
   StreamSubscription<ChatEvent>? _sub;
+  CancelableSignal? _abort;
   Timer? _timer;
   bool _stopped = true;
   bool _disposed = false;
@@ -60,12 +61,14 @@ class ChatController extends ChangeNotifier {
   void _connect() {
     feedState = FeedState.connecting;
     notifyListeners();
+    final abort = _abort = CancelableSignal();
     _sub = client
         .watch(
           WatchRequest(
             sleeve: sleeve,
             afterSeq: Int64(transcript.resumeAfter()),
           ),
+          signal: abort,
         )
         .listen(
           (e) {
@@ -80,10 +83,18 @@ class ChatController extends ChangeNotifier {
         );
   }
 
-  void _retry() {
-    if (_stopped) return;
+  // Cancelling the subscription alone leaves a web fetch open, and the
+  // browser allows only six connections per host; the signal aborts it.
+  void _close() {
     _sub?.cancel();
     _sub = null;
+    _abort?.cancel();
+    _abort = null;
+  }
+
+  void _retry() {
+    if (_stopped) return;
+    _close();
     final delay = reconnectBackoff(_attempt, initialDelay, maxDelay);
     _attempt++;
     feedState = FeedState.retrying;
@@ -141,7 +152,7 @@ class ChatController extends ChangeNotifier {
     _disposed = true;
     _stopped = true;
     _timer?.cancel();
-    _sub?.cancel();
+    _close();
     super.dispose();
   }
 }

@@ -107,7 +107,7 @@ Future<void> _pump(WidgetTester t, _Hub hub, {double width = 412}) async {
   addTearDown(t.view.reset);
   final events = StreamController<Event>.broadcast();
   addTearDown(events.close);
-  final feed = EventFeed(() => events.stream)..start();
+  final feed = EventFeed((_) => events.stream)..start();
   addTearDown(feed.dispose);
   await t.pumpWidget(
     MaterialApp(

@@ -235,7 +235,7 @@ void main() {
           )
           .build();
       final client = HubClient.withTransport(transport);
-      final feed = EventFeed(() => events.stream)..start();
+      final feed = EventFeed((_) => events.stream)..start();
       addTearDown(() {
         feed.dispose();
         events.close();
@@ -421,7 +421,7 @@ void main() {
           return KillSleeveResponse();
         })
         .build();
-    final feed = EventFeed(() => const Stream<Event>.empty());
+    final feed = EventFeed((_) => const Stream<Event>.empty());
     addTearDown(feed.dispose);
     await t.pumpWidget(
       MaterialApp(
@@ -626,7 +626,7 @@ void main() {
         ]);
       final events = StreamController<Event>.broadcast();
       addTearDown(events.close);
-      final feed = EventFeed(() => events.stream)..start();
+      final feed = EventFeed((_) => events.stream)..start();
       addTearDown(feed.dispose);
       final transport = FakeTransportBuilder()
           .unary(

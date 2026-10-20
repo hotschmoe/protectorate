@@ -145,7 +145,7 @@ Future<EventFeed> _pump(
   addTearDown(t.view.reset);
   final stream = events ?? StreamController<Event>.broadcast();
   if (events == null) addTearDown(stream.close);
-  final feed = EventFeed(() => stream.stream)..start();
+  final feed = EventFeed((_) => stream.stream)..start();
   addTearDown(feed.dispose);
   await t.pumpWidget(
     MaterialApp(

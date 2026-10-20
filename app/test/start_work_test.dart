@@ -240,7 +240,7 @@ void main() {
             );
           })
           .build();
-      final feed = EventFeed(() => const Stream<Event>.empty());
+      final feed = EventFeed((_) => const Stream<Event>.empty());
       addTearDown(feed.dispose);
       await t.pumpWidget(
         MaterialApp(

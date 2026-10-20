@@ -1259,7 +1259,7 @@ void main() {
               ),
             )
             .build();
-        final feed = EventFeed(() => const Stream<Event>.empty());
+        final feed = EventFeed((_) => const Stream<Event>.empty());
         addTearDown(feed.dispose);
         await tester.pumpWidget(
           RepaintBoundary(
@@ -1337,7 +1337,7 @@ void main() {
         }
         final events = StreamController<Event>.broadcast();
         addTearDown(events.close);
-        final feed = EventFeed(() => events.stream)..start();
+        final feed = EventFeed((_) => events.stream)..start();
         addTearDown(feed.dispose);
         final key = GlobalKey();
         await tester.pumpWidget(
@@ -1538,7 +1538,7 @@ void main() {
           addTearDown(tester.view.reset);
           final events = StreamController<Event>.broadcast();
           addTearDown(events.close);
-          final feed = EventFeed(() => events.stream)..start();
+          final feed = EventFeed((_) => events.stream)..start();
           addTearDown(feed.dispose);
           final key = GlobalKey();
           await tester.pumpWidget(

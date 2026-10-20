@@ -128,7 +128,7 @@ Future<void> _pumpTab(
   tester.view.physicalSize = Size(width, height);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final feed = EventFeed(() => const Stream<Event>.empty());
+  final feed = EventFeed((_) => const Stream<Event>.empty());
   addTearDown(feed.dispose);
   await tester.pumpWidget(
     MaterialApp(
@@ -431,7 +431,7 @@ void main() {
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
-      final feed = EventFeed(() => events.stream)..start();
+      final feed = EventFeed((_) => events.stream)..start();
       addTearDown(feed.dispose);
       await tester.pumpWidget(
         MaterialApp(

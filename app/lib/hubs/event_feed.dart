@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:connectrpc/connect.dart';
 import 'package:flutter/foundation.dart';
 
 import '../gen/protectorate/v1/events.pb.dart';
@@ -11,7 +12,9 @@ Duration reconnectBackoff(int attempt, Duration initial, Duration max) {
   return Duration(milliseconds: ms.clamp(0, max.inMilliseconds));
 }
 
-typedef EventStreamFactory = Stream<Event> Function();
+// The factory must pass the signal to the call: on the web only the signal
+// closes the connection behind a stream.
+typedef EventStreamFactory = Stream<Event> Function(AbortSignal signal);
 
 class EventFeed extends ChangeNotifier {
   EventFeed(
@@ -32,6 +35,7 @@ class EventFeed extends ChangeNotifier {
   Object? _lastError;
   int _attempt = 0;
   StreamSubscription<Event>? _sub;
+  CancelableSignal? _abort;
   Timer? _timer;
   bool _stopped = true;
 
@@ -49,7 +53,8 @@ class EventFeed extends ChangeNotifier {
 
   void _connect() {
     _setState(FeedState.connecting);
-    _sub = _open().listen(
+    final abort = _abort = CancelableSignal();
+    _sub = _open(abort).listen(
       (e) {
         _attempt = 0;
         _lastError = null;
@@ -67,10 +72,16 @@ class EventFeed extends ChangeNotifier {
   Duration backoff(int attempt) =>
       reconnectBackoff(attempt, initialDelay, maxDelay);
 
-  void _retry(Object? error) {
-    if (_stopped) return;
+  void _close() {
     _sub?.cancel();
     _sub = null;
+    _abort?.cancel();
+    _abort = null;
+  }
+
+  void _retry(Object? error) {
+    if (_stopped) return;
+    _close();
     _lastError = error;
     final delay = backoff(_attempt);
     _attempt++;
@@ -88,8 +99,7 @@ class EventFeed extends ChangeNotifier {
   void stop() {
     _stopped = true;
     _timer?.cancel();
-    _sub?.cancel();
-    _sub = null;
+    _close();
   }
 
   @override

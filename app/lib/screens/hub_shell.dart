@@ -75,7 +75,7 @@ class HubShell extends StatefulWidget {
 class _HubShellState extends State<HubShell> {
   late final HubClient _client = widget.clientFactory(widget.hub);
   late final EventFeed _feed = EventFeed(
-    () => _client.events.subscribe(SubscribeRequest()),
+    (signal) => _client.events.subscribe(SubscribeRequest(), signal: signal),
   )..start();
   late int _index = tabIndex(widget.initialTab);
   final _history = NodeHistory();
