@@ -380,57 +380,63 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		info.Chat = &Chat{Requested: req.Selection}
 	}
 	e := &entry{Info: info}
-	m.mu.Lock()
-	m.sleeves[req.Name] = e
-	err = m.saveLocked()
-	if err != nil {
-		if prev != nil {
-			m.sleeves[req.Name] = prev
-		} else {
-			delete(m.sleeves, req.Name)
-		}
-	}
-	m.mu.Unlock()
-	if err != nil {
+	if err := m.installSleeve(e, prev); err != nil {
 		return Info{}, fmt.Errorf("persist sleeve: %w", err)
 	}
 
-	if mode == ModeChat {
-		m.mu.Lock()
-		out := e.Info
-		m.mu.Unlock()
-		m.opts.Emit("sleeve.spawned", req.Name, map[string]any{
-			"harness": string(req.Harness), "workspace": ws, "mode": string(mode),
-			"spawn_ms": float64(time.Since(start).Milliseconds()),
-		})
-		return out, nil
-	}
-	if err := m.start(ctx, launch, info); err != nil {
-		m.mu.Lock()
-		if prev != nil {
-			m.sleeves[req.Name] = prev
-		} else {
-			delete(m.sleeves, req.Name)
+	if mode != ModeChat {
+		if err := m.start(ctx, launch, info); err != nil {
+			m.rollbackSpawn(req.Name, prev)
+			return Info{}, err
 		}
-		if serr := m.saveLocked(); serr != nil {
-			log.Printf("sleeve %s: persist after failed start: %v", req.Name, serr)
-		}
-		m.mu.Unlock()
-		if rerr := m.cfg.removeEnvFile(req.Name); rerr != nil {
-			log.Printf("sleeve %s: %v", req.Name, rerr)
-		}
-		return Info{}, err
 	}
 
 	m.mu.Lock()
-	m.sampleLocked(e, time.Now())
+	if mode != ModeChat {
+		m.sampleLocked(e, time.Now())
+	}
 	out := e.Info
 	m.mu.Unlock()
-	m.opts.Emit("sleeve.spawned", req.Name, map[string]any{
-		"harness": string(req.Harness), "workspace": ws, "session": info.Session, "mode": string(mode),
+	fields := map[string]any{
+		"harness": string(req.Harness), "workspace": ws, "mode": string(mode),
 		"spawn_ms": float64(time.Since(start).Milliseconds()),
-	})
+	}
+	if mode != ModeChat {
+		fields["session"] = info.Session
+	}
+	m.opts.Emit("sleeve.spawned", req.Name, fields)
 	return out, nil
+}
+
+func (m *Manager) restoreSleeveLocked(name string, prev *entry) {
+	if prev != nil {
+		m.sleeves[name] = prev
+	} else {
+		delete(m.sleeves, name)
+	}
+}
+
+func (m *Manager) installSleeve(e, prev *entry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sleeves[e.Name] = e
+	if err := m.saveLocked(); err != nil {
+		m.restoreSleeveLocked(e.Name, prev)
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) rollbackSpawn(name string, prev *entry) {
+	m.mu.Lock()
+	m.restoreSleeveLocked(name, prev)
+	if err := m.saveLocked(); err != nil {
+		log.Printf("sleeve %s: persist after failed start: %v", name, err)
+	}
+	m.mu.Unlock()
+	if err := m.cfg.removeEnvFile(name); err != nil {
+		log.Printf("sleeve %s: %v", name, err)
+	}
 }
 
 func (m *Manager) planSpawn(req SpawnRequest, workspace string) (Launch, error) {
