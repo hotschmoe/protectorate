@@ -2,11 +2,13 @@ package sleeve
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 func validBranch(s string) bool {
@@ -61,17 +63,24 @@ func BranchTip(dir, branch string) (string, error) {
 	if len(dirs) == 0 {
 		return "", fmt.Errorf("%w: base is not a git checkout", ErrInvalid)
 	}
-	gd := dirs[len(dirs)-1]
+	root, err := os.OpenRoot(dirs[len(dirs)-1])
+	if err != nil {
+		return "", fmt.Errorf("open base git directory: %w", err)
+	}
+	defer root.Close()
 	ref := "refs/heads/" + branch
 	var sha string
-	if raw, err := os.ReadFile(filepath.Join(gd, ref)); err == nil {
+	if raw, err := readGitMetadata(root, ref); err == nil {
 		sha = strings.TrimSpace(string(raw))
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("read base branch %s: %w", branch, err)
 	} else {
-		f, err := os.Open(filepath.Join(gd, "packed-refs"))
+		f, err := root.OpenFile("packed-refs", os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err == nil {
 			defer f.Close()
+			if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+				return "", fmt.Errorf("%w: base packed-refs is not a regular file", ErrInvalid)
+			}
 			sc := bufio.NewScanner(io.LimitReader(f, 16<<20))
 			for sc.Scan() {
 				fields := strings.Fields(sc.Text())
@@ -83,7 +92,7 @@ func BranchTip(dir, branch string) (string, error) {
 			if err := sc.Err(); err != nil {
 				return "", fmt.Errorf("read packed base refs: %w", err)
 			}
-		} else if !os.IsNotExist(err) {
+		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("open packed base refs: %w", err)
 		}
 	}

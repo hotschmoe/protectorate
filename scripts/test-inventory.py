@@ -106,6 +106,10 @@ TestBinaryNodeDrainAndRemoval
 TestBinaryStateMigrationAndPolicyRestart
 TestBinaryStreamAuthorizationAndRevocation
 TestBinaryTransferFailureAtomicity
+TestBinarySleeveCacheConfinement
+TestBinaryBackupManifestCoverage
+TestBinaryQuotaReapsClosedStdoutPeer
+TestBinaryWorkspaceMetadataIsBounded
 """.split())
 DELETE = set()
 

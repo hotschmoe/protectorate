@@ -316,7 +316,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=73, KEEP-FUZZ=8; total=81. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=77, KEEP-FUZZ=8; total=85. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips, unless explicitly labelled race. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -406,6 +406,10 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 | internal/mcpbridge/transport_fuzz_test.go | FuzzMCPRequest | Untrusted JSON-RPC envelope and request identity | unmeasured | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
 | internal/mcpbridge/transport_fuzz_test.go | FuzzMCPArguments | Strict protobuf JSON arguments for jobs, transfers and leases | unmeasured | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
 | internal/xfer/archive_fuzz_test.go | FuzzTransferArchive | Tar extraction confinement, failure atomicity and staging cleanup | unmeasured | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
+| tests/e2e/cache_confinement_test.go | TestBinarySleeveCacheConfinement | Production bwrap cache seeding, cancellation cleanup and sleeve-written Flutter/Pub/parent symlinks cannot expose the private hub token on relaunch | 1.530s pass | KEEP-E2E | exercises filesystem isolation without a systemd user manager |
+| tests/e2e/backup_manifest_test.go | TestBinaryBackupManifestCoverage | Real-binary restore rejects duplicate manifest entries hiding altered state and changed file permissions before creating the destination | 1.430s pass | KEEP-E2E | complete manifest verification regression |
+| tests/e2e/quota_cleanup_test.go | TestBinaryQuotaReapsClosedStdoutPeer | Hub polls a synthetic Codex peer that closes stdout and ignores TERM, publishes quota promptly and reaps the process | 4.350s pass | KEEP-E2E | process lifetime, rather than stdout EOF, bounds cleanup |
+| tests/e2e/workspace_metadata_test.go | TestBinaryWorkspaceMetadataIsBounded | Real hub list/browser reads refuse FIFO, oversized and escaping git metadata without hanging or leaking file contents | 1.270s pass | KEEP-E2E | hostile workspace metadata regression |
 
 ## Deleted files
 

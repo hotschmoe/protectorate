@@ -323,21 +323,21 @@ func startQuotaRPC(ctx context.Context, bin string) (*quotaRPC, error) {
 func (p *quotaRPC) close() {
 	close(p.stop)
 	_ = p.stdin.Close()
+	done := make(chan struct{})
+	go func() {
+		for range p.lines {
+		}
+		_ = p.cmd.Wait()
+		close(done)
+	}()
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
-drain:
-	for {
-		select {
-		case _, ok := <-p.lines:
-			if !ok {
-				break drain
-			}
-		case <-timer.C:
-			killProc(p.cmd)
-			break drain
-		}
+	select {
+	case <-done:
+	case <-timer.C:
+		killProc(p.cmd)
+		<-done
 	}
-	_ = p.cmd.Wait()
 }
 
 func (p *quotaRPC) call(ctx context.Context, id int, method string, params any) (json.RawMessage, error) {
