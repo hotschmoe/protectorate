@@ -63,4 +63,22 @@ abstract final class ChatService {
     protectoratev1chat.CompactRequest.new,
     protectoratev1chat.CompactResponse.new,
   );
+
+  /// Native catalog; no inference turn is started. Select by sleeve or harness.
+  static const listModels = connect.Spec(
+    '/$name/ListModels',
+    connect.StreamType.unary,
+    protectoratev1chat.ListModelsRequest.new,
+    protectoratev1chat.ListModelsResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
+  /// Replace the requested selection between turns, without restarting.
+  /// Empty fields restore the captured native defaults. Unsupported drivers fail.
+  static const setSelection = connect.Spec(
+    '/$name/SetSelection',
+    connect.StreamType.unary,
+    protectoratev1chat.SetSelectionRequest.new,
+    protectoratev1chat.SetSelectionResponse.new,
+  );
 }

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/driver"
 )
 
 // Mode is how a sleeve runs its harness. In chat mode the hub drives the
@@ -20,16 +22,19 @@ const (
 // Chat is the persisted chat summary of a sleeve. State holds the hub's
 // chat state name; the sleeve layer does not interpret it.
 type Chat struct {
-	State        string    `yaml:"state,omitempty"`
-	SessionID    string    `yaml:"session_id,omitempty"`
-	Model        string    `yaml:"model,omitempty"`
-	Provider     string    `yaml:"provider,omitempty"`
-	LocalModel   bool      `yaml:"local_model,omitempty"`
-	Context      uint64    `yaml:"context_tokens,omitempty"`
-	Window       uint64    `yaml:"context_window,omitempty"`
-	CacheExpires time.Time `yaml:"cache_expires,omitempty"`
-	LastSeq      uint64    `yaml:"last_seq,omitempty"`
-	LastActivity time.Time `yaml:"last_activity,omitempty"`
+	State        string           `yaml:"state,omitempty"`
+	SessionID    string           `yaml:"session_id,omitempty"`
+	Model        string           `yaml:"model,omitempty"`
+	Effort       string           `yaml:"effort,omitempty"`
+	Requested    driver.Selection `yaml:"requested,omitempty"`
+	Defaults     driver.Selection `yaml:"native_defaults,omitempty"`
+	Provider     string           `yaml:"provider,omitempty"`
+	LocalModel   bool             `yaml:"local_model,omitempty"`
+	Context      uint64           `yaml:"context_tokens,omitempty"`
+	Window       uint64           `yaml:"context_window,omitempty"`
+	CacheExpires time.Time        `yaml:"cache_expires,omitempty"`
+	LastSeq      uint64           `yaml:"last_seq,omitempty"`
+	LastActivity time.Time        `yaml:"last_activity,omitempty"`
 }
 
 func resolveMode(h Harness, m Mode, args []string) (Mode, error) {
@@ -73,8 +78,10 @@ func (m *Manager) SetChat(name string, f func(*Chat)) (Info, error) {
 		c = *e.Chat
 	}
 	f(&c)
+	previous := e.Chat
 	e.Chat = &c
 	if err := m.saveLocked(); err != nil {
+		e.Chat = previous
 		return e.Info, fmt.Errorf("persist sleeves: %w", err)
 	}
 	return e.Info, nil

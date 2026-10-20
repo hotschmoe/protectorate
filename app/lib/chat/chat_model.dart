@@ -83,6 +83,7 @@ class ChatTranscript {
   int contextTokens = 0;
   int contextWindow = 0;
   DateTime? cacheExpires;
+  ModelSettings? settings;
 
   Iterable<ApprovalItem> get pendingApprovals =>
       _approvals.values.where((a) => !a.resolved);
@@ -99,6 +100,14 @@ class ChatTranscript {
   void seed(ChatStatus s) {
     if (lastSeq > 0) return;
     reported = s.state;
+    settings = s.hasSettings()
+        ? s.settings
+        : ModelSettings(
+            effective: ModelSelection(
+              model: s.model,
+              effort: s.reasoningEffort,
+            ),
+          );
     contextTokens = s.contextTokens.toInt();
     contextWindow = s.contextWindow.toInt();
     cacheExpires = s.hasCacheExpiresAt() ? s.cacheExpiresAt.toDateTime() : null;
@@ -183,6 +192,8 @@ class ChatTranscript {
         reported = e.state.state;
       case ChatEvent_Body.handoff:
         items.add(HandoffItem(seq, e.handoff));
+      case ChatEvent_Body.settings:
+        settings = e.settings;
       case ChatEvent_Body.notSet:
         break;
     }

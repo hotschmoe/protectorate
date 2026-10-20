@@ -76,20 +76,69 @@ sandbox, Grok `/always-approve off`; pi has no gate), so approvals arrive as
 
 ## Models and reasoning effort
 
-Chat creation and running-chat APIs, CLI and UI currently have no model or
-reasoning-effort controls, including Envoy. The model shown in chat is an
-observed native value, not a saved selection; it may be absent until usage is
-reported, and the Grok driver does not report a model name. No effort is
-reported. Native defaults and existing per-sleeve session/config state apply.
-Codex seeds permission/sandbox settings in the sleeve's config and does not
-copy the owner's `config.toml` or model choice.
+Codex chats, including Envoy, support model and reasoning-effort selection at
+creation and between turns. The hub queries the native paginated `model/list`
+catalog: model IDs, effort values and per-model defaults come from that
+installation, not a Protectorate enum. Catalog presence does not guarantee
+account access; the harness can still reject an inference request.
 
-Extra harness arguments after `--` work in terminal mode; chat mode rejects
-them. There is no typed live model/effort update operation. Resleeving replaces
-the native session through a handoff and has no model/effort fields to carry
-across harnesses. Native model catalogs and capability-aware controls are
-proposed work, not current functionality. See [delegation](coordination.md#delegation)
-for the distinction between native tasks and separate sleeves.
+```
+protectorate chat models --harness codex       # discover before creation
+protectorate chat models alice                # this sleeve's native catalog
+protectorate sleeve spawn alice --workspace /srv/project --harness codex --model MODEL --effort EFFORT
+protectorate chat settings alice              # requested/effective settings
+protectorate chat settings alice --model MODEL --effort EFFORT
+protectorate chat settings alice --native-defaults
+protectorate chat settings envoy --model MODEL --effort EFFORT
+```
+
+Replace MODEL and EFFORT with advertised values. Creation also supports
+`orchestrator spawn --harness codex --model MODEL --effort EFFORT`; this
+respawns Envoy, so use `chat settings envoy` for an existing conversation.
+In the app, Codex creation forms have native selectors, and an idle chat's
+menu has MODEL AND EFFORT. Effective model and effort appear in the chat header
+and sleeve information. Other harnesses explain that controls are unavailable.
+
+`--model`/`--effort` replace the complete requested selection. An omitted model
+uses the native session's original model; an explicit model with omitted effort
+uses that model's advertised default effort. `--native-defaults` restores both
+defaults captured before the first override. With no selection at creation the
+driver sends no override. Requested, effective and captured default settings are
+persisted separately. Native model rerouting updates the effective model and
+leaves effort unknown when the harness does not report it.
+
+Updates require an idle chat with no pending approval, compaction or resleeve.
+Codex uses native `thread/settings/update` without a turn or restart,
+preserving the session and workspace. Older Codex versions without that
+operation return an explicit error; there is no hidden restart fallback.
+The driver reads native model/effort on start/resume. Codex's per-sleeve config
+seeds permission/sandbox settings and does not copy the owner's `config.toml`
+or model choice.
+
+Claude, Grok and pi retain native defaults/session/config behavior; explicit
+selection is rejected until those drivers implement verified controls. Their
+effective effort is unknown. Model names may be absent until usage arrives;
+Grok currently reports no model name. Extra harness arguments after `--` work
+in terminal mode; chat rejects them and typed selection is chat-only.
+
+The API is `ChatService.ListModels` (read) and `SetSelection` (requires
+`chat_set_selection` or a matching chat scope). Ordinary sleeve and Envoy
+tokens lack that write scope by default; use owner authentication or an
+explicitly granted token. `SpawnSleeveRequest.selection` and
+`SpawnEnvoyRequest.selection` carry creation settings. `ChatStatus.settings`
+and replayable settings events separate requested/effective values;
+`ChatStatus.reasoning_effort` reports the effective effort.
+
+Resleeving preserves the request on the same harness. When moving a selected
+chat to another harness, explicitly choose target `--model`/`--effort` or
+`--native-defaults`; there is no automatic vendor mapping. The API fields are
+`ResleeveSleeveRequest.selection` and `native_defaults`. See
+[delegation](coordination.md#delegation) for native tasks versus sleeves.
+
+Catalog discovery before creation runs in a temporary-home sandbox with the
+native auth directory and read-only tools, without a project mount, sleeve
+record or inference turn. Existing chats query their own driver. No model
+traffic is proxied and no credentials are copied into settings responses.
 
 ## API
 
@@ -110,6 +159,10 @@ covered by `chat_*`.
   harness confirmed it. `failed_precondition` unless the chat is IDLE, or when
   there is too little to compact; `unimplemented` for Grok, where `/compact`
   over ACP is not verified.
+- **ListModels(sleeve, harness)** queries native discovery without starting an
+  inference turn. Supply a sleeve or a harness for creation-time discovery.
+- **SetSelection(sleeve, selection)** replaces requested model/effort while
+  idle. Unsupported drivers and invalid catalog combinations fail.
 
 `Sleeve.chat` (`ChatStatus`) is kept current: state, harness session id, model,
 `context_tokens` (the prompt size of the last model call), `context_window`,

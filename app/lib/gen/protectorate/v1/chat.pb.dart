@@ -24,6 +24,565 @@ export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'chat.pbenum.dart';
 
+class ModelSelection extends $pb.GeneratedMessage {
+  factory ModelSelection({
+    $core.String? model,
+    $core.String? effort,
+  }) {
+    final result = ModelSelection._();
+    if (model != null) result.model = model;
+    if (effort != null) result.effort = effort;
+    return result;
+  }
+
+  ModelSelection._();
+
+  factory ModelSelection.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ModelSelection()..mergeFromBuffer(data, registry);
+  factory ModelSelection.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ModelSelection()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ModelSelection',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ModelSelection.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'model')
+    ..aOS(2, _omitFieldNames ? '' : 'effort')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ModelSelection clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ModelSelection copyWith(void Function(ModelSelection) updates) =>
+      super.copyWith((message) => updates(message as ModelSelection))
+          as ModelSelection;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ModelSelection() / ModelSelection.new instead')
+  static ModelSelection create() => ModelSelection._();
+  static $pb.GeneratedMessage $_createMessage() => ModelSelection._();
+  @$core.override
+  ModelSelection createEmptyInstance() => ModelSelection._();
+  @$core.pragma('dart2js:noInline')
+  static ModelSelection getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ModelSelection>(
+          ModelSelection.$_createMessage);
+  static ModelSelection? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get model => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set model($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasModel() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearModel() => $_clearField(1);
+
+  /// Native effort value, validated against the selected model's catalog.
+  @$pb.TagNumber(2)
+  $core.String get effort => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set effort($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasEffort() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearEffort() => $_clearField(2);
+}
+
+class ModelSettings extends $pb.GeneratedMessage {
+  factory ModelSettings({
+    ModelSelection? requested,
+    ModelSelection? effective,
+    ModelSelection? nativeDefaults,
+  }) {
+    final result = ModelSettings._();
+    if (requested != null) result.requested = requested;
+    if (effective != null) result.effective = effective;
+    if (nativeDefaults != null) result.nativeDefaults = nativeDefaults;
+    return result;
+  }
+
+  ModelSettings._();
+
+  factory ModelSettings.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ModelSettings()..mergeFromBuffer(data, registry);
+  factory ModelSettings.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ModelSettings()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ModelSettings',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ModelSettings.$_createMessage)
+    ..aOM<ModelSelection>(1, _omitFieldNames ? '' : 'requested',
+        subBuilder: ModelSelection.$_createMessage)
+    ..aOM<ModelSelection>(2, _omitFieldNames ? '' : 'effective',
+        subBuilder: ModelSelection.$_createMessage)
+    ..aOM<ModelSelection>(3, _omitFieldNames ? '' : 'nativeDefaults',
+        subBuilder: ModelSelection.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ModelSettings clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ModelSettings copyWith(void Function(ModelSettings) updates) =>
+      super.copyWith((message) => updates(message as ModelSettings))
+          as ModelSettings;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ModelSettings() / ModelSettings.new instead')
+  static ModelSettings create() => ModelSettings._();
+  static $pb.GeneratedMessage $_createMessage() => ModelSettings._();
+  @$core.override
+  ModelSettings createEmptyInstance() => ModelSettings._();
+  @$core.pragma('dart2js:noInline')
+  static ModelSettings getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ModelSettings>(
+          ModelSettings.$_createMessage);
+  static ModelSettings? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  ModelSelection get requested => $_getN(0);
+  @$pb.TagNumber(1)
+  set requested(ModelSelection value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasRequested() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearRequested() => $_clearField(1);
+  @$pb.TagNumber(1)
+  ModelSelection ensureRequested() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  ModelSelection get effective => $_getN(1);
+  @$pb.TagNumber(2)
+  set effective(ModelSelection value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasEffective() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearEffective() => $_clearField(2);
+  @$pb.TagNumber(2)
+  ModelSelection ensureEffective() => $_ensure(1);
+
+  /// Native session defaults captured before any explicit selection.
+  @$pb.TagNumber(3)
+  ModelSelection get nativeDefaults => $_getN(2);
+  @$pb.TagNumber(3)
+  set nativeDefaults(ModelSelection value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasNativeDefaults() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearNativeDefaults() => $_clearField(3);
+  @$pb.TagNumber(3)
+  ModelSelection ensureNativeDefaults() => $_ensure(2);
+}
+
+class ModelOption extends $pb.GeneratedMessage {
+  factory ModelOption({
+    $core.String? model,
+    $core.String? name,
+    $core.Iterable<$core.String>? efforts,
+    $core.String? defaultEffort,
+    $core.bool? isDefault,
+  }) {
+    final result = ModelOption._();
+    if (model != null) result.model = model;
+    if (name != null) result.name = name;
+    if (efforts != null) result.efforts.addAll(efforts);
+    if (defaultEffort != null) result.defaultEffort = defaultEffort;
+    if (isDefault != null) result.isDefault = isDefault;
+    return result;
+  }
+
+  ModelOption._();
+
+  factory ModelOption.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ModelOption()..mergeFromBuffer(data, registry);
+  factory ModelOption.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ModelOption()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ModelOption',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ModelOption.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'model')
+    ..aOS(2, _omitFieldNames ? '' : 'name')
+    ..pPS(3, _omitFieldNames ? '' : 'efforts')
+    ..aOS(4, _omitFieldNames ? '' : 'defaultEffort')
+    ..aOB(5, _omitFieldNames ? '' : 'isDefault')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ModelOption clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ModelOption copyWith(void Function(ModelOption) updates) =>
+      super.copyWith((message) => updates(message as ModelOption))
+          as ModelOption;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ModelOption() / ModelOption.new instead')
+  static ModelOption create() => ModelOption._();
+  static $pb.GeneratedMessage $_createMessage() => ModelOption._();
+  @$core.override
+  ModelOption createEmptyInstance() => ModelOption._();
+  @$core.pragma('dart2js:noInline')
+  static ModelOption getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ModelOption>(
+          ModelOption.$_createMessage);
+  static ModelOption? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get model => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set model($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasModel() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearModel() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get name => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set name($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasName() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearName() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $pb.PbList<$core.String> get efforts => $_getList(2);
+
+  @$pb.TagNumber(4)
+  $core.String get defaultEffort => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set defaultEffort($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasDefaultEffort() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearDefaultEffort() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.bool get isDefault => $_getBF(4);
+  @$pb.TagNumber(5)
+  set isDefault($core.bool value) => $_setBool(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasIsDefault() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearIsDefault() => $_clearField(5);
+}
+
+class ListModelsRequest extends $pb.GeneratedMessage {
+  factory ListModelsRequest({
+    $core.String? sleeve,
+    $core.String? harness,
+  }) {
+    final result = ListModelsRequest._();
+    if (sleeve != null) result.sleeve = sleeve;
+    if (harness != null) result.harness = harness;
+    return result;
+  }
+
+  ListModelsRequest._();
+
+  factory ListModelsRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListModelsRequest()..mergeFromBuffer(data, registry);
+  factory ListModelsRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListModelsRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListModelsRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListModelsRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
+    ..aOS(2, _omitFieldNames ? '' : 'harness')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListModelsRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListModelsRequest copyWith(void Function(ListModelsRequest) updates) =>
+      super.copyWith((message) => updates(message as ListModelsRequest))
+          as ListModelsRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ListModelsRequest() / ListModelsRequest.new instead')
+  static ListModelsRequest create() => ListModelsRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ListModelsRequest._();
+  @$core.override
+  ListModelsRequest createEmptyInstance() => ListModelsRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ListModelsRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ListModelsRequest>(
+          ListModelsRequest.$_createMessage);
+  static ListModelsRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get sleeve => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sleeve($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+
+  /// claude, codex, grok or pi; used when sleeve is empty, e.g. at creation.
+  @$pb.TagNumber(2)
+  $core.String get harness => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set harness($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasHarness() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearHarness() => $_clearField(2);
+}
+
+class ListModelsResponse extends $pb.GeneratedMessage {
+  factory ListModelsResponse({
+    $core.bool? supported,
+    $core.String? reason,
+    $core.Iterable<ModelOption>? models,
+    $core.bool? liveUpdate,
+  }) {
+    final result = ListModelsResponse._();
+    if (supported != null) result.supported = supported;
+    if (reason != null) result.reason = reason;
+    if (models != null) result.models.addAll(models);
+    if (liveUpdate != null) result.liveUpdate = liveUpdate;
+    return result;
+  }
+
+  ListModelsResponse._();
+
+  factory ListModelsResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListModelsResponse()..mergeFromBuffer(data, registry);
+  factory ListModelsResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListModelsResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListModelsResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListModelsResponse.$_createMessage)
+    ..aOB(1, _omitFieldNames ? '' : 'supported')
+    ..aOS(2, _omitFieldNames ? '' : 'reason')
+    ..pPM<ModelOption>(3, _omitFieldNames ? '' : 'models',
+        subBuilder: ModelOption.$_createMessage)
+    ..aOB(4, _omitFieldNames ? '' : 'liveUpdate')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListModelsResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListModelsResponse copyWith(void Function(ListModelsResponse) updates) =>
+      super.copyWith((message) => updates(message as ListModelsResponse))
+          as ListModelsResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ListModelsResponse() / ListModelsResponse.new instead')
+  static ListModelsResponse create() => ListModelsResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ListModelsResponse._();
+  @$core.override
+  ListModelsResponse createEmptyInstance() => ListModelsResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ListModelsResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListModelsResponse>(
+          ListModelsResponse.$_createMessage);
+  static ListModelsResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.bool get supported => $_getBF(0);
+  @$pb.TagNumber(1)
+  set supported($core.bool value) => $_setBool(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSupported() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSupported() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get reason => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set reason($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasReason() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearReason() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $pb.PbList<ModelOption> get models => $_getList(2);
+
+  @$pb.TagNumber(4)
+  $core.bool get liveUpdate => $_getBF(3);
+  @$pb.TagNumber(4)
+  set liveUpdate($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasLiveUpdate() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearLiveUpdate() => $_clearField(4);
+}
+
+class SetSelectionRequest extends $pb.GeneratedMessage {
+  factory SetSelectionRequest({
+    $core.String? sleeve,
+    ModelSelection? selection,
+  }) {
+    final result = SetSelectionRequest._();
+    if (sleeve != null) result.sleeve = sleeve;
+    if (selection != null) result.selection = selection;
+    return result;
+  }
+
+  SetSelectionRequest._();
+
+  factory SetSelectionRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetSelectionRequest()..mergeFromBuffer(data, registry);
+  factory SetSelectionRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetSelectionRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SetSelectionRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SetSelectionRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
+    ..aOM<ModelSelection>(2, _omitFieldNames ? '' : 'selection',
+        subBuilder: ModelSelection.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetSelectionRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetSelectionRequest copyWith(void Function(SetSelectionRequest) updates) =>
+      super.copyWith((message) => updates(message as SetSelectionRequest))
+          as SetSelectionRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core
+      .Deprecated('Use SetSelectionRequest() / SetSelectionRequest.new instead')
+  static SetSelectionRequest create() => SetSelectionRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SetSelectionRequest._();
+  @$core.override
+  SetSelectionRequest createEmptyInstance() => SetSelectionRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SetSelectionRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SetSelectionRequest>(
+          SetSelectionRequest.$_createMessage);
+  static SetSelectionRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get sleeve => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sleeve($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  ModelSelection get selection => $_getN(1);
+  @$pb.TagNumber(2)
+  set selection(ModelSelection value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSelection() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSelection() => $_clearField(2);
+  @$pb.TagNumber(2)
+  ModelSelection ensureSelection() => $_ensure(1);
+}
+
+class SetSelectionResponse extends $pb.GeneratedMessage {
+  factory SetSelectionResponse({
+    ChatStatus? chat,
+  }) {
+    final result = SetSelectionResponse._();
+    if (chat != null) result.chat = chat;
+    return result;
+  }
+
+  SetSelectionResponse._();
+
+  factory SetSelectionResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetSelectionResponse()..mergeFromBuffer(data, registry);
+  factory SetSelectionResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetSelectionResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SetSelectionResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SetSelectionResponse.$_createMessage)
+    ..aOM<ChatStatus>(1, _omitFieldNames ? '' : 'chat',
+        subBuilder: ChatStatus.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetSelectionResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetSelectionResponse copyWith(void Function(SetSelectionResponse) updates) =>
+      super.copyWith((message) => updates(message as SetSelectionResponse))
+          as SetSelectionResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use SetSelectionResponse() / SetSelectionResponse.new instead')
+  static SetSelectionResponse create() => SetSelectionResponse._();
+  static $pb.GeneratedMessage $_createMessage() => SetSelectionResponse._();
+  @$core.override
+  SetSelectionResponse createEmptyInstance() => SetSelectionResponse._();
+  @$core.pragma('dart2js:noInline')
+  static SetSelectionResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SetSelectionResponse>(
+          SetSelectionResponse.$_createMessage);
+  static SetSelectionResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  ChatStatus get chat => $_getN(0);
+  @$pb.TagNumber(1)
+  set chat(ChatStatus value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasChat() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearChat() => $_clearField(1);
+  @$pb.TagNumber(1)
+  ChatStatus ensureChat() => $_ensure(0);
+}
+
 /// ChatStatus is the live summary kept on the Sleeve.
 class ChatStatus extends $pb.GeneratedMessage {
   factory ChatStatus({
@@ -37,6 +596,8 @@ class ChatStatus extends $pb.GeneratedMessage {
     $0.Timestamp? lastActivityAt,
     $core.String? provider,
     $core.bool? localModel,
+    $core.String? reasoningEffort,
+    ModelSettings? settings,
   }) {
     final result = ChatStatus._();
     if (state != null) result.state = state;
@@ -49,6 +610,8 @@ class ChatStatus extends $pb.GeneratedMessage {
     if (lastActivityAt != null) result.lastActivityAt = lastActivityAt;
     if (provider != null) result.provider = provider;
     if (localModel != null) result.localModel = localModel;
+    if (reasoningEffort != null) result.reasoningEffort = reasoningEffort;
+    if (settings != null) result.settings = settings;
     return result;
   }
 
@@ -84,6 +647,9 @@ class ChatStatus extends $pb.GeneratedMessage {
         subBuilder: $0.Timestamp.$_createMessage)
     ..aOS(9, _omitFieldNames ? '' : 'provider')
     ..aOB(10, _omitFieldNames ? '' : 'localModel')
+    ..aOS(11, _omitFieldNames ? '' : 'reasoningEffort')
+    ..aOM<ModelSettings>(12, _omitFieldNames ? '' : 'settings',
+        subBuilder: ModelSettings.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -210,6 +776,26 @@ class ChatStatus extends $pb.GeneratedMessage {
   $core.bool hasLocalModel() => $_has(9);
   @$pb.TagNumber(10)
   void clearLocalModel() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $core.String get reasoningEffort => $_getSZ(10);
+  @$pb.TagNumber(11)
+  set reasoningEffort($core.String value) => $_setString(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasReasoningEffort() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearReasoningEffort() => $_clearField(11);
+
+  @$pb.TagNumber(12)
+  ModelSettings get settings => $_getN(11);
+  @$pb.TagNumber(12)
+  set settings(ModelSettings value) => $_setField(12, value);
+  @$pb.TagNumber(12)
+  $core.bool hasSettings() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearSettings() => $_clearField(12);
+  @$pb.TagNumber(12)
+  ModelSettings ensureSettings() => $_ensure(11);
 }
 
 enum ChatEvent_Body {
@@ -225,6 +811,7 @@ enum ChatEvent_Body {
   error,
   state,
   handoff,
+  settings,
   notSet
 }
 
@@ -244,6 +831,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     ChatError? error,
     StateChange? state,
     Handoff? handoff,
+    ModelSettings? settings,
   }) {
     final result = ChatEvent._();
     if (seq != null) result.seq = seq;
@@ -260,6 +848,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     if (error != null) result.error = error;
     if (state != null) result.state = state;
     if (handoff != null) result.handoff = handoff;
+    if (settings != null) result.settings = settings;
     return result;
   }
 
@@ -285,6 +874,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     19: ChatEvent_Body.error,
     20: ChatEvent_Body.state,
     21: ChatEvent_Body.handoff,
+    22: ChatEvent_Body.settings,
     0: ChatEvent_Body.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -292,7 +882,7 @@ class ChatEvent extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ChatEvent.$_createMessage)
-    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])
+    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22])
     ..a<$fixnum.Int64>(1, _omitFieldNames ? '' : 'seq', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOM<$0.Timestamp>(2, _omitFieldNames ? '' : 'time',
@@ -321,6 +911,8 @@ class ChatEvent extends $pb.GeneratedMessage {
         subBuilder: StateChange.$_createMessage)
     ..aOM<Handoff>(21, _omitFieldNames ? '' : 'handoff',
         subBuilder: Handoff.$_createMessage)
+    ..aOM<ModelSettings>(22, _omitFieldNames ? '' : 'settings',
+        subBuilder: ModelSettings.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -355,6 +947,7 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(19)
   @$pb.TagNumber(20)
   @$pb.TagNumber(21)
+  @$pb.TagNumber(22)
   ChatEvent_Body whichBody() => _ChatEvent_BodyByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
@@ -368,6 +961,7 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(19)
   @$pb.TagNumber(20)
   @$pb.TagNumber(21)
+  @$pb.TagNumber(22)
   void clearBody() => $_clearField($_whichOneof(0));
 
   /// seq increases by one per event within a sleeve, starting at 1. All text
@@ -525,6 +1119,17 @@ class ChatEvent extends $pb.GeneratedMessage {
   void clearHandoff() => $_clearField(21);
   @$pb.TagNumber(21)
   Handoff ensureHandoff() => $_ensure(13);
+
+  @$pb.TagNumber(22)
+  ModelSettings get settings => $_getN(14);
+  @$pb.TagNumber(22)
+  set settings(ModelSettings value) => $_setField(22, value);
+  @$pb.TagNumber(22)
+  $core.bool hasSettings() => $_has(14);
+  @$pb.TagNumber(22)
+  void clearSettings() => $_clearField(22);
+  @$pb.TagNumber(22)
+  ModelSettings ensureSettings() => $_ensure(14);
 }
 
 class UserMessage extends $pb.GeneratedMessage {
@@ -2234,6 +2839,19 @@ class ChatServiceApi {
           $pb.ClientContext? ctx, CompactRequest request) =>
       _client.invoke<CompactResponse>(
           ctx, 'ChatService', 'Compact', request, CompactResponse());
+
+  /// Native catalog; no inference turn is started. Select by sleeve or harness.
+  $async.Future<ListModelsResponse> listModels(
+          $pb.ClientContext? ctx, ListModelsRequest request) =>
+      _client.invoke<ListModelsResponse>(
+          ctx, 'ChatService', 'ListModels', request, ListModelsResponse());
+
+  /// Replace the requested selection between turns, without restarting.
+  /// Empty fields restore the captured native defaults. Unsupported drivers fail.
+  $async.Future<SetSelectionResponse> setSelection(
+          $pb.ClientContext? ctx, SetSelectionRequest request) =>
+      _client.invoke<SetSelectionResponse>(
+          ctx, 'ChatService', 'SetSelection', request, SetSelectionResponse());
 }
 
 const $core.bool _omitFieldNames =

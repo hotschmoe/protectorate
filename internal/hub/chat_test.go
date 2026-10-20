@@ -543,7 +543,14 @@ type stuckSession struct {
 	once   sync.Once
 }
 
-func (s *stuckSession) Harness() driver.Harness            { return s.h }
+func (s *stuckSession) Harness() driver.Harness { return s.h }
+func (s *stuckSession) Models(context.Context) ([]driver.Model, error) {
+	return nil, driver.ErrUnsupported
+}
+func (s *stuckSession) SetSelection(context.Context, driver.Selection) error {
+	return driver.ErrUnsupported
+}
+func (s *stuckSession) Selection() driver.SelectionState   { return driver.SelectionState{} }
 func (s *stuckSession) Caps() driver.Caps                  { return driver.Caps{Interrupt: true} }
 func (s *stuckSession) SessionID() string                  { return s.id }
 func (s *stuckSession) Events() <-chan driver.Event        { return s.events }

@@ -54,6 +54,155 @@ final $typed_data.Uint8List chatStateDescriptor = $convert.base64Decode(
     'X0NPTVBBQ1RJTkcQAxITCg9DSEFUX1NUQVRFX0lETEUQBBIVChFDSEFUX1NUQVRFX0ZBSUxFRB'
     'AFEhUKEUNIQVRfU1RBVEVfRVhJVEVEEAY=');
 
+@$core.Deprecated('Use modelSelectionDescriptor instead')
+const ModelSelection$json = {
+  '1': 'ModelSelection',
+  '2': [
+    {'1': 'model', '3': 1, '4': 1, '5': 9, '10': 'model'},
+    {'1': 'effort', '3': 2, '4': 1, '5': 9, '10': 'effort'},
+  ],
+};
+
+/// Descriptor for `ModelSelection`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List modelSelectionDescriptor = $convert.base64Decode(
+    'Cg5Nb2RlbFNlbGVjdGlvbhIUCgVtb2RlbBgBIAEoCVIFbW9kZWwSFgoGZWZmb3J0GAIgASgJUg'
+    'ZlZmZvcnQ=');
+
+@$core.Deprecated('Use modelSettingsDescriptor instead')
+const ModelSettings$json = {
+  '1': 'ModelSettings',
+  '2': [
+    {
+      '1': 'requested',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'requested'
+    },
+    {
+      '1': 'effective',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'effective'
+    },
+    {
+      '1': 'native_defaults',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'nativeDefaults'
+    },
+  ],
+};
+
+/// Descriptor for `ModelSettings`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List modelSettingsDescriptor = $convert.base64Decode(
+    'Cg1Nb2RlbFNldHRpbmdzEj0KCXJlcXVlc3RlZBgBIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2'
+    'RlbFNlbGVjdGlvblIJcmVxdWVzdGVkEj0KCWVmZmVjdGl2ZRgCIAEoCzIfLnByb3RlY3RvcmF0'
+    'ZS52MS5Nb2RlbFNlbGVjdGlvblIJZWZmZWN0aXZlEkgKD25hdGl2ZV9kZWZhdWx0cxgDIAEoCz'
+    'IfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbGVjdGlvblIObmF0aXZlRGVmYXVsdHM=');
+
+@$core.Deprecated('Use modelOptionDescriptor instead')
+const ModelOption$json = {
+  '1': 'ModelOption',
+  '2': [
+    {'1': 'model', '3': 1, '4': 1, '5': 9, '10': 'model'},
+    {'1': 'name', '3': 2, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'efforts', '3': 3, '4': 3, '5': 9, '10': 'efforts'},
+    {'1': 'default_effort', '3': 4, '4': 1, '5': 9, '10': 'defaultEffort'},
+    {'1': 'is_default', '3': 5, '4': 1, '5': 8, '10': 'isDefault'},
+  ],
+};
+
+/// Descriptor for `ModelOption`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List modelOptionDescriptor = $convert.base64Decode(
+    'CgtNb2RlbE9wdGlvbhIUCgVtb2RlbBgBIAEoCVIFbW9kZWwSEgoEbmFtZRgCIAEoCVIEbmFtZR'
+    'IYCgdlZmZvcnRzGAMgAygJUgdlZmZvcnRzEiUKDmRlZmF1bHRfZWZmb3J0GAQgASgJUg1kZWZh'
+    'dWx0RWZmb3J0Eh0KCmlzX2RlZmF1bHQYBSABKAhSCWlzRGVmYXVsdA==');
+
+@$core.Deprecated('Use listModelsRequestDescriptor instead')
+const ListModelsRequest$json = {
+  '1': 'ListModelsRequest',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {'1': 'harness', '3': 2, '4': 1, '5': 9, '10': 'harness'},
+  ],
+};
+
+/// Descriptor for `ListModelsRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listModelsRequestDescriptor = $convert.base64Decode(
+    'ChFMaXN0TW9kZWxzUmVxdWVzdBIWCgZzbGVldmUYASABKAlSBnNsZWV2ZRIYCgdoYXJuZXNzGA'
+    'IgASgJUgdoYXJuZXNz');
+
+@$core.Deprecated('Use listModelsResponseDescriptor instead')
+const ListModelsResponse$json = {
+  '1': 'ListModelsResponse',
+  '2': [
+    {'1': 'supported', '3': 1, '4': 1, '5': 8, '10': 'supported'},
+    {'1': 'reason', '3': 2, '4': 1, '5': 9, '10': 'reason'},
+    {
+      '1': 'models',
+      '3': 3,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.ModelOption',
+      '10': 'models'
+    },
+    {'1': 'live_update', '3': 4, '4': 1, '5': 8, '10': 'liveUpdate'},
+  ],
+};
+
+/// Descriptor for `ListModelsResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listModelsResponseDescriptor = $convert.base64Decode(
+    'ChJMaXN0TW9kZWxzUmVzcG9uc2USHAoJc3VwcG9ydGVkGAEgASgIUglzdXBwb3J0ZWQSFgoGcm'
+    'Vhc29uGAIgASgJUgZyZWFzb24SNAoGbW9kZWxzGAMgAygLMhwucHJvdGVjdG9yYXRlLnYxLk1v'
+    'ZGVsT3B0aW9uUgZtb2RlbHMSHwoLbGl2ZV91cGRhdGUYBCABKAhSCmxpdmVVcGRhdGU=');
+
+@$core.Deprecated('Use setSelectionRequestDescriptor instead')
+const SetSelectionRequest$json = {
+  '1': 'SetSelectionRequest',
+  '2': [
+    {'1': 'sleeve', '3': 1, '4': 1, '5': 9, '10': 'sleeve'},
+    {
+      '1': 'selection',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'selection'
+    },
+  ],
+};
+
+/// Descriptor for `SetSelectionRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List setSelectionRequestDescriptor = $convert.base64Decode(
+    'ChNTZXRTZWxlY3Rpb25SZXF1ZXN0EhYKBnNsZWV2ZRgBIAEoCVIGc2xlZXZlEj0KCXNlbGVjdG'
+    'lvbhgCIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbGVjdGlvblIJc2VsZWN0aW9u');
+
+@$core.Deprecated('Use setSelectionResponseDescriptor instead')
+const SetSelectionResponse$json = {
+  '1': 'SetSelectionResponse',
+  '2': [
+    {
+      '1': 'chat',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ChatStatus',
+      '10': 'chat'
+    },
+  ],
+};
+
+/// Descriptor for `SetSelectionResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List setSelectionResponseDescriptor = $convert.base64Decode(
+    'ChRTZXRTZWxlY3Rpb25SZXNwb25zZRIvCgRjaGF0GAEgASgLMhsucHJvdGVjdG9yYXRlLnYxLk'
+    'NoYXRTdGF0dXNSBGNoYXQ=');
+
 @$core.Deprecated('Use chatStatusDescriptor instead')
 const ChatStatus$json = {
   '1': 'ChatStatus',
@@ -95,6 +244,15 @@ const ChatStatus$json = {
     },
     {'1': 'provider', '3': 9, '4': 1, '5': 9, '10': 'provider'},
     {'1': 'local_model', '3': 10, '4': 1, '5': 8, '10': 'localModel'},
+    {'1': 'reasoning_effort', '3': 11, '4': 1, '5': 9, '10': 'reasoningEffort'},
+    {
+      '1': 'settings',
+      '3': 12,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSettings',
+      '10': 'settings'
+    },
   ],
 };
 
@@ -107,7 +265,9 @@ final $typed_data.Uint8List chatStatusDescriptor = $convert.base64Decode(
     'cmVzX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIOY2FjaGVFeHBpcmVzQX'
     'QSGQoIbGFzdF9zZXEYByABKARSB2xhc3RTZXESRAoQbGFzdF9hY3Rpdml0eV9hdBgIIAEoCzIa'
     'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSDmxhc3RBY3Rpdml0eUF0EhoKCHByb3ZpZGVyGA'
-    'kgASgJUghwcm92aWRlchIfCgtsb2NhbF9tb2RlbBgKIAEoCFIKbG9jYWxNb2RlbA==');
+    'kgASgJUghwcm92aWRlchIfCgtsb2NhbF9tb2RlbBgKIAEoCFIKbG9jYWxNb2RlbBIpChByZWFz'
+    'b25pbmdfZWZmb3J0GAsgASgJUg9yZWFzb25pbmdFZmZvcnQSOgoIc2V0dGluZ3MYDCABKAsyHi'
+    '5wcm90ZWN0b3JhdGUudjEuTW9kZWxTZXR0aW5nc1IIc2V0dGluZ3M=');
 
 @$core.Deprecated('Use chatEventDescriptor instead')
 const ChatEvent$json = {
@@ -230,6 +390,15 @@ const ChatEvent$json = {
       '9': 0,
       '10': 'handoff'
     },
+    {
+      '1': 'settings',
+      '3': 22,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSettings',
+      '9': 0,
+      '10': 'settings'
+    },
   ],
   '8': [
     {'1': 'body'},
@@ -252,7 +421,8 @@ final $typed_data.Uint8List chatEventDescriptor = $convert.base64Decode(
     '9uSABSCmNvbXBhY3Rpb24SMgoFZXJyb3IYEyABKAsyGi5wcm90ZWN0b3JhdGUudjEuQ2hhdEVy'
     'cm9ySABSBWVycm9yEjQKBXN0YXRlGBQgASgLMhwucHJvdGVjdG9yYXRlLnYxLlN0YXRlQ2hhbm'
     'dlSABSBXN0YXRlEjQKB2hhbmRvZmYYFSABKAsyGC5wcm90ZWN0b3JhdGUudjEuSGFuZG9mZkgA'
-    'UgdoYW5kb2ZmQgYKBGJvZHk=');
+    'UgdoYW5kb2ZmEjwKCHNldHRpbmdzGBYgASgLMh4ucHJvdGVjdG9yYXRlLnYxLk1vZGVsU2V0dG'
+    'luZ3NIAFIIc2V0dGluZ3NCBgoEYm9keQ==');
 
 @$core.Deprecated('Use userMessageDescriptor instead')
 const UserMessage$json = {
@@ -637,6 +807,17 @@ const $core.Map<$core.String, $core.dynamic> ChatServiceBase$json = {
       '2': '.protectorate.v1.CompactRequest',
       '3': '.protectorate.v1.CompactResponse'
     },
+    {
+      '1': 'ListModels',
+      '2': '.protectorate.v1.ListModelsRequest',
+      '3': '.protectorate.v1.ListModelsResponse',
+      '4': {'34': 1},
+    },
+    {
+      '1': 'SetSelection',
+      '2': '.protectorate.v1.SetSelectionRequest',
+      '3': '.protectorate.v1.SetSelectionResponse'
+    },
   ],
 };
 
@@ -658,6 +839,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ChatError': ChatError$json,
   '.protectorate.v1.StateChange': StateChange$json,
   '.protectorate.v1.Handoff': Handoff$json,
+  '.protectorate.v1.ModelSettings': ModelSettings$json,
+  '.protectorate.v1.ModelSelection': ModelSelection$json,
   '.protectorate.v1.SendRequest': SendRequest$json,
   '.protectorate.v1.SendResponse': SendResponse$json,
   '.protectorate.v1.InterruptRequest': InterruptRequest$json,
@@ -666,6 +849,12 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.RespondResponse': RespondResponse$json,
   '.protectorate.v1.CompactRequest': CompactRequest$json,
   '.protectorate.v1.CompactResponse': CompactResponse$json,
+  '.protectorate.v1.ListModelsRequest': ListModelsRequest$json,
+  '.protectorate.v1.ListModelsResponse': ListModelsResponse$json,
+  '.protectorate.v1.ModelOption': ModelOption$json,
+  '.protectorate.v1.SetSelectionRequest': SetSelectionRequest$json,
+  '.protectorate.v1.SetSelectionResponse': SetSelectionResponse$json,
+  '.protectorate.v1.ChatStatus': ChatStatus$json,
 };
 
 /// Descriptor for `ChatService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -677,4 +866,7 @@ final $typed_data.Uint8List chatServiceDescriptor = $convert.base64Decode(
     'MS5JbnRlcnJ1cHRSZXNwb25zZRJMCgdSZXNwb25kEh8ucHJvdGVjdG9yYXRlLnYxLlJlc3Bvbm'
     'RSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLlJlc3BvbmRSZXNwb25zZRJMCgdDb21wYWN0Eh8u'
     'cHJvdGVjdG9yYXRlLnYxLkNvbXBhY3RSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLkNvbXBhY3'
-    'RSZXNwb25zZQ==');
+    'RSZXNwb25zZRJaCgpMaXN0TW9kZWxzEiIucHJvdGVjdG9yYXRlLnYxLkxpc3RNb2RlbHNSZXF1'
+    'ZXN0GiMucHJvdGVjdG9yYXRlLnYxLkxpc3RNb2RlbHNSZXNwb25zZSIDkAIBElsKDFNldFNlbG'
+    'VjdGlvbhIkLnByb3RlY3RvcmF0ZS52MS5TZXRTZWxlY3Rpb25SZXF1ZXN0GiUucHJvdGVjdG9y'
+    'YXRlLnYxLlNldFNlbGVjdGlvblJlc3BvbnNl');

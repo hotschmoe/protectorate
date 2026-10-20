@@ -3,12 +3,15 @@ package sleeve
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/driver"
 )
 
 // readEnvFile recovers the caller env a sleeve was spawned with from its
@@ -79,6 +82,32 @@ func (m *Manager) Command(name string) (func(bin string, args []string) ([]strin
 }
 
 const gitTimeout = 20 * time.Second
+
+// CatalogOptions confines discovery to a temporary home and shared native auth.
+// It creates no sleeve record, project mount, native thread or inference turn.
+func (m *Manager) CatalogOptions() (driver.Options, error) {
+	bin, err := m.cfg.Locate(Codex)
+	if err != nil {
+		return driver.Options{}, err
+	}
+	auth := m.cfg.authDir(Codex)
+	fi, err := os.Stat(auth)
+	if err != nil {
+		return driver.Options{}, fmt.Errorf("Codex auth directory unavailable (run protectorate login codex on the hub): %w", err)
+	}
+	if !fi.IsDir() {
+		return driver.Options{}, fmt.Errorf("%w: Codex auth path is not a directory", ErrInvalid)
+	}
+	codexHome := filepath.Join(m.cfg.UserHome, ".codex")
+	links := append(append([]Link(nil), bin.Symlinks...), Link{Path: filepath.Join(codexHome, "auth.json"), Target: filepath.Join(auth, "auth.json")})
+	return driver.Options{Command: func(_ string, args []string) ([]string, error) {
+		return m.cfg.BoxArgv(Box{Unit: "prot-catalog-" + rand.Text(), Hostname: "catalog", Limits: Limits{CPUPercent: 100, MemoryBytes: 1 << 30},
+			RO: bin.RO, ROFiles: bin.Files, Symlinks: links, RW: []string{auth}, Chdir: "/tmp",
+			Env:     [][2]string{{"HOME", m.cfg.UserHome}, {"CODEX_HOME", codexHome}, {"PATH", strings.Join(m.cfg.PathDirs, ":")}},
+			Command: append([]string{bin.Path}, args...),
+		}), nil
+	}}, nil
+}
 
 // Git runs a read-only git command on the named sleeve's workspace in a
 // throwaway sandbox: no network, no home, nothing writable but a tmpfs, the

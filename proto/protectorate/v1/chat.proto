@@ -36,7 +36,53 @@ service ChatService {
   // with failed_precondition while a turn is running or an approval is
   // pending, and returns after the harness has confirmed the compaction.
   rpc Compact(CompactRequest) returns (CompactResponse);
+
+  // Native catalog; no inference turn is started. Select by sleeve or harness.
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Replace the requested selection between turns, without restarting.
+  // Empty fields restore the captured native defaults. Unsupported drivers fail.
+  rpc SetSelection(SetSelectionRequest) returns (SetSelectionResponse);
 }
+
+message ModelSelection {
+  string model = 1;
+  // Native effort value, validated against the selected model's catalog.
+  string effort = 2;
+}
+
+message ModelSettings {
+  ModelSelection requested = 1;
+  ModelSelection effective = 2;
+  // Native session defaults captured before any explicit selection.
+  ModelSelection native_defaults = 3;
+}
+
+message ModelOption {
+  string model = 1;
+  string name = 2;
+  repeated string efforts = 3;
+  string default_effort = 4;
+  bool is_default = 5;
+}
+
+message ListModelsRequest {
+  string sleeve = 1;
+  // claude, codex, grok or pi; used when sleeve is empty, e.g. at creation.
+  string harness = 2;
+}
+message ListModelsResponse {
+  bool supported = 1;
+  string reason = 2;
+  repeated ModelOption models = 3;
+  bool live_update = 4;
+}
+message SetSelectionRequest {
+  string sleeve = 1;
+  ModelSelection selection = 2;
+}
+message SetSelectionResponse { ChatStatus chat = 1; }
 
 enum SleeveMode {
   // UNSPECIFIED on spawn means CHAT for agent harnesses and TERMINAL for
@@ -82,6 +128,8 @@ message ChatStatus {
   // or the tailnet (a user-run LLM server) rather than a hosted API. The hub
   // decides it from the provider's base URL.
   bool local_model = 10;
+  string reasoning_effort = 11;
+  ModelSettings settings = 12;
 }
 
 message ChatEvent {
@@ -104,6 +152,7 @@ message ChatEvent {
     // handoff marks where a resleeve replaced the harness; the events after
     // it come from the new one.
     Handoff handoff = 21;
+    ModelSettings settings = 22;
   }
 }
 

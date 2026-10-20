@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
@@ -91,6 +92,8 @@ func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
 		State:            pb.ChatState(pb.ChatState_value[c.State]),
 		HarnessSessionId: c.SessionID,
 		Model:            c.Model,
+		ReasoningEffort:  c.Effort,
+		Settings:         settingsToProto(driver.SelectionState{Requested: c.Requested, Effective: driver.Selection{Model: c.Model, Effort: c.Effort}, Defaults: c.Defaults}),
 		ContextTokens:    c.Context,
 		ContextWindow:    c.Window,
 		LastSeq:          c.LastSeq,
@@ -194,11 +197,17 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; start it with the owner token via `protectorate orchestrator spawn` or START ENVOY in the app", m.Name))
 	}
 	r := sleeve.SpawnRequest{
-		Name: m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
+		Selection: selectionFromProto(m.Selection),
+		Name:      m.Name, Workspace: m.Workspace, Harness: harnessFromProto(m.Harness),
 		Args: m.Args, Env: m.Env, Mode: modeFromProto(m.Mode), Supervised: m.Supervised,
 	}
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
+	}
+	if !spawningEnvoy(ctx) {
+		if err := h.validateSelection(ctx, driver.Harness(r.Harness), r.Selection); err != nil {
+			return nil, err
+		}
 	}
 	info, err := h.spawn(ctx, r, spawnOpts{})
 	if err != nil {
@@ -208,6 +217,8 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 }
 
 type spawnOpts struct {
+	selection driver.Selection
+	defaults  driver.Selection
 	// keepLog continues the sleeve's chat log instead of moving it aside.
 	keepLog bool
 	// resume is a native session id the chat driver resumes instead of
@@ -261,7 +272,7 @@ func (h *Hub) spawn(ctx context.Context, r sleeve.SpawnRequest, o spawnOpts) (sl
 	}
 	if info.Mode == sleeve.ModeChat {
 		if o.resume != "" {
-			if _, err := h.sleeves.SetChat(info.Name, func(c *sleeve.Chat) { c.SessionID = o.resume }); err != nil {
+			if _, err := h.sleeves.SetChat(info.Name, func(c *sleeve.Chat) { c.SessionID = o.resume; c.Defaults = o.defaults }); err != nil {
 				log.Printf("sleeve %s: record session to resume: %v", info.Name, err)
 			}
 		}

@@ -106,6 +106,7 @@ does the work, so the app's ENVOY tab starts it as well. See docs/orchestrator.m
 }
 
 func orchestratorSpawnCmd(o *opts) *cobra.Command {
+	sel := &pb.ModelSelection{}
 	var harness string
 	var scopes, addScopes []string
 	var ttl time.Duration
@@ -139,7 +140,7 @@ Needs the owner token.`,
 				return err
 			}
 			res, err := sl.SpawnEnvoy(cmd.Context(), connect.NewRequest(&pb.SpawnEnvoyRequest{
-				Harness: hv, Scopes: scopes, AddScopes: addScopes, Ttl: durationpb.New(ttl),
+				Harness: hv, Scopes: scopes, AddScopes: addScopes, Ttl: durationpb.New(ttl), Selection: optionalSelection(sel),
 			}))
 			if err != nil {
 				return err
@@ -156,6 +157,7 @@ Needs the owner token.`,
 		},
 	}
 	c.Flags().StringVar(&harness, "harness", "auto", "auto (top of quota suggest), claude, codex, grok or pi")
+	selectionFlags(c, sel)
 	c.Flags().StringSliceVar(&scopes, "scopes", nil, "replace the default scopes (comma separated or repeated)")
 	c.Flags().StringSliceVar(&addScopes, "add-scopes", nil, "scopes to add to the defaults")
 	c.Flags().DurationVar(&ttl, "ttl", 720*time.Hour, "token lifetime, renewed by the hub; 0 never expires")

@@ -269,7 +269,7 @@ func TestFilter(t *testing.T) {
 		}
 		return out
 	}
-	readOnly := []string{"backlog_get_note", "backlog_list_notes", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "node_get_node", "node_list_nodes", "quota_get_quota", "quota_suggest", "session_capture_pane", "session_list_sessions", "sleeve_get_sleeve", "sleeve_list_sleeves", "sleeve_list_workspaces", "tailnet_get_status"}
+	readOnly := []string{"backlog_get_note", "backlog_list_notes", "chat_list_models", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "node_get_node", "node_list_nodes", "quota_get_quota", "quota_suggest", "session_capture_pane", "session_list_sessions", "sleeve_get_sleeve", "sleeve_list_sleeves", "sleeve_list_workspaces", "tailnet_get_status"}
 	cases := []struct {
 		name string
 		f    Filter
@@ -278,7 +278,7 @@ func TestFilter(t *testing.T) {
 		{"default is read-only", Filter{}, readOnly},
 		{"allow glob replaces default", Filter{Allow: []string{"backlog_*"}}, []string{"backlog_create_note", "backlog_delete_note", "backlog_get_note", "backlog_list_notes", "backlog_update_note"}},
 		{"deny wins", Filter{Allow: []string{"backlog_*"}, Deny: []string{"*_update_note", "backlog_create_*", "backlog_delete_*"}}, []string{"backlog_get_note", "backlog_list_notes"}},
-		{"deny on default", Filter{Deny: []string{"session_*", "node_*"}}, []string{"backlog_get_note", "backlog_list_notes", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "quota_get_quota", "quota_suggest", "sleeve_get_sleeve", "sleeve_list_sleeves", "sleeve_list_workspaces", "tailnet_get_status"}},
+		{"deny on default", Filter{Deny: []string{"session_*", "node_*"}}, []string{"backlog_get_note", "backlog_list_notes", "chat_list_models", "directory_get_project", "directory_list_projects", "hub_get_status", "job_get_job", "job_list_jobs", "lease_list_leases", "message_list_threads", "message_thread", "quota_get_quota", "quota_suggest", "sleeve_get_sleeve", "sleeve_list_sleeves", "sleeve_list_workspaces", "tailnet_get_status"}},
 	}
 	for _, c := range cases {
 		if got := names(c.f); !reflect.DeepEqual(got, c.want) {

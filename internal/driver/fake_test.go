@@ -287,6 +287,7 @@ func fakeGrok(f fakeIO) {
 
 func fakeCodex(f fakeIO) {
 	tid := "cx-new-1"
+	selected := "native"
 	compacts := 0
 	note := func(method string, p map[string]any) {
 		p["threadId"] = tid
@@ -303,6 +304,28 @@ func fakeCodex(f fakeIO) {
 		switch m["method"] {
 		case "initialize", "thread/unsubscribe":
 			reply(map[string]any{})
+		case "model/list":
+			model := "gpt-fake"
+			if params["cursor"] == "second" {
+				model = "gpt-other"
+			}
+			res := map[string]any{"data": []any{map[string]any{"model": model, "displayName": model, "isDefault": model == "gpt-fake", "defaultReasoningEffort": "medium", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "low"}, map[string]any{"reasoningEffort": "medium"}, map[string]any{"reasoningEffort": "xhigh"}}}}}
+			if model == "gpt-fake" {
+				res["nextCursor"] = "second"
+			}
+			reply(res)
+		case "thread/settings/update":
+			if os.Getenv("DRIVER_FAKE_NO_SETTINGS") != "" {
+				f.send(map[string]any{"id": id, "error": map[string]any{"code": -32601, "message": "unsupported"}})
+				continue
+			}
+			selected = fmt.Sprint(params["model"]) + "/" + fmt.Sprint(params["effort"])
+			reply(map[string]any{})
+			effort := params["effort"]
+			if reported := os.Getenv("DRIVER_FAKE_EFFECTIVE_EFFORT"); reported != "" {
+				effort = reported
+			}
+			note("thread/settings/updated", map[string]any{"threadSettings": map[string]any{"model": params["model"], "effort": effort}})
 		case "thread/start":
 			if os.Getenv("DRIVER_FAKE_POLICY") != "" {
 				_, hasPolicy := params["approvalPolicy"]
@@ -310,14 +333,14 @@ func fakeCodex(f fakeIO) {
 					tid = "cx-policy-set"
 				}
 			}
-			reply(map[string]any{"thread": map[string]any{"id": tid}, "model": "gpt-fake"})
+			reply(map[string]any{"thread": map[string]any{"id": tid}, "model": "gpt-fake", "reasoningEffort": "low"})
 		case "thread/resume":
 			tid, _ = params["threadId"].(string)
 			if tid == "locked" {
 				f.send(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": "thread locked already has an active writer"}})
 				continue
 			}
-			reply(map[string]any{"thread": map[string]any{"id": tid}, "model": "gpt-fake"})
+			reply(map[string]any{"thread": map[string]any{"id": tid}, "model": "gpt-fake", "reasoningEffort": "low"})
 		case "thread/compact/start":
 			reply(map[string]any{})
 			compacts++
@@ -333,6 +356,9 @@ func fakeCodex(f fakeIO) {
 			reply(map[string]any{"turn": map[string]any{"id": "t1"}})
 			note("turn/started", map[string]any{"turn": map[string]any{"id": "t1"}})
 			switch {
+			case text == "selection":
+				note("item/agentMessage/delta", map[string]any{"delta": selected})
+				complete("completed")
 			case strings.Contains(text, "die"):
 				os.Exit(3)
 			case strings.Contains(text, "slow"):

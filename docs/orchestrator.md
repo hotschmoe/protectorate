@@ -39,6 +39,15 @@ ordinary user messages at its next idle (see [coordination.md](coordination.md))
 The app's ENVOY tab (the first one) is a dedicated chat with Envoy and a selector for any other chat-mode sleeve. Watch it with `protectorate chat watch envoy`, and answer its approval requests
 with `chat respond`. There is no terminal mode for Envoy.
 
+For Codex, choose model/effort on creation with `--harness codex --model MODEL
+--effort EFFORT`, using values from `protectorate chat models --harness codex`.
+To change an existing idle Envoy without recreating it, use `protectorate chat
+settings envoy --model MODEL --effort EFFORT` or its chat menu's MODEL AND
+EFFORT action. See [model settings](chat.md#models-and-reasoning-effort) for
+native defaults, other-driver limits and scope requirements. Envoy's default
+token lacks `chat_set_selection`; owner authentication or an explicit grant
+is required. This feature does not require restarting the hub or Envoy.
+
 `AGENTS.md` holds the role, the working loop, the token's name and scopes, a table
 of every hub tool with whether this token may call it, and the CLI reference
 walked from the cobra command tree. It is rebuilt on every spawn, so it cannot

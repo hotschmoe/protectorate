@@ -102,6 +102,7 @@ var sleeveModes = map[string]pb.SleeveMode{
 }
 
 func sleeveSpawnCmd(o *opts) *cobra.Command {
+	sel := &pb.ModelSelection{}
 	var workspace, harness, mem, mode string
 	var cpu uint32
 	var env []string
@@ -164,7 +165,7 @@ sandbox is the boundary) unless --supervised: then it asks before acting and
 				return err
 			}
 			res, err := cl.SpawnSleeve(cmd.Context(), connect.NewRequest(&pb.SpawnSleeveRequest{
-				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode,
+				Name: name, Workspace: workspace, Harness: h, Args: extra, Limits: lim, Env: envMap, Mode: sleeveMode, Selection: optionalSelection(sel),
 				Supervised: supervised,
 			}))
 			if err != nil {
@@ -181,6 +182,7 @@ sandbox is the boundary) unless --supervised: then it asks before acting and
 		},
 	}
 	c.Flags().StringVar(&workspace, "workspace", "", "directory on the hub, or git URL to clone")
+	selectionFlags(c, sel)
 	c.Flags().StringVar(&harness, "harness", "", "claude, codex, grok, pi or shell")
 	c.Flags().Uint32Var(&cpu, "cpu", 0, "CPU limit in percent of one core (0 = unlimited)")
 	c.Flags().StringVar(&mem, "mem", "", "memory limit such as 512M or 8G (empty = unlimited)")
@@ -334,6 +336,9 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 				if s.Supervised {
 					fmt.Fprintln(w, "supervised\tyes (the harness asks; answer with chat respond)")
 				}
+				if s.Chat != nil {
+					printSelection(w, s.Chat)
+				}
 				if s.Handoff != nil {
 					printHandoff(w, s.Handoff)
 				}
@@ -398,6 +403,8 @@ func sleeveAttachCmd(o *opts) *cobra.Command {
 }
 
 func sleeveResleeveCmd(o *opts) *cobra.Command {
+	sel := &pb.ModelSelection{}
+	var defaults bool
 	var to string
 	var interrupt bool
 	var wait time.Duration
@@ -426,7 +433,10 @@ new harness and tells it to read the file. --to auto takes the top of
 			if err != nil {
 				return err
 			}
-			req := &pb.ResleeveSleeveRequest{Name: args[0], To: h, Interrupt: interrupt}
+			if defaults && optionalSelection(sel) != nil {
+				return errors.New("--native-defaults cannot be combined with --model or --effort")
+			}
+			req := &pb.ResleeveSleeveRequest{Name: args[0], To: h, Interrupt: interrupt, Selection: optionalSelection(sel), NativeDefaults: defaults}
 			if wait > 0 {
 				req.Wait = durationpb.New(wait)
 			}
@@ -441,6 +451,8 @@ new harness and tells it to read the file. --to auto takes the top of
 		},
 	}
 	c.Flags().StringVar(&to, "to", "auto", "auto, claude, codex, grok or pi")
+	selectionFlags(c, sel)
+	c.Flags().BoolVar(&defaults, "native-defaults", false, "explicitly use target harness defaults instead of carrying selection")
 	c.Flags().BoolVar(&interrupt, "interrupt", false, "interrupt a running turn instead of waiting for it")
 	c.Flags().DurationVar(&wait, "wait", 0, "how long a running turn may continue before it is interrupted (default 5m)")
 	return c

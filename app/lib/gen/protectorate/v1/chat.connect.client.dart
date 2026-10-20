@@ -110,4 +110,41 @@ extension type ChatServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// Native catalog; no inference turn is started. Select by sleeve or harness.
+  Future<protectoratev1chat.ListModelsResponse> listModels(
+    protectoratev1chat.ListModelsRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.ChatService.listModels,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// Replace the requested selection between turns, without restarting.
+  /// Empty fields restore the captured native defaults. Unsupported drivers fail.
+  Future<protectoratev1chat.SetSelectionResponse> setSelection(
+    protectoratev1chat.SetSelectionRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.ChatService.setSelection,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }

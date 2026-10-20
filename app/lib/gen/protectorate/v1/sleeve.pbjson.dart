@@ -279,6 +279,14 @@ const SpawnSleeveRequest$json = {
       '10': 'mode'
     },
     {'1': 'supervised', '3': 8, '4': 1, '5': 8, '10': 'supervised'},
+    {
+      '1': 'selection',
+      '3': 9,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'selection'
+    },
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -301,8 +309,9 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'N0b3JhdGUudjEuU2xlZXZlTGltaXRzUgZsaW1pdHMSPgoDZW52GAYgAygLMiwucHJvdGVjdG9y'
     'YXRlLnYxLlNwYXduU2xlZXZlUmVxdWVzdC5FbnZFbnRyeVIDZW52Ei8KBG1vZGUYByABKA4yGy'
     '5wcm90ZWN0b3JhdGUudjEuU2xlZXZlTW9kZVIEbW9kZRIeCgpzdXBlcnZpc2VkGAggASgIUgpz'
-    'dXBlcnZpc2VkGjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgJUg'
-    'V2YWx1ZToCOAE=');
+    'dXBlcnZpc2VkEj0KCXNlbGVjdGlvbhgJIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbG'
+    'VjdGlvblIJc2VsZWN0aW9uGjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVl'
+    'GAIgASgJUgV2YWx1ZToCOAE=');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {
@@ -479,6 +488,15 @@ const ResleeveSleeveRequest$json = {
       '6': '.google.protobuf.Duration',
       '10': 'wait'
     },
+    {
+      '1': 'selection',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'selection'
+    },
+    {'1': 'native_defaults', '3': 6, '4': 1, '5': 8, '10': 'nativeDefaults'},
   ],
 };
 
@@ -486,7 +504,9 @@ const ResleeveSleeveRequest$json = {
 final $typed_data.Uint8List resleeveSleeveRequestDescriptor = $convert.base64Decode(
     'ChVSZXNsZWV2ZVNsZWV2ZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIoCgJ0bxgCIAEoDj'
     'IYLnByb3RlY3RvcmF0ZS52MS5IYXJuZXNzUgJ0bxIcCglpbnRlcnJ1cHQYAyABKAhSCWludGVy'
-    'cnVwdBItCgR3YWl0GAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uUgR3YWl0');
+    'cnVwdBItCgR3YWl0GAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uUgR3YWl0Ej0KCX'
+    'NlbGVjdGlvbhgFIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbGVjdGlvblIJc2VsZWN0'
+    'aW9uEicKD25hdGl2ZV9kZWZhdWx0cxgGIAEoCFIObmF0aXZlRGVmYXVsdHM=');
 
 @$core.Deprecated('Use resleeveSleeveResponseDescriptor instead')
 const ResleeveSleeveResponse$json = {
@@ -531,6 +551,14 @@ const SpawnEnvoyRequest$json = {
       '6': '.google.protobuf.Duration',
       '10': 'ttl'
     },
+    {
+      '1': 'selection',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.ModelSelection',
+      '10': 'selection'
+    },
   ],
 };
 
@@ -539,7 +567,8 @@ final $typed_data.Uint8List spawnEnvoyRequestDescriptor = $convert.base64Decode(
     'ChFTcGF3bkVudm95UmVxdWVzdBIyCgdoYXJuZXNzGAEgASgOMhgucHJvdGVjdG9yYXRlLnYxLk'
     'hhcm5lc3NSB2hhcm5lc3MSFgoGc2NvcGVzGAIgAygJUgZzY29wZXMSHQoKYWRkX3Njb3BlcxgD'
     'IAMoCVIJYWRkU2NvcGVzEisKA3R0bBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbl'
-    'IDdHRs');
+    'IDdHRsEj0KCXNlbGVjdGlvbhgFIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbGVjdGlv'
+    'blIJc2VsZWN0aW9u');
 
 @$core.Deprecated('Use spawnEnvoyResponseDescriptor instead')
 const SpawnEnvoyResponse$json = {
@@ -627,11 +656,13 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveLimits': SleeveLimits$json,
   '.protectorate.v1.SpawnSleeveRequest.EnvEntry':
       SpawnSleeveRequest_EnvEntry$json,
+  '.protectorate.v1.ModelSelection': $1.ModelSelection$json,
   '.protectorate.v1.SpawnSleeveResponse': SpawnSleeveResponse$json,
   '.protectorate.v1.Sleeve': Sleeve$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.SleeveUsage': SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $1.ChatStatus$json,
+  '.protectorate.v1.ModelSettings': $1.ModelSettings$json,
   '.protectorate.v1.Handoff': $1.Handoff$json,
   '.protectorate.v1.ListSleevesRequest': ListSleevesRequest$json,
   '.protectorate.v1.ListSleevesResponse': ListSleevesResponse$json,

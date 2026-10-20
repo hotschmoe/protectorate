@@ -166,6 +166,28 @@
   },
   {
     "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Native catalog; no inference turn is started. Select by sleeve or harness.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "claude, codex, grok or pi; used when sleeve is empty, e.g. at creation.",
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_list_models"
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false,
@@ -216,6 +238,38 @@
       "type": "object"
     },
     "name": "chat_send"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Replace the requested selection between turns, without restarting. Empty fields restore the captured native defaults. Unsupported drivers fail.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "effort": {
+              "description": "Native effort value, validated against the selected model's catalog.",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_set_selection"
   },
   {
     "annotations": {
@@ -1410,6 +1464,23 @@
         "name": {
           "type": "string"
         },
+        "nativeDefaults": {
+          "description": "Explicitly discard the outgoing selection when switching harnesses.",
+          "type": "boolean"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "effort": {
+              "description": "Native effort value, validated against the selected model's catalog.",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "to": {
           "description": "to is the new harness. UNSPECIFIED means auto: the top recommendation of QuotaService.Suggest other than the current harness.",
           "enum": [
@@ -1493,6 +1564,20 @@
         "name": {
           "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",
           "type": "string"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "description": "Codex chat selection; omitted preserves native defaults. Other drivers reject it.",
+          "properties": {
+            "effort": {
+              "description": "Native effort value, validated against the selected model's catalog.",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
         "supervised": {
           "description": "supervised runs a chat sleeve's harness in its asking permission mode instead of autonomous: Claude --permission-mode default, Codex approvalPolicy untrusted with its workspace-write sandbox, Grok /always-approve off. pi has no gate and ignores it.",

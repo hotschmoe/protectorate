@@ -137,6 +137,413 @@ func (ChatState) EnumDescriptor() ([]byte, []int) {
 	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{1}
 }
 
+type ModelSelection struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Model string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// Native effort value, validated against the selected model's catalog.
+	Effort        string `protobuf:"bytes,2,opt,name=effort,proto3" json:"effort,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelSelection) Reset() {
+	*x = ModelSelection{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelSelection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelSelection) ProtoMessage() {}
+
+func (x *ModelSelection) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelSelection.ProtoReflect.Descriptor instead.
+func (*ModelSelection) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ModelSelection) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ModelSelection) GetEffort() string {
+	if x != nil {
+		return x.Effort
+	}
+	return ""
+}
+
+type ModelSettings struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Requested *ModelSelection        `protobuf:"bytes,1,opt,name=requested,proto3" json:"requested,omitempty"`
+	Effective *ModelSelection        `protobuf:"bytes,2,opt,name=effective,proto3" json:"effective,omitempty"`
+	// Native session defaults captured before any explicit selection.
+	NativeDefaults *ModelSelection `protobuf:"bytes,3,opt,name=native_defaults,json=nativeDefaults,proto3" json:"native_defaults,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ModelSettings) Reset() {
+	*x = ModelSettings{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelSettings) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelSettings) ProtoMessage() {}
+
+func (x *ModelSettings) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelSettings.ProtoReflect.Descriptor instead.
+func (*ModelSettings) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ModelSettings) GetRequested() *ModelSelection {
+	if x != nil {
+		return x.Requested
+	}
+	return nil
+}
+
+func (x *ModelSettings) GetEffective() *ModelSelection {
+	if x != nil {
+		return x.Effective
+	}
+	return nil
+}
+
+func (x *ModelSettings) GetNativeDefaults() *ModelSelection {
+	if x != nil {
+		return x.NativeDefaults
+	}
+	return nil
+}
+
+type ModelOption struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Efforts       []string               `protobuf:"bytes,3,rep,name=efforts,proto3" json:"efforts,omitempty"`
+	DefaultEffort string                 `protobuf:"bytes,4,opt,name=default_effort,json=defaultEffort,proto3" json:"default_effort,omitempty"`
+	IsDefault     bool                   `protobuf:"varint,5,opt,name=is_default,json=isDefault,proto3" json:"is_default,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelOption) Reset() {
+	*x = ModelOption{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelOption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelOption) ProtoMessage() {}
+
+func (x *ModelOption) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
+func (*ModelOption) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ModelOption) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *ModelOption) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ModelOption) GetEfforts() []string {
+	if x != nil {
+		return x.Efforts
+	}
+	return nil
+}
+
+func (x *ModelOption) GetDefaultEffort() string {
+	if x != nil {
+		return x.DefaultEffort
+	}
+	return ""
+}
+
+func (x *ModelOption) GetIsDefault() bool {
+	if x != nil {
+		return x.IsDefault
+	}
+	return false
+}
+
+type ListModelsRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Sleeve string                 `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	// claude, codex, grok or pi; used when sleeve is empty, e.g. at creation.
+	Harness       string `protobuf:"bytes,2,opt,name=harness,proto3" json:"harness,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListModelsRequest) Reset() {
+	*x = ListModelsRequest{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListModelsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListModelsRequest) ProtoMessage() {}
+
+func (x *ListModelsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListModelsRequest.ProtoReflect.Descriptor instead.
+func (*ListModelsRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ListModelsRequest) GetSleeve() string {
+	if x != nil {
+		return x.Sleeve
+	}
+	return ""
+}
+
+func (x *ListModelsRequest) GetHarness() string {
+	if x != nil {
+		return x.Harness
+	}
+	return ""
+}
+
+type ListModelsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Supported     bool                   `protobuf:"varint,1,opt,name=supported,proto3" json:"supported,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	Models        []*ModelOption         `protobuf:"bytes,3,rep,name=models,proto3" json:"models,omitempty"`
+	LiveUpdate    bool                   `protobuf:"varint,4,opt,name=live_update,json=liveUpdate,proto3" json:"live_update,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListModelsResponse) Reset() {
+	*x = ListModelsResponse{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListModelsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListModelsResponse) ProtoMessage() {}
+
+func (x *ListModelsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListModelsResponse.ProtoReflect.Descriptor instead.
+func (*ListModelsResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ListModelsResponse) GetSupported() bool {
+	if x != nil {
+		return x.Supported
+	}
+	return false
+}
+
+func (x *ListModelsResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ListModelsResponse) GetModels() []*ModelOption {
+	if x != nil {
+		return x.Models
+	}
+	return nil
+}
+
+func (x *ListModelsResponse) GetLiveUpdate() bool {
+	if x != nil {
+		return x.LiveUpdate
+	}
+	return false
+}
+
+type SetSelectionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sleeve        string                 `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	Selection     *ModelSelection        `protobuf:"bytes,2,opt,name=selection,proto3" json:"selection,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSelectionRequest) Reset() {
+	*x = SetSelectionRequest{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSelectionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSelectionRequest) ProtoMessage() {}
+
+func (x *SetSelectionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSelectionRequest.ProtoReflect.Descriptor instead.
+func (*SetSelectionRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SetSelectionRequest) GetSleeve() string {
+	if x != nil {
+		return x.Sleeve
+	}
+	return ""
+}
+
+func (x *SetSelectionRequest) GetSelection() *ModelSelection {
+	if x != nil {
+		return x.Selection
+	}
+	return nil
+}
+
+type SetSelectionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Chat          *ChatStatus            `protobuf:"bytes,1,opt,name=chat,proto3" json:"chat,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSelectionResponse) Reset() {
+	*x = SetSelectionResponse{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSelectionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSelectionResponse) ProtoMessage() {}
+
+func (x *SetSelectionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSelectionResponse.ProtoReflect.Descriptor instead.
+func (*SetSelectionResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SetSelectionResponse) GetChat() *ChatStatus {
+	if x != nil {
+		return x.Chat
+	}
+	return nil
+}
+
 // ChatStatus is the live summary kept on the Sleeve.
 type ChatStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -160,14 +567,16 @@ type ChatStatus struct {
 	// local_model is true when the model is served from this machine, the LAN
 	// or the tailnet (a user-run LLM server) rather than a hosted API. The hub
 	// decides it from the provider's base URL.
-	LocalModel    bool `protobuf:"varint,10,opt,name=local_model,json=localModel,proto3" json:"local_model,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LocalModel      bool           `protobuf:"varint,10,opt,name=local_model,json=localModel,proto3" json:"local_model,omitempty"`
+	ReasoningEffort string         `protobuf:"bytes,11,opt,name=reasoning_effort,json=reasoningEffort,proto3" json:"reasoning_effort,omitempty"`
+	Settings        *ModelSettings `protobuf:"bytes,12,opt,name=settings,proto3" json:"settings,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ChatStatus) Reset() {
 	*x = ChatStatus{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[0]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +588,7 @@ func (x *ChatStatus) String() string {
 func (*ChatStatus) ProtoMessage() {}
 
 func (x *ChatStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[0]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +601,7 @@ func (x *ChatStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatStatus.ProtoReflect.Descriptor instead.
 func (*ChatStatus) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{0}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ChatStatus) GetState() ChatState {
@@ -265,6 +674,20 @@ func (x *ChatStatus) GetLocalModel() bool {
 	return false
 }
 
+func (x *ChatStatus) GetReasoningEffort() string {
+	if x != nil {
+		return x.ReasoningEffort
+	}
+	return ""
+}
+
+func (x *ChatStatus) GetSettings() *ModelSettings {
+	if x != nil {
+		return x.Settings
+	}
+	return nil
+}
+
 type ChatEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// seq increases by one per event within a sleeve, starting at 1. All text
@@ -285,6 +708,7 @@ type ChatEvent struct {
 	//	*ChatEvent_Error
 	//	*ChatEvent_State
 	//	*ChatEvent_Handoff
+	//	*ChatEvent_Settings
 	Body          isChatEvent_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -292,7 +716,7 @@ type ChatEvent struct {
 
 func (x *ChatEvent) Reset() {
 	*x = ChatEvent{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[1]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +728,7 @@ func (x *ChatEvent) String() string {
 func (*ChatEvent) ProtoMessage() {}
 
 func (x *ChatEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[1]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +741,7 @@ func (x *ChatEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatEvent.ProtoReflect.Descriptor instead.
 func (*ChatEvent) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{1}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ChatEvent) GetSeq() uint64 {
@@ -449,6 +873,15 @@ func (x *ChatEvent) GetHandoff() *Handoff {
 	return nil
 }
 
+func (x *ChatEvent) GetSettings() *ModelSettings {
+	if x != nil {
+		if x, ok := x.Body.(*ChatEvent_Settings); ok {
+			return x.Settings
+		}
+	}
+	return nil
+}
+
 type isChatEvent_Body interface {
 	isChatEvent_Body()
 }
@@ -503,6 +936,10 @@ type ChatEvent_Handoff struct {
 	Handoff *Handoff `protobuf:"bytes,21,opt,name=handoff,proto3,oneof"`
 }
 
+type ChatEvent_Settings struct {
+	Settings *ModelSettings `protobuf:"bytes,22,opt,name=settings,proto3,oneof"`
+}
+
 func (*ChatEvent_User) isChatEvent_Body() {}
 
 func (*ChatEvent_Text) isChatEvent_Body() {}
@@ -527,6 +964,8 @@ func (*ChatEvent_State) isChatEvent_Body() {}
 
 func (*ChatEvent_Handoff) isChatEvent_Body() {}
 
+func (*ChatEvent_Settings) isChatEvent_Body() {}
+
 type UserMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Text  string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -539,7 +978,7 @@ type UserMessage struct {
 
 func (x *UserMessage) Reset() {
 	*x = UserMessage{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[2]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -551,7 +990,7 @@ func (x *UserMessage) String() string {
 func (*UserMessage) ProtoMessage() {}
 
 func (x *UserMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[2]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -564,7 +1003,7 @@ func (x *UserMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserMessage.ProtoReflect.Descriptor instead.
 func (*UserMessage) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{2}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UserMessage) GetText() string {
@@ -597,7 +1036,7 @@ type AssistantText struct {
 
 func (x *AssistantText) Reset() {
 	*x = AssistantText{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[3]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +1048,7 @@ func (x *AssistantText) String() string {
 func (*AssistantText) ProtoMessage() {}
 
 func (x *AssistantText) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[3]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +1061,7 @@ func (x *AssistantText) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssistantText.ProtoReflect.Descriptor instead.
 func (*AssistantText) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{3}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AssistantText) GetMessageId() string {
@@ -658,7 +1097,7 @@ type ToolCall struct {
 
 func (x *ToolCall) Reset() {
 	*x = ToolCall{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[4]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -670,7 +1109,7 @@ func (x *ToolCall) String() string {
 func (*ToolCall) ProtoMessage() {}
 
 func (x *ToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[4]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -683,7 +1122,7 @@ func (x *ToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCall.ProtoReflect.Descriptor instead.
 func (*ToolCall) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{4}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ToolCall) GetId() string {
@@ -720,7 +1159,7 @@ type ToolResult struct {
 
 func (x *ToolResult) Reset() {
 	*x = ToolResult{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[5]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -732,7 +1171,7 @@ func (x *ToolResult) String() string {
 func (*ToolResult) ProtoMessage() {}
 
 func (x *ToolResult) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[5]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -745,7 +1184,7 @@ func (x *ToolResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResult.ProtoReflect.Descriptor instead.
 func (*ToolResult) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{5}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ToolResult) GetToolCallId() string {
@@ -787,7 +1226,7 @@ type ApprovalRequest struct {
 
 func (x *ApprovalRequest) Reset() {
 	*x = ApprovalRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[6]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -799,7 +1238,7 @@ func (x *ApprovalRequest) String() string {
 func (*ApprovalRequest) ProtoMessage() {}
 
 func (x *ApprovalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[6]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -812,7 +1251,7 @@ func (x *ApprovalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalRequest.ProtoReflect.Descriptor instead.
 func (*ApprovalRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{6}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ApprovalRequest) GetId() string {
@@ -847,7 +1286,7 @@ type ApprovalResolved struct {
 
 func (x *ApprovalResolved) Reset() {
 	*x = ApprovalResolved{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[7]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -859,7 +1298,7 @@ func (x *ApprovalResolved) String() string {
 func (*ApprovalResolved) ProtoMessage() {}
 
 func (x *ApprovalResolved) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[7]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -872,7 +1311,7 @@ func (x *ApprovalResolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalResolved.ProtoReflect.Descriptor instead.
 func (*ApprovalResolved) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{7}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ApprovalResolved) GetId() string {
@@ -911,7 +1350,7 @@ type UsageUpdate struct {
 
 func (x *UsageUpdate) Reset() {
 	*x = UsageUpdate{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[8]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -923,7 +1362,7 @@ func (x *UsageUpdate) String() string {
 func (*UsageUpdate) ProtoMessage() {}
 
 func (x *UsageUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[8]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -936,7 +1375,7 @@ func (x *UsageUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageUpdate.ProtoReflect.Descriptor instead.
 func (*UsageUpdate) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{8}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *UsageUpdate) GetContextTokens() uint64 {
@@ -997,7 +1436,7 @@ type TurnSettled struct {
 
 func (x *TurnSettled) Reset() {
 	*x = TurnSettled{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[9]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1448,7 @@ func (x *TurnSettled) String() string {
 func (*TurnSettled) ProtoMessage() {}
 
 func (x *TurnSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[9]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1461,7 @@ func (x *TurnSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnSettled.ProtoReflect.Descriptor instead.
 func (*TurnSettled) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{9}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TurnSettled) GetStopReason() string {
@@ -1044,7 +1483,7 @@ type Compaction struct {
 
 func (x *Compaction) Reset() {
 	*x = Compaction{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[10]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1056,7 +1495,7 @@ func (x *Compaction) String() string {
 func (*Compaction) ProtoMessage() {}
 
 func (x *Compaction) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[10]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1069,7 +1508,7 @@ func (x *Compaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Compaction.ProtoReflect.Descriptor instead.
 func (*Compaction) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{10}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Compaction) GetTokensBefore() uint64 {
@@ -1102,7 +1541,7 @@ type ChatError struct {
 
 func (x *ChatError) Reset() {
 	*x = ChatError{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[11]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1114,7 +1553,7 @@ func (x *ChatError) String() string {
 func (*ChatError) ProtoMessage() {}
 
 func (x *ChatError) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[11]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1127,7 +1566,7 @@ func (x *ChatError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatError.ProtoReflect.Descriptor instead.
 func (*ChatError) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{11}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ChatError) GetText() string {
@@ -1146,7 +1585,7 @@ type StateChange struct {
 
 func (x *StateChange) Reset() {
 	*x = StateChange{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[12]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1158,7 +1597,7 @@ func (x *StateChange) String() string {
 func (*StateChange) ProtoMessage() {}
 
 func (x *StateChange) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[12]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1171,7 +1610,7 @@ func (x *StateChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateChange.ProtoReflect.Descriptor instead.
 func (*StateChange) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{12}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *StateChange) GetState() ChatState {
@@ -1211,7 +1650,7 @@ type Handoff struct {
 
 func (x *Handoff) Reset() {
 	*x = Handoff{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1223,7 +1662,7 @@ func (x *Handoff) String() string {
 func (*Handoff) ProtoMessage() {}
 
 func (x *Handoff) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[13]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1236,7 +1675,7 @@ func (x *Handoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Handoff.ProtoReflect.Descriptor instead.
 func (*Handoff) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{13}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Handoff) GetFromHarness() string {
@@ -1326,7 +1765,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1338,7 +1777,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[14]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1351,7 +1790,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{14}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *WatchRequest) GetSleeve() string {
@@ -1379,7 +1818,7 @@ type SendRequest struct {
 
 func (x *SendRequest) Reset() {
 	*x = SendRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1391,7 +1830,7 @@ func (x *SendRequest) String() string {
 func (*SendRequest) ProtoMessage() {}
 
 func (x *SendRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[15]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1404,7 +1843,7 @@ func (x *SendRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendRequest.ProtoReflect.Descriptor instead.
 func (*SendRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{15}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SendRequest) GetSleeve() string {
@@ -1438,7 +1877,7 @@ type SendResponse struct {
 
 func (x *SendResponse) Reset() {
 	*x = SendResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1450,7 +1889,7 @@ func (x *SendResponse) String() string {
 func (*SendResponse) ProtoMessage() {}
 
 func (x *SendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[16]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1463,7 +1902,7 @@ func (x *SendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendResponse.ProtoReflect.Descriptor instead.
 func (*SendResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{16}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SendResponse) GetSeq() uint64 {
@@ -1482,7 +1921,7 @@ type InterruptRequest struct {
 
 func (x *InterruptRequest) Reset() {
 	*x = InterruptRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1494,7 +1933,7 @@ func (x *InterruptRequest) String() string {
 func (*InterruptRequest) ProtoMessage() {}
 
 func (x *InterruptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[17]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1507,7 +1946,7 @@ func (x *InterruptRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptRequest.ProtoReflect.Descriptor instead.
 func (*InterruptRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{17}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *InterruptRequest) GetSleeve() string {
@@ -1525,7 +1964,7 @@ type InterruptResponse struct {
 
 func (x *InterruptResponse) Reset() {
 	*x = InterruptResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1537,7 +1976,7 @@ func (x *InterruptResponse) String() string {
 func (*InterruptResponse) ProtoMessage() {}
 
 func (x *InterruptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[18]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1550,7 +1989,7 @@ func (x *InterruptResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InterruptResponse.ProtoReflect.Descriptor instead.
 func (*InterruptResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{18}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{25}
 }
 
 type RespondRequest struct {
@@ -1565,7 +2004,7 @@ type RespondRequest struct {
 
 func (x *RespondRequest) Reset() {
 	*x = RespondRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1577,7 +2016,7 @@ func (x *RespondRequest) String() string {
 func (*RespondRequest) ProtoMessage() {}
 
 func (x *RespondRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[19]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1590,7 +2029,7 @@ func (x *RespondRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondRequest.ProtoReflect.Descriptor instead.
 func (*RespondRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{19}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RespondRequest) GetSleeve() string {
@@ -1629,7 +2068,7 @@ type RespondResponse struct {
 
 func (x *RespondResponse) Reset() {
 	*x = RespondResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1641,7 +2080,7 @@ func (x *RespondResponse) String() string {
 func (*RespondResponse) ProtoMessage() {}
 
 func (x *RespondResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[20]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1654,7 +2093,7 @@ func (x *RespondResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondResponse.ProtoReflect.Descriptor instead.
 func (*RespondResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{20}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{27}
 }
 
 type CompactRequest struct {
@@ -1666,7 +2105,7 @@ type CompactRequest struct {
 
 func (x *CompactRequest) Reset() {
 	*x = CompactRequest{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +2117,7 @@ func (x *CompactRequest) String() string {
 func (*CompactRequest) ProtoMessage() {}
 
 func (x *CompactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[21]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +2130,7 @@ func (x *CompactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactRequest.ProtoReflect.Descriptor instead.
 func (*CompactRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{21}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CompactRequest) GetSleeve() string {
@@ -1710,7 +2149,7 @@ type CompactResponse struct {
 
 func (x *CompactResponse) Reset() {
 	*x = CompactResponse{}
-	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1722,7 +2161,7 @@ func (x *CompactResponse) String() string {
 func (*CompactResponse) ProtoMessage() {}
 
 func (x *CompactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_chat_proto_msgTypes[22]
+	mi := &file_protectorate_v1_chat_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1735,7 +2174,7 @@ func (x *CompactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompactResponse.ProtoReflect.Descriptor instead.
 func (*CompactResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{22}
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CompactResponse) GetCompaction() *Compaction {
@@ -1749,7 +2188,35 @@ var File_protectorate_v1_chat_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/chat.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb4\x03\n" +
+	"\x1aprotectorate/v1/chat.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
+	"\x0eModelSelection\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
+	"\x06effort\x18\x02 \x01(\tR\x06effort\"\xd7\x01\n" +
+	"\rModelSettings\x12=\n" +
+	"\trequested\x18\x01 \x01(\v2\x1f.protectorate.v1.ModelSelectionR\trequested\x12=\n" +
+	"\teffective\x18\x02 \x01(\v2\x1f.protectorate.v1.ModelSelectionR\teffective\x12H\n" +
+	"\x0fnative_defaults\x18\x03 \x01(\v2\x1f.protectorate.v1.ModelSelectionR\x0enativeDefaults\"\x97\x01\n" +
+	"\vModelOption\x12\x14\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aefforts\x18\x03 \x03(\tR\aefforts\x12%\n" +
+	"\x0edefault_effort\x18\x04 \x01(\tR\rdefaultEffort\x12\x1d\n" +
+	"\n" +
+	"is_default\x18\x05 \x01(\bR\tisDefault\"E\n" +
+	"\x11ListModelsRequest\x12\x16\n" +
+	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x12\x18\n" +
+	"\aharness\x18\x02 \x01(\tR\aharness\"\xa1\x01\n" +
+	"\x12ListModelsResponse\x12\x1c\n" +
+	"\tsupported\x18\x01 \x01(\bR\tsupported\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x124\n" +
+	"\x06models\x18\x03 \x03(\v2\x1c.protectorate.v1.ModelOptionR\x06models\x12\x1f\n" +
+	"\vlive_update\x18\x04 \x01(\bR\n" +
+	"liveUpdate\"l\n" +
+	"\x13SetSelectionRequest\x12\x16\n" +
+	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x12=\n" +
+	"\tselection\x18\x02 \x01(\v2\x1f.protectorate.v1.ModelSelectionR\tselection\"G\n" +
+	"\x14SetSelectionResponse\x12/\n" +
+	"\x04chat\x18\x01 \x01(\v2\x1b.protectorate.v1.ChatStatusR\x04chat\"\x9b\x04\n" +
 	"\n" +
 	"ChatStatus\x120\n" +
 	"\x05state\x18\x01 \x01(\x0e2\x1a.protectorate.v1.ChatStateR\x05state\x12,\n" +
@@ -1763,7 +2230,9 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\bprovider\x18\t \x01(\tR\bprovider\x12\x1f\n" +
 	"\vlocal_model\x18\n" +
 	" \x01(\bR\n" +
-	"localModel\"\x9a\x06\n" +
+	"localModel\x12)\n" +
+	"\x10reasoning_effort\x18\v \x01(\tR\x0freasoningEffort\x12:\n" +
+	"\bsettings\x18\f \x01(\v2\x1e.protectorate.v1.ModelSettingsR\bsettings\"\xd8\x06\n" +
 	"\tChatEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x122\n" +
@@ -1782,7 +2251,8 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"compaction\x122\n" +
 	"\x05error\x18\x13 \x01(\v2\x1a.protectorate.v1.ChatErrorH\x00R\x05error\x124\n" +
 	"\x05state\x18\x14 \x01(\v2\x1c.protectorate.v1.StateChangeH\x00R\x05state\x124\n" +
-	"\ahandoff\x18\x15 \x01(\v2\x18.protectorate.v1.HandoffH\x00R\ahandoffB\x06\n" +
+	"\ahandoff\x18\x15 \x01(\v2\x18.protectorate.v1.HandoffH\x00R\ahandoff\x12<\n" +
+	"\bsettings\x18\x16 \x01(\v2\x1e.protectorate.v1.ModelSettingsH\x00R\bsettingsB\x06\n" +
 	"\x04body\"5\n" +
 	"\vUserMessage\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
@@ -1884,13 +2354,16 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x15CHAT_STATE_COMPACTING\x10\x03\x12\x13\n" +
 	"\x0fCHAT_STATE_IDLE\x10\x04\x12\x15\n" +
 	"\x11CHAT_STATE_FAILED\x10\x05\x12\x15\n" +
-	"\x11CHAT_STATE_EXITED\x10\x062\x8d\x03\n" +
+	"\x11CHAT_STATE_EXITED\x10\x062\xc6\x04\n" +
 	"\vChatService\x12I\n" +
 	"\x05Watch\x12\x1d.protectorate.v1.WatchRequest\x1a\x1a.protectorate.v1.ChatEvent\"\x03\x90\x02\x010\x01\x12C\n" +
 	"\x04Send\x12\x1c.protectorate.v1.SendRequest\x1a\x1d.protectorate.v1.SendResponse\x12R\n" +
 	"\tInterrupt\x12!.protectorate.v1.InterruptRequest\x1a\".protectorate.v1.InterruptResponse\x12L\n" +
 	"\aRespond\x12\x1f.protectorate.v1.RespondRequest\x1a .protectorate.v1.RespondResponse\x12L\n" +
-	"\aCompact\x12\x1f.protectorate.v1.CompactRequest\x1a .protectorate.v1.CompactResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\aCompact\x12\x1f.protectorate.v1.CompactRequest\x1a .protectorate.v1.CompactResponse\x12Z\n" +
+	"\n" +
+	"ListModels\x12\".protectorate.v1.ListModelsRequest\x1a#.protectorate.v1.ListModelsResponse\"\x03\x90\x02\x01\x12[\n" +
+	"\fSetSelection\x12$.protectorate.v1.SetSelectionRequest\x1a%.protectorate.v1.SetSelectionResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_chat_proto_rawDescOnce sync.Once
@@ -1905,71 +2378,90 @@ func file_protectorate_v1_chat_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_protectorate_v1_chat_proto_goTypes = []any{
 	(SleeveMode)(0),               // 0: protectorate.v1.SleeveMode
 	(ChatState)(0),                // 1: protectorate.v1.ChatState
-	(*ChatStatus)(nil),            // 2: protectorate.v1.ChatStatus
-	(*ChatEvent)(nil),             // 3: protectorate.v1.ChatEvent
-	(*UserMessage)(nil),           // 4: protectorate.v1.UserMessage
-	(*AssistantText)(nil),         // 5: protectorate.v1.AssistantText
-	(*ToolCall)(nil),              // 6: protectorate.v1.ToolCall
-	(*ToolResult)(nil),            // 7: protectorate.v1.ToolResult
-	(*ApprovalRequest)(nil),       // 8: protectorate.v1.ApprovalRequest
-	(*ApprovalResolved)(nil),      // 9: protectorate.v1.ApprovalResolved
-	(*UsageUpdate)(nil),           // 10: protectorate.v1.UsageUpdate
-	(*TurnSettled)(nil),           // 11: protectorate.v1.TurnSettled
-	(*Compaction)(nil),            // 12: protectorate.v1.Compaction
-	(*ChatError)(nil),             // 13: protectorate.v1.ChatError
-	(*StateChange)(nil),           // 14: protectorate.v1.StateChange
-	(*Handoff)(nil),               // 15: protectorate.v1.Handoff
-	(*WatchRequest)(nil),          // 16: protectorate.v1.WatchRequest
-	(*SendRequest)(nil),           // 17: protectorate.v1.SendRequest
-	(*SendResponse)(nil),          // 18: protectorate.v1.SendResponse
-	(*InterruptRequest)(nil),      // 19: protectorate.v1.InterruptRequest
-	(*InterruptResponse)(nil),     // 20: protectorate.v1.InterruptResponse
-	(*RespondRequest)(nil),        // 21: protectorate.v1.RespondRequest
-	(*RespondResponse)(nil),       // 22: protectorate.v1.RespondResponse
-	(*CompactRequest)(nil),        // 23: protectorate.v1.CompactRequest
-	(*CompactResponse)(nil),       // 24: protectorate.v1.CompactResponse
-	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
+	(*ModelSelection)(nil),        // 2: protectorate.v1.ModelSelection
+	(*ModelSettings)(nil),         // 3: protectorate.v1.ModelSettings
+	(*ModelOption)(nil),           // 4: protectorate.v1.ModelOption
+	(*ListModelsRequest)(nil),     // 5: protectorate.v1.ListModelsRequest
+	(*ListModelsResponse)(nil),    // 6: protectorate.v1.ListModelsResponse
+	(*SetSelectionRequest)(nil),   // 7: protectorate.v1.SetSelectionRequest
+	(*SetSelectionResponse)(nil),  // 8: protectorate.v1.SetSelectionResponse
+	(*ChatStatus)(nil),            // 9: protectorate.v1.ChatStatus
+	(*ChatEvent)(nil),             // 10: protectorate.v1.ChatEvent
+	(*UserMessage)(nil),           // 11: protectorate.v1.UserMessage
+	(*AssistantText)(nil),         // 12: protectorate.v1.AssistantText
+	(*ToolCall)(nil),              // 13: protectorate.v1.ToolCall
+	(*ToolResult)(nil),            // 14: protectorate.v1.ToolResult
+	(*ApprovalRequest)(nil),       // 15: protectorate.v1.ApprovalRequest
+	(*ApprovalResolved)(nil),      // 16: protectorate.v1.ApprovalResolved
+	(*UsageUpdate)(nil),           // 17: protectorate.v1.UsageUpdate
+	(*TurnSettled)(nil),           // 18: protectorate.v1.TurnSettled
+	(*Compaction)(nil),            // 19: protectorate.v1.Compaction
+	(*ChatError)(nil),             // 20: protectorate.v1.ChatError
+	(*StateChange)(nil),           // 21: protectorate.v1.StateChange
+	(*Handoff)(nil),               // 22: protectorate.v1.Handoff
+	(*WatchRequest)(nil),          // 23: protectorate.v1.WatchRequest
+	(*SendRequest)(nil),           // 24: protectorate.v1.SendRequest
+	(*SendResponse)(nil),          // 25: protectorate.v1.SendResponse
+	(*InterruptRequest)(nil),      // 26: protectorate.v1.InterruptRequest
+	(*InterruptResponse)(nil),     // 27: protectorate.v1.InterruptResponse
+	(*RespondRequest)(nil),        // 28: protectorate.v1.RespondRequest
+	(*RespondResponse)(nil),       // 29: protectorate.v1.RespondResponse
+	(*CompactRequest)(nil),        // 30: protectorate.v1.CompactRequest
+	(*CompactResponse)(nil),       // 31: protectorate.v1.CompactResponse
+	(*timestamppb.Timestamp)(nil), // 32: google.protobuf.Timestamp
 }
 var file_protectorate_v1_chat_proto_depIdxs = []int32{
-	1,  // 0: protectorate.v1.ChatStatus.state:type_name -> protectorate.v1.ChatState
-	25, // 1: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
-	25, // 2: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
-	25, // 3: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
-	4,  // 4: protectorate.v1.ChatEvent.user:type_name -> protectorate.v1.UserMessage
-	5,  // 5: protectorate.v1.ChatEvent.text:type_name -> protectorate.v1.AssistantText
-	6,  // 6: protectorate.v1.ChatEvent.tool_call:type_name -> protectorate.v1.ToolCall
-	7,  // 7: protectorate.v1.ChatEvent.tool_result:type_name -> protectorate.v1.ToolResult
-	8,  // 8: protectorate.v1.ChatEvent.approval:type_name -> protectorate.v1.ApprovalRequest
-	9,  // 9: protectorate.v1.ChatEvent.approval_resolved:type_name -> protectorate.v1.ApprovalResolved
-	10, // 10: protectorate.v1.ChatEvent.usage:type_name -> protectorate.v1.UsageUpdate
-	11, // 11: protectorate.v1.ChatEvent.settled:type_name -> protectorate.v1.TurnSettled
-	12, // 12: protectorate.v1.ChatEvent.compaction:type_name -> protectorate.v1.Compaction
-	13, // 13: protectorate.v1.ChatEvent.error:type_name -> protectorate.v1.ChatError
-	14, // 14: protectorate.v1.ChatEvent.state:type_name -> protectorate.v1.StateChange
-	15, // 15: protectorate.v1.ChatEvent.handoff:type_name -> protectorate.v1.Handoff
-	25, // 16: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 17: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
-	25, // 18: protectorate.v1.Handoff.at:type_name -> google.protobuf.Timestamp
-	12, // 19: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
-	16, // 20: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
-	17, // 21: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
-	19, // 22: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
-	21, // 23: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
-	23, // 24: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
-	3,  // 25: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
-	18, // 26: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
-	20, // 27: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
-	22, // 28: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
-	24, // 29: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
-	25, // [25:30] is the sub-list for method output_type
-	20, // [20:25] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	2,  // 0: protectorate.v1.ModelSettings.requested:type_name -> protectorate.v1.ModelSelection
+	2,  // 1: protectorate.v1.ModelSettings.effective:type_name -> protectorate.v1.ModelSelection
+	2,  // 2: protectorate.v1.ModelSettings.native_defaults:type_name -> protectorate.v1.ModelSelection
+	4,  // 3: protectorate.v1.ListModelsResponse.models:type_name -> protectorate.v1.ModelOption
+	2,  // 4: protectorate.v1.SetSelectionRequest.selection:type_name -> protectorate.v1.ModelSelection
+	9,  // 5: protectorate.v1.SetSelectionResponse.chat:type_name -> protectorate.v1.ChatStatus
+	1,  // 6: protectorate.v1.ChatStatus.state:type_name -> protectorate.v1.ChatState
+	32, // 7: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
+	32, // 8: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
+	3,  // 9: protectorate.v1.ChatStatus.settings:type_name -> protectorate.v1.ModelSettings
+	32, // 10: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
+	11, // 11: protectorate.v1.ChatEvent.user:type_name -> protectorate.v1.UserMessage
+	12, // 12: protectorate.v1.ChatEvent.text:type_name -> protectorate.v1.AssistantText
+	13, // 13: protectorate.v1.ChatEvent.tool_call:type_name -> protectorate.v1.ToolCall
+	14, // 14: protectorate.v1.ChatEvent.tool_result:type_name -> protectorate.v1.ToolResult
+	15, // 15: protectorate.v1.ChatEvent.approval:type_name -> protectorate.v1.ApprovalRequest
+	16, // 16: protectorate.v1.ChatEvent.approval_resolved:type_name -> protectorate.v1.ApprovalResolved
+	17, // 17: protectorate.v1.ChatEvent.usage:type_name -> protectorate.v1.UsageUpdate
+	18, // 18: protectorate.v1.ChatEvent.settled:type_name -> protectorate.v1.TurnSettled
+	19, // 19: protectorate.v1.ChatEvent.compaction:type_name -> protectorate.v1.Compaction
+	20, // 20: protectorate.v1.ChatEvent.error:type_name -> protectorate.v1.ChatError
+	21, // 21: protectorate.v1.ChatEvent.state:type_name -> protectorate.v1.StateChange
+	22, // 22: protectorate.v1.ChatEvent.handoff:type_name -> protectorate.v1.Handoff
+	3,  // 23: protectorate.v1.ChatEvent.settings:type_name -> protectorate.v1.ModelSettings
+	32, // 24: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 25: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
+	32, // 26: protectorate.v1.Handoff.at:type_name -> google.protobuf.Timestamp
+	19, // 27: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
+	23, // 28: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
+	24, // 29: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
+	26, // 30: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
+	28, // 31: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
+	30, // 32: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
+	5,  // 33: protectorate.v1.ChatService.ListModels:input_type -> protectorate.v1.ListModelsRequest
+	7,  // 34: protectorate.v1.ChatService.SetSelection:input_type -> protectorate.v1.SetSelectionRequest
+	10, // 35: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
+	25, // 36: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
+	27, // 37: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
+	29, // 38: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
+	31, // 39: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
+	6,  // 40: protectorate.v1.ChatService.ListModels:output_type -> protectorate.v1.ListModelsResponse
+	8,  // 41: protectorate.v1.ChatService.SetSelection:output_type -> protectorate.v1.SetSelectionResponse
+	35, // [35:42] is the sub-list for method output_type
+	28, // [28:35] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_chat_proto_init() }
@@ -1977,7 +2469,7 @@ func file_protectorate_v1_chat_proto_init() {
 	if File_protectorate_v1_chat_proto != nil {
 		return
 	}
-	file_protectorate_v1_chat_proto_msgTypes[1].OneofWrappers = []any{
+	file_protectorate_v1_chat_proto_msgTypes[8].OneofWrappers = []any{
 		(*ChatEvent_User)(nil),
 		(*ChatEvent_Text)(nil),
 		(*ChatEvent_ToolCall)(nil),
@@ -1990,6 +2482,7 @@ func file_protectorate_v1_chat_proto_init() {
 		(*ChatEvent_Error)(nil),
 		(*ChatEvent_State)(nil),
 		(*ChatEvent_Handoff)(nil),
+		(*ChatEvent_Settings)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1997,7 +2490,7 @@ func file_protectorate_v1_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_chat_proto_rawDesc), len(file_protectorate_v1_chat_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   23,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

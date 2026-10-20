@@ -43,6 +43,11 @@ const (
 	ChatServiceRespondProcedure = "/protectorate.v1.ChatService/Respond"
 	// ChatServiceCompactProcedure is the fully-qualified name of the ChatService's Compact RPC.
 	ChatServiceCompactProcedure = "/protectorate.v1.ChatService/Compact"
+	// ChatServiceListModelsProcedure is the fully-qualified name of the ChatService's ListModels RPC.
+	ChatServiceListModelsProcedure = "/protectorate.v1.ChatService/ListModels"
+	// ChatServiceSetSelectionProcedure is the fully-qualified name of the ChatService's SetSelection
+	// RPC.
+	ChatServiceSetSelectionProcedure = "/protectorate.v1.ChatService/SetSelection"
 )
 
 // ChatServiceClient is a client for the protectorate.v1.ChatService service.
@@ -63,6 +68,11 @@ type ChatServiceClient interface {
 	// with failed_precondition while a turn is running or an approval is
 	// pending, and returns after the harness has confirmed the compaction.
 	Compact(context.Context, *connect.Request[v1.CompactRequest]) (*connect.Response[v1.CompactResponse], error)
+	// Native catalog; no inference turn is started. Select by sleeve or harness.
+	ListModels(context.Context, *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error)
+	// Replace the requested selection between turns, without restarting.
+	// Empty fields restore the captured native defaults. Unsupported drivers fail.
+	SetSelection(context.Context, *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error)
 }
 
 // NewChatServiceClient constructs a client for the protectorate.v1.ChatService service. By default,
@@ -107,16 +117,31 @@ func NewChatServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(chatServiceMethods.ByName("Compact")),
 			connect.WithClientOptions(opts...),
 		),
+		listModels: connect.NewClient[v1.ListModelsRequest, v1.ListModelsResponse](
+			httpClient,
+			baseURL+ChatServiceListModelsProcedure,
+			connect.WithSchema(chatServiceMethods.ByName("ListModels")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		setSelection: connect.NewClient[v1.SetSelectionRequest, v1.SetSelectionResponse](
+			httpClient,
+			baseURL+ChatServiceSetSelectionProcedure,
+			connect.WithSchema(chatServiceMethods.ByName("SetSelection")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // chatServiceClient implements ChatServiceClient.
 type chatServiceClient struct {
-	watch     *connect.Client[v1.WatchRequest, v1.ChatEvent]
-	send      *connect.Client[v1.SendRequest, v1.SendResponse]
-	interrupt *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
-	respond   *connect.Client[v1.RespondRequest, v1.RespondResponse]
-	compact   *connect.Client[v1.CompactRequest, v1.CompactResponse]
+	watch        *connect.Client[v1.WatchRequest, v1.ChatEvent]
+	send         *connect.Client[v1.SendRequest, v1.SendResponse]
+	interrupt    *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
+	respond      *connect.Client[v1.RespondRequest, v1.RespondResponse]
+	compact      *connect.Client[v1.CompactRequest, v1.CompactResponse]
+	listModels   *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
+	setSelection *connect.Client[v1.SetSelectionRequest, v1.SetSelectionResponse]
 }
 
 // Watch calls protectorate.v1.ChatService.Watch.
@@ -144,6 +169,16 @@ func (c *chatServiceClient) Compact(ctx context.Context, req *connect.Request[v1
 	return c.compact.CallUnary(ctx, req)
 }
 
+// ListModels calls protectorate.v1.ChatService.ListModels.
+func (c *chatServiceClient) ListModels(ctx context.Context, req *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error) {
+	return c.listModels.CallUnary(ctx, req)
+}
+
+// SetSelection calls protectorate.v1.ChatService.SetSelection.
+func (c *chatServiceClient) SetSelection(ctx context.Context, req *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error) {
+	return c.setSelection.CallUnary(ctx, req)
+}
+
 // ChatServiceHandler is an implementation of the protectorate.v1.ChatService service.
 type ChatServiceHandler interface {
 	// Watch replays the sleeve's events after after_seq, then streams new ones
@@ -162,6 +197,11 @@ type ChatServiceHandler interface {
 	// with failed_precondition while a turn is running or an approval is
 	// pending, and returns after the harness has confirmed the compaction.
 	Compact(context.Context, *connect.Request[v1.CompactRequest]) (*connect.Response[v1.CompactResponse], error)
+	// Native catalog; no inference turn is started. Select by sleeve or harness.
+	ListModels(context.Context, *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error)
+	// Replace the requested selection between turns, without restarting.
+	// Empty fields restore the captured native defaults. Unsupported drivers fail.
+	SetSelection(context.Context, *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error)
 }
 
 // NewChatServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -202,6 +242,19 @@ func NewChatServiceHandler(svc ChatServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(chatServiceMethods.ByName("Compact")),
 		connect.WithHandlerOptions(opts...),
 	)
+	chatServiceListModelsHandler := connect.NewUnaryHandler(
+		ChatServiceListModelsProcedure,
+		svc.ListModels,
+		connect.WithSchema(chatServiceMethods.ByName("ListModels")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	chatServiceSetSelectionHandler := connect.NewUnaryHandler(
+		ChatServiceSetSelectionProcedure,
+		svc.SetSelection,
+		connect.WithSchema(chatServiceMethods.ByName("SetSelection")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.ChatService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ChatServiceWatchProcedure:
@@ -214,6 +267,10 @@ func NewChatServiceHandler(svc ChatServiceHandler, opts ...connect.HandlerOption
 			chatServiceRespondHandler.ServeHTTP(w, r)
 		case ChatServiceCompactProcedure:
 			chatServiceCompactHandler.ServeHTTP(w, r)
+		case ChatServiceListModelsProcedure:
+			chatServiceListModelsHandler.ServeHTTP(w, r)
+		case ChatServiceSetSelectionProcedure:
+			chatServiceSetSelectionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -241,4 +298,12 @@ func (UnimplementedChatServiceHandler) Respond(context.Context, *connect.Request
 
 func (UnimplementedChatServiceHandler) Compact(context.Context, *connect.Request[v1.CompactRequest]) (*connect.Response[v1.CompactResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.Compact is not implemented"))
+}
+
+func (UnimplementedChatServiceHandler) ListModels(context.Context, *connect.Request[v1.ListModelsRequest]) (*connect.Response[v1.ListModelsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.ListModels is not implemented"))
+}
+
+func (UnimplementedChatServiceHandler) SetSelection(context.Context, *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.SetSelection is not implemented"))
 }

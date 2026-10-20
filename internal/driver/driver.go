@@ -41,6 +41,7 @@ type Caps struct {
 	Approvals bool `json:"approvals"`
 	Interrupt bool `json:"interrupt"`
 	Steer     bool `json:"steer"`
+	Selection bool `json:"selection"`
 }
 
 func CapsFor(h Harness) (Caps, error) {
@@ -48,7 +49,7 @@ func CapsFor(h Harness) (Caps, error) {
 	case Claude:
 		return Caps{Approvals: true, Interrupt: true}, nil
 	case Codex:
-		return Caps{Approvals: true, Interrupt: true, Steer: true}, nil
+		return Caps{Approvals: true, Interrupt: true, Steer: true, Selection: true}, nil
 	case Grok:
 		return Caps{Approvals: true, Interrupt: true}, nil
 	case Pi:
@@ -69,6 +70,7 @@ const (
 	KindSettled    Kind = "settled"
 	KindError      Kind = "error"
 	KindExited     Kind = "exited"
+	KindSelection  Kind = "selection"
 )
 
 type ToolCall struct {
@@ -154,6 +156,7 @@ type Event struct {
 	StopReason string          `json:"stop_reason,omitempty"`
 	ExitCode   int             `json:"exit_code,omitempty"`
 	Raw        json.RawMessage `json:"raw,omitempty"`
+	Selection  *SelectionState `json:"selection,omitempty"`
 }
 
 type Session interface {
@@ -176,9 +179,14 @@ type Session interface {
 	// Close stops the harness and returns after it has exited, so the
 	// session id is free for a TUI to resume.
 	Close() error
+	Models(context.Context) ([]Model, error)
+	SetSelection(context.Context, Selection) error
+	Selection() SelectionState
 }
 
 type Options struct {
+	Selection Selection
+	Defaults  Selection
 	// Bin overrides the harness executable (stdio harnesses).
 	Bin string
 	// Env entries are appended to the process environment.
@@ -218,6 +226,9 @@ func (o Options) bin(def string) string {
 // Open starts a new session (sessionID == "") or resumes a native one. It
 // returns once the harness is ready to accept Send.
 func Open(ctx context.Context, h Harness, cwd, sessionID string, opts Options) (Session, error) {
+	if err := CheckSelection(h, opts.Selection); err != nil {
+		return nil, err
+	}
 	switch h {
 	case Claude:
 		return openClaude(ctx, cwd, sessionID, opts)

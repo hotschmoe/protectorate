@@ -185,6 +185,8 @@ message SpawnSleeveRequest {
   // approvalPolicy untrusted with its workspace-write sandbox, Grok
   // /always-approve off. pi has no gate and ignores it.
   bool supervised = 8;
+  // Codex chat selection; omitted preserves native defaults. Other drivers reject it.
+  ModelSelection selection = 9;
 }
 
 message SpawnSleeveResponse {
@@ -246,6 +248,9 @@ message ResleeveSleeveRequest {
   // wait bounds how long a running turn may continue before it is
   // interrupted. Default 5 minutes.
   google.protobuf.Duration wait = 4;
+  ModelSelection selection = 5;
+  // Explicitly discard the outgoing selection when switching harnesses.
+  bool native_defaults = 6;
 }
 
 message ResleeveSleeveResponse {
@@ -266,6 +271,7 @@ message SpawnEnvoyRequest {
   // ttl is the token lifetime. Unset means 720h; zero never expires. The hub
   // renews the token before it expires without restarting the harness.
   google.protobuf.Duration ttl = 4;
+  ModelSelection selection = 5;
 }
 
 message SpawnEnvoyResponse {
