@@ -17,7 +17,7 @@ import (
 func (h *Hub) SetBacklog(s *backlog.Store) { h.backlog = s }
 
 func (h *Hub) ListNotes(_ context.Context, req *connect.Request[pb.ListNotesRequest]) (*connect.Response[pb.ListNotesResponse], error) {
-	notes, err := h.backlog.List(backlog.Filter{Project: req.Msg.Project, Query: req.Msg.Query})
+	notes, err := h.backlog.List(backlog.Filter{Project: req.Msg.Project, Query: req.Msg.Query, State: req.Msg.State})
 	if err != nil {
 		return nil, backlogError(err)
 	}
@@ -49,9 +49,12 @@ func (h *Hub) CreateNote(ctx context.Context, req *connect.Request[pb.CreateNote
 	return connect.NewResponse(&pb.CreateNoteResponse{Note: toProtoNote(n)}), nil
 }
 
-func (h *Hub) UpdateNote(_ context.Context, req *connect.Request[pb.UpdateNoteRequest]) (*connect.Response[pb.UpdateNoteResponse], error) {
+func (h *Hub) UpdateNote(ctx context.Context, req *connect.Request[pb.UpdateNoteRequest]) (*connect.Response[pb.UpdateNoteResponse], error) {
 	m := req.Msg
-	n, changed, err := h.backlog.Update(m.Id, backlog.Patch{Title: m.Title, Body: m.Body, Pinned: m.Pinned, Project: m.Project})
+	n, changed, err := h.backlog.Update(m.Id, backlog.Patch{
+		Title: m.Title, Body: m.Body, Pinned: m.Pinned, Project: m.Project,
+		State: m.State, Resolution: m.Resolution, DoneBy: actor(ctx),
+	})
 	if err != nil {
 		return nil, backlogError(err)
 	}
@@ -82,7 +85,7 @@ func (h *Hub) fileNote(n backlog.NewNote) (backlog.Note, error) {
 
 func (h *Hub) publishNote(kind string, n backlog.Note) {
 	payload, err := structpb.NewStruct(map[string]any{
-		"id": n.ID, "title": n.Title, "project": n.Project, "source": n.Source, "pinned": n.Pinned,
+		"id": n.ID, "title": n.Title, "project": n.Project, "source": n.Source, "pinned": n.Pinned, "state": n.State,
 	})
 	if err != nil {
 		return
@@ -102,8 +105,13 @@ func backlogError(err error) error {
 }
 
 func toProtoNote(n backlog.Note) *pb.Note {
-	return &pb.Note{
+	out := &pb.Note{
 		Id: n.ID, Title: n.Title, Body: n.Body, Pinned: n.Pinned, Project: n.Project, Source: n.Source,
 		CreatedAt: timestamppb.New(n.Created), UpdatedAt: timestamppb.New(n.Updated),
+		State: n.State,
 	}
+	if n.DoneAt != nil {
+		out.Completion = &pb.NoteCompletion{DoneAt: timestamppb.New(*n.DoneAt), DoneBy: n.DoneBy, Resolution: n.Resolution}
+	}
+	return out
 }

@@ -30,7 +30,7 @@ func backlogCmd(o *opts) *command {
 edit. A note has a title, a markdown body, an optional project tag, a pin and
 the name of whoever created it. See docs/backlog.md.`,
 	}
-	c.AddCommand(backlogLs(o), backlogShow(o), backlogAdd(o), backlogEdit(o), backlogRm(o), backlogPin(o))
+	c.AddCommand(backlogLs(o), backlogShow(o), backlogAdd(o), backlogEdit(o), backlogRm(o), backlogPin(o), backlogState(o, "done"), backlogState(o, "reopen"))
 	return c
 }
 
@@ -50,7 +50,7 @@ func writeNote(w io.Writer, n *pb.Note) {
 	if project == "" {
 		project = "-"
 	}
-	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", n.Id, pin, n.UpdatedAt.AsTime().Local().Format("2006-01-02 15:04"), project, n.Source, noteTitle(n))
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", n.Id, n.State, pin, n.UpdatedAt.AsTime().Local().Format("2006-01-02 15:04"), project, n.Source, noteTitle(n))
 }
 
 func printNote(o *opts, cmd *command, n *pb.Note) error {
@@ -58,17 +58,28 @@ func printNote(o *opts, cmd *command, n *pb.Note) error {
 }
 
 func backlogLs(o *opts) *command {
-	var project, query string
+	var project, query, state string
+	var all bool
 	c := &command{
 		Use:   "ls",
-		Short: "List notes, pinned first and then most recently updated",
+		Short: "List open notes, pinned first and then most recently updated",
 		Args:  noArgs,
 		RunE: func(cmd *command, _ []string) error {
+			filter := state
+			if all {
+				if cmd.Flags().Changed("state") {
+					return fmt.Errorf("use --all or --state, not both")
+				}
+				filter = "all"
+			}
+			if filter != "open" && filter != "done" && filter != "all" {
+				return fmt.Errorf("state must be open, done or all")
+			}
 			cl, err := backlogClient(o)
 			if err != nil {
 				return err
 			}
-			res, err := cl.ListNotes(cmd.Context(), connect.NewRequest(&pb.ListNotesRequest{Project: project, Query: query}))
+			res, err := cl.ListNotes(cmd.Context(), connect.NewRequest(&pb.ListNotesRequest{Project: project, Query: query, State: filter}))
 			if err != nil {
 				return err
 			}
@@ -90,6 +101,8 @@ func backlogLs(o *opts) *command {
 	}
 	c.Flags().StringVar(&project, "project", "", "only notes with this project tag")
 	c.Flags().StringVar(&query, "query", "", "only notes whose title or body contains this text")
+	c.Flags().StringVar(&state, "state", "open", "note state: open, done or all")
+	c.Flags().BoolVar(&all, "all", false, "include open and done notes")
 	return c
 }
 
@@ -115,6 +128,14 @@ func backlogShow(o *opts) *command {
 					fmt.Fprintf(w, "project\t%s\n", n.Project)
 				}
 				fmt.Fprintf(w, "source\t%s\n", n.Source)
+				fmt.Fprintf(w, "state\t%s\n", n.State)
+				if done := n.Completion; done != nil {
+					fmt.Fprintf(w, "done at\t%s\n", done.DoneAt.AsTime().Local().Format("2006-01-02 15:04"))
+					fmt.Fprintf(w, "done by\t%s\n", done.DoneBy)
+					if done.Resolution != "" {
+						fmt.Fprintf(w, "resolution\t%s\n", done.Resolution)
+					}
+				}
 				fmt.Fprintf(w, "pinned\t%t\n", n.Pinned)
 				fmt.Fprintf(w, "created\t%s\n", n.CreatedAt.AsTime().Local().Format("2006-01-02 15:04"))
 				fmt.Fprintf(w, "updated\t%s\n", n.UpdatedAt.AsTime().Local().Format("2006-01-02 15:04"))
@@ -124,6 +145,36 @@ func backlogShow(o *opts) *command {
 			})
 		},
 	}
+}
+
+func backlogState(o *opts, action string) *command {
+	var resolution string
+	state, short := "done", "Mark a note done, with an optional resolution line"
+	if action == "reopen" {
+		state, short = "open", "Reopen a note and clear its completion"
+	}
+	c := &command{
+		Use: action + " <id>", Short: short, Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
+			cl, err := backlogClient(o)
+			if err != nil {
+				return err
+			}
+			req := &pb.UpdateNoteRequest{Id: args[0], State: &state}
+			if cmd.Flags().Changed("resolution") {
+				req.Resolution = &resolution
+			}
+			res, err := cl.UpdateNote(cmd.Context(), connect.NewRequest(req))
+			if err != nil {
+				return err
+			}
+			return printNote(o, cmd, res.Msg.Note)
+		},
+	}
+	if action == "done" {
+		c.Flags().StringVar(&resolution, "resolution", "", "single-line completion summary, up to 200 characters")
+	}
+	return c
 }
 
 // bodyFlags are the ways to give a note its body without an editor.

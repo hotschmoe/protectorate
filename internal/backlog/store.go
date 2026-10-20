@@ -34,6 +34,9 @@ type fileDoc struct {
 }
 
 func (s *Store) List(f Filter) ([]Note, error) {
+	if f.State != "" && f.State != "open" && f.State != "done" && f.State != "all" {
+		return nil, fmt.Errorf("%w: state must be open, done or all", ErrInvalid)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all, err := s.snapshot()
@@ -147,6 +150,11 @@ func decode(raw []byte) ([]Note, error) {
 	var d fileDoc
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", notesFile, err)
+	}
+	for i := range d.Notes {
+		if d.Notes[i].State == "" {
+			d.Notes[i].State = "open"
+		}
 	}
 	return d.Notes, nil
 }

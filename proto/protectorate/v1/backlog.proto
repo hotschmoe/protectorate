@@ -12,7 +12,8 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // through the same API. Mutations publish note.* events on EventService.
 service BacklogService {
   // ListNotes returns notes, pinned first and then most recently updated,
-  // optionally filtered by project tag and a text query.
+  // open by default, optionally filtered by project tag and a text query.
+  // Set state to "done" for completed notes or "all" for both states.
   rpc ListNotes(ListNotesRequest) returns (ListNotesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -26,6 +27,8 @@ service BacklogService {
   rpc CreateNote(CreateNoteRequest) returns (CreateNoteResponse);
 
   // UpdateNote changes the fields that are set and leaves the others alone.
+  // Set state to "done" with an optional resolution line to close a note,
+  // or "open" to reopen it and clear completion. Requires backlog_update_note.
   rpc UpdateNote(UpdateNoteRequest) returns (UpdateNoteResponse);
 
   // DeleteNote removes a note for good.
@@ -50,6 +53,10 @@ message Note {
   string project = 7;
   // source is who created the note: "owner", a sleeve name, "envoy" or "hub".
   string source = 8;
+  // state is "open" or "done".
+  string state = 9;
+  // completion is present only while the note is done.
+  NoteCompletion completion = 10;
 }
 
 message ListNotesRequest {
@@ -57,6 +64,8 @@ message ListNotesRequest {
   string project = 1;
   // query keeps notes whose title or body contains it, ignoring case.
   string query = 2;
+  // state is "open" (also the default), "done", or "all".
+  string state = 3;
 }
 
 message ListNotesResponse {
@@ -100,6 +109,10 @@ message UpdateNoteRequest {
   optional bool pinned = 4;
   // project replaces the project tag when set; "" clears it.
   optional string project = 5;
+  // state closes ("done") or reopens ("open") the note when set.
+  optional string state = 6;
+  // resolution is an optional single line, up to 200 characters, for a done note.
+  optional string resolution = 7;
 }
 
 message UpdateNoteResponse {
@@ -111,3 +124,11 @@ message DeleteNoteRequest {
 }
 
 message DeleteNoteResponse {}
+
+// NoteCompletion records the latest close; reopening clears it.
+message NoteCompletion {
+  google.protobuf.Timestamp done_at = 1;
+  // done_by is the authenticated actor, exactly as named in the audit log.
+  string done_by = 2;
+  string resolution = 3;
+}

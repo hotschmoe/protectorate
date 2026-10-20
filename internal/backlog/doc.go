@@ -28,23 +28,35 @@ const (
 
 // Note is one note. Body is markdown text.
 type Note struct {
-	ID      string    `json:"id"`
-	Title   string    `json:"title,omitempty"`
-	Body    string    `json:"body,omitempty"`
-	Created time.Time `json:"created_at"`
-	Updated time.Time `json:"updated_at"`
-	Pinned  bool      `json:"pinned,omitempty"`
-	Project string    `json:"project,omitempty"`
-	Source  string    `json:"source,omitempty"`
+	ID         string     `json:"id"`
+	Title      string     `json:"title,omitempty"`
+	Body       string     `json:"body,omitempty"`
+	Created    time.Time  `json:"created_at"`
+	Updated    time.Time  `json:"updated_at"`
+	Pinned     bool       `json:"pinned,omitempty"`
+	Project    string     `json:"project,omitempty"`
+	Source     string     `json:"source,omitempty"`
+	State      string     `json:"state"`
+	DoneAt     *time.Time `json:"done_at,omitempty"`
+	DoneBy     string     `json:"done_by,omitempty"`
+	Resolution string     `json:"resolution,omitempty"`
 }
 
 // Filter narrows List. Query matches title and body, ignoring case.
 type Filter struct {
 	Project string
 	Query   string
+	State   string
 }
 
 func (f Filter) match(n Note) bool {
+	state := f.State
+	if state == "" {
+		state = "open"
+	}
+	if state != "all" && n.State != state {
+		return false
+	}
 	if f.Project != "" && n.Project != f.Project {
 		return false
 	}
@@ -65,10 +77,13 @@ type NewNote struct {
 
 // Patch changes the fields that are non-nil.
 type Patch struct {
-	Title   *string
-	Body    *string
-	Pinned  *bool
-	Project *string
+	Title      *string
+	Body       *string
+	Pinned     *bool
+	Project    *string
+	State      *string
+	Resolution *string
+	DoneBy     string
 }
 
 func cleanTitle(s string) (string, error) {
@@ -123,6 +138,7 @@ func (n NewNote) build(id string, now time.Time) (Note, error) {
 		return Note{}, fmt.Errorf("%w: a note needs a title or a body", ErrInvalid)
 	}
 	out.ID, out.Pinned, out.Created, out.Updated = id, n.Pinned, now, now
+	out.State = "open"
 	return out, nil
 }
 
@@ -147,6 +163,26 @@ func (p Patch) apply(n Note, now time.Time) (Note, bool, error) {
 	}
 	if p.Pinned != nil {
 		out.Pinned = *p.Pinned
+	}
+	if p.State != nil {
+		switch *p.State {
+		case "open":
+			out.State, out.DoneAt, out.DoneBy, out.Resolution = "open", nil, "", ""
+		case "done":
+			if out.State != "done" {
+				out.State, out.DoneAt, out.DoneBy = "done", &now, p.DoneBy
+			}
+		default:
+			return n, false, fmt.Errorf("%w: state must be open or done", ErrInvalid)
+		}
+	}
+	if p.Resolution != nil {
+		if out.State != "done" {
+			return n, false, fmt.Errorf("%w: resolution requires a done note", ErrInvalid)
+		}
+		if out.Resolution, err = cleanTag("resolution", *p.Resolution, maxTitle); err != nil {
+			return n, false, err
+		}
 	}
 	if out.Title == "" && strings.TrimSpace(out.Body) == "" {
 		return n, false, fmt.Errorf("%w: a note needs a title or a body", ErrInvalid)

@@ -52,13 +52,16 @@ const (
 // BacklogServiceClient is a client for the protectorate.v1.BacklogService service.
 type BacklogServiceClient interface {
 	// ListNotes returns notes, pinned first and then most recently updated,
-	// optionally filtered by project tag and a text query.
+	// open by default, optionally filtered by project tag and a text query.
+	// Set state to "done" for completed notes or "all" for both states.
 	ListNotes(context.Context, *connect.Request[v1.ListNotesRequest]) (*connect.Response[v1.ListNotesResponse], error)
 	// GetNote returns one note by id.
 	GetNote(context.Context, *connect.Request[v1.GetNoteRequest]) (*connect.Response[v1.GetNoteResponse], error)
 	// CreateNote adds a note and returns it with its id.
 	CreateNote(context.Context, *connect.Request[v1.CreateNoteRequest]) (*connect.Response[v1.CreateNoteResponse], error)
 	// UpdateNote changes the fields that are set and leaves the others alone.
+	// Set state to "done" with an optional resolution line to close a note,
+	// or "open" to reopen it and clear completion. Requires backlog_update_note.
 	UpdateNote(context.Context, *connect.Request[v1.UpdateNoteRequest]) (*connect.Response[v1.UpdateNoteResponse], error)
 	// DeleteNote removes a note for good.
 	DeleteNote(context.Context, *connect.Request[v1.DeleteNoteRequest]) (*connect.Response[v1.DeleteNoteResponse], error)
@@ -147,13 +150,16 @@ func (c *backlogServiceClient) DeleteNote(ctx context.Context, req *connect.Requ
 // BacklogServiceHandler is an implementation of the protectorate.v1.BacklogService service.
 type BacklogServiceHandler interface {
 	// ListNotes returns notes, pinned first and then most recently updated,
-	// optionally filtered by project tag and a text query.
+	// open by default, optionally filtered by project tag and a text query.
+	// Set state to "done" for completed notes or "all" for both states.
 	ListNotes(context.Context, *connect.Request[v1.ListNotesRequest]) (*connect.Response[v1.ListNotesResponse], error)
 	// GetNote returns one note by id.
 	GetNote(context.Context, *connect.Request[v1.GetNoteRequest]) (*connect.Response[v1.GetNoteResponse], error)
 	// CreateNote adds a note and returns it with its id.
 	CreateNote(context.Context, *connect.Request[v1.CreateNoteRequest]) (*connect.Response[v1.CreateNoteResponse], error)
 	// UpdateNote changes the fields that are set and leaves the others alone.
+	// Set state to "done" with an optional resolution line to close a note,
+	// or "open" to reopen it and clear completion. Requires backlog_update_note.
 	UpdateNote(context.Context, *connect.Request[v1.UpdateNoteRequest]) (*connect.Response[v1.UpdateNoteResponse], error)
 	// DeleteNote removes a note for good.
 	DeleteNote(context.Context, *connect.Request[v1.DeleteNoteRequest]) (*connect.Response[v1.DeleteNoteResponse], error)

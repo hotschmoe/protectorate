@@ -29,6 +29,12 @@ terminal, and the tailnet listener. Nothing else reads a token.
   its own session; the hub checks the authenticated identity, not the request.
   See `docs/coordination.md`.
 
+  Note close and reopen use `BacklogService.UpdateNote`, authorized exactly
+  like a body edit (`backlog_update_note`, covered by `backlog_*`). There is
+  no creator restriction: sleeve tokens may close completed tasks. The hub
+  records `done_by` using the audit actor (`token:sleeve:<name>` for a sleeve),
+  and records the close time itself. `read` alone cannot close or reopen.
+
 Unknown, expired, revoked and malformed credentials all fail as
 `unauthenticated` (HTTP 401). A valid token without the needed scope fails as
 `permission_denied` (HTTP 403 on the terminal), and the message names the

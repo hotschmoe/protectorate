@@ -41,13 +41,15 @@ type Tool struct {
 var Workflow = []struct{ Command, Purpose string }{
 	{"quota suggest --for medium", "rank harnesses by usable spare capacity before reset"},
 	{"quota", "raw usage windows, resets and freshness per subscription"},
-	{"backlog ls", "the owner's notes (pinned first), to discuss or act on"},
+	{"backlog ls", "open notes (pinned first), to discuss or act on; --all includes done notes"},
 	{"backlog show", "read one note in full"},
 	{"sleeve ls", "running sleeves with CPU, memory and workspace"},
 	{"sleeve spawn", "start a harness in an isolated workspace"},
 	{"sleeve resleeve", "move a sleeve to another harness with a hub-written handoff (no confirmation needed)"},
 	{"session capture", "read what a sleeve's pane shows right now"},
 	{"backlog edit", "update a note, e.g. --append or --body, when the owner asks"},
+	{"backlog done", "close completed work with --resolution, e.g. 'implemented in 8b98d58'"},
+	{"backlog reopen", "return a note to open work and clear its completion"},
 	{"events", "stream hub events as they happen"},
 }
 
@@ -98,7 +100,7 @@ func RenderAgents(din DocInput) []byte {
 	for _, s := range Workflow {
 		w("- `protectorate %s`: %s\n", s.Command, s.Purpose)
 	}
-	w("\nTypical loop: read the notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and update the note.\n\n")
+	w("\nTypical loop: read the open notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and close completed work with `protectorate backlog done <id> --resolution TEXT`. Workers can close notes with their sleeve tokens too. Leave incomplete work open. MCP equivalents are `backlog_list_notes` (open by default, state=done or all for history) and `backlog_update_note` with id, state=done and resolution.\n\n")
 
 	w("## Coordination\n\n")
 	w("%s\n\n", mailbox.ConciseGuidance)

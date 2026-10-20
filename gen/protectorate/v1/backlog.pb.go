@@ -38,7 +38,11 @@ type Note struct {
 	// project is an optional tag such as "hotschmoe/protectorate".
 	Project string `protobuf:"bytes,7,opt,name=project,proto3" json:"project,omitempty"`
 	// source is who created the note: "owner", a sleeve name, "envoy" or "hub".
-	Source        string `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`
+	Source string `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`
+	// state is "open" or "done".
+	State string `protobuf:"bytes,9,opt,name=state,proto3" json:"state,omitempty"`
+	// completion is present only while the note is done.
+	Completion    *NoteCompletion `protobuf:"bytes,10,opt,name=completion,proto3" json:"completion,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -129,12 +133,28 @@ func (x *Note) GetSource() string {
 	return ""
 }
 
+func (x *Note) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *Note) GetCompletion() *NoteCompletion {
+	if x != nil {
+		return x.Completion
+	}
+	return nil
+}
+
 type ListNotesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// project keeps notes with exactly this tag.
 	Project string `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
 	// query keeps notes whose title or body contains it, ignoring case.
-	Query         string `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Query string `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	// state is "open" (also the default), "done", or "all".
+	State         string `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -179,6 +199,13 @@ func (x *ListNotesRequest) GetProject() string {
 func (x *ListNotesRequest) GetQuery() string {
 	if x != nil {
 		return x.Query
+	}
+	return ""
+}
+
+func (x *ListNotesRequest) GetState() string {
+	if x != nil {
+		return x.State
 	}
 	return ""
 }
@@ -445,7 +472,11 @@ type UpdateNoteRequest struct {
 	// pinned pins or unpins the note when set.
 	Pinned *bool `protobuf:"varint,4,opt,name=pinned,proto3,oneof" json:"pinned,omitempty"`
 	// project replaces the project tag when set; "" clears it.
-	Project       *string `protobuf:"bytes,5,opt,name=project,proto3,oneof" json:"project,omitempty"`
+	Project *string `protobuf:"bytes,5,opt,name=project,proto3,oneof" json:"project,omitempty"`
+	// state closes ("done") or reopens ("open") the note when set.
+	State *string `protobuf:"bytes,6,opt,name=state,proto3,oneof" json:"state,omitempty"`
+	// resolution is an optional single line, up to 200 characters, for a done note.
+	Resolution    *string `protobuf:"bytes,7,opt,name=resolution,proto3,oneof" json:"resolution,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -511,6 +542,20 @@ func (x *UpdateNoteRequest) GetPinned() bool {
 func (x *UpdateNoteRequest) GetProject() string {
 	if x != nil && x.Project != nil {
 		return *x.Project
+	}
+	return ""
+}
+
+func (x *UpdateNoteRequest) GetState() string {
+	if x != nil && x.State != nil {
+		return *x.State
+	}
+	return ""
+}
+
+func (x *UpdateNoteRequest) GetResolution() string {
+	if x != nil && x.Resolution != nil {
+		return *x.Resolution
 	}
 	return ""
 }
@@ -639,11 +684,73 @@ func (*DeleteNoteResponse) Descriptor() ([]byte, []int) {
 	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{10}
 }
 
+// NoteCompletion records the latest close; reopening clears it.
+type NoteCompletion struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	DoneAt *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=done_at,json=doneAt,proto3" json:"done_at,omitempty"`
+	// done_by is the authenticated actor, exactly as named in the audit log.
+	DoneBy        string `protobuf:"bytes,2,opt,name=done_by,json=doneBy,proto3" json:"done_by,omitempty"`
+	Resolution    string `protobuf:"bytes,3,opt,name=resolution,proto3" json:"resolution,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NoteCompletion) Reset() {
+	*x = NoteCompletion{}
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NoteCompletion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NoteCompletion) ProtoMessage() {}
+
+func (x *NoteCompletion) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_backlog_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NoteCompletion.ProtoReflect.Descriptor instead.
+func (*NoteCompletion) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_backlog_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *NoteCompletion) GetDoneAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DoneAt
+	}
+	return nil
+}
+
+func (x *NoteCompletion) GetDoneBy() string {
+	if x != nil {
+		return x.DoneBy
+	}
+	return ""
+}
+
+func (x *NoteCompletion) GetResolution() string {
+	if x != nil {
+		return x.Resolution
+	}
+	return ""
+}
+
 var File_protectorate_v1_backlog_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_backlog_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotectorate/v1/backlog.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\x80\x02\n" +
+	"\x1dprotectorate/v1/backlog.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dprotectorate/v1/options.proto\"\xd7\x02\n" +
 	"\x04Note\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
@@ -654,10 +761,16 @@ const file_protectorate_v1_backlog_proto_rawDesc = "" +
 	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x16\n" +
 	"\x06pinned\x18\x06 \x01(\bR\x06pinned\x12\x18\n" +
 	"\aproject\x18\a \x01(\tR\aproject\x12\x16\n" +
-	"\x06source\x18\b \x01(\tR\x06source\"B\n" +
+	"\x06source\x18\b \x01(\tR\x06source\x12\x14\n" +
+	"\x05state\x18\t \x01(\tR\x05state\x12?\n" +
+	"\n" +
+	"completion\x18\n" +
+	" \x01(\v2\x1f.protectorate.v1.NoteCompletionR\n" +
+	"completion\"X\n" +
 	"\x10ListNotesRequest\x12\x18\n" +
 	"\aproject\x18\x01 \x01(\tR\aproject\x12\x14\n" +
-	"\x05query\x18\x02 \x01(\tR\x05query\"@\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12\x14\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\"@\n" +
 	"\x11ListNotesResponse\x12+\n" +
 	"\x05notes\x18\x01 \x03(\v2\x15.protectorate.v1.NoteR\x05notes\" \n" +
 	"\x0eGetNoteRequest\x12\x0e\n" +
@@ -670,23 +783,35 @@ const file_protectorate_v1_backlog_proto_rawDesc = "" +
 	"\x06pinned\x18\x03 \x01(\bR\x06pinned\x12\x18\n" +
 	"\aproject\x18\x04 \x01(\tR\aproject\"?\n" +
 	"\x12CreateNoteResponse\x12)\n" +
-	"\x04note\x18\x01 \x01(\v2\x15.protectorate.v1.NoteR\x04note\"\xbd\x01\n" +
+	"\x04note\x18\x01 \x01(\v2\x15.protectorate.v1.NoteR\x04note\"\x96\x02\n" +
 	"\x11UpdateNoteRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
 	"\x05title\x18\x02 \x01(\tH\x00R\x05title\x88\x01\x01\x12\x17\n" +
 	"\x04body\x18\x03 \x01(\tH\x01R\x04body\x88\x01\x01\x12\x1b\n" +
 	"\x06pinned\x18\x04 \x01(\bH\x02R\x06pinned\x88\x01\x01\x12\x1d\n" +
-	"\aproject\x18\x05 \x01(\tH\x03R\aproject\x88\x01\x01B\b\n" +
+	"\aproject\x18\x05 \x01(\tH\x03R\aproject\x88\x01\x01\x12\x19\n" +
+	"\x05state\x18\x06 \x01(\tH\x04R\x05state\x88\x01\x01\x12#\n" +
+	"\n" +
+	"resolution\x18\a \x01(\tH\x05R\n" +
+	"resolution\x88\x01\x01B\b\n" +
 	"\x06_titleB\a\n" +
 	"\x05_bodyB\t\n" +
 	"\a_pinnedB\n" +
 	"\n" +
-	"\b_project\"?\n" +
+	"\b_projectB\b\n" +
+	"\x06_stateB\r\n" +
+	"\v_resolution\"?\n" +
 	"\x12UpdateNoteResponse\x12)\n" +
 	"\x04note\x18\x01 \x01(\v2\x15.protectorate.v1.NoteR\x04note\"#\n" +
 	"\x11DeleteNoteRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
-	"\x12DeleteNoteResponse2\xc7\x03\n" +
+	"\x12DeleteNoteResponse\"~\n" +
+	"\x0eNoteCompletion\x123\n" +
+	"\adone_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x06doneAt\x12\x17\n" +
+	"\adone_by\x18\x02 \x01(\tR\x06doneBy\x12\x1e\n" +
+	"\n" +
+	"resolution\x18\x03 \x01(\tR\n" +
+	"resolution2\xc7\x03\n" +
 	"\x0eBacklogService\x12W\n" +
 	"\tListNotes\x12!.protectorate.v1.ListNotesRequest\x1a\".protectorate.v1.ListNotesResponse\"\x03\x90\x02\x01\x12Q\n" +
 	"\aGetNote\x12\x1f.protectorate.v1.GetNoteRequest\x1a .protectorate.v1.GetNoteResponse\"\x03\x90\x02\x01\x12U\n" +
@@ -709,7 +834,7 @@ func file_protectorate_v1_backlog_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_backlog_proto_rawDescData
 }
 
-var file_protectorate_v1_backlog_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_protectorate_v1_backlog_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_protectorate_v1_backlog_proto_goTypes = []any{
 	(*Note)(nil),                  // 0: protectorate.v1.Note
 	(*ListNotesRequest)(nil),      // 1: protectorate.v1.ListNotesRequest
@@ -722,30 +847,33 @@ var file_protectorate_v1_backlog_proto_goTypes = []any{
 	(*UpdateNoteResponse)(nil),    // 8: protectorate.v1.UpdateNoteResponse
 	(*DeleteNoteRequest)(nil),     // 9: protectorate.v1.DeleteNoteRequest
 	(*DeleteNoteResponse)(nil),    // 10: protectorate.v1.DeleteNoteResponse
-	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*NoteCompletion)(nil),        // 11: protectorate.v1.NoteCompletion
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_protectorate_v1_backlog_proto_depIdxs = []int32{
-	11, // 0: protectorate.v1.Note.created_at:type_name -> google.protobuf.Timestamp
-	11, // 1: protectorate.v1.Note.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 2: protectorate.v1.ListNotesResponse.notes:type_name -> protectorate.v1.Note
-	0,  // 3: protectorate.v1.GetNoteResponse.note:type_name -> protectorate.v1.Note
-	0,  // 4: protectorate.v1.CreateNoteResponse.note:type_name -> protectorate.v1.Note
-	0,  // 5: protectorate.v1.UpdateNoteResponse.note:type_name -> protectorate.v1.Note
-	1,  // 6: protectorate.v1.BacklogService.ListNotes:input_type -> protectorate.v1.ListNotesRequest
-	3,  // 7: protectorate.v1.BacklogService.GetNote:input_type -> protectorate.v1.GetNoteRequest
-	5,  // 8: protectorate.v1.BacklogService.CreateNote:input_type -> protectorate.v1.CreateNoteRequest
-	7,  // 9: protectorate.v1.BacklogService.UpdateNote:input_type -> protectorate.v1.UpdateNoteRequest
-	9,  // 10: protectorate.v1.BacklogService.DeleteNote:input_type -> protectorate.v1.DeleteNoteRequest
-	2,  // 11: protectorate.v1.BacklogService.ListNotes:output_type -> protectorate.v1.ListNotesResponse
-	4,  // 12: protectorate.v1.BacklogService.GetNote:output_type -> protectorate.v1.GetNoteResponse
-	6,  // 13: protectorate.v1.BacklogService.CreateNote:output_type -> protectorate.v1.CreateNoteResponse
-	8,  // 14: protectorate.v1.BacklogService.UpdateNote:output_type -> protectorate.v1.UpdateNoteResponse
-	10, // 15: protectorate.v1.BacklogService.DeleteNote:output_type -> protectorate.v1.DeleteNoteResponse
-	11, // [11:16] is the sub-list for method output_type
-	6,  // [6:11] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	12, // 0: protectorate.v1.Note.created_at:type_name -> google.protobuf.Timestamp
+	12, // 1: protectorate.v1.Note.updated_at:type_name -> google.protobuf.Timestamp
+	11, // 2: protectorate.v1.Note.completion:type_name -> protectorate.v1.NoteCompletion
+	0,  // 3: protectorate.v1.ListNotesResponse.notes:type_name -> protectorate.v1.Note
+	0,  // 4: protectorate.v1.GetNoteResponse.note:type_name -> protectorate.v1.Note
+	0,  // 5: protectorate.v1.CreateNoteResponse.note:type_name -> protectorate.v1.Note
+	0,  // 6: protectorate.v1.UpdateNoteResponse.note:type_name -> protectorate.v1.Note
+	12, // 7: protectorate.v1.NoteCompletion.done_at:type_name -> google.protobuf.Timestamp
+	1,  // 8: protectorate.v1.BacklogService.ListNotes:input_type -> protectorate.v1.ListNotesRequest
+	3,  // 9: protectorate.v1.BacklogService.GetNote:input_type -> protectorate.v1.GetNoteRequest
+	5,  // 10: protectorate.v1.BacklogService.CreateNote:input_type -> protectorate.v1.CreateNoteRequest
+	7,  // 11: protectorate.v1.BacklogService.UpdateNote:input_type -> protectorate.v1.UpdateNoteRequest
+	9,  // 12: protectorate.v1.BacklogService.DeleteNote:input_type -> protectorate.v1.DeleteNoteRequest
+	2,  // 13: protectorate.v1.BacklogService.ListNotes:output_type -> protectorate.v1.ListNotesResponse
+	4,  // 14: protectorate.v1.BacklogService.GetNote:output_type -> protectorate.v1.GetNoteResponse
+	6,  // 15: protectorate.v1.BacklogService.CreateNote:output_type -> protectorate.v1.CreateNoteResponse
+	8,  // 16: protectorate.v1.BacklogService.UpdateNote:output_type -> protectorate.v1.UpdateNoteResponse
+	10, // 17: protectorate.v1.BacklogService.DeleteNote:output_type -> protectorate.v1.DeleteNoteResponse
+	13, // [13:18] is the sub-list for method output_type
+	8,  // [8:13] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_backlog_proto_init() }
@@ -761,7 +889,7 @@ func file_protectorate_v1_backlog_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_backlog_proto_rawDesc), len(file_protectorate_v1_backlog_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
