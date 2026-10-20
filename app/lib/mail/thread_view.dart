@@ -17,7 +17,7 @@ import '../vfd/panel.dart';
 const ownerAddress = 'owner';
 const hubSender = 'hub';
 // The orchestrator's sleeve name; it is addressed as "orchestrator".
-const orchestratorSleeve = 'poe';
+const orchestratorSleeve = 'envoy';
 
 bool isMailEvent(Event e) => e.kind.startsWith('msg.');
 

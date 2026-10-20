@@ -17,7 +17,7 @@ import 'messages_tab.dart';
 
 const orchestratorSpawnCommand = 'protectorate orchestrator spawn';
 
-// The always-open chat with the orchestrator. It talks to Poe unless the
+// The always-open chat with the orchestrator. It talks to Envoy unless the
 // owner picks another chat sleeve; terminal sleeves have no chat to show.
 class OrchestratorTab extends StatefulWidget {
   const OrchestratorTab({
@@ -99,7 +99,7 @@ class _OrchestratorTabState extends State<OrchestratorTab> {
     }
   }
 
-  // Poe first, then the other chat sleeves by name.
+  // Envoy first, then the other chat sleeves by name.
   List<Sleeve> get _chatSleeves {
     final out = _sleeves
         .where((s) => effectiveMode(s) == SleeveMode.SLEEVE_MODE_CHAT)
@@ -321,7 +321,7 @@ class _NotRunning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
-    final poe = name == orchestratorSleeve;
+    final envoy = name == orchestratorSleeve;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(Tokens.gapL),
@@ -334,7 +334,7 @@ class _NotRunning extends StatelessWidget {
               Text(
                 error != null
                     ? 'CANNOT LIST SLEEVES'
-                    : poe
+                    : envoy
                     ? 'THE ORCHESTRATOR IS NOT RUNNING'
                     : 'SLEEVE ${name.toUpperCase()} IS NOT RUNNING',
                 key: const ValueKey('orchestrator-empty'),
@@ -343,9 +343,9 @@ class _NotRunning extends StatelessWidget {
               const SizedBox(height: Tokens.gap),
               if (error != null)
                 Text('$error', style: t.body())
-              else if (poe) ...[
+              else if (envoy) ...[
                 Text(
-                  'Poe is an ordinary chat sleeve named poe. Start it with the '
+                  'Envoy is an ordinary chat sleeve named envoy. Start it with the '
                   'owner token on the hub machine:',
                   style: t.body(),
                 ),

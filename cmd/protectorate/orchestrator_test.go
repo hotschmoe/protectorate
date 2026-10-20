@@ -89,3 +89,17 @@ func TestTokenFileEnv(t *testing.T) {
 		t.Errorf("flag must beat env: %q", got)
 	}
 }
+
+func TestTokenFileIsReadOnEveryCall(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "tok")
+	t.Setenv(tokenFileEnv, file)
+	for _, secret := range []string{"first", "renewed"} {
+		if err := os.WriteFile(file, []byte(secret+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := (&opts{}).token()
+		if err != nil || got != secret {
+			t.Fatalf("token() = %q, %v; want %q: the hub renews Envoy's token by rewriting this file", got, err, secret)
+		}
+	}
+}

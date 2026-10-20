@@ -539,7 +539,7 @@ func TestSpawnSleeveReservesOrchestratorName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := h.SpawnSleeve(tt.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{Name: "poe", Workspace: "/tmp"}))
+			_, err := h.SpawnSleeve(tt.ctx, connect.NewRequest(&pb.SpawnSleeveRequest{Name: "envoy", Workspace: "/tmp"}))
 			if code(err) != connect.CodePermissionDenied {
 				t.Fatalf("err = %v, want permission_denied", err)
 			}

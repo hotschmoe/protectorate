@@ -37,7 +37,7 @@ type Note struct {
 	Pinned bool `protobuf:"varint,6,opt,name=pinned,proto3" json:"pinned,omitempty"`
 	// project is an optional tag such as "hotschmoe/protectorate".
 	Project string `protobuf:"bytes,7,opt,name=project,proto3" json:"project,omitempty"`
-	// source is who created the note: "owner", a sleeve name, "poe" or "hub".
+	// source is who created the note: "owner", a sleeve name, "envoy" or "hub".
 	Source        string `protobuf:"bytes,8,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -350,8 +350,8 @@ func TestMailSurvivesRestartAndTerminalSleevesUseInbox(t *testing.T) {
 
 func TestMailEscalation(t *testing.T) {
 	tests := []struct {
-		name    string
-		withPoe bool
+		name      string
+		withEnvoy bool
 	}{
 		{"orchestrator running", true},
 		{"no orchestrator", false},
@@ -361,7 +361,7 @@ func TestMailEscalation(t *testing.T) {
 			r := newMailRig(t)
 			r.h.AckTimeout = 30 * time.Minute
 			r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
-			if tt.withPoe {
+			if tt.withEnvoy {
 				r.spawnNamed(sleeve.OrchestratorName, pb.SleeveMode_SLEEVE_MODE_CHAT, "")
 			}
 			events := make(chan string, 16)
@@ -421,10 +421,10 @@ func TestMailEscalation(t *testing.T) {
 				}
 				return false
 			})
-			if tt.withPoe {
+			if tt.withEnvoy {
 				box, _ := r.h.coord.mail.Inbox(sleeve.OrchestratorName, "", false, true)
 				if len(box) != 1 || box[0].From != "hub" || box[0].Kind != mailbox.Notice || box[0].Thread != sent.Message.ThreadId || !strings.Contains(box[0].Body, id) {
-					t.Fatalf("poe's inbox = %+v", box)
+					t.Fatalf("envoy's inbox = %+v", box)
 				}
 				if want := "\nReply: protectorate msg send " + r.name + " --thread " + sent.Message.ThreadId + ` "..."`; !strings.HasSuffix(box[0].Body, want) {
 					t.Fatalf("escalation does not end with a reply line:\n%s", box[0].Body)

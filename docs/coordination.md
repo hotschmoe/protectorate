@@ -20,7 +20,7 @@ sleeve is killed and replaced on respawn (a sleeve that exits on its own keeps
 a valid token until it is killed or respawned).
 
 The sender of a message is the authenticated caller: a sleeve token maps to
-its sleeve name, the orchestrator's to `poe`, the owner token to `owner`, the
+its sleeve name, the orchestrator's to `envoy`, the owner token to `owner`, the
 hub itself to `hub`. There is no `from` field to claim. Leases follow the same
 rule: a sleeve's lease is always held by that sleeve.
 
@@ -67,7 +67,7 @@ protectorate msg threads --sleeve api
 ```
 
 - **Addresses:** a sleeve name, `project:<id|owner/repo|name>`,
-  `orchestrator` (sleeve `poe`) or `owner`.
+  `orchestrator` (sleeve `envoy`) or `owner`.
 - **Kinds:** `note`, `request` (asks for action), `notice` (facts, usually
   from the hub). `ack_required` is optional in the API: unset, a `request`
   requires an ack and other kinds do not; an explicit false (`--ack=false`)

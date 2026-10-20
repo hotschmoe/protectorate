@@ -83,6 +83,9 @@ type Hub struct {
 	chat    *chatManager
 	coord   *coordinator
 
+	envoy      *EnvoyConfig
+	envoyState envoyState
+
 	// WebDir, when set, serves a built web client (app/build/web) from the
 	// hub's own origin so browsers need no CORS. The client still authenticates.
 	WebDir string
@@ -329,6 +332,11 @@ func (h *Hub) Serve(parent context.Context, l net.Listener, extra ...Extra) erro
 
 	if h.chat != nil {
 		defer h.chat.shutdown()
+	}
+	if h.envoy != nil {
+		envoyDone := make(chan struct{})
+		go func() { defer close(envoyDone); h.watchEnvoy(ctx) }()
+		defer func() { <-envoyDone }()
 	}
 	if h.sleeves != nil {
 		sleevesDone := make(chan struct{})

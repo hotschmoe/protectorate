@@ -967,7 +967,7 @@ func TestCareTierEnforcement(t *testing.T) {
 		"plain":              {"ptk_plain", "", work},
 		"grant":              {"ptk_grant", auth.MintedByOwner, append([]string{"node_admin:pe*"}, work...)},
 		"other grant":        {"ptk_other", auth.MintedByOwner, append([]string{"node_admin:kidsbox"}, work...)},
-		"orchestrator grant": {"ptk_orch", "orchestrator-poe", append([]string{"node_admin:peer"}, work...)},
+		"orchestrator grant": {"ptk_orch", "orchestrator-envoy", append([]string{"node_admin:peer"}, work...)},
 	}
 	var yml strings.Builder
 	yml.WriteString("tokens:\n")

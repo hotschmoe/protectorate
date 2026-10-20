@@ -22,6 +22,7 @@ import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
 
 import 'chat.pb.dart' as $1;
 import 'sleeve.pbenum.dart';
+import 'token.pb.dart' as $3;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
@@ -1484,6 +1485,214 @@ class ResleeveSleeveResponse extends $pb.GeneratedMessage {
   Sleeve ensureSleeve() => $_ensure(0);
 }
 
+class SpawnEnvoyRequest extends $pb.GeneratedMessage {
+  factory SpawnEnvoyRequest({
+    Harness? harness,
+    $core.Iterable<$core.String>? scopes,
+    $core.Iterable<$core.String>? addScopes,
+    $2.Duration? ttl,
+  }) {
+    final result = SpawnEnvoyRequest._();
+    if (harness != null) result.harness = harness;
+    if (scopes != null) result.scopes.addAll(scopes);
+    if (addScopes != null) result.addScopes.addAll(addScopes);
+    if (ttl != null) result.ttl = ttl;
+    return result;
+  }
+
+  SpawnEnvoyRequest._();
+
+  factory SpawnEnvoyRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnEnvoyRequest()..mergeFromBuffer(data, registry);
+  factory SpawnEnvoyRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnEnvoyRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SpawnEnvoyRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SpawnEnvoyRequest.$_createMessage)
+    ..aE<Harness>(1, _omitFieldNames ? '' : 'harness',
+        enumValues: Harness.values)
+    ..pPS(2, _omitFieldNames ? '' : 'scopes')
+    ..pPS(3, _omitFieldNames ? '' : 'addScopes')
+    ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'ttl',
+        subBuilder: $2.Duration.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnEnvoyRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnEnvoyRequest copyWith(void Function(SpawnEnvoyRequest) updates) =>
+      super.copyWith((message) => updates(message as SpawnEnvoyRequest))
+          as SpawnEnvoyRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SpawnEnvoyRequest() / SpawnEnvoyRequest.new instead')
+  static SpawnEnvoyRequest create() => SpawnEnvoyRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SpawnEnvoyRequest._();
+  @$core.override
+  SpawnEnvoyRequest createEmptyInstance() => SpawnEnvoyRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SpawnEnvoyRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SpawnEnvoyRequest>(
+          SpawnEnvoyRequest.$_createMessage);
+  static SpawnEnvoyRequest? _defaultInstance;
+
+  /// harness is the harness to run; UNSPECIFIED picks the top recommendation
+  /// of QuotaService.Suggest. HARNESS_SHELL is invalid.
+  @$pb.TagNumber(1)
+  Harness get harness => $_getN(0);
+  @$pb.TagNumber(1)
+  set harness(Harness value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasHarness() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearHarness() => $_clearField(1);
+
+  /// scopes replaces the default scopes (read, events and the non-destructive
+  /// backlog, lease, message, sleeve spawn and resleeve tools) when not empty.
+  @$pb.TagNumber(2)
+  $pb.PbList<$core.String> get scopes => $_getList(1);
+
+  /// add_scopes extends the scopes, defaults or replaced.
+  @$pb.TagNumber(3)
+  $pb.PbList<$core.String> get addScopes => $_getList(2);
+
+  /// ttl is the token lifetime. Unset means 720h; zero never expires. The hub
+  /// renews the token before it expires without restarting the harness.
+  @$pb.TagNumber(4)
+  $2.Duration get ttl => $_getN(3);
+  @$pb.TagNumber(4)
+  set ttl($2.Duration value) => $_setField(4, value);
+  @$pb.TagNumber(4)
+  $core.bool hasTtl() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearTtl() => $_clearField(4);
+  @$pb.TagNumber(4)
+  $2.Duration ensureTtl() => $_ensure(3);
+}
+
+class SpawnEnvoyResponse extends $pb.GeneratedMessage {
+  factory SpawnEnvoyResponse({
+    Sleeve? sleeve,
+    $3.TokenInfo? token,
+    $core.String? workspace,
+    $core.String? reason,
+    $core.bool? replaced,
+  }) {
+    final result = SpawnEnvoyResponse._();
+    if (sleeve != null) result.sleeve = sleeve;
+    if (token != null) result.token = token;
+    if (workspace != null) result.workspace = workspace;
+    if (reason != null) result.reason = reason;
+    if (replaced != null) result.replaced = replaced;
+    return result;
+  }
+
+  SpawnEnvoyResponse._();
+
+  factory SpawnEnvoyResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnEnvoyResponse()..mergeFromBuffer(data, registry);
+  factory SpawnEnvoyResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SpawnEnvoyResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SpawnEnvoyResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SpawnEnvoyResponse.$_createMessage)
+    ..aOM<Sleeve>(1, _omitFieldNames ? '' : 'sleeve',
+        subBuilder: Sleeve.$_createMessage)
+    ..aOM<$3.TokenInfo>(2, _omitFieldNames ? '' : 'token',
+        subBuilder: $3.TokenInfo.$_createMessage)
+    ..aOS(3, _omitFieldNames ? '' : 'workspace')
+    ..aOS(4, _omitFieldNames ? '' : 'reason')
+    ..aOB(5, _omitFieldNames ? '' : 'replaced')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnEnvoyResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SpawnEnvoyResponse copyWith(void Function(SpawnEnvoyResponse) updates) =>
+      super.copyWith((message) => updates(message as SpawnEnvoyResponse))
+          as SpawnEnvoyResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SpawnEnvoyResponse() / SpawnEnvoyResponse.new instead')
+  static SpawnEnvoyResponse create() => SpawnEnvoyResponse._();
+  static $pb.GeneratedMessage $_createMessage() => SpawnEnvoyResponse._();
+  @$core.override
+  SpawnEnvoyResponse createEmptyInstance() => SpawnEnvoyResponse._();
+  @$core.pragma('dart2js:noInline')
+  static SpawnEnvoyResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SpawnEnvoyResponse>(
+          SpawnEnvoyResponse.$_createMessage);
+  static SpawnEnvoyResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  Sleeve get sleeve => $_getN(0);
+  @$pb.TagNumber(1)
+  set sleeve(Sleeve value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Sleeve ensureSleeve() => $_ensure(0);
+
+  /// token describes the minted token; the secret stays in the token file.
+  @$pb.TagNumber(2)
+  $3.TokenInfo get token => $_getN(1);
+  @$pb.TagNumber(2)
+  set token($3.TokenInfo value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasToken() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearToken() => $_clearField(2);
+  @$pb.TagNumber(2)
+  $3.TokenInfo ensureToken() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  $core.String get workspace => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set workspace($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasWorkspace() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearWorkspace() => $_clearField(3);
+
+  /// reason says why the harness was chosen.
+  @$pb.TagNumber(4)
+  $core.String get reason => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set reason($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasReason() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearReason() => $_clearField(4);
+
+  /// replaced is true when a running Envoy was stopped first.
+  @$pb.TagNumber(5)
+  $core.bool get replaced => $_getBF(4);
+  @$pb.TagNumber(5)
+  set replaced($core.bool value) => $_setBool(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasReplaced() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearReplaced() => $_clearField(5);
+}
+
 /// SleeveService manages sleeves on the hub machine: one workspace plus one
 /// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
 /// memory limits. In chat mode (the default for agent harnesses) the harness
@@ -1560,6 +1769,21 @@ class SleeveServiceApi {
           $pb.ClientContext? ctx, ResleeveSleeveRequest request) =>
       _client.invoke<ResleeveSleeveResponse>(ctx, 'SleeveService',
           'ResleeveSleeve', request, ResleeveSleeveResponse());
+
+  /// SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
+  /// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
+  /// token. It picks the harness (the top of QuotaService.Suggest unless one
+  /// is given), stops a running Envoy, revokes every earlier orchestrator
+  /// token, mints a new one, writes the token file and the generated context
+  /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+  /// is byte-identical across respawns unless the CLI, the tool catalog, the
+  /// hub URL, the harness or the scopes change, so a resumed session keeps its
+  /// prompt-cache prefix. Only the owner token may call it, and the token it
+  /// mints never holds it.
+  $async.Future<SpawnEnvoyResponse> spawnEnvoy(
+          $pb.ClientContext? ctx, SpawnEnvoyRequest request) =>
+      _client.invoke<SpawnEnvoyResponse>(
+          ctx, 'SleeveService', 'SpawnEnvoy', request, SpawnEnvoyResponse());
 }
 
 const $core.bool _omitFieldNames =

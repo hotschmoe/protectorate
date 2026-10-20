@@ -15,39 +15,43 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'sleeve.pb.dart' as $3;
+import 'sleeve.pb.dart' as $4;
 import 'sleeve.pbjson.dart';
 
 export 'sleeve.pb.dart';
 
 abstract class SleeveServiceBase extends $pb.GeneratedService {
-  $async.Future<$3.SpawnSleeveResponse> spawnSleeve(
-      $pb.ServerContext ctx, $3.SpawnSleeveRequest request);
-  $async.Future<$3.ListSleevesResponse> listSleeves(
-      $pb.ServerContext ctx, $3.ListSleevesRequest request);
-  $async.Future<$3.ListWorkspacesResponse> listWorkspaces(
-      $pb.ServerContext ctx, $3.ListWorkspacesRequest request);
-  $async.Future<$3.GetSleeveResponse> getSleeve(
-      $pb.ServerContext ctx, $3.GetSleeveRequest request);
-  $async.Future<$3.KillSleeveResponse> killSleeve(
-      $pb.ServerContext ctx, $3.KillSleeveRequest request);
-  $async.Future<$3.ResleeveSleeveResponse> resleeveSleeve(
-      $pb.ServerContext ctx, $3.ResleeveSleeveRequest request);
+  $async.Future<$4.SpawnSleeveResponse> spawnSleeve(
+      $pb.ServerContext ctx, $4.SpawnSleeveRequest request);
+  $async.Future<$4.ListSleevesResponse> listSleeves(
+      $pb.ServerContext ctx, $4.ListSleevesRequest request);
+  $async.Future<$4.ListWorkspacesResponse> listWorkspaces(
+      $pb.ServerContext ctx, $4.ListWorkspacesRequest request);
+  $async.Future<$4.GetSleeveResponse> getSleeve(
+      $pb.ServerContext ctx, $4.GetSleeveRequest request);
+  $async.Future<$4.KillSleeveResponse> killSleeve(
+      $pb.ServerContext ctx, $4.KillSleeveRequest request);
+  $async.Future<$4.ResleeveSleeveResponse> resleeveSleeve(
+      $pb.ServerContext ctx, $4.ResleeveSleeveRequest request);
+  $async.Future<$4.SpawnEnvoyResponse> spawnEnvoy(
+      $pb.ServerContext ctx, $4.SpawnEnvoyRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'SpawnSleeve':
-        return $3.SpawnSleeveRequest();
+        return $4.SpawnSleeveRequest();
       case 'ListSleeves':
-        return $3.ListSleevesRequest();
+        return $4.ListSleevesRequest();
       case 'ListWorkspaces':
-        return $3.ListWorkspacesRequest();
+        return $4.ListWorkspacesRequest();
       case 'GetSleeve':
-        return $3.GetSleeveRequest();
+        return $4.GetSleeveRequest();
       case 'KillSleeve':
-        return $3.KillSleeveRequest();
+        return $4.KillSleeveRequest();
       case 'ResleeveSleeve':
-        return $3.ResleeveSleeveRequest();
+        return $4.ResleeveSleeveRequest();
+      case 'SpawnEnvoy':
+        return $4.SpawnEnvoyRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -57,17 +61,19 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'SpawnSleeve':
-        return spawnSleeve(ctx, request as $3.SpawnSleeveRequest);
+        return spawnSleeve(ctx, request as $4.SpawnSleeveRequest);
       case 'ListSleeves':
-        return listSleeves(ctx, request as $3.ListSleevesRequest);
+        return listSleeves(ctx, request as $4.ListSleevesRequest);
       case 'ListWorkspaces':
-        return listWorkspaces(ctx, request as $3.ListWorkspacesRequest);
+        return listWorkspaces(ctx, request as $4.ListWorkspacesRequest);
       case 'GetSleeve':
-        return getSleeve(ctx, request as $3.GetSleeveRequest);
+        return getSleeve(ctx, request as $4.GetSleeveRequest);
       case 'KillSleeve':
-        return killSleeve(ctx, request as $3.KillSleeveRequest);
+        return killSleeve(ctx, request as $4.KillSleeveRequest);
       case 'ResleeveSleeve':
-        return resleeveSleeve(ctx, request as $3.ResleeveSleeveRequest);
+        return resleeveSleeve(ctx, request as $4.ResleeveSleeveRequest);
+      case 'SpawnEnvoy':
+        return spawnEnvoy(ctx, request as $4.SpawnEnvoyRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

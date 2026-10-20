@@ -1190,11 +1190,165 @@ func (x *ResleeveSleeveResponse) GetSleeve() *Sleeve {
 	return nil
 }
 
+type SpawnEnvoyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// harness is the harness to run; UNSPECIFIED picks the top recommendation
+	// of QuotaService.Suggest. HARNESS_SHELL is invalid.
+	Harness Harness `protobuf:"varint,1,opt,name=harness,proto3,enum=protectorate.v1.Harness" json:"harness,omitempty"`
+	// scopes replaces the default scopes (read, events and the non-destructive
+	// backlog, lease, message, sleeve spawn and resleeve tools) when not empty.
+	Scopes []string `protobuf:"bytes,2,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	// add_scopes extends the scopes, defaults or replaced.
+	AddScopes []string `protobuf:"bytes,3,rep,name=add_scopes,json=addScopes,proto3" json:"add_scopes,omitempty"`
+	// ttl is the token lifetime. Unset means 720h; zero never expires. The hub
+	// renews the token before it expires without restarting the harness.
+	Ttl           *durationpb.Duration `protobuf:"bytes,4,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpawnEnvoyRequest) Reset() {
+	*x = SpawnEnvoyRequest{}
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpawnEnvoyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpawnEnvoyRequest) ProtoMessage() {}
+
+func (x *SpawnEnvoyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpawnEnvoyRequest.ProtoReflect.Descriptor instead.
+func (*SpawnEnvoyRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SpawnEnvoyRequest) GetHarness() Harness {
+	if x != nil {
+		return x.Harness
+	}
+	return Harness_HARNESS_UNSPECIFIED
+}
+
+func (x *SpawnEnvoyRequest) GetScopes() []string {
+	if x != nil {
+		return x.Scopes
+	}
+	return nil
+}
+
+func (x *SpawnEnvoyRequest) GetAddScopes() []string {
+	if x != nil {
+		return x.AddScopes
+	}
+	return nil
+}
+
+func (x *SpawnEnvoyRequest) GetTtl() *durationpb.Duration {
+	if x != nil {
+		return x.Ttl
+	}
+	return nil
+}
+
+type SpawnEnvoyResponse struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Sleeve *Sleeve                `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	// token describes the minted token; the secret stays in the token file.
+	Token     *TokenInfo `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
+	Workspace string     `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// reason says why the harness was chosen.
+	Reason string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	// replaced is true when a running Envoy was stopped first.
+	Replaced      bool `protobuf:"varint,5,opt,name=replaced,proto3" json:"replaced,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpawnEnvoyResponse) Reset() {
+	*x = SpawnEnvoyResponse{}
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpawnEnvoyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpawnEnvoyResponse) ProtoMessage() {}
+
+func (x *SpawnEnvoyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpawnEnvoyResponse.ProtoReflect.Descriptor instead.
+func (*SpawnEnvoyResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SpawnEnvoyResponse) GetSleeve() *Sleeve {
+	if x != nil {
+		return x.Sleeve
+	}
+	return nil
+}
+
+func (x *SpawnEnvoyResponse) GetToken() *TokenInfo {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
+func (x *SpawnEnvoyResponse) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *SpawnEnvoyResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SpawnEnvoyResponse) GetReplaced() bool {
+	if x != nil {
+		return x.Replaced
+	}
+	return false
+}
+
 var File_protectorate_v1_sleeve_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\n" +
-	"\x1cprotectorate/v1/sleeve.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aprotectorate/v1/chat.proto\x1a\x1dprotectorate/v1/options.proto\"R\n" +
+	"\x1cprotectorate/v1/sleeve.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aprotectorate/v1/chat.proto\x1a\x1dprotectorate/v1/options.proto\x1a\x1bprotectorate/v1/token.proto\"R\n" +
 	"\fSleeveLimits\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\rR\n" +
 	"cpuPercent\x12!\n" +
@@ -1285,7 +1439,19 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tinterrupt\x18\x03 \x01(\bR\tinterrupt\x12-\n" +
 	"\x04wait\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x04wait\"I\n" +
 	"\x16ResleeveSleeveResponse\x12/\n" +
-	"\x06sleeve\x18\x01 \x01(\v2\x17.protectorate.v1.SleeveR\x06sleeve*~\n" +
+	"\x06sleeve\x18\x01 \x01(\v2\x17.protectorate.v1.SleeveR\x06sleeve\"\xab\x01\n" +
+	"\x11SpawnEnvoyRequest\x122\n" +
+	"\aharness\x18\x01 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x16\n" +
+	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x12\x1d\n" +
+	"\n" +
+	"add_scopes\x18\x03 \x03(\tR\taddScopes\x12+\n" +
+	"\x03ttl\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\"\xc9\x01\n" +
+	"\x12SpawnEnvoyResponse\x12/\n" +
+	"\x06sleeve\x18\x01 \x01(\v2\x17.protectorate.v1.SleeveR\x06sleeve\x120\n" +
+	"\x05token\x18\x02 \x01(\v2\x1a.protectorate.v1.TokenInfoR\x05token\x12\x1c\n" +
+	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x1a\n" +
+	"\breplaced\x18\x05 \x01(\bR\breplaced*~\n" +
 	"\aHarness\x12\x17\n" +
 	"\x13HARNESS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eHARNESS_CLAUDE\x10\x01\x12\x11\n" +
@@ -1297,7 +1463,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\vSleeveState\x12\x1c\n" +
 	"\x18SLEEVE_STATE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14SLEEVE_STATE_RUNNING\x10\x01\x12\x17\n" +
-	"\x13SLEEVE_STATE_EXITED\x10\x022\xc9\x04\n" +
+	"\x13SLEEVE_STATE_EXITED\x10\x022\xa6\x05\n" +
 	"\rSleeveService\x12X\n" +
 	"\vSpawnSleeve\x12#.protectorate.v1.SpawnSleeveRequest\x1a$.protectorate.v1.SpawnSleeveResponse\x12]\n" +
 	"\vListSleeves\x12#.protectorate.v1.ListSleevesRequest\x1a$.protectorate.v1.ListSleevesResponse\"\x03\x90\x02\x01\x12f\n" +
@@ -1305,7 +1471,9 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tGetSleeve\x12!.protectorate.v1.GetSleeveRequest\x1a\".protectorate.v1.GetSleeveResponse\"\x03\x90\x02\x01\x12[\n" +
 	"\n" +
 	"KillSleeve\x12\".protectorate.v1.KillSleeveRequest\x1a#.protectorate.v1.KillSleeveResponse\"\x04\x88\xb5\x18\x01\x12a\n" +
-	"\x0eResleeveSleeve\x12&.protectorate.v1.ResleeveSleeveRequest\x1a'.protectorate.v1.ResleeveSleeveResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\x0eResleeveSleeve\x12&.protectorate.v1.ResleeveSleeveRequest\x1a'.protectorate.v1.ResleeveSleeveResponse\x12[\n" +
+	"\n" +
+	"SpawnEnvoy\x12\".protectorate.v1.SpawnEnvoyRequest\x1a#.protectorate.v1.SpawnEnvoyResponse\"\x04\xa0\xb5\x18\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_sleeve_proto_rawDescOnce sync.Once
@@ -1320,7 +1488,7 @@ func file_protectorate_v1_sleeve_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_sleeve_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_sleeve_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_protectorate_v1_sleeve_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_protectorate_v1_sleeve_proto_goTypes = []any{
 	(Harness)(0),                   // 0: protectorate.v1.Harness
 	(SleeveState)(0),               // 1: protectorate.v1.SleeveState
@@ -1340,53 +1508,62 @@ var file_protectorate_v1_sleeve_proto_goTypes = []any{
 	(*KillSleeveResponse)(nil),     // 15: protectorate.v1.KillSleeveResponse
 	(*ResleeveSleeveRequest)(nil),  // 16: protectorate.v1.ResleeveSleeveRequest
 	(*ResleeveSleeveResponse)(nil), // 17: protectorate.v1.ResleeveSleeveResponse
-	nil,                            // 18: protectorate.v1.SpawnSleeveRequest.EnvEntry
-	(*timestamppb.Timestamp)(nil),  // 19: google.protobuf.Timestamp
-	(SleeveMode)(0),                // 20: protectorate.v1.SleeveMode
-	(*ChatStatus)(nil),             // 21: protectorate.v1.ChatStatus
-	(*Handoff)(nil),                // 22: protectorate.v1.Handoff
-	(*durationpb.Duration)(nil),    // 23: google.protobuf.Duration
+	(*SpawnEnvoyRequest)(nil),      // 18: protectorate.v1.SpawnEnvoyRequest
+	(*SpawnEnvoyResponse)(nil),     // 19: protectorate.v1.SpawnEnvoyResponse
+	nil,                            // 20: protectorate.v1.SpawnSleeveRequest.EnvEntry
+	(*timestamppb.Timestamp)(nil),  // 21: google.protobuf.Timestamp
+	(SleeveMode)(0),                // 22: protectorate.v1.SleeveMode
+	(*ChatStatus)(nil),             // 23: protectorate.v1.ChatStatus
+	(*Handoff)(nil),                // 24: protectorate.v1.Handoff
+	(*durationpb.Duration)(nil),    // 25: google.protobuf.Duration
+	(*TokenInfo)(nil),              // 26: protectorate.v1.TokenInfo
 }
 var file_protectorate_v1_sleeve_proto_depIdxs = []int32{
-	19, // 0: protectorate.v1.SleeveUsage.sampled_at:type_name -> google.protobuf.Timestamp
-	19, // 1: protectorate.v1.SleeveUsage.disk_sampled_at:type_name -> google.protobuf.Timestamp
+	21, // 0: protectorate.v1.SleeveUsage.sampled_at:type_name -> google.protobuf.Timestamp
+	21, // 1: protectorate.v1.SleeveUsage.disk_sampled_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: protectorate.v1.Sleeve.harness:type_name -> protectorate.v1.Harness
-	19, // 3: protectorate.v1.Sleeve.created_at:type_name -> google.protobuf.Timestamp
+	21, // 3: protectorate.v1.Sleeve.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 4: protectorate.v1.Sleeve.state:type_name -> protectorate.v1.SleeveState
 	2,  // 5: protectorate.v1.Sleeve.limits:type_name -> protectorate.v1.SleeveLimits
 	3,  // 6: protectorate.v1.Sleeve.usage:type_name -> protectorate.v1.SleeveUsage
-	19, // 7: protectorate.v1.Sleeve.exited_at:type_name -> google.protobuf.Timestamp
-	20, // 8: protectorate.v1.Sleeve.mode:type_name -> protectorate.v1.SleeveMode
-	21, // 9: protectorate.v1.Sleeve.chat:type_name -> protectorate.v1.ChatStatus
-	22, // 10: protectorate.v1.Sleeve.handoff:type_name -> protectorate.v1.Handoff
+	21, // 7: protectorate.v1.Sleeve.exited_at:type_name -> google.protobuf.Timestamp
+	22, // 8: protectorate.v1.Sleeve.mode:type_name -> protectorate.v1.SleeveMode
+	23, // 9: protectorate.v1.Sleeve.chat:type_name -> protectorate.v1.ChatStatus
+	24, // 10: protectorate.v1.Sleeve.handoff:type_name -> protectorate.v1.Handoff
 	0,  // 11: protectorate.v1.SpawnSleeveRequest.harness:type_name -> protectorate.v1.Harness
 	2,  // 12: protectorate.v1.SpawnSleeveRequest.limits:type_name -> protectorate.v1.SleeveLimits
-	18, // 13: protectorate.v1.SpawnSleeveRequest.env:type_name -> protectorate.v1.SpawnSleeveRequest.EnvEntry
-	20, // 14: protectorate.v1.SpawnSleeveRequest.mode:type_name -> protectorate.v1.SleeveMode
+	20, // 13: protectorate.v1.SpawnSleeveRequest.env:type_name -> protectorate.v1.SpawnSleeveRequest.EnvEntry
+	22, // 14: protectorate.v1.SpawnSleeveRequest.mode:type_name -> protectorate.v1.SleeveMode
 	4,  // 15: protectorate.v1.SpawnSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
 	4,  // 16: protectorate.v1.ListSleevesResponse.sleeves:type_name -> protectorate.v1.Sleeve
 	10, // 17: protectorate.v1.ListWorkspacesResponse.workspaces:type_name -> protectorate.v1.Workspace
 	4,  // 18: protectorate.v1.GetSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
 	0,  // 19: protectorate.v1.ResleeveSleeveRequest.to:type_name -> protectorate.v1.Harness
-	23, // 20: protectorate.v1.ResleeveSleeveRequest.wait:type_name -> google.protobuf.Duration
+	25, // 20: protectorate.v1.ResleeveSleeveRequest.wait:type_name -> google.protobuf.Duration
 	4,  // 21: protectorate.v1.ResleeveSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	5,  // 22: protectorate.v1.SleeveService.SpawnSleeve:input_type -> protectorate.v1.SpawnSleeveRequest
-	7,  // 23: protectorate.v1.SleeveService.ListSleeves:input_type -> protectorate.v1.ListSleevesRequest
-	9,  // 24: protectorate.v1.SleeveService.ListWorkspaces:input_type -> protectorate.v1.ListWorkspacesRequest
-	12, // 25: protectorate.v1.SleeveService.GetSleeve:input_type -> protectorate.v1.GetSleeveRequest
-	14, // 26: protectorate.v1.SleeveService.KillSleeve:input_type -> protectorate.v1.KillSleeveRequest
-	16, // 27: protectorate.v1.SleeveService.ResleeveSleeve:input_type -> protectorate.v1.ResleeveSleeveRequest
-	6,  // 28: protectorate.v1.SleeveService.SpawnSleeve:output_type -> protectorate.v1.SpawnSleeveResponse
-	8,  // 29: protectorate.v1.SleeveService.ListSleeves:output_type -> protectorate.v1.ListSleevesResponse
-	11, // 30: protectorate.v1.SleeveService.ListWorkspaces:output_type -> protectorate.v1.ListWorkspacesResponse
-	13, // 31: protectorate.v1.SleeveService.GetSleeve:output_type -> protectorate.v1.GetSleeveResponse
-	15, // 32: protectorate.v1.SleeveService.KillSleeve:output_type -> protectorate.v1.KillSleeveResponse
-	17, // 33: protectorate.v1.SleeveService.ResleeveSleeve:output_type -> protectorate.v1.ResleeveSleeveResponse
-	28, // [28:34] is the sub-list for method output_type
-	22, // [22:28] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	0,  // 22: protectorate.v1.SpawnEnvoyRequest.harness:type_name -> protectorate.v1.Harness
+	25, // 23: protectorate.v1.SpawnEnvoyRequest.ttl:type_name -> google.protobuf.Duration
+	4,  // 24: protectorate.v1.SpawnEnvoyResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	26, // 25: protectorate.v1.SpawnEnvoyResponse.token:type_name -> protectorate.v1.TokenInfo
+	5,  // 26: protectorate.v1.SleeveService.SpawnSleeve:input_type -> protectorate.v1.SpawnSleeveRequest
+	7,  // 27: protectorate.v1.SleeveService.ListSleeves:input_type -> protectorate.v1.ListSleevesRequest
+	9,  // 28: protectorate.v1.SleeveService.ListWorkspaces:input_type -> protectorate.v1.ListWorkspacesRequest
+	12, // 29: protectorate.v1.SleeveService.GetSleeve:input_type -> protectorate.v1.GetSleeveRequest
+	14, // 30: protectorate.v1.SleeveService.KillSleeve:input_type -> protectorate.v1.KillSleeveRequest
+	16, // 31: protectorate.v1.SleeveService.ResleeveSleeve:input_type -> protectorate.v1.ResleeveSleeveRequest
+	18, // 32: protectorate.v1.SleeveService.SpawnEnvoy:input_type -> protectorate.v1.SpawnEnvoyRequest
+	6,  // 33: protectorate.v1.SleeveService.SpawnSleeve:output_type -> protectorate.v1.SpawnSleeveResponse
+	8,  // 34: protectorate.v1.SleeveService.ListSleeves:output_type -> protectorate.v1.ListSleevesResponse
+	11, // 35: protectorate.v1.SleeveService.ListWorkspaces:output_type -> protectorate.v1.ListWorkspacesResponse
+	13, // 36: protectorate.v1.SleeveService.GetSleeve:output_type -> protectorate.v1.GetSleeveResponse
+	15, // 37: protectorate.v1.SleeveService.KillSleeve:output_type -> protectorate.v1.KillSleeveResponse
+	17, // 38: protectorate.v1.SleeveService.ResleeveSleeve:output_type -> protectorate.v1.ResleeveSleeveResponse
+	19, // 39: protectorate.v1.SleeveService.SpawnEnvoy:output_type -> protectorate.v1.SpawnEnvoyResponse
+	33, // [33:40] is the sub-list for method output_type
+	26, // [26:33] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_sleeve_proto_init() }
@@ -1396,6 +1573,7 @@ func file_protectorate_v1_sleeve_proto_init() {
 	}
 	file_protectorate_v1_chat_proto_init()
 	file_protectorate_v1_options_proto_init()
+	file_protectorate_v1_token_proto_init()
 	file_protectorate_v1_sleeve_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1403,7 +1581,7 @@ func file_protectorate_v1_sleeve_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_sleeve_proto_rawDesc), len(file_protectorate_v1_sleeve_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

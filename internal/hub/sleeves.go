@@ -38,6 +38,7 @@ func (h *Hub) SetSleeves(m *sleeve.Manager) {
 	h.chat = newChatManager(h)
 	h.dropHelpers(context.Background())
 	h.chat.recover()
+	h.migrateEnvoyTokens(time.Now())
 }
 
 // sleeveProto is sleeveToProto with the live chat status laid over the
@@ -188,10 +189,10 @@ func sleeveErr(err error) error {
 func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSleeveRequest]) (*connect.Response[pb.SpawnSleeveResponse], error) {
 	m := req.Msg
 	// The orchestrator's name owns the orchestrator directory and its token,
-	// so only the owner (through `orchestrator spawn`) may claim it.
+	// so only the owner (through SpawnEnvoy) may claim it.
 	if m.Name == sleeve.OrchestratorName {
 		if p := auth.PrincipalFrom(ctx); p == nil || !p.Owner {
-			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; spawn it with the owner token via `protectorate orchestrator spawn`", m.Name))
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("sleeve name %q is reserved for the orchestrator; start it with the owner token via `protectorate orchestrator spawn`", m.Name))
 		}
 	}
 	r := sleeve.SpawnRequest{

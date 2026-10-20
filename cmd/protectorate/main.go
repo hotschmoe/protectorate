@@ -226,6 +226,11 @@ func hubCmd() *cobra.Command {
 			if err := attachSleeves(ctx, h, toolDirs); err != nil {
 				return err
 			}
+			tools, err := toolDocs()
+			if err != nil {
+				return err
+			}
+			h.SetEnvoy(hub.EnvoyConfig{Commands: commandDocs(cmd.Root()), Tools: tools})
 			if backupDir != "" {
 				bctx, bstop := context.WithCancel(ctx)
 				backups := make(chan struct{})

@@ -190,8 +190,8 @@ void main() {
     test('targets, labels and permissions', () {
       final orch = MailMessage(
         from: 'hub',
-        to: 'poe',
-        deliveries: [MailDelivery(recipient: 'poe')],
+        to: 'envoy',
+        deliveries: [MailDelivery(recipient: 'envoy')],
       );
       final waiting = MailMessage(from: 'web', to: 'project:acme/lib');
       expect(threadTargets([_ask(), _fyi(), orch, waiting]), [

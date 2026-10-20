@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,7 +28,7 @@ const (
 )
 
 // Hub is the part of the hub API Spawn uses. Token management needs the
-// owner token.
+// owner. The hub satisfies it with its own handlers, called in process.
 type Hub interface {
 	protectoratev1connect.TokenServiceClient
 	protectoratev1connect.SleeveServiceClient
@@ -44,7 +45,6 @@ type Options struct {
 	Tools   []Tool
 	// Commands feed the generated CLI reference.
 	Commands []Command
-	Now      func() time.Time
 }
 
 // Result describes the sleeve that was started.
@@ -62,7 +62,8 @@ var harnessNames = map[string]pb.Harness{
 	"pi": pb.Harness_HARNESS_PI,
 }
 
-func harnessLabel(h pb.Harness) string {
+// HarnessName is the name Options.Harness takes for h.
+func HarnessName(h pb.Harness) string {
 	for k, v := range harnessNames {
 		if v == h {
 			return k
@@ -71,13 +72,10 @@ func harnessLabel(h pb.Harness) string {
 	return "?"
 }
 
-// Spawn creates or respawns the poe sleeve: it stops a running one, revokes
-// every earlier poe token, mints a fresh scoped token, regenerates the
+// Spawn creates or respawns the envoy sleeve: it stops a running one, revokes
+// every earlier orchestrator token, mints a fresh scoped token, regenerates the
 // workspace files and starts the harness.
 func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
-	if o.Now == nil {
-		o.Now = time.Now
-	}
 	harness, reason, err := resolveHarness(ctx, hub, o.Harness)
 	if err != nil {
 		return nil, err
@@ -92,7 +90,7 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 		return nil, fmt.Errorf("create %s: %w", ws, err)
 	}
 
-	res := &Result{Workspace: ws, Harness: harnessLabel(harness), Reason: reason}
+	res := &Result{Workspace: ws, Harness: HarnessName(harness), Reason: reason}
 	if cur, err := hub.GetSleeve(ctx, connect.NewRequest(&pb.GetSleeveRequest{Name: SleeveName})); err == nil {
 		if cur.Msg.Sleeve.State == pb.SleeveState_SLEEVE_STATE_RUNNING {
 			if _, err := hub.KillSleeve(ctx, connect.NewRequest(&pb.KillSleeveRequest{Name: SleeveName})); err != nil {
@@ -120,19 +118,15 @@ func Spawn(ctx context.Context, hub Hub, o Options) (*Result, error) {
 	}
 
 	tokenPath := filepath.Join(ws, TokenFile)
-	if err := fsutil.WriteFile(tokenPath, []byte(created.Msg.Secret+"\n"), 0o600); err != nil {
-		return fail(fmt.Errorf("write token file: %w", err))
-	}
-	expires := "never"
-	if t := res.Token.ExpiresAt; t != nil {
-		expires = t.AsTime().UTC().Format(time.RFC3339)
+	if err := WriteTokenFile(tokenPath, created.Msg.Secret); err != nil {
+		return fail(err)
 	}
 	doc := RenderAgents(DocInput{
-		Generated: o.Now(), Harness: res.Harness, Hub: o.HubURL,
-		Token:    TokenSummary{ID: res.Token.Id, Name: res.Token.Name, Scopes: res.Token.Scopes, Expires: expires},
+		Harness: res.Harness, Hub: o.HubURL,
+		Token:    TokenSummary{Name: res.Token.Name, Scopes: res.Token.Scopes},
 		Commands: o.Commands, Tools: o.Tools,
 	})
-	if err := WriteContext(ws, doc, readHosts(o.Home)); err != nil {
+	if err := WriteContext(ws, doc, ReadHosts(o.Home)); err != nil {
 		return fail(err)
 	}
 
@@ -184,7 +178,32 @@ func RevokeTokens(ctx context.Context, hub protectoratev1connect.TokenServiceCli
 	return nil
 }
 
-func readHosts(home string) []byte {
+// WriteTokenFile replaces the token file atomically, so a CLI call that reads
+// it while the hub renews the token sees the old secret or the new one, whole.
+func WriteTokenFile(path, secret string) error {
+	if err := fsutil.WriteFile(path, []byte(secret+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write token file: %w", err)
+	}
+	return nil
+}
+
+func writeIfChanged(path string, data []byte) error {
+	if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, data) {
+		return nil
+	}
+	if err := fsutil.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+// WriteHosts refreshes hosts.md in the orchestrator workspace dir.
+func WriteHosts(dir string, hosts []byte) error {
+	return writeIfChanged(filepath.Join(dir, "hosts.md"), hosts)
+}
+
+// ReadHosts returns the hub's host inventory from home, or a placeholder.
+func ReadHosts(home string) []byte {
 	b, err := os.ReadFile(filepath.Join(home, "hosts.md"))
 	if err != nil {
 		return []byte(missingHosts)
@@ -192,16 +211,18 @@ func readHosts(home string) []byte {
 	return b
 }
 
-// WriteContext writes AGENTS.md and hosts.md atomically and makes CLAUDE.md a
+// WriteContext writes AGENTS.md and hosts.md atomically, skipping a file whose
+// content is already right so its mtime stays put, and makes CLAUDE.md a
 // relative symlink to AGENTS.md: Claude Code reads CLAUDE.md, while Codex,
 // Grok and pi read AGENTS.md. A CLAUDE.md that is something else is renamed
-// aside, never deleted.
+// aside, never deleted. hosts.md is volatile and is only referenced from
+// AGENTS.md, never part of the context the harness loads.
 func WriteContext(dir string, agents, hosts []byte) error {
-	if err := fsutil.WriteFile(filepath.Join(dir, "AGENTS.md"), agents, 0o644); err != nil {
-		return fmt.Errorf("write AGENTS.md: %w", err)
+	if err := writeIfChanged(filepath.Join(dir, "AGENTS.md"), agents); err != nil {
+		return err
 	}
-	if err := fsutil.WriteFile(filepath.Join(dir, "hosts.md"), hosts, 0o644); err != nil {
-		return fmt.Errorf("write hosts.md: %w", err)
+	if err := WriteHosts(dir, hosts); err != nil {
+		return err
 	}
 	link := filepath.Join(dir, "CLAUDE.md")
 	fi, err := os.Lstat(link)

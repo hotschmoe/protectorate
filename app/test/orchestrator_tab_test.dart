@@ -32,7 +32,7 @@ void main() {
     unread = 0;
   });
 
-  Future<void> pump(WidgetTester tester, {String selected = 'poe'}) async {
+  Future<void> pump(WidgetTester tester, {String selected = 'envoy'}) async {
     final transport = FakeTransportBuilder()
         .unary(
           SleeveService.listSleeves,
@@ -76,7 +76,7 @@ void main() {
   testWidgets('switches between chat and mail and badges unread mail', (
     tester,
   ) async {
-    sleeves = [_sleeve('poe', SleeveMode.SLEEVE_MODE_CHAT)];
+    sleeves = [_sleeve('envoy', SleeveMode.SLEEVE_MODE_CHAT)];
     unread = 3;
     await pump(tester);
     expect(find.byKey(const ValueKey('sleeve-selector')), findsOneWidget);
@@ -95,7 +95,7 @@ void main() {
     expect(find.byKey(const ValueKey('sleeve-selector')), findsOneWidget);
   });
 
-  testWidgets('offers the spawn command when poe is not running', (
+  testWidgets('offers the spawn command when envoy is not running', (
     tester,
   ) async {
     sleeves = [_sleeve('worker', SleeveMode.SLEEVE_MODE_CHAT)];
@@ -105,31 +105,31 @@ void main() {
     expect(watched, isEmpty);
   });
 
-  testWidgets('talks to poe and lists only chat sleeves, poe first', (
+  testWidgets('talks to envoy and lists only chat sleeves, envoy first', (
     tester,
   ) async {
     sleeves = [
       _sleeve('zed', SleeveMode.SLEEVE_MODE_CHAT),
       _sleeve('shell1', SleeveMode.SLEEVE_MODE_TERMINAL),
-      _sleeve('poe', SleeveMode.SLEEVE_MODE_CHAT),
+      _sleeve('envoy', SleeveMode.SLEEVE_MODE_CHAT),
     ];
     await pump(tester);
-    expect(watched, ['poe']);
+    expect(watched, ['envoy']);
     expect(find.byKey(const ValueKey('orchestrator-empty')), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('sleeve-selector')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('sleeve-option-shell1')), findsNothing);
-    final poe = tester.getTopLeft(
-      find.byKey(const ValueKey('sleeve-option-poe')).last,
+    final envoy = tester.getTopLeft(
+      find.byKey(const ValueKey('sleeve-option-envoy')).last,
     );
     final zed = tester.getTopLeft(
       find.byKey(const ValueKey('sleeve-option-zed')).last,
     );
-    expect(poe.dy, lessThan(zed.dy));
+    expect(envoy.dy, lessThan(zed.dy));
 
     await tester.tap(find.byKey(const ValueKey('sleeve-option-zed')).last);
     await tester.pumpAndSettle();
-    expect(watched, ['poe', 'zed']);
+    expect(watched, ['envoy', 'zed']);
   });
 }

@@ -151,4 +151,31 @@ extension type SleeveServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
+  /// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
+  /// token. It picks the harness (the top of QuotaService.Suggest unless one
+  /// is given), stops a running Envoy, revokes every earlier orchestrator
+  /// token, mints a new one, writes the token file and the generated context
+  /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+  /// is byte-identical across respawns unless the CLI, the tool catalog, the
+  /// hub URL, the harness or the scopes change, so a resumed session keeps its
+  /// prompt-cache prefix. Only the owner token may call it, and the token it
+  /// mints never holds it.
+  Future<protectoratev1sleeve.SpawnEnvoyResponse> spawnEnvoy(
+    protectoratev1sleeve.SpawnEnvoyRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.spawnEnvoy,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }

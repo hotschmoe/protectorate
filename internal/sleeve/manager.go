@@ -172,6 +172,9 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 	if errors.Is(m.cfg.Preflight(), ErrUnsupported) {
 		return m, nil
 	}
+	if err := m.renameRecord(ctx, previousOrchestratorName, OrchestratorName); err != nil {
+		log.Printf("migrate orchestrator sleeve: %v", err)
+	}
 	if err := m.Reconcile(ctx); err != nil {
 		return nil, err
 	}

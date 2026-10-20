@@ -445,12 +445,12 @@ void main() {
       await tester.pump();
       expect(find.text('first body'), findsWidgets);
       hub.notes[0] = hub.notes[0].deepCopy()
-        ..body = 'rewritten by poe'
+        ..body = 'rewritten by envoy'
         ..updatedAt = _ago(Duration.zero);
       events.add(Event(kind: 'note.updated', subject: 'a1'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('rewritten by poe'), findsWidgets);
+      expect(find.text('rewritten by envoy'), findsWidgets);
       expect(hub.updates, isEmpty);
     });
   });

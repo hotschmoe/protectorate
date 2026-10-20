@@ -818,13 +818,13 @@ List<ThreadSummary> _threads() => [
   ),
   ThreadSummary(
     threadId: 't9',
-    participants: ['poe', 'scratch'],
+    participants: ['envoy', 'scratch'],
     messageCount: 4,
     last: _mail(
       'm31',
       't9',
       'scratch',
-      'poe',
+      'envoy',
       'Benchmarks done: qwen3:8b at 41 tok/s on the 4090, results in bench/.',
       300,
     ),

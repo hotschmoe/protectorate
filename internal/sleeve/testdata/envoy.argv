@@ -2,13 +2,13 @@ sh
 -c
 exec 3<"$1"; shift; exec "$@"
 sh
-/state/sleeves/poe/env.args
+/state/sleeves/envoy/env.args
 systemd-run
 --user
 --scope
 --quiet
 --collect
---unit=prot-sleeve-poe
+--unit=prot-sleeve-envoy
 -p
 MemoryMax=4294967296
 -p
@@ -26,7 +26,7 @@ bwrap
 --unshare-uts
 --die-with-parent
 --hostname
-poe
+envoy
 --tmpfs
 /
 --ro-bind
@@ -47,7 +47,7 @@ usr/bin
 --tmpfs
 /var/tmp
 --bind
-/state/sleeves/poe/home
+/state/sleeves/envoy/home
 /home/u
 --ro-bind
 /home/u/.local
