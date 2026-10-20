@@ -157,7 +157,7 @@ func hubCmd() *command {
 	var backupEvery time.Duration
 	var watch, toolDirs, refDirs, workspaceRoots []string
 	var orchestratorGrants bool
-	var startEnvoy string
+	var startEnvoy, sleeveEffort string
 	serve := &command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -194,6 +194,7 @@ func hubCmd() *command {
 			defer audit.Close()
 			defer store.Flush()
 			h := hub.New(version, tok)
+			h.SleeveEffort = sleeveEffort
 			h.SelfURL = hub.LocalURL(l.Addr())
 			h.AckTimeout = ackTimeout
 			h.SetAuth(auth.New(tok, store, audit))
@@ -264,6 +265,7 @@ func hubCmd() *command {
 	serve.Flags().StringVar(&nodeTokenFile, "node-token-file", "", "file holding the bearer token presented to node agents (or the token itself in env "+nodeTokenEnv+")")
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringSliceVar(&refDirs, "sleeve-reference-dir", nil, "directory offered read-only to sleeves by 'sleeve workspaces' (repeatable), besides each workspace's references/")
+	serve.Flags().StringVar(&sleeveEffort, "sleeve-effort", "high", "default requested reasoning effort for supported chat harnesses (empty uses native default; unsupported levels fall back to native default)")
 	serve.Flags().StringSliceVar(&workspaceRoots, "workspace-root", nil, "directory browser root (repeatable; defaults to ~/github when it exists)")
 	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")

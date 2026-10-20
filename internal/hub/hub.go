@@ -39,6 +39,9 @@ type Hub struct {
 	// SelfURL is how sleeves on this machine reach the hub; it is exported to
 	// them as PROTECTORATE_HUB.
 	SelfURL string
+	// SleeveEffort is the requested effort for new selection-capable chats;
+	// empty leaves the harness's native default in control.
+	SleeveEffort string
 	// AckTimeout is how long an ack_required message may stay unacked before
 	// it is re-delivered, and again before it is escalated; 0 means 30m.
 	AckTimeout time.Duration
@@ -113,6 +116,7 @@ type Hub struct {
 func New(version, token string) *Hub {
 	h := &Hub{
 		Version:       version,
+		SleeveEffort:  "high",
 		Heartbeat:     5 * time.Second,
 		Sessions:      session.New(session.DefaultSocket),
 		SessionPoll:   time.Second,

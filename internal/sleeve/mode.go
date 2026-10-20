@@ -22,19 +22,20 @@ const (
 // Chat is the persisted chat summary of a sleeve. State holds the hub's
 // chat state name; the sleeve layer does not interpret it.
 type Chat struct {
-	State        string           `json:"state,omitempty"`
-	SessionID    string           `json:"session_id,omitempty"`
-	Model        string           `json:"model,omitempty"`
-	Effort       string           `json:"effort,omitempty"`
-	Requested    driver.Selection `json:"requested,omitempty"`
-	Defaults     driver.Selection `json:"native_defaults,omitempty"`
-	Provider     string           `json:"provider,omitempty"`
-	LocalModel   bool             `json:"local_model,omitempty"`
-	Context      uint64           `json:"context_tokens,omitempty"`
-	Window       uint64           `json:"context_window,omitempty"`
-	CacheExpires time.Time        `json:"cache_expires,omitempty"`
-	LastSeq      uint64           `json:"last_seq,omitempty"`
-	LastActivity time.Time        `json:"last_activity,omitempty"`
+	State          string           `json:"state,omitempty"`
+	SessionID      string           `json:"session_id,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	Effort         string           `json:"effort,omitempty"`
+	Requested      driver.Selection `json:"requested,omitempty"`
+	Defaults       driver.Selection `json:"native_defaults,omitempty"`
+	EffortFallback bool             `json:"effort_fallback,omitempty"`
+	Provider       string           `json:"provider,omitempty"`
+	LocalModel     bool             `json:"local_model,omitempty"`
+	Context        uint64           `json:"context_tokens,omitempty"`
+	Window         uint64           `json:"context_window,omitempty"`
+	CacheExpires   time.Time        `json:"cache_expires,omitempty"`
+	LastSeq        uint64           `json:"last_seq,omitempty"`
+	LastActivity   time.Time        `json:"last_activity,omitempty"`
 }
 
 func resolveMode(h Harness, m Mode, args []string) (Mode, error) {

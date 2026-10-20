@@ -90,7 +90,7 @@ class _ModelSelectionFieldsState extends State<ModelSelectionFields> {
     final catalog = _catalog;
     if (catalog == null) {
       return const Text(
-        'Loading native model options; native defaults remain available.',
+        'Loading native model options; default settings remain available.',
       );
     }
     if (!catalog.supported) return Text(catalog.reason);
@@ -139,7 +139,12 @@ class _ModelSelectionFieldsState extends State<ModelSelectionFields> {
                 : 'Model default: ${model.defaultEffort}',
           ),
           items: [
-            const DropdownMenuItem(value: '', child: Text('Native default')),
+            DropdownMenuItem(
+              value: '',
+              child: Text(
+                widget.sleeve.isEmpty ? 'Hub default' : 'Native default',
+              ),
+            ),
             for (final e in efforts) DropdownMenuItem(value: e, child: Text(e)),
             if (selection.effort.isNotEmpty &&
                 !efforts.contains(selection.effort))

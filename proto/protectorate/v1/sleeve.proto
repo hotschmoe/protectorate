@@ -228,7 +228,8 @@ message SpawnSleeveRequest {
   // approvalPolicy untrusted with its workspace-write sandbox, Grok
   // /always-approve off. pi has no gate and ignores it.
   bool supervised = 8;
-  // Codex chat selection; omitted preserves native defaults. Other drivers reject it.
+  // Codex chat selection; omitted effort uses the hub's sleeve effort default.
+  // Other drivers reject explicit selection.
   ModelSelection selection = 9;
   repeated ReadOnlyMount read_only = 10;
   // Zero disables automatic removal. Applies only to chat sleeves.
