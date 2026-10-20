@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const [chromium, profile, size, destination, theme, output, hub, credential, connected, interaction] = process.argv.slice(2);
+const startupFailureMessage = 'Local storage is unavailable for startup verification.';
+const detailNode = new URLSearchParams(new URL(destination).hash.split('?')[1] || '').get('node');
+let detailVersion;
 const browser = spawn(chromium, [
   '--headless=new', '--disable-gpu', '--no-sandbox',
   `--user-data-dir=${profile}`, '--remote-debugging-port=0',
@@ -77,12 +80,29 @@ try {
   await call('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-color-scheme', value: theme }],
   });
+  if (interaction === 'startup-failure') {
+    await call('Page.addScriptToEvaluateOnNewDocument', {
+      source: `Object.defineProperty(window, 'localStorage', { configurable: true, get() {
+        window.screenshotStorageFailure = true;
+        throw new Error(${JSON.stringify(startupFailureMessage)});
+      } });`,
+    });
+  }
   if (connected === 'true') {
     const token = (await readFile(credential, 'utf8')).trim();
     const hubs = JSON.stringify([{ id: 'screenshots', name: 'demo hub', baseUrl: hub, token }]);
     await call('Page.addScriptToEvaluateOnNewDocument', {
       source: `if (location.origin === ${JSON.stringify(new URL(hub).origin)}) localStorage.setItem('flutter.hubs', ${JSON.stringify(JSON.stringify(hubs))});`,
     });
+    if (interaction === 'node-detail') {
+      const status = await fetch(`${hub.replace(/\/$/, '')}/protectorate.v1.HubService/GetStatus`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{}', signal: AbortSignal.timeout(8000),
+      });
+      if (!status.ok) throw new Error(`Checking node-detail hub version failed: HTTP ${status.status}`);
+      detailVersion = (await status.json()).version;
+      if (!detailVersion || !detailNode) throw new Error('Node-detail capture requires a node name and reported hub version');
+    }
   }
   await call('Page.navigate', { url: destination });
   await delay(12_000);
@@ -98,7 +118,7 @@ try {
   }; true`);
   inspect = () => evaluate(`(() => {
     const elements = window.screenshotElements();
-    const label = el => (el.getAttribute('aria-label') || el.textContent || '').replace(/\\s+/g, ' ').trim();
+    const label = el => String(el.getAttribute('aria-label') || el.value || el.textContent || '').replace(/\\s+/g, ' ').trim();
     const bounds = el => {
       const rect = el.getBoundingClientRect();
       return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
@@ -113,7 +133,12 @@ try {
         .map(el => ({ value: el.value, ...bounds(el) })),
       updates: elements.filter(el => /^(?:HUB UPDATE|NODE UPDATES)(?: |$)/.test(label(el)))
         .map(el => ({ label: label(el).startsWith('HUB UPDATE') ? 'HUB UPDATE' : 'NODE UPDATES', ...bounds(el) })),
-      active: { tag: active?.tagName, value: active?.value },
+      startupFailureTriggered: window.screenshotStorageFailure === true,
+      startupErrors: elements.filter(el => /^Could not start Protectorate(?: |$)/.test(label(el)) || label(el).includes(${JSON.stringify(startupFailureMessage)}))
+        .map(el => ({ label: label(el), ...bounds(el) })),
+      nodeDetails: elements.filter(el => ['HUB', ${JSON.stringify(detailNode)}, ${JSON.stringify(detailVersion || '')}].includes(label(el)))
+        .map(el => ({ label: label(el), ...bounds(el) })),
+      active: { tag: active?.tagName, value: active?.value, readOnly: active?.readOnly },
     };
   })()`);
   const tap = async (x, y) => {
@@ -143,9 +168,39 @@ try {
   };
   if (interaction) {
     await evaluate(`window.screenshotElements().find(el => el.tagName === 'FLT-SEMANTICS-PLACEHOLDER')?.click(); true`);
-    await waitFor('phone navigation semantics', state => state.tabs.some(tab => tab.label === 'ENVOY'));
+    if (!['startup-failure', 'node-detail'].includes(interaction)) {
+      await waitFor('phone navigation semantics', state => state.tabs.some(tab => tab.label === 'ENVOY'));
+    }
   }
-  if (interaction === 'nodes' || interaction === 'updates') {
+  if (interaction === 'startup-failure') {
+    const visible = (item, state) => item.width > 0 && item.height > 0 && item.y >= 0 && item.y + item.height <= state.viewport.height;
+    const state = await waitFor('visible production startup error title', state =>
+      state.startupFailureTriggered &&
+      state.startupErrors.some(item => item.label.startsWith('Could not start Protectorate') && visible(item, state)));
+    const accessibility = await call('Accessibility.getFullAXTree');
+    const message = accessibility.nodes.find(node => !node.ignored && node.role?.value === 'textbox' && node.backendDOMNodeId);
+    if (!message) throw new Error('Startup error message has no accessible text field');
+    const { model } = await call('DOM.getBoxModel', { backendNodeId: message.backendDOMNodeId });
+    const [left, top, right, , , bottom] = model.content;
+    if (left < 0 || right > state.viewport.width || top < 0 || bottom > state.viewport.height || right <= left || bottom <= top) {
+      throw new Error('Startup error text field is outside the visible viewport');
+    }
+    // Flutter exposes SelectableText's value after its first pointer interaction.
+    await tap((left + right) / 2, (top + bottom) / 2);
+    await waitFor('visible startup error text', state => state.startupErrors.some(item => item.label.includes(startupFailureMessage) && visible(item, state)));
+    const reported = await call('Accessibility.getFullAXTree');
+    if (!reported.nodes.some(node => !node.ignored && node.role?.value === 'textbox' && node.value?.value?.includes(startupFailureMessage) &&
+      node.properties?.some(property => ['disabled', 'readonly'].includes(property.name) && property.value.value === true))) {
+      throw new Error('Startup error message is not exposed as noneditable accessible text');
+    }
+  } else if (interaction === 'node-detail') {
+    const visible = (item, state) => item.width > 0 && item.height > 0 && item.x >= 0 && item.x + item.width <= state.viewport.width && item.y >= 0 && item.y + item.height <= state.viewport.height;
+    await waitFor('node detail and current hub version row', state =>
+      state.nodeDetails.some(item => item.label === detailNode && visible(item, state)) &&
+      state.nodeDetails.some(label => label.label === 'HUB' && visible(label, state) &&
+        state.nodeDetails.some(value => value.label === detailVersion && visible(value, state) && value.x >= label.x + label.width &&
+          Math.abs(value.y + value.height / 2 - label.y - label.height / 2) < 8)));
+  } else if (interaction === 'nodes' || interaction === 'updates') {
     await selectTab('NODES');
     await delay(1000);
     if (interaction === 'updates') {
@@ -181,7 +236,8 @@ try {
       const screenshot = await call('Page.captureScreenshot', { format: 'png' });
       const failurePath = output.replace(/\.png$/, '-failure.png');
       await writeFile(failurePath, Buffer.from(screenshot.data, 'base64'));
-      await writeFile(`${failurePath}.json`, JSON.stringify({ error: error.message, state: inspect ? await inspect() : null }, null, 2));
+      const accessibility = interaction === 'startup-failure' ? await call('Accessibility.getFullAXTree') : undefined;
+      await writeFile(`${failurePath}.json`, JSON.stringify({ error: error.message, state: inspect ? await inspect() : null, accessibility }, null, 2));
       console.error(`Screenshot failure evidence: ${failurePath}`);
     } catch (captureError) {
       console.error(`Could not capture screenshot failure: ${captureError.message}`);

@@ -64,12 +64,21 @@ devices remain actionable on tabs, node details and other pushed pages.
 Phone Envoy captures type an unsent draft, switch to NODES and back, and assert
 the editor retained the text. NODES captures use the actual bottom tab button.
 A separate node-detail capture checks the pending device banner on a pushed
-page; the temporary device request stays unapproved during these scenes.
+page; the temporary device request stays unapproved during these scenes. Node
+detail captures also require the expected node title and a visible HUB version
+row matching a real `GetStatus` request made with the approved device token.
 The phone NODES tab also embeds the shared hub and fleet update cards below
 the hardware inventory. Release and fleet mutations retain their existing
 capability checks and progress displays.
 The update captures scroll the NODES tab with real wheel input and assert that
 the hub update card is visible, alongside the fleet card when available.
+Startup-error captures make Chromium's `window.localStorage` getter throw before
+Flutter starts, causing the production preferences load to fail. They assert
+that both the startup-error title and the underlying storage error are visible,
+then save `phone-startup-error-*.png` or `startup-error-*.png`. There is no app-side
+failure flag or alternate startup path. Use `E2E_ONLY=phone-startup-error` with
+`E2E_PHONE=1`, or `E2E_ONLY=startup-error` for release web, to run this scenario
+alone.
 
 Run `make test-race` to build `bin/protectorate-race` with `-race`, the same
 feature tags, trimpath and version ldflags as `make build`, and run the full

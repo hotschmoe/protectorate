@@ -109,6 +109,7 @@ if [ "${E2E_PHONE:-0}" = 1 ]; then
   for size in 360,800 412,860; do
     for theme in light dark; do
       shot phone-envoy-start "$size" "$web&tab=orchestrator" "$theme" true
+      shot phone-startup-error "$size" "http://127.0.0.1:$port/" "$theme" false startup-failure
     done
   done
   "$bin" api call SleeveService/SpawnEnvoy '{"harness":"HARNESS_CLAUDE"}' >"$work/envoy-spawn.json"
@@ -128,7 +129,7 @@ if [ "${E2E_PHONE:-0}" = 1 ]; then
           shot "phone-$tab" "$size" "$web&tab=$tab" "$theme" true
         fi
       done
-      shot phone-node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true
+      shot phone-node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true node-detail
       shot phone-nodes-updates "$size" "$web&tab=orchestrator" "$theme" true updates
     done
   done
@@ -136,11 +137,12 @@ else
   for size in 412,860 1280,800; do
     for theme in light dark; do
       shot hubs-empty "$size" "http://127.0.0.1:$port/" "$theme"
+      shot startup-error "$size" "http://127.0.0.1:$port/" "$theme" false startup-failure
       shot pair-confirm "$size" "$web" "$theme"
       for tab in overview sleeves nodes notes mail devices; do
         shot "$tab" "$size" "$web&tab=$tab" "$theme" true
       done
-      shot node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true
+      shot node-detail "$size" "$web&tab=nodes&node=$node_name" "$theme" true node-detail
       shot node-ghost "$size" "$web&tab=nodes&node=ghost" "$theme" true
       shot terminal "$size" "$web&tab=sleeves&session=demo" "$theme" true
     done
