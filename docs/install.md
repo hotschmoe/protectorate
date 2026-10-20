@@ -44,6 +44,8 @@ Upgrading a v0.3 hub: since v0.4 the hub keeps `nodes`, `tokens`, `sleeves`, `le
 
 Upgrading a v0.4.0 hub to v0.4.1 needs no state conversion: restart the hub on the new binary and run `protectorate node update --all`. Existing sleeves keep their old cache layout until respawned; reclaim a sleeve's old private cache copies with `protectorate sleeve kill NAME --drop-caches` before respawning, and review leftovers with `protectorate sleeve prune` (it removes nothing without `--yes`). Copy-on-write caches need bubblewrap 0.9 or newer first on the hub service's PATH (see [sleeves](sleeves.md)); with Debian's 0.8 the hub keeps copying caches. Codex sleeves now default to reasoning effort `high` (`hub serve --sleeve-effort`).
 
+Upgrading a v0.4.1 hub to v0.4.2 needs no state conversion. The hub now keeps verified GitHub releases under its data directory and serves node binaries and the web client from the current one, so drop explicit `--web` and `--binary-dir` flags (or point `--release-dir` at a custom root) and restart it on the new binary; from then on `protectorate hub update` (or the app's Update hub button) updates it, and `protectorate node update --all` follows. Behind a reverse proxy, add `--trusted-proxy <proxy IP>`. Devices now connect through device approval: token-carrying pairing links are rejected, while previously paired device tokens become Full devices automatically. APKs are now signed with one release key, so an app installed from an earlier APK must be uninstalled once before installing v0.4.2.
+
 Log in to each harness once on the hub. This runs the harness's own login in your terminal and stores the credential in `~/.protectorate/auth/<harness>`, which every sleeve shares:
 
 ```
