@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 type process struct {
@@ -37,9 +39,7 @@ type cluster struct {
 
 func newCluster(t *testing.T) *cluster {
 	t.Helper()
-	if os.Getenv("PROT_E2E") != "1" {
-		t.Skip("real binary scenarios: set PROT_E2E=1 (optionally PROT_E2E_BINARY=/absolute/protectorate)")
-	}
+	binary := testenv.E2E(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
 	c := &cluster{t: t, owner: t, ctx: ctx, root: t.TempDir(), client: &http.Client{Timeout: 30 * time.Second}}
@@ -48,7 +48,7 @@ func newCluster(t *testing.T) *cluster {
 	if err := os.MkdirAll(binDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c.binary = os.Getenv("PROT_E2E_BINARY")
+	c.binary = binary
 	if c.binary == "" {
 		c.binary = filepath.Join(binDir, "protectorate")
 		cmd := exec.CommandContext(ctx, "go", "build", "-p", "2", "-o", c.binary, "../../cmd/protectorate")

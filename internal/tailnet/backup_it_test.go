@@ -10,12 +10,14 @@ import (
 
 	"github.com/hotschmoe/protectorate/internal/backup"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 // TestBackupRestoreWithLiveHeadscale backs up a home while headscale runs and
 // has a node enrolled, restores it into a new home and starts headscale there:
 // the enrolled node and the DERP certificate that nodes pin must be back.
 func TestBackupRestoreWithLiveHeadscale(t *testing.T) {
+	testenv.E2E(t)
 	if os.Getenv("PROT_TAILNET_IT") != "1" {
 		t.Skip("set PROT_TAILNET_IT=1 to run (downloads headscale, starts real processes)")
 	}

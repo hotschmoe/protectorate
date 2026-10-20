@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/hotschmoe/protectorate/internal/session"
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 type recorder struct {
@@ -51,6 +52,7 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	testenv.E2E(t)
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	home := t.TempDir()
 	cfg, err := DefaultConfig(home, nil)
