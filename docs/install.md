@@ -240,6 +240,15 @@ Targets: any directory, including a share mounted on the hub box (NFS, SMB). The
 Connect the phone to the same LAN as the hub. Device approval is LAN-only
 until the security audit; keep the hub off the public Internet.
 
+Release and dev APKs are signed with one release key, so a newer APK installs
+over the previous one. CI reads it from the repository secrets
+`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
+`ANDROID_KEY_PASSWORD`; local builds use it when `PROTECTORATE_ANDROID_SIGNING`
+names a properties file with `storeFile`, `storePassword`, `keyAlias` and
+`keyPassword`, and otherwise sign with the machine's debug key (such an APK
+cannot update one signed elsewhere; uninstall first). Keep an off-box backup of
+the keystore: without it, future APKs cannot update installed apps.
+
 1. Install and open the native app, or open the hub's web client in the phone
    browser. On the hub, `protectorate pair --app` displays a native-app link
    and QR; `protectorate pair` displays the web link. These contain the hub

@@ -64,6 +64,18 @@ jobs:
         run: make cross
       - run: make app-check
       - run: make app-build-web
+      - name: Android release signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then echo "no signing secrets (fork or PR): debug-signed APK"; exit 0; fi
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$RUNNER_TEMP/release.jks" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > "$RUNNER_TEMP/signing.properties"
+          echo "PROTECTORATE_ANDROID_SIGNING=$RUNNER_TEMP/signing.properties" >> "$GITHUB_ENV"
       - run: make apk
       - name: Assemble release assets
         run: |

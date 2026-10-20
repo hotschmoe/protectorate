@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -25,11 +27,24 @@ android {
         versionName = flutter.versionName
     }
 
+    // PROTECTORATE_ANDROID_SIGNING names a properties file (storeFile,
+    // storePassword, keyAlias, keyPassword) for the one release key, so every
+    // APK installs over the previous one. Without it, release builds use the
+    // machine's debug key and cannot update an APK signed elsewhere.
+    val signing = System.getenv("PROTECTORATE_ANDROID_SIGNING")?.let { file(it) }
+    if (signing != null) {
+        val key = Properties().apply { signing.inputStream().use { load(it) } }
+        signingConfigs.create("release") {
+            storeFile = file(key.getProperty("storeFile"))
+            storePassword = key.getProperty("storePassword")
+            keyAlias = key.getProperty("keyAlias")
+            keyPassword = key.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
