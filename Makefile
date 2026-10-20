@@ -40,8 +40,9 @@ TAILSCALE_TAGS := \
 	ts_omit_unixsocketidentity ts_omit_useexitnode ts_omit_usermetrics ts_omit_useroutes \
 	ts_omit_wakeonlan ts_omit_webbrowser ts_omit_webclient
 TARGETS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 android/arm64
+E2E_COVER_BINARY ?= bin/protectorate-cover
 
-.PHONY: gen check-gen build build-tags test test-race vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check
+.PHONY: gen check-gen build build-tags test test-race e2e-cover e2e-cover-build vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check
 
 gen:
 	buf lint
@@ -66,6 +67,12 @@ test-race:
 
 build-tags:
 	@echo '$(TAILSCALE_TAGS)'
+
+e2e-cover:
+	@TAILSCALE_TAGS='$(TAILSCALE_TAGS)' MAKE='$(MAKE)' sh scripts/e2e-cover.sh
+
+e2e-cover-build:
+	go build -cover -covermode=atomic -tags '$(TAILSCALE_TAGS)' -ldflags '$(LDFLAGS)' -o '$(E2E_COVER_BINARY)' ./cmd/protectorate
 
 cross:
 	@for t in $(TARGETS); do \

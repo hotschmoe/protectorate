@@ -92,6 +92,9 @@ func newCluster(t *testing.T) *cluster {
 	c.ctx = runCtx
 	c.env = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
 	c.env = append(c.env, c.raceEnv("CLI-helper"))
+	if dir := os.Getenv("GOCOVERDIR"); dir != "" {
+		c.env = append(c.env, "GOCOVERDIR="+dir)
+	}
 	tmuxDir := filepath.Join(c.root, "tmux")
 	if err := os.Mkdir(tmuxDir, 0700); err != nil {
 		t.Fatal(err)
@@ -149,11 +152,18 @@ func loopback(t *testing.T) string {
 }
 func (c *cluster) start(name string, env []string, args ...string) *process {
 	c.t.Helper()
+	// Test contexts cancel before cleanup; stop must reap graceful exits first.
+	ctx := context.WithoutCancel(c.ctx)
+	if deadline, ok := c.ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		c.owner.Cleanup(cancel)
+	}
 	f, err := os.CreateTemp(c.root, name+"-*.log")
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	p := &process{cmd: exec.CommandContext(c.ctx, c.binary, args...), done: make(chan error, 1), log: f}
+	p := &process{cmd: exec.CommandContext(ctx, c.binary, args...), done: make(chan error, 1), log: f}
 	p.cmd.Env = append(append([]string(nil), env...), c.raceEnv(name))
 	p.cmd.Stdout = f
 	p.cmd.Stderr = f
@@ -190,7 +200,7 @@ func (c *cluster) stop(p *process) {
 	}
 }
 func (c *cluster) boot() {
-	c.hub = c.start("hub", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "100ms", "--tmux-socket", "e2e-"+filepath.Base(c.root))
+	c.hub = c.start("hub", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-"+filepath.Base(c.root))
 	c.eventually(func() bool {
 		b, e := os.ReadFile(filepath.Join(c.home, "token"))
 		c.token = strings.TrimSpace(string(b))
