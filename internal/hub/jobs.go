@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -377,10 +378,8 @@ func validateSubmit(req *pb.SubmitJobRequest) (time.Duration, error) {
 			return 0, invalid("invalid environment variable name %q", k)
 		}
 	}
-	for _, g := range req.ArtifactGlobs {
-		if _, err := filepath.Match(g, ""); err != nil || !fs.ValidPath(g) {
-			return 0, invalid("invalid artifact glob %q", g)
-		}
+	if err := node.ValidateArtifactGlobs(req.ArtifactGlobs); err != nil {
+		return 0, err
 	}
 	if m := req.GetLimits().GetMemoryBytes(); m != 0 && m < minJobMemory {
 		return 0, invalid("a memory limit must be at least 64 MiB")
@@ -609,14 +608,9 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	envKeys := make([]string, 0, len(req.Env))
-	for k := range req.Env {
-		envKeys = append(envKeys, k)
-	}
-	sort.Strings(envKeys)
 	job := &pb.Job{
 		Id: id, State: pb.JobState_JOB_STATE_PREPARING, Target: req.Target, Node: n.Name, Source: src,
-		Command: req.Command, EnvKeys: envKeys, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
+		Command: req.Command, EnvKeys: slices.Sorted(maps.Keys(req.Env)), Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
 		SubmittedAt: timestamppb.Now(), Mode: mode, Task: p.GetTask(), Limits: req.Limits,
 	}
 	if gpu != nil {
@@ -638,6 +632,14 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 		m.emit("job.updated", id, p)
 	}
 
+	run := runRequest(req, plan, id, gpu, timeout, mode)
+	snap := proto.Clone(job).(*pb.Job)
+	m.wg.Add(1)
+	go m.run(jctx, e, m.execFor(n), plan, run)
+	return snap, nil
+}
+
+func runRequest(req *pb.SubmitJobRequest, plan *sourcePlan, id string, gpu *int, timeout time.Duration, mode pb.JobMode) *pb.RunJobRequest {
 	env := map[string]string{}
 	if gpu != nil {
 		idx := strconv.Itoa(*gpu)
@@ -646,15 +648,11 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	for k, v := range req.Env {
 		env[k] = v
 	}
-	run := &pb.RunJobRequest{
+	return &pb.RunJobRequest{
 		JobId: id, Command: req.Command, Env: env, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
 		RepoKey: plan.key, Commit: plan.commit, ArtifactName: plan.name,
 		ArtifactArchive: plan.dir != "", Workdir: plan.workdir, Mode: mode, Limits: req.Limits,
 	}
-	snap := proto.Clone(job).(*pb.Job)
-	m.wg.Add(1)
-	go m.run(jctx, e, m.execFor(n), plan, run)
-	return snap, nil
 }
 
 func (m *JobManager) run(ctx context.Context, e *jobEntry, ex nodeExec, plan *sourcePlan, run *pb.RunJobRequest) {
@@ -1010,6 +1008,11 @@ func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *
 		}
 		return fmt.Errorf("node connection lost: %w", err)
 	}
+	m.finishJob(e, fin, art)
+	return nil
+}
+
+func (m *JobManager) finishJob(e *jobEntry, fin *pb.JobFinished, art *artifactSink) {
 	m.update(e, func(j *pb.Job) {
 		j.ExitCode, j.Error, j.RunTime, j.FinishedAt = fin.ExitCode, fin.Error, fin.RunTime, timestamppb.Now()
 		j.Artifacts, j.ArtifactBytes = art.files, art.total
@@ -1030,7 +1033,6 @@ func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *
 			j.State = pb.JobState_JOB_STATE_FAILED
 		}
 	})
-	return nil
 }
 
 // artifactSink writes artifact frames below dir.
