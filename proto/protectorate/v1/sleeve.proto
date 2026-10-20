@@ -31,6 +31,16 @@ service SleeveService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // ListWorkspaces returns the directories SpawnSleeve would accept as an
+  // existing workspace: git checkouts and other directories under the hub's
+  // workspaces directory (cloned or created by earlier sleeves), and the
+  // workspaces of known sleeves elsewhere on disk. It never walks the rest of
+  // the filesystem; any other absolute path can still be given to
+  // SpawnSleeve directly.
+  rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // GetSleeve returns one sleeve with its latest resource usage.
   rpc GetSleeve(GetSleeveRequest) returns (GetSleeveResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -170,6 +180,31 @@ message ListSleevesRequest {}
 
 message ListSleevesResponse {
   repeated Sleeve sleeves = 1;
+}
+
+message ListWorkspacesRequest {}
+
+message Workspace {
+  // name is the directory's base name.
+  string name = 1;
+  // path is the absolute, symlink-resolved directory.
+  string path = 2;
+  // git_remote is the URL of the origin remote of a git checkout.
+  string git_remote = 3;
+  // git_branch is the checked-out branch of a git checkout; empty for a
+  // detached HEAD or a directory that is not a git checkout.
+  string git_branch = 4;
+  // sleeve is the sleeve that uses this workspace, running or exited.
+  string sleeve = 5;
+  // busy is true while that sleeve is running; SpawnSleeve then refuses it.
+  bool busy = 6;
+  // required_name is set for a workspace in the hub's state directory: only a
+  // sleeve of exactly that name may use it. Other workspaces take any name.
+  string required_name = 7;
+}
+
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
 }
 
 message GetSleeveRequest {

@@ -59,12 +59,12 @@ for size in 412,860 1280,800; do
   for theme in light dark; do
     shot hubs-empty "$size" "http://127.0.0.1:$port/" "$theme"
     shot pair-confirm "$size" "$web" "$theme"
-    for tab in overview nodes quota sessions backlog; do
+    for tab in overview nodes quota sleeves backlog; do
       shot "$tab" "$size" "$web&confirm=auto&tab=$tab" "$theme"
     done
     shot node-detail "$size" "$web&confirm=auto&tab=nodes&node=$node_name" "$theme"
     shot node-ghost "$size" "$web&confirm=auto&tab=nodes&node=ghost" "$theme"
-    shot terminal "$size" "$web&confirm=auto&tab=sessions&session=demo" "$theme"
+    shot terminal "$size" "$web&confirm=auto&tab=sleeves&session=demo" "$theme"
   done
 done
 echo "screenshots in $out"

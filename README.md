@@ -19,7 +19,7 @@ clients (desktop, Android, web) talk to the same API.
 |------|----------|-------|
 | Subscription quota (P1) | `quota [--refresh]`, `quota suggest` | Claude, Codex, Grok, Antigravity, local LLM; resets, reset credits, projected unused; never refreshes tokens or redeems resets |
 | Sessions (P4) | `session ls/new/attach/capture/kill` | tmux on a dedicated socket; WebSocket terminal at `/ws/terminal/{name}` |
-| Sleeves (P7, P8) | `sleeve spawn/ls/show/attach/kill` | bwrap + systemd user scope: PID isolation, CPU/memory caps, shared live credentials |
+| Sleeves (P7, P8) | `sleeve spawn/ls/workspaces/show/attach/kill` | bwrap + systemd user scope: PID isolation, CPU/memory caps, shared live credentials |
 | Chat (`docs/chat.md`) | `chat watch/send/interrupt/respond/compact`, `sleeve spawn --mode` | a sleeve's harness driven through its headless protocol inside the sandbox, with a replayable event log any number of clients can watch |
 | Coordination (`docs/coordination.md`) | `who`, `msg send/reply/ack/inbox/thread`, `lease acquire --wait` | per-sleeve identity, a project directory from git remotes and manifests, a mailbox delivered into idle chats, a lease queue, dependency notices; all deterministic hub code |
 | Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, discrete and integrated GPUs, NPUs, memory, every filesystem, Docker disk, per-container and per-sleeve usage |

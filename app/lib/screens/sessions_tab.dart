@@ -80,7 +80,7 @@ class _SessionsTabState extends State<SessionsTab> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('New session'),
+        title: const Text('New raw session'),
         scrollable: true,
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -135,7 +135,7 @@ class _SessionsTabState extends State<SessionsTab> {
       setState(
         () => _error = e.code == Code.permissionDenied
             ? 'Raw sessions run unsandboxed and need the owner token. '
-                  'Start work in a sleeve instead (Nodes, this hub, Sleeves).'
+                  'Start work in a sleeve instead (SLEEVES tab, NEW SLEEVE).'
             : e,
       );
     } on Object catch (e) {
@@ -161,7 +161,7 @@ class _SessionsTabState extends State<SessionsTab> {
         key: const ValueKey('new-session'),
         onPressed: _create,
         icon: const Icon(Icons.add),
-        label: const Text('NEW SESSION'),
+        label: const Text('NEW RAW SESSION'),
       ),
       body: Column(
         children: [
@@ -189,7 +189,7 @@ class _SessionsTabState extends State<SessionsTab> {
                         maxWidth: Tokens.contentMaxWidth,
                       ),
                       child: Panel(
-                        legend: 'TERMINAL SESSIONS',
+                        legend: 'RAW TERMINAL SESSIONS',
                         trailing: Text(
                           '${_sessions.length}',
                           style: t.legend(),
@@ -259,4 +259,25 @@ class _SessionsTabState extends State<SessionsTab> {
       ),
     );
   }
+}
+
+// Unsandboxed tmux sessions on the hub, for the owner. Work normally starts
+// in a sleeve.
+class RawSessionsScreen extends StatelessWidget {
+  const RawSessionsScreen({
+    super.key,
+    required this.hub,
+    required this.client,
+    this.openSession,
+  });
+
+  final HubProfile hub;
+  final HubClient client;
+  final String? openSession;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Raw sessions')),
+    body: SessionsTab(hub: hub, client: client, openSession: openSession),
+  );
 }

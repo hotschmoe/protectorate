@@ -57,6 +57,29 @@ extension type SleeveServiceClient (connect.Transport _transport) {
     );
   }
 
+  /// ListWorkspaces returns the directories SpawnSleeve would accept as an
+  /// existing workspace: git checkouts and other directories under the hub's
+  /// workspaces directory (cloned or created by earlier sleeves), and the
+  /// workspaces of known sleeves elsewhere on disk. It never walks the rest of
+  /// the filesystem; any other absolute path can still be given to
+  /// SpawnSleeve directly.
+  Future<protectoratev1sleeve.ListWorkspacesResponse> listWorkspaces(
+    protectoratev1sleeve.ListWorkspacesRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.listWorkspaces,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
   /// GetSleeve returns one sleeve with its latest resource usage.
   Future<protectoratev1sleeve.GetSleeveResponse> getSleeve(
     protectoratev1sleeve.GetSleeveRequest input, {

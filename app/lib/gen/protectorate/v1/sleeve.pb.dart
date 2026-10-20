@@ -860,6 +860,242 @@ class ListSleevesResponse extends $pb.GeneratedMessage {
   $pb.PbList<Sleeve> get sleeves => $_getList(0);
 }
 
+class ListWorkspacesRequest extends $pb.GeneratedMessage {
+  factory ListWorkspacesRequest() => ListWorkspacesRequest._();
+
+  ListWorkspacesRequest._();
+
+  factory ListWorkspacesRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListWorkspacesRequest()..mergeFromBuffer(data, registry);
+  factory ListWorkspacesRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListWorkspacesRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListWorkspacesRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListWorkspacesRequest.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListWorkspacesRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListWorkspacesRequest copyWith(
+          void Function(ListWorkspacesRequest) updates) =>
+      super.copyWith((message) => updates(message as ListWorkspacesRequest))
+          as ListWorkspacesRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ListWorkspacesRequest() / ListWorkspacesRequest.new instead')
+  static ListWorkspacesRequest create() => ListWorkspacesRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ListWorkspacesRequest._();
+  @$core.override
+  ListWorkspacesRequest createEmptyInstance() => ListWorkspacesRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ListWorkspacesRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListWorkspacesRequest>(
+          ListWorkspacesRequest.$_createMessage);
+  static ListWorkspacesRequest? _defaultInstance;
+}
+
+class Workspace extends $pb.GeneratedMessage {
+  factory Workspace({
+    $core.String? name,
+    $core.String? path,
+    $core.String? gitRemote,
+    $core.String? gitBranch,
+    $core.String? sleeve,
+    $core.bool? busy,
+    $core.String? requiredName,
+  }) {
+    final result = Workspace._();
+    if (name != null) result.name = name;
+    if (path != null) result.path = path;
+    if (gitRemote != null) result.gitRemote = gitRemote;
+    if (gitBranch != null) result.gitBranch = gitBranch;
+    if (sleeve != null) result.sleeve = sleeve;
+    if (busy != null) result.busy = busy;
+    if (requiredName != null) result.requiredName = requiredName;
+    return result;
+  }
+
+  Workspace._();
+
+  factory Workspace.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Workspace()..mergeFromBuffer(data, registry);
+  factory Workspace.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Workspace()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Workspace',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: Workspace.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'path')
+    ..aOS(3, _omitFieldNames ? '' : 'gitRemote')
+    ..aOS(4, _omitFieldNames ? '' : 'gitBranch')
+    ..aOS(5, _omitFieldNames ? '' : 'sleeve')
+    ..aOB(6, _omitFieldNames ? '' : 'busy')
+    ..aOS(7, _omitFieldNames ? '' : 'requiredName')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Workspace clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Workspace copyWith(void Function(Workspace) updates) =>
+      super.copyWith((message) => updates(message as Workspace)) as Workspace;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Workspace() / Workspace.new instead')
+  static Workspace create() => Workspace._();
+  static $pb.GeneratedMessage $_createMessage() => Workspace._();
+  @$core.override
+  Workspace createEmptyInstance() => Workspace._();
+  @$core.pragma('dart2js:noInline')
+  static Workspace getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Workspace>(Workspace.$_createMessage);
+  static Workspace? _defaultInstance;
+
+  /// name is the directory's base name.
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  /// path is the absolute, symlink-resolved directory.
+  @$pb.TagNumber(2)
+  $core.String get path => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set path($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPath() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPath() => $_clearField(2);
+
+  /// git_remote is the URL of the origin remote of a git checkout.
+  @$pb.TagNumber(3)
+  $core.String get gitRemote => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set gitRemote($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasGitRemote() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearGitRemote() => $_clearField(3);
+
+  /// git_branch is the checked-out branch of a git checkout; empty for a
+  /// detached HEAD or a directory that is not a git checkout.
+  @$pb.TagNumber(4)
+  $core.String get gitBranch => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set gitBranch($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasGitBranch() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearGitBranch() => $_clearField(4);
+
+  /// sleeve is the sleeve that uses this workspace, running or exited.
+  @$pb.TagNumber(5)
+  $core.String get sleeve => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set sleeve($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasSleeve() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearSleeve() => $_clearField(5);
+
+  /// busy is true while that sleeve is running; SpawnSleeve then refuses it.
+  @$pb.TagNumber(6)
+  $core.bool get busy => $_getBF(5);
+  @$pb.TagNumber(6)
+  set busy($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasBusy() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearBusy() => $_clearField(6);
+
+  /// required_name is set for a workspace in the hub's state directory: only a
+  /// sleeve of exactly that name may use it. Other workspaces take any name.
+  @$pb.TagNumber(7)
+  $core.String get requiredName => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set requiredName($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasRequiredName() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearRequiredName() => $_clearField(7);
+}
+
+class ListWorkspacesResponse extends $pb.GeneratedMessage {
+  factory ListWorkspacesResponse({
+    $core.Iterable<Workspace>? workspaces,
+  }) {
+    final result = ListWorkspacesResponse._();
+    if (workspaces != null) result.workspaces.addAll(workspaces);
+    return result;
+  }
+
+  ListWorkspacesResponse._();
+
+  factory ListWorkspacesResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListWorkspacesResponse()..mergeFromBuffer(data, registry);
+  factory ListWorkspacesResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListWorkspacesResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListWorkspacesResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListWorkspacesResponse.$_createMessage)
+    ..pPM<Workspace>(1, _omitFieldNames ? '' : 'workspaces',
+        subBuilder: Workspace.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListWorkspacesResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListWorkspacesResponse copyWith(
+          void Function(ListWorkspacesResponse) updates) =>
+      super.copyWith((message) => updates(message as ListWorkspacesResponse))
+          as ListWorkspacesResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ListWorkspacesResponse() / ListWorkspacesResponse.new instead')
+  static ListWorkspacesResponse create() => ListWorkspacesResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ListWorkspacesResponse._();
+  @$core.override
+  ListWorkspacesResponse createEmptyInstance() => ListWorkspacesResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ListWorkspacesResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListWorkspacesResponse>(
+          ListWorkspacesResponse.$_createMessage);
+  static ListWorkspacesResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<Workspace> get workspaces => $_getList(0);
+}
+
 class GetSleeveRequest extends $pb.GeneratedMessage {
   factory GetSleeveRequest({
     $core.String? name,
@@ -1277,6 +1513,17 @@ class SleeveServiceApi {
           $pb.ClientContext? ctx, ListSleevesRequest request) =>
       _client.invoke<ListSleevesResponse>(
           ctx, 'SleeveService', 'ListSleeves', request, ListSleevesResponse());
+
+  /// ListWorkspaces returns the directories SpawnSleeve would accept as an
+  /// existing workspace: git checkouts and other directories under the hub's
+  /// workspaces directory (cloned or created by earlier sleeves), and the
+  /// workspaces of known sleeves elsewhere on disk. It never walks the rest of
+  /// the filesystem; any other absolute path can still be given to
+  /// SpawnSleeve directly.
+  $async.Future<ListWorkspacesResponse> listWorkspaces(
+          $pb.ClientContext? ctx, ListWorkspacesRequest request) =>
+      _client.invoke<ListWorkspacesResponse>(ctx, 'SleeveService',
+          'ListWorkspaces', request, ListWorkspacesResponse());
 
   /// GetSleeve returns one sleeve with its latest resource usage.
   $async.Future<GetSleeveResponse> getSleeve(

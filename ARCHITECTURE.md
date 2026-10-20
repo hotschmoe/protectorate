@@ -50,7 +50,7 @@ protectorate hub serve            # the engine, runs as a systemd service on the
 protectorate node serve           # node agent on any machine (joins the tailnet)
 protectorate node join <token>    # enroll a machine
 protectorate quota                # every other subcommand is a CLI client of the hub API
-protectorate sleeve ls|spawn|show|kill
+protectorate sleeve ls|workspaces|spawn|show|kill
 protectorate session ls|new|attach|capture|respawn|kill
 protectorate api call <Method> '<json>'   # generic escape hatch
 ```
@@ -288,6 +288,12 @@ Design:
   stay until killed, respawned, or `hub serve --dead-retention` (default 24h)
   elapses, when the hub removes them and publishes `session.removed`. The
   WebSocket terminal shows an exited pane read-only with a notice frame.
+- `SleeveService.ListWorkspaces` (`sleeve workspaces`, a read RPC) feeds the
+  app's workspace picker: only directories under `workspaces/` and the
+  workspaces of known sleeves that pass the checks below, with branch and
+  origin read from `.git/HEAD` and `.git/config` (never by running git: a
+  repository an agent wrote to must not run code on the hub) and credentials
+  removed from http(s) remotes. Other paths are not discovered.
 - Mounts:
   - the workspace is read-write. Inside the state directory only the sleeve's
     own `workspaces/<name>` (or `orchestrator/` for `poe`) is allowed; the
