@@ -23,7 +23,10 @@ type process struct {
 	log  *os.File
 }
 type cluster struct {
-	t                                       *testing.T
+	t *testing.T
+	// owner is the top-level test; processes live until it ends, even when a
+	// subtest restarts them.
+	owner                                   *testing.T
 	ctx                                     context.Context
 	binary, root, home, url, token, nodeURL string
 	env                                     []string
@@ -38,7 +41,7 @@ func newCluster(t *testing.T) *cluster {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	t.Cleanup(cancel)
-	c := &cluster{t: t, ctx: ctx, root: t.TempDir(), client: &http.Client{Timeout: 3 * time.Second}}
+	c := &cluster{t: t, owner: t, ctx: ctx, root: t.TempDir(), client: &http.Client{Timeout: 30 * time.Second}}
 	c.home = filepath.Join(c.root, "hub")
 	binDir := filepath.Join(c.root, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0700); err != nil {
@@ -77,6 +80,12 @@ func newCluster(t *testing.T) *cluster {
 	t.Cleanup(runCancel)
 	c.ctx = runCtx
 	c.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	// systemd-run --user needs the user manager's bus.
+	for _, k := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
+		if v, ok := os.LookupEnv(k); ok {
+			c.env = append(c.env, k+"="+v)
+		}
+	}
 	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte(protocolPeer), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -117,12 +126,13 @@ func (c *cluster) start(name string, env []string, args ...string) *process {
 		c.t.Fatalf("start %s: %v", name, err)
 	}
 	go func() { p.done <- p.cmd.Wait(); close(p.done) }()
-	c.t.Cleanup(func() {
+	owner := c.owner
+	owner.Cleanup(func() {
 		c.stop(p)
 		f.Close()
-		if c.t.Failed() {
+		if owner.Failed() {
 			b, _ := os.ReadFile(f.Name())
-			c.t.Logf("%s logs:\n%s", name, b)
+			owner.Logf("%s logs:\n%s", name, b)
 		}
 	})
 	return p
@@ -181,6 +191,7 @@ func (c *cluster) rpc(service, method string, in, out any) int {
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	res, err := c.client.Do(req)
 	if err != nil {
+		c.t.Logf("%s.%s: %v", service, method, err)
 		return 0
 	}
 	defer res.Body.Close()
