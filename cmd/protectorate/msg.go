@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -22,8 +21,8 @@ func (o *opts) messageClient() (protectoratev1connect.MessageServiceClient, erro
 	return protectoratev1connect.NewMessageServiceClient(hc, o.hubURL), nil
 }
 
-func msgCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{
+func msgCmd(o *opts) *command {
+	c := &command{
 		Use:     "msg",
 		Aliases: []string{"message"},
 		Short:   "Send messages between sleeves, projects, the orchestrator and the owner",
@@ -40,7 +39,7 @@ var messageKinds = map[string]pb.MessageKind{
 	"note": pb.MessageKind_MESSAGE_KIND_NOTE, "request": pb.MessageKind_MESSAGE_KIND_REQUEST, "notice": pb.MessageKind_MESSAGE_KIND_NOTICE,
 }
 
-func bodyArg(cmd *cobra.Command, args []string) (string, error) {
+func bodyArg(cmd *command, args []string) (string, error) {
 	text := strings.Join(args, " ")
 	if text == "-" {
 		b, err := io.ReadAll(cmd.InOrStdin())
@@ -52,18 +51,18 @@ func bodyArg(cmd *cobra.Command, args []string) (string, error) {
 	return text, nil
 }
 
-func msgSendCmd(o *opts) *cobra.Command {
+func msgSendCmd(o *opts) *command {
 	var thread, kind, requestID string
 	var ack bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "send <to> <body...>",
 		Short: "Send a message (use - as the body to read stdin)",
 		Long: `<to> is a sleeve name, project:<id-or-name>, orchestrator or owner. A request
 asks for something and asks for an ack by default; a project with no live
 sleeve keeps the message and files a backlog note. An ack-required message
 not acked within the hub's timeout is re-delivered once, then escalated.`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: minimumArgs(2),
+		RunE: func(cmd *command, args []string) error {
 			k, ok := messageKinds[kind]
 			if !ok {
 				return fmt.Errorf("unknown kind %q, want note, request or notice", kind)
@@ -108,13 +107,13 @@ not acked within the hub's timeout is re-delivered once, then escalated.`,
 	return c
 }
 
-func msgReplyCmd(o *opts) *cobra.Command {
+func msgReplyCmd(o *opts) *command {
 	var requestID string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "reply <id> <body...>",
 		Short: "Answer a message in its thread; this also acks it",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  minimumArgs(2),
+		RunE: func(cmd *command, args []string) error {
 			body, err := bodyArg(cmd, args[1:])
 			if err != nil {
 				return err
@@ -136,13 +135,13 @@ func msgReplyCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func msgAckCmd(o *opts) *cobra.Command {
+func msgAckCmd(o *opts) *command {
 	var as string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "ack <id>",
 		Short: "Confirm a message",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.messageClient()
 			if err != nil {
 				return err
@@ -158,14 +157,14 @@ func msgAckCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func msgInboxCmd(o *opts) *cobra.Command {
+func msgInboxCmd(o *opts) *command {
 	var unread, peek bool
 	var as, thread string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "inbox",
 		Short: "List messages addressed to you, oldest first, and mark them read",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.messageClient()
 			if err != nil {
 				return err
@@ -184,14 +183,14 @@ func msgInboxCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func msgThreadsCmd(o *opts) *cobra.Command {
+func msgThreadsCmd(o *opts) *command {
 	var sleeveName, project string
 	var limit int32
-	c := &cobra.Command{
+	c := &command{
 		Use:   "threads",
 		Short: "List threads, most recently active first",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.messageClient()
 			if err != nil {
 				return err
@@ -225,12 +224,12 @@ func msgThreadsCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func msgThreadCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func msgThreadCmd(o *opts) *command {
+	return &command{
 		Use:   "thread <thread-id>",
 		Short: "Show every message of a thread",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.messageClient()
 			if err != nil {
 				return err
@@ -275,10 +274,10 @@ func writeMail(w io.Writer, msgs []*pb.MailMessage) {
 	}
 }
 
-func msgWaitCmd(o *opts) *cobra.Command {
+func msgWaitCmd(o *opts) *command {
 	var timeout time.Duration
-	c := &cobra.Command{Use: "wait <message-id|thread>", Short: "Wait on the hub for a reply or ack", Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+	c := &command{Use: "wait <message-id|thread>", Short: "Wait on the hub for a reply or ack", Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.messageClient()
 			if err != nil {
 				return err

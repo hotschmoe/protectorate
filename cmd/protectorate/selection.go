@@ -6,10 +6,9 @@ import (
 
 	"connectrpc.com/connect"
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
-	"github.com/spf13/cobra"
 )
 
-func selectionFlags(c *cobra.Command, s *pb.ModelSelection) {
+func selectionFlags(c *command, s *pb.ModelSelection) {
 	c.Flags().StringVar(&s.Model, "model", "", "native model ID (Codex chat; empty uses native default)")
 	c.Flags().StringVar(&s.Effort, "effort", "", "native reasoning effort, validated against model catalog")
 }
@@ -28,9 +27,9 @@ func printSelection(w io.Writer, c *pb.ChatStatus) {
 	}
 	fmt.Fprintf(w, "model\t%s\neffort\t%s\nrequested model\t%s\nrequested effort\t%s\n", value(c.GetModel(), "unknown"), value(c.GetReasoningEffort(), "unknown"), value(c.GetSettings().GetRequested().GetModel(), "native default"), value(c.GetSettings().GetRequested().GetEffort(), "native default"))
 }
-func chatModelsCmd(o *opts) *cobra.Command {
+func chatModelsCmd(o *opts) *command {
 	var harness string
-	c := &cobra.Command{Use: "models [sleeve]", Short: "List native model and effort capabilities (no inference)", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	c := &command{Use: "models [sleeve]", Short: "List native model and effort capabilities (no inference)", Args: maximumArgs(1), RunE: func(cmd *command, args []string) error {
 		cl, err := chatClient(o)
 		if err != nil {
 			return err
@@ -56,10 +55,10 @@ func chatModelsCmd(o *opts) *cobra.Command {
 	c.Flags().StringVar(&harness, "harness", "codex", "harness catalog when no sleeve is supplied")
 	return c
 }
-func chatSettingsCmd(o *opts) *cobra.Command {
+func chatSettingsCmd(o *opts) *command {
 	sel := &pb.ModelSelection{}
 	var defaults bool
-	c := &cobra.Command{Use: "settings <sleeve>", Short: "Show or replace model/effort selection between turns", Long: "Show settings without flags. --model and --effort replace the full requested selection; an omitted field uses its native default. --native-defaults clears both. Codex updates the same session without restarting; other drivers reject changes.", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	c := &command{Use: "settings <sleeve>", Short: "Show or replace model/effort selection between turns", Long: "Show settings without flags. --model and --effort replace the full requested selection; an omitted field uses its native default. --native-defaults clears both. Codex updates the same session without restarting; other drivers reject changes.", Args: exactArgs(1), RunE: func(cmd *command, args []string) error {
 		if defaults && (cmd.Flags().Changed("model") || cmd.Flags().Changed("effort")) {
 			return fmt.Errorf("--native-defaults cannot be combined with --model or --effort")
 		}

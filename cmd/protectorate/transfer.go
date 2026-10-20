@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/node"
@@ -19,15 +18,15 @@ type transferFlags struct {
 	overwrite, noCompress bool
 }
 
-func (t *transferFlags) bind(c *cobra.Command) {
+func (t *transferFlags) bind(c *command) {
 	f := c.Flags()
 	f.BoolVarP(&t.overwrite, "force", "f", false, "replace an existing destination")
 	f.BoolVar(&t.noCompress, "no-compress", false, "send chunks uncompressed (already-compressed data is detected and sent as is anyway)")
 }
 
-func nodePutCmd(o *opts) *cobra.Command {
+func nodePutCmd(o *opts) *command {
 	var tf transferFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "put <node> <local> <remote>",
 		Short: "Copy a file or directory to a node",
 		Long: `Copy <local> to <remote> on the node, through the hub. A directory is sent as
@@ -36,8 +35,8 @@ where that makes it smaller, then verified by size and SHA-256 and moved into
 place atomically. A relative <remote> is under the node's file root; absolute
 paths must stay inside it unless the node agent runs with --file-unconfined.
 <remote> is the destination path itself, not a directory to copy into.`,
-		Args: cobra.ExactArgs(3),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(3),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -71,17 +70,17 @@ func putFile(ctx context.Context, cl putClient, name, local, remote string, tf t
 	}, nil)
 }
 
-func nodeGetCmd(o *opts) *cobra.Command {
+func nodeGetCmd(o *opts) *command {
 	var tf transferFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "get <node> <remote> <local>",
 		Short: "Copy a file or directory from a node",
 		Long: `Copy <remote> on the node to <local>, through the hub, with the same
 compression, verification and path rules as put. <local> is the destination
 path itself. It is written to a temporary file next to it and renamed only
 after size and SHA-256 match.`,
-		Args: cobra.ExactArgs(3),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(3),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err

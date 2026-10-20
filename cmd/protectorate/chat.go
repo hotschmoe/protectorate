@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -24,23 +23,23 @@ func chatClient(o *opts) (protectoratev1connect.ChatServiceClient, error) {
 	return protectoratev1connect.NewChatServiceClient(hc, o.hubURL), nil
 }
 
-func chatCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "chat", Short: "Talk to a sleeve in chat mode"}
+func chatCmd(o *opts) *command {
+	c := &command{Use: "chat", Short: "Talk to a sleeve in chat mode"}
 	c.AddCommand(chatWatchCmd(o), chatSendCmd(o), chatInterruptCmd(o), chatRespondCmd(o), chatCompactCmd(o), chatModelsCmd(o), chatSettingsCmd(o))
 	return c
 }
 
-func chatWatchCmd(o *opts) *cobra.Command {
+func chatWatchCmd(o *opts) *command {
 	var after uint64
-	c := &cobra.Command{
+	c := &command{
 		Use:   "watch <sleeve>",
 		Short: "Replay a chat from --after, then follow it live",
 		Long: `Replays the sleeve's chat events after --after (default: all), then streams new
 ones until interrupted. With --json each event is one JSON line. To resume
 after a disconnect, pass the last seq you saw; if the last event was assistant
 text still being streamed, pass its seq minus one.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := chatClient(o)
 			if err != nil {
 				return err
@@ -75,13 +74,13 @@ text still being streamed, pass its seq minus one.`,
 	return c
 }
 
-func chatSendCmd(o *opts) *cobra.Command {
+func chatSendCmd(o *opts) *command {
 	var requestID string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "send <sleeve> <text...>",
 		Short: "Send a message (use - as the text to read stdin)",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  minimumArgs(2),
+		RunE: func(cmd *command, args []string) error {
 			text := strings.Join(args[1:], " ")
 			if text == "-" {
 				b, err := io.ReadAll(cmd.InOrStdin())
@@ -105,12 +104,12 @@ func chatSendCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func chatInterruptCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func chatInterruptCmd(o *opts) *command {
+	return &command{
 		Use:   "interrupt <sleeve>",
 		Short: "Cancel the running turn",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := chatClient(o)
 			if err != nil {
 				return err
@@ -124,14 +123,14 @@ func chatInterruptCmd(o *opts) *cobra.Command {
 	}
 }
 
-func chatRespondCmd(o *opts) *cobra.Command {
+func chatRespondCmd(o *opts) *command {
 	var allow, deny bool
 	var note string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "respond <sleeve> <approval-id> --allow|--deny",
 		Short: "Answer a pending approval",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(2),
+		RunE: func(cmd *command, args []string) error {
 			if allow == deny {
 				return errors.New("pass exactly one of --allow and --deny")
 			}
@@ -154,12 +153,12 @@ func chatRespondCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func chatCompactCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func chatCompactCmd(o *opts) *command {
+	return &command{
 		Use:   "compact <sleeve>",
 		Short: "Run the harness's own compaction (only while idle)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := chatClient(o)
 			if err != nil {
 				return err

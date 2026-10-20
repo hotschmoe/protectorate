@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -69,9 +68,9 @@ type updateFlags struct {
 	all, force, noWait bool
 }
 
-func nodeUpdateCmd(o *opts) *cobra.Command {
+func nodeUpdateCmd(o *opts) *command {
 	var f updateFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "update <node> | --all",
 		Short: "Push the hub's build to a node and restart it onto it",
 		Long: `Ask the hub to bring a node to the hub's version. The hub sends the right
@@ -86,13 +85,13 @@ The node keeps exactly one previous binary (protectorate.exe.old, or
 protectorate.old) and puts it back if the hub does not reach the new one within
 a few minutes. Nodes already at the hub's version are skipped unless --force.
 The hub's own node is updated by replacing its binary and restarting the hub.`,
-		Args: func(cmd *cobra.Command, args []string) error {
+		Args: func(cmd *command, args []string) error {
 			if f.all == (len(args) == 1) {
 				return errors.New("name one node, or pass --all")
 			}
-			return cobra.MaximumNArgs(1)(cmd, args)
+			return maximumArgs(1)(cmd, args)
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -114,7 +113,7 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 // updateNodes updates the named node, or every node with --all. With --all a
 // node that cannot be updated now (invited, unreachable) is skipped with a
 // printed reason; only a failed attempt makes the result an error.
-func updateNodes(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, nodes []*pb.NodeStatus, args []string, f updateFlags) error {
+func updateNodes(cmd *command, cl protectoratev1connect.NodeServiceClient, nodes []*pb.NodeStatus, args []string, f updateFlags) error {
 	var errs []error
 	matched := false
 	for _, s := range nodes {
@@ -177,7 +176,7 @@ func updateLine(p *pb.UpdateNodeProgress) string {
 	return ""
 }
 
-func updateNode(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, s *pb.NodeStatus, f updateFlags) error {
+func updateNode(cmd *command, cl protectoratev1connect.NodeServiceClient, s *pb.NodeStatus, f updateFlags) error {
 	w := cmd.OutOrStdout()
 	name := s.Node.Name
 	if why := unreachableReason(s); why != "" {

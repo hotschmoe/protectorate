@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -33,9 +32,9 @@ type deskFlags struct {
 	maxWidth              int32
 }
 
-func deskCmd(o *opts) *cobra.Command {
+func deskCmd(o *opts) *command {
 	var f deskFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "desk <node> screenshot|windows|foreground|click X Y|move X Y|type TEXT|key CHORD|run PROGRAM [ARGS]",
 		Short: "Drive the interactive desktop of a Windows node",
 		Long: `The desktop is the last resort. Prefer, in this order: the program's own API
@@ -59,8 +58,8 @@ fails naming the holder and the expiry. For a long session take an explicit one:
 
 Coordinates are pixels of the screenshot. Write -- before a program's own
 arguments or negative numbers: desk win1 --lease L run -- notepad.exe a.txt`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: minimumArgs(2),
+		RunE: func(cmd *command, args []string) error {
 			if f.lease == "" {
 				f.lease = os.Getenv(deskLeaseEnv)
 			}
@@ -152,7 +151,7 @@ func parseDeskArgs(verb string, args []string, f deskFlags) (*pb.DeskActionReque
 	return nil, fmt.Errorf("unknown desk command %q: want screenshot, windows, foreground, click, move, type, key or run", verb)
 }
 
-func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceClient, node string, act *pb.DeskActionRequest, f deskFlags) error {
+func runDesk(cmd *command, o *opts, cl protectoratev1connect.DeskServiceClient, node string, act *pb.DeskActionRequest, f deskFlags) error {
 	ctx := cmd.Context()
 	t := &pb.DeskTarget{Name: node, LeaseId: f.lease}
 	switch a := act.Action.(type) {
@@ -228,7 +227,7 @@ func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceCl
 }
 
 // noteAutoLease tells the user about a lease the hub took on their behalf.
-func noteAutoLease(cmd *cobra.Command, h http.Header) {
+func noteAutoLease(cmd *command, h http.Header) {
 	id := h.Get(hub.DeskLeaseHeader)
 	if id == "" {
 		return
@@ -236,7 +235,7 @@ func noteAutoLease(cmd *cobra.Command, h http.Header) {
 	fmt.Fprintf(cmd.ErrOrStderr(), "desk lease %s (auto, renewed by each desk command, expires %s)\n", id, h.Get(hub.DeskLeaseExpiresHeader))
 }
 
-func inputResult(cmd *cobra.Command, o *opts, verb string) func(*connect.Response[pb.InputResponse], error) error {
+func inputResult(cmd *command, o *opts, verb string) func(*connect.Response[pb.InputResponse], error) error {
 	return func(res *connect.Response[pb.InputResponse], err error) error {
 		if err != nil {
 			return err

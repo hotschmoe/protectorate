@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -90,8 +89,8 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 	return h.EnableJobs(home, local)
 }
 
-func nodeCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
+func nodeCmd(o *opts) *command {
+	c := &command{Use: "node", Short: "Inventory and live metrics of machines"}
 	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o), nodeTierCmd(o), nodeMigrateTiersCmd())
 	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
@@ -105,12 +104,12 @@ func (o *opts) nodeClient() (protectoratev1connect.NodeServiceClient, error) {
 	return protectoratev1connect.NewNodeServiceClient(hc, o.hubURL), nil
 }
 
-func nodeLsCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func nodeLsCmd(o *opts) *command {
+	return &command{
 		Use:   "ls",
 		Short: "List nodes with live metrics",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -124,12 +123,12 @@ func nodeLsCmd(o *opts) *cobra.Command {
 	}
 }
 
-func nodeShowCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func nodeShowCmd(o *opts) *command {
+	return &command{
 		Use:   "show <name>",
 		Short: "Show one node in full",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -143,13 +142,13 @@ func nodeShowCmd(o *opts) *cobra.Command {
 	}
 }
 
-func nodeAddCmd(o *opts) *cobra.Command {
+func nodeAddCmd(o *opts) *command {
 	var n pb.NodeInfo
-	c := &cobra.Command{
+	c := &command{
 		Use:   "add <name> --addr <host[:port]>",
 		Short: "Add a node to the inventory",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -174,16 +173,16 @@ func nodeAddCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func nodeTierCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func nodeTierCmd(o *opts) *command {
+	return &command{
 		Use:   "tier <name> shared|care",
 		Short: "Change a node's tier (owner only)",
 		Long: `Moves a node between the tiers: shared (the compute pool: jobs and leases,
 sandboxed) and care (a machine kept for a person: never scheduled or leased,
 used only under an admin grant for it). The hub retags the machine on the
 tailnet (tag:tier-<tier>) and then records the tier in its inventory.`,
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(2),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -197,8 +196,8 @@ tailnet (tag:tier-<tier>) and then records the tier in its inventory.`,
 	}
 }
 
-func nodeMigrateTiersCmd() *cobra.Command {
-	return &cobra.Command{
+func nodeMigrateTiersCmd() *command {
+	return &command{
 		Use:   "migrate-tiers",
 		Short: "Rename the retired tiers in this hub's nodes.json (server to shared, family to care)",
 		Long: `Run once on the hub machine, with the hub stopped, when the hub refuses to
@@ -206,8 +205,8 @@ start because nodes.json still names the tiers server or family. It copies
 nodes.json to nodes.json.pre-tiers (refusing if that copy exists), rewrites
 the tiers atomically and regenerates hosts.md. Then start the hub and retag
 each node on the tailnet with the printed node tier commands.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			home, err := hub.Home()
 			if err != nil {
 				return err
@@ -240,11 +239,11 @@ var removeJobs = map[string]pb.RemoveJobs{
 	"cancel": pb.RemoveJobs_REMOVE_JOBS_CANCEL,
 }
 
-func nodeRmCmd(o *opts) *cobra.Command {
+func nodeRmCmd(o *opts) *command {
 	var jobs string
 	var uninstall bool
 	var wait time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "rm <name>",
 		Short: "Drain, revoke and remove a node (or cancel a pending invite)",
 		Long: `Takes a node out of service on the hub: no new jobs or leases go to it,
@@ -255,8 +254,8 @@ removed. A revoked machine cannot rejoin without a new invite. --uninstall
 first asks a reachable agent to unregister its startup and stop; it deletes
 nothing on the machine. For a node that was invited but never joined this
 cancels the invite.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			mode, ok := removeJobs[jobs]
 			if !ok {
 				return fmt.Errorf("--jobs must be wait or cancel, not %q", jobs)
@@ -294,18 +293,18 @@ func removePhaseLabel(p pb.RemovePhase) string {
 	return strings.ToLower(strings.TrimPrefix(p.String(), "REMOVE_PHASE_"))
 }
 
-func nodeServeCmd() *cobra.Command {
+func nodeServeCmd() *command {
 	var memoryLimit int64
 	var listen, tokenFile, jobDir, fileRoot, homeDir string
 	var fileUnconfined bool
 	var watch []string
 	var slow time.Duration
 	var jobSlots int
-	c := &cobra.Command{
+	c := &command{
 		Use:   "serve",
 		Short: "Run the node agent",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) (err error) {
 			if memoryLimit <= 0 {
 				return errors.New("--memory-limit must be positive")
 			}
@@ -433,14 +432,14 @@ func nodeServeCmd() *cobra.Command {
 	return c
 }
 
-func nodeMetricsCmd(o *opts) *cobra.Command {
+func nodeMetricsCmd(o *opts) *command {
 	var local bool
 	var watch []string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "metrics --local",
 		Short: "Collect metrics on this machine once, without a hub",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			if !local {
 				return errors.New("only --local is supported")
 			}

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
@@ -23,8 +22,8 @@ func backlogClient(o *opts) (protectoratev1connect.BacklogServiceClient, error) 
 	return protectoratev1connect.NewBacklogServiceClient(hc, o.hubURL), nil
 }
 
-func backlogCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{
+func backlogCmd(o *opts) *command {
+	c := &command{
 		Use:   "backlog",
 		Short: "Notes kept on the hub, shared with the app and the orchestrator",
 		Long: `Notes the owner writes in the app or here and the orchestrator can read and
@@ -54,17 +53,17 @@ func writeNote(w io.Writer, n *pb.Note) {
 	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", n.Id, pin, n.UpdatedAt.AsTime().Local().Format("2006-01-02 15:04"), project, n.Source, noteTitle(n))
 }
 
-func printNote(o *opts, cmd *cobra.Command, n *pb.Note) error {
+func printNote(o *opts, cmd *command, n *pb.Note) error {
 	return o.out(cmd).print(n, func(w io.Writer) { writeNote(w, n) })
 }
 
-func backlogLs(o *opts) *cobra.Command {
+func backlogLs(o *opts) *command {
 	var project, query string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "ls",
 		Short: "List notes, pinned first and then most recently updated",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := backlogClient(o)
 			if err != nil {
 				return err
@@ -94,12 +93,12 @@ func backlogLs(o *opts) *cobra.Command {
 	return c
 }
 
-func backlogShow(o *opts) *cobra.Command {
-	return &cobra.Command{
+func backlogShow(o *opts) *command {
+	return &command{
 		Use:   "show <id>",
 		Short: "Print a note with its body",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := backlogClient(o)
 			if err != nil {
 				return err
@@ -132,12 +131,12 @@ type bodyFlags struct {
 	body, file string
 }
 
-func (b *bodyFlags) register(c *cobra.Command) {
+func (b *bodyFlags) register(c *command) {
 	c.Flags().StringVar(&b.body, "body", "", "markdown body")
 	c.Flags().StringVar(&b.file, "body-file", "", "read the body from this file, or - for stdin")
 }
 
-func (b *bodyFlags) read(cmd *cobra.Command) (string, bool, error) {
+func (b *bodyFlags) read(cmd *command) (string, bool, error) {
 	switch {
 	case b.body != "" && b.file != "":
 		return "", false, fmt.Errorf("use --body or --body-file, not both")
@@ -154,15 +153,15 @@ func (b *bodyFlags) read(cmd *cobra.Command) (string, bool, error) {
 	return b.body, cmd.Flags().Changed("body"), nil
 }
 
-func backlogAdd(o *opts) *cobra.Command {
+func backlogAdd(o *opts) *command {
 	var project string
 	var pin bool
 	var bf bodyFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "add [title]",
 		Short: "Add a note",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  maximumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			req := &pb.CreateNoteRequest{Project: project, Pinned: pin}
 			if len(args) == 1 {
 				req.Title = args[0]
@@ -189,18 +188,18 @@ func backlogAdd(o *opts) *cobra.Command {
 	return c
 }
 
-func backlogEdit(o *opts) *cobra.Command {
+func backlogEdit(o *opts) *command {
 	var title, project, appendText string
 	var bf bodyFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "edit <id>",
 		Short: "Change a note: with flags directly, otherwise in $EDITOR",
 		Long: `With --title, --body, --body-file, --append or --project the note is changed
 directly. With none of them the note opens in $EDITOR as the title, a blank
 line and the body. --project "" clears the tag; --append adds text after the
 current body.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := backlogClient(o)
 			if err != nil {
 				return err
@@ -266,7 +265,7 @@ current body.`,
 	return c
 }
 
-func editInEditor(cmd *cobra.Command, n *pb.Note) (string, string, error) {
+func editInEditor(cmd *command, n *pb.Note) (string, string, error) {
 	argv := strings.Fields(os.Getenv("EDITOR"))
 	if len(argv) == 0 {
 		argv = []string{"vi"}
@@ -299,12 +298,12 @@ func editInEditor(cmd *cobra.Command, n *pb.Note) (string, string, error) {
 	return strings.TrimSpace(title), strings.TrimPrefix(body, "\n"), nil
 }
 
-func backlogRm(o *opts) *cobra.Command {
-	return &cobra.Command{
+func backlogRm(o *opts) *command {
+	return &command{
 		Use:   "rm <id>",
 		Short: "Delete a note for good",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := backlogClient(o)
 			if err != nil {
 				return err
@@ -318,13 +317,13 @@ func backlogRm(o *opts) *cobra.Command {
 	}
 }
 
-func backlogPin(o *opts) *cobra.Command {
+func backlogPin(o *opts) *command {
 	var off bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "pin <id>",
 		Short: "Pin a note to the top of the list (--off to unpin)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := backlogClient(o)
 			if err != nil {
 				return err

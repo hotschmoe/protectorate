@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -31,16 +29,16 @@ var orchestratorHidden = map[string]bool{
 }
 
 // commandDocs lists every runnable command of the tree for AGENTS.md.
-func commandDocs(root *cobra.Command) []orchestrator.Command {
+func commandDocs(root *command) []orchestrator.Command {
 	var out []orchestrator.Command
-	var walk func(c *cobra.Command, path string)
-	walk = func(c *cobra.Command, path string) {
+	var walk func(c *command, path string)
+	walk = func(c *command, path string) {
 		if path != "" && (c.Hidden || c.Name() == "help" || c.Name() == "completion" || orchestratorHidden[path]) {
 			return
 		}
 		if path != "" && c.Runnable() {
 			d := orchestrator.Command{Path: path, Use: strings.TrimPrefix(c.CommandPath(), root.Name()+" "), Short: c.Short}
-			c.NonInheritedFlags().VisitAll(func(f *pflag.Flag) {
+			c.NonInheritedFlags().VisitAll(func(f *cliFlag) {
 				if f.Hidden {
 					return
 				}
@@ -92,8 +90,8 @@ func (o *opts) orchestratorHub() (orchestratorHub, error) {
 	}, nil
 }
 
-func orchestratorCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{
+func orchestratorCmd(o *opts) *command {
+	c := &command{
 		Use:   "orchestrator",
 		Short: "Run Envoy, the orchestrator sleeve (owner token)",
 		Long: `Envoy is an ordinary sleeve named "envoy" whose workspace is
@@ -105,12 +103,12 @@ does the work, so the app's ENVOY tab starts it as well. See docs/orchestrator.m
 	return c
 }
 
-func orchestratorSpawnCmd(o *opts) *cobra.Command {
+func orchestratorSpawnCmd(o *opts) *command {
 	sel := &pb.ModelSelection{}
 	var harness string
 	var scopes, addScopes []string
 	var ttl time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "spawn [--harness auto|claude|codex|grok|pi] [--scopes ...]",
 		Short: "Create or respawn the envoy sleeve with a fresh scoped token",
 		Long: `Ask the hub to create the sleeve "envoy", or to stop and recreate it when it
@@ -127,8 +125,8 @@ creation: it runs outside the sandbox), named explicitly. --scopes replaces them
 Use orchestrator scopes --add/--remove to change its grants in place.
 The hub renews the token before it expires without restarting the harness.
 Needs the owner token.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			var hv pb.Harness
 			if harness != "" && harness != "auto" {
 				var ok bool
@@ -165,12 +163,12 @@ Needs the owner token.`,
 	return c
 }
 
-func orchestratorStatusCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func orchestratorStatusCmd(o *opts) *command {
+	return &command{
 		Use:   "status",
 		Short: "Show the envoy sleeve, its harness and its token",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			h, err := o.orchestratorHub()
 			if err != nil {
 				return err

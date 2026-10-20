@@ -6,14 +6,13 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 )
 
-func whoCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func whoCmd(o *opts) *command {
+	return &command{
 		Use:   "who [project|sleeve]",
 		Short: "Show which sleeves work on which projects and how projects depend on each other",
 		Long: `Without an argument, list every project the hub knows: its sleeves and the
@@ -21,8 +20,8 @@ projects it depends on. With a sleeve name, list the projects that sleeve works
 on; with a project (id, owner/repo or bare name), show its sleeves, provided
 packages and edges. The directory is built from each workspace's git remote
 and package manifests; nothing is declared by hand.`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: maximumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			hc, err := o.httpClient()
 			if err != nil {
 				return err
