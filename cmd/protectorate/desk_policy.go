@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -81,11 +80,11 @@ func writeDeskPolicy(w io.Writer, name string, r *pb.DeskPolicyStatus) {
 	}
 }
 
-func deskPolicyCmd(o *opts) *cobra.Command {
+func deskPolicyCmd(o *opts) *command {
 	var window, tz string
 	var idle time.Duration
 	var lockAfter, off bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "policy <node> [--window HH:MM-HH:MM --idle DUR [--tz ZONE] [--lock-after] | --off]",
 		Short: "Set or show when agents may drive a node's desktop",
 		Long: `Without flags, shows the node's desk policy and whether its desktop is
@@ -101,8 +100,8 @@ always available again, which is also the default.
 local time. --lock-after locks the workstation when the window ends and when
 an agent's lease ends inside the window with none following within a minute,
 and never while the user is active.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			fl := cmd.Flags()
 			setting := fl.Changed("window") || fl.Changed("idle") || fl.Changed("tz") || fl.Changed("lock-after")
 			cl, err := o.nodeClient()

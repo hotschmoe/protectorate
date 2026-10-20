@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -26,8 +25,8 @@ func (o *opts) leaseClient() (protectoratev1connect.LeaseServiceClient, error) {
 	return protectoratev1connect.NewLeaseServiceClient(hc, o.hubURL), nil
 }
 
-func leaseCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "lease", Aliases: []string{"leases"}, Short: "Reserve nodes and GPUs"}
+func leaseCmd(o *opts) *command {
+	c := &command{Use: "lease", Aliases: []string{"leases"}, Short: "Reserve nodes and GPUs"}
 	c.AddCommand(leaseAcquireCmd(o), leaseLsCmd(o), leaseRenewCmd(o), leaseReleaseCmd(o))
 	return c
 }
@@ -44,12 +43,12 @@ func defaultHolder() string {
 	return user + "@" + host
 }
 
-func leaseAcquireCmd(o *opts) *cobra.Command {
+func leaseAcquireCmd(o *opts) *command {
 	var resource, osName, arch, mem, vram, gpu, npu, holder string
 	var ttl time.Duration
 	var wait bool
 	var priority int32
-	c := &cobra.Command{
+	c := &command{
 		Use:   "acquire [--node <name[:gpuN]> | --os <os> --arch <arch> --min-free-mem 8G --gpu-vram 24G --gpu <text> --npu <text>] --ttl 30m",
 		Short: "Reserve a node, a GPU, or the least-loaded node matching a selector",
 		Long: `Print the lease id and the chosen resource. The lease expires unless renewed
@@ -61,8 +60,8 @@ With --wait, a resource that is held queues you (first in first out, larger
 --priority first) and prints a ticket. When your turn comes the hub holds the
 lease for you for a short claim window and sends you a notice message; claim it
 with 'lease renew <id>'. Without --wait a held resource is an error.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			req := &pb.AcquireLeaseRequest{Holder: holder, Ttl: durationpb.New(ttl), Wait: wait, Priority: priority}
 			sel := &pb.NodeSelector{Os: osName, Arch: arch, Gpu: gpu, Npu: npu}
 			var err error
@@ -121,12 +120,12 @@ func writeLease(w io.Writer, l *pb.Lease) {
 	fmt.Fprintf(w, "lease\t%s\nresource\t%s\nholder\t%s\nexpires\t%s\n", l.Id, l.Resource, l.Holder, fmtStamp(l.ExpiresAt, "-"))
 }
 
-func leaseLsCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func leaseLsCmd(o *opts) *command {
+	return &command{
 		Use:   "ls",
 		Short: "List live leases",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.leaseClient()
 			if err != nil {
 				return err
@@ -152,13 +151,13 @@ func leaseExpiry(l *pb.Lease) string {
 	return time.Until(l.ExpiresAt.AsTime()).Round(time.Second).String()
 }
 
-func leaseRenewCmd(o *opts) *cobra.Command {
+func leaseRenewCmd(o *opts) *command {
 	var ttl time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "renew <id>",
 		Short: "Extend a lease by its TTL from now",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.leaseClient()
 			if err != nil {
 				return err
@@ -174,12 +173,12 @@ func leaseRenewCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func leaseReleaseCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func leaseReleaseCmd(o *opts) *command {
+	return &command{
 		Use:   "release <id>...",
 		Short: "Free leases now",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  minimumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.leaseClient()
 			if err != nil {
 				return err

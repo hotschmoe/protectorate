@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -34,8 +33,8 @@ func (o *opts) tokenClient() (protectoratev1connect.TokenServiceClient, error) {
 	return protectoratev1connect.NewTokenServiceClient(hc, o.hubURL), nil
 }
 
-func tokenCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{
+func tokenCmd(o *opts) *command {
+	c := &command{
 		Use:   "token",
 		Short: "Issue, list, update and revoke scoped API tokens (owner token only)",
 		Long: `Scoped tokens limit what a phone, bridge or agent can do. The owner token
@@ -46,11 +45,11 @@ nothing and gains only the scopes it is created with. See docs/auth.md.`,
 	return c
 }
 
-func tokenScopesCmd(o *opts, envoy bool) *cobra.Command {
+func tokenScopesCmd(o *opts, envoy bool) *command {
 	var add, remove []string
-	c := &cobra.Command{
-		Use: "scopes <id|name>", Short: "Change token scopes in place (owner only)", Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+	c := &command{
+		Use: "scopes <id|name>", Short: "Change token scopes in place (owner only)", Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			if len(add) == 0 && len(remove) == 0 {
 				return fmt.Errorf("provide --add or --remove")
 			}
@@ -88,23 +87,23 @@ func tokenScopesCmd(o *opts, envoy bool) *cobra.Command {
 	}
 	if envoy {
 		c.Use = "scopes"
-		c.Args = cobra.NoArgs
+		c.Args = noArgs
 	}
 	c.Flags().StringSliceVar(&add, "add", nil, "scopes to add (comma separated or repeated)")
 	c.Flags().StringSliceVar(&remove, "remove", nil, "exact scopes to remove (comma separated or repeated)")
 	return c
 }
 
-func tokenCreateCmd(o *opts) *cobra.Command {
+func tokenCreateCmd(o *opts) *command {
 	var scopes []string
 	var ttl time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "create <name>",
 		Short: "Issue a token; the secret is printed once",
 		Example: `  protectorate token create phone --scope read --scope terminal --ttl 720h
   protectorate token create bridge --scope read --scope 'backlog_*'`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.tokenClient()
 			if err != nil {
 				return err
@@ -137,12 +136,12 @@ func fmtStamp(ts *timestamppb.Timestamp, none string) string {
 	return ts.AsTime().Local().Format(time.RFC3339)
 }
 
-func tokenLsCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func tokenLsCmd(o *opts) *command {
+	return &command{
 		Use:   "ls",
 		Short: "List issued tokens",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.tokenClient()
 			if err != nil {
 				return err
@@ -174,12 +173,12 @@ func tokenLsCmd(o *opts) *cobra.Command {
 	}
 }
 
-func tokenRevokeCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func tokenRevokeCmd(o *opts) *command {
+	return &command{
 		Use:   "revoke <id>",
 		Short: "Revoke a token immediately",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.tokenClient()
 			if err != nil {
 				return err
@@ -203,11 +202,11 @@ func (o *opts) grantClient() (protectoratev1connect.GrantServiceClient, error) {
 	return protectoratev1connect.NewGrantServiceClient(hc, o.hubURL), nil
 }
 
-func grantCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "grant", Short: "Mint task-scoped grants"}
+func grantCmd(o *opts) *command {
+	c := &command{Use: "grant", Short: "Mint task-scoped grants"}
 	var node, task, out string
 	var ttl time.Duration
-	admin := &cobra.Command{
+	admin := &command{
 		Use:   "admin --node <node|glob> --task <text> [--ttl 4h]",
 		Short: "Mint a short-lived token for one task: job_* and node_admin:<node>",
 		Long: `Mints a token whose scopes are job_* and node_admin:<node>: jobs on that node,
@@ -217,8 +216,8 @@ audited with the task. The owner may name a glob over node names; the
 orchestrator may grant one shared node by name when the hub runs with
 --orchestrator-admin-grants. Revoke early with protectorate token revoke <id>.`,
 		Example: `  protectorate grant admin --node kidsbox --ttl 4h --task "update kids machine"`,
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:    noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.grantClient()
 			if err != nil {
 				return err
@@ -257,14 +256,14 @@ orchestrator may grant one shared node by name when the hub runs with
 	return c
 }
 
-func auditCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "audit", Short: "Inspect the audit log"}
+func auditCmd(o *opts) *command {
+	c := &command{Use: "audit", Short: "Inspect the audit log"}
 	var n int
-	tail := &cobra.Command{
+	tail := &command{
 		Use:   "tail",
 		Short: "Show the most recent audit entries (reads the local log of a hub on this machine)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			home, err := hub.Home()
 			if err != nil {
 				return err

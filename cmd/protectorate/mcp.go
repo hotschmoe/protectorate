@@ -10,16 +10,13 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/spf13/cobra"
-
 	"github.com/hotschmoe/protectorate/internal/mcpbridge"
 )
 
-func mcpCmd(o *opts) *cobra.Command {
+func mcpCmd(o *opts) *command {
 	var httpAddr string
 	var f mcpbridge.Filter
-	c := &cobra.Command{
+	c := &command{
 		Use:   "mcp",
 		Short: "Serve the hub API as MCP tools (stdio, or streamable HTTP with --http)",
 		Long: `Serve every unary hub RPC as an MCP tool named <service>_<method>.
@@ -30,8 +27,8 @@ matches and always wins. These filters only limit what the client is offered.
 What the bridge may actually do is set by its token: run it with a scoped token
 (--token-file, or env PROTECTORATE_TOKEN) created by 'protectorate token
 create'. See docs/mcp.md and docs/auth.md.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			tok, err := o.token()
 			if err != nil {
 				return err
@@ -46,7 +43,7 @@ create'. See docs/mcp.md and docs/auth.md.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 			defer stop()
 			if httpAddr == "" {
-				return srv.Run(ctx, &mcp.StdioTransport{})
+				return srv.Run(ctx, os.Stdin, cmd.OutOrStdout())
 			}
 			if err := checkMCPListen(httpAddr); err != nil {
 				return err

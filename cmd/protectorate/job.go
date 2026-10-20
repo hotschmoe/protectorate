@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -45,8 +44,8 @@ type exitError struct {
 
 func (e *exitError) Error() string { return e.msg }
 
-func jobCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "job", Aliases: []string{"jobs"}, Short: "Run commands on nodes"}
+func jobCmd(o *opts) *command {
+	c := &command{Use: "job", Aliases: []string{"jobs"}, Short: "Run commands on nodes"}
 	c.AddCommand(jobRunCmd(o), jobLsCmd(o), jobShowCmd(o), jobCancelCmd(o), jobLogsCmd(o), jobTestCrossCmd(o))
 	return c
 }
@@ -139,14 +138,14 @@ func parseEnv(pairs []string) (map[string]string, error) {
 	return env, nil
 }
 
-func jobRunCmd(o *opts) *cobra.Command {
+func jobRunCmd(o *opts) *command {
 	var on, gitSrc, artifact, workdir string
 	var globs, envPairs []string
 	var timeout time.Duration
 	var admin bool
 	var cpu uint32
 	var mem string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
 		Long: `Run a command on a node chosen by --on: a node name, a lease id, or a selector
@@ -164,8 +163,8 @@ fresh match, never a leased node). The command runs in:
 Output streams live; the exit status of the command is this command's exit
 status. Files matching --artifact-glob (relative to the working directory) are
 copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: minimumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			if cmd.ArgsLenAtDash() != 0 {
 				return errors.New("usage: job run [flags] -- <cmd...>")
 			}
@@ -257,7 +256,7 @@ func newRequestID() (string, error) {
 // stdout (stderr with --json) until the job ends. An interrupt, SIGTERM or a
 // canceled ctx cancels the job by that key, so it works even when the submit
 // is still in flight and the job id is not known; a second interrupt quits.
-func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1connect.JobServiceClient, req *pb.SubmitJobRequest) (*pb.Job, error) {
+func runJob(ctx context.Context, o *opts, cmd *command, jc protectoratev1connect.JobServiceClient, req *pb.SubmitJobRequest) (*pb.Job, error) {
 	if req.RequestId == "" {
 		key, err := newRequestID()
 		if err != nil {
@@ -389,14 +388,14 @@ func jobSummary(j *pb.Job) string {
 	return b.String()
 }
 
-func jobLsCmd(o *opts) *cobra.Command {
+func jobLsCmd(o *opts) *command {
 	var state string
 	var limit int32
-	c := &cobra.Command{
+	c := &command{
 		Use:   "ls",
 		Short: "List jobs, newest first",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			req := &pb.ListJobsRequest{Limit: limit}
 			if state != "" {
 				v, ok := pb.JobState_value["JOB_STATE_"+strings.ToUpper(strings.ReplaceAll(state, "-", "_"))]
@@ -434,12 +433,12 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "~"
 }
 
-func jobShowCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func jobShowCmd(o *opts) *command {
+	return &command{
 		Use:   "show <id>",
 		Short: "Show one job record",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			jc, err := o.jobClient()
 			if err != nil {
 				return err
@@ -480,12 +479,12 @@ func jobModeName(m pb.JobMode) string {
 	return strings.ToLower(strings.TrimPrefix(m.String(), "JOB_MODE_"))
 }
 
-func jobCancelCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func jobCancelCmd(o *opts) *command {
+	return &command{
 		Use:   "cancel <id>",
 		Short: "Stop a job and its process tree",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			jc, err := o.jobClient()
 			if err != nil {
 				return err
@@ -499,13 +498,13 @@ func jobCancelCmd(o *opts) *cobra.Command {
 	}
 }
 
-func jobLogsCmd(o *opts) *cobra.Command {
+func jobLogsCmd(o *opts) *command {
 	var follow bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "logs <id>",
 		Short: "Print a job's output",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			jc, err := o.jobClient()
 			if err != nil {
 				return err
@@ -535,10 +534,10 @@ func jobLogsCmd(o *opts) *cobra.Command {
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-func jobTestCrossCmd(o *opts) *cobra.Command {
+func jobTestCrossCmd(o *opts) *command {
 	var goos, goarch, on string
 	var timeout time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "test-cross --goos <os> --goarch <arch> <packages...> [-- <test flags>]",
 		Short: "Compile Go tests here and run the test binaries on a matching node",
 		Long: `Runs "go test -c" for every package with GOOS/GOARCH set, uploads each test
@@ -550,8 +549,8 @@ tests open) and the module's go.mod/go.sum, laid out as in the module, and runs
 with the package directory as working directory, as "go test" does. Files over
 8 MiB and .git, node_modules and target directories are left out. Arguments
 after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: minimumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			pkgArgs, testArgs := args, []string(nil)
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				pkgArgs, testArgs = args[:dash], args[dash:]
@@ -572,7 +571,7 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 	return c
 }
 
-func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout time.Duration, patterns, testArgs []string) error {
+func testCross(cmd *command, o *opts, goos, goarch, on string, timeout time.Duration, patterns, testArgs []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	jobCtx, lose := context.WithCancelCause(ctx)

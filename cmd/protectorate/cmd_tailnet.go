@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -22,15 +21,15 @@ import (
 	"github.com/hotschmoe/protectorate/internal/tailnet"
 )
 
-func hubTailnetCmd() *cobra.Command {
-	c := &cobra.Command{Use: "tailnet", Short: "Manage the hub's tailnet (headscale)"}
+func hubTailnetCmd() *command {
+	c := &command{Use: "tailnet", Short: "Manage the hub's tailnet (headscale)"}
 
 	var version string
-	install := &cobra.Command{
+	install := &command{
 		Use:   "install",
 		Short: "Download headscale into $PROTECTORATE_HOME/bin and verify its sha256",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			home, err := hub.Home()
 			if err != nil {
 				return err
@@ -47,11 +46,11 @@ func hubTailnetCmd() *cobra.Command {
 
 	var cfg tailnet.Config
 	var noEmbeddedDERP bool
-	init := &cobra.Command{
+	init := &command{
 		Use:   "init",
 		Short: "Write the tailnet config (server URL, DERP, key expiry, pools)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			home, err := hub.Home()
 			if err != nil {
 				return err
@@ -90,13 +89,13 @@ func hubTailnetCmd() *cobra.Command {
 	return c
 }
 
-func tailnetCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "tailnet", Short: "Inspect the hub's tailnet"}
-	c.AddCommand(&cobra.Command{
+func tailnetCmd(o *opts) *command {
+	c := &command{Use: "tailnet", Short: "Inspect the hub's tailnet"}
+	c.AddCommand(&command{
 		Use:   "status",
 		Short: "Show the hub's tailnet identity and how it reaches each peer",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			hc, err := o.httpClient()
 			if err != nil {
 				return err
@@ -174,11 +173,11 @@ func admin(ctx context.Context) (*tailnet.Admin, tailnet.Config, error) {
 }
 
 // nodeEnrollCmds are the tailnet enrollment commands under `node`.
-func nodeEnrollCmds(o *opts) []*cobra.Command {
+func nodeEnrollCmds(o *opts) []*command {
 	var tier, installURL string
 	var expires time.Duration
 	var pools []string
-	invite := &cobra.Command{
+	invite := &command{
 		Use:   "invite <name>",
 		Short: "Create a single-use enrollment key and print the install commands",
 		Long: `Asks the hub for a single-use enrollment key for a new node, records the node
@@ -188,8 +187,8 @@ line. The commands hold the key; it expires (--expires, default 1h). Inviting
 a pending node again expires its previous key. The install URL defaults to the
 hub's --public-url, else the --hub URL this command talks to; pass --url when
 new machines reach the hub at another address.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := o.nodeClient()
 			if err != nil {
 				return err
@@ -214,11 +213,11 @@ new machines reach the hub at another address.`,
 	invite.Flags().StringVar(&installURL, "url", "", "hub URL the new machine downloads the installer from (default: the hub's --public-url, else --hub)")
 
 	var control, key, keyFile, name string
-	join := &cobra.Command{
+	join := &command{
 		Use:   "join",
 		Short: "Enroll this machine; state goes to $PROTECTORATE_HOME/tsnet",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			home, err := hub.Home()
 			if err != nil {
 				return err
@@ -246,11 +245,11 @@ new machines reach the hub at another address.`,
 	join.Flags().StringVar(&name, "name", "", "tailnet name (default: sanitised hostname)")
 	_ = join.MarkFlagRequired("control")
 
-	revoke := &cobra.Command{
+	revoke := &command{
 		Use:   "revoke <name>",
 		Short: "Remove a node from the tailnet immediately",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			a, _, err := admin(cmd.Context())
 			if err != nil {
 				return err
@@ -267,11 +266,11 @@ new machines reach the hub at another address.`,
 		},
 	}
 
-	renew := &cobra.Command{
+	renew := &command{
 		Use:   "renew <name>",
 		Short: "Restart a node's key lifetime from now",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			a, _, err := admin(cmd.Context())
 			if err != nil {
 				return err
@@ -285,7 +284,7 @@ new machines reach the hub at another address.`,
 		},
 	}
 
-	return []*cobra.Command{invite, join, revoke, renew}
+	return []*command{invite, join, revoke, renew}
 }
 
 func writeInvite(w io.Writer, r *pb.InviteNodeResponse) {
@@ -295,15 +294,15 @@ func writeInvite(w io.Writer, r *pb.InviteNodeResponse) {
 	fmt.Fprintf(w, "Manual, with a protectorate binary already on the machine:\n  PROTECTORATE_ENROLL_KEY=%s protectorate node install --control %s --name %s\n", r.Key, r.ControlUrl, r.Node.Name)
 }
 
-func clientCmd() *cobra.Command {
-	c := &cobra.Command{Use: "client", Short: "Enroll phones and laptops"}
+func clientCmd() *command {
+	c := &command{Use: "client", Short: "Enroll phones and laptops"}
 	var name string
 	var expires time.Duration
-	invite := &cobra.Command{
+	invite := &command{
 		Use:   "invite",
 		Short: "Create a single-use key for the stock Tailscale app or CLI",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			a, cfg, err := admin(cmd.Context())
 			if err != nil {
 				return err
@@ -330,11 +329,11 @@ Then reach the hub at http://%[4]s:%[5]d. The key is single-use and expires in %
 	invite.Flags().DurationVar(&expires, "expires", time.Hour, "how long the key can be redeemed")
 	_ = invite.MarkFlagRequired("name")
 
-	register := &cobra.Command{
+	register := &command{
 		Use:   "register <registration-key>",
 		Short: "Approve a phone that signed in through the Tailscale app",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			a, _, err := admin(cmd.Context())
 			if err != nil {
 				return err

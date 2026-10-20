@@ -8,18 +8,16 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
 
 var loginHarnesses = []sleeve.Harness{sleeve.Claude, sleeve.Codex, sleeve.Grok, sleeve.Pi}
 
-func loginCmd() *cobra.Command {
+func loginCmd() *command {
 	var home string
 	var status bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "login <claude|codex|grok|pi> [-- login args...]",
 		Short: "Log a harness in once on the hub so every sleeve shares the credential",
 		Long: `Run on the hub machine. Runs the harness's own login flow in this terminal
@@ -28,8 +26,8 @@ the directory every sleeve of that harness reads. Nothing is copied or printed.
 Arguments after -- go to the harness's login command (codex login -- --device-auth).
 pi has no login command: it starts pi; type /login, then exit.
 --status lists which harnesses have a credential (file presence only).`,
-		Args: cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: arbitraryArgs,
+		RunE: func(cmd *command, args []string) error {
 			cfg, err := loginConfig(home)
 			if err != nil {
 				return err
@@ -69,7 +67,7 @@ func loginConfig(home string) (sleeve.Config, error) {
 	return sleeve.Config{Home: home}, nil
 }
 
-func printLoginStatus(cmd *cobra.Command, cfg sleeve.Config) error {
+func printLoginStatus(cmd *command, cfg sleeve.Config) error {
 	for _, h := range loginHarnesses {
 		ok, err := cfg.LoggedIn(h)
 		if err != nil {
@@ -92,7 +90,7 @@ func loginEnv(l sleeve.Login) []string {
 	return env
 }
 
-func runLogin(ctx context.Context, cmd *cobra.Command, cfg sleeve.Config, h sleeve.Harness, extra []string) error {
+func runLogin(ctx context.Context, cmd *command, cfg sleeve.Config, h sleeve.Harness, extra []string) error {
 	l, err := cfg.LoginPlan(h, extra)
 	if err != nil {
 		return err

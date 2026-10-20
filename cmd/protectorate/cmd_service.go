@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
-
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/svcgen"
 )
@@ -19,7 +17,7 @@ type svcFlags struct {
 	install                bool
 }
 
-func (f *svcFlags) bind(c *cobra.Command) {
+func (f *svcFlags) bind(c *command) {
 	c.Flags().StringVar(&f.binary, "binary", "", "absolute path of the protectorate binary (default: this executable)")
 	c.Flags().StringVar(&f.home, "home", "", "PROTECTORATE_HOME baked into the service (default: resolved state dir)")
 	c.Flags().StringVar(&f.writeDir, "write", "", "write files into this directory instead of printing")
@@ -87,8 +85,8 @@ func (f *svcFlags) target(def string) (string, error) {
 	return "", nil
 }
 
-func serviceCmd() *cobra.Command {
-	c := &cobra.Command{
+func serviceCmd() *command {
+	c := &command{
 		Use:   "service",
 		Short: "Generate service definitions for hub and node (prints by default; never starts anything)",
 		Long: "Generate service definitions. Arguments after `--` are passed to `<role> serve`.\n" +
@@ -98,7 +96,7 @@ func serviceCmd() *cobra.Command {
 	return c
 }
 
-func roleArg(cmd *cobra.Command, args []string) error {
+func roleArg(cmd *command, args []string) error {
 	if len(args) == 0 {
 		return errors.New("role required: hub or node")
 	}
@@ -108,14 +106,14 @@ func roleArg(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func serviceSystemdCmd() *cobra.Command {
+func serviceSystemdCmd() *command {
 	var f svcFlags
 	var user, path, tmux string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "systemd <hub|node> [flags] [-- serve-flags]",
 		Short: "Generate a systemd unit (user unit, or system unit with --user-name)",
 		Args:  roleArg,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *command, args []string) error {
 			s, err := f.spec(args[0], args[1:])
 			if err != nil {
 				return err
@@ -168,14 +166,14 @@ func serviceSystemdCmd() *cobra.Command {
 	return c
 }
 
-func serviceWindowsTaskCmd() *cobra.Command {
+func serviceWindowsTaskCmd() *command {
 	var f svcFlags
 	var trigger string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "windows-task [flags] [-- serve-flags]",
 		Short: "Generate a Task Scheduler XML for `node serve` (UTF-16, for schtasks /Create /XML)",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  arbitraryArgs,
+		RunE: func(cmd *command, args []string) error {
 			s, err := f.spec(svcgen.RoleNode, args)
 			if err != nil {
 				return err
@@ -211,13 +209,13 @@ func serviceWindowsTaskCmd() *cobra.Command {
 	return c
 }
 
-func serviceWindowsCmd() *cobra.Command {
+func serviceWindowsCmd() *command {
 	var f svcFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "install-windows [flags] [-- serve-flags]",
 		Short: "Print the sc.exe commands that register `node serve` as a Windows service",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  arbitraryArgs,
+		RunE: func(cmd *command, args []string) error {
 			s, err := f.spec(svcgen.RoleNode, args)
 			if err != nil {
 				return err
@@ -241,13 +239,13 @@ func serviceWindowsCmd() *cobra.Command {
 	return c
 }
 
-func serviceTermuxCmd() *cobra.Command {
+func serviceTermuxCmd() *command {
 	var f svcFlags
-	c := &cobra.Command{
+	c := &command{
 		Use:   "termux [flags] [-- serve-flags]",
 		Short: "Generate a termux-services (runit) run script and a Termux:Boot script for `node serve`",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  arbitraryArgs,
+		RunE: func(cmd *command, args []string) error {
 			s, err := f.spec(svcgen.RoleNode, args)
 			if err != nil {
 				return err

@@ -11,19 +11,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/hotschmoe/protectorate/internal/driver"
 )
 
-func driverCmd() *cobra.Command {
-	c := &cobra.Command{Use: "driver", Short: "Dev: drive a harness through its headless protocol"}
+func driverCmd() *command {
+	c := &command{Use: "driver", Short: "Dev: drive a harness through its headless protocol"}
 	var harness, cwd, session string
-	run := &cobra.Command{
+	run := &command{
 		Use:   "run [flags] <prompt>",
 		Short: "Run one prompt, streaming events as JSON lines and asking approvals on the terminal",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  minimumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			return driverRun(cmd.Context(), driver.Harness(harness), cwd, session, strings.Join(args, " "))
 		},
 	}

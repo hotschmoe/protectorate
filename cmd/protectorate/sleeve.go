@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -58,8 +57,8 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 	return protectoratev1connect.NewSleeveServiceClient(hc, o.hubURL), nil
 }
 
-func sleeveCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
+func sleeveCmd(o *opts) *command {
+	c := &command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
 	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
@@ -102,7 +101,7 @@ var sleeveModes = map[string]pb.SleeveMode{
 	"terminal": pb.SleeveMode_SLEEVE_MODE_TERMINAL,
 }
 
-func sleeveSpawnCmd(o *opts) *cobra.Command {
+func sleeveSpawnCmd(o *opts) *command {
 	sel := &pb.ModelSelection{}
 	var workspace, harness, mem, mode string
 	var cpu uint32
@@ -110,7 +109,7 @@ func sleeveSpawnCmd(o *opts) *cobra.Command {
 	var supervised bool
 	var readOnly []string
 	var exitAfterIdle time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "spawn <name> --workspace <dir|git url> --harness <h> [--cpu 200] [--mem 8G] [--supervised] [-- args...]",
 		Short: "Start a harness in an isolated sleeve",
 		Long: `Start a harness (claude, codex, grok, pi or shell) in a sandbox with its own
@@ -123,8 +122,8 @@ sandbox is the boundary) unless --supervised: then it asks before acting and
 'protectorate chat respond' answers. --ro host-path[:sandbox-path] adds read-only
 reference directories (repeatable, default same path). --exit-after-idle 5m
 removes a chat sleeve after five minutes idle with no pending mail (default off).`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: minimumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			name, extra := args[0], args[1:]
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 && dash != 1 {
 				return errors.New("usage: sleeve spawn <name> [flags] -- <args...>")
@@ -253,12 +252,12 @@ func limitLabel(l *pb.SleeveLimits) string {
 	return cpu + "/" + mem
 }
 
-func sleeveLsCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sleeveLsCmd(o *opts) *command {
+	return &command{
 		Use:   "ls",
 		Short: "List sleeves with live usage",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := sleeveClient(o)
 			if err != nil {
 				return err
@@ -279,8 +278,8 @@ func sleeveLsCmd(o *opts) *cobra.Command {
 	}
 }
 
-func sleeveWorkspacesCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sleeveWorkspacesCmd(o *opts) *command {
+	return &command{
 		Use:     "workspaces",
 		Aliases: []string{"ws"},
 		Short:   "List workspaces on the hub that a sleeve can start in",
@@ -290,8 +289,8 @@ workspaces directory and the workspaces of known sleeves. Pass a PATH to
 A workspace marked with a required name can only be
 used by a sleeve of that name. Any other absolute directory, or a git URL to
 clone, can also be given to spawn.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := sleeveClient(o)
 			if err != nil {
 				return err
@@ -314,12 +313,12 @@ clone, can also be given to spawn.`,
 	}
 }
 
-func sleeveShowCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sleeveShowCmd(o *opts) *command {
+	return &command{
 		Use:   "show <name>",
 		Short: "Show one sleeve",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := sleeveClient(o)
 			if err != nil {
 				return err
@@ -370,12 +369,12 @@ func sleeveShowCmd(o *opts) *cobra.Command {
 	}
 }
 
-func sleeveKillCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sleeveKillCmd(o *opts) *command {
+	return &command{
 		Use:   "kill <name>",
 		Short: "Stop a sleeve and its processes; the workspace is kept",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			cl, err := sleeveClient(o)
 			if err != nil {
 				return err
@@ -389,14 +388,14 @@ func sleeveKillCmd(o *opts) *cobra.Command {
 	}
 }
 
-func sleeveAttachCmd(o *opts) *cobra.Command {
+func sleeveAttachCmd(o *opts) *command {
 	var readOnly bool
 	var escape string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "attach <name>",
 		Short: "Attach this terminal to a sleeve's session (detach with Ctrl-])",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			esc, err := parseEscape(escape)
 			if err != nil {
 				return err
@@ -417,13 +416,13 @@ func sleeveAttachCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func sleeveResleeveCmd(o *opts) *cobra.Command {
+func sleeveResleeveCmd(o *opts) *command {
 	sel := &pb.ModelSelection{}
 	var defaults bool
 	var to string
 	var interrupt bool
 	var wait time.Duration
-	c := &cobra.Command{
+	c := &command{
 		Use:   "resleeve <name> [--to auto|claude|codex|grok|pi] [--interrupt] [--wait 5m]",
 		Short: "Move a chat sleeve to another harness with a handoff",
 		Long: `Move a chat sleeve to another harness on the same workspace, under the same
@@ -435,8 +434,8 @@ subscription with the most spare quota, else the local LLM through pi),
 overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git), starts the
 new harness and tells it to read the file. --to auto takes the top of
 'quota suggest' other than the current harness.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			h := pb.Harness_HARNESS_UNSPECIFIED
 			if to != "auto" {
 				var ok bool

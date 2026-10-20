@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/node"
@@ -321,10 +319,10 @@ func lingerValue(out string) string {
 	return ""
 }
 
-func nodeInstallCmd() *cobra.Command {
+func nodeInstallCmd() *command {
 	var control, key, keyFile, name, homeDir string
 	var elevated, dryRun, runner bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "install --control <headscale url> --key <enrollment key> [flags] [-- serve-flags] | install --runner",
 		Short: "Install this machine as a node: binary, enrollment, start at login",
 		Long: `One command per machine. It copies this binary to a stable per-user place,
@@ -347,8 +345,8 @@ the process list. An existing enrollment is kept and needs no key.
 as) instead creates the local account protectorate-runner that sandboxed jobs
 run as, inside a job object, without access to your profile. It prints each
 step as it goes (with --dry-run, only prints them). Restart the agent after.`,
-		Args: cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: arbitraryArgs,
+		RunE: func(cmd *command, args []string) error {
 			if homeDir != "" {
 				if err := os.Setenv("PROTECTORATE_HOME", homeDir); err != nil {
 					return fmt.Errorf("set home: %w", err)
@@ -424,16 +422,16 @@ func installRunner(w io.Writer, dryRun bool) error {
 	return nil
 }
 
-func nodeUninstallCmd() *cobra.Command {
+func nodeUninstallCmd() *command {
 	var name, homeDir string
 	var dryRun bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "uninstall",
 		Short: "Stop the agent and unregister its startup; deletes nothing",
 		Long: `Unregisters the logon task or unit and stops the agent. It never deletes a
 file or directory; it prints the paths you may delete yourself.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			if homeDir != "" {
 				if err := os.Setenv("PROTECTORATE_HOME", homeDir); err != nil {
 					return fmt.Errorf("set home: %w", err)

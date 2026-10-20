@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -79,7 +78,7 @@ func (o *opts) token() (string, error) {
 	return hub.ReadToken()
 }
 
-func (o *opts) out(cmd *cobra.Command) out { return out{w: cmd.OutOrStdout(), json: o.json} }
+func (o *opts) out(cmd *command) out { return out{w: cmd.OutOrStdout(), json: o.json} }
 
 // httpClient sends the resolved token on every request.
 func (o *opts) httpClient() (*http.Client, error) {
@@ -101,13 +100,11 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	return b.next.RoundTrip(r)
 }
 
-func newRoot() *cobra.Command {
+func newRoot() *command {
 	o := &opts{}
-	root := &cobra.Command{
-		Use:           "protectorate",
-		Short:         "Orchestrate coding-agent harnesses across machines",
-		SilenceUsage:  true,
-		SilenceErrors: true,
+	root := &command{
+		Use:   "protectorate",
+		Short: "Orchestrate coding-agent harnesses across machines",
 	}
 	hubDefault := "http://127.0.0.1:7470"
 	if v := os.Getenv("PROTECTORATE_HUB"); v != "" {
@@ -150,8 +147,8 @@ func installedDir(flag, name, marker string) string {
 	return dir
 }
 
-func hubCmd() *cobra.Command {
-	c := &cobra.Command{Use: "hub", Short: "Run the hub"}
+func hubCmd() *command {
+	c := &command{Use: "hub", Short: "Run the hub"}
 	var listen, tmuxSocket, webDir, binaryDir, publicURL string
 	var quotaInterval, deadRetention time.Duration
 	var localURLs, localModelHosts []string
@@ -161,11 +158,11 @@ func hubCmd() *cobra.Command {
 	var watch, toolDirs, refDirs []string
 	var orchestratorGrants bool
 	var startEnvoy string
-	serve := &cobra.Command{
+	serve := &command{
 		Use:   "serve",
 		Short: "Serve the hub API",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			if backupDir != "" && backupEvery <= 0 {
 				return errors.New("--backup-every must be positive")
 			}
@@ -284,13 +281,13 @@ func hubCmd() *cobra.Command {
 	return c
 }
 
-func quotaCmd(o *opts) *cobra.Command {
+func quotaCmd(o *opts) *command {
 	var refresh bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "quota",
 		Short: "Show subscription usage, resets and projected unused capacity",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			hc, err := o.httpClient()
 			if err != nil {
 				return err
@@ -308,12 +305,12 @@ func quotaCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func statusCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func statusCmd(o *opts) *command {
+	return &command{
 		Use:   "status",
 		Short: "Show hub status",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			hc, err := o.httpClient()
 			if err != nil {
 				return err
@@ -335,12 +332,12 @@ func statusCmd(o *opts) *cobra.Command {
 	}
 }
 
-func eventsCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func eventsCmd(o *opts) *command {
+	return &command{
 		Use:   "events",
 		Short: "Stream hub events, one per line",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			hc, err := o.httpClient()
 			if err != nil {
 				return err
@@ -373,13 +370,13 @@ func eventsCmd(o *opts) *cobra.Command {
 	}
 }
 
-func apiCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "api", Short: "Raw API access"}
-	c.AddCommand(&cobra.Command{
+func apiCmd(o *opts) *command {
+	c := &command{Use: "api", Short: "Raw API access"}
+	c.AddCommand(&command{
 		Use:   "call <Service/Method> [json]",
 		Short: "Unary call, e.g. api call HubService/GetStatus '{}'",
-		Args:  cobra.RangeArgs(1, 2),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  rangeArgs(1, 2),
+		RunE: func(cmd *command, args []string) error {
 			svc, method, ok := strings.Cut(args[0], "/")
 			if !ok || svc == "" || method == "" {
 				return errors.New("method must look like Service/Method")
@@ -430,12 +427,12 @@ func apiCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func versionCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func versionCmd(o *opts) *command {
+	return &command{
 		Use:   "version",
 		Short: "Print the client version",
-		Args:  cobra.NoArgs,
-		Run: func(cmd *cobra.Command, _ []string) {
+		Args:  noArgs,
+		Run: func(cmd *command, _ []string) {
 			if o.json {
 				fmt.Fprintf(cmd.OutOrStdout(), `{"version":%q,"os":%q,"arch":%q}`+"\n", version, runtime.GOOS, runtime.GOARCH)
 				return
@@ -445,15 +442,15 @@ func versionCmd(o *opts) *cobra.Command {
 	}
 }
 
-func pairCmd(o *opts) *cobra.Command {
+func pairCmd(o *opts) *command {
 	var pubURL, name string
 	var appQR, hostShell bool
 	ttl := deviceTTL
-	c := &cobra.Command{
+	c := &command{
 		Use:   "pair",
 		Short: "Print a pairing link and QR code for adding this hub on another device",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			cl, err := o.tokenClient()
 			if err != nil {
 				return err
@@ -500,10 +497,10 @@ func pairCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func quotaSuggestCmd(o *opts) *cobra.Command {
+func quotaSuggestCmd(o *opts) *command {
 	var forSize string
 	var refresh bool
-	c := &cobra.Command{
+	c := &command{
 		Use:   "suggest [--for small|medium|large]",
 		Short: "Rank harnesses by usable spare capacity before reset",
 		Long: `Rank claude, codex, grok and pi (local LLM) by capacity that is usable now
@@ -511,8 +508,8 @@ and would otherwise expire unused at a reset. Only fresh quota data counts:
 stale or unknown providers are listed as not picked. The local LLM is always
 available as the fallback. --for says how much headroom the task needs
 (small 5%, medium 15%, large 30% usable).`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			size := pb.TaskSize_TASK_SIZE_UNSPECIFIED
 			if forSize != "" {
 				var ok bool

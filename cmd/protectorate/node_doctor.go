@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/hotschmoe/protectorate/internal/desk"
 	"github.com/hotschmoe/protectorate/internal/node"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
@@ -204,16 +202,16 @@ func enrollCheck(home string) check {
 	return check{"enrollment", levelWarn, "not enrolled in a tailnet: run `protectorate node install` (or node join); a token-mode agent is not checked here"}
 }
 
-func nodeDoctorCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func nodeDoctorCmd(o *opts) *command {
+	return &command{
 		Use:   "doctor",
 		Short: "Check this machine as a node: session, screen lock, startup, hub",
 		Long: `Reports whether the agent can run desk commands here: whether this process is
 in an interactive desktop session, whether the screen is locked, whether startup is
 registered, and whether the hub answers. Exits nonzero when a check fails.
 It changes nothing.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			in, err := currentInstallInput()
 			if err != nil {
 				return err

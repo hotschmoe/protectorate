@@ -14,7 +14,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/coder/websocket"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
@@ -30,18 +29,18 @@ func sessionClient(o *opts) (protectoratev1connect.SessionServiceClient, error) 
 	return protectoratev1connect.NewSessionServiceClient(hc, o.hubURL), nil
 }
 
-func sessionCmd(o *opts) *cobra.Command {
-	c := &cobra.Command{Use: "session", Aliases: []string{"sessions"}, Short: "Manage tmux-backed harness sessions"}
+func sessionCmd(o *opts) *command {
+	c := &command{Use: "session", Aliases: []string{"sessions"}, Short: "Manage tmux-backed harness sessions"}
 	c.AddCommand(sessionLsCmd(o), sessionNewCmd(o), sessionKillCmd(o), sessionRespawnCmd(o), sessionAttachCmd(o), sessionCaptureCmd(o))
 	return c
 }
 
-func sessionLsCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sessionLsCmd(o *opts) *command {
+	return &command{
 		Use:   "ls",
 		Short: "List sessions",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  noArgs,
+		RunE: func(cmd *command, _ []string) error {
 			c, err := sessionClient(o)
 			if err != nil {
 				return err
@@ -72,14 +71,14 @@ func sessionStateLabel(s *pb.Session) string {
 	return fmt.Sprintf("exited(%d)", s.ExitCode)
 }
 
-func sessionNewCmd(o *opts) *cobra.Command {
+func sessionNewCmd(o *opts) *command {
 	var cwd string
 	var env []string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "new <name> [--cwd dir] [--env K=V] [-- cmd args...]",
 		Short: "Start a session running cmd (default: the login shell)",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  minimumArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			name, argv := args[0], args[1:]
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 && dash != 1 {
 				return errors.New("usage: session new <name> [flags] -- <cmd...>")
@@ -114,12 +113,12 @@ func sessionNewCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func sessionKillCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sessionKillCmd(o *opts) *command {
+	return &command{
 		Use:   "kill <name>",
 		Short: "Kill a session and its processes",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			c, err := sessionClient(o)
 			if err != nil {
 				return err
@@ -133,12 +132,12 @@ func sessionKillCmd(o *opts) *cobra.Command {
 	}
 }
 
-func sessionRespawnCmd(o *opts) *cobra.Command {
-	return &cobra.Command{
+func sessionRespawnCmd(o *opts) *command {
+	return &command{
 		Use:   "respawn <name>",
 		Short: "Restart an exited session with its original command",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			c, err := sessionClient(o)
 			if err != nil {
 				return err
@@ -152,13 +151,13 @@ func sessionRespawnCmd(o *opts) *cobra.Command {
 	}
 }
 
-func sessionCaptureCmd(o *opts) *cobra.Command {
+func sessionCaptureCmd(o *opts) *command {
 	var lines int
-	c := &cobra.Command{
+	c := &command{
 		Use:   "capture <name>",
 		Short: "Print the pane contents plus scrollback without attaching",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args:  exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			c, err := sessionClient(o)
 			if err != nil {
 				return err
@@ -174,17 +173,17 @@ func sessionCaptureCmd(o *opts) *cobra.Command {
 	return c
 }
 
-func sessionAttachCmd(o *opts) *cobra.Command {
+func sessionAttachCmd(o *opts) *command {
 	var readOnly bool
 	var escape string
-	c := &cobra.Command{
+	c := &command{
 		Use:   "attach <name>",
 		Short: "Attach this terminal to a session through the hub",
 		Long: `Attach this terminal to a session through the hub's WebSocket terminal.
 Works against a remote hub. Detach with the escape key (default Ctrl-]),
 which leaves the session running. Use --escape none to disable it.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Args: exactArgs(1),
+		RunE: func(cmd *command, args []string) error {
 			esc, err := parseEscape(escape)
 			if err != nil {
 				return err
