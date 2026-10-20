@@ -105,6 +105,16 @@ const TokenInfo$json = {
     },
     {'1': 'task', '3': 8, '4': 1, '5': 9, '10': 'task'},
     {'1': 'minted_by', '3': 9, '4': 1, '5': 9, '10': 'mintedBy'},
+    {'1': 'platform', '3': 10, '4': 1, '5': 9, '10': 'platform'},
+    {
+      '1': 'approved_at',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'approvedAt'
+    },
+    {'1': 'approved_by', '3': 12, '4': 1, '5': 9, '10': 'approvedBy'},
   ],
 };
 
@@ -116,7 +126,9 @@ final $typed_data.Uint8List tokenInfoDescriptor = $convert.base64Decode(
     'VmLlRpbWVzdGFtcFIJZXhwaXJlc0F0EjwKDGxhc3RfdXNlZF9hdBgGIAEoCzIaLmdvb2dsZS5w'
     'cm90b2J1Zi5UaW1lc3RhbXBSCmxhc3RVc2VkQXQSOQoKcmV2b2tlZF9hdBgHIAEoCzIaLmdvb2'
     'dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSCXJldm9rZWRBdBISCgR0YXNrGAggASgJUgR0YXNrEhsK'
-    'CW1pbnRlZF9ieRgJIAEoCVIIbWludGVkQnk=');
+    'CW1pbnRlZF9ieRgJIAEoCVIIbWludGVkQnkSGgoIcGxhdGZvcm0YCiABKAlSCHBsYXRmb3JtEj'
+    'sKC2FwcHJvdmVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIKYXBwcm92'
+    'ZWRBdBIfCgthcHByb3ZlZF9ieRgMIAEoCVIKYXBwcm92ZWRCeQ==');
 
 @$core.Deprecated('Use createTokenRequestDescriptor instead')
 const CreateTokenRequest$json = {

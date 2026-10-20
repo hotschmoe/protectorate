@@ -81,6 +81,9 @@ message TokenInfo {
   string task = 8;
   // minted_by names who minted an admin grant: "owner" or a token name.
   string minted_by = 9;
+  string platform = 10;
+  google.protobuf.Timestamp approved_at = 11;
+  string approved_by = 12;
 }
 
 message CreateTokenRequest {

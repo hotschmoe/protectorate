@@ -162,7 +162,10 @@ type TokenInfo struct {
 	// task is set on an admin grant: what it was minted for.
 	Task string `protobuf:"bytes,8,opt,name=task,proto3" json:"task,omitempty"`
 	// minted_by names who minted an admin grant: "owner" or a token name.
-	MintedBy      string `protobuf:"bytes,9,opt,name=minted_by,json=mintedBy,proto3" json:"minted_by,omitempty"`
+	MintedBy      string                 `protobuf:"bytes,9,opt,name=minted_by,json=mintedBy,proto3" json:"minted_by,omitempty"`
+	Platform      string                 `protobuf:"bytes,10,opt,name=platform,proto3" json:"platform,omitempty"`
+	ApprovedAt    *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=approved_at,json=approvedAt,proto3" json:"approved_at,omitempty"`
+	ApprovedBy    string                 `protobuf:"bytes,12,opt,name=approved_by,json=approvedBy,proto3" json:"approved_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -256,6 +259,27 @@ func (x *TokenInfo) GetTask() string {
 func (x *TokenInfo) GetMintedBy() string {
 	if x != nil {
 		return x.MintedBy
+	}
+	return ""
+}
+
+func (x *TokenInfo) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *TokenInfo) GetApprovedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ApprovedAt
+	}
+	return nil
+}
+
+func (x *TokenInfo) GetApprovedBy() string {
+	if x != nil {
+		return x.ApprovedBy
 	}
 	return ""
 }
@@ -661,7 +685,7 @@ const file_protectorate_v1_token_proto_rawDesc = "" +
 	"\x04task\x18\x03 \x01(\tR\x04task\"e\n" +
 	"\x19GrantServiceAdminResponse\x120\n" +
 	"\x05token\x18\x01 \x01(\v2\x1a.protectorate.v1.TokenInfoR\x05token\x12\x16\n" +
-	"\x06secret\x18\x02 \x01(\tR\x06secret\"\xe7\x02\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\"\xe1\x03\n" +
 	"\tTokenInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -675,7 +699,13 @@ const file_protectorate_v1_token_proto_rawDesc = "" +
 	"\n" +
 	"revoked_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\x12\x12\n" +
 	"\x04task\x18\b \x01(\tR\x04task\x12\x1b\n" +
-	"\tminted_by\x18\t \x01(\tR\bmintedBy\"m\n" +
+	"\tminted_by\x18\t \x01(\tR\bmintedBy\x12\x1a\n" +
+	"\bplatform\x18\n" +
+	" \x01(\tR\bplatform\x12;\n" +
+	"\vapproved_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"approvedAt\x12\x1f\n" +
+	"\vapproved_by\x18\f \x01(\tR\n" +
+	"approvedBy\"m\n" +
 	"\x12CreateTokenRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x12+\n" +
@@ -740,26 +770,27 @@ var file_protectorate_v1_token_proto_depIdxs = []int32{
 	12, // 3: protectorate.v1.TokenInfo.expires_at:type_name -> google.protobuf.Timestamp
 	12, // 4: protectorate.v1.TokenInfo.last_used_at:type_name -> google.protobuf.Timestamp
 	12, // 5: protectorate.v1.TokenInfo.revoked_at:type_name -> google.protobuf.Timestamp
-	11, // 6: protectorate.v1.CreateTokenRequest.ttl:type_name -> google.protobuf.Duration
-	2,  // 7: protectorate.v1.CreateTokenResponse.token:type_name -> protectorate.v1.TokenInfo
-	2,  // 8: protectorate.v1.ListTokensResponse.tokens:type_name -> protectorate.v1.TokenInfo
-	2,  // 9: protectorate.v1.RevokeTokenResponse.token:type_name -> protectorate.v1.TokenInfo
-	2,  // 10: protectorate.v1.UpdateTokenScopesResponse.token:type_name -> protectorate.v1.TokenInfo
-	3,  // 11: protectorate.v1.TokenService.CreateToken:input_type -> protectorate.v1.CreateTokenRequest
-	9,  // 12: protectorate.v1.TokenService.UpdateTokenScopes:input_type -> protectorate.v1.UpdateTokenScopesRequest
-	5,  // 13: protectorate.v1.TokenService.ListTokens:input_type -> protectorate.v1.ListTokensRequest
-	7,  // 14: protectorate.v1.TokenService.RevokeToken:input_type -> protectorate.v1.RevokeTokenRequest
-	0,  // 15: protectorate.v1.GrantService.Admin:input_type -> protectorate.v1.GrantServiceAdminRequest
-	4,  // 16: protectorate.v1.TokenService.CreateToken:output_type -> protectorate.v1.CreateTokenResponse
-	10, // 17: protectorate.v1.TokenService.UpdateTokenScopes:output_type -> protectorate.v1.UpdateTokenScopesResponse
-	6,  // 18: protectorate.v1.TokenService.ListTokens:output_type -> protectorate.v1.ListTokensResponse
-	8,  // 19: protectorate.v1.TokenService.RevokeToken:output_type -> protectorate.v1.RevokeTokenResponse
-	1,  // 20: protectorate.v1.GrantService.Admin:output_type -> protectorate.v1.GrantServiceAdminResponse
-	16, // [16:21] is the sub-list for method output_type
-	11, // [11:16] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	12, // 6: protectorate.v1.TokenInfo.approved_at:type_name -> google.protobuf.Timestamp
+	11, // 7: protectorate.v1.CreateTokenRequest.ttl:type_name -> google.protobuf.Duration
+	2,  // 8: protectorate.v1.CreateTokenResponse.token:type_name -> protectorate.v1.TokenInfo
+	2,  // 9: protectorate.v1.ListTokensResponse.tokens:type_name -> protectorate.v1.TokenInfo
+	2,  // 10: protectorate.v1.RevokeTokenResponse.token:type_name -> protectorate.v1.TokenInfo
+	2,  // 11: protectorate.v1.UpdateTokenScopesResponse.token:type_name -> protectorate.v1.TokenInfo
+	3,  // 12: protectorate.v1.TokenService.CreateToken:input_type -> protectorate.v1.CreateTokenRequest
+	9,  // 13: protectorate.v1.TokenService.UpdateTokenScopes:input_type -> protectorate.v1.UpdateTokenScopesRequest
+	5,  // 14: protectorate.v1.TokenService.ListTokens:input_type -> protectorate.v1.ListTokensRequest
+	7,  // 15: protectorate.v1.TokenService.RevokeToken:input_type -> protectorate.v1.RevokeTokenRequest
+	0,  // 16: protectorate.v1.GrantService.Admin:input_type -> protectorate.v1.GrantServiceAdminRequest
+	4,  // 17: protectorate.v1.TokenService.CreateToken:output_type -> protectorate.v1.CreateTokenResponse
+	10, // 18: protectorate.v1.TokenService.UpdateTokenScopes:output_type -> protectorate.v1.UpdateTokenScopesResponse
+	6,  // 19: protectorate.v1.TokenService.ListTokens:output_type -> protectorate.v1.ListTokensResponse
+	8,  // 20: protectorate.v1.TokenService.RevokeToken:output_type -> protectorate.v1.RevokeTokenResponse
+	1,  // 21: protectorate.v1.GrantService.Admin:output_type -> protectorate.v1.GrantServiceAdminResponse
+	17, // [17:22] is the sub-list for method output_type
+	12, // [12:17] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_token_proto_init() }
