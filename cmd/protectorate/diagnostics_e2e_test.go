@@ -150,28 +150,33 @@ func TestDiagnosticsEndToEnd(t *testing.T) {
 	check(hubURL, "/debug/nodes/missing/metrics", owner, http.StatusNotFound)
 	check(hubURL, "/debug/nodes/diagnostics-node/metrics", owner, http.StatusUnauthorized)
 	agent := protectoratev1connect.NewNodeAgentServiceClient(client, nodeURL)
+	want := make([]byte, (1<<20)+137)
+	for i := range want {
+		want[i] = byte((i >> 13) ^ i)
+	}
+	input := filepath.Join(t.TempDir(), "output.bin")
+	if err := os.WriteFile(input, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	run := connect.NewRequest(&pb.RunJobRequest{JobId: "diagnostics-output", Mode: pb.JobMode_JOB_MODE_PLAIN,
-		Command: []string{"sh", "-c", "head -c 1048576 /dev/zero"}})
+		Command: []string{"cat", input}})
 	run.Header().Set("Authorization", "Bearer diagnostics-node")
 	stream, err := agent.RunJob(ctx, run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	var size int
+	var output bytes.Buffer
 	var finished *pb.JobFinished
 	for stream.Receive() {
 		if out := stream.Msg().GetOutput(); out != nil {
-			if bytes.Count(out.Data, []byte{0}) != len(out.Data) {
-				t.Fatal("job output corrupted")
-			}
-			size += len(out.Data)
+			output.Write(out.Data)
 		}
 		if fin := stream.Msg().GetFinished(); fin != nil {
 			finished = fin
 		}
 	}
-	if err := stream.Err(); err != nil || size != 1<<20 || finished == nil || finished.End != pb.JobEnd_JOB_END_EXITED || finished.ExitCode != 0 {
-		t.Fatalf("stream: bytes=%d finished=%v err=%v", size, finished, err)
+	if err := stream.Err(); err != nil || !bytes.Equal(output.Bytes(), want) || finished == nil || finished.End != pb.JobEnd_JOB_END_EXITED || finished.ExitCode != 0 {
+		t.Fatalf("stream: bytes=%d finished=%v err=%v", output.Len(), finished, err)
 	}
 }

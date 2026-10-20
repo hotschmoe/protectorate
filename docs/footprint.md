@@ -14,11 +14,26 @@ DERP clients, our DERP server, STUN, netns, disco ping, userspace networking,
 DNS, NAT port mapping, Windows or standalone Android/Termux support. System
 proxy support and fallback certificate roots remain available.
 
+The source and registry contain 85 omit tags. The selected set omits 69;
+14 transport/bootstrap features remain enabled, and ACME/Serve remain
+because their omissions cannot compile in this version. The retained core
+features are:
+
+- `netstack`, `dns`, `ipnbus`, `health`: tsnet startup, status and networking.
+- `udptransport`, `nattraversal`, `portmapper`, `listenrawdisco`, `gro`:
+  direct connectivity, NAT traversal and packet processing.
+- `androidbin`, `androiddns`: standalone Android/Termux networking.
+- `bakedroots`, `useproxy`, `dnsresolvecache`: TLS roots, system proxies and
+  bootstrap DNS fallback.
+
 ACME also remains linked: with the pinned Tailscale v1.104.1,
 `ts_omit_acme` fails to compile because tsnet calls the omitted
 `LocalClient.GetCertificate`. Do not add the tag without rechecking that
 upstream constraint.
 Its ACME refresh path also requires Serve, so `ts_omit_serve` is excluded.
+The standalone `ts_omit_clientmetrics` probe also fails, in syspolicy's
+metrics code. It is used in the tested combined set, which omits syspolicy
+as well; it is not a supported standalone flag in this dependency version.
 
 When upgrading Tailscale, inspect its `feature/featuretags` registry and source
 build constraints again, cross-build all five targets and run:
@@ -39,7 +54,8 @@ the running hub's state.
 The diagnostics end-to-end test launches real hub and node processes with
 temporary state, rejects broad scoped tokens from every debug endpoint,
 collects owner profiles, refuses fallback-node diagnostics and verifies a
-1 MiB job output stream byte for byte.
+job output stream larger than 1 MiB byte for byte, including its partial
+final chunk.
 
 ## Diagnostics
 
@@ -51,12 +67,12 @@ Tailnet identity alone does not grant access; the normal tailnet admission
 check also applies there. Responses use `Cache-Control: no-store`.
 
 ```sh
-curl -fsS -H "Authorization: Bearer $(cat "$PROTECTORATE_HOME/token")" \
+curl -fsS -H "Authorization: Bearer $(cat "${PROTECTORATE_HOME:-$HOME/.protectorate}/token")" \
   http://127.0.0.1:7470/debug/metrics
-curl -fsS -H "Authorization: Bearer $(cat "$PROTECTORATE_HOME/token")" \
+curl -fsS -H "Authorization: Bearer $(cat "${PROTECTORATE_HOME:-$HOME/.protectorate}/token")" \
   'http://127.0.0.1:7470/debug/pprof/heap?gc=1' -o heap.pprof
 go tool pprof -top heap.pprof
-curl -fsS -H "Authorization: Bearer $(cat "$PROTECTORATE_HOME/token")" \
+curl -fsS -H "Authorization: Bearer $(cat "${PROTECTORATE_HOME:-$HOME/.protectorate}/token")" \
   'http://127.0.0.1:7470/debug/pprof/profile?seconds=10' -o cpu.pprof
 ```
 
@@ -68,9 +84,9 @@ enable diagnostics, even for a valid node token. Fetch node profiles with
 the hub's owner-only proxy, which uses its tailnet HTTP client:
 
 ```sh
-curl -fsS -H "Authorization: Bearer $(cat "$PROTECTORATE_HOME/token")" \
+curl -fsS -H "Authorization: Bearer $(cat "${PROTECTORATE_HOME:-$HOME/.protectorate}/token")" \
   http://127.0.0.1:7470/debug/nodes/NODE_NAME/metrics
-curl -fsS -H "Authorization: Bearer $(cat "$PROTECTORATE_HOME/token")" \
+curl -fsS -H "Authorization: Bearer $(cat "${PROTECTORATE_HOME:-$HOME/.protectorate}/token")" \
   'http://127.0.0.1:7470/debug/nodes/NODE_NAME/pprof/heap?gc=1' -o node.pprof
 ```
 
@@ -109,15 +125,33 @@ Measurements use Go 1.27.2, `CGO_ENABLED=0`, `-trimpath -ldflags '-s -w'`,
 and the same default version string on the base commit 028ea15 and this
 change. Feature probes change one tag at a time against the base commit on
 linux/arm64; combined savings are not the sum of individual savings because
-features share code. The diagnostic handlers add some code back.
+features share code.
+
+The [per-tag CSV](footprint-tags.csv) records every one of the 71 unused
+feature candidates against an extracted `git archive 028ea15`, plus the
+combined tags on that same base. Empty byte fields mean the standalone
+probe could not compile, not zero savings. The final binaries below also
+include Protectorate's new profiling code and normal Go VCS metadata.
+With the other 68 omissions held fixed, keeping clientmetrics grows the
+linux/arm64 base binary from 45,482,144 to 45,613,216 bytes. Its conditional
+saving is therefore 131,072 bytes despite the unsupported standalone probe.
+
+To repeat an individual probe from that base source tree:
+
+```sh
+GOMAXPROCS=2 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -p 2 \
+  -trimpath -ldflags '-s -w' -tags ts_omit_tailnetlock \
+  -o /tmp/protectorate-tag-size ./cmd/protectorate
+wc -c /tmp/protectorate-tag-size
+```
 
 | Target | Before bytes | After bytes | Reduction |
 | --- | ---: | ---: | ---: |
-| linux/amd64 | 51,794,080 | 48,455,840 | 6.4% |
+| linux/amd64 | 51,794,080 | 48,390,304 | 6.6% |
 | linux/arm64 | 48,627,872 | 45,482,144 | 6.5% |
-| windows/amd64 | 52,401,664 | 49,271,296 | 6.0% |
-| windows/arm64 | 48,516,608 | 45,675,008 | 5.9% |
-| android/arm64 | 52,560,166 | 50,266,406 | 4.4% |
+| windows/amd64 | 52,401,664 | 49,206,784 | 6.1% |
+| windows/arm64 | 48,516,608 | 45,620,224 | 6.0% |
+| android/arm64 | 52,560,166 | 50,135,334 | 4.6% |
 
 RSS samples below are from separate real linux/arm64 processes with temporary
 state and `GOMAXPROCS=2`, before forcing a profiling GC. The hub uses no
@@ -126,9 +160,9 @@ instance and the hub's tsnet HTTP client. No running hub state is used.
 
 | Process | Before RSS | After RSS |
 | --- | ---: | ---: |
-| Hub, no tailnet, 15 seconds idle | 47,760 KiB | 42,776 KiB |
-| Node, token listener, 15 seconds idle | 37,156 KiB | 35,648 KiB |
-| Node, enrolled tailnet, 20 seconds idle | 45,576 KiB | 44,408 KiB |
+| Hub, no tailnet, 15 seconds idle | 47,760 KiB | 43,480 KiB |
+| Node, token listener, 15 seconds idle | 37,156 KiB | 35,984 KiB |
+| Node, enrolled tailnet, 20 seconds idle | 45,580 KiB | 40,132 KiB |
 
 These are single-run observations, not a claim about the owner's production
 hub. Idle RSS varies with GC and page residency. The enrolled node's metrics
