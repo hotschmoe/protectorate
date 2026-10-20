@@ -2,6 +2,7 @@ package sleeve
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 type Directory struct {
@@ -239,22 +241,25 @@ func cmpName(name, required string) string {
 // gitDetails reads the origin URL and the checked-out branch of a plain
 // checkout. A worktree or submodule (.git as a file) reports neither.
 func gitDetails(dir string) (remote, branch string) {
-	gd := filepath.Join(dir, ".git")
-	if fi, err := os.Stat(gd); err != nil || !fi.IsDir() {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
 		return "", ""
 	}
-	if b, err := os.ReadFile(filepath.Join(gd, "HEAD")); err == nil {
+	defer root.Close()
+	if fi, err := root.Stat(".git"); err != nil || !fi.IsDir() {
+		return "", ""
+	}
+	if b, err := readGitMetadata(root, ".git/HEAD"); err == nil {
 		if ref, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "ref: refs/heads/"); ok {
 			branch = ref
 		}
 	}
-	f, err := os.Open(filepath.Join(gd, "config"))
+	config, err := readGitMetadata(root, ".git/config")
 	if err != nil {
 		return "", branch
 	}
-	defer f.Close()
 	in := false
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(config))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if strings.HasPrefix(line, "[") {
@@ -266,6 +271,30 @@ func gitDetails(dir string) (remote, branch string) {
 		}
 	}
 	return "", branch
+}
+
+func readGitMetadata(root *os.Root, name string) ([]byte, error) {
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open git metadata %s: %w", name, err)
+	}
+	defer f.Close()
+	const maxBytes = 1 << 20
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat git metadata %s: %w", name, err)
+	}
+	if !fi.Mode().IsRegular() || fi.Size() > maxBytes {
+		return nil, fmt.Errorf("git metadata %s is not a bounded regular file", name)
+	}
+	b, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read git metadata %s: %w", name, err)
+	}
+	if len(b) > maxBytes {
+		return nil, fmt.Errorf("git metadata %s exceeds %d bytes", name, maxBytes)
+	}
+	return b, nil
 }
 
 // stripCredentials drops the user info of an http(s) remote so a token

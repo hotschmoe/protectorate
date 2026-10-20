@@ -92,6 +92,7 @@ TestBinaryClusterRestartAndRestore
 TestBinaryWorkspaceBrowser
 TestBinaryBackupManifestCoverage
 TestBinaryQuotaReapsClosedStdoutPeer
+TestBinaryWorkspaceMetadataIsBounded
 """.split())
 DELETE = set()
 
