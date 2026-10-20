@@ -118,6 +118,8 @@ func TestSleeveIdleReapHTTP(t *testing.T) {
 	if _, err := r.sl.GetSleeve(r.ctx, connect.NewRequest(&pb.GetSleeveRequest{Name: r.name})); err != nil {
 		t.Fatalf("pending mail did not prevent reap: %v", err)
 	}
+	// The rig's fixed clock would keep the pending mail inside the delivery debounce forever.
+	r.h.coord.now = time.Now
 	r.h.coord.every = 25 * time.Millisecond
 	ctx, cancel := context.WithCancel(r.ctx)
 	done := make(chan struct{})
