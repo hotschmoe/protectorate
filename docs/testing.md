@@ -122,6 +122,17 @@ read-only denial and a sleeve identity with the production backlog scopes
 closing a note with the same actor recorded in audit, then lists open notes
 and closes an existing note through MCP. It needs no host user manager.
 
+`TestBinarySleeveReports` uses persisted chat sleeve records and identity tokens
+minted by the temporary hub, so no AI CLI or user manager is needed. It checks
+own-sleeve reporting, cross-sleeve and owner/scoped forgery denial, status/size
+validation, timeout and exit/kill failures, immediate idle waits, concurrent CLI
+waits printing each summary as it lands, owner report and kill events, replacement
+history, retained exited chat/terminal result replay without restoring chat state,
+read-scoped waits, cross-sleeve wait denial, MCP wait-for-report and
+restart persistence. The host-only binary chat subscenario also checks that
+pending mail drains before idle, mail leaves a result intact, a retried brief
+preserves it and a new brief clears it.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -147,7 +158,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=61, KEEP-FUZZ=5; total=66. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=62, KEEP-FUZZ=5; total=67. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -221,6 +232,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | tests/e2e/backlog_test.go | TestBinaryNoteLifecycle | Real hub/CLI/MCP note completion, filters, reopen, persistence and sleeve authorization | unmeasured | KEEP-E2E | note lifecycle regression scenario |
 | tests/e2e/dispatch_test.go | TestBinaryBranchDispatch | Real CLI branch dispatch, atomic brief replay, credential-stripped remotes, jailed fetch and source write denial, packed refs, coalesced notices, restart dedupe and own-advance suppression | host runtime required | KEEP-E2E | deterministic Claude protocol peer; requires systemd user manager and bwrap |
 | tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
+| tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
 
 ## Deleted files
 

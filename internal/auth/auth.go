@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -181,6 +182,10 @@ func (a *Authorizer) AuthorizeProcedure(p *Principal, procedure string) error {
 	}
 	if m.OwnerOnly {
 		return &DeniedError{Name: p.Name, Need: "owner token (" + m.Tool + " is owner-only)"}
+	}
+	// Reporting is an identity right; the handler still checks the target.
+	if m.Tool == "chat_report" && strings.HasPrefix(p.Name, "sleeve:") {
+		return nil
 	}
 	if !scopesAllow(p.Scopes, m) {
 		return &DeniedError{Name: p.Name, Need: needed(m)}

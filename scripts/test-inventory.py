@@ -93,6 +93,7 @@ TestBinaryWorkspaceBrowser
 TestBinaryNoteLifecycle
 TestBinaryBranchDispatch
 TestBinaryBaseNotices
+TestBinarySleeveReports
 """.split())
 DELETE = set()
 

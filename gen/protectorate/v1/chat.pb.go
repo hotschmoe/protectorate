@@ -9,6 +9,7 @@ package protectoratev1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -135,6 +136,107 @@ func (x ChatState) Number() protoreflect.EnumNumber {
 // Deprecated: Use ChatState.Descriptor instead.
 func (ChatState) EnumDescriptor() ([]byte, []int) {
 	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{1}
+}
+
+type ReportStatus int32
+
+const (
+	ReportStatus_REPORT_STATUS_UNSPECIFIED ReportStatus = 0
+	ReportStatus_REPORT_STATUS_COMPLETE    ReportStatus = 1
+	ReportStatus_REPORT_STATUS_PARTIAL     ReportStatus = 2
+	ReportStatus_REPORT_STATUS_BLOCKED     ReportStatus = 3
+)
+
+// Enum value maps for ReportStatus.
+var (
+	ReportStatus_name = map[int32]string{
+		0: "REPORT_STATUS_UNSPECIFIED",
+		1: "REPORT_STATUS_COMPLETE",
+		2: "REPORT_STATUS_PARTIAL",
+		3: "REPORT_STATUS_BLOCKED",
+	}
+	ReportStatus_value = map[string]int32{
+		"REPORT_STATUS_UNSPECIFIED": 0,
+		"REPORT_STATUS_COMPLETE":    1,
+		"REPORT_STATUS_PARTIAL":     2,
+		"REPORT_STATUS_BLOCKED":     3,
+	}
+)
+
+func (x ReportStatus) Enum() *ReportStatus {
+	p := new(ReportStatus)
+	*p = x
+	return p
+}
+
+func (x ReportStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReportStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_chat_proto_enumTypes[2].Descriptor()
+}
+
+func (ReportStatus) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_chat_proto_enumTypes[2]
+}
+
+func (x ReportStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReportStatus.Descriptor instead.
+func (ReportStatus) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{2}
+}
+
+type WaitUntil int32
+
+const (
+	WaitUntil_WAIT_UNTIL_UNSPECIFIED WaitUntil = 0
+	WaitUntil_WAIT_UNTIL_IDLE        WaitUntil = 1
+	WaitUntil_WAIT_UNTIL_REPORT      WaitUntil = 2
+)
+
+// Enum value maps for WaitUntil.
+var (
+	WaitUntil_name = map[int32]string{
+		0: "WAIT_UNTIL_UNSPECIFIED",
+		1: "WAIT_UNTIL_IDLE",
+		2: "WAIT_UNTIL_REPORT",
+	}
+	WaitUntil_value = map[string]int32{
+		"WAIT_UNTIL_UNSPECIFIED": 0,
+		"WAIT_UNTIL_IDLE":        1,
+		"WAIT_UNTIL_REPORT":      2,
+	}
+)
+
+func (x WaitUntil) Enum() *WaitUntil {
+	p := new(WaitUntil)
+	*p = x
+	return p
+}
+
+func (x WaitUntil) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (WaitUntil) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_chat_proto_enumTypes[3].Descriptor()
+}
+
+func (WaitUntil) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_chat_proto_enumTypes[3]
+}
+
+func (x WaitUntil) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use WaitUntil.Descriptor instead.
+func (WaitUntil) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{3}
 }
 
 type ModelSelection struct {
@@ -709,6 +811,7 @@ type ChatEvent struct {
 	//	*ChatEvent_State
 	//	*ChatEvent_Handoff
 	//	*ChatEvent_Settings
+	//	*ChatEvent_Report
 	Body          isChatEvent_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -882,6 +985,15 @@ func (x *ChatEvent) GetSettings() *ModelSettings {
 	return nil
 }
 
+func (x *ChatEvent) GetReport() *SleeveResult {
+	if x != nil {
+		if x, ok := x.Body.(*ChatEvent_Report); ok {
+			return x.Report
+		}
+	}
+	return nil
+}
+
 type isChatEvent_Body interface {
 	isChatEvent_Body()
 }
@@ -940,6 +1052,10 @@ type ChatEvent_Settings struct {
 	Settings *ModelSettings `protobuf:"bytes,22,opt,name=settings,proto3,oneof"`
 }
 
+type ChatEvent_Report struct {
+	Report *SleeveResult `protobuf:"bytes,23,opt,name=report,proto3,oneof"`
+}
+
 func (*ChatEvent_User) isChatEvent_Body() {}
 
 func (*ChatEvent_Text) isChatEvent_Body() {}
@@ -965,6 +1081,8 @@ func (*ChatEvent_State) isChatEvent_Body() {}
 func (*ChatEvent_Handoff) isChatEvent_Body() {}
 
 func (*ChatEvent_Settings) isChatEvent_Body() {}
+
+func (*ChatEvent_Report) isChatEvent_Body() {}
 
 type UserMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2184,11 +2302,307 @@ func (x *CompactResponse) GetCompaction() *Compaction {
 	return nil
 }
 
+type SleeveResult struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Status ReportStatus           `protobuf:"varint,1,opt,name=status,proto3,enum=protectorate.v1.ReportStatus" json:"status,omitempty"`
+	// At most 32 KiB, the same limit as mail bodies.
+	Summary string                 `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	Time    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=time,proto3" json:"time,omitempty"`
+	ChatSeq uint64                 `protobuf:"varint,4,opt,name=chat_seq,json=chatSeq,proto3" json:"chat_seq,omitempty"`
+	// The latest non-mail user message; zero for the initial spawn brief.
+	BriefSeq      uint64 `protobuf:"varint,5,opt,name=brief_seq,json=briefSeq,proto3" json:"brief_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SleeveResult) Reset() {
+	*x = SleeveResult{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SleeveResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SleeveResult) ProtoMessage() {}
+
+func (x *SleeveResult) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SleeveResult.ProtoReflect.Descriptor instead.
+func (*SleeveResult) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *SleeveResult) GetStatus() ReportStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ReportStatus_REPORT_STATUS_UNSPECIFIED
+}
+
+func (x *SleeveResult) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *SleeveResult) GetTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Time
+	}
+	return nil
+}
+
+func (x *SleeveResult) GetChatSeq() uint64 {
+	if x != nil {
+		return x.ChatSeq
+	}
+	return 0
+}
+
+func (x *SleeveResult) GetBriefSeq() uint64 {
+	if x != nil {
+		return x.BriefSeq
+	}
+	return 0
+}
+
+type ReportRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty selects the authenticated sleeve. An explicit name must be its own.
+	Sleeve        string       `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	Status        ReportStatus `protobuf:"varint,2,opt,name=status,proto3,enum=protectorate.v1.ReportStatus" json:"status,omitempty"`
+	Summary       string       `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportRequest) Reset() {
+	*x = ReportRequest{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportRequest) ProtoMessage() {}
+
+func (x *ReportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
+func (*ReportRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ReportRequest) GetSleeve() string {
+	if x != nil {
+		return x.Sleeve
+	}
+	return ""
+}
+
+func (x *ReportRequest) GetStatus() ReportStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ReportStatus_REPORT_STATUS_UNSPECIFIED
+}
+
+func (x *ReportRequest) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+type ReportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *SleeveResult          `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportResponse) Reset() {
+	*x = ReportResponse{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportResponse) ProtoMessage() {}
+
+func (x *ReportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportResponse.ProtoReflect.Descriptor instead.
+func (*ReportResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ReportResponse) GetResult() *SleeveResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+type WaitRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Sleeve string                 `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	Until  WaitUntil              `protobuf:"varint,2,opt,name=until,proto3,enum=protectorate.v1.WaitUntil" json:"until,omitempty"`
+	// Unset defaults to ten minutes. Zero waits until cancellation.
+	Timeout       *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WaitRequest) Reset() {
+	*x = WaitRequest{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WaitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WaitRequest) ProtoMessage() {}
+
+func (x *WaitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WaitRequest.ProtoReflect.Descriptor instead.
+func (*WaitRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *WaitRequest) GetSleeve() string {
+	if x != nil {
+		return x.Sleeve
+	}
+	return ""
+}
+
+func (x *WaitRequest) GetUntil() WaitUntil {
+	if x != nil {
+		return x.Until
+	}
+	return WaitUntil_WAIT_UNTIL_UNSPECIFIED
+}
+
+func (x *WaitRequest) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+type WaitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sleeve        string                 `protobuf:"bytes,1,opt,name=sleeve,proto3" json:"sleeve,omitempty"`
+	Result        *SleeveResult          `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WaitResponse) Reset() {
+	*x = WaitResponse{}
+	mi := &file_protectorate_v1_chat_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WaitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WaitResponse) ProtoMessage() {}
+
+func (x *WaitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_chat_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WaitResponse.ProtoReflect.Descriptor instead.
+func (*WaitResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_chat_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *WaitResponse) GetSleeve() string {
+	if x != nil {
+		return x.Sleeve
+	}
+	return ""
+}
+
+func (x *WaitResponse) GetResult() *SleeveResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 var File_protectorate_v1_chat_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x1aprotectorate/v1/chat.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
+	"\x1aprotectorate/v1/chat.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\">\n" +
 	"\x0eModelSelection\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
 	"\x06effort\x18\x02 \x01(\tR\x06effort\"\xd7\x01\n" +
@@ -2232,7 +2646,7 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	" \x01(\bR\n" +
 	"localModel\x12)\n" +
 	"\x10reasoning_effort\x18\v \x01(\tR\x0freasoningEffort\x12:\n" +
-	"\bsettings\x18\f \x01(\v2\x1e.protectorate.v1.ModelSettingsR\bsettings\"\xd8\x06\n" +
+	"\bsettings\x18\f \x01(\v2\x1e.protectorate.v1.ModelSettingsR\bsettings\"\x91\a\n" +
 	"\tChatEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12.\n" +
 	"\x04time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x122\n" +
@@ -2252,7 +2666,8 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x05error\x18\x13 \x01(\v2\x1a.protectorate.v1.ChatErrorH\x00R\x05error\x124\n" +
 	"\x05state\x18\x14 \x01(\v2\x1c.protectorate.v1.StateChangeH\x00R\x05state\x124\n" +
 	"\ahandoff\x18\x15 \x01(\v2\x18.protectorate.v1.HandoffH\x00R\ahandoff\x12<\n" +
-	"\bsettings\x18\x16 \x01(\v2\x1e.protectorate.v1.ModelSettingsH\x00R\bsettingsB\x06\n" +
+	"\bsettings\x18\x16 \x01(\v2\x1e.protectorate.v1.ModelSettingsH\x00R\bsettings\x127\n" +
+	"\x06report\x18\x17 \x01(\v2\x1d.protectorate.v1.SleeveResultH\x00R\x06reportB\x06\n" +
 	"\x04body\"5\n" +
 	"\vUserMessage\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
@@ -2341,7 +2756,26 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x0fCompactResponse\x12;\n" +
 	"\n" +
 	"compaction\x18\x01 \x01(\v2\x1b.protectorate.v1.CompactionR\n" +
-	"compaction*Y\n" +
+	"compaction\"\xc7\x01\n" +
+	"\fSleeveResult\x125\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1d.protectorate.v1.ReportStatusR\x06status\x12\x18\n" +
+	"\asummary\x18\x02 \x01(\tR\asummary\x12.\n" +
+	"\x04time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x19\n" +
+	"\bchat_seq\x18\x04 \x01(\x04R\achatSeq\x12\x1b\n" +
+	"\tbrief_seq\x18\x05 \x01(\x04R\bbriefSeq\"x\n" +
+	"\rReportRequest\x12\x16\n" +
+	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x125\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x1d.protectorate.v1.ReportStatusR\x06status\x12\x18\n" +
+	"\asummary\x18\x03 \x01(\tR\asummary\"G\n" +
+	"\x0eReportResponse\x125\n" +
+	"\x06result\x18\x01 \x01(\v2\x1d.protectorate.v1.SleeveResultR\x06result\"\x8c\x01\n" +
+	"\vWaitRequest\x12\x16\n" +
+	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x120\n" +
+	"\x05until\x18\x02 \x01(\x0e2\x1a.protectorate.v1.WaitUntilR\x05until\x123\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"]\n" +
+	"\fWaitResponse\x12\x16\n" +
+	"\x06sleeve\x18\x01 \x01(\tR\x06sleeve\x125\n" +
+	"\x06result\x18\x02 \x01(\v2\x1d.protectorate.v1.SleeveResultR\x06result*Y\n" +
 	"\n" +
 	"SleeveMode\x12\x1b\n" +
 	"\x17SLEEVE_MODE_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -2354,7 +2788,16 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\x15CHAT_STATE_COMPACTING\x10\x03\x12\x13\n" +
 	"\x0fCHAT_STATE_IDLE\x10\x04\x12\x15\n" +
 	"\x11CHAT_STATE_FAILED\x10\x05\x12\x15\n" +
-	"\x11CHAT_STATE_EXITED\x10\x062\xc6\x04\n" +
+	"\x11CHAT_STATE_EXITED\x10\x06*\x7f\n" +
+	"\fReportStatus\x12\x1d\n" +
+	"\x19REPORT_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16REPORT_STATUS_COMPLETE\x10\x01\x12\x19\n" +
+	"\x15REPORT_STATUS_PARTIAL\x10\x02\x12\x19\n" +
+	"\x15REPORT_STATUS_BLOCKED\x10\x03*S\n" +
+	"\tWaitUntil\x12\x1a\n" +
+	"\x16WAIT_UNTIL_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fWAIT_UNTIL_IDLE\x10\x01\x12\x15\n" +
+	"\x11WAIT_UNTIL_REPORT\x10\x022\xdb\x05\n" +
 	"\vChatService\x12I\n" +
 	"\x05Watch\x12\x1d.protectorate.v1.WatchRequest\x1a\x1a.protectorate.v1.ChatEvent\"\x03\x90\x02\x010\x01\x12C\n" +
 	"\x04Send\x12\x1c.protectorate.v1.SendRequest\x1a\x1d.protectorate.v1.SendResponse\x12R\n" +
@@ -2363,7 +2806,9 @@ const file_protectorate_v1_chat_proto_rawDesc = "" +
 	"\aCompact\x12\x1f.protectorate.v1.CompactRequest\x1a .protectorate.v1.CompactResponse\x12Z\n" +
 	"\n" +
 	"ListModels\x12\".protectorate.v1.ListModelsRequest\x1a#.protectorate.v1.ListModelsResponse\"\x03\x90\x02\x01\x12[\n" +
-	"\fSetSelection\x12$.protectorate.v1.SetSelectionRequest\x1a%.protectorate.v1.SetSelectionResponseBFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\fSetSelection\x12$.protectorate.v1.SetSelectionRequest\x1a%.protectorate.v1.SetSelectionResponse\x12I\n" +
+	"\x06Report\x12\x1e.protectorate.v1.ReportRequest\x1a\x1f.protectorate.v1.ReportResponse\x12H\n" +
+	"\x04Wait\x12\x1c.protectorate.v1.WaitRequest\x1a\x1d.protectorate.v1.WaitResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_chat_proto_rawDescOnce sync.Once
@@ -2377,91 +2822,111 @@ func file_protectorate_v1_chat_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_chat_proto_rawDescData
 }
 
-var file_protectorate_v1_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_protectorate_v1_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_protectorate_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_protectorate_v1_chat_proto_goTypes = []any{
 	(SleeveMode)(0),               // 0: protectorate.v1.SleeveMode
 	(ChatState)(0),                // 1: protectorate.v1.ChatState
-	(*ModelSelection)(nil),        // 2: protectorate.v1.ModelSelection
-	(*ModelSettings)(nil),         // 3: protectorate.v1.ModelSettings
-	(*ModelOption)(nil),           // 4: protectorate.v1.ModelOption
-	(*ListModelsRequest)(nil),     // 5: protectorate.v1.ListModelsRequest
-	(*ListModelsResponse)(nil),    // 6: protectorate.v1.ListModelsResponse
-	(*SetSelectionRequest)(nil),   // 7: protectorate.v1.SetSelectionRequest
-	(*SetSelectionResponse)(nil),  // 8: protectorate.v1.SetSelectionResponse
-	(*ChatStatus)(nil),            // 9: protectorate.v1.ChatStatus
-	(*ChatEvent)(nil),             // 10: protectorate.v1.ChatEvent
-	(*UserMessage)(nil),           // 11: protectorate.v1.UserMessage
-	(*AssistantText)(nil),         // 12: protectorate.v1.AssistantText
-	(*ToolCall)(nil),              // 13: protectorate.v1.ToolCall
-	(*ToolResult)(nil),            // 14: protectorate.v1.ToolResult
-	(*ApprovalRequest)(nil),       // 15: protectorate.v1.ApprovalRequest
-	(*ApprovalResolved)(nil),      // 16: protectorate.v1.ApprovalResolved
-	(*UsageUpdate)(nil),           // 17: protectorate.v1.UsageUpdate
-	(*TurnSettled)(nil),           // 18: protectorate.v1.TurnSettled
-	(*Compaction)(nil),            // 19: protectorate.v1.Compaction
-	(*ChatError)(nil),             // 20: protectorate.v1.ChatError
-	(*StateChange)(nil),           // 21: protectorate.v1.StateChange
-	(*Handoff)(nil),               // 22: protectorate.v1.Handoff
-	(*WatchRequest)(nil),          // 23: protectorate.v1.WatchRequest
-	(*SendRequest)(nil),           // 24: protectorate.v1.SendRequest
-	(*SendResponse)(nil),          // 25: protectorate.v1.SendResponse
-	(*InterruptRequest)(nil),      // 26: protectorate.v1.InterruptRequest
-	(*InterruptResponse)(nil),     // 27: protectorate.v1.InterruptResponse
-	(*RespondRequest)(nil),        // 28: protectorate.v1.RespondRequest
-	(*RespondResponse)(nil),       // 29: protectorate.v1.RespondResponse
-	(*CompactRequest)(nil),        // 30: protectorate.v1.CompactRequest
-	(*CompactResponse)(nil),       // 31: protectorate.v1.CompactResponse
-	(*timestamppb.Timestamp)(nil), // 32: google.protobuf.Timestamp
+	(ReportStatus)(0),             // 2: protectorate.v1.ReportStatus
+	(WaitUntil)(0),                // 3: protectorate.v1.WaitUntil
+	(*ModelSelection)(nil),        // 4: protectorate.v1.ModelSelection
+	(*ModelSettings)(nil),         // 5: protectorate.v1.ModelSettings
+	(*ModelOption)(nil),           // 6: protectorate.v1.ModelOption
+	(*ListModelsRequest)(nil),     // 7: protectorate.v1.ListModelsRequest
+	(*ListModelsResponse)(nil),    // 8: protectorate.v1.ListModelsResponse
+	(*SetSelectionRequest)(nil),   // 9: protectorate.v1.SetSelectionRequest
+	(*SetSelectionResponse)(nil),  // 10: protectorate.v1.SetSelectionResponse
+	(*ChatStatus)(nil),            // 11: protectorate.v1.ChatStatus
+	(*ChatEvent)(nil),             // 12: protectorate.v1.ChatEvent
+	(*UserMessage)(nil),           // 13: protectorate.v1.UserMessage
+	(*AssistantText)(nil),         // 14: protectorate.v1.AssistantText
+	(*ToolCall)(nil),              // 15: protectorate.v1.ToolCall
+	(*ToolResult)(nil),            // 16: protectorate.v1.ToolResult
+	(*ApprovalRequest)(nil),       // 17: protectorate.v1.ApprovalRequest
+	(*ApprovalResolved)(nil),      // 18: protectorate.v1.ApprovalResolved
+	(*UsageUpdate)(nil),           // 19: protectorate.v1.UsageUpdate
+	(*TurnSettled)(nil),           // 20: protectorate.v1.TurnSettled
+	(*Compaction)(nil),            // 21: protectorate.v1.Compaction
+	(*ChatError)(nil),             // 22: protectorate.v1.ChatError
+	(*StateChange)(nil),           // 23: protectorate.v1.StateChange
+	(*Handoff)(nil),               // 24: protectorate.v1.Handoff
+	(*WatchRequest)(nil),          // 25: protectorate.v1.WatchRequest
+	(*SendRequest)(nil),           // 26: protectorate.v1.SendRequest
+	(*SendResponse)(nil),          // 27: protectorate.v1.SendResponse
+	(*InterruptRequest)(nil),      // 28: protectorate.v1.InterruptRequest
+	(*InterruptResponse)(nil),     // 29: protectorate.v1.InterruptResponse
+	(*RespondRequest)(nil),        // 30: protectorate.v1.RespondRequest
+	(*RespondResponse)(nil),       // 31: protectorate.v1.RespondResponse
+	(*CompactRequest)(nil),        // 32: protectorate.v1.CompactRequest
+	(*CompactResponse)(nil),       // 33: protectorate.v1.CompactResponse
+	(*SleeveResult)(nil),          // 34: protectorate.v1.SleeveResult
+	(*ReportRequest)(nil),         // 35: protectorate.v1.ReportRequest
+	(*ReportResponse)(nil),        // 36: protectorate.v1.ReportResponse
+	(*WaitRequest)(nil),           // 37: protectorate.v1.WaitRequest
+	(*WaitResponse)(nil),          // 38: protectorate.v1.WaitResponse
+	(*timestamppb.Timestamp)(nil), // 39: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),   // 40: google.protobuf.Duration
 }
 var file_protectorate_v1_chat_proto_depIdxs = []int32{
-	2,  // 0: protectorate.v1.ModelSettings.requested:type_name -> protectorate.v1.ModelSelection
-	2,  // 1: protectorate.v1.ModelSettings.effective:type_name -> protectorate.v1.ModelSelection
-	2,  // 2: protectorate.v1.ModelSettings.native_defaults:type_name -> protectorate.v1.ModelSelection
-	4,  // 3: protectorate.v1.ListModelsResponse.models:type_name -> protectorate.v1.ModelOption
-	2,  // 4: protectorate.v1.SetSelectionRequest.selection:type_name -> protectorate.v1.ModelSelection
-	9,  // 5: protectorate.v1.SetSelectionResponse.chat:type_name -> protectorate.v1.ChatStatus
+	4,  // 0: protectorate.v1.ModelSettings.requested:type_name -> protectorate.v1.ModelSelection
+	4,  // 1: protectorate.v1.ModelSettings.effective:type_name -> protectorate.v1.ModelSelection
+	4,  // 2: protectorate.v1.ModelSettings.native_defaults:type_name -> protectorate.v1.ModelSelection
+	6,  // 3: protectorate.v1.ListModelsResponse.models:type_name -> protectorate.v1.ModelOption
+	4,  // 4: protectorate.v1.SetSelectionRequest.selection:type_name -> protectorate.v1.ModelSelection
+	11, // 5: protectorate.v1.SetSelectionResponse.chat:type_name -> protectorate.v1.ChatStatus
 	1,  // 6: protectorate.v1.ChatStatus.state:type_name -> protectorate.v1.ChatState
-	32, // 7: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
-	32, // 8: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
-	3,  // 9: protectorate.v1.ChatStatus.settings:type_name -> protectorate.v1.ModelSettings
-	32, // 10: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
-	11, // 11: protectorate.v1.ChatEvent.user:type_name -> protectorate.v1.UserMessage
-	12, // 12: protectorate.v1.ChatEvent.text:type_name -> protectorate.v1.AssistantText
-	13, // 13: protectorate.v1.ChatEvent.tool_call:type_name -> protectorate.v1.ToolCall
-	14, // 14: protectorate.v1.ChatEvent.tool_result:type_name -> protectorate.v1.ToolResult
-	15, // 15: protectorate.v1.ChatEvent.approval:type_name -> protectorate.v1.ApprovalRequest
-	16, // 16: protectorate.v1.ChatEvent.approval_resolved:type_name -> protectorate.v1.ApprovalResolved
-	17, // 17: protectorate.v1.ChatEvent.usage:type_name -> protectorate.v1.UsageUpdate
-	18, // 18: protectorate.v1.ChatEvent.settled:type_name -> protectorate.v1.TurnSettled
-	19, // 19: protectorate.v1.ChatEvent.compaction:type_name -> protectorate.v1.Compaction
-	20, // 20: protectorate.v1.ChatEvent.error:type_name -> protectorate.v1.ChatError
-	21, // 21: protectorate.v1.ChatEvent.state:type_name -> protectorate.v1.StateChange
-	22, // 22: protectorate.v1.ChatEvent.handoff:type_name -> protectorate.v1.Handoff
-	3,  // 23: protectorate.v1.ChatEvent.settings:type_name -> protectorate.v1.ModelSettings
-	32, // 24: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 25: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
-	32, // 26: protectorate.v1.Handoff.at:type_name -> google.protobuf.Timestamp
-	19, // 27: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
-	23, // 28: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
-	24, // 29: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
-	26, // 30: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
-	28, // 31: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
-	30, // 32: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
-	5,  // 33: protectorate.v1.ChatService.ListModels:input_type -> protectorate.v1.ListModelsRequest
-	7,  // 34: protectorate.v1.ChatService.SetSelection:input_type -> protectorate.v1.SetSelectionRequest
-	10, // 35: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
-	25, // 36: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
-	27, // 37: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
-	29, // 38: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
-	31, // 39: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
-	6,  // 40: protectorate.v1.ChatService.ListModels:output_type -> protectorate.v1.ListModelsResponse
-	8,  // 41: protectorate.v1.ChatService.SetSelection:output_type -> protectorate.v1.SetSelectionResponse
-	35, // [35:42] is the sub-list for method output_type
-	28, // [28:35] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	39, // 7: protectorate.v1.ChatStatus.cache_expires_at:type_name -> google.protobuf.Timestamp
+	39, // 8: protectorate.v1.ChatStatus.last_activity_at:type_name -> google.protobuf.Timestamp
+	5,  // 9: protectorate.v1.ChatStatus.settings:type_name -> protectorate.v1.ModelSettings
+	39, // 10: protectorate.v1.ChatEvent.time:type_name -> google.protobuf.Timestamp
+	13, // 11: protectorate.v1.ChatEvent.user:type_name -> protectorate.v1.UserMessage
+	14, // 12: protectorate.v1.ChatEvent.text:type_name -> protectorate.v1.AssistantText
+	15, // 13: protectorate.v1.ChatEvent.tool_call:type_name -> protectorate.v1.ToolCall
+	16, // 14: protectorate.v1.ChatEvent.tool_result:type_name -> protectorate.v1.ToolResult
+	17, // 15: protectorate.v1.ChatEvent.approval:type_name -> protectorate.v1.ApprovalRequest
+	18, // 16: protectorate.v1.ChatEvent.approval_resolved:type_name -> protectorate.v1.ApprovalResolved
+	19, // 17: protectorate.v1.ChatEvent.usage:type_name -> protectorate.v1.UsageUpdate
+	20, // 18: protectorate.v1.ChatEvent.settled:type_name -> protectorate.v1.TurnSettled
+	21, // 19: protectorate.v1.ChatEvent.compaction:type_name -> protectorate.v1.Compaction
+	22, // 20: protectorate.v1.ChatEvent.error:type_name -> protectorate.v1.ChatError
+	23, // 21: protectorate.v1.ChatEvent.state:type_name -> protectorate.v1.StateChange
+	24, // 22: protectorate.v1.ChatEvent.handoff:type_name -> protectorate.v1.Handoff
+	5,  // 23: protectorate.v1.ChatEvent.settings:type_name -> protectorate.v1.ModelSettings
+	34, // 24: protectorate.v1.ChatEvent.report:type_name -> protectorate.v1.SleeveResult
+	39, // 25: protectorate.v1.UsageUpdate.cache_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 26: protectorate.v1.StateChange.state:type_name -> protectorate.v1.ChatState
+	39, // 27: protectorate.v1.Handoff.at:type_name -> google.protobuf.Timestamp
+	21, // 28: protectorate.v1.CompactResponse.compaction:type_name -> protectorate.v1.Compaction
+	2,  // 29: protectorate.v1.SleeveResult.status:type_name -> protectorate.v1.ReportStatus
+	39, // 30: protectorate.v1.SleeveResult.time:type_name -> google.protobuf.Timestamp
+	2,  // 31: protectorate.v1.ReportRequest.status:type_name -> protectorate.v1.ReportStatus
+	34, // 32: protectorate.v1.ReportResponse.result:type_name -> protectorate.v1.SleeveResult
+	3,  // 33: protectorate.v1.WaitRequest.until:type_name -> protectorate.v1.WaitUntil
+	40, // 34: protectorate.v1.WaitRequest.timeout:type_name -> google.protobuf.Duration
+	34, // 35: protectorate.v1.WaitResponse.result:type_name -> protectorate.v1.SleeveResult
+	25, // 36: protectorate.v1.ChatService.Watch:input_type -> protectorate.v1.WatchRequest
+	26, // 37: protectorate.v1.ChatService.Send:input_type -> protectorate.v1.SendRequest
+	28, // 38: protectorate.v1.ChatService.Interrupt:input_type -> protectorate.v1.InterruptRequest
+	30, // 39: protectorate.v1.ChatService.Respond:input_type -> protectorate.v1.RespondRequest
+	32, // 40: protectorate.v1.ChatService.Compact:input_type -> protectorate.v1.CompactRequest
+	7,  // 41: protectorate.v1.ChatService.ListModels:input_type -> protectorate.v1.ListModelsRequest
+	9,  // 42: protectorate.v1.ChatService.SetSelection:input_type -> protectorate.v1.SetSelectionRequest
+	35, // 43: protectorate.v1.ChatService.Report:input_type -> protectorate.v1.ReportRequest
+	37, // 44: protectorate.v1.ChatService.Wait:input_type -> protectorate.v1.WaitRequest
+	12, // 45: protectorate.v1.ChatService.Watch:output_type -> protectorate.v1.ChatEvent
+	27, // 46: protectorate.v1.ChatService.Send:output_type -> protectorate.v1.SendResponse
+	29, // 47: protectorate.v1.ChatService.Interrupt:output_type -> protectorate.v1.InterruptResponse
+	31, // 48: protectorate.v1.ChatService.Respond:output_type -> protectorate.v1.RespondResponse
+	33, // 49: protectorate.v1.ChatService.Compact:output_type -> protectorate.v1.CompactResponse
+	8,  // 50: protectorate.v1.ChatService.ListModels:output_type -> protectorate.v1.ListModelsResponse
+	10, // 51: protectorate.v1.ChatService.SetSelection:output_type -> protectorate.v1.SetSelectionResponse
+	36, // 52: protectorate.v1.ChatService.Report:output_type -> protectorate.v1.ReportResponse
+	38, // 53: protectorate.v1.ChatService.Wait:output_type -> protectorate.v1.WaitResponse
+	45, // [45:54] is the sub-list for method output_type
+	36, // [36:45] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_chat_proto_init() }
@@ -2483,14 +2948,15 @@ func file_protectorate_v1_chat_proto_init() {
 		(*ChatEvent_State)(nil),
 		(*ChatEvent_Handoff)(nil),
 		(*ChatEvent_Settings)(nil),
+		(*ChatEvent_Report)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_chat_proto_rawDesc), len(file_protectorate_v1_chat_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   30,
+			NumEnums:      4,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

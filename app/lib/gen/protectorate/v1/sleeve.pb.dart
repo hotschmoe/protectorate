@@ -304,33 +304,35 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.String? baseRepo,
     $core.String? baseBranch,
     $core.String? baseTip,
+    $1.SleeveResult? result,
   }) {
-    final result = Sleeve._();
-    if (name != null) result.name = name;
-    if (harness != null) result.harness = harness;
-    if (workspace != null) result.workspace = workspace;
-    if (session != null) result.session = session;
-    if (createdAt != null) result.createdAt = createdAt;
-    if (state != null) result.state = state;
-    if (limits != null) result.limits = limits;
-    if (usage != null) result.usage = usage;
-    if (args != null) result.args.addAll(args);
-    if (exitedAt != null) result.exitedAt = exitedAt;
-    if (exitCode != null) result.exitCode = exitCode;
-    if (exitSignal != null) result.exitSignal = exitSignal;
-    if (oomKilled != null) result.oomKilled = oomKilled;
-    if (mode != null) result.mode = mode;
-    if (chat != null) result.chat = chat;
-    if (supervised != null) result.supervised = supervised;
-    if (handoff != null) result.handoff = handoff;
-    if (readOnly != null) result.readOnly.addAll(readOnly);
-    if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
-    if (parent != null) result.parent = parent;
-    if (gitBranch != null) result.gitBranch = gitBranch;
-    if (baseRepo != null) result.baseRepo = baseRepo;
-    if (baseBranch != null) result.baseBranch = baseBranch;
-    if (baseTip != null) result.baseTip = baseTip;
-    return result;
+    final result$ = Sleeve._();
+    if (name != null) result$.name = name;
+    if (harness != null) result$.harness = harness;
+    if (workspace != null) result$.workspace = workspace;
+    if (session != null) result$.session = session;
+    if (createdAt != null) result$.createdAt = createdAt;
+    if (state != null) result$.state = state;
+    if (limits != null) result$.limits = limits;
+    if (usage != null) result$.usage = usage;
+    if (args != null) result$.args.addAll(args);
+    if (exitedAt != null) result$.exitedAt = exitedAt;
+    if (exitCode != null) result$.exitCode = exitCode;
+    if (exitSignal != null) result$.exitSignal = exitSignal;
+    if (oomKilled != null) result$.oomKilled = oomKilled;
+    if (mode != null) result$.mode = mode;
+    if (chat != null) result$.chat = chat;
+    if (supervised != null) result$.supervised = supervised;
+    if (handoff != null) result$.handoff = handoff;
+    if (readOnly != null) result$.readOnly.addAll(readOnly);
+    if (exitAfterIdle != null) result$.exitAfterIdle = exitAfterIdle;
+    if (parent != null) result$.parent = parent;
+    if (gitBranch != null) result$.gitBranch = gitBranch;
+    if (baseRepo != null) result$.baseRepo = baseRepo;
+    if (baseBranch != null) result$.baseBranch = baseBranch;
+    if (baseTip != null) result$.baseTip = baseTip;
+    if (result != null) result$.result = result;
+    return result$;
   }
 
   Sleeve._();
@@ -382,6 +384,8 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOS(22, _omitFieldNames ? '' : 'baseRepo')
     ..aOS(23, _omitFieldNames ? '' : 'baseBranch')
     ..aOS(24, _omitFieldNames ? '' : 'baseTip')
+    ..aOM<$1.SleeveResult>(25, _omitFieldNames ? '' : 'result',
+        subBuilder: $1.SleeveResult.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -638,6 +642,18 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasBaseTip() => $_has(23);
   @$pb.TagNumber(24)
   void clearBaseTip() => $_clearField(24);
+
+  /// Latest self-reported result for the current brief, independent of mail turns.
+  @$pb.TagNumber(25)
+  $1.SleeveResult get result => $_getN(24);
+  @$pb.TagNumber(25)
+  set result($1.SleeveResult value) => $_setField(25, value);
+  @$pb.TagNumber(25)
+  $core.bool hasResult() => $_has(24);
+  @$pb.TagNumber(25)
+  void clearResult() => $_clearField(25);
+  @$pb.TagNumber(25)
+  $1.SleeveResult ensureResult() => $_ensure(24);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {

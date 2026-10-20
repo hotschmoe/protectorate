@@ -14,7 +14,63 @@ protectorate chat send alice "run the tests"
 protectorate chat interrupt alice
 protectorate chat respond alice <approval-id> --allow
 protectorate chat compact alice
+protectorate chat wait alice --until idle --timeout 10m
+protectorate chat wait alice bob --until report --timeout 30m
 ```
+
+## Results and completion
+
+Finish every brief from inside its sleeve with a marked result:
+
+```sh
+protectorate report --status complete --summary-file result.md
+printf '%s\n' 'Implementation is partial; host validation remains.' | protectorate report --status partial -
+protectorate report --status blocked --summary-file blocker.md
+```
+
+Statuses are `complete`, `partial` and `blocked`. Use `partial` whenever work
+remains, including validation that the brief requires. The UTF-8 summary is
+optional and limited to 32 KiB, like a mail body; `--summary-file -` also reads
+stdin. Only the sleeve's own identity may report. The owner and other sleeves
+cannot submit a result on its behalf. Terminal sleeves can report too, and
+`chat watch` exposes their report history without starting a chat driver.
+
+Each submission records its status, summary, timestamp and chat sequence in
+history. A later report replaces the current result while preserving every
+earlier report in history. `sleeve show`, `sleeve ls --json` and the app's
+sleeve card expose the latest result; tap its REPORT button to read the summary.
+Results persist across hub restarts. A new accepted `chat send` starts a brief
+and clears the current result. Mail delivery and its extra turns leave the
+current result intact, including across resleeves. A fresh spawn starts without
+a result.
+
+`chat wait` waits on the hub's event bus without polling. Its default condition
+is `--until idle`: the chat must be idle, outside a resleeve takeover, with no
+pending or queued mail, exactly as `--exit-after-idle` requires. `--until report`
+accepts any marked status and prints its summary; callers must inspect partial
+and blocked results before deciding the work is done. An already satisfied
+condition returns immediately. Several names wait concurrently and print each
+result as it arrives, returning success only after all qualify. `--json` emits
+one `WaitResponse` per sleeve. A timeout, sleeve exit, failure or removal before
+the condition is met exits nonzero. `--timeout 0` (the CLI default) waits until
+interrupted. Idle waits require chat mode.
+
+The unary `ChatService.Wait` RPC uses the same event-driven wait and is exposed
+to Envoy and MCP as the read-only `chat_wait` tool. Its `until` is
+`WAIT_UNTIL_IDLE` or `WAIT_UNTIL_REPORT`; `timeout` is a protobuf duration,
+defaulting to ten minutes when omitted and waiting until cancellation when
+explicitly zero. For example, MCP arguments
+`{"sleeve":"alice","until":"WAIT_UNTIL_REPORT","timeout":"1800s"}`
+return the sleeve name and its result. Cancellation ends the subscription.
+
+`protectorate events` already carries `chat.state` and `sleeve.exited`;
+`sleeve.report` adds the status, summary, time and chat/brief sequences, and
+`sleeve.brief` announces that a new brief cleared a result. Use `events --json`
+for payloads. `sleeve.killed` announces a kill independently of whether its
+record is retained; a stored result still satisfies a report wait after exit.
+This remains the single owner event stream.
+Mailbox reads also emit `msg.read`, so idle waits wake when pending mail is
+read without starting a harness turn.
 
 ## Workspaces
 

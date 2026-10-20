@@ -185,6 +185,8 @@ message Sleeve {
   string base_repo = 22;
   string base_branch = 23;
   string base_tip = 24;
+  // Latest self-reported result for the current brief, independent of mail turns.
+  SleeveResult result = 25;
 }
 
 message BrowseWorkspacesRequest {

@@ -37,6 +37,38 @@ type Chat struct {
 	CacheExpires   time.Time        `json:"cache_expires,omitempty"`
 	LastSeq        uint64           `json:"last_seq,omitempty"`
 	LastActivity   time.Time        `json:"last_activity,omitempty"`
+	BriefSeq       uint64           `json:"brief_seq,omitempty"`
+}
+
+type Result struct {
+	Status   string    `json:"status"`
+	Summary  string    `json:"summary"`
+	Time     time.Time `json:"time"`
+	ChatSeq  uint64    `json:"chat_seq"`
+	BriefSeq uint64    `json:"brief_seq"`
+}
+
+func (m *Manager) SetResult(name string, result *Result) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e := m.sleeves[name]
+	if e == nil {
+		return ErrNotFound
+	}
+	previous := e.Result
+	previousChat := e.Chat
+	e.Result = result
+	if result != nil && e.Mode == ModeChat && e.Chat != nil && result.ChatSeq > e.Chat.LastSeq {
+		c := *e.Chat
+		c.LastSeq, c.LastActivity = result.ChatSeq, result.Time
+		e.Chat = &c
+	}
+	if err := m.saveLocked(); err != nil {
+		e.Result = previous
+		e.Chat = previousChat
+		return fmt.Errorf("persist sleeve result: %w", err)
+	}
+	return nil
 }
 
 func resolveMode(h Harness, m Mode, args []string) (Mode, error) {

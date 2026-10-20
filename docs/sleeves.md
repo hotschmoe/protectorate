@@ -1,5 +1,13 @@
 # Sleeve development environments
 
+Finish each brief inside its sleeve with
+`protectorate report --status complete|partial|blocked --summary-file result.md`.
+Coordinators can run `protectorate chat wait worker1 worker2 --until report
+--timeout 30m` to receive each marked summary as it arrives. `sleeve show`,
+`sleeve ls --json` and the app's REPORT button retain the current result across
+mail turns and hub restarts. See [chat results and completion](chat.md#results-and-completion)
+for status semantics, idle waits and the `chat_wait` MCP tool.
+
 Start in an existing directory with `protectorate sleeve browse --json` to
 list the hub's browser roots, then `protectorate sleeve browse /absolute/root`
 to list its subdirectories. Pass the selected path to

@@ -125,12 +125,32 @@ func (c *cluster) chatScenario(t *testing.T) {
 	if text := watch(); text != "pong" {
 		t.Fatalf("live/replay text=%q", text)
 	}
+	identityFile := filepath.Join(c.home, "sleeves", "chatfixture", "home", ".protectorate-token")
+	summaryFile := filepath.Join(c.root, "chat-result.txt")
+	if err := os.WriteFile(summaryFile, []byte("First brief complete."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c.cli("--token-file", identityFile, "report", "--status", "complete", "--summary-file", summaryFile)
+	firstResult := c.call("SleeveService", "GetSleeve", map[string]any{"name": "chatfixture"})["sleeve"].(map[string]any)["result"].(map[string]any)
+	c.call("MessageService", "Send", map[string]any{"to": "chatfixture", "body": "Peer information; no reply needed.", "kind": "MESSAGE_KIND_NOTE"})
+	c.cli("chat", "wait", "chatfixture", "--until", "idle", "--timeout", "10s")
+	if result := c.call("SleeveService", "GetSleeve", map[string]any{"name": "chatfixture"})["sleeve"].(map[string]any)["result"].(map[string]any); result["chatSeq"] != firstResult["chatSeq"] {
+		t.Fatalf("mail replaced the brief's result: %v", result)
+	}
 	c.stop(c.hub)
 	c.boot()
 	c.call("ChatService", "Send", request)
 	if text := watch(); text != "pong" {
 		t.Fatalf("duplicate send changed replay=%q", text)
 	}
+	if result := c.call("SleeveService", "GetSleeve", map[string]any{"name": "chatfixture"})["sleeve"].(map[string]any)["result"]; result == nil {
+		t.Fatal("retrying a brief cleared its result")
+	}
+	c.call("ChatService", "Send", map[string]any{"sleeve": "chatfixture", "text": "next brief", "requestId": "chat-e2e-0002"})
+	if result := c.call("SleeveService", "GetSleeve", map[string]any{"name": "chatfixture"})["sleeve"].(map[string]any)["result"]; result != nil {
+		t.Fatalf("new brief retained the old result: %v", result)
+	}
+	c.cli("chat", "wait", "chatfixture", "--until", "idle", "--timeout", "10s")
 	c.codexSelectionScenario(t)
 }
 

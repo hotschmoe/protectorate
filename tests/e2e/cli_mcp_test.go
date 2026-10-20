@@ -155,7 +155,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 				t.Fatal(err)
 			}
 			pretty.WriteByte('\n')
-			const goldenHash = "699805a51cf5e16d84c585d938a1d9439574baa01db4287d314d5348d9be0d36"
+			const goldenHash = "2773817e8a2e91f1cc63ffca813e33f4e268afd0218586370b5994fcbf7d6904"
 			if got := fmt.Sprintf("%x", sha256.Sum256(pretty.Bytes())); got != goldenHash {
 				t.Fatalf("tools/list differs byte-for-byte from expected catalog: %s", got)
 			}

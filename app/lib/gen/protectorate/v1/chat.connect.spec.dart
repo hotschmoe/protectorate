@@ -12,13 +12,14 @@ import "chat.pb.dart" as protectoratev1chat;
 /// so any number of clients can watch and a reconnecting client resumes from
 /// the last seq it saw. The harness's own session store stays the full record;
 /// the log is the view. A sleeve is in chat mode for life, or in terminal mode
-/// and then has no chat.
+/// and then has only self-reported result events in this log.
 abstract final class ChatService {
   /// Fully-qualified name of the ChatService service.
   static const name = 'protectorate.v1.ChatService';
 
   /// Watch replays the sleeve's events after after_seq, then streams new ones
-  /// until the client disconnects or the sleeve is killed.
+  /// until the client disconnects or the sleeve is killed. Terminal sleeves
+  /// expose their result history without starting a headless harness.
   static const watch = connect.Spec(
     '/$name/Watch',
     connect.StreamType.server,
@@ -80,5 +81,25 @@ abstract final class ChatService {
     connect.StreamType.unary,
     protectoratev1chat.SetSelectionRequest.new,
     protectoratev1chat.SetSelectionResponse.new,
+  );
+
+  /// Report replaces this sleeve's result for its current brief. Only the
+  /// sleeve's own identity token may report, never the owner or another sleeve.
+  static const report = connect.Spec(
+    '/$name/Report',
+    connect.StreamType.unary,
+    protectoratev1chat.ReportRequest.new,
+    protectoratev1chat.ReportResponse.new,
+  );
+
+  /// Wait blocks on hub events until a sleeve is idle without pending mail,
+  /// or has reported for its current brief. Exits and timeouts fail the call.
+  /// Available as the read-only MCP tool chat_wait; no polling is needed.
+  static const wait = connect.Spec(
+    '/$name/Wait',
+    connect.StreamType.unary,
+    protectoratev1chat.WaitRequest.new,
+    protectoratev1chat.WaitResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
   );
 }

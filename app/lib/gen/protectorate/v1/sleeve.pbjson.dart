@@ -237,6 +237,14 @@ const Sleeve$json = {
     {'1': 'base_repo', '3': 22, '4': 1, '5': 9, '10': 'baseRepo'},
     {'1': 'base_branch', '3': 23, '4': 1, '5': 9, '10': 'baseBranch'},
     {'1': 'base_tip', '3': 24, '4': 1, '5': 9, '10': 'baseTip'},
+    {
+      '1': 'result',
+      '3': 25,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.SleeveResult',
+      '10': 'result'
+    },
   ],
   '8': [
     {'1': '_exit_code'},
@@ -262,7 +270,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'T25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYEyABKAsyGS5nb29nbGUucH'
     'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSHQoKZ2l0X2JyYW5jaBgVIAEoCVIJZ2l0'
     'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
-    'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXBCDAoKX2V4aXRfY29kZQ==');
+    'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXASNQoGcmVzdWx0GBkgASgL'
+    'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0QgwKCl9leGl0X2NvZGU=');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -796,6 +805,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ChatStatus': $1.ChatStatus$json,
   '.protectorate.v1.ModelSettings': $1.ModelSettings$json,
   '.protectorate.v1.Handoff': $1.Handoff$json,
+  '.protectorate.v1.SleeveResult': $1.SleeveResult$json,
   '.protectorate.v1.ListSleevesRequest': ListSleevesRequest$json,
   '.protectorate.v1.ListSleevesResponse': ListSleevesResponse$json,
   '.protectorate.v1.ListWorkspacesRequest': ListWorkspacesRequest$json,

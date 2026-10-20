@@ -48,12 +48,17 @@ const (
 	// ChatServiceSetSelectionProcedure is the fully-qualified name of the ChatService's SetSelection
 	// RPC.
 	ChatServiceSetSelectionProcedure = "/protectorate.v1.ChatService/SetSelection"
+	// ChatServiceReportProcedure is the fully-qualified name of the ChatService's Report RPC.
+	ChatServiceReportProcedure = "/protectorate.v1.ChatService/Report"
+	// ChatServiceWaitProcedure is the fully-qualified name of the ChatService's Wait RPC.
+	ChatServiceWaitProcedure = "/protectorate.v1.ChatService/Wait"
 )
 
 // ChatServiceClient is a client for the protectorate.v1.ChatService service.
 type ChatServiceClient interface {
 	// Watch replays the sleeve's events after after_seq, then streams new ones
-	// until the client disconnects or the sleeve is killed.
+	// until the client disconnects or the sleeve is killed. Terminal sleeves
+	// expose their result history without starting a headless harness.
 	Watch(context.Context, *connect.Request[v1.WatchRequest]) (*connect.ServerStreamForClient[v1.ChatEvent], error)
 	// Send delivers a user message. It starts a turn when the harness is idle;
 	// during a turn it steers that turn on harnesses that support it and fails
@@ -73,6 +78,13 @@ type ChatServiceClient interface {
 	// Replace the requested selection between turns, without restarting.
 	// Empty fields restore the captured native defaults. Unsupported drivers fail.
 	SetSelection(context.Context, *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error)
+	// Report replaces this sleeve's result for its current brief. Only the
+	// sleeve's own identity token may report, never the owner or another sleeve.
+	Report(context.Context, *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error)
+	// Wait blocks on hub events until a sleeve is idle without pending mail,
+	// or has reported for its current brief. Exits and timeouts fail the call.
+	// Available as the read-only MCP tool chat_wait; no polling is needed.
+	Wait(context.Context, *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error)
 }
 
 // NewChatServiceClient constructs a client for the protectorate.v1.ChatService service. By default,
@@ -130,6 +142,19 @@ func NewChatServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(chatServiceMethods.ByName("SetSelection")),
 			connect.WithClientOptions(opts...),
 		),
+		report: connect.NewClient[v1.ReportRequest, v1.ReportResponse](
+			httpClient,
+			baseURL+ChatServiceReportProcedure,
+			connect.WithSchema(chatServiceMethods.ByName("Report")),
+			connect.WithClientOptions(opts...),
+		),
+		wait: connect.NewClient[v1.WaitRequest, v1.WaitResponse](
+			httpClient,
+			baseURL+ChatServiceWaitProcedure,
+			connect.WithSchema(chatServiceMethods.ByName("Wait")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -142,6 +167,8 @@ type chatServiceClient struct {
 	compact      *connect.Client[v1.CompactRequest, v1.CompactResponse]
 	listModels   *connect.Client[v1.ListModelsRequest, v1.ListModelsResponse]
 	setSelection *connect.Client[v1.SetSelectionRequest, v1.SetSelectionResponse]
+	report       *connect.Client[v1.ReportRequest, v1.ReportResponse]
+	wait         *connect.Client[v1.WaitRequest, v1.WaitResponse]
 }
 
 // Watch calls protectorate.v1.ChatService.Watch.
@@ -179,10 +206,21 @@ func (c *chatServiceClient) SetSelection(ctx context.Context, req *connect.Reque
 	return c.setSelection.CallUnary(ctx, req)
 }
 
+// Report calls protectorate.v1.ChatService.Report.
+func (c *chatServiceClient) Report(ctx context.Context, req *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error) {
+	return c.report.CallUnary(ctx, req)
+}
+
+// Wait calls protectorate.v1.ChatService.Wait.
+func (c *chatServiceClient) Wait(ctx context.Context, req *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error) {
+	return c.wait.CallUnary(ctx, req)
+}
+
 // ChatServiceHandler is an implementation of the protectorate.v1.ChatService service.
 type ChatServiceHandler interface {
 	// Watch replays the sleeve's events after after_seq, then streams new ones
-	// until the client disconnects or the sleeve is killed.
+	// until the client disconnects or the sleeve is killed. Terminal sleeves
+	// expose their result history without starting a headless harness.
 	Watch(context.Context, *connect.Request[v1.WatchRequest], *connect.ServerStream[v1.ChatEvent]) error
 	// Send delivers a user message. It starts a turn when the harness is idle;
 	// during a turn it steers that turn on harnesses that support it and fails
@@ -202,6 +240,13 @@ type ChatServiceHandler interface {
 	// Replace the requested selection between turns, without restarting.
 	// Empty fields restore the captured native defaults. Unsupported drivers fail.
 	SetSelection(context.Context, *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error)
+	// Report replaces this sleeve's result for its current brief. Only the
+	// sleeve's own identity token may report, never the owner or another sleeve.
+	Report(context.Context, *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error)
+	// Wait blocks on hub events until a sleeve is idle without pending mail,
+	// or has reported for its current brief. Exits and timeouts fail the call.
+	// Available as the read-only MCP tool chat_wait; no polling is needed.
+	Wait(context.Context, *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error)
 }
 
 // NewChatServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -255,6 +300,19 @@ func NewChatServiceHandler(svc ChatServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(chatServiceMethods.ByName("SetSelection")),
 		connect.WithHandlerOptions(opts...),
 	)
+	chatServiceReportHandler := connect.NewUnaryHandler(
+		ChatServiceReportProcedure,
+		svc.Report,
+		connect.WithSchema(chatServiceMethods.ByName("Report")),
+		connect.WithHandlerOptions(opts...),
+	)
+	chatServiceWaitHandler := connect.NewUnaryHandler(
+		ChatServiceWaitProcedure,
+		svc.Wait,
+		connect.WithSchema(chatServiceMethods.ByName("Wait")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.ChatService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ChatServiceWatchProcedure:
@@ -271,6 +329,10 @@ func NewChatServiceHandler(svc ChatServiceHandler, opts ...connect.HandlerOption
 			chatServiceListModelsHandler.ServeHTTP(w, r)
 		case ChatServiceSetSelectionProcedure:
 			chatServiceSetSelectionHandler.ServeHTTP(w, r)
+		case ChatServiceReportProcedure:
+			chatServiceReportHandler.ServeHTTP(w, r)
+		case ChatServiceWaitProcedure:
+			chatServiceWaitHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -306,4 +368,12 @@ func (UnimplementedChatServiceHandler) ListModels(context.Context, *connect.Requ
 
 func (UnimplementedChatServiceHandler) SetSelection(context.Context, *connect.Request[v1.SetSelectionRequest]) (*connect.Response[v1.SetSelectionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.SetSelection is not implemented"))
+}
+
+func (UnimplementedChatServiceHandler) Report(context.Context, *connect.Request[v1.ReportRequest]) (*connect.Response[v1.ReportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.Report is not implemented"))
+}
+
+func (UnimplementedChatServiceHandler) Wait(context.Context, *connect.Request[v1.WaitRequest]) (*connect.Response[v1.WaitResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.ChatService.Wait is not implemented"))
 }

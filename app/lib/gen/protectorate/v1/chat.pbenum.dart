@@ -76,5 +76,52 @@ class ChatState extends $pb.ProtobufEnum {
   const ChatState._(super.value, super.name);
 }
 
+class ReportStatus extends $pb.ProtobufEnum {
+  static const ReportStatus REPORT_STATUS_UNSPECIFIED =
+      ReportStatus._(0, _omitEnumNames ? '' : 'REPORT_STATUS_UNSPECIFIED');
+  static const ReportStatus REPORT_STATUS_COMPLETE =
+      ReportStatus._(1, _omitEnumNames ? '' : 'REPORT_STATUS_COMPLETE');
+  static const ReportStatus REPORT_STATUS_PARTIAL =
+      ReportStatus._(2, _omitEnumNames ? '' : 'REPORT_STATUS_PARTIAL');
+  static const ReportStatus REPORT_STATUS_BLOCKED =
+      ReportStatus._(3, _omitEnumNames ? '' : 'REPORT_STATUS_BLOCKED');
+
+  static const $core.List<ReportStatus> values = <ReportStatus>[
+    REPORT_STATUS_UNSPECIFIED,
+    REPORT_STATUS_COMPLETE,
+    REPORT_STATUS_PARTIAL,
+    REPORT_STATUS_BLOCKED,
+  ];
+
+  static final $core.List<ReportStatus?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
+  static ReportStatus? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const ReportStatus._(super.value, super.name);
+}
+
+class WaitUntil extends $pb.ProtobufEnum {
+  static const WaitUntil WAIT_UNTIL_UNSPECIFIED =
+      WaitUntil._(0, _omitEnumNames ? '' : 'WAIT_UNTIL_UNSPECIFIED');
+  static const WaitUntil WAIT_UNTIL_IDLE =
+      WaitUntil._(1, _omitEnumNames ? '' : 'WAIT_UNTIL_IDLE');
+  static const WaitUntil WAIT_UNTIL_REPORT =
+      WaitUntil._(2, _omitEnumNames ? '' : 'WAIT_UNTIL_REPORT');
+
+  static const $core.List<WaitUntil> values = <WaitUntil>[
+    WAIT_UNTIL_UNSPECIFIED,
+    WAIT_UNTIL_IDLE,
+    WAIT_UNTIL_REPORT,
+  ];
+
+  static final $core.List<WaitUntil?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 2);
+  static WaitUntil? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const WaitUntil._(super.value, super.name);
+}
+
 const $core.bool _omitEnumNames =
     $core.bool.fromEnvironment('protobuf.omit_enum_names');

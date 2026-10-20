@@ -15,43 +15,51 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'chat.pb.dart' as $1;
+import 'chat.pb.dart' as $2;
 import 'chat.pbjson.dart';
 
 export 'chat.pb.dart';
 
 abstract class ChatServiceBase extends $pb.GeneratedService {
-  $async.Future<$1.ChatEvent> watch(
-      $pb.ServerContext ctx, $1.WatchRequest request);
-  $async.Future<$1.SendResponse> send(
-      $pb.ServerContext ctx, $1.SendRequest request);
-  $async.Future<$1.InterruptResponse> interrupt(
-      $pb.ServerContext ctx, $1.InterruptRequest request);
-  $async.Future<$1.RespondResponse> respond(
-      $pb.ServerContext ctx, $1.RespondRequest request);
-  $async.Future<$1.CompactResponse> compact(
-      $pb.ServerContext ctx, $1.CompactRequest request);
-  $async.Future<$1.ListModelsResponse> listModels(
-      $pb.ServerContext ctx, $1.ListModelsRequest request);
-  $async.Future<$1.SetSelectionResponse> setSelection(
-      $pb.ServerContext ctx, $1.SetSelectionRequest request);
+  $async.Future<$2.ChatEvent> watch(
+      $pb.ServerContext ctx, $2.WatchRequest request);
+  $async.Future<$2.SendResponse> send(
+      $pb.ServerContext ctx, $2.SendRequest request);
+  $async.Future<$2.InterruptResponse> interrupt(
+      $pb.ServerContext ctx, $2.InterruptRequest request);
+  $async.Future<$2.RespondResponse> respond(
+      $pb.ServerContext ctx, $2.RespondRequest request);
+  $async.Future<$2.CompactResponse> compact(
+      $pb.ServerContext ctx, $2.CompactRequest request);
+  $async.Future<$2.ListModelsResponse> listModels(
+      $pb.ServerContext ctx, $2.ListModelsRequest request);
+  $async.Future<$2.SetSelectionResponse> setSelection(
+      $pb.ServerContext ctx, $2.SetSelectionRequest request);
+  $async.Future<$2.ReportResponse> report(
+      $pb.ServerContext ctx, $2.ReportRequest request);
+  $async.Future<$2.WaitResponse> wait(
+      $pb.ServerContext ctx, $2.WaitRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'Watch':
-        return $1.WatchRequest();
+        return $2.WatchRequest();
       case 'Send':
-        return $1.SendRequest();
+        return $2.SendRequest();
       case 'Interrupt':
-        return $1.InterruptRequest();
+        return $2.InterruptRequest();
       case 'Respond':
-        return $1.RespondRequest();
+        return $2.RespondRequest();
       case 'Compact':
-        return $1.CompactRequest();
+        return $2.CompactRequest();
       case 'ListModels':
-        return $1.ListModelsRequest();
+        return $2.ListModelsRequest();
       case 'SetSelection':
-        return $1.SetSelectionRequest();
+        return $2.SetSelectionRequest();
+      case 'Report':
+        return $2.ReportRequest();
+      case 'Wait':
+        return $2.WaitRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -61,19 +69,23 @@ abstract class ChatServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'Watch':
-        return watch(ctx, request as $1.WatchRequest);
+        return watch(ctx, request as $2.WatchRequest);
       case 'Send':
-        return send(ctx, request as $1.SendRequest);
+        return send(ctx, request as $2.SendRequest);
       case 'Interrupt':
-        return interrupt(ctx, request as $1.InterruptRequest);
+        return interrupt(ctx, request as $2.InterruptRequest);
       case 'Respond':
-        return respond(ctx, request as $1.RespondRequest);
+        return respond(ctx, request as $2.RespondRequest);
       case 'Compact':
-        return compact(ctx, request as $1.CompactRequest);
+        return compact(ctx, request as $2.CompactRequest);
       case 'ListModels':
-        return listModels(ctx, request as $1.ListModelsRequest);
+        return listModels(ctx, request as $2.ListModelsRequest);
       case 'SetSelection':
-        return setSelection(ctx, request as $1.SetSelectionRequest);
+        return setSelection(ctx, request as $2.SetSelectionRequest);
+      case 'Report':
+        return report(ctx, request as $2.ReportRequest);
+      case 'Wait':
+        return wait(ctx, request as $2.WaitRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

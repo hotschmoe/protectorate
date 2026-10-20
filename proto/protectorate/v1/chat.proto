@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package protectorate.v1;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
@@ -12,10 +13,11 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // so any number of clients can watch and a reconnecting client resumes from
 // the last seq it saw. The harness's own session store stays the full record;
 // the log is the view. A sleeve is in chat mode for life, or in terminal mode
-// and then has no chat.
+// and then has only self-reported result events in this log.
 service ChatService {
   // Watch replays the sleeve's events after after_seq, then streams new ones
-  // until the client disconnects or the sleeve is killed.
+  // until the client disconnects or the sleeve is killed. Terminal sleeves
+  // expose their result history without starting a headless harness.
   rpc Watch(WatchRequest) returns (stream ChatEvent) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -44,6 +46,17 @@ service ChatService {
   // Replace the requested selection between turns, without restarting.
   // Empty fields restore the captured native defaults. Unsupported drivers fail.
   rpc SetSelection(SetSelectionRequest) returns (SetSelectionResponse);
+
+  // Report replaces this sleeve's result for its current brief. Only the
+  // sleeve's own identity token may report, never the owner or another sleeve.
+  rpc Report(ReportRequest) returns (ReportResponse);
+
+  // Wait blocks on hub events until a sleeve is idle without pending mail,
+  // or has reported for its current brief. Exits and timeouts fail the call.
+  // Available as the read-only MCP tool chat_wait; no polling is needed.
+  rpc Wait(WaitRequest) returns (WaitResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 message ModelSelection {
@@ -153,6 +166,7 @@ message ChatEvent {
     // it come from the new one.
     Handoff handoff = 21;
     ModelSettings settings = 22;
+    SleeveResult report = 23;
   }
 }
 
@@ -292,4 +306,50 @@ message CompactRequest {
 
 message CompactResponse {
   Compaction compaction = 1;
+}
+
+enum ReportStatus {
+  REPORT_STATUS_UNSPECIFIED = 0;
+  REPORT_STATUS_COMPLETE = 1;
+  REPORT_STATUS_PARTIAL = 2;
+  REPORT_STATUS_BLOCKED = 3;
+}
+
+message SleeveResult {
+  ReportStatus status = 1;
+  // At most 32 KiB, the same limit as mail bodies.
+  string summary = 2;
+  google.protobuf.Timestamp time = 3;
+  uint64 chat_seq = 4;
+  // The latest non-mail user message; zero for the initial spawn brief.
+  uint64 brief_seq = 5;
+}
+
+message ReportRequest {
+  // Empty selects the authenticated sleeve. An explicit name must be its own.
+  string sleeve = 1;
+  ReportStatus status = 2;
+  string summary = 3;
+}
+
+message ReportResponse {
+  SleeveResult result = 1;
+}
+
+enum WaitUntil {
+  WAIT_UNTIL_UNSPECIFIED = 0;
+  WAIT_UNTIL_IDLE = 1;
+  WAIT_UNTIL_REPORT = 2;
+}
+
+message WaitRequest {
+  string sleeve = 1;
+  WaitUntil until = 2;
+  // Unset defaults to ten minutes. Zero waits until cancellation.
+  google.protobuf.Duration timeout = 3;
+}
+
+message WaitResponse {
+  string sleeve = 1;
+  SleeveResult result = 2;
 }
