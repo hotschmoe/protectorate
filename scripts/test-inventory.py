@@ -90,6 +90,15 @@ TestNodeRestartRecovery
 TestDERPRelay
 TestBinaryClusterRestartAndRestore
 TestBinaryWorkspaceBrowser
+TestBinaryCLIAndMCP
+TestBinaryArtifactJobAndReplay
+TestBinaryGeneratedServiceExecution
+TestBinaryJobCancellationAndIdempotency
+TestBinaryNodeCredentialBoundaries
+TestBinaryNodeDrainAndRemoval
+TestBinaryStateMigrationAndPolicyRestart
+TestBinaryStreamAuthorizationAndRevocation
+TestBinaryTransferFailureAtomicity
 """.split())
 DELETE = set()
 
