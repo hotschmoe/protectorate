@@ -11,7 +11,7 @@ func (c *cluster) rejectedCLI(want string, args ...string) {
 	c.t.Helper()
 	cmd := exec.CommandContext(c.ctx, c.binary, append([]string{"--hub", c.url}, args...)...)
 	cmd.Env = c.env
-	out, err := cmd.CombinedOutput()
+	out, err := c.commandOutput(cmd)
 	if err == nil || !strings.Contains(string(out), want) {
 		c.t.Fatalf("expected CLI rejection containing %q: args=%v err=%v output=%s", want, args, err, out)
 	}

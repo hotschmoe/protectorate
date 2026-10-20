@@ -16,6 +16,46 @@ CI uses this entry point. Release additionally runs `tests/e2e` against its
 cross-built linux/amd64 binary with the same release feature tags.
 `make app-check` runs `flutter analyze`; no Dart unit/widget tests remain.
 
+Run `make test-race` to build `bin/protectorate-race` with `-race`, the same
+feature tags, trimpath and version ldflags as `make build`, and run the full
+Go e2e suite and fuzz seeds with `go test -race`. It forces `CGO_ENABLED=1`
+and fails with an explicit diagnostic if the configured C compiler is missing.
+`go test -race` alone does not instrument an ordinary supplied or fallback
+application binary; use this target to cover both sides of the process boundary.
+CI runs it in a separate Ubuntu job; release builds remain non-race.
+
+On this two-core linux/arm64 sleeve, the passing warm-cache target took
+114.10s wall time, with 98.63s in `tests/e2e` (18.68s for the non-race binary
+scenarios). The initial cold-cache attempt
+took 744.75s including module downloads and compilation; it exposed a
+care-tier scenario's transient-node-readiness assumption, fixed before the
+passing run. `make check` keeps its existing non-race lane: adding nearly two
+minutes to each warm local check is left to the explicit race target and CI.
+
+The race lane uses `GORACE=halt_on_error=1 atexit_sleep_ms=0`: the first
+detected race terminates the process, and short-lived CLI calls do not each
+sleep a second on exit. The binary harness also writes race reports to files
+named for each process with PID suffixes in each scenario's temporary directory.
+After shutting down its processes it checks those files and all reachable
+`.log` files, including hub/node/MCP stderr and node job output, plus sleeve
+`chat.jsonl` logs (and rotated copies) containing captured driver stderr. CLI
+combined output is checked even for expected command failures. Any `WARNING: DATA RACE`
+fails the owning scenario and prints the process/log name and full report,
+including when the scenario's assertions passed. These log checks also run
+with non-race binaries, so reports from separately instrumented helpers count.
+Remaining tmux panes are captured and checked before the private server stops.
+
+`TestBinaryRaceReports` builds a deliberately racing Go peer in the race lane
+and runs otherwise passing scenarios in subprocesses. It requires failures
+with complete reports from hub and node logs, CLI output, redirected CLI race
+files, and a successful artifact job executed by the real node agent.
+Where tmux is installed, it also checks a terminal helper whose final screen
+contains a race report.
+The detector only covers executed code paths: omitted e2e workflows, unexercised
+interleavings, non-Go/uninstrumented helpers and unreachable child output are
+not covered. Runtime and tailnet scenarios still require their documented host
+prerequisites and opt-in lane; skips inside a sleeve do not verify those paths.
+
 `PROT_E2E=1 go test ./tests/e2e` also works, building one binary if necessary.
 Supply an absolute `PROT_E2E_BINARY` to avoid that build. This is the single
 gate for real-binary/process scenarios in `tests/e2e`, the hub chat/runtime
@@ -181,9 +221,9 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=64, KEEP-FUZZ=5; total=69. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=65, KEEP-FUZZ=5; total=70. TestMain rows are infrastructure, not scenarios.
 
-Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
+Runtime is the observed non-race test-function elapsed time, including skips, unless explicitly labelled race. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
 | File | Function / callback | Exercises | Runtime | Verdict | Replacement / reason |
 |---|---|---|---|---|---|
@@ -258,6 +298,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
 | tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache/overlay cleanup, host-lower and running-data protection, owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
 | tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | host verification pending | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
+| tests/e2e/race_reports_test.go | TestBinaryRaceReports | Real detector reports fail otherwise passing subprocess scenarios, including successful node artifact jobs and retained terminal panes | 6.81s race; skips non-race | KEEP-E2E | prevents silent loss of subprocess race reports |
 
 ## Deleted files
 

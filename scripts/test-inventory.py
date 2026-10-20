@@ -96,6 +96,7 @@ TestBinaryBaseNotices
 TestBinarySleeveReports
 TestBinarySleeveDiskPrune
 TestBinaryNestedRuntime
+TestBinaryRaceReports
 """.split())
 DELETE = set()
 
