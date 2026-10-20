@@ -24,12 +24,15 @@ jobs:
           cache: true
       - name: GNU make
         run: command -v make || choco install make --no-progress -y
+      - name: Version
+        run: |
+          echo "VERSION=$(make -s version)" >> "$GITHUB_ENV"
+          echo "version $(make -s version), app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
       - run: make app-build-windows
       - name: Package
         run: |
-          version=$(make -s version)
-          echo "version $version, app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
-          pwsh -NoProfile -Command "Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath protectorate-desktop-windows-x64-$version.zip"
+          git status --short
+          pwsh -NoProfile -Command "Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath protectorate-desktop-windows-x64-$VERSION.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows
