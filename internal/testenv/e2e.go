@@ -7,25 +7,6 @@ import (
 	"testing"
 )
 
-// TmuxDir keeps Unix socket paths short even when TMPDIR is disk-backed and deep.
-func TmuxDir(t testing.TB) string {
-	t.Helper()
-	base := os.TempDir()
-	if runtime.GOOS != "windows" {
-		base = "/tmp"
-	}
-	dir, err := os.MkdirTemp(base, "prot-e2e-tmux-")
-	if err != nil {
-		t.Fatalf("create private tmux directory: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("remove private tmux directory: %v", err)
-		}
-	})
-	return dir
-}
-
 // E2E gates real-process scenarios and isolates their hub identity.
 // The optional returned binary is used by scenarios that launch the CLI.
 func E2E(t testing.TB) string {
