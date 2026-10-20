@@ -423,12 +423,12 @@ chat, hidden parent state, actual memory OOM and CPU throttling, unchanged
 outer limits, and descendant cleanup. The same test can run inside an already
 nested-enabled sleeve and exercises another sandbox level.
 
-That scenario seeds private synthetic Flutter/Pub lower trees before the extra
-sandbox level: reusing an SDK cache already overlaid by the development sleeve
-would exceed the kernel's overlayfs stacking limit. The selected real bwrap,
-production hub/CLI, namespace and cgroup checks stay unchanged, and the inner
-run fails on any skip. Its binary and cache fixtures use its private home as
-disk-backed temporary storage.
+That scenario explicitly mounts the installed Go toolchain and its private
+executable peers, and seeds private Pub lower trees. It excludes unused Flutter
+caches to avoid stacking another overlay above the development sleeve's SDK.
+The selected real bwrap, production hub/CLI, namespace and cgroup checks stay
+unchanged, and the inner run fails on any skip. Its binary and cache fixtures
+use its private home as disk-backed temporary storage.
 
 Design references: [systemd cgroup delegation](https://systemd.io/CGROUP_DELEGATION/),
 [Linux 6.6 cgroup v2 delegation and namespaces](https://www.kernel.org/doc/html/v6.6/admin-guide/cgroup-v2.html),

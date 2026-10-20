@@ -275,11 +275,8 @@ on disk, avoiding the nested sandbox's memory-backed `/tmp`.
 The scenario passed in a nested-enabled development sleeve in 15.39 seconds
 with no inner skips; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
 
-The nested runtime fixture seeds private synthetic SDK/cache lower trees to
-avoid adding a third overlay above the development sleeve's existing caches.
-The selected real bwrap, production binaries, namespace and cgroup checks stay
-unchanged, including actual OOM, CPU throttling, hidden limits and cleanup.
-Its inner run rejects skips; no manual SDK copy or production fallback is used.
+Private Pub lower trees keep the nested cache overlays independent of the
+development sleeve's caches. No manual SDK copy or production fallback is used.
 
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
