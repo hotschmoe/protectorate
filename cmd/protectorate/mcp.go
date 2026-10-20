@@ -10,8 +10,6 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/hotschmoe/protectorate/internal/mcpbridge"
 )
 
@@ -45,7 +43,7 @@ create'. See docs/mcp.md and docs/auth.md.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 			defer stop()
 			if httpAddr == "" {
-				return srv.Run(ctx, &mcp.StdioTransport{})
+				return srv.Run(ctx, os.Stdin, cmd.OutOrStdout())
 			}
 			if err := checkMCPListen(httpAddr); err != nil {
 				return err

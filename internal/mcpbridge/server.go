@@ -11,13 +11,11 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-// Config describes the hub to bridge to and which tools to serve.
 type Config struct {
 	HubURL     string
 	HTTPClient connect.HTTPClient
@@ -25,8 +23,25 @@ type Config struct {
 	Filter     Filter
 }
 
-// NewServer builds an MCP server with one tool per permitted unary RPC.
-func NewServer(cfg Config) (*mcp.Server, error) {
+type Tool map[string]any
+
+type toolResult struct {
+	Content []textContent `json:"content"`
+	IsError bool          `json:"isError,omitempty"`
+}
+
+type textContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type Server struct {
+	version  string
+	tools    []Tool
+	handlers map[string]func(context.Context, json.RawMessage) *toolResult
+}
+
+func NewServer(cfg Config) (*Server, error) {
 	if err := cfg.Filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -34,27 +49,23 @@ func NewServer(cfg Config) (*mcp.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "protectorate", Version: cfg.Version}, nil)
-	base := strings.TrimRight(cfg.HubURL, "/")
+	srv := &Server{version: cfg.Version, tools: []Tool{}, handlers: make(map[string]func(context.Context, json.RawMessage) *toolResult)}
 	for _, def := range defs {
 		if !cfg.Filter.Permits(def) {
 			continue
 		}
-		srv.AddTool(&mcp.Tool{
-			Name:        def.Name,
-			Description: def.Description,
-			InputSchema: InputSchema(def.Method.Input()),
-			Annotations: annotations(def),
-		}, handler(def, cfg.HTTPClient, base))
+		a := map[string]any{"readOnlyHint": def.ReadOnly, "idempotentHint": def.ReadOnly, "openWorldHint": false}
+		if !def.ReadOnly {
+			a["destructiveHint"] = def.Destructive
+		}
+		srv.tools = append(srv.tools, Tool{"name": def.Name, "description": def.Description, "inputSchema": InputSchema(def.Method.Input()), "annotations": a})
+		srv.handlers[def.Name] = handler(def, cfg.HTTPClient, strings.TrimRight(cfg.HubURL, "/"))
 	}
 	return srv, nil
 }
 
-// HTTPHandler serves the same tools over streamable HTTP. Every request must
-// present token, the credential the bridge itself uses against the hub, as a
-// bearer: reaching the endpoint must not be enough to inherit its authority.
-func HTTPHandler(srv *mcp.Server, token string) http.Handler {
-	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+func HTTPHandler(srv *Server, token string) http.Handler {
+	transport := srv.httpHandler()
 	want := sha256.Sum256([]byte(token))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -64,48 +75,34 @@ func HTTPHandler(srv *mcp.Server, token string) http.Handler {
 			http.Error(w, "missing or invalid bearer token", http.StatusUnauthorized)
 			return
 		}
-		mcpHandler.ServeHTTP(w, r)
+		transport.ServeHTTP(w, r)
 	})
 }
 
-func annotations(def ToolDef) *mcp.ToolAnnotations {
-	a := &mcp.ToolAnnotations{ReadOnlyHint: def.ReadOnly, IdempotentHint: def.ReadOnly}
-	closed := false
-	a.OpenWorldHint = &closed
-	if !def.ReadOnly {
-		d := def.Destructive
-		a.DestructiveHint = &d
-	}
-	return a
-}
-
-func handler(def ToolDef, hc connect.HTTPClient, base string) mcp.ToolHandler {
+func handler(def ToolDef, hc connect.HTTPClient, base string) func(context.Context, json.RawMessage) *toolResult {
 	in, out := def.Method.Input(), def.Method.Output()
-	client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](hc, base+def.Path(),
-		connect.WithProtoJSON(),
-		connect.WithResponseInitializer(func(_ connect.Spec, msg any) error {
-			*msg.(*dynamicpb.Message) = *dynamicpb.NewMessage(out)
-			return nil
-		}),
-	)
-	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		msg, err := decodeArgs(in, req.Params.Arguments)
+	client := connect.NewClient[dynamicpb.Message, dynamicpb.Message](hc, base+def.Path(), connect.WithProtoJSON(), connect.WithResponseInitializer(func(_ connect.Spec, msg any) error {
+		*msg.(*dynamicpb.Message) = *dynamicpb.NewMessage(out)
+		return nil
+	}))
+	return func(ctx context.Context, raw json.RawMessage) *toolResult {
+		msg, err := decodeArgs(in, raw)
 		if err != nil {
-			return toolError(connect.CodeInvalidArgument, err.Error()), nil
+			return toolError(connect.CodeInvalidArgument, err.Error())
 		}
 		res, err := client.CallUnary(ctx, connect.NewRequest(msg))
 		if err != nil {
 			var ce *connect.Error
 			if errors.As(err, &ce) {
-				return toolError(ce.Code(), ce.Message()), nil
+				return toolError(ce.Code(), ce.Message())
 			}
-			return toolError(connect.CodeUnavailable, err.Error()), nil
+			return toolError(connect.CodeUnavailable, err.Error())
 		}
 		b, err := protojson.Marshal(res.Msg)
 		if err != nil {
-			return toolError(connect.CodeInternal, err.Error()), nil
+			return toolError(connect.CodeInternal, err.Error())
 		}
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil
+		return &toolResult{Content: []textContent{{Type: "text", Text: string(b)}}}
 	}
 }
 
@@ -120,9 +117,6 @@ func decodeArgs(md protoreflect.MessageDescriptor, raw json.RawMessage) (*dynami
 	return msg, nil
 }
 
-func toolError(code connect.Code, msg string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("%s: %s", code, msg)}},
-	}
+func toolError(code connect.Code, msg string) *toolResult {
+	return &toolResult{IsError: true, Content: []textContent{{Type: "text", Text: fmt.Sprintf("%s: %s", code, msg)}}}
 }
