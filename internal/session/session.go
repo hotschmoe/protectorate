@@ -84,7 +84,8 @@ func ValidName(name string) error {
 }
 
 func (m *Manager) cmd(ctx context.Context, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, m.Bin, append([]string{"-L", m.Socket}, args...)...)
+	// -u: without a UTF-8 locale tmux prints the tab separators of -F formats as "_".
+	return exec.CommandContext(ctx, m.Bin, append([]string{"-u", "-L", m.Socket}, args...)...)
 }
 
 // MaxCaptureLines caps the scrollback Capture reads; larger requests are
@@ -456,7 +457,7 @@ func (m *Manager) AttachCmd(ctx context.Context, name string, readOnly bool) (*e
 	if readOnly || s.State == Exited {
 		args = append(args, "-r")
 	}
-	c := exec.Command(m.Bin, append([]string{"-L", m.Socket}, args...)...)
+	c := exec.Command(m.Bin, append([]string{"-u", "-L", m.Socket}, args...)...)
 	c.Env = append(c.Environ(), "TERM=xterm-256color")
 	return c, s, nil
 }
