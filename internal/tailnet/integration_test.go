@@ -16,6 +16,7 @@ import (
 
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/tailnet"
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 func freeAddr(t *testing.T, network string) string {
@@ -105,6 +106,7 @@ func get(ctx context.Context, c *http.Client, url string, timeout time.Duration)
 }
 
 func TestTailnetEndToEnd(t *testing.T) {
+	testenv.E2E(t)
 	if os.Getenv("PROT_TAILNET_IT") != "1" {
 		t.Skip("set PROT_TAILNET_IT=1 to run (downloads headscale, starts real processes)")
 	}
@@ -369,6 +371,7 @@ func serveNode(t *testing.T, n *tailnet.Net, name string) func() {
 // TestNodeRestartRecovery restarts a node agent and checks the hub's tailnet
 // client reaches it again within two poll intervals, without a hub restart.
 func TestNodeRestartRecovery(t *testing.T) {
+	testenv.E2E(t)
 	if os.Getenv("PROT_TAILNET_IT") != "1" {
 		t.Skip("set PROT_TAILNET_IT=1 to run (downloads headscale, starts real processes)")
 	}
@@ -458,6 +461,7 @@ func TestNodeRestartRecovery(t *testing.T) {
 // disabled in magicsock, over the hub's TLS DERP relay using the pinned
 // self-signed certificate.
 func TestDERPRelay(t *testing.T) {
+	testenv.E2E(t)
 	if os.Getenv("PROT_TAILNET_IT") != "1" {
 		t.Skip("set PROT_TAILNET_IT=1 to run (downloads headscale, starts real processes)")
 	}

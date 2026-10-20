@@ -808,7 +808,8 @@ type SpawnSleeveRequest struct {
 	// approvalPolicy untrusted with its workspace-write sandbox, Grok
 	// /always-approve off. pi has no gate and ignores it.
 	Supervised bool `protobuf:"varint,8,opt,name=supervised,proto3" json:"supervised,omitempty"`
-	// Codex chat selection; omitted preserves native defaults. Other drivers reject it.
+	// Codex chat selection; omitted effort uses the hub's sleeve effort default.
+	// Other drivers reject explicit selection.
 	Selection *ModelSelection  `protobuf:"bytes,9,opt,name=selection,proto3" json:"selection,omitempty"`
 	ReadOnly  []*ReadOnlyMount `protobuf:"bytes,10,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	// Zero disables automatic removal. Applies only to chat sleeves.

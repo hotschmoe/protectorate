@@ -1128,7 +1128,8 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   void clearSupervised() => $_clearField(8);
 
-  /// Codex chat selection; omitted preserves native defaults. Other drivers reject it.
+  /// Codex chat selection; omitted effort uses the hub's sleeve effort default.
+  /// Other drivers reject explicit selection.
   @$pb.TagNumber(9)
   $1.ModelSelection get selection => $_getN(8);
   @$pb.TagNumber(9)

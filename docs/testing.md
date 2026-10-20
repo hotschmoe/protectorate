@@ -9,15 +9,24 @@ The archive and references are read-only and outside this suite.
 
 Run `make test`: it builds the binary with `TAILSCALE_TAGS`, runs tagged vet,
 then runs all fuzz seed corpora and end-to-end tests with `PROT_E2E=1` and
-`PROT_E2E_BINARY` set to the built binary. It clears inherited
-`PROTECTORATE_TOKEN_FILE`, `PROTECTORATE_HUB` and `PROTECTORATE_TOKEN`.
+`PROT_E2E_BINARY` set to the built binary. The shared `internal/testenv.E2E`
+entry point clears inherited `PROTECTORATE_TOKEN_FILE`, `PROTECTORATE_HUB`
+and `PROTECTORATE_TOKEN` itself, including when tests run inside a sleeve.
 CI uses this entry point. Release additionally runs `tests/e2e` against its
 cross-built linux/amd64 binary with the same release feature tags.
 `make app-check` runs `flutter analyze`; no Dart unit/widget tests remain.
 
 `PROT_E2E=1 go test ./tests/e2e` also works, building one binary if necessary.
-Supply an absolute `PROT_E2E_BINARY` to avoid that build. Build time is separate
-from the execution budget. A cluster has a 75-second process deadline and a
+Supply an absolute `PROT_E2E_BINARY` to avoid that build. This is the single
+gate for real-binary/process scenarios in `tests/e2e`, the hub chat/runtime
+harness, `internal/sleeve` and `internal/tailnet`. In-package scenarios drive
+their own production entry points and do not need the CLI binary path. Driver
+protocol fixtures and fuzz targets run without a gate; they need no installed
+AI CLI, provider login or runtime. Runtime capability checks may additionally
+skip when systemd user scopes or namespaces are unavailable. No manual
+credential unsets are required.
+
+Build time is separate from the execution budget. A cluster has a 75-second process deadline and a
 five-minute compilation deadline; every subprocess is reaped after bounded
 shutdown. Each child gets explicit private HOME, state, credentials, node
 bearer and tmux directory. Tests never use the running hub or provider logins.
@@ -47,7 +56,11 @@ scenario does not claim to test them.
 
 On hosts with systemd user manager, bwrap namespaces, tmux and git, the binary
 scenario also checks sandbox isolation, persisted ownership, cross-sleeve kill
-denial and official Claude chat folding. In-package hub scenarios retain
+denial and official Claude chat folding. Its Codex protocol peer covers default
+requested effort `high`, explicit effort precedence, unsupported-default
+fallback across restart, resleeve onto Codex, Envoy, custom and empty hub defaults,
+and the effective settings received by a native turn, without a Codex login.
+In-package hub scenarios retain
 real sandbox/driver/HTTP chat approval, interruption, compaction, replay,
 authenticated idle-only mailbox delivery, wait/wake, threading, routing,
 redelivery/escalation, grant notices and idle reap. They need package internals
@@ -73,8 +86,12 @@ respawn. No migration is needed for the default home.
 Optional tailnet lane (private Headscale, tsnet, DERP and live SQLite backup):
 
 ```sh
-PROT_TAILNET_IT=1 go test -count=1 -timeout 15m -tags "$(make -s build-tags)" ./internal/tailnet
+PROT_E2E=1 PROT_TAILNET_IT=1 go test -count=1 -timeout 15m -tags "$(make -s build-tags)" ./internal/tailnet
 ```
+
+`PROT_TAILNET_IT=1` is an additional network-access opt-in: these scenarios
+download the pinned Headscale binary and start private tailnet/DERP processes.
+It does not replace `PROT_E2E`.
 
 Fuzz seeds run on every commit. Mutation campaigns are separate, for example:
 
@@ -92,8 +109,10 @@ scope prefix.
 default and explicit roots, drill-down, hidden/file filtering, symlink escape
 refusal, result truncation, rejected-workspace reasons, credential-stripped
 origins, paired-device acceptance and sleeve-identity denial. A persisted
-exited sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
-text and JSON, without needing the host user manager.
+exited chat sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
+text and JSON, plus model/effort columns, read-only mounts, idle timeout and
+persisted chat details. It deliberately inherits invalid sleeve credentials
+to verify that the harness isolates them without needing the host user manager.
 
 `TestBinaryNoteLifecycle` drives a real hub, CLI and stdio MCP bridge through
 loading an existing note without a state, creating and closing with a
@@ -157,7 +176,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/driver/fake_test.go | TestMain | Main | not measured | KEEP-E2E | runner infrastructure; retain while any package tests use it |
 | internal/driver/selection_test.go | TestCodexSelectionProtocol | Codex Selection Protocol | 0.010s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/driver/selection_test.go | TestSelectionUnsupportedAndNativeDefaults | Selection Unsupported And Native Defaults | 0.010s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
-| internal/driver/selection_test.go | TestCodexSelectionAtOpenAndResume | Codex Selection At Open And Resume | 0.010s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
+| internal/driver/selection_test.go | TestCodexSelectionAtOpenAndResume | Native selection and unsupported hub-effort fallback on open/resume, confirmed by a real protocol-peer turn | unmeasured | KEEP-E2E | preserves requested effort while using native fallback |
 | internal/driver/selection_test.go | TestSelectionUsesNativeConfirmation | Selection Uses Native Confirmation | 0.010s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/hub/chat_test.go | TestChatEndToEnd | Chat End To End | 0.010s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/hub/chat_test.go | TestChatShellAndMissing | Chat Shell And Missing | 0.020s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
@@ -196,8 +215,9 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestTailnetEndToEnd | Tailnet End To End | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/tailnet/integration_test.go | TestNodeRestartRecovery | Node Restart Recovery | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
-| tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
-| tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/chat_test.go | TestMain | Native-protocol executable peer for the binary runtime lane | unmeasured | KEEP-E2E | runner infrastructure; no installed Codex or provider login |
+| tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary cluster lifecycle, host runtime and Codex default/explicit/fallback effort, restart, resleeve and Envoy | unmeasured | KEEP-E2E | effort runtime lane uses a deterministic native-protocol peer, no provider login |
+| tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial, live branch refresh and complete sleeve details | unmeasured | KEEP-E2E | inherited credential isolation, model/effort columns, mounts and idle timeout |
 | tests/e2e/backlog_test.go | TestBinaryNoteLifecycle | Real hub/CLI/MCP note completion, filters, reopen, persistence and sleeve authorization | unmeasured | KEEP-E2E | note lifecycle regression scenario |
 
 ## Deleted files

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hotschmoe/protectorate/internal/testenv"
 )
 
 func hostGit(t *testing.T, dir string, args ...string) {
@@ -24,6 +26,7 @@ func hostGit(t *testing.T, dir string, args ...string) {
 // A repository config written by an agent names a clean filter that tries to
 // leave a marker on the host; status still works and the marker never appears.
 func TestGitRunsRepositoryProgramsInAJail(t *testing.T) {
+	testenv.E2E(t)
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap not installed")
 	}

@@ -88,13 +88,14 @@ type SpawnRequest struct {
 	ReadOnly      []Mount
 	ExitAfterIdle time.Duration
 
-	Selection driver.Selection
-	Name      string
-	Workspace string // absolute directory or git URL
-	Harness   Harness
-	Args      []string
-	Limits    Limits
-	Env       map[string]string
+	Selection      driver.Selection
+	EffortFallback bool
+	Name           string
+	Workspace      string // absolute directory or git URL
+	Harness        Harness
+	Args           []string
+	Limits         Limits
+	Env            map[string]string
 	// Mode defaults to chat for agent harnesses and terminal for shell.
 	Mode Mode
 	// Supervised applies to chat mode only.
@@ -377,7 +378,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 		info.Session = SessionName(req.Name)
 	}
 	if mode == ModeChat {
-		info.Chat = &Chat{Requested: req.Selection}
+		info.Chat = &Chat{Requested: req.Selection, EffortFallback: req.EffortFallback}
 	}
 	e := &entry{Info: info}
 	if err := m.installSleeve(e, prev); err != nil {

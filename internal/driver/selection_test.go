@@ -109,6 +109,23 @@ func TestCodexSelectionAtOpenAndResume(t *testing.T) {
 		}
 		s.Close()
 	}
+	opts.Selection.Effort, opts.EffortFallback = "high", true
+	for _, id := range []string{"", "saved-thread"} {
+		s, err := Open(ctx5(t), Codex, t.TempDir(), id, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Selection().Requested != opts.Selection || s.Selection().Effective.Effort != "medium" {
+			t.Fatalf("hub default fallback lost request or native effort: %+v", s.Selection())
+		}
+		if err := s.Send(ctx5(t), "selection"); err != nil {
+			t.Fatal(err)
+		}
+		if got := joinText(until(t, s, KindSettled)); got != "gpt-other/medium" {
+			t.Fatalf("native fallback on open/resume: %q", got)
+		}
+		s.Close()
+	}
 }
 
 func TestSelectionUsesNativeConfirmation(t *testing.T) {

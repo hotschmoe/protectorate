@@ -99,13 +99,22 @@ In the app, Codex creation forms have native selectors, and an idle chat's
 menu has MODEL AND EFFORT. Effective model and effort appear in the chat header
 and sleeve information. Other harnesses explain that controls are unavailable.
 
-`--model`/`--effort` replace the complete requested selection. An omitted model
-uses the native session's original model; an explicit model with omitted effort
-uses that model's advertised default effort. `--native-defaults` restores both
-defaults captured before the first override. With no selection at creation the
-driver sends no override. Requested, effective and captured default settings are
-persisted separately. Native model rerouting updates the effective model and
-leaves effort unknown when the harness does not report it.
+At creation, an omitted effort uses `hub serve --sleeve-effort LEVEL`, which
+defaults to `high`, including for Envoy and resleeves onto Codex. An explicit
+effort wins. Set `--sleeve-effort=''` to leave native defaults in control. If
+the chosen model does not advertise the hub's default effort, the hub logs
+the fallback and uses the native effort while retaining the requested effort.
+Other harnesses and terminal sleeves keep their native behavior. Existing
+chats retain their persisted selection across hub restarts.
+
+Between turns, `chat settings --model`/`--effort` replace the complete requested
+selection. An omitted model uses the native session's original model; an
+explicit model with omitted effort uses that model's advertised default effort.
+`--native-defaults` restores both defaults captured before the first override.
+Requested, effective and captured default settings are persisted separately.
+Native model rerouting updates the effective model and leaves effort unknown
+when the harness does not report it. `sleeve ls` includes effective model and
+effort columns; `sleeve show` includes requested and native settings as well.
 
 Updates require an idle chat with no pending approval, compaction or resleeve.
 Codex uses native `thread/settings/update` without a turn or restart,
@@ -130,9 +139,11 @@ and replayable settings events separate requested/effective values;
 `ChatStatus.reasoning_effort` reports the effective effort.
 
 Resleeving preserves the request on the same harness. When moving a selected
-chat to another harness, explicitly choose target `--model`/`--effort` or
+chat with explicit selection to another harness, choose target `--model`/`--effort` or
 `--native-defaults`; there is no automatic vendor mapping. The API fields are
-`ResleeveSleeveRequest.selection` and `native_defaults`. See
+`ResleeveSleeveRequest.selection` and `native_defaults`. A hub-applied effort
+alone does not require an explicit choice when changing harnesses;
+`--native-defaults` deliberately bypasses the hub effort default. See
 [delegation](coordination.md#delegation) for native tasks versus sleeves.
 
 Catalog discovery before creation runs in a temporary-home sandbox with the

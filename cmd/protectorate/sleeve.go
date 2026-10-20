@@ -293,10 +293,20 @@ func sleeveLsCmd(o *opts) *command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "NAME\tHARNESS\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
+				fmt.Fprintln(w, "NAME\tHARNESS\tMODEL\tEFFORT\tSTATE\tCPU\tMEM\tPEAK\tLIMITS\tWORKSPACE\tPARENT\tBRANCH")
 				for _, s := range res.Msg.Sleeves {
 					u := s.Usage
-					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
+					model, effort := "-", "-"
+					if s.Chat != nil {
+						model, effort = s.Chat.Model, s.Chat.ReasoningEffort
+						if model == "" {
+							model = "unknown"
+						}
+						if effort == "" {
+							effort = "unknown"
+						}
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), model, effort, sleeveRowState(s),
 						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace, s.Parent, s.GitBranch)
 				}
 			})
@@ -399,17 +409,34 @@ func sleeveShowCmd(o *opts) *command {
 				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
 				fmt.Fprintf(w, "branch\t%s\n", s.GitBranch)
 				fmt.Fprintf(w, "parent\t%s\n", s.Parent)
+				fmt.Fprintf(w, "mode\t%s\n", strings.ToLower(strings.TrimPrefix(s.Mode.String(), "SLEEVE_MODE_")))
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {
 					fmt.Fprintf(w, "exited\t%s\n", s.ExitedAt.AsTime().Local().Format(time.RFC3339))
+				}
+				if s.State == pb.SleeveState_SLEEVE_STATE_EXITED {
 					fmt.Fprintf(w, "exit\t%s\n", exitLabel(s))
+					fmt.Fprintf(w, "exit signal\t%d\noom killed\t%t\n", s.ExitSignal, s.OomKilled)
 				}
 				fmt.Fprintf(w, "args\t%s\nlimits\t%s\n", strings.Join(s.Args, " "), limitLabel(s.Limits))
+				fmt.Fprintf(w, "exit after idle\t%s\n", s.ExitAfterIdle.AsDuration())
+				for _, mount := range s.ReadOnly {
+					fmt.Fprintf(w, "read-only mount\t%s -> %s\n", mount.Source, mount.Target)
+				}
 				if s.Supervised {
 					fmt.Fprintln(w, "supervised\tyes (the harness asks; answer with chat respond)")
+				} else {
+					fmt.Fprintln(w, "supervised\tno")
 				}
 				if s.Chat != nil {
 					printSelection(w, s.Chat)
+					fmt.Fprintf(w, "chat state\t%s\nharness session\t%s\nprovider\t%s\nlocal model\t%t\ncontext tokens\t%d/%d\nlast sequence\t%d\n", s.Chat.State, s.Chat.HarnessSessionId, s.Chat.Provider, s.Chat.LocalModel, s.Chat.ContextTokens, s.Chat.ContextWindow, s.Chat.LastSeq)
+					if s.Chat.CacheExpiresAt != nil {
+						fmt.Fprintf(w, "cache expires\t%s\n", s.Chat.CacheExpiresAt.AsTime().Local().Format(time.RFC3339))
+					}
+					if s.Chat.LastActivityAt != nil {
+						fmt.Fprintf(w, "last activity\t%s\n", s.Chat.LastActivityAt.AsTime().Local().Format(time.RFC3339))
+					}
 				}
 				if s.Handoff != nil {
 					printHandoff(w, s.Handoff)
@@ -417,6 +444,12 @@ func sleeveShowCmd(o *opts) *command {
 				fmt.Fprintf(w, "cpu\t%.1f%% (%.1fs total)\n", u.CpuPercent, u.CpuSeconds)
 				fmt.Fprintf(w, "memory\t%s (peak %s)\n", fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes))
 				fmt.Fprintf(w, "pids\t%d\noom kills\t%d\nworkspace disk\t%s\n", u.Pids, u.OomKills, fmtBytes(u.WorkspaceDiskBytes))
+				if u.SampledAt != nil {
+					fmt.Fprintf(w, "usage sampled\t%s\n", u.SampledAt.AsTime().Local().Format(time.RFC3339))
+				}
+				if u.DiskSampledAt != nil {
+					fmt.Fprintf(w, "disk sampled\t%s\n", u.DiskSampledAt.AsTime().Local().Format(time.RFC3339))
+				}
 				if tail != "" {
 					fmt.Fprintf(w, "\nlast %d lines of output:\n%s\n", showTailLines, tail)
 				} else if s.State == pb.SleeveState_SLEEVE_STATE_EXITED {
@@ -547,5 +580,8 @@ func printHandoff(w io.Writer, h *pb.Handoff) {
 	fmt.Fprintf(w, "handoff\t%s\n", h.Path)
 	if h.ArchivePath != "" {
 		fmt.Fprintf(w, "archive\t%s\n", h.ArchivePath)
+	}
+	if h.SummarizerHarness != "" && h.SummaryError != "" {
+		fmt.Fprintf(w, "summary error\t%s\n", h.SummaryError)
 	}
 }

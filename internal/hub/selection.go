@@ -20,6 +20,22 @@ func settingsToProto(s driver.SelectionState) *pb.ModelSettings {
 	return &pb.ModelSettings{Requested: selectionToProto(s.Requested), Effective: selectionToProto(s.Effective), NativeDefaults: selectionToProto(s.Defaults)}
 }
 
+func (h *Hub) spawnSelection(harness driver.Harness, selection driver.Selection) (driver.Selection, bool) {
+	caps, err := driver.CapsFor(harness)
+	if err == nil && caps.Selection && selection.Effort == "" && h.SleeveEffort != "" {
+		selection.Effort = h.SleeveEffort
+		return selection, true
+	}
+	return selection, false
+}
+
+func (h *Hub) validateSpawnSelection(ctx context.Context, harness driver.Harness, selection driver.Selection, effortFallback bool) error {
+	if effortFallback {
+		selection.Effort = ""
+	}
+	return h.validateSelection(ctx, harness, selection)
+}
+
 // Validate before a create/resleeve can stop an existing session or clone a repo.
 func (h *Hub) validateSelection(ctx context.Context, harness driver.Harness, selection driver.Selection) error {
 	if err := driver.CheckSelection(harness, selection); err != nil {
@@ -134,6 +150,9 @@ func (s *chatSleeve) setSelection(ctx context.Context, selection *pb.ModelSelect
 		return nil, connect.NewError(connect.CodeFailedPrecondition, updateErr)
 	}
 	s.requested, s.defaults, s.model, s.effort = st.Requested, st.Defaults, st.Effective.Model, st.Effective.Effort
+	if updateErr == nil {
+		s.effortFallback = false
+	}
 	s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Settings{Settings: settingsToProto(st)} })
 	if err := s.persistLocked(true); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("native selection applied, persistence failed: %w", err))

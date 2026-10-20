@@ -99,6 +99,8 @@ func chatToProto(c *sleeve.Chat) *pb.ChatStatus {
 		ContextTokens:    c.Context,
 		ContextWindow:    c.Window,
 		LastSeq:          c.LastSeq,
+		Provider:         c.Provider,
+		LocalModel:       c.LocalModel,
 	}
 	if !c.CacheExpires.IsZero() {
 		s.CacheExpiresAt = timestamppb.New(c.CacheExpires)
@@ -232,8 +234,11 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 	if l := m.Limits; l != nil {
 		r.Limits = sleeve.Limits{CPUPercent: l.CpuPercent, MemoryBytes: l.MemoryBytes}
 	}
+	if r.Mode != sleeve.ModeTerminal {
+		r.Selection, r.EffortFallback = h.spawnSelection(driver.Harness(r.Harness), r.Selection)
+	}
 	if !spawningEnvoy(ctx) {
-		if err := h.validateSelection(ctx, driver.Harness(r.Harness), r.Selection); err != nil {
+		if err := h.validateSpawnSelection(ctx, driver.Harness(r.Harness), r.Selection, r.EffortFallback); err != nil {
 			return nil, err
 		}
 	}
@@ -245,8 +250,9 @@ func (h *Hub) SpawnSleeve(ctx context.Context, req *connect.Request[pb.SpawnSlee
 }
 
 type spawnOpts struct {
-	selection driver.Selection
-	defaults  driver.Selection
+	selection      driver.Selection
+	defaults       driver.Selection
+	effortFallback bool
 	// keepLog continues the sleeve's chat log instead of moving it aside.
 	keepLog bool
 	// resume is a native session id the chat driver resumes instead of

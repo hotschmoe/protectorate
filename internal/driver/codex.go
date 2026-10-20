@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 )
 
@@ -107,7 +108,7 @@ func openCodex(ctx context.Context, cwd, sessionID string, opts Options) (Sessio
 	}
 	s.tmu.Unlock()
 	if opts.Selection != (Selection{}) {
-		if err := s.SetSelection(ctx, opts.Selection); err != nil {
+		if err := s.setSelection(ctx, opts.Selection, opts.EffortFallback); err != nil {
 			return fail(err)
 		}
 	}
@@ -152,6 +153,10 @@ func (s *codexSession) Selection() SelectionState {
 }
 
 func (s *codexSession) SetSelection(ctx context.Context, requested Selection) error {
+	return s.setSelection(ctx, requested, false)
+}
+
+func (s *codexSession) setSelection(ctx context.Context, requested Selection, effortFallback bool) error {
 	s.smu.Lock()
 	defer s.smu.Unlock()
 	if s.isBusy() {
@@ -162,6 +167,14 @@ func (s *codexSession) SetSelection(ctx context.Context, requested Selection) er
 		return err
 	}
 	effective, err := resolveSelection(models, s.Selection().Defaults, requested)
+	if err != nil && effortFallback {
+		native := requested
+		native.Effort = ""
+		effective, err = resolveSelection(models, s.Selection().Defaults, native)
+		if err == nil {
+			log.Printf("codex model %q does not advertise hub default effort %q; using native default effort %q", effective.Model, requested.Effort, effective.Effort)
+		}
+	}
 	if err != nil {
 		return err
 	}

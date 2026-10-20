@@ -63,25 +63,26 @@ type chatSleeve struct {
 	opMu sync.Mutex
 	pmu  sync.Mutex
 
-	mu         sync.Mutex
-	sess       driver.Session
-	pumpDone   chan struct{}
-	closing    bool
-	releaseTUI func()
-	state      pb.ChatState
-	idleSince  time.Time
-	sessionID  string
-	model      string
-	effort     string
-	requested  driver.Selection
-	defaults   driver.Selection
-	provider   string
-	local      bool
-	context    uint64
-	window     uint64
-	cacheExp   time.Time
-	activity   time.Time
-	turn       bool
+	mu             sync.Mutex
+	sess           driver.Session
+	pumpDone       chan struct{}
+	closing        bool
+	releaseTUI     func()
+	state          pb.ChatState
+	idleSince      time.Time
+	sessionID      string
+	model          string
+	effort         string
+	requested      driver.Selection
+	effortFallback bool
+	defaults       driver.Selection
+	provider       string
+	local          bool
+	context        uint64
+	window         uint64
+	cacheExp       time.Time
+	activity       time.Time
+	turn           bool
 	// used is set once a turn was sent: the harness stores a session only
 	// then, so only then is its id worth resuming.
 	used       bool
@@ -141,6 +142,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 		s.sessionID, s.model, s.context, s.window = c.SessionID, c.Model, c.Context, c.Window
 		s.provider, s.local = c.Provider, c.LocalModel
 		s.effort, s.requested, s.defaults = c.Effort, c.Requested, c.Defaults
+		s.effortFallback = c.EffortFallback
 		s.cacheExp, s.activity = c.CacheExpires, c.LastActivity
 		s.used = c.SessionID != ""
 	}
@@ -290,6 +292,7 @@ func (s *chatSleeve) persistLocked(force bool) error {
 		c.State, c.Model, c.Context, c.Window = st.State.String(), st.Model, st.ContextTokens, st.ContextWindow
 		c.Provider, c.LocalModel = st.Provider, st.LocalModel
 		c.Effort, c.Requested, c.Defaults = s.effort, s.requested, s.defaults
+		c.EffortFallback = s.effortFallback
 		c.CacheExpires, c.LastActivity, c.LastSeq = s.cacheExp, s.activity, st.LastSeq
 		if c.SessionID == "" && s.used {
 			c.SessionID = s.sessionID
@@ -369,7 +372,7 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	requested, defaults := s.requested, s.defaults
+	requested, defaults, effortFallback := s.requested, s.defaults, s.effortFallback
 	s.mu.Unlock()
 	info, err := s.m.h.sleeves.Get(s.name)
 	if err != nil {
@@ -386,7 +389,7 @@ func (s *chatSleeve) ensureOpen(ctx context.Context) error {
 	octx, cancel := context.WithTimeout(ctx, driverOpenTimeout)
 	defer cancel()
 	sess, err := s.m.open(octx, driver.Harness(info.Harness), info.Workspace, resume, "chat:"+s.name,
-		driver.Options{Command: cmd, Autonomous: !info.Supervised, Selection: requested, Defaults: defaults})
+		driver.Options{Command: cmd, Autonomous: !info.Supervised, Selection: requested, Defaults: defaults, EffortFallback: effortFallback})
 	if err != nil {
 		s.mu.Lock()
 		s.appendLocked(func(e *pb.ChatEvent) {
