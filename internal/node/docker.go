@@ -323,10 +323,8 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 		if ct.State != "running" {
 			continue
 		}
-		wg.Add(1)
 		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
 			sctx, cancel := context.WithTimeout(ctx, statsTimeout)
 			defer cancel()
@@ -338,7 +336,7 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 			if err := applyStats(cm, body); err != nil {
 				cm.StatsError = err.Error()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	sort.Slice(eng.Containers, func(i, j int) bool { return eng.Containers[i].Name < eng.Containers[j].Name })

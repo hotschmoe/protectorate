@@ -91,8 +91,6 @@ func (s *sandbox) trial() error {
 	return nil
 }
 
-// env is the job's environment inside the sandbox: a clean one for the job
-// user, then the job's own variables, which win.
 // forget removes the empty mount point bwrap made in the job home for a job
 // directory under the user's home, so finished jobs leave nothing behind.
 func (s *sandbox) forget(jobDir string) {
@@ -103,6 +101,7 @@ func (s *sandbox) forget(jobDir string) {
 	_ = os.Remove(filepath.Join(s.home, rel))
 }
 
+// env starts with a clean job environment; the job's own variables win.
 func (s *sandbox) env(jobEnv [][2]string) [][2]string {
 	uh := s.cfg.UserHome
 	env := [][2]string{
