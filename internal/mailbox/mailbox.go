@@ -30,6 +30,8 @@ var (
 
 const ConciseGuidance = "Mail: aim for 150 words; lead with the result or blocker. Include only actionable findings and essential evidence; reference a file, commit or note for details. Do not restate the request or prior context. No acknowledgements unless asked or ack-required; use msg ack when only confirmation is needed."
 
+const SubagentGuidance = "Use the harness's own subagents for parallel subtasks inside one workspace. Ask for another sleeve when the work needs its own branch, resource limits or isolation."
+
 type Kind string
 
 const (

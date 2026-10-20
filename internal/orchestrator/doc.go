@@ -104,6 +104,7 @@ func RenderAgents(din DocInput) []byte {
 
 	w("## Coordination\n\n")
 	w("%s\n\n", mailbox.ConciseGuidance)
+	w("%s\n\n", mailbox.SubagentGuidance)
 	w("After sending a request, end your turn. Replies arrive as a new turn automatically. Never sleep-poll or repeatedly check the inbox. For an explicit blocking workflow, use `protectorate msg wait <message-id|thread> --timeout 10m`.\n\n")
 	w("Do not send progress checks for tasks younger than about 10 minutes. Every brief must state a word limit for replies and use real paths from `protectorate sleeve workspaces`. Tell workers 'no reply needed' when none is needed.\n\n")
 	w("## Your token\n\n")
