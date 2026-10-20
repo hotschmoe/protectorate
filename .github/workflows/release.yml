@@ -8,7 +8,12 @@ permissions:
   contents: write
 
 jobs:
+  desktop-windows:
+    uses: ./.github/workflows/desktop-windows.yml
+
   release:
+    needs: desktop-windows
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,10 +61,16 @@ jobs:
       - name: Android APK (optional)
         continue-on-error: true
         run: make apk
+      - name: Windows desktop app (optional)
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist
       - name: Assemble release assets
         run: |
           version=$(make -s version)
-          mkdir dist
+          mkdir -p dist
           cp bin/protectorate-* dist/
           tar -czf "dist/protectorate-web-$version.tar.gz" -C app/build/web .
           apk=app/build/app/outputs/flutter-apk/app-release.apk

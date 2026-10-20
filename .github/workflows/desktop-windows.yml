@@ -1,0 +1,36 @@
+name: desktop-windows
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.1
+          cache: true
+      - name: GNU make
+        run: command -v make || choco install make --no-progress -y
+      - run: make app-build-windows
+      - name: Package
+        run: |
+          version=$(make -s version)
+          echo "version $version, app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
+          pwsh -NoProfile -Command "Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath protectorate-desktop-windows-x64-$version.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: protectorate-desktop-windows-x64-*.zip

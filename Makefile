@@ -41,7 +41,7 @@ TAILSCALE_TAGS := \
 	ts_omit_wakeonlan ts_omit_webbrowser ts_omit_webclient
 TARGETS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 android/arm64
 
-.PHONY: gen check-gen build build-tags test vet cross app-check app-build-web apk app-build-linux version version-app check-version check
+.PHONY: gen check-gen build build-tags test vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check
 
 gen:
 	buf lint
@@ -81,6 +81,9 @@ apk:
 
 app-build-linux:
 	cd app && flutter build linux $(APP_VERSION_FLAGS) $(APP_FLAGS)
+
+app-build-windows:
+	cd app && flutter build windows $(APP_VERSION_FLAGS) $(APP_FLAGS)
 
 version:
 	@echo $(VERSION)

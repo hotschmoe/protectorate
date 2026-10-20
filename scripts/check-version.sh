@@ -11,7 +11,7 @@ bad() { echo "check-version: $*" >&2; fail=1; }
 
 grep -qx 'version: 0\.0\.0+0' "$pubspec" || bad "$pubspec: version must stay the placeholder 0.0.0+0; the version is the git tag"
 
-for target in app-build-web apk app-build-linux; do
+for target in app-build-web apk app-build-linux app-build-windows; do
 	lines=$(${MAKE:-make} -n "$target" 2>&1 | grep -E 'flutter build|dart run tool/build_web\.dart') || { bad "make $target runs no app build"; continue; }
 	echo "$lines" | while IFS= read -r l; do
 		for f in --build-name= --build-number= --dart-define=PROTECTORATE_VERSION=; do
@@ -29,7 +29,7 @@ done
 for f in $workflows scripts/*.sh; do
 	[ "$f" = scripts/check-version.sh ] && continue
 	if grep -nE 'flutter build|go build' "$f" >&2; then
-		bad "$f: build through make (build, cross, apk, app-build-web, app-build-linux) so the version is applied"
+		bad "$f: build through make (build, cross, apk, app-build-web, app-build-linux, app-build-windows) so the version is applied"
 	fi
 done
 

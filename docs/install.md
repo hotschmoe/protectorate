@@ -234,6 +234,10 @@ protectorate client register <key>           # for the app's registration key
 protectorate pair --app                      # QR for the native app; without --app, the web link
 ```
 
+## Desktop client (Windows)
+
+CI builds the native Windows app on every push (artifact `desktop-windows` of the `ci` run) and releases attach it as `protectorate-desktop-windows-x64-<version>.zip`. Unzip anywhere and run `protectorate.exe`; it needs no installer. Add the hub with its URL (for example `http://192.168.10.44:7470` on the LAN, or the tailnet name) and a token: the owner token, or a device token from `protectorate pair` (the pairing link's `token=` value). The machine must reach the hub's listen address; a node's agent already does, so the same URL works there.
+
 ## Troubleshooting the tailnet
 
 `protectorate tailnet status` shows the hub's own view: its tailnet name and IPs, then one row per peer with tags, online flag, how the hub reaches it, last WireGuard handshake, last seen and rx/tx bytes. PATH reads `direct <ip:port>` for a UDP path, `DERP protectorate` when traffic goes through the hub's relay, and `-` when no path exists yet. `--json` prints the same data for scripts; the `tailnet_get_status` MCP tool and `TailnetService/GetStatus` carry it too (read scope). It fails with a precondition error when the hub runs without a tailnet.
@@ -246,6 +250,6 @@ protectorate pair --app                      # QR for the native app; without --
 
 ## Versions
 
-The version is the git tag; nothing else defines it. `make version` prints it (`git describe --tags --always --dirty`), and every build takes it from there: `make build` and `make cross` stamp the Go binaries, `make app-build-web`, `make apk` and `make app-build-linux` pass `--build-name` (the x.y.z of the nearest tag, `0.0.0` without one), `--build-number` (commits on HEAD, so it only grows; `make version-app` prints `name+number`) and `--dart-define=PROTECTORATE_VERSION=<version>` to Flutter. `app/pubspec.yaml` holds the placeholder `0.0.0+0`, which every build overrides. `make check-version` fails if the placeholder changed or a make target, script or CI workflow builds without those flags; `make check` runs it with the rest of the checks. Tag with `git tag vX.Y.Z` and build from a full clone (CI uses `fetch-depth: 0`).
+The version is the git tag; nothing else defines it. `make version` prints it (`git describe --tags --always --dirty`), and every build takes it from there: `make build` and `make cross` stamp the Go binaries, `make app-build-web`, `make apk`, `make app-build-linux` and `make app-build-windows` pass `--build-name` (the x.y.z of the nearest tag, `0.0.0` without one), `--build-number` (commits on HEAD, so it only grows; `make version-app` prints `name+number`) and `--dart-define=PROTECTORATE_VERSION=<version>` to Flutter. `app/pubspec.yaml` holds the placeholder `0.0.0+0`, which every build overrides. `make check-version` fails if the placeholder changed or a make target, script or CI workflow builds without those flags; `make check` runs it with the rest of the checks. Tag with `git tag vX.Y.Z` and build from a full clone (CI uses `fetch-depth: 0`).
 
 The app shows its own version in the hub list and the hub's in the overview, and lights VERSION SKEW on the overview when it differs from the hub's or any node's does.

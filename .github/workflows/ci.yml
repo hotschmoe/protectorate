@@ -56,3 +56,6 @@ jobs:
             bin/protectorate-*
             app/build/web
             app/build/app/outputs/flutter-apk/app-release.apk
+
+  desktop-windows:
+    uses: ./.github/workflows/desktop-windows.yml
