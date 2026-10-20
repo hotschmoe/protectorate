@@ -5,3 +5,4 @@ references/
 .claude/worktrees/
 
 /e2e-out/
+*.exe
