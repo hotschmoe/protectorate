@@ -3,9 +3,10 @@ package sleeve
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -422,35 +423,37 @@ func SetenvArgs(env [][2]string) []byte {
 
 // Plan builds the systemd-run and bwrap command for spec. It has no side
 // effects; Layout.Apply prepares the host directories it refers to.
-func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
+func (c Config) validateSpec(spec Spec) ([]Mount, error) {
 	if err := ValidName(spec.Name); err != nil {
-		return Launch{}, err
+		return nil, err
 	}
 	if err := spec.Limits.Validate(); err != nil {
-		return Launch{}, err
+		return nil, err
 	}
 	if err := checkEnv(spec.Env); err != nil {
-		return Launch{}, err
+		return nil, err
 	}
 	if err := c.CheckWorkspace(spec.Name, spec.Workspace); err != nil {
-		return Launch{}, err
+		return nil, err
 	}
 	for _, a := range spec.Args {
 		if strings.ContainsRune(a, 0) {
-			return Launch{}, fmt.Errorf("%w: argument contains a NUL byte", ErrInvalid)
+			return nil, fmt.Errorf("%w: argument contains a NUL byte", ErrInvalid)
 		}
 	}
-	lay := c.layout(spec.Name, spec.Harness)
 	mounts, err := c.ResolveMounts(spec.ReadOnly)
 	if err != nil {
-		return Launch{}, err
+		return nil, err
 	}
 	for _, m := range mounts {
 		if within(spec.Workspace, m.Target) {
-			return Launch{}, fmt.Errorf("%w: read-only mount overlaps workspace", ErrInvalid)
+			return nil, fmt.Errorf("%w: read-only mount overlaps workspace", ErrInvalid)
 		}
 	}
-	unit := c.UnitName(spec.Name)
+	return mounts, nil
+}
+
+func (c Config) launchEnv(spec Spec, lay Layout) [][2]string {
 	env := [][2]string{
 		{"HOME", c.UserHome},
 		{"PATH", strings.Join(c.PathDirs, ":")},
@@ -472,13 +475,18 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 			env = append(env, kv)
 		}
 	}
-	keys := make([]string, 0, len(spec.Env))
-	for k := range spec.Env {
-		keys = append(keys, k)
+	return env
+}
+
+func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
+	mounts, err := c.validateSpec(spec)
+	if err != nil {
+		return Launch{}, err
 	}
-	sort.Strings(keys)
+	lay := c.layout(spec.Name, spec.Harness)
+	unit := c.UnitName(spec.Name)
 	var callerEnv [][2]string
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(spec.Env)) {
 		callerEnv = append(callerEnv, [2]string{k, spec.Env[k]})
 	}
 	envArgs := SetenvArgs(callerEnv)
@@ -494,7 +502,7 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		Mounts:         mounts,
 		WritableMounts: lay.CacheCopies,
 		RW:             append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,
-		Env: env, EnvFD: len(envArgs) > 0, Command: command,
+		Env: c.launchEnv(spec, lay), EnvFD: len(envArgs) > 0, Command: command,
 	})
 	launch := Launch{Argv: argv, Unit: unit, Layout: lay}
 	if len(envArgs) > 0 {
