@@ -1,7 +1,10 @@
 # Work on nodes: tiers, jobs, admin, sandboxes, toolchains
 
 Status: design, agreed in direction on 2026-10-20 and open to revisit. Not
-built yet unless marked **(built)**.
+built yet unless marked **(built)**. Gap 1 (jobs on nodes are too powerful) is
+closed by the tier rename, care enforcement, admin grants, the Linux and
+Windows job sandboxes and busy-GPU placement below; see "Live proof" and
+"Rollout" at the end.
 
 ## Principles
 
@@ -54,16 +57,17 @@ keep working until `node tier` retags them.
   explicit opt-in. `node_admin:<glob>` is a `path.Match` glob over node names
   and admits no RPC by itself; `*` does not include it.
 
-## Jobs today (built)
+## Jobs (built)
 
-`protectorate job run --on <node|lease|selector>` runs as the node agent's own
-user, unsandboxed, in a job directory or a warm git worktree; `--git
-repo@commit` ships only the missing objects, `--artifact` ships files.
-Selection prefers fresh, less loaded nodes and warm worktrees. The job scope
-is therefore shell access on every node the caller can target
-([auth.md](auth.md)); on `kidsbox`, whose agent runs as `alarm` with
-passwordless sudo, that is effectively root. Tier enforcement below closes
-this.
+`protectorate job run --on <node|lease|selector>` runs in a job directory or a
+warm git worktree; `--git repo@commit` ships only the missing objects,
+`--artifact` ships files. Selection prefers fresh, less loaded nodes and warm
+worktrees. Until 2026-10-20 every job ran as the node agent's own user,
+unsandboxed, so the job scope was shell access on every node the caller could
+target, and on `kidsbox` (agent `alarm`, passwordless sudo) effectively root.
+Now a job on a `shared` node runs sandboxed where the node can (bwrap on
+Linux, the runner account on Windows), a `care` node takes jobs only under an
+owner's grant for it, and elevation exists only as `--admin` under a grant.
 
 ## Admin grants
 
@@ -318,10 +322,68 @@ keeps two holders off one card.
 ## Build order
 
 1. Web Add node and Remove node (in progress).
-2. Tier rename and enforcement (`shared|care`), `--admin` grants.
+2. Tier rename and enforcement (`shared|care`), `--admin` grants **(built)**.
 3. Toolchain reporting and `--needs`.
 4. Job sandboxes: Linux bwrap first, then the Windows runner account and Job
-   Object.
+   Object **(built; Windows untried on a real machine)**.
 5. `--provision`.
 6. Hub offload rule.
-7. Busy-GPU placement (after integrated GPU and NPU detection lands).
+7. Busy-GPU placement **(built)**.
+
+## Live proof (2026-10-20)
+
+On the hub machine (ms-r1), with the running hub left alone except for
+read-only calls:
+
+- Running hub, read-only: every node is still tier `server`; a probe job per
+  Linux node found bwrap on ms-r1 and kidsbox but not on agentworld or
+  b70-nas-server, systemd-run and a user manager delegating cpu, memory and
+  pids everywhere, and `sudo -n` working on ms-r1, agentworld and kidsbox but
+  not on b70-nas-server. officepc's agent runs at Medium integrity (not
+  elevated), so it will report no admin jobs. b70-nas-server's B70s idled at
+  0.02-0.04% busy and 52-55 C over three minutes, VRAM use unknown: not busy.
+- A scratch hub on 127.0.0.1:17470 with the new code and two local agents
+  (`shared1`, and `carebox` moved with `node tier carebox care`): a `job_*`
+  token is refused on carebox (permission_denied) and selectors never place
+  there; `lease acquire --node carebox` and `carebox:gpu0` are refused even
+  for the owner; a sandboxed job on shared1 with `--cpu 50 --mem 256M` ran in
+  `prot-job-<id>.scope` with 5 processes visible, no `/home/hotschmoe`, a clean
+  environment and isolation `bwrap, cpu 50%, memory 256 MiB`; `token create
+  --scope node_admin:carebox` is refused; `grant admin --node carebox --task
+  "update kids machine"` minted `job_* node_admin:carebox` for 4h, under which
+  a plain job ran as the agent user (`plain`) and `--admin` ran as uid 0
+  through sudo (`isolation sudo`, task recorded); the grant is refused for
+  admin on shared1, and `--admin` with a selector is refused; the orchestrator
+  token (with `--orchestrator-admin-grants`) minted for shared1 but not for
+  carebox or a glob; `token ls` shows the task and minter; the audit lines
+  carry the task, the job id, the mode and, for grant and admin jobs, the
+  command.
+
+## Rollout
+
+1. Stop the hub, then rename the tiers in `~/.protectorate/nodes.yaml`
+   (`tier: server` becomes `tier: shared`, `family` becomes `care`); the new
+   hub refuses to load the old names. Queued lease tickets and job records
+   written with the old `allowFamily` field still load.
+2. Start the new hub (`hub serve` as today; add `--orchestrator-admin-grants`
+   only if the orchestrator should mint grants for shared nodes), with the web
+   client rebuilt (`make app-build-web`) for the CARE, GPU BUSY and JOBS
+   views. Respawn the orchestrator (`orchestrator spawn`) so its token gains
+   `grant_admin`.
+3. Retag every node on the tailnet: `protectorate node tier <name> shared`
+   for agentworld, b70-nas-server, officepc and snapdragon-laptop, and
+   `protectorate node tier kidsbox care`. Headscale keeps the retired
+   `tag:tier-server` until then, so nothing breaks in between.
+4. Update the nodes (`node update --all`): the new agents report
+   `JobIsolation` (`node show` `jobs` line); until a node runs the new agent,
+   admin jobs there are refused.
+5. Optional, for sandboxes: install bubblewrap on agentworld and
+   b70-nas-server (`sudo apt install bubblewrap`; on Ubuntu 26.04 the package's
+   AppArmor profile allows its user namespaces), then restart their agents;
+   on officepc (and snapdragon-laptop) run `protectorate node install --runner`
+   once from an elevated PowerShell as the user the agent runs as, then sign
+   out and in. Until then those nodes say `sandbox none` or `job-object`
+   (unisolated).
+6. For kidsbox work: `protectorate grant admin --node kidsbox --ttl 4h --task
+   "..." --out grant.tok`, then `protectorate --token-file grant.tok job run
+   --on kidsbox [--admin] -- ...`.
