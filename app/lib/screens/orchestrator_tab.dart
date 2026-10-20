@@ -530,16 +530,17 @@ class _NotRunningState extends State<_NotRunning> {
                   style: t.body(),
                 ),
                 const SizedBox(height: Tokens.gap),
-                Row(
+                Wrap(
+                  spacing: Tokens.gapL,
+                  runSpacing: Tokens.gap,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text('HARNESS', style: t.legend()),
-                    const SizedBox(width: Tokens.gapL),
                     _HarnessPicker(
                       key: const ValueKey('start-harness'),
                       value: _harness,
                       onChanged: (h) => setState(() => _harness = h),
                     ),
-                    const Spacer(),
                     FilledButton(
                       key: const ValueKey('start-envoy'),
                       onPressed: _starting ? null : _start,
