@@ -144,6 +144,10 @@ re-exec. An inherited session invocation ID must still use standalone re-exec.
 All release requests stay on loopback; no GitHub access
 or installed service registration is needed. The rollback guardian PID comes
 from the private hub update journal and is stopped during test cleanup.
+The hub accepts `--release-api-url URL` for a GitHub-compatible API override;
+the scenario supplies its loopback server, a private `--release-dir`, and
+`--hub-update-timeout 3s`. Production defaults to `https://api.github.com`
+and a 45-second hub health deadline.
 
 `TestHubInstallerVerifiesFleetBeforeInstalling` runs the real shell installer
 with real binary assets on a loopback release server. It checks stable and dev
