@@ -503,13 +503,20 @@ func (i authInterceptor) admit(ctx context.Context, procedure string, header htt
 		if !audited || (quiet && callErr == nil) {
 			return
 		}
-		code := ""
-		if callErr != nil {
-			code = connect.CodeOf(callErr).String()
-		}
-		i.a.Record(ctx, p, procedure, subject, callErr, code)
+		i.a.Record(ctx, p, procedure, subject, callErr, resultCode(callErr))
 	}
 	return auth.WithPrincipal(ctx, p), finish, nil
+}
+
+func resultCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	return connect.CodeOf(err).String()
+}
+
+func (h *Hub) recordStream(ctx context.Context, procedure, subject string, err error) {
+	h.authz.Record(ctx, auth.PrincipalFrom(ctx), procedure, subject, err, resultCode(err))
 }
 
 // continuesTransfer marks the middle chunks of a file upload, which are not

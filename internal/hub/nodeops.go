@@ -11,7 +11,6 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
-	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/node"
 )
 
@@ -149,11 +148,7 @@ func (h *Hub) PutFile(ctx context.Context, req *connect.Request[pb.PutFileReques
 // skips streams and does not see their request.
 func (h *Hub) GetFile(ctx context.Context, req *connect.Request[pb.GetFileRequest], stream *connect.ServerStream[pb.GetFileResponse]) (err error) {
 	defer func() {
-		code := ""
-		if err != nil {
-			code = connect.CodeOf(err).String()
-		}
-		h.authz.Record(ctx, auth.PrincipalFrom(ctx), req.Spec().Procedure, req.Msg.Name, err, code)
+		h.recordStream(ctx, req.Spec().Procedure, req.Msg.Name, err)
 	}()
 	ops, err := h.opsFor(ctx, req.Msg.Name)
 	if err != nil {

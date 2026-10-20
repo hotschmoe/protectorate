@@ -10,7 +10,6 @@ import (
 	"connectrpc.com/connect"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
-	"github.com/hotschmoe/protectorate/internal/auth"
 )
 
 const (
@@ -57,11 +56,7 @@ func (m *JobManager) activeOn(name string) []string {
 // interceptor does not see a stream's request, so it is audited here.
 func (h *Hub) RemoveNode(ctx context.Context, req *connect.Request[pb.RemoveNodeRequest], stream *connect.ServerStream[pb.RemoveNodeProgress]) (err error) {
 	defer func() {
-		code := ""
-		if err != nil {
-			code = connect.CodeOf(err).String()
-		}
-		h.authz.Record(ctx, auth.PrincipalFrom(ctx), req.Spec().Procedure, req.Msg.Name, err, code)
+		h.recordStream(ctx, req.Spec().Procedure, req.Msg.Name, err)
 	}()
 	name := strings.ToLower(strings.TrimSpace(req.Msg.Name))
 	if name == h.nodes.self.Name {

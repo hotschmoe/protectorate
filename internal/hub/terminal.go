@@ -161,13 +161,11 @@ func (h *Hub) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
 	if sess.State != session.Exited {
-		wg.Add(1)
-		go func() { defer wg.Done(); h.noticeOnExit(ctx, conn, name) }()
+		wg.Go(func() { h.noticeOnExit(ctx, conn, name) })
 	}
-	go func() { defer wg.Done(); defer cancel(); pumpOutput(ctx, conn, ptmx) }()
-	go func() { defer wg.Done(); pingLoop(ctx, conn, h.PingInterval, cancel) }()
+	wg.Go(func() { defer cancel(); pumpOutput(ctx, conn, ptmx) })
+	wg.Go(func() { pingLoop(ctx, conn, h.PingInterval, cancel) })
 
 	pumpInput(ctx, conn, ptmx, readOnly)
 	cancel()

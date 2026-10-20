@@ -3,7 +3,6 @@ package hub
 import (
 	"context"
 	"errors"
-	"strconv"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -88,13 +87,7 @@ func (h *Hub) publishNote(kind string, n backlog.Note) {
 	if err != nil {
 		return
 	}
-	h.events.publish(&pb.Event{
-		Id:      strconv.FormatUint(h.seq.Add(1), 10),
-		Time:    timestamppb.Now(),
-		Kind:    kind,
-		Subject: n.ID,
-		Payload: payload,
-	})
+	h.emit(kind, n.ID, payload)
 }
 
 func backlogError(err error) error {

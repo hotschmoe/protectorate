@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"connectrpc.com/connect"
@@ -186,13 +185,7 @@ func (h *Hub) publishSession(kind string, s session.Session) {
 	if err != nil {
 		return
 	}
-	h.events.publish(&pb.Event{
-		Id:      strconv.FormatUint(h.seq.Add(1), 10),
-		Time:    timestamppb.Now(),
-		Kind:    kind,
-		Subject: s.Name,
-		Payload: payload,
-	})
+	h.emit(kind, s.Name, payload)
 }
 
 // refuseSleeveSession keeps plain session RPCs from creating or respawning a
