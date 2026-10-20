@@ -34,7 +34,8 @@ covered by `chat_*`.
 - **Watch(sleeve, after_seq)** replays stored events with `seq > after_seq`,
   then streams live ones, with no gap or duplicate at the boundary.
 - **Send(sleeve, text, request_id)** starts a turn. A retry with the same
-  `request_id` (8-128 chars) returns the original `seq`. During a turn it
+  `request_id` (8-128 chars) returns the original `seq`, for an hour and across a
+  hub restart (`chat.jsonl.request-ids` beside the log). During a turn it
   steers on harnesses that can (Codex, pi) and fails with `failed_precondition`
   on the rest (Claude, Grok): interrupt first.
 - **Interrupt** cancels the running turn; a no-op when idle.
@@ -86,8 +87,8 @@ anything. Decision record: `docs/memory-options.md`, sections 3 and 4.
    is interrupted; one that does not settle 30s later is closed under it.
 2. Facts, composed in code (`internal/handoff`): git status, `diff --stat
    HEAD` and the last 10 commits (run in a read-only bwrap jail, since the
-   repository config is agent-written), the sleeve's claimed backlog items
-   and its project's open ones, open ack-required messages, whether
+   repository config is agent-written), the hub notes the sleeve wrote or
+   tagged with its project, open ack-required messages, whether
    `.protectorate/NOTES.md` exists, and from the outgoing harness's own
    transcript (read-only, inside the sleeve home: Claude
    `.claude/projects/*/<id>.jsonl`, Codex `.codex/sessions/Y/M/D/rollout-*-<id>.jsonl`,
@@ -143,6 +144,13 @@ FAILED and EXITED when the driver is gone. The driver starts at spawn, stays
 open until the sleeve is killed or the hub stops, and restarts on the next Send
 after a crash or a hub restart, resuming the native session. A session id is
 only resumed once a turn was sent, since harnesses store a session only then.
+
+A hub restart while a turn, an approval or a compaction was running leaves the
+sleeve FAILED, with an error event "hub restarted mid-turn" (or
+"mid-compaction") in the log, as soon as the hub is up. The turn is not
+replayed; the next Send opens the harness again and resumes the same native
+session (`--resume`, `thread/resume`, `session/load`, `--session`). An idle
+sleeve comes back IDLE.
 
 ## Per harness
 

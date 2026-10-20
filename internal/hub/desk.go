@@ -2,8 +2,12 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +17,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
 // deskResource is the lease resource that guards a node's desktop.
@@ -30,11 +35,41 @@ const (
 	DeskLeaseExpiresHeader = "Protectorate-Desk-Lease-Expires"
 )
 
-// deskUse counts desk input commands per node and caller for the current day.
+// deskUse counts desk input commands per node and caller for the current
+// local day. With a path the counts are kept on disk and survive a restart.
 type deskUse struct {
 	mu     sync.Mutex
+	path   string
 	day    string
 	counts map[string]map[string]int32
+}
+
+type deskUseFile struct {
+	Day    string                      `json:"day"`
+	Counts map[string]map[string]int32 `json:"counts"`
+}
+
+// open adopts the counts saved at path if they are from today, and keeps
+// saving there.
+func (u *deskUse) open(path string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.path = path
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read desk use: %w", err)
+	}
+	var f deskUseFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	if f.Day == time.Now().Format(time.DateOnly) && f.Counts != nil {
+		u.day, u.counts = f.Day, f.Counts
+	}
+	return nil
 }
 
 func (u *deskUse) add(node, caller string) {
@@ -45,6 +80,16 @@ func (u *deskUse) add(node, caller string) {
 		u.counts[node] = map[string]int32{}
 	}
 	u.counts[node][caller]++
+	if u.path == "" {
+		return
+	}
+	raw, err := json.Marshal(deskUseFile{Day: u.day, Counts: u.counts})
+	if err == nil {
+		err = fsutil.WriteFile(u.path, raw, 0o600)
+	}
+	if err != nil {
+		log.Printf("desk: save input counts: %v", err)
+	}
 }
 
 func (u *deskUse) rollLocked() {

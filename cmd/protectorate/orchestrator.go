@@ -26,7 +26,7 @@ import (
 var orchestratorHidden = map[string]bool{
 	"hub": true, "service": true, "pair": true, "token": true, "audit": true, "orchestrator": true,
 	"client": true, "mcp": true, "node invite": true, "node join": true, "node renew": true,
-	"node revoke": true, "node rm": true, "node serve": true, "node metrics": true, "backlog edit": true,
+	"node revoke": true, "node rm": true, "node serve": true, "node metrics": true,
 	"session attach": true, "sleeve attach": true,
 }
 

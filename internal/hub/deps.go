@@ -19,7 +19,7 @@ import (
 // checkReleases compares each project's tags and default branch with what was
 // last seen and, on a new tag or an advance of the default branch, tells every
 // dependent project the facts: a notice message where a sleeve works on it, a
-// backlog item where none does. It reads local git only.
+// note where none does. It reads local git only.
 func (c *coordinator) checkReleases(ctx context.Context) {
 	for _, v := range c.dir.List() {
 		if ctx.Err() != nil {
@@ -88,7 +88,7 @@ func (c *coordinator) announce(ctx context.Context, v directory.View, ws string,
 			}
 			continue
 		}
-		c.fileRelease(v, d, ch, e.Via)
+		c.fileRelease(v, d, ch, e.Via, body)
 	}
 }
 
@@ -115,28 +115,25 @@ func (c *coordinator) publishRelease(v directory.View, ch directory.Change, depe
 	}
 }
 
-// fileRelease files a backlog item for a dependent nobody works on, once.
-func (c *coordinator) fileRelease(up, down directory.View, ch directory.Change, via []string) {
+// fileRelease files a note for a dependent nobody works on, once.
+func (c *coordinator) fileRelease(up, down directory.View, ch directory.Change, via []string, body string) {
 	if c.h.backlog == nil {
 		return
 	}
 	title := fmt.Sprintf("%s %s: review changes (uses %s)", up.Display, releaseHeadline(ch), strings.Join(via, ", "))
 	existing, err := c.h.backlog.List(backlog.Filter{Project: down.Display})
 	if err != nil {
-		log.Printf("coordination: read backlog: %v", err)
+		log.Printf("coordination: read notes: %v", err)
 		return
 	}
-	for _, it := range existing {
-		if it.Title == title {
+	for _, n := range existing {
+		if n.Title == title {
 			return
 		}
 	}
-	it, err := c.h.backlog.Add(backlog.NewItem{Project: down.Display, Title: title})
-	if err != nil {
-		log.Printf("coordination: file backlog item for %s: %v", down.ID, err)
-		return
+	if _, err := c.h.fileNote(backlog.NewNote{Title: title, Body: body, Project: down.Display, Source: hubName}); err != nil {
+		log.Printf("coordination: file note for %s: %v", down.ID, err)
 	}
-	c.h.publishBacklog("backlog.added", it)
 }
 
 func releaseHeadline(ch directory.Change) string {

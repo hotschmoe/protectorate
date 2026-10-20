@@ -27,12 +27,22 @@ clients (desktop, Android, web) talk to the same API.
 | Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
 | Files and desktop (P11, `docs/desk.md`) | `node put/get`, `desk <node> screenshot/windows/click/move/type/key/run` | zstd-adaptive, sha256-verified, atomic file copies confined to a node file root; Windows screen and input from the logged-in session behind a `desk:<node>` lease |
 | Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("poe") with a scoped token, driving the hub through the CLI |
-| Backlog (P6) | `backlog ls/add/claim/done/edit` | one markdown file on the hub; items link to GitHub issues |
+| Notes (backlog) | `backlog add/ls/show/edit/rm/pin` | the owner's notes, kept on the hub, editable in the app and by the orchestrator |
 | Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |
 | Clients | `pair`, `mcp`, `hub serve --web` | QR pairing with a scoped device token; MCP tools generated from the API |
 | Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
 | Nodes | `node install/uninstall/doctor/update` | one-command node setup per OS, dry-run first; uninstall deletes nothing; update pushes a build, swaps it with one rollback binary |
 | Add and remove nodes (`docs/install.md`) | app ADD NODE / REMOVE NODE, `node invite`, `node rm [--jobs wait\|cancel] [--uninstall]` | the hub serves `/install.sh`, `/install.ps1` and sha256-checked builds under `/dl/`; a single-use key from the environment, never a URL; live INVITED, JOINED, FIRST METRICS, READY; removal drains, revokes the tailnet enrollment and deletes nothing on the machine |
+
+## Install
+
+Hub, on Linux (x86_64 or aarch64), per user, no sudo; re-run to upgrade:
+
+```
+curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.2.1/install-hub.sh | bash
+```
+
+It verifies the release against `SHA256SUMS`, lists missing prerequisites (bwrap, tmux, git, systemd user manager) instead of installing them, and enables a `protectorate-hub` user unit. Nodes join from the web app (NODES, ADD NODE). Details in [docs/install.md](docs/install.md); branch and release rules in [DEV.md](DEV.md).
 
 ## Build
 
@@ -48,7 +58,7 @@ make app-check  # flutter analyze + test
 ## Run
 
 ```
-protectorate hub serve [--web app/build/web]   # owner token at ~/.protectorate/token
+protectorate hub serve [--web app/build/web]   # --web defaults to ~/.local/share/protectorate/web when installed; owner token at ~/.protectorate/token
 protectorate login claude                       # once per harness, on the hub; --status lists them
 protectorate quota
 protectorate session new demo -- claude

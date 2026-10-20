@@ -143,7 +143,7 @@ func TestMarkdownBudget(t *testing.T) {
 		Sleeve: "alice", Harness: "claude", To: "codex", SessionID: "s1", Workspace: "/w",
 		Branch: "main", Head: "abc1234", Status: strings.Repeat("?? file\n", 1000), Log: "abc1234 2026-10-20 first",
 		Transcript: Transcript{Path: ".claude/projects/-w/s1.jsonl", Turns: turns},
-		Backlog:    []string{"b1 [open] fix it"}, Mail: []string{"m1 request from bob: please"},
+		HubNotes:   []string{"b1 fix it (by owner)"}, Mail: []string{"m1 request from bob: please"},
 	}
 	tests := []struct {
 		budget  int
@@ -151,7 +151,7 @@ func TestMarkdownBudget(t *testing.T) {
 		hasNot  []string
 		maxSize int
 	}{
-		{DefaultBudget, []string{"FIRST ask", "LATEST ask", "FINAL", " END", "U19", "U16", "bytes clipped", "b1 [open]", "m1 request", "branch main at abc1234"}, []string{"U15", "A19"}, DefaultBudget},
+		{DefaultBudget, []string{"FIRST ask", "LATEST ask", "FINAL", " END", "U19", "U16", "bytes clipped", "b1 fix it", "m1 request", "branch main at abc1234"}, []string{"U15", "A19"}, DefaultBudget},
 		{6000, []string{"FINAL", " END"}, []string{"U19"}, 6000},
 		{8000, []string{"FINAL", " END", "LATEST ask", "FIRST ask"}, []string{"U18"}, 8000},
 		{2500, []string{"git status"}, []string{"FINAL"}, 5000},

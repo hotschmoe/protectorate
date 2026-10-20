@@ -295,8 +295,8 @@ func (h *Hub) handoffFacts(ctx context.Context, info sleeve.Info, cs *chatSleeve
 	f.ReadGit(ctx, func(ctx context.Context, dir string, args ...string) (string, error) {
 		return h.sleeves.Git(ctx, info.Name, dir, args...)
 	})
-	f.Notes = handoff.HasNotes(info.Workspace)
-	f.Backlog = h.backlogLines(info.Name)
+	f.NotesFile = handoff.HasNotes(info.Workspace)
+	f.HubNotes = h.noteLines(info.Name)
 	if h.coord != nil {
 		for _, m := range h.coord.mail.Involving(info.Name) {
 			f.Mail = append(f.Mail, fmt.Sprintf("%s (%s, thread %s) from %s to %s: %s", m.ID, m.Kind, m.Thread, m.From, m.To, firstLine(m.Body, 200)))
@@ -305,34 +305,41 @@ func (h *Hub) handoffFacts(ctx context.Context, info sleeve.Info, cs *chatSleeve
 	return f
 }
 
-// backlogLines lists the open items the sleeve claimed, then the open items
-// of the projects it works on.
-func (h *Hub) backlogLines(name string) []string {
+// noteLines lists the hub notes the sleeve wrote and those tagged with a
+// project it works on (by id, name or display name).
+func (h *Hub) noteLines(name string) []string {
 	if h.backlog == nil {
 		return nil
 	}
-	items, err := h.backlog.List(backlog.Filter{})
+	notes, err := h.backlog.List(backlog.Filter{})
 	if err != nil {
-		return []string{"backlog unreadable: " + err.Error()}
+		return []string{"notes unreadable: " + err.Error()}
 	}
-	projects := map[string]bool{}
+	tags := map[string]bool{}
 	if h.coord != nil {
-		for _, p := range h.coord.dir.ProjectsOf(name) {
-			projects[p] = true
+		for _, id := range h.coord.dir.ProjectsOf(name) {
+			tags[id] = true
+			if v, err := h.coord.dir.Get(id); err == nil {
+				tags[v.Name], tags[v.Display] = true, true
+			}
 		}
 	}
-	var claimed, open []string
-	for _, it := range items {
-		line := fmt.Sprintf("%s [%s] %s", it.ID, it.State, it.Title)
-		switch {
-		case it.State == backlog.StateDone:
-		case it.Claim != nil && (it.Claim.By == name || it.Claim.By == sleeveTokenName(name)):
-			claimed = append(claimed, line+" (claimed by this sleeve)")
-		case it.State == backlog.StateTodo && projects[it.Project]:
-			open = append(open, line)
+	var out []string
+	for _, n := range notes {
+		if n.Source != name && !(n.Project != "" && tags[n.Project]) {
+			continue
 		}
+		title := n.Title
+		if title == "" {
+			title = firstLine(n.Body, 120)
+		}
+		line := fmt.Sprintf("%s %s (by %s", n.ID, title, n.Source)
+		if n.Project != "" {
+			line += ", project " + n.Project
+		}
+		out = append(out, line+")")
 	}
-	return append(claimed, open...)
+	return out
 }
 
 // summarize has a separate model write the narrative part, trying the

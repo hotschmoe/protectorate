@@ -37,6 +37,7 @@ func (h *Hub) SetSleeves(m *sleeve.Manager) {
 	h.sleeves = m
 	h.chat = newChatManager(h)
 	h.dropHelpers(context.Background())
+	h.chat.recover()
 }
 
 // sleeveProto is sleeveToProto with the live chat status laid over the

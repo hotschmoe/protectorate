@@ -26,6 +26,9 @@ import (
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 )
 
+// followWindow is how long followJob keeps retrying without receiving anything.
+var followWindow = 5 * time.Minute
+
 func (o *opts) jobClient() (protectoratev1connect.JobServiceClient, error) {
 	hc, err := o.httpClient()
 	if err != nil {
@@ -302,48 +305,55 @@ func runJob(ctx context.Context, o *opts, cmd *cobra.Command, jc protectoratev1c
 }
 
 // followJob copies the log from offset to w and returns the final record. A
-// dropped stream is resumed from the last offset a few times.
+// dropped stream, or a hub that is restarting, is resumed from the last
+// offset received until followWindow passes with no progress.
 func followJob(ctx context.Context, jc protectoratev1connect.JobServiceClient, id string, offset uint64, w io.Writer) (*pb.Job, error) {
 	var last *pb.Job
 	var streamErr error
-	for attempt := 0; attempt < 5; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-time.After(time.Second):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
+	progress := time.Now()
+	for delay := time.Second; time.Since(progress) < followWindow; delay = min(2*delay, 5*time.Second) {
 		stream, err := jc.WatchJob(ctx, connect.NewRequest(&pb.WatchJobRequest{Id: id, FromOffset: offset, Follow: true}))
-		if err != nil {
-			streamErr = err
-			continue
-		}
-		for stream.Receive() {
-			switch ev := stream.Msg().Event.(type) {
-			case *pb.WatchJobResponse_Job:
-				last = ev.Job
-			case *pb.WatchJobResponse_Log:
-				if _, err := w.Write(ev.Log.Data); err != nil {
-					stream.Close()
-					return nil, err
+		if err == nil {
+			for stream.Receive() {
+				progress = time.Now()
+				switch ev := stream.Msg().Event.(type) {
+				case *pb.WatchJobResponse_Job:
+					last = ev.Job
+				case *pb.WatchJobResponse_Log:
+					if _, err := w.Write(ev.Log.Data); err != nil {
+						stream.Close()
+						return nil, err
+					}
+					offset = ev.Log.Offset + uint64(len(ev.Log.Data))
 				}
-				offset = ev.Log.Offset + uint64(len(ev.Log.Data))
+			}
+			err = stream.Err()
+			stream.Close()
+			if err == nil && last != nil && jobEnded(last.State) {
+				return last, nil
 			}
 		}
-		streamErr = stream.Err()
-		stream.Close()
-		if streamErr == nil && last != nil {
-			return last, nil
+		streamErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		if connect.CodeOf(streamErr) == connect.CodeNotFound {
+		if code := connect.CodeOf(err); err != nil && code != connect.CodeUnavailable && code != connect.CodeUnknown && code != connect.CodeInternal && code != connect.CodeDeadlineExceeded {
 			break
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
 	if streamErr == nil {
-		streamErr = errors.New("log stream ended without a job record")
+		streamErr = errors.New("log stream ended before the job did")
 	}
 	return nil, fmt.Errorf("watch job %s: %w", id, streamErr)
+}
+
+func jobEnded(s pb.JobState) bool {
+	return s != pb.JobState_JOB_STATE_PREPARING && s != pb.JobState_JOB_STATE_RUNNING
 }
 
 func jobSummary(j *pb.Job) string {
@@ -478,7 +488,11 @@ func jobLogsCmd(o *opts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stream, err := jc.WatchJob(cmd.Context(), connect.NewRequest(&pb.WatchJobRequest{Id: args[0], Follow: follow}))
+			if follow {
+				_, err := followJob(cmd.Context(), jc, args[0], 0, cmd.OutOrStdout())
+				return err
+			}
+			stream, err := jc.WatchJob(cmd.Context(), connect.NewRequest(&pb.WatchJobRequest{Id: args[0]}))
 			if err != nil {
 				return err
 			}

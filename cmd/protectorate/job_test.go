@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -435,5 +436,86 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type watchHub struct {
+	protectoratev1connect.UnimplementedJobServiceHandler
+	mu      sync.Mutex
+	script  []func(*pb.WatchJobRequest, *connect.ServerStream[pb.WatchJobResponse]) error
+	offsets []uint64
+}
+
+func (w *watchHub) WatchJob(_ context.Context, req *connect.Request[pb.WatchJobRequest], stream *connect.ServerStream[pb.WatchJobResponse]) error {
+	w.mu.Lock()
+	w.offsets = append(w.offsets, req.Msg.FromOffset)
+	step := w.script[min(len(w.offsets), len(w.script))-1]
+	w.mu.Unlock()
+	return step(req.Msg, stream)
+}
+
+func logFrame(off uint64, text string) *pb.WatchJobResponse {
+	return &pb.WatchJobResponse{Event: &pb.WatchJobResponse_Log{Log: &pb.JobLog{Offset: off, Data: []byte(text)}}}
+}
+
+func jobFrame(s pb.JobState) *pb.WatchJobResponse {
+	return &pb.WatchJobResponse{Event: &pb.WatchJobResponse_Job{Job: &pb.Job{Id: "j1", State: s}}}
+}
+
+func TestFollowJobResumesAcrossHubRestart(t *testing.T) {
+	down := func(*pb.WatchJobRequest, *connect.ServerStream[pb.WatchJobResponse]) error {
+		return connect.NewError(connect.CodeUnavailable, errors.New("hub restarting"))
+	}
+	partial := func(_ *pb.WatchJobRequest, s *connect.ServerStream[pb.WatchJobResponse]) error {
+		for _, f := range []*pb.WatchJobResponse{jobFrame(pb.JobState_JOB_STATE_RUNNING), logFrame(0, "one\n")} {
+			if err := s.Send(f); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	rest := func(r *pb.WatchJobRequest, s *connect.ServerStream[pb.WatchJobResponse]) error {
+		for _, f := range []*pb.WatchJobResponse{jobFrame(pb.JobState_JOB_STATE_RUNNING), logFrame(r.FromOffset, "two\n"), jobFrame(pb.JobState_JOB_STATE_SUCCEEDED)} {
+			if err := s.Send(f); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	notFound := func(*pb.WatchJobRequest, *connect.ServerStream[pb.WatchJobResponse]) error {
+		return connect.NewError(connect.CodeNotFound, errors.New("no such job"))
+	}
+	tests := []struct {
+		name        string
+		script      []func(*pb.WatchJobRequest, *connect.ServerStream[pb.WatchJobResponse]) error
+		wantOut     string
+		wantOffsets []uint64
+		wantErr     bool
+	}{
+		{"stream ends early, then the hub is down, then it is back", []func(*pb.WatchJobRequest, *connect.ServerStream[pb.WatchJobResponse]) error{partial, down, rest}, "one\ntwo\n", []uint64{0, 4, 4}, false},
+		{"a missing job is final", []func(*pb.WatchJobRequest, *connect.ServerStream[pb.WatchJobResponse]) error{notFound}, "", []uint64{0}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &watchHub{script: tt.script}
+			mux := http.NewServeMux()
+			mux.Handle(protectoratev1connect.NewJobServiceHandler(h))
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			var out bytes.Buffer
+			job, err := followJob(context.Background(), protectoratev1connect.NewJobServiceClient(http.DefaultClient, srv.URL), "j1", 0, &out)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v", err)
+			}
+			if err == nil && job.State != pb.JobState_JOB_STATE_SUCCEEDED {
+				t.Fatalf("job = %v", job)
+			}
+			if out.String() != tt.wantOut {
+				t.Fatalf("out = %q, want %q", out.String(), tt.wantOut)
+			}
+			if !slices.Equal(h.offsets, tt.wantOffsets) {
+				t.Fatalf("offsets = %v, want %v", h.offsets, tt.wantOffsets)
+			}
+		})
 	}
 }

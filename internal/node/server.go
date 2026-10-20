@@ -185,6 +185,20 @@ func (a *Agent) RunJob(ctx context.Context, req *connect.Request[pb.RunJobReques
 	return a.Jobs.Run(ctx, req.Msg, stream.Send)
 }
 
+func (a *Agent) AttachJob(ctx context.Context, req *connect.Request[pb.AttachJobRequest], stream *connect.ServerStream[pb.JobEvent]) error {
+	if a.Jobs == nil {
+		return errNoJobs
+	}
+	return a.Jobs.Attach(ctx, req.Msg.JobId, req.Msg.FromOffset, stream.Send)
+}
+
+func (a *Agent) ListJobs(_ context.Context, _ *connect.Request[pb.NodeAgentServiceListJobsRequest]) (*connect.Response[pb.NodeAgentServiceListJobsResponse], error) {
+	if a.Jobs == nil {
+		return nil, errNoJobs
+	}
+	return connect.NewResponse(&pb.NodeAgentServiceListJobsResponse{Jobs: a.Jobs.List()}), nil
+}
+
 func (a *Agent) CancelJob(_ context.Context, req *connect.Request[pb.NodeAgentServiceCancelJobRequest]) (*connect.Response[pb.NodeAgentServiceCancelJobResponse], error) {
 	if a.Jobs == nil {
 		return nil, errNoJobs

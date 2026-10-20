@@ -6,32 +6,48 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "AddItem appends a new TODO item to a project and returns it with its id.",
+    "description": "CreateNote adds a note and returns it with its id.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "harness": {
-          "description": "harness is a preference such as \"codex\"; empty or \"any\" means none.",
+        "body": {
+          "description": "body is markdown text.",
           "type": "string"
         },
-        "issueUrl": {
-          "type": "string"
-        },
-        "priority": {
-          "description": "priority is 1 (highest) to 9; 0 means unset.",
-          "type": "integer"
+        "pinned": {
+          "type": "boolean"
         },
         "project": {
-          "description": "project is the heading to file the item under.",
+          "description": "project is an optional tag such as \"hotschmoe/protectorate\".",
           "type": "string"
         },
         "title": {
+          "description": "title is a single line, up to 200 characters.",
           "type": "string"
         }
       },
       "type": "object"
     },
-    "name": "backlog_add_item"
+    "name": "backlog_create_note"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "DeleteNote removes a note for good.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_delete_note"
   },
   {
     "annotations": {
@@ -39,31 +55,40 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "ListItems returns backlog items, optionally filtered by project, state and harness.",
+    "description": "GetNote returns one note by id.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "harness": {
-          "description": "harness keeps items this harness may run: its own plus \"any\"/unset.",
-          "type": "string"
-        },
-        "project": {
-          "type": "string"
-        },
-        "state": {
-          "description": "state of UNSPECIFIED matches every state.",
-          "enum": [
-            "ITEM_STATE_UNSPECIFIED",
-            "ITEM_STATE_TODO",
-            "ITEM_STATE_CLAIMED",
-            "ITEM_STATE_DONE"
-          ],
+        "id": {
           "type": "string"
         }
       },
       "type": "object"
     },
-    "name": "backlog_list_items"
+    "name": "backlog_get_note"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListNotes returns notes, pinned first and then most recently updated, optionally filtered by project tag and a text query.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "description": "project keeps notes with exactly this tag.",
+          "type": "string"
+        },
+        "query": {
+          "description": "query keeps notes whose title or body contains it, ignoring case.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_list_notes"
   },
   {
     "annotations": {
@@ -72,43 +97,34 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "UpdateItem sets an item's state, claiming or releasing it.",
+    "description": "UpdateNote changes the fields that are set and leaves the others alone.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "claim": {
-          "additionalProperties": false,
-          "description": "claim is required when state is CLAIMED.",
-          "properties": {
-            "at": {
-              "format": "date-time",
-              "type": "string"
-            },
-            "by": {
-              "description": "by is \"\u003csleeve\u003e\" or \"\u003csleeve\u003e/\u003charness\u003e\"; no whitespace or '@'.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "id": {
-          "description": "id of the item to change.",
+        "body": {
+          "description": "body replaces the whole markdown body when set; send the full text.",
           "type": "string"
         },
-        "state": {
-          "description": "state is the state to move the item to.",
-          "enum": [
-            "ITEM_STATE_UNSPECIFIED",
-            "ITEM_STATE_TODO",
-            "ITEM_STATE_CLAIMED",
-            "ITEM_STATE_DONE"
-          ],
+        "id": {
+          "description": "id of the note to change.",
+          "type": "string"
+        },
+        "pinned": {
+          "description": "pinned pins or unpins the note when set.",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "project replaces the project tag when set; \"\" clears it.",
+          "type": "string"
+        },
+        "title": {
+          "description": "title replaces the title when set.",
           "type": "string"
         }
       },
       "type": "object"
     },
-    "name": "backlog_update_item"
+    "name": "backlog_update_note"
   },
   {
     "annotations": {

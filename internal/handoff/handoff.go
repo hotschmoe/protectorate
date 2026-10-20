@@ -65,11 +65,11 @@ type Facts struct {
 	Log      string
 	GitErr   string
 
-	// Backlog and Mail are rendered lines (one item or message each).
-	Backlog []string
-	Mail    []string
-	// Notes is set when the workspace has .protectorate/NOTES.md.
-	Notes bool
+	// HubNotes and Mail are rendered lines (one note or message each).
+	HubNotes []string
+	Mail     []string
+	// NotesFile is set when the workspace has .protectorate/NOTES.md.
+	NotesFile bool
 }
 
 // ReadGit fills the git facts of the workspace. Every command is read-only;
@@ -144,7 +144,7 @@ func (f Facts) Markdown(budget int) string {
 		}
 		b.WriteString("\n")
 	}
-	if f.Notes {
+	if f.NotesFile {
 		fmt.Fprintf(&b, "- Standing notes: %s/NOTES.md\n", Dir)
 	}
 	if f.GitErr != "" {
@@ -153,7 +153,7 @@ func (f Facts) Markdown(budget int) string {
 	block(&b, "git status", f.Status, clipGit)
 	block(&b, "git diff --stat HEAD", f.DiffStat, clipGit)
 	block(&b, "Recent commits", f.Log, clipGit)
-	list(&b, "Backlog", f.Backlog)
+	list(&b, "Hub notes", f.HubNotes)
 	list(&b, "Open messages", f.Mail)
 
 	conv := f.conversation(budget - b.Len())

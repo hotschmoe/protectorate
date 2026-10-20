@@ -41,13 +41,13 @@ type Tool struct {
 var Workflow = []struct{ Command, Purpose string }{
 	{"quota suggest --for medium", "rank harnesses by usable spare capacity before reset"},
 	{"quota", "raw usage windows, resets and freshness per subscription"},
-	{"backlog ls", "low-priority work waiting for spare capacity"},
+	{"backlog ls", "the owner's notes (pinned first), to discuss or act on"},
+	{"backlog show", "read one note in full"},
 	{"sleeve ls", "running sleeves with CPU, memory and workspace"},
 	{"sleeve spawn", "start a harness in an isolated workspace"},
 	{"sleeve resleeve", "move a sleeve to another harness with a hub-written handoff (no confirmation needed)"},
 	{"session capture", "read what a sleeve's pane shows right now"},
-	{"backlog claim", "record which sleeve and harness took an item"},
-	{"backlog done", "mark an item finished"},
+	{"backlog edit", "update a note, e.g. --append or --body, when the owner asks"},
 	{"events", "stream hub events as they happen"},
 }
 
@@ -82,7 +82,7 @@ func RenderAgents(din DocInput) []byte {
 
 	w("## Role\n\n")
 	w("You are running as the %s harness in a sleeve named `poe`, an isolated sandbox on the hub machine.\n", din.Harness)
-	w("You oversee the other sleeves (harness sessions in their own workspaces), read subscription quota, pick which harness should do which work, and manage the backlog.\n\n")
+	w("You oversee the other sleeves (harness sessions in their own workspaces), read subscription quota, pick which harness should do which work, and read and edit the owner's notes (`protectorate backlog ...`).\n\n")
 	w("- Act only through the `protectorate` CLI against the hub at `%s`. Your token is already configured (`PROTECTORATE_TOKEN_FILE`); never print, copy or move it.\n", din.Hub)
 	w("- Use `--json` whenever you parse output.\n")
 	w("- Never run a destructive action (killing a sleeve or session, removing a node, anything irreversible) without the user's explicit approval in this conversation, even if your token would allow it. Ask first and say what it will affect.\n")
@@ -97,7 +97,7 @@ func RenderAgents(din DocInput) []byte {
 	for _, s := range Workflow {
 		w("- `protectorate %s`: %s\n", s.Command, s.Purpose)
 	}
-	w("\nTypical loop: check the backlog, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one item, claim the item, watch the sleeve, then mark it done or report back.\n\n")
+	w("\nTypical loop: read the notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and update the note.\n\n")
 
 	w("## Your token\n\n")
 	w("- id `%s`, name `%s`, expires %s\n", din.Token.ID, din.Token.Name, din.Token.Expires)

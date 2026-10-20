@@ -63,7 +63,7 @@ type Message struct {
 	Recipients  []string             `json:"recipients,omitempty"`
 	Deliveries  map[string]*Delivery `json:"deliveries,omitempty"`
 	Escalated   *time.Time           `json:"escalated,omitempty"`
-	BacklogItem string               `json:"backlog_item,omitempty"`
+	NoteID      string               `json:"note_id,omitempty"`
 }
 
 func (m *Message) clone() Message {
@@ -251,7 +251,7 @@ func (s *Store) apply(rec record) {
 			m.Escalated = &at
 		}
 	case "backlog":
-		m.BacklogItem = rec.Item
+		m.NoteID = rec.Item
 	}
 }
 
@@ -372,11 +372,11 @@ func (s *Store) Escalate(id string) error {
 	return s.op("escalate", id, "", nil)
 }
 
-// SetBacklogItem records the backlog item a request was filed as.
-func (s *Store) SetBacklogItem(id, item string) error {
+// SetNoteID records the note a request was filed as.
+func (s *Store) SetNoteID(id, note string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.op("backlog", id, "", func(r *record) { r.Item = item })
+	return s.op("backlog", id, "", func(r *record) { r.Item = note })
 }
 
 // Ack marks the message acked by rcpt. changed is false if it already was.
