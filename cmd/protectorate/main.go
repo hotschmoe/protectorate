@@ -188,7 +188,7 @@ func hubCmd(o *opts) *command {
 				if !wantRestart.Load() {
 					return
 				}
-				if os.Getenv("INVOCATION_ID") != "" {
+				if hubSystemdUnit() {
 					retErr = &exitError{code: 75, msg: "restarting hub through supervisor"}
 					return
 				}

@@ -193,6 +193,7 @@ func TestBinaryGitHubReleaseUpdates(t *testing.T) {
 	server.stable, server.dev = next, "dev"
 	releases := filepath.Join(c.root, "releases")
 	c.stop(c.hub)
+	c.env = append(c.env, "INVOCATION_ID=inherited-session")
 	c.boot("--release-repo", "e2e/protectorate", "--release-api-url", server.server.URL, "--release-dir", releases, "--hub-update-timeout", "3s", "--binary-dir", "")
 	pid := c.hub.cmd.Process.Pid
 	arguments, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
@@ -239,6 +240,18 @@ func TestBinaryGitHubReleaseUpdates(t *testing.T) {
 	if after, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err != nil || !bytes.Equal(arguments, after) {
 		t.Fatalf("hub restart changed invocation: before=%q after=%q error=%v", arguments, after, err)
 	}
+	var healthyGuard struct {
+		Phase    string `json:"phase"`
+		GuardPID int    `json:"guard_pid"`
+	}
+	c.eventually(func() bool {
+		journal, err := os.ReadFile(filepath.Join(c.home, "hub-update.json"))
+		return err == nil && json.Unmarshal(journal, &healthyGuard) == nil && healthyGuard.Phase == "confirmed" && healthyGuard.GuardPID > 0
+	})
+	c.eventually(func() bool {
+		_, err := os.Stat(fmt.Sprintf("/proc/%d", healthyGuard.GuardPID))
+		return os.IsNotExist(err)
+	})
 	assertCurrent := func(version string) {
 		t.Helper()
 		current, err := filepath.EvalSymlinks(filepath.Join(releases, "current"))

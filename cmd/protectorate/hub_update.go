@@ -45,6 +45,23 @@ type hubTrial struct {
 	Error           string    `json:"error,omitempty"`
 }
 
+func hubSystemdUnit() bool {
+	if runtime.GOOS != "linux" || os.Getenv("INVOCATION_ID") == "" {
+		return false
+	}
+	b, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		_, path, ok := strings.Cut(line, "::")
+		if ok && strings.HasSuffix(path, "/protectorate-hub.service") {
+			return true
+		}
+	}
+	return false
+}
+
 func saveHubTrial(path string, st *hubTrial) error {
 	b, err := json.Marshal(st)
 	if err != nil {
@@ -122,7 +139,10 @@ func prepareHubUpdate(ctx context.Context, h *hub.Hub, tokFile string, timeout t
 	if err := fsutil.WriteFile(exe+".next", next, 0755); err != nil {
 		return nil, fmt.Errorf("stage hub executable: %w", err)
 	}
-	st := &hubTrial{Phase: "trial", Exe: exe, Args: append([]string{}, os.Args[1:]...), Dir: h.Releases.Dir, PreviousRelease: h.Releases.Current().Version, Version: r.Version, PreviousVersion: h.Version, Channel: r.Channel, URL: h.SelfURL, TokenFile: tokFile, Started: time.Now(), Deadline: time.Now().Add(timeout), PID: os.Getpid(), PIDStart: pidStart, Supervised: os.Getenv("INVOCATION_ID") != ""}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("hub update canceled before replacement: %w", err)
+	}
+	st := &hubTrial{Phase: "trial", Exe: exe, Args: append([]string{}, os.Args[1:]...), Dir: h.Releases.Dir, PreviousRelease: h.Releases.Current().Version, Version: r.Version, PreviousVersion: h.Version, Channel: r.Channel, URL: h.SelfURL, TokenFile: tokFile, Started: time.Now(), Deadline: time.Now().Add(timeout), PID: os.Getpid(), PIDStart: pidStart, Supervised: hubSystemdUnit()}
 	if err := saveHubTrial(statePath, st); err != nil {
 		return nil, err
 	}
@@ -140,14 +160,19 @@ func prepareHubUpdate(ctx context.Context, h *hub.Hub, tokFile string, timeout t
 		return abort(err)
 	}
 	guardArgs := []string{"hub", "update-guard", "--state", statePath}
+	guardCtx, cancelGuard := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancelGuard()
 	if st.Supervised {
 		// A separate unit survives the hub unit's control-group cleanup.
-		out, err = exec.CommandContext(ctx, "systemd-run", "--user", "--collect", "--unit", fmt.Sprintf("protectorate-update-%d-%d", st.PID, st.Started.UnixNano()), exe+".previous", guardArgs[0], guardArgs[1], guardArgs[2], guardArgs[3]).CombinedOutput()
+		out, err = exec.CommandContext(guardCtx, "systemd-run", "--user", "--collect", "--unit", fmt.Sprintf("protectorate-update-%d-%d", st.PID, st.Started.UnixNano()), exe+".previous", guardArgs[0], guardArgs[1], guardArgs[2], guardArgs[3]).CombinedOutput()
 		if err != nil {
 			err = fmt.Errorf("start update watchdog unit: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 	} else {
-		err = node.StartDetached(exe+".previous", guardArgs)
+		out, err = exec.CommandContext(guardCtx, exe+".previous", append(guardArgs, "--detach")...).CombinedOutput()
+		if err != nil {
+			err = fmt.Errorf("detach update watchdog: %w: %s", err, strings.TrimSpace(string(out)))
+		}
 	}
 	if err != nil {
 		_ = fsutil.Rename(exe+".previous", exe)
@@ -159,8 +184,22 @@ func prepareHubUpdate(ctx context.Context, h *hub.Hub, tokFile string, timeout t
 
 func hubUpdateGuardCmd() *command {
 	var state string
-	c := &command{Use: "update-guard", Short: "Monitor a hub update trial", Hidden: true, Args: noArgs, RunE: func(cmd *command, _ []string) error { return guardHubUpdate(cmd.Context(), state) }}
+	var detach bool
+	c := &command{Use: "update-guard", Short: "Monitor a hub update trial", Hidden: true, Args: noArgs, RunE: func(cmd *command, _ []string) error {
+		if detach {
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("resolve watchdog executable: %w", err)
+			}
+			if err := node.StartDetached(exe, []string{"hub", "update-guard", "--state", state}); err != nil {
+				return fmt.Errorf("start detached update watchdog: %w", err)
+			}
+			return nil
+		}
+		return guardHubUpdate(cmd.Context(), state)
+	}}
 	c.Flags().StringVar(&state, "state", "", "private hub trial state")
+	c.Flags().BoolVar(&detach, "detach", false, "start the watchdog through an intermediate process")
 	return c
 }
 func guardHubUpdate(ctx context.Context, path string) error {

@@ -138,7 +138,10 @@ and updates a real hub while preserving its arguments. Its release contains
 all five platform binaries, checksums, VERSION and a web archive. The scenario
 checks web/download serving, updates a real node from that release, rolls back
 a candidate that reports its version but fails to serve, and retains only two
-release directories. All release requests stay on loopback; no GitHub access
+release directories. After a healthy standalone update, its guardian PID must
+disappear after confirmation, catching unreaped watchdog processes across
+re-exec. An inherited session invocation ID must still use standalone re-exec.
+All release requests stay on loopback; no GitHub access
 or installed service registration is needed. The rollback guardian PID comes
 from the private hub update journal and is stopped during test cleanup.
 
