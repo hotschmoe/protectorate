@@ -334,6 +334,9 @@ func (j *Jobs) Run(ctx context.Context, req *pb.RunJobRequest, send func(*pb.Job
 		delete(j.uploads, req.JobId)
 		j.mu.Unlock()
 		os.RemoveAll(jobDir)
+		if j.Isolation(); j.box != nil {
+			j.box.forget(jobDir)
+		}
 	}()
 
 	finish := func(f *pb.JobFinished) error {

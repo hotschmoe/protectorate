@@ -228,3 +228,37 @@ func hasProcess(arg string) bool {
 	}
 	return false
 }
+
+// TestSandboxJobDirUnderHomeLeavesNoMountPoints covers the usual layout,
+// the job dir inside ~/.protectorate: bwrap makes a mount point for the job
+// directory inside the job home, which must go when the job ends.
+func TestSandboxJobDirUnderHomeLeavesNoMountPoints(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("bwrap sandboxes are linux only")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	state := filepath.Join(home, ".protectorate")
+	j, err := NewJobs(filepath.Join(state, "node-jobs"), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Home = state
+	if iso := j.Isolation(); iso.Sandbox != "bwrap" {
+		t.Skipf("no sandbox on this host: %s", iso.Note)
+	}
+	c := &collector{}
+	if err := j.Run(context.Background(), &pb.RunJobRequest{JobId: "sbx-home", Command: []string{"sh", "-c", "pwd; ls -A \"$HOME\""}, Timeout: durationpb.New(time.Minute)}, c.send); err != nil {
+		t.Fatal(err)
+	}
+	if f := c.finished(); f == nil || f.ExitCode != 0 {
+		t.Fatalf("finished %v:\n%s", f, c.output())
+	}
+	leftover := filepath.Join(j.Dir(), "home", ".protectorate", "node-jobs", "jobs", "sbx-home")
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("mount point %s left behind (%v)", leftover, err)
+	}
+	if strings.Contains(c.output(), "tsnet") || strings.Contains(c.output(), "token") {
+		t.Fatalf("state visible in the job home:\n%s", c.output())
+	}
+}

@@ -100,6 +100,9 @@ func (s *sandbox) plan(req *pb.RunJobRequest, workdir, _ string, _ [][2]string) 
 	return append([]string{path}, req.Command[1:]...), nil, nil
 }
 
+// forget has nothing to tidy: the runner has its own profile.
+func (s *sandbox) forget(string) {}
+
 func logonUser(user, password string) (windows.Token, error) {
 	u, err := windows.UTF16PtrFromString(user)
 	if err != nil {
