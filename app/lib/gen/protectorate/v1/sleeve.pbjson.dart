@@ -233,6 +233,7 @@ const Sleeve$json = {
       '6': '.google.protobuf.Duration',
       '10': 'exitAfterIdle'
     },
+    {'1': 'git_branch', '3': 21, '4': 1, '5': 9, '10': 'gitBranch'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -256,7 +257,69 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'ZG9mZhgRIAEoCzIYLnByb3RlY3RvcmF0ZS52MS5IYW5kb2ZmUgdoYW5kb2ZmEhYKBnBhcmVudB'
     'gUIAEoCVIGcGFyZW50EjsKCXJlYWRfb25seRgSIAMoCzIeLnByb3RlY3RvcmF0ZS52MS5SZWFk'
     'T25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYEyABKAsyGS5nb29nbGUucH'
-    'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGVCDAoKX2V4aXRfY29kZQ==');
+    'JvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSHQoKZ2l0X2JyYW5jaBgVIAEoCVIJZ2l0'
+    'QnJhbmNoQgwKCl9leGl0X2NvZGU=');
+
+@$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
+const BrowseWorkspacesRequest$json = {
+  '1': 'BrowseWorkspacesRequest',
+  '2': [
+    {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
+  ],
+};
+
+/// Descriptor for `BrowseWorkspacesRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List browseWorkspacesRequestDescriptor =
+    $convert.base64Decode(
+        'ChdCcm93c2VXb3Jrc3BhY2VzUmVxdWVzdBISCgRwYXRoGAEgASgJUgRwYXRo');
+
+@$core.Deprecated('Use workspaceDirectoryDescriptor instead')
+const WorkspaceDirectory$json = {
+  '1': 'WorkspaceDirectory',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'path', '3': 2, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'is_git', '3': 3, '4': 1, '5': 8, '10': 'isGit'},
+    {'1': 'git_branch', '3': 4, '4': 1, '5': 9, '10': 'gitBranch'},
+    {'1': 'git_remote', '3': 5, '4': 1, '5': 9, '10': 'gitRemote'},
+    {'1': 'acceptable', '3': 6, '4': 1, '5': 8, '10': 'acceptable'},
+    {'1': 'reason', '3': 7, '4': 1, '5': 9, '10': 'reason'},
+    {'1': 'required_name', '3': 8, '4': 1, '5': 9, '10': 'requiredName'},
+  ],
+};
+
+/// Descriptor for `WorkspaceDirectory`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List workspaceDirectoryDescriptor = $convert.base64Decode(
+    'ChJXb3Jrc3BhY2VEaXJlY3RvcnkSEgoEbmFtZRgBIAEoCVIEbmFtZRISCgRwYXRoGAIgASgJUg'
+    'RwYXRoEhUKBmlzX2dpdBgDIAEoCFIFaXNHaXQSHQoKZ2l0X2JyYW5jaBgEIAEoCVIJZ2l0QnJh'
+    'bmNoEh0KCmdpdF9yZW1vdGUYBSABKAlSCWdpdFJlbW90ZRIeCgphY2NlcHRhYmxlGAYgASgIUg'
+    'phY2NlcHRhYmxlEhYKBnJlYXNvbhgHIAEoCVIGcmVhc29uEiMKDXJlcXVpcmVkX25hbWUYCCAB'
+    'KAlSDHJlcXVpcmVkTmFtZQ==');
+
+@$core.Deprecated('Use browseWorkspacesResponseDescriptor instead')
+const BrowseWorkspacesResponse$json = {
+  '1': 'BrowseWorkspacesResponse',
+  '2': [
+    {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'parent', '3': 2, '4': 1, '5': 9, '10': 'parent'},
+    {
+      '1': 'directories',
+      '3': 3,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.WorkspaceDirectory',
+      '10': 'directories'
+    },
+    {'1': 'truncated', '3': 4, '4': 1, '5': 8, '10': 'truncated'},
+  ],
+};
+
+/// Descriptor for `BrowseWorkspacesResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List browseWorkspacesResponseDescriptor = $convert.base64Decode(
+    'ChhCcm93c2VXb3Jrc3BhY2VzUmVzcG9uc2USEgoEcGF0aBgBIAEoCVIEcGF0aBIWCgZwYXJlbn'
+    'QYAiABKAlSBnBhcmVudBJFCgtkaXJlY3RvcmllcxgDIAMoCzIjLnByb3RlY3RvcmF0ZS52MS5X'
+    'b3Jrc3BhY2VEaXJlY3RvcnlSC2RpcmVjdG9yaWVzEhwKCXRydW5jYXRlZBgEIAEoCFIJdHJ1bm'
+    'NhdGVk');
 
 @$core.Deprecated('Use readOnlyMountDescriptor instead')
 const ReadOnlyMount$json = {
@@ -677,6 +740,12 @@ const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
       '4': {'34': 1},
     },
     {
+      '1': 'BrowseWorkspaces',
+      '2': '.protectorate.v1.BrowseWorkspacesRequest',
+      '3': '.protectorate.v1.BrowseWorkspacesResponse',
+      '4': {'34': 1},
+    },
+    {
       '1': 'GetSleeve',
       '2': '.protectorate.v1.GetSleeveRequest',
       '3': '.protectorate.v1.GetSleeveResponse',
@@ -724,6 +793,9 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ListWorkspacesRequest': ListWorkspacesRequest$json,
   '.protectorate.v1.ListWorkspacesResponse': ListWorkspacesResponse$json,
   '.protectorate.v1.Workspace': Workspace$json,
+  '.protectorate.v1.BrowseWorkspacesRequest': BrowseWorkspacesRequest$json,
+  '.protectorate.v1.BrowseWorkspacesResponse': BrowseWorkspacesResponse$json,
+  '.protectorate.v1.WorkspaceDirectory': WorkspaceDirectory$json,
   '.protectorate.v1.GetSleeveRequest': GetSleeveRequest$json,
   '.protectorate.v1.GetSleeveResponse': GetSleeveResponse$json,
   '.protectorate.v1.KillSleeveRequest': KillSleeveRequest$json,
@@ -742,11 +814,13 @@ final $typed_data.Uint8List sleeveServiceDescriptor = $convert.base64Decode(
     'c3RTbGVldmVzEiMucHJvdGVjdG9yYXRlLnYxLkxpc3RTbGVldmVzUmVxdWVzdBokLnByb3RlY3'
     'RvcmF0ZS52MS5MaXN0U2xlZXZlc1Jlc3BvbnNlIgOQAgESZgoOTGlzdFdvcmtzcGFjZXMSJi5w'
     'cm90ZWN0b3JhdGUudjEuTGlzdFdvcmtzcGFjZXNSZXF1ZXN0GicucHJvdGVjdG9yYXRlLnYxLk'
-    'xpc3RXb3Jrc3BhY2VzUmVzcG9uc2UiA5ACARJXCglHZXRTbGVldmUSIS5wcm90ZWN0b3JhdGUu'
-    'djEuR2V0U2xlZXZlUmVxdWVzdBoiLnByb3RlY3RvcmF0ZS52MS5HZXRTbGVldmVSZXNwb25zZS'
-    'IDkAIBElsKCktpbGxTbGVldmUSIi5wcm90ZWN0b3JhdGUudjEuS2lsbFNsZWV2ZVJlcXVlc3Qa'
-    'Iy5wcm90ZWN0b3JhdGUudjEuS2lsbFNsZWV2ZVJlc3BvbnNlIgSItRgBEmEKDlJlc2xlZXZlU2'
-    'xlZXZlEiYucHJvdGVjdG9yYXRlLnYxLlJlc2xlZXZlU2xlZXZlUmVxdWVzdBonLnByb3RlY3Rv'
-    'cmF0ZS52MS5SZXNsZWV2ZVNsZWV2ZVJlc3BvbnNlElsKClNwYXduRW52b3kSIi5wcm90ZWN0b3'
-    'JhdGUudjEuU3Bhd25FbnZveVJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuU3Bhd25FbnZveVJl'
-    'c3BvbnNlIgSgtRgB');
+    'xpc3RXb3Jrc3BhY2VzUmVzcG9uc2UiA5ACARJsChBCcm93c2VXb3Jrc3BhY2VzEigucHJvdGVj'
+    'dG9yYXRlLnYxLkJyb3dzZVdvcmtzcGFjZXNSZXF1ZXN0GikucHJvdGVjdG9yYXRlLnYxLkJyb3'
+    'dzZVdvcmtzcGFjZXNSZXNwb25zZSIDkAIBElcKCUdldFNsZWV2ZRIhLnByb3RlY3RvcmF0ZS52'
+    'MS5HZXRTbGVldmVSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkdldFNsZWV2ZVJlc3BvbnNlIg'
+    'OQAgESWwoKS2lsbFNsZWV2ZRIiLnByb3RlY3RvcmF0ZS52MS5LaWxsU2xlZXZlUmVxdWVzdBoj'
+    'LnByb3RlY3RvcmF0ZS52MS5LaWxsU2xlZXZlUmVzcG9uc2UiBIi1GAESYQoOUmVzbGVldmVTbG'
+    'VldmUSJi5wcm90ZWN0b3JhdGUudjEuUmVzbGVldmVTbGVldmVSZXF1ZXN0GicucHJvdGVjdG9y'
+    'YXRlLnYxLlJlc2xlZXZlU2xlZXZlUmVzcG9uc2USWwoKU3Bhd25FbnZveRIiLnByb3RlY3Rvcm'
+    'F0ZS52MS5TcGF3bkVudm95UmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5TcGF3bkVudm95UmVz'
+    'cG9uc2UiBKC1GAE=');

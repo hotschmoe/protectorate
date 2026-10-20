@@ -113,7 +113,8 @@ type Config struct {
 	GitEmail  string
 	// ReferenceDirs are offered read-only by ListWorkspaces besides each
 	// known workspace's references/ directory.
-	ReferenceDirs []string
+	ReferenceDirs  []string
+	WorkspaceRoots []string
 }
 
 // Names of the orchestrator sleeve and the state subdirectory that is its

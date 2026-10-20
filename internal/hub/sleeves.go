@@ -127,6 +127,7 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Name:       i.Name,
 		Harness:    harnessToProto[i.Harness],
 		Workspace:  i.Workspace,
+		GitBranch:  sleeve.WorkspaceBranch(i.Workspace),
 		Session:    i.Session,
 		CreatedAt:  timestamppb.New(i.Created),
 		Args:       i.Args,
@@ -335,6 +336,21 @@ func (h *Hub) ListWorkspaces(context.Context, *connect.Request[pb.ListWorkspaces
 			Name: w.Name, Path: w.Path, GitRemote: w.Remote, GitBranch: w.Branch,
 			Sleeve: w.Sleeve, Busy: w.Busy, RequiredName: w.RequiredName, ReadOnly: w.ReadOnly,
 		})
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (h *Hub) BrowseWorkspaces(ctx context.Context, req *connect.Request[pb.BrowseWorkspacesRequest]) (*connect.Response[pb.BrowseWorkspacesResponse], error) {
+	if _, ok := callerSleeve(ctx); ok {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("sleeve identity tokens cannot browse workspace directories"))
+	}
+	dirs, path, parent, truncated, err := h.sleeves.Browse(ctx, req.Msg.Path)
+	if err != nil {
+		return nil, sleeveErr(err)
+	}
+	res := &pb.BrowseWorkspacesResponse{Path: path, Parent: parent, Truncated: truncated}
+	for _, d := range dirs {
+		res.Directories = append(res.Directories, &pb.WorkspaceDirectory{Name: d.Name, Path: d.Path, IsGit: d.IsGit, GitBranch: d.Branch, GitRemote: d.Remote, Acceptable: d.Acceptable, Reason: d.Reason, RequiredName: d.RequiredName})
 	}
 	return connect.NewResponse(res), nil
 }

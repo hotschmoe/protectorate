@@ -55,6 +55,17 @@ abstract final class SleeveService {
     idempotency: connect.Idempotency.noSideEffects,
   );
 
+  /// BrowseWorkspaces lists configured roots when path is empty, otherwise
+  /// subdirectories of path. Resolved paths must stay inside a configured root.
+  /// Sleeve identity tokens cannot call this RPC, even with read scope.
+  static const browseWorkspaces = connect.Spec(
+    '/$name/BrowseWorkspaces',
+    connect.StreamType.unary,
+    protectoratev1sleeve.BrowseWorkspacesRequest.new,
+    protectoratev1sleeve.BrowseWorkspacesResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
   /// GetSleeve returns one sleeve with its latest resource usage.
   static const getSleeve = connect.Spec(
     '/$name/GetSleeve',

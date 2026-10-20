@@ -341,6 +341,8 @@ type Sleeve struct {
 	Parent        string               `protobuf:"bytes,20,opt,name=parent,proto3" json:"parent,omitempty"`
 	ReadOnly      []*ReadOnlyMount     `protobuf:"bytes,18,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	ExitAfterIdle *durationpb.Duration `protobuf:"bytes,19,opt,name=exit_after_idle,json=exitAfterIdle,proto3" json:"exit_after_idle,omitempty"`
+	// Current branch read from .git files; empty for non-git and worktrees.
+	GitBranch     string `protobuf:"bytes,21,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -515,6 +517,226 @@ func (x *Sleeve) GetExitAfterIdle() *durationpb.Duration {
 	return nil
 }
 
+func (x *Sleeve) GetGitBranch() string {
+	if x != nil {
+		return x.GitBranch
+	}
+	return ""
+}
+
+type BrowseWorkspacesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BrowseWorkspacesRequest) Reset() {
+	*x = BrowseWorkspacesRequest{}
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BrowseWorkspacesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BrowseWorkspacesRequest) ProtoMessage() {}
+
+func (x *BrowseWorkspacesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BrowseWorkspacesRequest.ProtoReflect.Descriptor instead.
+func (*BrowseWorkspacesRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *BrowseWorkspacesRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type WorkspaceDirectory struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	IsGit         bool                   `protobuf:"varint,3,opt,name=is_git,json=isGit,proto3" json:"is_git,omitempty"`
+	GitBranch     string                 `protobuf:"bytes,4,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
+	GitRemote     string                 `protobuf:"bytes,5,opt,name=git_remote,json=gitRemote,proto3" json:"git_remote,omitempty"`
+	Acceptable    bool                   `protobuf:"varint,6,opt,name=acceptable,proto3" json:"acceptable,omitempty"`
+	Reason        string                 `protobuf:"bytes,7,opt,name=reason,proto3" json:"reason,omitempty"`
+	RequiredName  string                 `protobuf:"bytes,8,opt,name=required_name,json=requiredName,proto3" json:"required_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceDirectory) Reset() {
+	*x = WorkspaceDirectory{}
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceDirectory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceDirectory) ProtoMessage() {}
+
+func (x *WorkspaceDirectory) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceDirectory.ProtoReflect.Descriptor instead.
+func (*WorkspaceDirectory) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WorkspaceDirectory) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceDirectory) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WorkspaceDirectory) GetIsGit() bool {
+	if x != nil {
+		return x.IsGit
+	}
+	return false
+}
+
+func (x *WorkspaceDirectory) GetGitBranch() string {
+	if x != nil {
+		return x.GitBranch
+	}
+	return ""
+}
+
+func (x *WorkspaceDirectory) GetGitRemote() string {
+	if x != nil {
+		return x.GitRemote
+	}
+	return ""
+}
+
+func (x *WorkspaceDirectory) GetAcceptable() bool {
+	if x != nil {
+		return x.Acceptable
+	}
+	return false
+}
+
+func (x *WorkspaceDirectory) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *WorkspaceDirectory) GetRequiredName() string {
+	if x != nil {
+		return x.RequiredName
+	}
+	return ""
+}
+
+type BrowseWorkspacesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Empty at a root; clients return to the root list from there.
+	Parent        string                `protobuf:"bytes,2,opt,name=parent,proto3" json:"parent,omitempty"`
+	Directories   []*WorkspaceDirectory `protobuf:"bytes,3,rep,name=directories,proto3" json:"directories,omitempty"`
+	Truncated     bool                  `protobuf:"varint,4,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BrowseWorkspacesResponse) Reset() {
+	*x = BrowseWorkspacesResponse{}
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BrowseWorkspacesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BrowseWorkspacesResponse) ProtoMessage() {}
+
+func (x *BrowseWorkspacesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BrowseWorkspacesResponse.ProtoReflect.Descriptor instead.
+func (*BrowseWorkspacesResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *BrowseWorkspacesResponse) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *BrowseWorkspacesResponse) GetParent() string {
+	if x != nil {
+		return x.Parent
+	}
+	return ""
+}
+
+func (x *BrowseWorkspacesResponse) GetDirectories() []*WorkspaceDirectory {
+	if x != nil {
+		return x.Directories
+	}
+	return nil
+}
+
+func (x *BrowseWorkspacesResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
 type ReadOnlyMount struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Source string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
@@ -526,7 +748,7 @@ type ReadOnlyMount struct {
 
 func (x *ReadOnlyMount) Reset() {
 	*x = ReadOnlyMount{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[3]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -538,7 +760,7 @@ func (x *ReadOnlyMount) String() string {
 func (*ReadOnlyMount) ProtoMessage() {}
 
 func (x *ReadOnlyMount) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[3]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -551,7 +773,7 @@ func (x *ReadOnlyMount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadOnlyMount.ProtoReflect.Descriptor instead.
 func (*ReadOnlyMount) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{3}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ReadOnlyMount) GetSource() string {
@@ -597,7 +819,7 @@ type SpawnSleeveRequest struct {
 
 func (x *SpawnSleeveRequest) Reset() {
 	*x = SpawnSleeveRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[4]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +831,7 @@ func (x *SpawnSleeveRequest) String() string {
 func (*SpawnSleeveRequest) ProtoMessage() {}
 
 func (x *SpawnSleeveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[4]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +844,7 @@ func (x *SpawnSleeveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnSleeveRequest.ProtoReflect.Descriptor instead.
 func (*SpawnSleeveRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{4}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SpawnSleeveRequest) GetName() string {
@@ -711,7 +933,7 @@ type SpawnSleeveResponse struct {
 
 func (x *SpawnSleeveResponse) Reset() {
 	*x = SpawnSleeveResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[5]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +945,7 @@ func (x *SpawnSleeveResponse) String() string {
 func (*SpawnSleeveResponse) ProtoMessage() {}
 
 func (x *SpawnSleeveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[5]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +958,7 @@ func (x *SpawnSleeveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnSleeveResponse.ProtoReflect.Descriptor instead.
 func (*SpawnSleeveResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{5}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SpawnSleeveResponse) GetSleeve() *Sleeve {
@@ -754,7 +976,7 @@ type ListSleevesRequest struct {
 
 func (x *ListSleevesRequest) Reset() {
 	*x = ListSleevesRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[6]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -766,7 +988,7 @@ func (x *ListSleevesRequest) String() string {
 func (*ListSleevesRequest) ProtoMessage() {}
 
 func (x *ListSleevesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[6]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -779,7 +1001,7 @@ func (x *ListSleevesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSleevesRequest.ProtoReflect.Descriptor instead.
 func (*ListSleevesRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{6}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{9}
 }
 
 type ListSleevesResponse struct {
@@ -791,7 +1013,7 @@ type ListSleevesResponse struct {
 
 func (x *ListSleevesResponse) Reset() {
 	*x = ListSleevesResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[7]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -803,7 +1025,7 @@ func (x *ListSleevesResponse) String() string {
 func (*ListSleevesResponse) ProtoMessage() {}
 
 func (x *ListSleevesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[7]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -816,7 +1038,7 @@ func (x *ListSleevesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSleevesResponse.ProtoReflect.Descriptor instead.
 func (*ListSleevesResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{7}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListSleevesResponse) GetSleeves() []*Sleeve {
@@ -834,7 +1056,7 @@ type ListWorkspacesRequest struct {
 
 func (x *ListWorkspacesRequest) Reset() {
 	*x = ListWorkspacesRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[8]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +1068,7 @@ func (x *ListWorkspacesRequest) String() string {
 func (*ListWorkspacesRequest) ProtoMessage() {}
 
 func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[8]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +1081,7 @@ func (x *ListWorkspacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{8}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{11}
 }
 
 type Workspace struct {
@@ -887,7 +1109,7 @@ type Workspace struct {
 
 func (x *Workspace) Reset() {
 	*x = Workspace{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[9]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -899,7 +1121,7 @@ func (x *Workspace) String() string {
 func (*Workspace) ProtoMessage() {}
 
 func (x *Workspace) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[9]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -912,7 +1134,7 @@ func (x *Workspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workspace.ProtoReflect.Descriptor instead.
 func (*Workspace) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{9}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Workspace) GetName() string {
@@ -980,7 +1202,7 @@ type ListWorkspacesResponse struct {
 
 func (x *ListWorkspacesResponse) Reset() {
 	*x = ListWorkspacesResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[10]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -992,7 +1214,7 @@ func (x *ListWorkspacesResponse) String() string {
 func (*ListWorkspacesResponse) ProtoMessage() {}
 
 func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[10]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1005,7 +1227,7 @@ func (x *ListWorkspacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspacesResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspacesResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{10}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListWorkspacesResponse) GetWorkspaces() []*Workspace {
@@ -1024,7 +1246,7 @@ type GetSleeveRequest struct {
 
 func (x *GetSleeveRequest) Reset() {
 	*x = GetSleeveRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[11]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1036,7 +1258,7 @@ func (x *GetSleeveRequest) String() string {
 func (*GetSleeveRequest) ProtoMessage() {}
 
 func (x *GetSleeveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[11]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1049,7 +1271,7 @@ func (x *GetSleeveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSleeveRequest.ProtoReflect.Descriptor instead.
 func (*GetSleeveRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{11}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetSleeveRequest) GetName() string {
@@ -1068,7 +1290,7 @@ type GetSleeveResponse struct {
 
 func (x *GetSleeveResponse) Reset() {
 	*x = GetSleeveResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[12]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1080,7 +1302,7 @@ func (x *GetSleeveResponse) String() string {
 func (*GetSleeveResponse) ProtoMessage() {}
 
 func (x *GetSleeveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[12]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1093,7 +1315,7 @@ func (x *GetSleeveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSleeveResponse.ProtoReflect.Descriptor instead.
 func (*GetSleeveResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{12}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetSleeveResponse) GetSleeve() *Sleeve {
@@ -1112,7 +1334,7 @@ type KillSleeveRequest struct {
 
 func (x *KillSleeveRequest) Reset() {
 	*x = KillSleeveRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[13]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +1346,7 @@ func (x *KillSleeveRequest) String() string {
 func (*KillSleeveRequest) ProtoMessage() {}
 
 func (x *KillSleeveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[13]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +1359,7 @@ func (x *KillSleeveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillSleeveRequest.ProtoReflect.Descriptor instead.
 func (*KillSleeveRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{13}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *KillSleeveRequest) GetName() string {
@@ -1155,7 +1377,7 @@ type KillSleeveResponse struct {
 
 func (x *KillSleeveResponse) Reset() {
 	*x = KillSleeveResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[14]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1167,7 +1389,7 @@ func (x *KillSleeveResponse) String() string {
 func (*KillSleeveResponse) ProtoMessage() {}
 
 func (x *KillSleeveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[14]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1180,7 +1402,7 @@ func (x *KillSleeveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KillSleeveResponse.ProtoReflect.Descriptor instead.
 func (*KillSleeveResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{14}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{17}
 }
 
 type ResleeveSleeveRequest struct {
@@ -1203,7 +1425,7 @@ type ResleeveSleeveRequest struct {
 
 func (x *ResleeveSleeveRequest) Reset() {
 	*x = ResleeveSleeveRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[15]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1215,7 +1437,7 @@ func (x *ResleeveSleeveRequest) String() string {
 func (*ResleeveSleeveRequest) ProtoMessage() {}
 
 func (x *ResleeveSleeveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[15]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1228,7 +1450,7 @@ func (x *ResleeveSleeveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResleeveSleeveRequest.ProtoReflect.Descriptor instead.
 func (*ResleeveSleeveRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{15}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ResleeveSleeveRequest) GetName() string {
@@ -1284,7 +1506,7 @@ type ResleeveSleeveResponse struct {
 
 func (x *ResleeveSleeveResponse) Reset() {
 	*x = ResleeveSleeveResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[16]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1296,7 +1518,7 @@ func (x *ResleeveSleeveResponse) String() string {
 func (*ResleeveSleeveResponse) ProtoMessage() {}
 
 func (x *ResleeveSleeveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[16]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1309,7 +1531,7 @@ func (x *ResleeveSleeveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResleeveSleeveResponse.ProtoReflect.Descriptor instead.
 func (*ResleeveSleeveResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{16}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ResleeveSleeveResponse) GetSleeve() *Sleeve {
@@ -1339,7 +1561,7 @@ type SpawnEnvoyRequest struct {
 
 func (x *SpawnEnvoyRequest) Reset() {
 	*x = SpawnEnvoyRequest{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[17]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +1573,7 @@ func (x *SpawnEnvoyRequest) String() string {
 func (*SpawnEnvoyRequest) ProtoMessage() {}
 
 func (x *SpawnEnvoyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[17]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +1586,7 @@ func (x *SpawnEnvoyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnEnvoyRequest.ProtoReflect.Descriptor instead.
 func (*SpawnEnvoyRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{17}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SpawnEnvoyRequest) GetHarness() Harness {
@@ -1418,7 +1640,7 @@ type SpawnEnvoyResponse struct {
 
 func (x *SpawnEnvoyResponse) Reset() {
 	*x = SpawnEnvoyResponse{}
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[18]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1430,7 +1652,7 @@ func (x *SpawnEnvoyResponse) String() string {
 func (*SpawnEnvoyResponse) ProtoMessage() {}
 
 func (x *SpawnEnvoyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_sleeve_proto_msgTypes[18]
+	mi := &file_protectorate_v1_sleeve_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1443,7 +1665,7 @@ func (x *SpawnEnvoyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnEnvoyResponse.ProtoReflect.Descriptor instead.
 func (*SpawnEnvoyResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{18}
+	return file_protectorate_v1_sleeve_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SpawnEnvoyResponse) GetSleeve() *Sleeve {
@@ -1502,7 +1724,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xed\x06\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\x8c\a\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -1529,9 +1751,31 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\ahandoff\x18\x11 \x01(\v2\x18.protectorate.v1.HandoffR\ahandoff\x12\x16\n" +
 	"\x06parent\x18\x14 \x01(\tR\x06parent\x12;\n" +
 	"\tread_only\x18\x12 \x03(\v2\x1e.protectorate.v1.ReadOnlyMountR\breadOnly\x12A\n" +
-	"\x0fexit_after_idle\x18\x13 \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdleB\f\n" +
+	"\x0fexit_after_idle\x18\x13 \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x12\x1d\n" +
 	"\n" +
-	"_exit_code\"?\n" +
+	"git_branch\x18\x15 \x01(\tR\tgitBranchB\f\n" +
+	"\n" +
+	"_exit_code\"-\n" +
+	"\x17BrowseWorkspacesRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"\xee\x01\n" +
+	"\x12WorkspaceDirectory\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x15\n" +
+	"\x06is_git\x18\x03 \x01(\bR\x05isGit\x12\x1d\n" +
+	"\n" +
+	"git_branch\x18\x04 \x01(\tR\tgitBranch\x12\x1d\n" +
+	"\n" +
+	"git_remote\x18\x05 \x01(\tR\tgitRemote\x12\x1e\n" +
+	"\n" +
+	"acceptable\x18\x06 \x01(\bR\n" +
+	"acceptable\x12\x16\n" +
+	"\x06reason\x18\a \x01(\tR\x06reason\x12#\n" +
+	"\rrequired_name\x18\b \x01(\tR\frequiredName\"\xab\x01\n" +
+	"\x18BrowseWorkspacesResponse\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
+	"\x06parent\x18\x02 \x01(\tR\x06parent\x12E\n" +
+	"\vdirectories\x18\x03 \x03(\v2#.protectorate.v1.WorkspaceDirectoryR\vdirectories\x12\x1c\n" +
+	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"?\n" +
 	"\rReadOnlyMount\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\"\xcd\x04\n" +
@@ -1614,11 +1858,12 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\vSleeveState\x12\x1c\n" +
 	"\x18SLEEVE_STATE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14SLEEVE_STATE_RUNNING\x10\x01\x12\x17\n" +
-	"\x13SLEEVE_STATE_EXITED\x10\x022\xa6\x05\n" +
+	"\x13SLEEVE_STATE_EXITED\x10\x022\x94\x06\n" +
 	"\rSleeveService\x12X\n" +
 	"\vSpawnSleeve\x12#.protectorate.v1.SpawnSleeveRequest\x1a$.protectorate.v1.SpawnSleeveResponse\x12]\n" +
 	"\vListSleeves\x12#.protectorate.v1.ListSleevesRequest\x1a$.protectorate.v1.ListSleevesResponse\"\x03\x90\x02\x01\x12f\n" +
-	"\x0eListWorkspaces\x12&.protectorate.v1.ListWorkspacesRequest\x1a'.protectorate.v1.ListWorkspacesResponse\"\x03\x90\x02\x01\x12W\n" +
+	"\x0eListWorkspaces\x12&.protectorate.v1.ListWorkspacesRequest\x1a'.protectorate.v1.ListWorkspacesResponse\"\x03\x90\x02\x01\x12l\n" +
+	"\x10BrowseWorkspaces\x12(.protectorate.v1.BrowseWorkspacesRequest\x1a).protectorate.v1.BrowseWorkspacesResponse\"\x03\x90\x02\x01\x12W\n" +
 	"\tGetSleeve\x12!.protectorate.v1.GetSleeveRequest\x1a\".protectorate.v1.GetSleeveResponse\"\x03\x90\x02\x01\x12[\n" +
 	"\n" +
 	"KillSleeve\x12\".protectorate.v1.KillSleeveRequest\x1a#.protectorate.v1.KillSleeveResponse\"\x04\x88\xb5\x18\x01\x12a\n" +
@@ -1639,91 +1884,97 @@ func file_protectorate_v1_sleeve_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_sleeve_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_sleeve_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_protectorate_v1_sleeve_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_protectorate_v1_sleeve_proto_goTypes = []any{
-	(Harness)(0),                   // 0: protectorate.v1.Harness
-	(SleeveState)(0),               // 1: protectorate.v1.SleeveState
-	(*SleeveLimits)(nil),           // 2: protectorate.v1.SleeveLimits
-	(*SleeveUsage)(nil),            // 3: protectorate.v1.SleeveUsage
-	(*Sleeve)(nil),                 // 4: protectorate.v1.Sleeve
-	(*ReadOnlyMount)(nil),          // 5: protectorate.v1.ReadOnlyMount
-	(*SpawnSleeveRequest)(nil),     // 6: protectorate.v1.SpawnSleeveRequest
-	(*SpawnSleeveResponse)(nil),    // 7: protectorate.v1.SpawnSleeveResponse
-	(*ListSleevesRequest)(nil),     // 8: protectorate.v1.ListSleevesRequest
-	(*ListSleevesResponse)(nil),    // 9: protectorate.v1.ListSleevesResponse
-	(*ListWorkspacesRequest)(nil),  // 10: protectorate.v1.ListWorkspacesRequest
-	(*Workspace)(nil),              // 11: protectorate.v1.Workspace
-	(*ListWorkspacesResponse)(nil), // 12: protectorate.v1.ListWorkspacesResponse
-	(*GetSleeveRequest)(nil),       // 13: protectorate.v1.GetSleeveRequest
-	(*GetSleeveResponse)(nil),      // 14: protectorate.v1.GetSleeveResponse
-	(*KillSleeveRequest)(nil),      // 15: protectorate.v1.KillSleeveRequest
-	(*KillSleeveResponse)(nil),     // 16: protectorate.v1.KillSleeveResponse
-	(*ResleeveSleeveRequest)(nil),  // 17: protectorate.v1.ResleeveSleeveRequest
-	(*ResleeveSleeveResponse)(nil), // 18: protectorate.v1.ResleeveSleeveResponse
-	(*SpawnEnvoyRequest)(nil),      // 19: protectorate.v1.SpawnEnvoyRequest
-	(*SpawnEnvoyResponse)(nil),     // 20: protectorate.v1.SpawnEnvoyResponse
-	nil,                            // 21: protectorate.v1.SpawnSleeveRequest.EnvEntry
-	(*timestamppb.Timestamp)(nil),  // 22: google.protobuf.Timestamp
-	(SleeveMode)(0),                // 23: protectorate.v1.SleeveMode
-	(*ChatStatus)(nil),             // 24: protectorate.v1.ChatStatus
-	(*Handoff)(nil),                // 25: protectorate.v1.Handoff
-	(*durationpb.Duration)(nil),    // 26: google.protobuf.Duration
-	(*ModelSelection)(nil),         // 27: protectorate.v1.ModelSelection
-	(*TokenInfo)(nil),              // 28: protectorate.v1.TokenInfo
+	(Harness)(0),                     // 0: protectorate.v1.Harness
+	(SleeveState)(0),                 // 1: protectorate.v1.SleeveState
+	(*SleeveLimits)(nil),             // 2: protectorate.v1.SleeveLimits
+	(*SleeveUsage)(nil),              // 3: protectorate.v1.SleeveUsage
+	(*Sleeve)(nil),                   // 4: protectorate.v1.Sleeve
+	(*BrowseWorkspacesRequest)(nil),  // 5: protectorate.v1.BrowseWorkspacesRequest
+	(*WorkspaceDirectory)(nil),       // 6: protectorate.v1.WorkspaceDirectory
+	(*BrowseWorkspacesResponse)(nil), // 7: protectorate.v1.BrowseWorkspacesResponse
+	(*ReadOnlyMount)(nil),            // 8: protectorate.v1.ReadOnlyMount
+	(*SpawnSleeveRequest)(nil),       // 9: protectorate.v1.SpawnSleeveRequest
+	(*SpawnSleeveResponse)(nil),      // 10: protectorate.v1.SpawnSleeveResponse
+	(*ListSleevesRequest)(nil),       // 11: protectorate.v1.ListSleevesRequest
+	(*ListSleevesResponse)(nil),      // 12: protectorate.v1.ListSleevesResponse
+	(*ListWorkspacesRequest)(nil),    // 13: protectorate.v1.ListWorkspacesRequest
+	(*Workspace)(nil),                // 14: protectorate.v1.Workspace
+	(*ListWorkspacesResponse)(nil),   // 15: protectorate.v1.ListWorkspacesResponse
+	(*GetSleeveRequest)(nil),         // 16: protectorate.v1.GetSleeveRequest
+	(*GetSleeveResponse)(nil),        // 17: protectorate.v1.GetSleeveResponse
+	(*KillSleeveRequest)(nil),        // 18: protectorate.v1.KillSleeveRequest
+	(*KillSleeveResponse)(nil),       // 19: protectorate.v1.KillSleeveResponse
+	(*ResleeveSleeveRequest)(nil),    // 20: protectorate.v1.ResleeveSleeveRequest
+	(*ResleeveSleeveResponse)(nil),   // 21: protectorate.v1.ResleeveSleeveResponse
+	(*SpawnEnvoyRequest)(nil),        // 22: protectorate.v1.SpawnEnvoyRequest
+	(*SpawnEnvoyResponse)(nil),       // 23: protectorate.v1.SpawnEnvoyResponse
+	nil,                              // 24: protectorate.v1.SpawnSleeveRequest.EnvEntry
+	(*timestamppb.Timestamp)(nil),    // 25: google.protobuf.Timestamp
+	(SleeveMode)(0),                  // 26: protectorate.v1.SleeveMode
+	(*ChatStatus)(nil),               // 27: protectorate.v1.ChatStatus
+	(*Handoff)(nil),                  // 28: protectorate.v1.Handoff
+	(*durationpb.Duration)(nil),      // 29: google.protobuf.Duration
+	(*ModelSelection)(nil),           // 30: protectorate.v1.ModelSelection
+	(*TokenInfo)(nil),                // 31: protectorate.v1.TokenInfo
 }
 var file_protectorate_v1_sleeve_proto_depIdxs = []int32{
-	22, // 0: protectorate.v1.SleeveUsage.sampled_at:type_name -> google.protobuf.Timestamp
-	22, // 1: protectorate.v1.SleeveUsage.disk_sampled_at:type_name -> google.protobuf.Timestamp
+	25, // 0: protectorate.v1.SleeveUsage.sampled_at:type_name -> google.protobuf.Timestamp
+	25, // 1: protectorate.v1.SleeveUsage.disk_sampled_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: protectorate.v1.Sleeve.harness:type_name -> protectorate.v1.Harness
-	22, // 3: protectorate.v1.Sleeve.created_at:type_name -> google.protobuf.Timestamp
+	25, // 3: protectorate.v1.Sleeve.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 4: protectorate.v1.Sleeve.state:type_name -> protectorate.v1.SleeveState
 	2,  // 5: protectorate.v1.Sleeve.limits:type_name -> protectorate.v1.SleeveLimits
 	3,  // 6: protectorate.v1.Sleeve.usage:type_name -> protectorate.v1.SleeveUsage
-	22, // 7: protectorate.v1.Sleeve.exited_at:type_name -> google.protobuf.Timestamp
-	23, // 8: protectorate.v1.Sleeve.mode:type_name -> protectorate.v1.SleeveMode
-	24, // 9: protectorate.v1.Sleeve.chat:type_name -> protectorate.v1.ChatStatus
-	25, // 10: protectorate.v1.Sleeve.handoff:type_name -> protectorate.v1.Handoff
-	5,  // 11: protectorate.v1.Sleeve.read_only:type_name -> protectorate.v1.ReadOnlyMount
-	26, // 12: protectorate.v1.Sleeve.exit_after_idle:type_name -> google.protobuf.Duration
-	0,  // 13: protectorate.v1.SpawnSleeveRequest.harness:type_name -> protectorate.v1.Harness
-	2,  // 14: protectorate.v1.SpawnSleeveRequest.limits:type_name -> protectorate.v1.SleeveLimits
-	21, // 15: protectorate.v1.SpawnSleeveRequest.env:type_name -> protectorate.v1.SpawnSleeveRequest.EnvEntry
-	23, // 16: protectorate.v1.SpawnSleeveRequest.mode:type_name -> protectorate.v1.SleeveMode
-	27, // 17: protectorate.v1.SpawnSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
-	5,  // 18: protectorate.v1.SpawnSleeveRequest.read_only:type_name -> protectorate.v1.ReadOnlyMount
-	26, // 19: protectorate.v1.SpawnSleeveRequest.exit_after_idle:type_name -> google.protobuf.Duration
-	4,  // 20: protectorate.v1.SpawnSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	4,  // 21: protectorate.v1.ListSleevesResponse.sleeves:type_name -> protectorate.v1.Sleeve
-	11, // 22: protectorate.v1.ListWorkspacesResponse.workspaces:type_name -> protectorate.v1.Workspace
-	4,  // 23: protectorate.v1.GetSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	0,  // 24: protectorate.v1.ResleeveSleeveRequest.to:type_name -> protectorate.v1.Harness
-	26, // 25: protectorate.v1.ResleeveSleeveRequest.wait:type_name -> google.protobuf.Duration
-	27, // 26: protectorate.v1.ResleeveSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
-	4,  // 27: protectorate.v1.ResleeveSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	0,  // 28: protectorate.v1.SpawnEnvoyRequest.harness:type_name -> protectorate.v1.Harness
-	26, // 29: protectorate.v1.SpawnEnvoyRequest.ttl:type_name -> google.protobuf.Duration
-	27, // 30: protectorate.v1.SpawnEnvoyRequest.selection:type_name -> protectorate.v1.ModelSelection
-	4,  // 31: protectorate.v1.SpawnEnvoyResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	28, // 32: protectorate.v1.SpawnEnvoyResponse.token:type_name -> protectorate.v1.TokenInfo
-	6,  // 33: protectorate.v1.SleeveService.SpawnSleeve:input_type -> protectorate.v1.SpawnSleeveRequest
-	8,  // 34: protectorate.v1.SleeveService.ListSleeves:input_type -> protectorate.v1.ListSleevesRequest
-	10, // 35: protectorate.v1.SleeveService.ListWorkspaces:input_type -> protectorate.v1.ListWorkspacesRequest
-	13, // 36: protectorate.v1.SleeveService.GetSleeve:input_type -> protectorate.v1.GetSleeveRequest
-	15, // 37: protectorate.v1.SleeveService.KillSleeve:input_type -> protectorate.v1.KillSleeveRequest
-	17, // 38: protectorate.v1.SleeveService.ResleeveSleeve:input_type -> protectorate.v1.ResleeveSleeveRequest
-	19, // 39: protectorate.v1.SleeveService.SpawnEnvoy:input_type -> protectorate.v1.SpawnEnvoyRequest
-	7,  // 40: protectorate.v1.SleeveService.SpawnSleeve:output_type -> protectorate.v1.SpawnSleeveResponse
-	9,  // 41: protectorate.v1.SleeveService.ListSleeves:output_type -> protectorate.v1.ListSleevesResponse
-	12, // 42: protectorate.v1.SleeveService.ListWorkspaces:output_type -> protectorate.v1.ListWorkspacesResponse
-	14, // 43: protectorate.v1.SleeveService.GetSleeve:output_type -> protectorate.v1.GetSleeveResponse
-	16, // 44: protectorate.v1.SleeveService.KillSleeve:output_type -> protectorate.v1.KillSleeveResponse
-	18, // 45: protectorate.v1.SleeveService.ResleeveSleeve:output_type -> protectorate.v1.ResleeveSleeveResponse
-	20, // 46: protectorate.v1.SleeveService.SpawnEnvoy:output_type -> protectorate.v1.SpawnEnvoyResponse
-	40, // [40:47] is the sub-list for method output_type
-	33, // [33:40] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	25, // 7: protectorate.v1.Sleeve.exited_at:type_name -> google.protobuf.Timestamp
+	26, // 8: protectorate.v1.Sleeve.mode:type_name -> protectorate.v1.SleeveMode
+	27, // 9: protectorate.v1.Sleeve.chat:type_name -> protectorate.v1.ChatStatus
+	28, // 10: protectorate.v1.Sleeve.handoff:type_name -> protectorate.v1.Handoff
+	8,  // 11: protectorate.v1.Sleeve.read_only:type_name -> protectorate.v1.ReadOnlyMount
+	29, // 12: protectorate.v1.Sleeve.exit_after_idle:type_name -> google.protobuf.Duration
+	6,  // 13: protectorate.v1.BrowseWorkspacesResponse.directories:type_name -> protectorate.v1.WorkspaceDirectory
+	0,  // 14: protectorate.v1.SpawnSleeveRequest.harness:type_name -> protectorate.v1.Harness
+	2,  // 15: protectorate.v1.SpawnSleeveRequest.limits:type_name -> protectorate.v1.SleeveLimits
+	24, // 16: protectorate.v1.SpawnSleeveRequest.env:type_name -> protectorate.v1.SpawnSleeveRequest.EnvEntry
+	26, // 17: protectorate.v1.SpawnSleeveRequest.mode:type_name -> protectorate.v1.SleeveMode
+	30, // 18: protectorate.v1.SpawnSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
+	8,  // 19: protectorate.v1.SpawnSleeveRequest.read_only:type_name -> protectorate.v1.ReadOnlyMount
+	29, // 20: protectorate.v1.SpawnSleeveRequest.exit_after_idle:type_name -> google.protobuf.Duration
+	4,  // 21: protectorate.v1.SpawnSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	4,  // 22: protectorate.v1.ListSleevesResponse.sleeves:type_name -> protectorate.v1.Sleeve
+	14, // 23: protectorate.v1.ListWorkspacesResponse.workspaces:type_name -> protectorate.v1.Workspace
+	4,  // 24: protectorate.v1.GetSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	0,  // 25: protectorate.v1.ResleeveSleeveRequest.to:type_name -> protectorate.v1.Harness
+	29, // 26: protectorate.v1.ResleeveSleeveRequest.wait:type_name -> google.protobuf.Duration
+	30, // 27: protectorate.v1.ResleeveSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
+	4,  // 28: protectorate.v1.ResleeveSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	0,  // 29: protectorate.v1.SpawnEnvoyRequest.harness:type_name -> protectorate.v1.Harness
+	29, // 30: protectorate.v1.SpawnEnvoyRequest.ttl:type_name -> google.protobuf.Duration
+	30, // 31: protectorate.v1.SpawnEnvoyRequest.selection:type_name -> protectorate.v1.ModelSelection
+	4,  // 32: protectorate.v1.SpawnEnvoyResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	31, // 33: protectorate.v1.SpawnEnvoyResponse.token:type_name -> protectorate.v1.TokenInfo
+	9,  // 34: protectorate.v1.SleeveService.SpawnSleeve:input_type -> protectorate.v1.SpawnSleeveRequest
+	11, // 35: protectorate.v1.SleeveService.ListSleeves:input_type -> protectorate.v1.ListSleevesRequest
+	13, // 36: protectorate.v1.SleeveService.ListWorkspaces:input_type -> protectorate.v1.ListWorkspacesRequest
+	5,  // 37: protectorate.v1.SleeveService.BrowseWorkspaces:input_type -> protectorate.v1.BrowseWorkspacesRequest
+	16, // 38: protectorate.v1.SleeveService.GetSleeve:input_type -> protectorate.v1.GetSleeveRequest
+	18, // 39: protectorate.v1.SleeveService.KillSleeve:input_type -> protectorate.v1.KillSleeveRequest
+	20, // 40: protectorate.v1.SleeveService.ResleeveSleeve:input_type -> protectorate.v1.ResleeveSleeveRequest
+	22, // 41: protectorate.v1.SleeveService.SpawnEnvoy:input_type -> protectorate.v1.SpawnEnvoyRequest
+	10, // 42: protectorate.v1.SleeveService.SpawnSleeve:output_type -> protectorate.v1.SpawnSleeveResponse
+	12, // 43: protectorate.v1.SleeveService.ListSleeves:output_type -> protectorate.v1.ListSleevesResponse
+	15, // 44: protectorate.v1.SleeveService.ListWorkspaces:output_type -> protectorate.v1.ListWorkspacesResponse
+	7,  // 45: protectorate.v1.SleeveService.BrowseWorkspaces:output_type -> protectorate.v1.BrowseWorkspacesResponse
+	17, // 46: protectorate.v1.SleeveService.GetSleeve:output_type -> protectorate.v1.GetSleeveResponse
+	19, // 47: protectorate.v1.SleeveService.KillSleeve:output_type -> protectorate.v1.KillSleeveResponse
+	21, // 48: protectorate.v1.SleeveService.ResleeveSleeve:output_type -> protectorate.v1.ResleeveSleeveResponse
+	23, // 49: protectorate.v1.SleeveService.SpawnEnvoy:output_type -> protectorate.v1.SpawnEnvoyResponse
+	42, // [42:50] is the sub-list for method output_type
+	34, // [34:42] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_sleeve_proto_init() }
@@ -1741,7 +1992,7 @@ func file_protectorate_v1_sleeve_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_sleeve_proto_rawDesc), len(file_protectorate_v1_sleeve_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

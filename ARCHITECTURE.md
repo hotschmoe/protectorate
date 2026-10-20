@@ -50,7 +50,7 @@ protectorate hub serve            # the engine, runs as a systemd service on the
 protectorate node serve           # node agent on any machine (joins the tailnet)
 protectorate node join <token>    # enroll a machine
 protectorate quota                # every other subcommand is a CLI client of the hub API
-protectorate sleeve ls|workspaces|spawn|show|kill
+protectorate sleeve ls|workspaces|browse|spawn|show|kill
 protectorate session ls|new|attach|capture|respawn|kill
 protectorate api call <Method> '<json>'   # generic escape hatch
 ```

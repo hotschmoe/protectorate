@@ -42,6 +42,9 @@ const (
 	// SleeveServiceListWorkspacesProcedure is the fully-qualified name of the SleeveService's
 	// ListWorkspaces RPC.
 	SleeveServiceListWorkspacesProcedure = "/protectorate.v1.SleeveService/ListWorkspaces"
+	// SleeveServiceBrowseWorkspacesProcedure is the fully-qualified name of the SleeveService's
+	// BrowseWorkspaces RPC.
+	SleeveServiceBrowseWorkspacesProcedure = "/protectorate.v1.SleeveService/BrowseWorkspaces"
 	// SleeveServiceGetSleeveProcedure is the fully-qualified name of the SleeveService's GetSleeve RPC.
 	SleeveServiceGetSleeveProcedure = "/protectorate.v1.SleeveService/GetSleeve"
 	// SleeveServiceKillSleeveProcedure is the fully-qualified name of the SleeveService's KillSleeve
@@ -74,6 +77,10 @@ type SleeveServiceClient interface {
 	// the filesystem; any other absolute path can still be given to
 	// SpawnSleeve directly.
 	ListWorkspaces(context.Context, *connect.Request[v1.ListWorkspacesRequest]) (*connect.Response[v1.ListWorkspacesResponse], error)
+	// BrowseWorkspaces lists configured roots when path is empty, otherwise
+	// subdirectories of path. Resolved paths must stay inside a configured root.
+	// Sleeve identity tokens cannot call this RPC, even with read scope.
+	BrowseWorkspaces(context.Context, *connect.Request[v1.BrowseWorkspacesRequest]) (*connect.Response[v1.BrowseWorkspacesResponse], error)
 	// GetSleeve returns one sleeve with its latest resource usage.
 	GetSleeve(context.Context, *connect.Request[v1.GetSleeveRequest]) (*connect.Response[v1.GetSleeveResponse], error)
 	// KillSleeve stops a sleeve's harness and every process in its sandbox and
@@ -142,6 +149,13 @@ func NewSleeveServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		browseWorkspaces: connect.NewClient[v1.BrowseWorkspacesRequest, v1.BrowseWorkspacesResponse](
+			httpClient,
+			baseURL+SleeveServiceBrowseWorkspacesProcedure,
+			connect.WithSchema(sleeveServiceMethods.ByName("BrowseWorkspaces")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		getSleeve: connect.NewClient[v1.GetSleeveRequest, v1.GetSleeveResponse](
 			httpClient,
 			baseURL+SleeveServiceGetSleeveProcedure,
@@ -172,13 +186,14 @@ func NewSleeveServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 
 // sleeveServiceClient implements SleeveServiceClient.
 type sleeveServiceClient struct {
-	spawnSleeve    *connect.Client[v1.SpawnSleeveRequest, v1.SpawnSleeveResponse]
-	listSleeves    *connect.Client[v1.ListSleevesRequest, v1.ListSleevesResponse]
-	listWorkspaces *connect.Client[v1.ListWorkspacesRequest, v1.ListWorkspacesResponse]
-	getSleeve      *connect.Client[v1.GetSleeveRequest, v1.GetSleeveResponse]
-	killSleeve     *connect.Client[v1.KillSleeveRequest, v1.KillSleeveResponse]
-	resleeveSleeve *connect.Client[v1.ResleeveSleeveRequest, v1.ResleeveSleeveResponse]
-	spawnEnvoy     *connect.Client[v1.SpawnEnvoyRequest, v1.SpawnEnvoyResponse]
+	spawnSleeve      *connect.Client[v1.SpawnSleeveRequest, v1.SpawnSleeveResponse]
+	listSleeves      *connect.Client[v1.ListSleevesRequest, v1.ListSleevesResponse]
+	listWorkspaces   *connect.Client[v1.ListWorkspacesRequest, v1.ListWorkspacesResponse]
+	browseWorkspaces *connect.Client[v1.BrowseWorkspacesRequest, v1.BrowseWorkspacesResponse]
+	getSleeve        *connect.Client[v1.GetSleeveRequest, v1.GetSleeveResponse]
+	killSleeve       *connect.Client[v1.KillSleeveRequest, v1.KillSleeveResponse]
+	resleeveSleeve   *connect.Client[v1.ResleeveSleeveRequest, v1.ResleeveSleeveResponse]
+	spawnEnvoy       *connect.Client[v1.SpawnEnvoyRequest, v1.SpawnEnvoyResponse]
 }
 
 // SpawnSleeve calls protectorate.v1.SleeveService.SpawnSleeve.
@@ -194,6 +209,11 @@ func (c *sleeveServiceClient) ListSleeves(ctx context.Context, req *connect.Requ
 // ListWorkspaces calls protectorate.v1.SleeveService.ListWorkspaces.
 func (c *sleeveServiceClient) ListWorkspaces(ctx context.Context, req *connect.Request[v1.ListWorkspacesRequest]) (*connect.Response[v1.ListWorkspacesResponse], error) {
 	return c.listWorkspaces.CallUnary(ctx, req)
+}
+
+// BrowseWorkspaces calls protectorate.v1.SleeveService.BrowseWorkspaces.
+func (c *sleeveServiceClient) BrowseWorkspaces(ctx context.Context, req *connect.Request[v1.BrowseWorkspacesRequest]) (*connect.Response[v1.BrowseWorkspacesResponse], error) {
+	return c.browseWorkspaces.CallUnary(ctx, req)
 }
 
 // GetSleeve calls protectorate.v1.SleeveService.GetSleeve.
@@ -235,6 +255,10 @@ type SleeveServiceHandler interface {
 	// the filesystem; any other absolute path can still be given to
 	// SpawnSleeve directly.
 	ListWorkspaces(context.Context, *connect.Request[v1.ListWorkspacesRequest]) (*connect.Response[v1.ListWorkspacesResponse], error)
+	// BrowseWorkspaces lists configured roots when path is empty, otherwise
+	// subdirectories of path. Resolved paths must stay inside a configured root.
+	// Sleeve identity tokens cannot call this RPC, even with read scope.
+	BrowseWorkspaces(context.Context, *connect.Request[v1.BrowseWorkspacesRequest]) (*connect.Response[v1.BrowseWorkspacesResponse], error)
 	// GetSleeve returns one sleeve with its latest resource usage.
 	GetSleeve(context.Context, *connect.Request[v1.GetSleeveRequest]) (*connect.Response[v1.GetSleeveResponse], error)
 	// KillSleeve stops a sleeve's harness and every process in its sandbox and
@@ -299,6 +323,13 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	sleeveServiceBrowseWorkspacesHandler := connect.NewUnaryHandler(
+		SleeveServiceBrowseWorkspacesProcedure,
+		svc.BrowseWorkspaces,
+		connect.WithSchema(sleeveServiceMethods.ByName("BrowseWorkspaces")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	sleeveServiceGetSleeveHandler := connect.NewUnaryHandler(
 		SleeveServiceGetSleeveProcedure,
 		svc.GetSleeve,
@@ -332,6 +363,8 @@ func NewSleeveServiceHandler(svc SleeveServiceHandler, opts ...connect.HandlerOp
 			sleeveServiceListSleevesHandler.ServeHTTP(w, r)
 		case SleeveServiceListWorkspacesProcedure:
 			sleeveServiceListWorkspacesHandler.ServeHTTP(w, r)
+		case SleeveServiceBrowseWorkspacesProcedure:
+			sleeveServiceBrowseWorkspacesHandler.ServeHTTP(w, r)
 		case SleeveServiceGetSleeveProcedure:
 			sleeveServiceGetSleeveHandler.ServeHTTP(w, r)
 		case SleeveServiceKillSleeveProcedure:
@@ -359,6 +392,10 @@ func (UnimplementedSleeveServiceHandler) ListSleeves(context.Context, *connect.R
 
 func (UnimplementedSleeveServiceHandler) ListWorkspaces(context.Context, *connect.Request[v1.ListWorkspacesRequest]) (*connect.Response[v1.ListWorkspacesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.ListWorkspaces is not implemented"))
+}
+
+func (UnimplementedSleeveServiceHandler) BrowseWorkspaces(context.Context, *connect.Request[v1.BrowseWorkspacesRequest]) (*connect.Response[v1.BrowseWorkspacesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.SleeveService.BrowseWorkspaces is not implemented"))
 }
 
 func (UnimplementedSleeveServiceHandler) GetSleeve(context.Context, *connect.Request[v1.GetSleeveRequest]) (*connect.Response[v1.GetSleeveResponse], error) {

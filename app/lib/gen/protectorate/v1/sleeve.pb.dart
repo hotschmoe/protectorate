@@ -300,6 +300,7 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.Iterable<ReadOnlyMount>? readOnly,
     $2.Duration? exitAfterIdle,
     $core.String? parent,
+    $core.String? gitBranch,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -322,6 +323,7 @@ class Sleeve extends $pb.GeneratedMessage {
     if (readOnly != null) result.readOnly.addAll(readOnly);
     if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
     if (parent != null) result.parent = parent;
+    if (gitBranch != null) result.gitBranch = gitBranch;
     return result;
   }
 
@@ -370,6 +372,7 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOM<$2.Duration>(19, _omitFieldNames ? '' : 'exitAfterIdle',
         subBuilder: $2.Duration.$_createMessage)
     ..aOS(20, _omitFieldNames ? '' : 'parent')
+    ..aOS(21, _omitFieldNames ? '' : 'gitBranch')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -589,6 +592,311 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasParent() => $_has(19);
   @$pb.TagNumber(20)
   void clearParent() => $_clearField(20);
+
+  /// Current branch read from .git files; empty for non-git and worktrees.
+  @$pb.TagNumber(21)
+  $core.String get gitBranch => $_getSZ(20);
+  @$pb.TagNumber(21)
+  set gitBranch($core.String value) => $_setString(20, value);
+  @$pb.TagNumber(21)
+  $core.bool hasGitBranch() => $_has(20);
+  @$pb.TagNumber(21)
+  void clearGitBranch() => $_clearField(21);
+}
+
+class BrowseWorkspacesRequest extends $pb.GeneratedMessage {
+  factory BrowseWorkspacesRequest({
+    $core.String? path,
+  }) {
+    final result = BrowseWorkspacesRequest._();
+    if (path != null) result.path = path;
+    return result;
+  }
+
+  BrowseWorkspacesRequest._();
+
+  factory BrowseWorkspacesRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      BrowseWorkspacesRequest()..mergeFromBuffer(data, registry);
+  factory BrowseWorkspacesRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      BrowseWorkspacesRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'BrowseWorkspacesRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: BrowseWorkspacesRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'path')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  BrowseWorkspacesRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  BrowseWorkspacesRequest copyWith(
+          void Function(BrowseWorkspacesRequest) updates) =>
+      super.copyWith((message) => updates(message as BrowseWorkspacesRequest))
+          as BrowseWorkspacesRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use BrowseWorkspacesRequest() / BrowseWorkspacesRequest.new instead')
+  static BrowseWorkspacesRequest create() => BrowseWorkspacesRequest._();
+  static $pb.GeneratedMessage $_createMessage() => BrowseWorkspacesRequest._();
+  @$core.override
+  BrowseWorkspacesRequest createEmptyInstance() => BrowseWorkspacesRequest._();
+  @$core.pragma('dart2js:noInline')
+  static BrowseWorkspacesRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<BrowseWorkspacesRequest>(
+          BrowseWorkspacesRequest.$_createMessage);
+  static BrowseWorkspacesRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get path => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set path($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPath() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPath() => $_clearField(1);
+}
+
+class WorkspaceDirectory extends $pb.GeneratedMessage {
+  factory WorkspaceDirectory({
+    $core.String? name,
+    $core.String? path,
+    $core.bool? isGit,
+    $core.String? gitBranch,
+    $core.String? gitRemote,
+    $core.bool? acceptable,
+    $core.String? reason,
+    $core.String? requiredName,
+  }) {
+    final result = WorkspaceDirectory._();
+    if (name != null) result.name = name;
+    if (path != null) result.path = path;
+    if (isGit != null) result.isGit = isGit;
+    if (gitBranch != null) result.gitBranch = gitBranch;
+    if (gitRemote != null) result.gitRemote = gitRemote;
+    if (acceptable != null) result.acceptable = acceptable;
+    if (reason != null) result.reason = reason;
+    if (requiredName != null) result.requiredName = requiredName;
+    return result;
+  }
+
+  WorkspaceDirectory._();
+
+  factory WorkspaceDirectory.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WorkspaceDirectory()..mergeFromBuffer(data, registry);
+  factory WorkspaceDirectory.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WorkspaceDirectory()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'WorkspaceDirectory',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: WorkspaceDirectory.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'path')
+    ..aOB(3, _omitFieldNames ? '' : 'isGit')
+    ..aOS(4, _omitFieldNames ? '' : 'gitBranch')
+    ..aOS(5, _omitFieldNames ? '' : 'gitRemote')
+    ..aOB(6, _omitFieldNames ? '' : 'acceptable')
+    ..aOS(7, _omitFieldNames ? '' : 'reason')
+    ..aOS(8, _omitFieldNames ? '' : 'requiredName')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WorkspaceDirectory clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WorkspaceDirectory copyWith(void Function(WorkspaceDirectory) updates) =>
+      super.copyWith((message) => updates(message as WorkspaceDirectory))
+          as WorkspaceDirectory;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use WorkspaceDirectory() / WorkspaceDirectory.new instead')
+  static WorkspaceDirectory create() => WorkspaceDirectory._();
+  static $pb.GeneratedMessage $_createMessage() => WorkspaceDirectory._();
+  @$core.override
+  WorkspaceDirectory createEmptyInstance() => WorkspaceDirectory._();
+  @$core.pragma('dart2js:noInline')
+  static WorkspaceDirectory getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<WorkspaceDirectory>(
+          WorkspaceDirectory.$_createMessage);
+  static WorkspaceDirectory? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get path => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set path($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPath() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPath() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get isGit => $_getBF(2);
+  @$pb.TagNumber(3)
+  set isGit($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasIsGit() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearIsGit() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get gitBranch => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set gitBranch($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasGitBranch() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearGitBranch() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get gitRemote => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set gitRemote($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasGitRemote() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearGitRemote() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $core.bool get acceptable => $_getBF(5);
+  @$pb.TagNumber(6)
+  set acceptable($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasAcceptable() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearAcceptable() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  $core.String get reason => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set reason($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasReason() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearReason() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.String get requiredName => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set requiredName($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasRequiredName() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearRequiredName() => $_clearField(8);
+}
+
+class BrowseWorkspacesResponse extends $pb.GeneratedMessage {
+  factory BrowseWorkspacesResponse({
+    $core.String? path,
+    $core.String? parent,
+    $core.Iterable<WorkspaceDirectory>? directories,
+    $core.bool? truncated,
+  }) {
+    final result = BrowseWorkspacesResponse._();
+    if (path != null) result.path = path;
+    if (parent != null) result.parent = parent;
+    if (directories != null) result.directories.addAll(directories);
+    if (truncated != null) result.truncated = truncated;
+    return result;
+  }
+
+  BrowseWorkspacesResponse._();
+
+  factory BrowseWorkspacesResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      BrowseWorkspacesResponse()..mergeFromBuffer(data, registry);
+  factory BrowseWorkspacesResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      BrowseWorkspacesResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'BrowseWorkspacesResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: BrowseWorkspacesResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'path')
+    ..aOS(2, _omitFieldNames ? '' : 'parent')
+    ..pPM<WorkspaceDirectory>(3, _omitFieldNames ? '' : 'directories',
+        subBuilder: WorkspaceDirectory.$_createMessage)
+    ..aOB(4, _omitFieldNames ? '' : 'truncated')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  BrowseWorkspacesResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  BrowseWorkspacesResponse copyWith(
+          void Function(BrowseWorkspacesResponse) updates) =>
+      super.copyWith((message) => updates(message as BrowseWorkspacesResponse))
+          as BrowseWorkspacesResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use BrowseWorkspacesResponse() / BrowseWorkspacesResponse.new instead')
+  static BrowseWorkspacesResponse create() => BrowseWorkspacesResponse._();
+  static $pb.GeneratedMessage $_createMessage() => BrowseWorkspacesResponse._();
+  @$core.override
+  BrowseWorkspacesResponse createEmptyInstance() =>
+      BrowseWorkspacesResponse._();
+  @$core.pragma('dart2js:noInline')
+  static BrowseWorkspacesResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<BrowseWorkspacesResponse>(
+          BrowseWorkspacesResponse.$_createMessage);
+  static BrowseWorkspacesResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get path => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set path($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPath() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPath() => $_clearField(1);
+
+  /// Empty at a root; clients return to the root list from there.
+  @$pb.TagNumber(2)
+  $core.String get parent => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set parent($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasParent() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearParent() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $pb.PbList<WorkspaceDirectory> get directories => $_getList(2);
+
+  @$pb.TagNumber(4)
+  $core.bool get truncated => $_getBF(3);
+  @$pb.TagNumber(4)
+  set truncated($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasTruncated() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearTruncated() => $_clearField(4);
 }
 
 class ReadOnlyMount extends $pb.GeneratedMessage {
@@ -1934,6 +2242,14 @@ class SleeveServiceApi {
           $pb.ClientContext? ctx, ListWorkspacesRequest request) =>
       _client.invoke<ListWorkspacesResponse>(ctx, 'SleeveService',
           'ListWorkspaces', request, ListWorkspacesResponse());
+
+  /// BrowseWorkspaces lists configured roots when path is empty, otherwise
+  /// subdirectories of path. Resolved paths must stay inside a configured root.
+  /// Sleeve identity tokens cannot call this RPC, even with read scope.
+  $async.Future<BrowseWorkspacesResponse> browseWorkspaces(
+          $pb.ClientContext? ctx, BrowseWorkspacesRequest request) =>
+      _client.invoke<BrowseWorkspacesResponse>(ctx, 'SleeveService',
+          'BrowseWorkspaces', request, BrowseWorkspacesResponse());
 
   /// GetSleeve returns one sleeve with its latest resource usage.
   $async.Future<GetSleeveResponse> getSleeve(

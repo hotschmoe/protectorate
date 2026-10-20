@@ -81,6 +81,26 @@ extension type SleeveServiceClient (connect.Transport _transport) {
     );
   }
 
+  /// BrowseWorkspaces lists configured roots when path is empty, otherwise
+  /// subdirectories of path. Resolved paths must stay inside a configured root.
+  /// Sleeve identity tokens cannot call this RPC, even with read scope.
+  Future<protectoratev1sleeve.BrowseWorkspacesResponse> browseWorkspaces(
+    protectoratev1sleeve.BrowseWorkspacesRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.browseWorkspaces,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
   /// GetSleeve returns one sleeve with its latest resource usage.
   Future<protectoratev1sleeve.GetSleeveResponse> getSleeve(
     protectoratev1sleeve.GetSleeveRequest input, {
