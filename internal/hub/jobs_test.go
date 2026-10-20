@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -789,7 +790,7 @@ func TestJobEventsAndScopes(t *testing.T) {
 
 func TestJobAndLeaseScopesAndAudit(t *testing.T) {
 	e := newJobEnv(t, 1)
-	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(e.home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,19 +970,21 @@ func TestCareTierEnforcement(t *testing.T) {
 		"other grant":        {"ptk_other", auth.MintedByOwner, append([]string{"node_admin:kidsbox"}, work...)},
 		"orchestrator grant": {"ptk_orch", "orchestrator-envoy", append([]string{"node_admin:peer"}, work...)},
 	}
-	var yml strings.Builder
-	yml.WriteString("tokens:\n")
+	var records []auth.Token
 	clients := map[string]*http.Client{"owner": {Transport: bearer{testToken}}}
 	i := 0
 	for who, tk := range toks {
 		i++
 		sum := sha256.Sum256([]byte(tk.secret))
-		fmt.Fprintf(&yml, "  - id: t%d\n    name: %q\n    hash: %s\n    scopes: [%s]\n    created: 2026-10-20T00:00:00Z\n    minted_by: %q\n    task: %q\n",
-			i, who, hex.EncodeToString(sum[:]), `"`+strings.Join(tk.scopes, `", "`)+`"`, tk.by, map[bool]string{true: "test", false: ""}[tk.by != ""])
+		records = append(records, auth.Token{ID: fmt.Sprintf("t%d", i), Name: who, Hash: hex.EncodeToString(sum[:]), Scopes: tk.scopes, Created: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), MintedBy: tk.by, Task: map[bool]string{true: "test", false: ""}[tk.by != ""]})
 		clients[who] = &http.Client{Transport: bearer{tk.secret}}
 	}
-	path := filepath.Join(e.home, "tokens.yaml")
-	writeFile(t, path, []byte(yml.String()), 0o600)
+	path := filepath.Join(e.home, "tokens.json")
+	raw, err := json.Marshal(map[string]any{"tokens": records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, raw, 0o600)
 	store, err := auth.OpenStore(path)
 	if err != nil {
 		t.Fatal(err)

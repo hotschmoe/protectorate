@@ -23,7 +23,7 @@ func startAuthHub(t *testing.T) (url, home string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := auth.OpenStore(filepath.Join(home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +117,9 @@ func TestTokenCLI(t *testing.T) {
 	if lines := strings.Count(strings.TrimSpace(two), "\n") + 1; lines != 2 {
 		t.Fatalf("tail -n 2 printed %d lines", lines)
 	}
-	raw, _ := os.ReadFile(filepath.Join(home, "tokens.yaml"))
+	raw, _ := os.ReadFile(filepath.Join(home, "tokens.json"))
 	if strings.Contains(string(raw), secret[1]) {
-		t.Fatal("secret in tokens.yaml")
+		t.Fatal("secret in tokens.json")
 	}
 }
 

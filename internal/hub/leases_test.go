@@ -52,7 +52,7 @@ func fixed(node string, gpu *int) func(func(string, *int) *pb.Lease) (string, *i
 func intp(i int) *int { return &i }
 
 func TestLeaseExclusivityAndExpiry(t *testing.T) {
-	tb, clk, evs := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
+	tb, clk, evs := newTable(t, filepath.Join(t.TempDir(), "leases.json"))
 
 	a, err := tb.Acquire("alice", time.Minute, fixed("win", nil))
 	if err != nil {
@@ -115,7 +115,7 @@ func TestLeaseExclusivityAndExpiry(t *testing.T) {
 }
 
 func TestLeaseRunSweepsExpired(t *testing.T) {
-	tb, clk, evs := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
+	tb, clk, evs := newTable(t, filepath.Join(t.TempDir(), "leases.json"))
 	l, err := tb.Acquire("alice", time.Second, fixed("win", nil))
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestLeaseRunSweepsExpired(t *testing.T) {
 }
 
 func TestLeaseValidationAndRelease(t *testing.T) {
-	tb, _, evs := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
+	tb, _, evs := newTable(t, filepath.Join(t.TempDir(), "leases.json"))
 	for _, tt := range []struct {
 		name, holder string
 		ttl          time.Duration
@@ -166,7 +166,7 @@ func TestLeaseValidationAndRelease(t *testing.T) {
 }
 
 func TestLeasePersistence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "leases.yaml")
+	path := filepath.Join(t.TempDir(), "sub", "leases.json")
 	tb, clk, _ := newTable(t, path)
 	a, err := tb.Acquire("alice", 10*time.Minute, fixed("win", nil))
 	if err != nil {
@@ -177,7 +177,7 @@ func TestLeasePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fi, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
-		t.Fatalf("leases.yaml = %v, %v", fi, err)
+		t.Fatalf("leases.json = %v, %v", fi, err)
 	}
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	if len(entries) != 1 {
@@ -211,13 +211,13 @@ func TestLeasePersistence(t *testing.T) {
 
 func TestLeaseLoadErrors(t *testing.T) {
 	for name, content := range map[string]string{
-		"corrupt":       "leases: [",
-		"unknown field": "leases:\n  - {id: a, node: n, ttl: 1m, bogus: 1}\n",
-		"no ttl":        "leases:\n  - {id: a, node: n}\n",
-		"duplicate":     "leases:\n  - {id: a, node: n, ttl: 1m}\n  - {id: a, node: m, ttl: 1m}\n",
+		"corrupt":       `{"leases": [`,
+		"unknown field": `{"leases":[{"id":"a","node":"n","ttl":60000000000,"bogus":1}]}`,
+		"no ttl":        `{"leases":[{"id":"a","node":"n"}]}`,
+		"duplicate":     `{"leases":[{"id":"a","node":"n","ttl":60000000000},{"id":"a","node":"m","ttl":60000000000}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "leases.yaml")
+			path := filepath.Join(t.TempDir(), "leases.json")
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -229,7 +229,7 @@ func TestLeaseLoadErrors(t *testing.T) {
 			}
 		})
 	}
-	if tb, err := OpenLeases(filepath.Join(t.TempDir(), "none.yaml"), nil); err != nil || len(tb.List()) != 0 {
+	if tb, err := OpenLeases(filepath.Join(t.TempDir(), "none.json"), nil); err != nil || len(tb.List()) != 0 {
 		t.Fatalf("missing file: %v", err)
 	}
 }
@@ -516,7 +516,7 @@ func TestLeasesSurviveHubRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	re, err := OpenLeases(filepath.Join(e.home, "leases.yaml"), nil)
+	re, err := OpenLeases(filepath.Join(e.home, "leases.json"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestLeaseTTLHoldsAcrossRestart(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "leases.yaml")
+			path := filepath.Join(t.TempDir(), "leases.json")
 			tb, clk, _ := newTable(t, path)
 			l, err := tb.Acquire("alice", 5*time.Minute, fixed("win", nil))
 			if err != nil {

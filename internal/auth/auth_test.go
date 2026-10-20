@@ -382,7 +382,7 @@ func TestCreateValidation(t *testing.T) {
 }
 
 func TestStorePersistenceAndNoSecrets(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "tokens.yaml")
+	path := filepath.Join(t.TempDir(), "sub", "tokens.json")
 	st, err := OpenStore(path)
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +396,7 @@ func TestStorePersistenceAndNoSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), secret) || strings.Contains(string(raw), strings.TrimPrefix(secret, SecretPrefix)) {
-		t.Fatalf("secret stored in tokens.yaml:\n%s", raw)
+		t.Fatalf("secret stored in tokens.json:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), tok.Hash) || !strings.Contains(string(raw), "phone") {
 		t.Fatalf("hash or name missing:\n%s", raw)
@@ -439,7 +439,7 @@ func TestStorePersistenceAndNoSecrets(t *testing.T) {
 }
 
 func TestStoreCorruptFileFailsClosed(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tokens.yaml")
+	path := filepath.Join(t.TempDir(), "tokens.json")
 	if err := os.WriteFile(path, []byte("tokens: [: nope"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +449,7 @@ func TestStoreCorruptFileFailsClosed(t *testing.T) {
 }
 
 func TestStoreConcurrent(t *testing.T) {
-	st, err := OpenStore(filepath.Join(t.TempDir(), "tokens.yaml"))
+	st, err := OpenStore(filepath.Join(t.TempDir(), "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

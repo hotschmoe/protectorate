@@ -1,18 +1,18 @@
 package sleeve
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/hotschmoe/protectorate/internal/driver"
-	"gopkg.in/yaml.v3"
 )
 
 func TestSelectionPersistence(t *testing.T) {
 	home := t.TempDir()
-	m := &Manager{cfg: Config{Home: home}, path: filepath.Join(home, "sleeves.yaml"), sleeves: map[string]*entry{
+	m := &Manager{cfg: Config{Home: home}, path: filepath.Join(home, "sleeves.json"), sleeves: map[string]*entry{
 		"envoy": {Info: Info{Name: "envoy", Harness: Codex, Mode: ModeChat, Chat: &Chat{Model: "native", Effort: "low",
 			Requested: driver.Selection{Model: "chosen", Effort: "xhigh"}, Defaults: driver.Selection{Model: "native", Effort: "low"}}}},
 	}}
@@ -27,7 +27,7 @@ func TestSelectionPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stored fileFormat
-	if err := yaml.Unmarshal(raw, &stored); err != nil {
+	if err := json.Unmarshal(raw, &stored); err != nil {
 		t.Fatal(err)
 	}
 	chat := stored.Sleeves[0].Chat

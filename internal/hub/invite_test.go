@@ -124,7 +124,7 @@ func newInviteEnv(t *testing.T, withTailnet bool) *inviteEnv {
 	e.peers.Store(&[]Peer{})
 	v := "test"
 	e.version.Store(&v)
-	store, err := auth.OpenStore(filepath.Join(home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

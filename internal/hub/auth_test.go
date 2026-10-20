@@ -39,7 +39,7 @@ func newAuthEnv(t *testing.T) *authEnv {
 	h := New("test", testToken)
 	h.Heartbeat = 20 * time.Millisecond
 	h.PingInterval = 50 * time.Millisecond
-	store, err := auth.OpenStore(filepath.Join(home, "tokens.yaml"))
+	store, err := auth.OpenStore(filepath.Join(home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,12 +278,12 @@ func TestTokenServiceOwnerOnly(t *testing.T) {
 		t.Fatalf("revoke unknown: %v", err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(e.home, "tokens.yaml"))
+	raw, err := os.ReadFile(filepath.Join(e.home, "tokens.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), secret) || strings.Contains(string(raw), strings.TrimPrefix(secret, auth.SecretPrefix)) {
-		t.Fatal("secret persisted in tokens.yaml")
+		t.Fatal("secret persisted in tokens.json")
 	}
 }
 

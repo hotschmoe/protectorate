@@ -9,7 +9,7 @@ terminal, and the tailnet listener. Nothing else reads a token.
 - **Owner token**: `$PROTECTORATE_HOME/token`, created by `hub serve`. Full
   access, never expires, the only credential that may call `TokenService`.
 - **Scoped tokens**: issued by the owner, stored as SHA-256 hashes in
-  `$PROTECTORATE_HOME/tokens.yaml` (0600, rewritten atomically; the hub is its
+  `$PROTECTORATE_HOME/tokens.json` (0600, rewritten atomically; the hub is its
   only writer). The secret (`ptk_` + 64 hex) is shown once and cannot be
   recovered. Each token has id, name, scopes, created, expires (optional),
   last_used (persisted at most about once a minute) and revoked.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"gopkg.in/yaml.v3"
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/internal/auth"
@@ -64,15 +64,15 @@ type chooseFunc = func(blocked func(node string, gpu *int) *pb.Lease) (string, *
 // the AcquireLeaseRequest, from which the hub rebuilds the chooser after a
 // restart.
 type ticketRecord struct {
-	ID       string        `yaml:"id"`
-	Resource string        `yaml:"resource"`
-	Holder   string        `yaml:"holder"`
-	Notify   string        `yaml:"notify,omitempty"`
-	Priority int           `yaml:"priority,omitempty"`
-	Seq      uint64        `yaml:"seq"`
-	Enqueued time.Time     `yaml:"enqueued"`
-	TTL      time.Duration `yaml:"ttl"`
-	Request  string        `yaml:"request"`
+	ID       string        `json:"id"`
+	Resource string        `json:"resource"`
+	Holder   string        `json:"holder"`
+	Notify   string        `json:"notify,omitempty"`
+	Priority int           `json:"priority,omitempty"`
+	Seq      uint64        `json:"seq"`
+	Enqueued time.Time     `json:"enqueued"`
+	TTL      time.Duration `json:"ttl"`
+	Request  string        `json:"request"`
 }
 
 type queueEntry struct {
@@ -81,21 +81,21 @@ type queueEntry struct {
 }
 
 type leaseRecord struct {
-	ID       string        `yaml:"id"`
-	Node     string        `yaml:"node"`
-	GPU      *int          `yaml:"gpu,omitempty"`
-	Holder   string        `yaml:"holder"`
-	TTL      time.Duration `yaml:"ttl"`
-	Acquired time.Time     `yaml:"acquired"`
-	Expires  time.Time     `yaml:"expires"`
+	ID       string        `json:"id"`
+	Node     string        `json:"node"`
+	GPU      *int          `json:"gpu,omitempty"`
+	Holder   string        `json:"holder"`
+	TTL      time.Duration `json:"ttl"`
+	Acquired time.Time     `json:"acquired"`
+	Expires  time.Time     `json:"expires"`
 	// Want is the ttl a queued waiter asked for. The grant holds the lease
 	// only for the claim window; the first renew without a ttl switches to Want.
-	Want time.Duration `yaml:"want,omitempty"`
+	Want time.Duration `json:"want,omitempty"`
 }
 
 type leaseFile struct {
-	Leases []leaseRecord  `yaml:"leases"`
-	Queue  []ticketRecord `yaml:"queue,omitempty"`
+	Leases []leaseRecord  `json:"leases"`
+	Queue  []ticketRecord `json:"queue,omitempty"`
 }
 
 func (r leaseRecord) resource() string {
@@ -126,7 +126,7 @@ func (r leaseRecord) conflicts(node string, gpu *int) bool {
 	return r.GPU == nil || gpu == nil || *r.GPU == *gpu
 }
 
-// LeaseTable holds the live leases, persisted to a YAML file so they survive
+// LeaseTable holds the live leases, persisted to a JSON file so they survive
 // a hub restart. Expired leases are dropped lazily and by Run.
 type LeaseTable struct {
 	path string
@@ -158,8 +158,8 @@ func OpenLeases(path string, emit func(kind, subject string, payload *structpb.S
 		return nil, fmt.Errorf("read leases: %w", err)
 	}
 	var f leaseFile
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -233,7 +233,7 @@ func (t *LeaseTable) persistLocked() error {
 		f.Queue = append(f.Queue, q.ticketRecord)
 	}
 	sort.Slice(f.Leases, func(i, j int) bool { return f.Leases[i].ID < f.Leases[j].ID })
-	raw, err := yaml.Marshal(f)
+	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}

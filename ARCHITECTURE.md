@@ -128,7 +128,7 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
 ```
 
 - `node invite` and the app's ADD NODE call `NodeService.InviteNode` (owner
-  only): the hub issues the key, upserts the node into `nodes.yaml` (address =
+  only): the hub issues the key, upserts the node into `nodes.json` (address =
   name, tier, `pool-X` tags) and returns one-line installers that fetch the
   hub-generated `/install.sh` or `/install.ps1` and the matching build from
   `/dl/` (see docs/install.md). `node ls` shows it as `invited, not yet joined`
@@ -336,7 +336,7 @@ node) executes.
               jobs/<id>/{job.json, job.log, artifacts/}
 ```
 
-- **Leases** are `(resource, holder, ttl)` kept in `leases.yaml` (atomic
+- **Leases** are `(resource, holder, ttl)` kept in `leases.json` (atomic
   rewrite, 0600) and swept every second; an unrenewed lease frees itself and
   publishes `lease.expired`. A resource is a node or `node:gpu<N>`; a node
   lease overlaps all of its GPUs. Exclusive only. TTL is at most 24h. Expiry
@@ -414,7 +414,7 @@ node) executes.
   same way, for up to 5 minutes without progress. A graceful hub stop leaves
   remote jobs running and active in their records; jobs on the hub's own node
   die with the process and are marked failed ("hub stopped"). Leases keep
-  absolute expiry times in `leases.yaml`, so a lease that ran out while the
+  absolute expiry times in `leases.json`, so a lease that ran out while the
   hub was down is gone on the first read and its holder's renew fails.
 - Source paths are resolved on the hub and are not confined to a directory:
   the scopes that admit `SubmitJob` are shell access to every node.
@@ -548,9 +548,11 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
 
 ```
 ~/.protectorate/
-  hub.yaml            # config
-  nodes.yaml          # inventory (P2)
-  leases.yaml         # live leases and the lease queue (P9)
+  nodes.json          # inventory (P2)
+  leases.json         # live leases and the lease queue (P9)
+  tokens.json         # issued scoped token hashes
+  sleeves.json        # sleeve records and chat summaries
+  desk-policies.json  # per-node desk policies
   directory.json      # projects, packages, last seen refs
   mailbox.jsonl       # messages and their delivery state
   handoffs/<sleeve>/  # archived HANDOFF.md of every resleeve
@@ -562,6 +564,10 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
 ```
 
 Per-workspace memory stays in `.cstack/` (cortical-stack format).
+
+Persisted JSON durations (`ttl`, `want`, `idle`) are integer nanoseconds;
+timestamps are RFC 3339. Hub state uses no YAML decoder. Headscale still
+requires its generated `headscale.yaml` and DERP flow document.
 
 ## Repo layout
 

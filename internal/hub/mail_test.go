@@ -521,7 +521,7 @@ func TestMailProjectAddressing(t *testing.T) {
 func TestLeaseGrantSendsNotice(t *testing.T) {
 	r := newMailRig(t)
 	r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
-	tb, err := OpenLeases(filepath.Join(t.TempDir(), "leases.yaml"), nil)
+	tb, err := OpenLeases(filepath.Join(t.TempDir(), "leases.json"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
@@ -31,24 +30,24 @@ var (
 
 // Token is one issued token. Only the SHA-256 hash of the secret is kept.
 type Token struct {
-	ID        string     `yaml:"id"`
-	Name      string     `yaml:"name"`
-	Hash      string     `yaml:"hash"`
-	Scopes    []string   `yaml:"scopes"`
-	Created   time.Time  `yaml:"created"`
-	Expires   *time.Time `yaml:"expires,omitempty"`
-	LastUsed  *time.Time `yaml:"last_used,omitempty"`
-	RevokedAt *time.Time `yaml:"revoked,omitempty"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Hash      string     `json:"hash"`
+	Scopes    []string   `json:"scopes"`
+	Created   time.Time  `json:"created"`
+	Expires   *time.Time `json:"expires,omitempty"`
+	LastUsed  *time.Time `json:"last_used,omitempty"`
+	RevokedAt *time.Time `json:"revoked,omitempty"`
 	// Task and MintedBy are set on an admin grant.
-	Task     string `yaml:"task,omitempty"`
-	MintedBy string `yaml:"minted_by,omitempty"`
+	Task     string `json:"task,omitempty"`
+	MintedBy string `json:"minted_by,omitempty"`
 }
 
 type tokenFile struct {
-	Tokens []Token `yaml:"tokens"`
+	Tokens []Token `json:"tokens"`
 }
 
-// Store holds issued tokens in a YAML file, rewritten atomically with mode
+// Store holds issued tokens in a JSON file, rewritten atomically with mode
 // 0600. The hub process is its only writer. An empty path keeps tokens in
 // memory.
 type Store struct {
@@ -70,7 +69,7 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("read tokens: %w", err)
 	}
 	var f tokenFile
-	if err := yaml.Unmarshal(b, &f); err != nil {
+	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	s.tokens = f.Tokens
@@ -245,7 +244,7 @@ func (s *Store) writeLocked() error {
 	if s.path == "" {
 		return nil
 	}
-	b, err := yaml.Marshal(tokenFile{Tokens: s.tokens})
+	b, err := json.MarshalIndent(tokenFile{Tokens: s.tokens}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode tokens: %w", err)
 	}

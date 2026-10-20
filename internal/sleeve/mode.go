@@ -22,19 +22,19 @@ const (
 // Chat is the persisted chat summary of a sleeve. State holds the hub's
 // chat state name; the sleeve layer does not interpret it.
 type Chat struct {
-	State        string           `yaml:"state,omitempty"`
-	SessionID    string           `yaml:"session_id,omitempty"`
-	Model        string           `yaml:"model,omitempty"`
-	Effort       string           `yaml:"effort,omitempty"`
-	Requested    driver.Selection `yaml:"requested,omitempty"`
-	Defaults     driver.Selection `yaml:"native_defaults,omitempty"`
-	Provider     string           `yaml:"provider,omitempty"`
-	LocalModel   bool             `yaml:"local_model,omitempty"`
-	Context      uint64           `yaml:"context_tokens,omitempty"`
-	Window       uint64           `yaml:"context_window,omitempty"`
-	CacheExpires time.Time        `yaml:"cache_expires,omitempty"`
-	LastSeq      uint64           `yaml:"last_seq,omitempty"`
-	LastActivity time.Time        `yaml:"last_activity,omitempty"`
+	State        string           `json:"state,omitempty"`
+	SessionID    string           `json:"session_id,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	Effort       string           `json:"effort,omitempty"`
+	Requested    driver.Selection `json:"requested,omitempty"`
+	Defaults     driver.Selection `json:"native_defaults,omitempty"`
+	Provider     string           `json:"provider,omitempty"`
+	LocalModel   bool             `json:"local_model,omitempty"`
+	Context      uint64           `json:"context_tokens,omitempty"`
+	Window       uint64           `json:"context_window,omitempty"`
+	CacheExpires time.Time        `json:"cache_expires,omitempty"`
+	LastSeq      uint64           `json:"last_seq,omitempty"`
+	LastActivity time.Time        `json:"last_activity,omitempty"`
 }
 
 func resolveMode(h Harness, m Mode, args []string) (Mode, error) {
@@ -104,17 +104,17 @@ func (m *Manager) UserHome() string { return m.cfg.UserHome }
 // Handoff records the resleeve that put a sleeve on its harness. The sleeve
 // layer stores it for the hub and does not interpret it.
 type Handoff struct {
-	From               string    `yaml:"from"`
-	FromSession        string    `yaml:"from_session,omitempty"`
-	To                 string    `yaml:"to"`
-	Summarizer         string    `yaml:"summarizer,omitempty"`
-	SummarizerModel    string    `yaml:"summarizer_model,omitempty"`
-	SummarizerProvider string    `yaml:"summarizer_provider,omitempty"`
-	SummarizerLocal    bool      `yaml:"summarizer_local,omitempty"`
-	SummaryError       string    `yaml:"summary_error,omitempty"`
-	Path               string    `yaml:"path"`
-	Archive            string    `yaml:"archive,omitempty"`
-	At                 time.Time `yaml:"at"`
+	From               string    `json:"from"`
+	FromSession        string    `json:"from_session,omitempty"`
+	To                 string    `json:"to"`
+	Summarizer         string    `json:"summarizer,omitempty"`
+	SummarizerModel    string    `json:"summarizer_model,omitempty"`
+	SummarizerProvider string    `json:"summarizer_provider,omitempty"`
+	SummarizerLocal    bool      `json:"summarizer_local,omitempty"`
+	SummaryError       string    `json:"summary_error,omitempty"`
+	Path               string    `json:"path"`
+	Archive            string    `json:"archive,omitempty"`
+	At                 time.Time `json:"at"`
 }
 
 // SetHandoff records how a sleeve got its harness.

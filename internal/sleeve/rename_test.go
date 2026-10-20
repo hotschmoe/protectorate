@@ -29,7 +29,7 @@ func TestRenameRecord(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
 			cfg := Config{Home: home, CgroupRoot: filepath.Join(home, "cgroup"), UnitPrefix: "prot-test-"}
-			m := &Manager{cfg: cfg, path: filepath.Join(home, "sleeves.yaml"), sleeves: map[string]*entry{}, pending: map[string]chan struct{}{}}
+			m := &Manager{cfg: cfg, path: filepath.Join(home, "sleeves.json"), sleeves: map[string]*entry{}, pending: map[string]chan struct{}{}}
 			for n, st := range tt.records {
 				m.sleeves[n] = &entry{Info: Info{Name: n, Mode: ModeChat, State: st, Chat: &Chat{SessionID: "native-" + n}}}
 			}
@@ -68,7 +68,7 @@ func TestRenameRecord(t *testing.T) {
 					t.Fatalf("record = %+v, chat %+v", e.Info, e.Chat)
 				}
 				raw, err := os.ReadFile(m.path)
-				if err != nil || !strings.Contains(string(raw), "name: envoy") || strings.Contains(string(raw), "name: poe") {
+				if err != nil || !strings.Contains(string(raw), `"name": "envoy"`) || strings.Contains(string(raw), `"name": "poe"`) {
 					t.Fatalf("persisted = %q, %v", raw, err)
 				}
 			}

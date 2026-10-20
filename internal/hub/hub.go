@@ -139,11 +139,11 @@ func (h *Hub) SetNodes(m *NodeMonitor) {
 // home. local runs jobs placed on the hub's own node. Call after SetNodes and
 // before Handler or Serve.
 func (h *Hub) EnableJobs(home string, local *node.Jobs) error {
-	leases, err := OpenLeases(filepath.Join(home, "leases.yaml"), h.leaseEvent)
+	leases, err := OpenLeases(filepath.Join(home, "leases.json"), h.leaseEvent)
 	if err != nil {
 		return err
 	}
-	if h.deskPol, err = openDeskPolicies(filepath.Join(home, "desk-policies.yaml")); err != nil {
+	if h.deskPol, err = openDeskPolicies(filepath.Join(home, "desk-policies.json")); err != nil {
 		return err
 	}
 	if err := h.deskUse.open(filepath.Join(home, "desk-use.json")); err != nil {
