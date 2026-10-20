@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:fixnum/fixnum.dart';
 
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../hubs/event_feed.dart';
@@ -12,14 +11,13 @@ import '../gen/protectorate/v1/chat.pb.dart';
 import '../chat/badges.dart';
 import '../sleeves/sleeve_card.dart';
 import '../sleeves/sleeve_info.dart';
+import '../sleeves/spawn_dialog.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
 import 'chat_screen.dart';
 import 'terminal_screen.dart';
-
-final _sleeveName = RegExp(r'^[a-z0-9][a-z0-9-]{0,39}$');
 
 class SleevesScreen extends StatefulWidget {
   const SleevesScreen({
@@ -85,13 +83,9 @@ class _SleevesScreenState extends State<SleevesScreen> {
   }
 
   Future<void> _spawn() async {
-    final req = await showDialog<SpawnSleeveRequest>(
-      context: context,
-      builder: (_) => const SpawnSleeveDialog(),
-    );
-    if (req == null) return;
     try {
-      await widget.client.sleeves.spawnSleeve(req);
+      final s = await startSleeve(context, widget.client);
+      if (s == null) return;
       await _refresh();
     } on Object catch (e) {
       _fail(e);
@@ -411,127 +405,6 @@ class SleeveStatusPane extends StatelessWidget {
             ],
           ),
         ],
-      ],
-    );
-  }
-}
-
-class SpawnSleeveDialog extends StatefulWidget {
-  const SpawnSleeveDialog({super.key});
-
-  @override
-  State<SpawnSleeveDialog> createState() => _SpawnSleeveDialogState();
-}
-
-class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
-  final _form = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _workspace = TextEditingController();
-  final _cpu = TextEditingController();
-  final _mem = TextEditingController();
-  Harness _harness = Harness.HARNESS_CLAUDE;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _workspace.dispose();
-    _cpu.dispose();
-    _mem.dispose();
-    super.dispose();
-  }
-
-  String? _optionalInt(String? v) {
-    final t = (v ?? '').trim();
-    if (t.isEmpty) return null;
-    final n = int.tryParse(t);
-    return n == null || n < 0 ? 'whole number' : null;
-  }
-
-  void _submit() {
-    if (!_form.currentState!.validate()) return;
-    final cpu = int.tryParse(_cpu.text.trim()) ?? 0;
-    final memMb = int.tryParse(_mem.text.trim()) ?? 0;
-    Navigator.of(context).pop(
-      SpawnSleeveRequest(
-        name: _name.text.trim(),
-        workspace: _workspace.text.trim(),
-        harness: _harness,
-        limits: SleeveLimits(cpuPercent: cpu, memoryBytes: Int64(memMb) << 20),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Spawn sleeve'),
-      content: SingleChildScrollView(
-        child: Form(
-          key: _form,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                key: const ValueKey('sleeve-name'),
-                controller: _name,
-                decoration: const InputDecoration(labelText: 'Name'),
-                validator: (v) => _sleeveName.hasMatch((v ?? '').trim())
-                    ? null
-                    : 'a-z, 0-9 and -, up to 40',
-              ),
-              TextFormField(
-                key: const ValueKey('sleeve-workspace'),
-                controller: _workspace,
-                decoration: const InputDecoration(
-                  labelText: 'Workspace path or git URL',
-                ),
-                validator: (v) => (v ?? '').trim().isEmpty ? 'required' : null,
-              ),
-              DropdownButtonFormField<Harness>(
-                initialValue: _harness,
-                decoration: const InputDecoration(labelText: 'Harness'),
-                items: [
-                  for (final h in Harness.values.where(
-                    (h) => h != Harness.HARNESS_UNSPECIFIED,
-                  ))
-                    DropdownMenuItem(value: h, child: Text(harnessLabel(h))),
-                ],
-                onChanged: (h) => setState(() => _harness = h ?? _harness),
-              ),
-              TextFormField(
-                key: const ValueKey('sleeve-cpu'),
-                controller: _cpu,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'CPU limit %',
-                  helperText: '100 = one core, empty = unlimited',
-                ),
-                validator: _optionalInt,
-              ),
-              TextFormField(
-                key: const ValueKey('sleeve-mem'),
-                controller: _mem,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Memory limit MB',
-                  helperText: 'empty = unlimited',
-                ),
-                validator: _optionalInt,
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('CANCEL'),
-        ),
-        FilledButton(
-          key: const ValueKey('sleeve-spawn'),
-          onPressed: _submit,
-          child: const Text('SPAWN'),
-        ),
       ],
     );
   }
