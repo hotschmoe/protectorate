@@ -180,11 +180,11 @@ func (c Config) waitGone(ctx context.Context, name string, d time.Duration) bool
 // dirSize sums regular file sizes under dir without following symlinks.
 func dirSize(ctx context.Context, dir string) (uint64, error) {
 	var total uint64
-	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrPermission) && overlayWorkDir(path) {
 			return nil
 		}
 		if err != nil {
@@ -204,4 +204,12 @@ func dirSize(ctx context.Context, dir string) (uint64, error) {
 		return nil
 	})
 	return total, err
+}
+
+// overlayWorkDir reports overlayfs's internal work directory below a sleeve
+// cache overlay, which the kernel creates without permissions; it holds only
+// transient copy-up state.
+func overlayWorkDir(path string) bool {
+	return filepath.Base(path) == "work" && filepath.Base(filepath.Dir(path)) == "work" &&
+		strings.Contains(filepath.ToSlash(path), "/.cache/overlays/")
 }

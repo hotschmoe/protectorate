@@ -32,7 +32,7 @@ func homeSize(ctx context.Context, home string) (total, caches, goBuild uint64, 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if errors.Is(walkErr, os.ErrNotExist) {
+		if errors.Is(walkErr, os.ErrNotExist) || errors.Is(walkErr, fs.ErrPermission) && overlayWorkDir(path) {
 			return nil
 		}
 		if walkErr != nil {

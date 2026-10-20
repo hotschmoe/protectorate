@@ -27,7 +27,14 @@ func (c *Config) probeRuntime() {
 		}
 	}
 	var env struct{ GOCACHE, GOMODCACHE string }
-	cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOCACHE", "GOMODCACHE")
+	goBin := "go"
+	for _, d := range c.ToolDirs {
+		if fi, err := os.Stat(filepath.Join(d, "bin/go")); err == nil && !fi.IsDir() {
+			goBin = filepath.Join(d, "bin/go")
+			break
+		}
+	}
+	cmd := exec.CommandContext(ctx, goBin, "env", "-json", "GOCACHE", "GOMODCACHE")
 	cmd.Dir = c.UserHome
 	if b, err := cmd.Output(); err == nil && json.Unmarshal(b, &env) == nil {
 		for src, dst := range map[string]*string{env.GOCACHE: &c.GoCache, env.GOMODCACHE: &c.GoModCache} {

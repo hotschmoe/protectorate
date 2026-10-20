@@ -317,7 +317,7 @@ func (c Config) protectedDirs() []string {
 // contain, lexically and resolved.
 func (c Config) workspaceDenied() []string {
 	out := c.protectedDirs()
-	cacheDirs := []string{c.GoCache, c.GoModCache}
+	cacheDirs := []string{c.GoCache, c.GoModCache, filepath.Join(c.UserHome, ".pub-cache")}
 	for _, d := range c.ToolDirs {
 		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
 			cacheDirs = append(cacheDirs, filepath.Join(d, "bin/cache"))
