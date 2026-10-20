@@ -10,7 +10,7 @@ Branch and release rules.
 
 Generated code must be byte-identical everywhere, so the generators are pinned, and CI and the release workflow install exactly these: buf 1.74.0, protoc-gen-go v1.36.12, protoc-gen-connect-go v1.21.1, Dart protoc_plugin 25.1.0 and connectrpc 2.0.0, Flutter 3.44.1. Upgrade them together, locally and in `.github/workflows/`, in one commit with the regenerated output.
 
-Checks before every commit and before every merge: `go vet ./...`, `go test -race ./...`, `gofmt -l cmd internal` printing nothing, `make check-gen`, `make cross`, `make app-check`, `make check-version`. `make check` runs them all. CI runs the same on pushes to `master` and `dev-hotschmoe` and on pull requests.
+Checks before every commit and before every merge: `make test` (tagged vet, fuzz seeds and real-binary end-to-end scenarios), `gofmt -l cmd internal` printing nothing, `make check-gen`, `make cross`, `make app-check`, `make check-version`. `make check` runs them all. `make test` builds the tagged binary first, clears inherited hub credentials and enables `PROT_E2E=1`; `make app-check` runs Flutter analysis. Optional tailnet and host runtime lanes are documented in docs/testing.md. CI runs the same on pushes to `master` and `dev-hotschmoe` and on pull requests.
 
 ## Research references and access
 

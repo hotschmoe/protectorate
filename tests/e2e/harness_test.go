@@ -31,6 +31,7 @@ type cluster struct {
 	binary, root, home, url, token, nodeURL string
 	env                                     []string
 	hub                                     *process
+	node                                    *process
 	client                                  *http.Client
 }
 
@@ -80,6 +81,18 @@ func newCluster(t *testing.T) *cluster {
 	t.Cleanup(runCancel)
 	c.ctx = runCtx
 	c.env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	tmuxDir := filepath.Join(c.root, "tmux")
+	if err := os.Mkdir(tmuxDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	c.env = append(c.env, "TMUX_TMPDIR="+tmuxDir)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "tmux", "-L", "e2e-"+filepath.Base(c.root), "kill-server")
+		cmd.Env = c.env
+		_ = cmd.Run()
+	})
 	// systemd-run --user needs the user manager's bus.
 	for _, k := range []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"} {
 		if v, ok := os.LookupEnv(k); ok {
@@ -91,7 +104,17 @@ func newCluster(t *testing.T) *cluster {
 	}
 	c.url = "http://" + loopback(t)
 	c.nodeURL = "http://" + loopback(t)
-	c.start("node", append(c.env, "PROTECTORATE_HOME="+filepath.Join(c.root, "node")), "node", "serve", "--listen", strings.TrimPrefix(c.nodeURL, "http://"))
+	nodeBinary := filepath.Join(binDir, "node-protectorate")
+	b, err := os.ReadFile(c.binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nodeBinary, b, 0700); err != nil {
+		t.Fatal(err)
+	}
+	nodeCluster := *c
+	nodeCluster.binary = nodeBinary
+	c.node = nodeCluster.start("node", append(c.env, "PROTECTORATE_HOME="+filepath.Join(c.root, "node"), "INVOCATION_ID=e2e"), "node", "serve", "--listen", strings.TrimPrefix(c.nodeURL, "http://"))
 	c.boot()
 	c.eventually(func() bool {
 		return c.rpc("NodeService", "AddNode", map[string]any{"node": map[string]any{"name": "peer", "address": strings.TrimPrefix(c.nodeURL, "http://")}}, nil) == 200
@@ -202,7 +225,7 @@ func (c *cluster) rpc(service, method string, in, out any) int {
 	if res.StatusCode != 200 {
 		c.t.Logf("%s.%s: HTTP %d: %s", service, method, res.StatusCode, body)
 	}
-	if out != nil && res.StatusCode == 200 {
+	if out != nil {
 		if err := json.Unmarshal(body, out); err != nil {
 			c.t.Fatalf("decode %s: %v", method, err)
 		}

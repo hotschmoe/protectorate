@@ -1,6 +1,7 @@
 package sleeve
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,6 +46,57 @@ func FuzzEnvironmentArgumentEncoding(f *testing.F) {
 		got := strings.Split(string(SetenvArgs([][2]string{{key, value}})), "\x00")
 		if len(got) != 4 || got[0] != "--setenv" || got[1] != key || got[2] != value || got[3] != "" {
 			t.Fatalf("environment did not roundtrip: %q", got)
+		}
+	})
+}
+
+func FuzzHomeScopeNamespace(f *testing.F) {
+	for _, seed := range []string{"state", "state/../state", "alternate", "with spaces"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, name string) {
+		if name == "" || strings.ContainsRune(name, 0) {
+			t.Skip()
+		}
+		root := t.TempDir()
+		home := filepath.Join(root, name)
+		rel, err := filepath.Rel(root, home)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Skip()
+		}
+		if err := os.MkdirAll(home, 0700); err != nil {
+			t.Skip()
+		}
+		alias := filepath.Join(t.TempDir(), "alias")
+		if err := os.Symlink(home, alias); err != nil {
+			t.Skip()
+		}
+		first, err := DefaultConfig(home, []string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := DefaultConfig(alias, []string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		relative, err := filepath.Rel(cwd, home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		third, err := DefaultConfig(relative, []string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := DefaultConfig(t.TempDir(), []string{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first.UnitPrefix != second.UnitPrefix || first.UnitPrefix != third.UnitPrefix || first.UnitPrefix == other.UnitPrefix || strings.HasPrefix(first.UnitPrefix, DefaultUnitPrefix) {
+			t.Fatalf("home scope isolation: %q %q %q", first.UnitPrefix, second.UnitPrefix, other.UnitPrefix)
 		}
 	})
 }

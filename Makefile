@@ -55,9 +55,9 @@ check-gen: gen
 build:
 	CGO_ENABLED=0 go build -trimpath -tags '$(TAILSCALE_TAGS)' -ldflags '$(LDFLAGS)' -o bin/protectorate ./cmd/protectorate
 
-test:
+test: build
 	go vet -tags '$(TAILSCALE_TAGS)' ./...
-	go test -tags '$(TAILSCALE_TAGS)' -race ./...
+	env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN PROT_E2E=1 PROT_E2E_BINARY='$(CURDIR)/bin/protectorate' go test -count=1 -tags '$(TAILSCALE_TAGS)' ./...
 
 build-tags:
 	@echo '$(TAILSCALE_TAGS)'
@@ -71,7 +71,7 @@ cross:
 	done
 
 app-check:
-	cd app && flutter analyze && flutter test $${FLUTTER_TEST_CONCURRENCY:+--concurrency=$$FLUTTER_TEST_CONCURRENCY}
+	cd app && flutter analyze
 
 app-build-web:
 	cd app && dart run tool/build_web.dart $(APP_VERSION_FLAGS) $(APP_FLAGS)

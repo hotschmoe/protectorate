@@ -42,8 +42,8 @@ internal/hub/            Connect service implementations
 ```
 make gen     # buf lint + generate (needs buf, protoc-gen-go, protoc-gen-connect-go via go install; protoc-gen-dart and protoc-gen-connect-dart via dart pub global activate protoc_plugin / connectrpc, on PATH from ~/.pub-cache/bin)
 make build   # bin/protectorate
-make app-check  # flutter analyze + test in app/
-make test    # go vet + go test -race
+make app-check  # flutter analyze in app/
+make test    # tagged build + vet + fuzz seeds + real-binary e2e
 make check-gen  # fails if generated Go/Dart/descriptor image are stale or uncommitted
 make cross   # linux/windows amd64+arm64 and android/arm64 into bin/
 gofmt -l .   # must print nothing

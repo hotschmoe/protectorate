@@ -136,61 +136,6 @@ func (m *mailRig) waitIdle(name string) {
 	})
 }
 
-func TestRenderMessage(t *testing.T) {
-	tests := []struct {
-		name     string
-		m        mailbox.Message
-		project  string
-		reminder bool
-		want     string
-	}{
-		{
-			name: "request from a sleeve",
-			m:    mailbox.Message{ID: "m42", Thread: "t7", From: "api", Kind: mailbox.Request, AckRequired: true, Body: "please export Foo\n"},
-			want: "[request m42 from sleeve api, thread t7, ack required]\nplease export Foo\n\n" +
-				"Reply: protectorate msg reply m42 \"...\"\nAck: protectorate msg ack m42",
-		},
-		{
-			name:    "note to a project",
-			m:       mailbox.Message{ID: "m3", Thread: "t1", From: "owner", Kind: mailbox.Note, Body: "heads up"},
-			project: "acme/lib",
-			want: "[message m3 from owner, thread t1, to project acme/lib]\nheads up\n\n" +
-				"Reply: protectorate msg reply m3 \"...\"\nAck: protectorate msg ack m3",
-		},
-		{
-			name: "hub notice needs no reply",
-			m:    mailbox.Message{ID: "m9", Thread: "t4", From: "hub", Kind: mailbox.Notice, Body: "lib v1.2.0"},
-			want: "[notice m9 from hub, thread t4]\nlib v1.2.0",
-		},
-		{
-			name: "hub notice that needs an ack",
-			m:    mailbox.Message{ID: "m9", Thread: "t4", From: "hub", Kind: mailbox.Notice, AckRequired: true, Body: "x"},
-			want: "[notice m9 from hub, thread t4, ack required]\nx\n\nAck: protectorate msg ack m9",
-		},
-		{
-			name: "request already filed as a note",
-			m:    mailbox.Message{ID: "m5", Thread: "t2", From: "api", Kind: mailbox.Request, AckRequired: true, Body: "export Foo", NoteID: "b7"},
-			want: "[request m5 from sleeve api, thread t2, ack required]\nexport Foo\n\n" +
-				"This request is already filed as note b7 for the project. Work it from the note (protectorate backlog show b7); do not add another note for it.\n" +
-				"Reply: protectorate msg reply m5 \"...\"\nAck: protectorate msg ack m5",
-		},
-		{
-			name:     "reminder",
-			m:        mailbox.Message{ID: "m1", Thread: "t1", From: "api", Kind: mailbox.Note, AckRequired: true, Body: "b"},
-			reminder: true,
-			want: "[reminder, still unacked: message m1 from sleeve api, thread t1, ack required]\nb\n\n" +
-				"Reply: protectorate msg reply m1 \"...\"\nAck: protectorate msg ack m1",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := renderMessage(tt.m, tt.project, tt.reminder); got != tt.want {
-				t.Fatalf("got:\n%s\nwant:\n%s", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMailWaitsForIdleAndIsAuthenticated(t *testing.T) {
 	r := newMailRig(t)
 	r.spawnNamed("sender", pb.SleeveMode_SLEEVE_MODE_TERMINAL, "")

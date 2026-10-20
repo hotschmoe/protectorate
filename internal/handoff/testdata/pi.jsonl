@@ -1,6 +1,0 @@
-{"type":"session","id":"p1","cwd":"/w"}
-{"type":"model_change","provider":"hotschmoe-local","modelId":"m"}
-{"type":"message","message":{"role":"user","content":[{"type":"text","text":"add a Foo function to lib"}]}}
-{"type":"message","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"},{"type":"toolCall","id":"c1"}]}}
-{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"ok"}]}}
-{"type":"message","message":{"role":"assistant","content":[{"type":"thinking","thinking":"done"},{"type":"text","text":"Added Foo."}]}}

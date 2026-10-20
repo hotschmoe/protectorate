@@ -85,7 +85,22 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 	if err != nil || string(artifact) != "artifact" {
 		t.Fatalf("artifact=%q err=%v", artifact, err)
 	}
+	t.Run("large binary job output", c.outputScenario)
 	t.Run("git bundle and warm worktree", c.gitScenario)
+	t.Run("scopes and care tier", c.securityScenario)
+	t.Run("diagnostics", func(t *testing.T) {
+		previous := c.t
+		c.t = t
+		defer func() { c.t = previous }()
+		c.diagnosticsScenario(t)
+	})
+	t.Run("binary transports", func(t *testing.T) {
+		previous := c.t
+		c.t = t
+		defer func() { c.t = previous }()
+		c.transportScenario(t)
+	})
+	t.Run("node distribution and update", func(t *testing.T) { previous := c.t; c.t = t; defer func() { c.t = previous }(); c.updateScenario(t) })
 	t.Run("lease priority and FIFO across restart", c.leaseQueueScenario)
 	t.Run("sleeve isolation", c.runtimeScenario)
 	c.stop(c.hub)
@@ -96,6 +111,7 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 	if err != nil || len(archiveBytes) == 0 {
 		t.Fatalf("read backup for integrity probe: %v", err)
 	}
+	c.rejectTamperedBackups(archiveBytes)
 	archiveBytes[0] ^= 0xff
 	if err := os.WriteFile(corrupt, archiveBytes, 0600); err != nil {
 		t.Fatal(err)

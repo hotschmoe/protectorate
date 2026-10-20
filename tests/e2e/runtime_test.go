@@ -11,8 +11,8 @@ import (
 
 func (c *cluster) runtimeScenario(t *testing.T) {
 	t.Helper()
-	local := *c
-	c = &local
+	previous := c.t
+	defer func() { c.t = previous }()
 	c.t = t
 	for _, tool := range []string{"bwrap", "systemd-run", "tmux", "git"} {
 		if _, err := exec.LookPath(tool); err != nil {
@@ -46,5 +46,6 @@ func (c *cluster) runtimeScenario(t *testing.T) {
 		}
 	}
 	c.call("SleeveService", "KillSleeve", map[string]any{"name": "isolation"})
+	t.Run("ownership across restart", c.ownershipScenario)
 	t.Run("official protocol chat", c.chatScenario)
 }

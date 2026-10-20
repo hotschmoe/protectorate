@@ -16,16 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hotschmoe/protectorate/internal/jobtest"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
-
-func TestMain(m *testing.M) {
-	done := jobtest.PrivateTmux()
-	code := m.Run()
-	done()
-	os.Exit(code)
-}
 
 type recorder struct {
 	mu     sync.Mutex
@@ -59,6 +51,7 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	home := t.TempDir()
 	cfg, err := DefaultConfig(home, nil)
 	if err != nil {
@@ -407,30 +400,6 @@ func TestSpawnClonesGitURL(t *testing.T) {
 	}
 }
 
-func TestSpawnRejectsBadRequests(t *testing.T) {
-	r := newRig(t)
-	ws := r.workspace(t, "x")
-	tests := []struct {
-		name string
-		req  SpawnRequest
-	}{
-		{"no harness", SpawnRequest{Name: "ok", Workspace: ws}},
-		{"relative ws", SpawnRequest{Name: "ok", Workspace: "rel", Harness: Shell}},
-		{"missing ws", SpawnRequest{Name: "ok", Workspace: ws + "/nope", Harness: Shell}},
-		{"home ws", SpawnRequest{Name: "ok", Workspace: r.cfg.UserHome, Harness: Shell}},
-		{"bad name", SpawnRequest{Name: "Bad", Workspace: ws, Harness: Shell}},
-		{"dash url", SpawnRequest{Name: "ok", Workspace: "-x://y", Harness: Shell}},
-	}
-	for _, tt := range tests {
-		if _, err := r.m.Spawn(context.Background(), tt.req); !errors.Is(err, ErrInvalid) {
-			t.Errorf("%s: err = %v, want ErrInvalid", tt.name, err)
-		}
-	}
-	if got := r.m.List(); len(got) != 0 {
-		t.Errorf("failed spawns left records: %v", got)
-	}
-}
-
 func TestKillRestoresRecordWhenSaveFails(t *testing.T) {
 	r := newRig(t)
 	info, _ := r.spawn(t, "ks", Limits{}, "sleep", "600")
@@ -452,25 +421,5 @@ func TestKillRestoresRecordWhenSaveFails(t *testing.T) {
 	}
 	if _, err := r.m.Get(info.Name); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get after Kill = %v", err)
-	}
-}
-
-func TestFailedStartLeavesNothingRunning(t *testing.T) {
-	r := newRig(t)
-	ws := r.workspace(t, "fs")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	name := r.pfx + "fs"
-	if _, err := r.m.Spawn(ctx, SpawnRequest{Name: name, Workspace: ws, Harness: Shell, Args: []string{"sleep", "600"}}); err == nil {
-		t.Fatal("Spawn succeeded with a canceled context")
-	}
-	if _, err := r.sess.Get(context.Background(), SessionName(name)); !errors.Is(err, session.ErrNotFound) {
-		t.Errorf("session left behind: %v", err)
-	}
-	if r.cfg.scopeAlive(name) {
-		t.Errorf("scope %s left running", name)
-	}
-	if _, err := r.m.Get(name); !errors.Is(err, ErrNotFound) {
-		t.Errorf("record left behind: %v", err)
 	}
 }

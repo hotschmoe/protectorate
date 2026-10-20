@@ -112,6 +112,8 @@ func TestTailnetEndToEnd(t *testing.T) {
 	defer cancel()
 
 	home := t.TempDir()
+	t.Setenv("PROTECTORATE_HOME", home)
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	if _, err := tailnet.Install(ctx, home, tailnet.HeadscaleVersion, nil); err != nil {
 		t.Fatal(err)
 	}

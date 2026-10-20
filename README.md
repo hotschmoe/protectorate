@@ -64,7 +64,7 @@ Contributors: read [DEV.md](DEV.md) first. Development starts from
 make gen        # buf generate -> gen/ (Go) and app/lib/gen/ (Dart), both committed
 make check-gen  # fails if generated code is stale
 make build      # bin/protectorate
-make test       # go vet + go test -race
+make test       # tagged vet, fuzz seeds and real-binary e2e
 make cross      # linux/windows amd64+arm64, android/arm64 into bin/
 make app-check  # flutter analyze + test
 ```
