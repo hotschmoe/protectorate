@@ -134,7 +134,14 @@ func (c *cluster) securityScenario(t *testing.T) {
 			t.Fatalf("care denial came from an unrelated gate: %v", direct)
 		}
 		var job map[string]any
-		status := c.rpc("JobService", "SubmitJob", map[string]any{"target": map[string]any{"selector": map[string]any{}}, "command": []string{"true"}}, &job)
+		var status int
+		// A poll that lands late under load makes a node briefly not fresh;
+		// retry until the refusal, if any, names the care tier.
+		c.eventually(func() bool {
+			job = nil
+			status = c.rpc("JobService", "SubmitJob", map[string]any{"target": map[string]any{"selector": map[string]any{}}, "command": []string{"true"}}, &job)
+			return status != 400 || !strings.Contains(fmt.Sprint(job["message"]), "not fresh")
+		})
 		if status != 200 && status != 400 {
 			t.Fatalf("selector status=%d", status)
 		}
