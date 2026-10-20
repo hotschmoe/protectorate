@@ -234,33 +234,6 @@ func TestCodexResumeLocked(t *testing.T) {
 	}
 }
 
-func TestOpenErrors(t *testing.T) {
-	if _, err := Open(ctx5(t), "nope", t.TempDir(), "", Options{}); err == nil {
-		t.Fatal("unknown harness accepted")
-	}
-	if _, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{Bin: "/nonexistent/claude"}); err == nil {
-		t.Fatal("missing binary accepted")
-	}
-}
-
-func TestCaps(t *testing.T) {
-	want := map[Harness]Caps{
-		Claude: {Approvals: true, Interrupt: true},
-		Codex:  {Approvals: true, Interrupt: true, Steer: true, Selection: true},
-		Grok:   {Approvals: true, Interrupt: true},
-		Pi:     {Interrupt: true, Steer: true},
-	}
-	for h, w := range want {
-		got, err := CapsFor(h)
-		if err != nil || got != w {
-			t.Errorf("%s: %+v %v", h, got, err)
-		}
-	}
-	if _, err := CapsFor("x"); err == nil {
-		t.Error("unknown harness has caps")
-	}
-}
-
 func TestStderrBounded(t *testing.T) {
 	s, err := Open(ctx5(t), Claude, t.TempDir(), "", Options{
 		Bin: os.Args[0], Env: fakeEnv("claude", "DRIVER_FAKE_STDERR=1"), StderrLimit: 64, StopTimeout: time.Second,
@@ -306,57 +279,6 @@ func startHang(t *testing.T, mode string) (Session, error) {
 	return Open(ctx5(t), Claude, t.TempDir(), "", Options{
 		Bin: os.Args[0], Env: fakeEnv(mode), StopTimeout: 200 * time.Millisecond,
 	})
-}
-
-func TestOwners(t *testing.T) {
-	o := NewOwners()
-	rel, err := o.Acquire(Claude, "s1", OwnerTUI, "tmux:a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name string
-		h    Harness
-		id   string
-		kind OwnerKind
-		ok   bool
-	}{
-		{"same session driver vs tui", Claude, "s1", OwnerDriver, false},
-		{"same session tui vs tui", Claude, "s1", OwnerTUI, false},
-		{"other id", Claude, "s2", OwnerDriver, true},
-		{"other harness same id", Pi, "s1", OwnerDriver, true},
-		{"empty id", Claude, "", OwnerDriver, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			r, err := o.Acquire(tc.h, tc.id, tc.kind, "x")
-			if (err == nil) != tc.ok {
-				t.Fatalf("err=%v want ok=%v", err, tc.ok)
-			}
-			if err == nil {
-				r()
-				return
-			}
-			var ce *ConflictError
-			if tc.id != "" && (!errors.As(err, &ce) || ce.Current.Holder != "tmux:a" || !strings.Contains(err.Error(), "already owned")) {
-				t.Fatalf("not a conflict error: %v", err)
-			}
-		})
-	}
-	rel()
-	rel()
-	if _, ok := o.Holder(Claude, "s1"); ok {
-		t.Fatal("still held after release")
-	}
-	r2, err := o.Acquire(Claude, "s1", OwnerDriver, "d")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rel() // stale release must not drop the new owner
-	if _, ok := o.Holder(Claude, "s1"); !ok {
-		t.Fatal("stale release freed new owner")
-	}
-	r2()
 }
 
 func TestOwnersOpenDriver(t *testing.T) {

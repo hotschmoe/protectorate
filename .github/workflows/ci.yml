@@ -40,7 +40,7 @@ jobs:
           echo "version $(make -s version), app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: gofmt
         run: test -z "$(gofmt -l cmd internal)"
-      - name: Vet and race tests
+      - name: Vet, fuzz seeds and binary end-to-end tests
         run: make test
       - run: make check-gen
       - run: make check-version

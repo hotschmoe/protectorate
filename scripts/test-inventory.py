@@ -31,21 +31,66 @@ SCENARIOS = {
     "web": "WEB: binary serves SPA, bootstrap, pairing, install scripts and downloads",
 }
 KEEP = set("""
-TestBinaryClusterRestartAndRestore TestTailnetEndToEnd TestNodeRestartRecovery TestDERPRelay
-TestBackupRestoreWithLiveHeadscale TestGitRunsRepositoryProgramsInAJail
-TestSleeveLifecycle TestMemoryLimitEnforced TestSleeveExitKeepsSession TestSleeveExitReasons
-TestSpawnClonesGitURL TestChatSleeveLifecycle TestManagerLifecycle TestSessionExit TestRespawn
-TestAttachCmdExitedIsReadOnly TestCaptureClampsLines TestInstantExitsGetStatus
-TestGitJobWarmCacheAndIncrementalBundle TestArtifactJobAndArtifactUpload TestJobOnHubsOwnNode
-TestJobFailureAndEnv TestJobCancelKillsProcessTree TestJobTimeout TestNodeConcurrencyLimit
-TestConcurrencyTwoSlots TestSamRepoJobsSerialize TestWatchJobReplayAndFollow
-TestJobSurvivesHubRestart TestSandboxedJobSurvivesHubRestart TestRecoveredJobCanBeCanceled
-TestRestartReconcilesRecordsWithNodes TestShutdownLeavesRemoteJobsRunningAndStopsLocalOnes
-TestJobEventsAndScopes TestJobAndLeaseScopesAndAudit TestArtifactDirectoryRunsInWorkdirAndKeepsModes
-TestCareTierEnforcement TestSubmitRequestIDsSurviveHubRestart TestFileTransferThroughHub
-TestChatEndToEnd TestChatSendRequestIDsSurviveHubRestart
+TestNewSession
+TestEventDetails
+TestResume
+TestApproval
+TestInterruptAndSteer
+TestExitMidTurn
+TestCodexResumeLocked
+TestStderrBounded
+TestCloseEscalates
+TestOwnersOpenDriver
+TestCommandWrapsHarness
+TestUsageAndToolResults
+TestThinkingAndMessageIDs
+TestCompact
+TestCompactBusy
+TestNativeAutoCompaction
+TestAutonomousFlags
+TestCodexAutonomousLeavesPolicyToConfig
+TestSyntheticMessageReportsNoUsage
+TestMain
+TestCodexSelectionProtocol
+TestSelectionUnsupportedAndNativeDefaults
+TestCodexSelectionAtOpenAndResume
+TestSelectionUsesNativeConfirmation
+TestChatEndToEnd
+TestChatShellAndMissing
+TestChatSupervisedPermissionMode
+TestChatTerminalSleeveHasNoChat
+TestSleeveTokenReadsOnlyItself
+TestChatSendRequestIDsSurviveHubRestart
+TestMailWaitsForIdleAndIsAuthenticated
+TestMailReplyKeepsThreadAndAcks
+TestMailSendValidationAndDedupe
+TestMailSurvivesRestartAndTerminalSleevesUseInbox
+TestMailEscalation
+TestMailProjectAddressing
+TestLeaseGrantSendsNotice
+TestMailRequestAcksByDefault
+TestMailListThreads
+TestDeskEndedNotice
+TestEnvoyMailQueue
+TestEnvoyMailAfterOwner
+TestMailWakeWaitE2E
+TestSleeveReadOnlyMountHTTP
+TestSleeveIdleReapHTTP
+TestDevelopmentToolchainsEndToEnd
+TestGitRunsRepositoryProgramsInAJail
+TestSleeveLifecycle
+TestMemoryLimitEnforced
+TestSleeveExitKeepsSession
+TestSleeveExitReasons
+TestSpawnClonesGitURL
+TestKillRestoresRecordWhenSaveFails
+TestBackupRestoreWithLiveHeadscale
+TestTailnetEndToEnd
+TestNodeRestartRecovery
+TestDERPRelay
+TestBinaryClusterRestartAndRestore
 """.split())
-DELETE = {"TestPlanGolden", "TestTerminalArgs", "TestEventDetails", "TestStatusProto", "TestRenderMessage", "TestUpdateStep", "TestHeadscaleConfig", "TestPolicy", "TestDefaultToolDirsAreNarrow", "TestCatalogHasNoWorkspaceOrRealHomeMount"}
+DELETE = set()
 
 def scenario(path, name):
     lower = str(path).lower() + name.lower()
@@ -118,18 +163,7 @@ def main():
     preamble = (ROOT / "docs/testing-policy.md").read_text()
     out = [preamble, "\n## Inventory\n", "Snapshot counts: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items())) + f"; total={len(rows)}. TestMain rows are infrastructure, not scenarios.\n", "Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.\n", "| File | Function / callback | Exercises | Runtime | Verdict | Replacement / reason |", "|---|---|---|---|---|---|"]
     out.extend("| " + " | ".join(row) + " |" for row in rows)
-    out.extend(["\n## Phase-2 exact removal manifest\n", "This is a proposed function-level manifest, not authorization to delete. Every CONVERT entry is blocked until its named scenario assertions run and pass on the host. Keep shared helpers and TestMain until their last caller moves. No entire-file `git rm` is proposed: helpers cross file boundaries, so deleting whole files now would break retained workflows. Remove unused imports along with each approved function.\n", "Counts by package (CONVERT plus DELETE):\n"])
-    groups = collections.defaultdict(list)
-    for row in rows:
-        if row[4] in {"CONVERT", "DELETE"}:
-            groups[str(pathlib.Path(row[0]).parent)].append(row)
-    for package, members in sorted(groups.items()):
-        out.extend([f"\n### {package}: {len(members)} functions/callbacks\n"])
-        files = collections.defaultdict(list)
-        for row in members:
-            files[row[0]].append(row[1])
-        for path, names in sorted(files.items()):
-            out.extend([f"\n`{path}` — remove only these functions/callbacks:\n", "\n".join(f"- `{name}`" for name in names)])
+    out.extend(["\n## Deleted files\n", "See [the phase 2 deletion record](testing-deletions.md) for the exact paths grouped by package."])
     (ROOT / "docs/testing.md").write_text("\n".join(out) + "\n")
     print(f"Inventoried {len(rows)} functions/callbacks: {dict(counts)}")
 

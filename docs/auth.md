@@ -186,10 +186,11 @@ works against a remote hub (`--hub` or `PROTECTORATE_HUB`). `protectorate pair`
 mints a device token (`read`, `events`, `terminal`, `session_*`, `sleeve_*`, `chat_*`, `backlog_*`,
 90 days) instead of embedding the owner token.
 
-Run `python3 scripts/e2e-scopes.py ./bin/protectorate --require-runtime` on a
-Linux host with tmux, bwrap and a systemd user manager to verify ownership and
-scope changes against a real temporary hub. Without `--require-runtime`, it
-still verifies scope changes, persistence and audit when sleeves are unavailable.
+Run `make test` to verify scope changes, persistence, audit and care-tier
+authorization against a real temporary hub. On Linux with tmux, bwrap and a
+systemd user manager, the same Go harness also verifies persisted parent
+ownership and cross-sleeve denial. Runtime prerequisites produce explicit
+subscenario skips; the core authorization checks always run.
 
 ## Shared node token
 

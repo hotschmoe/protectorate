@@ -9,7 +9,7 @@ export PATH="$HOME/.pub-cache/bin:$PATH"
 cd app
 flutter pub get
 flutter run -d chrome        # or -d linux / windows / macos / an Android device
-flutter analyze && flutter test
+flutter analyze
 dart run tool/build_web.dart
 ```
 

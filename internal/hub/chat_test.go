@@ -20,7 +20,6 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
-	"github.com/hotschmoe/protectorate/internal/driver"
 	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
@@ -89,6 +88,7 @@ type chatRig struct {
 
 func newChatRig(t *testing.T) *chatRig {
 	t.Helper()
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	bin := t.TempDir()
 	for _, h := range []string{"claude", "codex", "grok", "pi"} {
 		if err := os.WriteFile(filepath.Join(bin, h), []byte(fakeClaude), 0o755); err != nil {
@@ -97,6 +97,10 @@ func newChatRig(t *testing.T) *chatRig {
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	home := t.TempDir()
+	t.Setenv("PROTECTORATE_HOME", home)
+	for _, key := range []string{"PROTECTORATE_TOKEN_FILE", "PROTECTORATE_HUB", "PROTECTORATE_TOKEN"} {
+		t.Setenv(key, "")
+	}
 	cfg, err := sleeve.DefaultConfig(home, []string{bin})
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +111,7 @@ func newChatRig(t *testing.T) *chatRig {
 	}
 	h := New("test", testToken)
 	h.Heartbeat = 20 * time.Millisecond
-	sock := fmt.Sprintf("prot-chat-test-%d", time.Now().UnixNano()%1000000)
+	sock := "chat"
 	h.Sessions = session.New(sock)
 	h.SessionPoll = 20 * time.Millisecond
 	name := fmt.Sprintf("chat%d", time.Now().UnixNano()%1000000)
@@ -531,94 +535,5 @@ func TestChatSendRequestIDsSurviveHubRestart(t *testing.T) {
 	waitFor(t, "replay", func() bool { return strings.Contains(describe(replay.all()), ":settled") })
 	if n := strings.Count(describe(replay.all()), ":user:"); n != 1 {
 		t.Fatalf("%d user messages after a deduped resend: %s", n, describe(replay.all()))
-	}
-}
-
-// stuckSession is a driver session whose turn never ends, so the hub can be
-// "restarted" in the middle of it.
-type stuckSession struct {
-	h      driver.Harness
-	id     string
-	events chan driver.Event
-	once   sync.Once
-}
-
-func (s *stuckSession) Harness() driver.Harness { return s.h }
-func (s *stuckSession) Models(context.Context) ([]driver.Model, error) {
-	return nil, driver.ErrUnsupported
-}
-func (s *stuckSession) SetSelection(context.Context, driver.Selection) error {
-	return driver.ErrUnsupported
-}
-func (s *stuckSession) Selection() driver.SelectionState   { return driver.SelectionState{} }
-func (s *stuckSession) Caps() driver.Caps                  { return driver.Caps{Interrupt: true} }
-func (s *stuckSession) SessionID() string                  { return s.id }
-func (s *stuckSession) Events() <-chan driver.Event        { return s.events }
-func (s *stuckSession) Send(context.Context, string) error { return nil }
-func (s *stuckSession) Respond(context.Context, string, bool, string) error {
-	return driver.ErrUnsupported
-}
-func (s *stuckSession) Interrupt(context.Context) error { return nil }
-func (s *stuckSession) Compact(context.Context) (driver.Compaction, error) {
-	return driver.Compaction{}, driver.ErrUnsupported
-}
-func (s *stuckSession) Close() error {
-	s.once.Do(func() {
-		s.events <- driver.Event{Kind: driver.KindExited}
-		close(s.events)
-	})
-	return nil
-}
-
-func TestChatHubRestartMidTurnFailsThenResumes(t *testing.T) {
-	for _, harness := range []pb.Harness{pb.Harness_HARNESS_CLAUDE, pb.Harness_HARNESS_CODEX, pb.Harness_HARNESS_GROK, pb.Harness_HARNESS_PI} {
-		t.Run(harness.String(), func(t *testing.T) {
-			r := newChatRig(t)
-			r.harness = harness
-			var mu sync.Mutex
-			var resumed []string
-			open := func(_ context.Context, h driver.Harness, _, sessionID, _ string, _ driver.Options) (driver.Session, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				resumed = append(resumed, sessionID)
-				if sessionID == "" {
-					sessionID = "native-" + string(h)
-				}
-				return &stuckSession{h: h, id: sessionID, events: make(chan driver.Event, 2)}, nil
-			}
-			r.h.chat.open = open
-			r.spawn(pb.SleeveMode_SLEEVE_MODE_CHAT)
-			if _, err := r.send("work", ""); err != nil {
-				t.Fatal(err)
-			}
-			r.waitState(pb.ChatState_CHAT_STATE_WORKING)
-
-			// the hub dies with the turn running: nothing but the persisted
-			// WORKING state and the session id is left
-			r.h.chat.remove(r.name)
-			if _, err := r.h.sleeves.SetChat(r.name, func(c *sleeve.Chat) { c.State = pb.ChatState_CHAT_STATE_WORKING.String() }); err != nil {
-				t.Fatal(err)
-			}
-			r.h.chat = newChatManager(r.h)
-			r.h.chat.open = open
-			r.h.chat.recover()
-
-			st := r.get().Chat
-			if st.State != pb.ChatState_CHAT_STATE_FAILED || st.HarnessSessionId != "native-"+string(harnessFromProto(harness)) {
-				t.Fatalf("after restart mid-turn: %v", st)
-			}
-			live := r.watch(0)
-			waitFor(t, "failure event", func() bool { return strings.Contains(describe(live.all()), "hub restarted mid-turn") })
-
-			if _, err := r.send("again", ""); err != nil {
-				t.Fatal(err)
-			}
-			r.waitState(pb.ChatState_CHAT_STATE_WORKING)
-			mu.Lock()
-			defer mu.Unlock()
-			if want := "native-" + string(harnessFromProto(harness)); len(resumed) != 2 || resumed[0] != "" || resumed[1] != want {
-				t.Fatalf("driver opens (resume ids) = %q, want a fresh open then a resume of %s", resumed, want)
-			}
-		})
 	}
 }

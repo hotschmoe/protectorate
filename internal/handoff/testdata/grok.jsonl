@@ -1,8 +1,0 @@
-{"type":"system","content":"You are Grok"}
-{"type":"user","content":[{"type":"text","text":"<user_info>\nOS Version: linux\n</user_info>"}]}
-{"type":"user","content":[{"type":"text","text":"<system-reminder>skills</system-reminder>"}],"synthetic_reason":"skills"}
-{"type":"user","content":[{"type":"text","text":"<user_query>\nadd a Foo function to lib\n</user_query>"}],"prompt_index":0}
-{"type":"reasoning","encrypted_content":"x","summary":[]}
-{"type":"assistant","content":"I'll add it.","tool_calls":[{"id":"c1"}]}
-{"type":"tool_result","content":"ok","tool_call_id":"c1"}
-{"type":"assistant","content":"Added Foo."}

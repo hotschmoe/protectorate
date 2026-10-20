@@ -41,7 +41,7 @@ jobs:
           echo "version $version, app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: gofmt
         run: test -z "$(gofmt -l cmd internal)"
-      - name: Vet and race tests
+      - name: Vet, fuzz seeds and binary end-to-end tests
         run: make test
       - run: make check-gen
       - run: make check-version
@@ -49,8 +49,8 @@ jobs:
         run: make cross
       - name: Tailnet join and DERP with release feature tags
         run: PROT_TAILNET_IT=1 go test -timeout 15m -tags "$(make -s build-tags)" ./internal/tailnet
-      - name: Diagnostics and job output through real binaries
-        run: PROT_DIAGNOSTICS_BINARY="$PWD/bin/protectorate-linux-amd64" go test -tags "$(make -s build-tags)" -run '^TestDiagnosticsEndToEnd$' ./cmd/protectorate
+      - name: End-to-end suite against the release binary
+        run: PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate-linux-amd64" go test -count=1 -tags "$(make -s build-tags)" ./tests/e2e
       - run: make app-check
       - run: make app-build-web
       - name: Android APK (optional)

@@ -29,8 +29,8 @@ done
 `
 
 func (c *cluster) chatScenario(t *testing.T) {
-	local := *c
-	c = &local
+	previous := c.t
+	defer func() { c.t = previous }()
 	c.t = t
 	workspace := filepath.Join(c.root, "chat-project")
 	if err := os.MkdirAll(workspace, 0700); err != nil {
@@ -67,6 +67,8 @@ func (c *cluster) chatScenario(t *testing.T) {
 	if text := watch(); text != "pong" {
 		t.Fatalf("live/replay text=%q", text)
 	}
+	c.stop(c.hub)
+	c.boot()
 	c.call("ChatService", "Send", request)
 	if text := watch(); text != "pong" {
 		t.Fatalf("duplicate send changed replay=%q", text)

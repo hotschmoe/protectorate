@@ -42,8 +42,8 @@ build constraints again, cross-build all five targets and run:
 GOMAXPROCS=2 PROT_TAILNET_IT=1 go test -p 2 -timeout 15m \
   -tags "$(make -s build-tags)" -v ./internal/tailnet
 make build
-GOMAXPROCS=2 PROT_DIAGNOSTICS_BINARY="$PWD/bin/protectorate" go test -p 2 \
-  -tags "$(make -s build-tags)" -run '^TestDiagnosticsEndToEnd$' ./cmd/protectorate
+GOMAXPROCS=2 PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" go test -p 2 \
+  -tags "$(make -s build-tags)" ./tests/e2e
 ```
 
 This includes `TestTailnetEndToEnd`, status/authorization checks and
