@@ -23,7 +23,7 @@ import (
 )
 
 // attachSleeves wires SleeveService into h and recovers persisted sleeves.
-func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspaceRoots []string) error {
+func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspaceRoots []string, goCacheMax uint64) error {
 	home, err := hub.Home()
 	if err != nil {
 		return err
@@ -35,6 +35,7 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspace
 	if err != nil {
 		return err
 	}
+	cfg.GoCacheMaxBytes = goCacheMax
 	cfg.ReferenceDirs = refDirs
 	if workspaceRoots == nil {
 		if ownerHome, err := os.UserHomeDir(); err == nil {

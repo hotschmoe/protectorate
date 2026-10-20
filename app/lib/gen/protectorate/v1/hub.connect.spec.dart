@@ -19,4 +19,13 @@ abstract final class HubService {
     protectoratev1hub.GetStatusResponse.new,
     idempotency: connect.Idempotency.noSideEffects,
   );
+
+  /// GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+  static const getSleeveRuntime = connect.Spec(
+    '/$name/GetSleeveRuntime',
+    connect.StreamType.unary,
+    protectoratev1hub.GetSleeveRuntimeRequest.new,
+    protectoratev1hub.GetSleeveRuntimeResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
 }

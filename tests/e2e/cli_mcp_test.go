@@ -145,19 +145,51 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 			peer.send(2, "tools/list", map[string]any{"_meta": meta})
 			listed := peer.read()
 			var tools struct {
-				Tools json.RawMessage `json:"tools"`
+				Tools []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
 			}
 			if err := json.Unmarshal(listed.Result, &tools); err != nil {
 				t.Fatal(err)
 			}
+			var catalog struct {
+				Tools json.RawMessage `json:"tools"`
+			}
+			if err := json.Unmarshal(listed.Result, &catalog); err != nil {
+				t.Fatal(err)
+			}
 			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, tools.Tools, "", "  "); err != nil {
+			if err := json.Indent(&pretty, catalog.Tools, "", "  "); err != nil {
 				t.Fatal(err)
 			}
 			pretty.WriteByte('\n')
-			const goldenHash = "81ca3fb55bf1057c2e8aa37296edf84b4b0daf3b433c73e21c88d089b6fda1ab"
+			const goldenHash = "427efe9fa8c55d81ab33d29b86ad67bfd91c78e8151401a2734a588703d7a65f"
 			if got := fmt.Sprintf("%x", sha256.Sum256(pretty.Bytes())); got != goldenHash {
 				t.Fatalf("tools/list differs byte-for-byte from expected catalog: %s", got)
+			}
+			found := map[string]bool{}
+			for _, tool := range tools.Tools {
+				found[tool.Name] = true
+			}
+			if listed.Error != nil || !found["hub_get_status"] || !found["hub_get_sleeve_runtime"] || found["token_create_token"] {
+				t.Fatalf("hub tools missing or owner-only tool exposed: %+v", listed)
+			}
+			peer.send(20, "tools/call", map[string]any{"_meta": meta, "name": "hub_get_sleeve_runtime", "arguments": map[string]any{}})
+			res := peer.read()
+			var result struct {
+				IsError bool                    `json:"isError"`
+				Content []struct{ Text string } `json:"content"`
+			}
+			if err := json.Unmarshal(res.Result, &result); err != nil || res.Error != nil || result.IsError || len(result.Content) != 1 {
+				t.Fatalf("discovered sleeve runtime tool could not read host capabilities: %+v", res)
+			}
+			var runtime map[string]any
+			if err := json.Unmarshal([]byte(result.Content[0].Text), &runtime); err != nil {
+				t.Fatal(err)
+			}
+			want := c.call("HubService", "GetSleeveRuntime", map[string]any{})
+			if runtime["bwrapPath"] != want["bwrapPath"] || runtime["overlays"] != want["overlays"] {
+				t.Fatalf("MCP host capabilities differ from the hub: %v, want %v", runtime, want)
 			}
 			peer.send(3, "tools/call", map[string]any{"_meta": meta, "name": "hub_get_status", "arguments": map[string]any{}})
 			assertCLIMCPStatus(t, peer.read())
@@ -199,7 +231,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 				Name string `json:"name"`
 			} `json:"tools"`
 		}
-		if err := json.Unmarshal(res.Result, &tools); err != nil || len(tools.Tools) != 1 || tools.Tools[0].Name != "hub_get_status" {
+		if err := json.Unmarshal(res.Result, &tools); err != nil || len(tools.Tools) != 2 || tools.Tools[0].Name != "hub_get_sleeve_runtime" || tools.Tools[1].Name != "hub_get_status" {
 			t.Fatalf("allow commas and deny: %+v %v", res, err)
 		}
 	})

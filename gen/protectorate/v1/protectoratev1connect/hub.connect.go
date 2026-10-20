@@ -35,12 +35,17 @@ const (
 const (
 	// HubServiceGetStatusProcedure is the fully-qualified name of the HubService's GetStatus RPC.
 	HubServiceGetStatusProcedure = "/protectorate.v1.HubService/GetStatus"
+	// HubServiceGetSleeveRuntimeProcedure is the fully-qualified name of the HubService's
+	// GetSleeveRuntime RPC.
+	HubServiceGetSleeveRuntimeProcedure = "/protectorate.v1.HubService/GetSleeveRuntime"
 )
 
 // HubServiceClient is a client for the protectorate.v1.HubService service.
 type HubServiceClient interface {
 	// GetStatus returns the hub version, host platform and uptime.
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
+	// GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+	GetSleeveRuntime(context.Context, *connect.Request[v1.GetSleeveRuntimeRequest]) (*connect.Response[v1.GetSleeveRuntimeResponse], error)
 }
 
 // NewHubServiceClient constructs a client for the protectorate.v1.HubService service. By default,
@@ -61,12 +66,20 @@ func NewHubServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getSleeveRuntime: connect.NewClient[v1.GetSleeveRuntimeRequest, v1.GetSleeveRuntimeResponse](
+			httpClient,
+			baseURL+HubServiceGetSleeveRuntimeProcedure,
+			connect.WithSchema(hubServiceMethods.ByName("GetSleeveRuntime")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // hubServiceClient implements HubServiceClient.
 type hubServiceClient struct {
-	getStatus *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	getStatus        *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	getSleeveRuntime *connect.Client[v1.GetSleeveRuntimeRequest, v1.GetSleeveRuntimeResponse]
 }
 
 // GetStatus calls protectorate.v1.HubService.GetStatus.
@@ -74,10 +87,17 @@ func (c *hubServiceClient) GetStatus(ctx context.Context, req *connect.Request[v
 	return c.getStatus.CallUnary(ctx, req)
 }
 
+// GetSleeveRuntime calls protectorate.v1.HubService.GetSleeveRuntime.
+func (c *hubServiceClient) GetSleeveRuntime(ctx context.Context, req *connect.Request[v1.GetSleeveRuntimeRequest]) (*connect.Response[v1.GetSleeveRuntimeResponse], error) {
+	return c.getSleeveRuntime.CallUnary(ctx, req)
+}
+
 // HubServiceHandler is an implementation of the protectorate.v1.HubService service.
 type HubServiceHandler interface {
 	// GetStatus returns the hub version, host platform and uptime.
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
+	// GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+	GetSleeveRuntime(context.Context, *connect.Request[v1.GetSleeveRuntimeRequest]) (*connect.Response[v1.GetSleeveRuntimeResponse], error)
 }
 
 // NewHubServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -94,10 +114,19 @@ func NewHubServiceHandler(svc HubServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	hubServiceGetSleeveRuntimeHandler := connect.NewUnaryHandler(
+		HubServiceGetSleeveRuntimeProcedure,
+		svc.GetSleeveRuntime,
+		connect.WithSchema(hubServiceMethods.ByName("GetSleeveRuntime")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/protectorate.v1.HubService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HubServiceGetStatusProcedure:
 			hubServiceGetStatusHandler.ServeHTTP(w, r)
+		case HubServiceGetSleeveRuntimeProcedure:
+			hubServiceGetSleeveRuntimeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -109,4 +138,8 @@ type UnimplementedHubServiceHandler struct{}
 
 func (UnimplementedHubServiceHandler) GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.HubService.GetStatus is not implemented"))
+}
+
+func (UnimplementedHubServiceHandler) GetSleeveRuntime(context.Context, *connect.Request[v1.GetSleeveRuntimeRequest]) (*connect.Response[v1.GetSleeveRuntimeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.HubService.GetSleeveRuntime is not implemented"))
 }

@@ -155,6 +155,8 @@ type Manager struct {
 	runCtx   context.Context
 }
 
+func (m *Manager) Runtime() Config { return m.cfg }
+
 type fileFormat struct {
 	Sleeves []Info `json:"sleeves"`
 }
@@ -181,6 +183,7 @@ func Open(ctx context.Context, opts Options) (*Manager, error) {
 		opts: opts, cfg: opts.Config, path: filepath.Join(opts.Config.Home, "sleeves.json"),
 		sleeves: map[string]*entry{}, pending: map[string]chan struct{}{}, runCtx: context.Background(),
 	}
+	m.initGoCaches()
 	raw, err := os.ReadFile(m.path)
 	switch {
 	case os.IsNotExist(err):
@@ -501,9 +504,10 @@ func (m *Manager) planSpawn(req SpawnRequest, workspace string) (Launch, error) 
 		args = terminalArgs(req.Harness, args)
 	}
 	return m.cfg.Plan(Spec{
-		BaseRepo: req.Base.BaseRepo,
-		BaseTip:  req.Base.BaseTip,
-		Name:     req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
+		GoCacheSnapshot: m.cfg.pinGoCache(req.Name),
+		BaseRepo:        req.Base.BaseRepo,
+		BaseTip:         req.Base.BaseTip,
+		Name:            req.Name, Harness: req.Harness, Args: args, Workspace: workspace,
 		Env: req.Env, Limits: req.Limits, ReadOnly: req.ReadOnly,
 		Nested: req.Nested,
 	}, bin)
@@ -718,6 +722,12 @@ func (m *Manager) Run(ctx context.Context) {
 	m.mu.Lock()
 	m.runCtx = ctx
 	m.mu.Unlock()
+	cacheDone := make(chan struct{})
+	go func() {
+		defer close(cacheDone)
+		m.cfg.goCaches.run(ctx)
+	}()
+	defer func() { <-cacheDone }()
 	tick := time.NewTicker(m.opts.UsageInterval)
 	defer tick.Stop()
 	oomTick := time.NewTicker(m.opts.OOMInterval)

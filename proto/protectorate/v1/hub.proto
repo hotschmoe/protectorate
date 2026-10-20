@@ -12,6 +12,10 @@ service HubService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+  rpc GetSleeveRuntime(GetSleeveRuntimeRequest) returns (GetSleeveRuntimeResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 message GetStatusRequest {}
@@ -25,4 +29,20 @@ message GetStatusResponse {
   string arch = 4;
   int64 uptime_seconds = 5;
   google.protobuf.Timestamp started_at = 6;
+}
+
+message GetSleeveRuntimeRequest {}
+
+message GetSleeveRuntimeResponse {
+  string bwrap_path = 1;
+  string bwrap_version = 2;
+  bool overlays = 3;
+  string go_build_cache = 4;
+  string go_build_lower = 5;
+  uint64 snapshot_bytes = 6;
+  uint64 snapshot_entries = 7;
+  google.protobuf.Timestamp snapshot_prepared_at = 8;
+  bool snapshot_preparing = 9;
+  string snapshot_error = 10;
+  uint64 snapshot_limit_bytes = 11;
 }

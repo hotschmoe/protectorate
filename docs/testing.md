@@ -110,6 +110,34 @@ including resume, approvals, interruption, usage, tools, selection, compaction,
 process exit and ownership. Sleeve scenarios retain real cgroup limits,
 lifecycle, warm git clone, toolchain/cache and jailed repository execution.
 
+`TestBinarySleeveCaches` starts private real hubs and shell sleeves on hosts
+with a systemd user manager or delegated nested runtime. Its overlay lane uses a non-Dart workspace,
+writes Flutter/Pub/Go caches, verifies host lower bytes and paths are unchanged,
+checks small persistent upper deltas and respawn reuse, and requires spawn
+under one second. A second sleeve must still see clean cached data after the
+first poisons an existing Go output. A private owner Go build prewarms the
+cache; unlinking an owner output after snapshot publication must still allow
+the sleeve build without compiler invocations. The copy lane puts `/usr/bin/bwrap` first on
+PATH, requires its lack of overlay options, and exercises the writable Dart
+cache copies and respawn persistence. Fixtures use private synthetic Flutter
+and Pub trees plus the installed Go toolchain; provider logins are not used.
+Capability detection and unreferenced-output rejection run before the runtime
+gate. `TestBinaryGoSnapshotLifecycle` uses a sparse source exceeding 128 GiB
+to check bounded newest-first imports, duplicate outputs, stale entries,
+size mismatch rejection, executable outputs, hardlinked outputs versus copied
+indexes, owner rewrites/unlinks, nonblocking startup, refresh across restart,
+unreferenced generation cleanup and explicit pruning. Its runtime subtest
+keeps mounted old generations across refresh/prune, including an unreadable
+mount reference. `TestBinaryGoSnapshotHardlinkFailure` uses a second filesystem
+and requires a logged private-cache fallback with no retained or copied data.
+The metadata-heavy sparse fixture has 101,029 indexes and more than 128 GiB
+of output lengths. On this two-core sleeve, background preparation took
+5.334s while other checks ran; 100,009 imported indexes retained 957,025,679
+logical bytes under a 1 GiB cap. This measures metadata work without reading
+output data, not cold storage performance on the owner's actual 111 GB cache.
+The runtime also refuses host cache workspaces and cache-directory symlinks
+that would escape the private sleeve home during a respawn.
+
 A sleeve spawned with `--nested --cpu 200 --mem 5G` runs these runtime lanes
 through private delegated cgroups and nested bwrap. A normal sleeve still
 skips them. `TestBinaryNestedRuntime` starts a real nested-enabled sleeve and
@@ -394,6 +422,9 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary cluster lifecycle, host runtime and Codex default/explicit/fallback effort, restart, resleeve and Envoy | unmeasured | KEEP-E2E | effort runtime lane uses a deterministic native-protocol peer, no provider login |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial, live branch refresh and complete sleeve details | unmeasured | KEEP-E2E | inherited credential isolation, model/effort columns, mounts and idle timeout |
 | tests/e2e/backlog_test.go | TestBinaryNoteLifecycle | Real hub/CLI/MCP note completion, filters, reopen, persistence and sleeve authorization | unmeasured | KEEP-E2E | note lifecycle regression scenario |
+| tests/e2e/cache_test.go | TestBinarySleeveCaches | Real hub/shell overlay and bwrap 0.8 fallback, lower integrity, delta size, warm Go reuse and respawn | host runtime required | KEEP-E2E | cache isolation and spawn regression scenario |
+| tests/e2e/go_snapshot_test.go | TestBinaryGoSnapshotLifecycle | Real hub with a sparse 128 GiB owner cache, bounded hardlink imports, copied indexes, refresh/prune and mounted generation retention | unmeasured | KEEP-E2E | startup cost, lifetime and cache isolation regression scenario |
+| tests/e2e/go_snapshot_test.go | TestBinaryGoSnapshotHardlinkFailure | Real hub with a cache on another filesystem refuses sharing and never copies outputs | unmeasured | KEEP-E2E | prevents expensive cross-filesystem copy fallback |
 | tests/e2e/dispatch_test.go | TestBinaryBranchDispatch | Real CLI branch dispatch, atomic brief replay, credential-stripped remotes, jailed fetch and source write denial, packed refs, coalesced notices, restart dedupe and own-advance suppression | host runtime required | KEEP-E2E | deterministic Claude protocol peer; requires systemd user manager and bwrap |
 | tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
 | tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |

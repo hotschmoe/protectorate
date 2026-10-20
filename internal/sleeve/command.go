@@ -49,18 +49,20 @@ func (c Config) launch(info Info, args []string) (Launch, error) {
 	if err != nil {
 		return Launch{}, err
 	}
+	if !c.waitGone(context.Background(), info.Name, 5*time.Second) {
+		return Launch{}, fmt.Errorf("%w: sleeve %s scope is still running", ErrUnavailable, info.Name)
+	}
 	launch, err := c.Plan(Spec{
-		BaseRepo: info.BaseRepo,
-		BaseTip:  info.BaseTip,
-		ReadOnly: info.ReadOnly,
-		Nested:   info.Nested,
-		Name:     info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
+		GoCacheSnapshot: c.pinGoCache(info.Name),
+		BaseRepo:        info.BaseRepo,
+		BaseTip:         info.BaseTip,
+		ReadOnly:        info.ReadOnly,
+		Nested:          info.Nested,
+		Name:            info.Name, Harness: info.Harness, Args: args, Workspace: info.Workspace, Env: env, Limits: info.Limits(),
 	}, bin)
 	if err != nil {
 		return Launch{}, err
 	}
-	// systemd-run refuses a unit name that is still being torn down.
-	c.waitGone(context.Background(), info.Name, 5*time.Second)
 	if err := launch.Layout.Apply(context.Background()); err != nil {
 		return Launch{}, fmt.Errorf("prepare sleeve layout: %w", err)
 	}
@@ -156,7 +158,7 @@ func (c Config) gitArgv(name, dir string, args []string) ([]string, error) {
 		}
 		binds = append(binds, d)
 	}
-	argv := []string{"bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--tmpfs", "/"}
+	argv := []string{c.bwrap(), "--unshare-all", "--die-with-parent", "--new-session", "--tmpfs", "/"}
 	argv = append(argv, c.System...)
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
 	for _, d := range binds {

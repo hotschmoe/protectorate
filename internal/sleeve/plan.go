@@ -15,16 +15,17 @@ import (
 
 // Spec is a validated request to run a harness.
 type Spec struct {
-	BaseRepo  string
-	BaseTip   string
-	Name      string
-	Harness   Harness
-	Args      []string
-	Workspace string // absolute, symlinks resolved
-	Env       map[string]string
-	Limits    Limits
-	ReadOnly  []Mount
-	Nested    bool
+	BaseRepo        string
+	BaseTip         string
+	Name            string
+	Harness         Harness
+	Args            []string
+	Workspace       string // absolute, symlinks resolved
+	Env             map[string]string
+	Limits          Limits
+	ReadOnly        []Mount
+	Nested          bool
+	GoCacheSnapshot string
 }
 
 type Mount struct {
@@ -339,6 +340,7 @@ type Box struct {
 	EmptyDirs      []string
 	Mounts         []Mount
 	WritableMounts []Mount
+	Overlays       []Overlay
 
 	Unit     string
 	Hostname string
@@ -383,7 +385,7 @@ func (c Config) BoxArgv(b Box) []string {
 	}
 	prefix := argv
 
-	argv = []string{"bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
+	argv = []string{c.bwrap(), "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
 		"--hostname", b.Hostname, "--tmpfs", "/"}
 	if c.delegated && !b.Nested {
 		argv = append(argv, "--unshare-cgroup")
@@ -416,6 +418,9 @@ func (c Config) BoxArgv(b Box) []string {
 	}
 	for _, m := range b.WritableMounts {
 		argv = append(argv, "--bind", m.Source, m.Target)
+	}
+	for _, m := range b.Overlays {
+		argv = append(argv, "--overlay-src", m.Lower, "--overlay", m.Upper, m.Work, m.Target)
 	}
 	for _, p := range b.EmptyDirs {
 		argv = append(argv, "--tmpfs", p)
@@ -509,7 +514,7 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	if err != nil {
 		return Launch{}, err
 	}
-	lay := c.layout(spec.Name, spec.Harness, spec.Workspace)
+	lay := c.layout(spec.Name, spec.Harness, spec.Workspace, spec.GoCacheSnapshot)
 	var emptyDirs []string
 	if spec.BaseRepo != "" {
 		// Mask sources live in the hub-owned sleeve directory, outside the
@@ -559,8 +564,9 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		Unit:      unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
 		Nested: spec.Nested,
 		RO:     bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
-		Mounts:         mounts,
+		Mounts:         append(mounts, lay.ReadOnly...),
 		WritableMounts: lay.CacheCopies,
+		Overlays:       lay.Overlays,
 		RW:             append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,
 		Env: c.launchEnv(spec, lay), EnvFD: len(envArgs) > 0, Command: command,
 	})

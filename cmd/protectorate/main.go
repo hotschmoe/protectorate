@@ -157,12 +157,16 @@ func hubCmd() *command {
 	var backupEvery time.Duration
 	var watch, toolDirs, refDirs, workspaceRoots []string
 	var orchestratorGrants bool
-	var startEnvoy, sleeveEffort string
+	var startEnvoy, sleeveEffort, goCacheMax string
 	serve := &command{
 		Use:   "serve",
 		Short: "Serve the hub API",
 		Args:  noArgs,
 		RunE: func(cmd *command, _ []string) error {
+			cacheLimit, err := parseSize(goCacheMax)
+			if err != nil {
+				return fmt.Errorf("parse sleeve Go cache limit: %w", err)
+			}
 			if backupDir != "" && backupEvery <= 0 {
 				return errors.New("--backup-every must be positive")
 			}
@@ -222,7 +226,7 @@ func hubCmd() *command {
 			if err := attachNodes(h, nodeInterval, nodeTok, watch, ts.Client, ts.Peers); err != nil {
 				return err
 			}
-			if err := attachSleeves(ctx, h, toolDirs, refDirs, workspaceRoots); err != nil {
+			if err := attachSleeves(ctx, h, toolDirs, refDirs, workspaceRoots, cacheLimit); err != nil {
 				return err
 			}
 			tools, err := toolDocs()
@@ -266,6 +270,7 @@ func hubCmd() *command {
 	serve.Flags().StringSliceVar(&watch, "watch", nil, "directory on the hub whose size is tracked (repeatable)")
 	serve.Flags().StringSliceVar(&refDirs, "sleeve-reference-dir", nil, "directory offered read-only to sleeves by 'sleeve workspaces' (repeatable), besides each workspace's references/")
 	serve.Flags().StringVar(&sleeveEffort, "sleeve-effort", "high", "default requested reasoning effort for supported chat harnesses (empty uses native default; unsupported levels fall back to native default)")
+	serve.Flags().StringVar(&goCacheMax, "sleeve-go-cache-max", "20G", "maximum logical bytes per shared Go cache snapshot (0 disables sharing; recent entries imported newest first in background)")
 	serve.Flags().StringSliceVar(&workspaceRoots, "workspace-root", nil, "directory browser root (repeatable; defaults to ~/github when it exists)")
 	serve.Flags().StringSliceVar(&toolDirs, "sleeve-tool-dir", nil, "directory bound read-only into sleeves (repeatable; replaces the default ~/.local/{bin,lib,opt,go} ~/.nvm ~/go ~/.cargo/bin ~/.rustup)")
 	serve.Flags().StringVar(&listen, "listen", "127.0.0.1:7470", "address to listen on")
@@ -324,12 +329,18 @@ func statusCmd(o *opts) *command {
 				return err
 			}
 			s := res.Msg
+			runtime, err := protectoratev1connect.NewHubServiceClient(hc, o.hubURL).
+				GetSleeveRuntime(cmd.Context(), connect.NewRequest(&pb.GetSleeveRuntimeRequest{}))
+			if err != nil {
+				return err
+			}
 			return o.out(cmd).print(s, func(w io.Writer) {
 				fmt.Fprintf(w, "version\t%s\n", s.Version)
 				fmt.Fprintf(w, "hostname\t%s\n", s.Hostname)
 				fmt.Fprintf(w, "platform\t%s/%s\n", s.Os, s.Arch)
 				fmt.Fprintf(w, "uptime\t%s\n", (time.Duration(s.UptimeSeconds) * time.Second))
 				fmt.Fprintf(w, "started\t%s\n", s.StartedAt.AsTime().Local().Format(time.RFC3339))
+				fmt.Fprintf(w, "bwrap\t%s (%s)\noverlays\t%t\n", runtime.Msg.BwrapPath, runtime.Msg.BwrapVersion, runtime.Msg.Overlays)
 			})
 		},
 	}

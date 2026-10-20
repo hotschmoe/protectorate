@@ -115,6 +115,13 @@ func (m *Manager) Prune(ctx context.Context, opts PruneOptions) ([]DiskEntry, er
 		}
 		root.Close()
 	}
+	if opts.Caches && m.cfg.goCaches != nil {
+		rows, err := m.cfg.goCaches.prune(ctx, opts, true)
+		out = append(out, rows...)
+		if err != nil {
+			return out, err
+		}
+	}
 	return out, nil
 }
 

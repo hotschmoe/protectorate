@@ -349,7 +349,7 @@ func (c *coordinator) inject(ctx context.Context, rcpt string, msgs []mailbox.Me
 	if len(msgs) == 1 {
 		from = chatFrom(msgs[0].From)
 	}
-	body := strings.Join(parts, "\n\n---\n\n") + "\n\n" + mailbox.ConciseGuidance
+	body := strings.Join(parts, "\n\n---\n\n") + "\n\n" + mailbox.ConciseGuidance + "\n\n" + mailbox.SubagentGuidance
 	if _, err := s.sendMailbox(ctx, from, body, rid); err != nil {
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 			log.Printf("mailbox: deliver to %s: %v", rcpt, err)

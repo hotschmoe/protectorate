@@ -323,10 +323,15 @@ Design:
   - each sleeve has its own config dirs;
   - Flutter is discovered through `PROTECTORATE_FLUTTER_SDK`, `flutter` on
     PATH, or `~/development/flutter`. Its SDK and the global Pub executable
-    directories are read-only. The SDK's `bin/cache` is seeded into the sleeve
-    home and overlaid writable, since Flutter requires cache locks. Pub package
-    caches are seeded likewise; `PUB_CACHE` and `GOMODCACHE` are sleeve-local.
-    Go uses the host module download cache as its first file proxy when present;
+    directories are read-only. With overlay-capable bwrap, Flutter and Pub
+    caches use host lowers and persistent private upper/work directories.
+    Older bwrap copies caches for Dart workspaces. GOCACHE overlays bounded
+    generations prepared in the background: output hardlinks, copied action
+    indexes and separate private uppers per generation. Mounted generations
+    survive refresh and pruning; failed hardlinks leave Go caches private.
+    GOMODCACHE stays private with the discovered host download cache as a
+    read-only file proxy. Startup costs and lower-layer coherence are documented
+    in [sleeves](docs/sleeves.md);
   - a sleeve-local `.gitconfig` seeds the owner's global name/email, falling
     back to the owner checkout's literal identity settings (includes disabled).
     The owner's config and repository config are never modified. Commits keep

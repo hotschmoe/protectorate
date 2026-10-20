@@ -23,11 +23,15 @@ export 'hub.pb.dart';
 abstract class HubServiceBase extends $pb.GeneratedService {
   $async.Future<$1.GetStatusResponse> getStatus(
       $pb.ServerContext ctx, $1.GetStatusRequest request);
+  $async.Future<$1.GetSleeveRuntimeResponse> getSleeveRuntime(
+      $pb.ServerContext ctx, $1.GetSleeveRuntimeRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'GetStatus':
         return $1.GetStatusRequest();
+      case 'GetSleeveRuntime':
+        return $1.GetSleeveRuntimeRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -38,6 +42,8 @@ abstract class HubServiceBase extends $pb.GeneratedService {
     switch (methodName) {
       case 'GetStatus':
         return getStatus(ctx, request as $1.GetStatusRequest);
+      case 'GetSleeveRuntime':
+        return getSleeveRuntime(ctx, request as $1.GetSleeveRuntimeRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

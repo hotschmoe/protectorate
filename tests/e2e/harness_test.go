@@ -199,8 +199,9 @@ func (c *cluster) stop(p *process) {
 		<-p.done
 	}
 }
-func (c *cluster) boot() {
-	c.hub = c.start("hub", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-"+filepath.Base(c.root))
+func (c *cluster) boot(extra ...string) {
+	args := []string{"hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-" + filepath.Base(c.root)}
+	c.hub = c.start("hub", c.env, append(args, extra...)...)
 	c.eventually(func() bool {
 		b, e := os.ReadFile(filepath.Join(c.home, "token"))
 		c.token = strings.TrimSpace(string(b))

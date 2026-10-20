@@ -16,6 +16,8 @@ import (
 type Layout struct {
 	home        string
 	CacheCopies []Mount
+	Overlays    []Overlay
+	ReadOnly    []Mount
 	Dirs        []string
 	Links       []Link
 	Seeds       []Seed
@@ -45,29 +47,51 @@ const profileSeed = "# Written by the protectorate hub: login shells keep the sl
 const sleevePathEnv = "PROTECTORATE_SLEEVE_PATH"
 
 // layout paths on the host live under the sleeve's home; the same paths
-// relative to $HOME are what the harness sees. The SDK and Pub caches are
-// copied only for Dart workspaces (or when an earlier spawn copied them):
-// without reflinks a copy costs seconds and gigabytes per sleeve.
-func (c Config) layout(name string, h Harness, workspace string) Layout {
+// relative to $HOME are what the harness sees. Older bwrap versions copy
+// SDK and Pub caches only for Dart workspaces or previously seeded sleeves.
+func (c Config) layout(name string, h Harness, workspace, goSnapshot string) Layout {
 	host := func(rel string) string { return filepath.Join(c.sleeveHome(name), rel) }
 	inside := func(rel string) string { return filepath.Join(c.UserHome, rel) }
 	l := Layout{home: c.sleeveHome(name), Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
-	dart := dartWorkspace(workspace)
+	dart := !c.Overlays && dartWorkspace(workspace)
 	cacheCopy := func(m Mount) {
 		if _, err := os.Stat(m.Source); dart || err == nil {
 			l.CacheCopies = append(l.CacheCopies, m)
 		}
 	}
+	overlay := func(key, lower, target string) {
+		if fi, err := os.Stat(lower); err != nil || !fi.IsDir() {
+			return
+		}
+		base := host(".cache/overlays/" + key)
+		upper, work := filepath.Join(base, "upper"), filepath.Join(base, "work")
+		l.Dirs = append(l.Dirs, upper, work)
+		l.Overlays = append(l.Overlays, Overlay{Lower: lower, Upper: upper, Work: work, Target: target})
+	}
 	l.Dirs = append(l.Dirs, host(".cache/pub"), host(".cache/go-mod"))
 	l.Env = append(l.Env, [2]string{"PUB_CACHE", inside(".cache/pub")}, [2]string{"GOMODCACHE", inside(".cache/go-mod")}, [2]string{"GOCACHE", inside(".cache/go-build")})
-	if contains(c.ToolDirs, filepath.Join(c.UserHome, "go")) {
-		l.Env = append(l.Env, [2]string{"GOPROXY", "file://" + filepath.Join(c.UserHome, "go/pkg/mod/cache/download") + ",https://proxy.golang.org,direct"})
+	if c.Overlays && goSnapshot != "" {
+		overlay("go-build/"+filepath.Base(filepath.Dir(goSnapshot)), goSnapshot, inside(".cache/go-build"))
+	}
+	if fi, err := os.Stat(filepath.Join(c.GoModCache, "cache/download")); c.GoModCache != "" && err == nil && fi.IsDir() {
+		proxy := filepath.Join(c.GoModCache, "cache/download")
+		l.ReadOnly = append(l.ReadOnly, Mount{Source: proxy, Target: proxy})
+		l.Env = append(l.Env, [2]string{"GOPROXY", "file://" + proxy + ",https://proxy.golang.org,direct"})
 	}
 	if c.GitName != "" && c.GitEmail != "" {
 		l.Seeds = append(l.Seeds, Seed{host(".gitconfig"), "[user]\n\tname = " + strconv.Quote(c.GitName) + "\n\temail = " + strconv.Quote(c.GitEmail) + "\n"})
 	}
+	if c.Overlays {
+		for _, part := range []string{"hosted", "hosted-hashes", "git", "global_packages"} {
+			p := filepath.Join(c.UserHome, ".pub-cache", part)
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				overlay("pub-"+part, p, p)
+				l.Links = append(l.Links, Link{host(".cache/pub/" + part), p})
+			}
+		}
+	}
 	for _, d := range c.ToolDirs {
-		if filepath.Base(d) == "global_packages" && filepath.Dir(d) == filepath.Join(c.UserHome, ".pub-cache") {
+		if !c.Overlays && filepath.Base(d) == "global_packages" && filepath.Dir(d) == filepath.Join(c.UserHome, ".pub-cache") {
 			for _, part := range []string{"hosted", "hosted-hashes", "git", "global_packages"} {
 				p := filepath.Join(c.UserHome, ".pub-cache", part)
 				if fi, err := os.Stat(p); err == nil && fi.IsDir() {
@@ -76,7 +100,11 @@ func (c Config) layout(name string, h Harness, workspace string) Layout {
 			}
 		}
 		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
-			cacheCopy(Mount{Source: host(".cache/flutter"), Target: filepath.Join(d, "bin/cache")})
+			if c.Overlays {
+				overlay("flutter", filepath.Join(d, "bin/cache"), filepath.Join(d, "bin/cache"))
+			} else {
+				cacheCopy(Mount{Source: host(".cache/flutter"), Target: filepath.Join(d, "bin/cache")})
+			}
 		}
 	}
 	auth := c.authDir(h)
@@ -166,11 +194,25 @@ func (l Layout) Apply(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+	if err := os.MkdirAll(l.home, 0700); err != nil {
+		return fmt.Errorf("create sleeve home: %w", err)
+	}
+	root, err := os.OpenRoot(l.home)
+	if err != nil {
+		return fmt.Errorf("open sleeve home: %w", err)
+	}
+	defer root.Close()
 	for _, m := range l.CacheCopies {
-		if _, err := os.Stat(m.Source); err == nil {
-			continue
+		rel, err := filepath.Rel(l.home, m.Source)
+		if err != nil {
+			return fmt.Errorf("locate private tool cache: %w", err)
 		}
-		if err := os.MkdirAll(filepath.Dir(m.Source), 0700); err != nil {
+		if _, err := root.Stat(rel); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect private tool cache: %w", err)
+		}
+		if err := root.MkdirAll(filepath.Dir(rel), 0700); err != nil {
 			return fmt.Errorf("create SDK cache parent: %w", err)
 		}
 		stage, err := os.MkdirTemp(filepath.Dir(m.Source), ".cache-seed-")
@@ -187,7 +229,17 @@ func (l Layout) Apply(ctx context.Context) error {
 		}
 	}
 	for _, d := range l.Dirs {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+		var err error
+		if within(d, l.home) {
+			var rel string
+			rel, err = filepath.Rel(l.home, d)
+			if err == nil {
+				err = root.MkdirAll(rel, 0700)
+			}
+		} else {
+			err = os.MkdirAll(d, 0700)
+		}
+		if err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
 	}

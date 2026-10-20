@@ -114,8 +114,15 @@ type Config struct {
 	GitEmail  string
 	// ReferenceDirs are offered read-only by ListWorkspaces besides each
 	// known workspace's references/ directory.
-	ReferenceDirs  []string
-	WorkspaceRoots []string
+	ReferenceDirs   []string
+	WorkspaceRoots  []string
+	BwrapPath       string
+	BwrapVersion    string
+	Overlays        bool
+	GoCache         string
+	GoModCache      string
+	GoCacheMaxBytes uint64
+	goCaches        *goCacheSnapshots
 }
 
 // Names of the orchestrator sleeve and the state subdirectory that is its
@@ -170,7 +177,7 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve state directory: %w", err)
 	}
-	c := Config{Home: home, UserHome: uh, TasksMax: 4096, UnitPrefix: DefaultUnitPrefix}
+	c := Config{Home: home, UserHome: uh, TasksMax: 4096, UnitPrefix: DefaultUnitPrefix, GoCacheMaxBytes: DefaultGoCacheMaxBytes}
 	defaultHome := filepath.Join(uh, ".protectorate")
 	if resolved, err := filepath.EvalSymlinks(defaultHome); err == nil {
 		defaultHome = resolved
@@ -217,6 +224,7 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 		}
 	}
 	c.readGitIdentity()
+	c.probeRuntime()
 	return c, nil
 }
 
@@ -309,6 +317,21 @@ func (c Config) protectedDirs() []string {
 // contain, lexically and resolved.
 func (c Config) workspaceDenied() []string {
 	out := c.protectedDirs()
+	cacheDirs := []string{c.GoCache, c.GoModCache}
+	for _, d := range c.ToolDirs {
+		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
+			cacheDirs = append(cacheDirs, filepath.Join(d, "bin/cache"))
+		}
+	}
+	for _, p := range cacheDirs {
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+		if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+			out = append(out, r)
+		}
+	}
 	for _, d := range secretPaths {
 		p := filepath.Join(c.UserHome, d)
 		out = append(out, p)

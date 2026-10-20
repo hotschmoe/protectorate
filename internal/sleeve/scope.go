@@ -54,9 +54,9 @@ func (c Config) Preflight() error {
 	if runtime.GOOS != "linux" {
 		return ErrUnsupported
 	}
-	binaries := []string{"bwrap", "systemd-run", "systemctl"}
+	binaries := []string{c.bwrap(), "systemd-run", "systemctl"}
 	if c.delegated {
-		binaries = []string{"bwrap", "unshare", "flock"}
+		binaries = []string{c.bwrap(), "unshare", "flock"}
 		b, err := os.ReadFile(filepath.Join(c.CgroupRoot, "cgroup.subtree_control"))
 		if err != nil {
 			return fmt.Errorf("%w: read delegated controllers: %w", ErrUnavailable, err)

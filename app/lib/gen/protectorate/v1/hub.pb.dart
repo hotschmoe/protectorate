@@ -185,6 +185,242 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   $0.Timestamp ensureStartedAt() => $_ensure(5);
 }
 
+class GetSleeveRuntimeRequest extends $pb.GeneratedMessage {
+  factory GetSleeveRuntimeRequest() => GetSleeveRuntimeRequest._();
+
+  GetSleeveRuntimeRequest._();
+
+  factory GetSleeveRuntimeRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeRequest()..mergeFromBuffer(data, registry);
+  factory GetSleeveRuntimeRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetSleeveRuntimeRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetSleeveRuntimeRequest.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeRequest copyWith(
+          void Function(GetSleeveRuntimeRequest) updates) =>
+      super.copyWith((message) => updates(message as GetSleeveRuntimeRequest))
+          as GetSleeveRuntimeRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetSleeveRuntimeRequest() / GetSleeveRuntimeRequest.new instead')
+  static GetSleeveRuntimeRequest create() => GetSleeveRuntimeRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetSleeveRuntimeRequest._();
+  @$core.override
+  GetSleeveRuntimeRequest createEmptyInstance() => GetSleeveRuntimeRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetSleeveRuntimeRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetSleeveRuntimeRequest>(
+          GetSleeveRuntimeRequest.$_createMessage);
+  static GetSleeveRuntimeRequest? _defaultInstance;
+}
+
+class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
+  factory GetSleeveRuntimeResponse({
+    $core.String? bwrapPath,
+    $core.String? bwrapVersion,
+    $core.bool? overlays,
+    $core.String? goBuildCache,
+    $core.String? goBuildLower,
+    $fixnum.Int64? snapshotBytes,
+    $fixnum.Int64? snapshotEntries,
+    $0.Timestamp? snapshotPreparedAt,
+    $core.bool? snapshotPreparing,
+    $core.String? snapshotError,
+    $fixnum.Int64? snapshotLimitBytes,
+  }) {
+    final result = GetSleeveRuntimeResponse._();
+    if (bwrapPath != null) result.bwrapPath = bwrapPath;
+    if (bwrapVersion != null) result.bwrapVersion = bwrapVersion;
+    if (overlays != null) result.overlays = overlays;
+    if (goBuildCache != null) result.goBuildCache = goBuildCache;
+    if (goBuildLower != null) result.goBuildLower = goBuildLower;
+    if (snapshotBytes != null) result.snapshotBytes = snapshotBytes;
+    if (snapshotEntries != null) result.snapshotEntries = snapshotEntries;
+    if (snapshotPreparedAt != null)
+      result.snapshotPreparedAt = snapshotPreparedAt;
+    if (snapshotPreparing != null) result.snapshotPreparing = snapshotPreparing;
+    if (snapshotError != null) result.snapshotError = snapshotError;
+    if (snapshotLimitBytes != null)
+      result.snapshotLimitBytes = snapshotLimitBytes;
+    return result;
+  }
+
+  GetSleeveRuntimeResponse._();
+
+  factory GetSleeveRuntimeResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeResponse()..mergeFromBuffer(data, registry);
+  factory GetSleeveRuntimeResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetSleeveRuntimeResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetSleeveRuntimeResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'bwrapPath')
+    ..aOS(2, _omitFieldNames ? '' : 'bwrapVersion')
+    ..aOB(3, _omitFieldNames ? '' : 'overlays')
+    ..aOS(4, _omitFieldNames ? '' : 'goBuildCache')
+    ..aOS(5, _omitFieldNames ? '' : 'goBuildLower')
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'snapshotBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        7, _omitFieldNames ? '' : 'snapshotEntries', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOM<$0.Timestamp>(8, _omitFieldNames ? '' : 'snapshotPreparedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOB(9, _omitFieldNames ? '' : 'snapshotPreparing')
+    ..aOS(10, _omitFieldNames ? '' : 'snapshotError')
+    ..a<$fixnum.Int64>(
+        11, _omitFieldNames ? '' : 'snapshotLimitBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeResponse copyWith(
+          void Function(GetSleeveRuntimeResponse) updates) =>
+      super.copyWith((message) => updates(message as GetSleeveRuntimeResponse))
+          as GetSleeveRuntimeResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetSleeveRuntimeResponse() / GetSleeveRuntimeResponse.new instead')
+  static GetSleeveRuntimeResponse create() => GetSleeveRuntimeResponse._();
+  static $pb.GeneratedMessage $_createMessage() => GetSleeveRuntimeResponse._();
+  @$core.override
+  GetSleeveRuntimeResponse createEmptyInstance() =>
+      GetSleeveRuntimeResponse._();
+  @$core.pragma('dart2js:noInline')
+  static GetSleeveRuntimeResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetSleeveRuntimeResponse>(
+          GetSleeveRuntimeResponse.$_createMessage);
+  static GetSleeveRuntimeResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get bwrapPath => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set bwrapPath($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasBwrapPath() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearBwrapPath() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get bwrapVersion => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set bwrapVersion($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasBwrapVersion() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearBwrapVersion() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get overlays => $_getBF(2);
+  @$pb.TagNumber(3)
+  set overlays($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasOverlays() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearOverlays() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get goBuildCache => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set goBuildCache($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasGoBuildCache() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearGoBuildCache() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get goBuildLower => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set goBuildLower($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasGoBuildLower() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearGoBuildLower() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get snapshotBytes => $_getI64(5);
+  @$pb.TagNumber(6)
+  set snapshotBytes($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasSnapshotBytes() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearSnapshotBytes() => $_clearField(6);
+
+  @$pb.TagNumber(7)
+  $fixnum.Int64 get snapshotEntries => $_getI64(6);
+  @$pb.TagNumber(7)
+  set snapshotEntries($fixnum.Int64 value) => $_setInt64(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasSnapshotEntries() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearSnapshotEntries() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $0.Timestamp get snapshotPreparedAt => $_getN(7);
+  @$pb.TagNumber(8)
+  set snapshotPreparedAt($0.Timestamp value) => $_setField(8, value);
+  @$pb.TagNumber(8)
+  $core.bool hasSnapshotPreparedAt() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearSnapshotPreparedAt() => $_clearField(8);
+  @$pb.TagNumber(8)
+  $0.Timestamp ensureSnapshotPreparedAt() => $_ensure(7);
+
+  @$pb.TagNumber(9)
+  $core.bool get snapshotPreparing => $_getBF(8);
+  @$pb.TagNumber(9)
+  set snapshotPreparing($core.bool value) => $_setBool(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasSnapshotPreparing() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearSnapshotPreparing() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.String get snapshotError => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set snapshotError($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasSnapshotError() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearSnapshotError() => $_clearField(10);
+
+  @$pb.TagNumber(11)
+  $fixnum.Int64 get snapshotLimitBytes => $_getI64(10);
+  @$pb.TagNumber(11)
+  set snapshotLimitBytes($fixnum.Int64 value) => $_setInt64(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasSnapshotLimitBytes() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearSnapshotLimitBytes() => $_clearField(11);
+}
+
 /// HubService reports on the hub process itself.
 class HubServiceApi {
   final $pb.RpcClient _client;
@@ -196,6 +432,12 @@ class HubServiceApi {
           $pb.ClientContext? ctx, GetStatusRequest request) =>
       _client.invoke<GetStatusResponse>(
           ctx, 'HubService', 'GetStatus', request, GetStatusResponse());
+
+  /// GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+  $async.Future<GetSleeveRuntimeResponse> getSleeveRuntime(
+          $pb.ClientContext? ctx, GetSleeveRuntimeRequest request) =>
+      _client.invoke<GetSleeveRuntimeResponse>(ctx, 'HubService',
+          'GetSleeveRuntime', request, GetSleeveRuntimeResponse());
 }
 
 const $core.bool _omitFieldNames =

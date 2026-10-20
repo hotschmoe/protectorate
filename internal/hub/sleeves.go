@@ -44,6 +44,22 @@ func (h *Hub) SetSleeves(m *sleeve.Manager) {
 	h.migrateEnvoyTokens(time.Now())
 }
 
+func (h *Hub) GetSleeveRuntime(context.Context, *connect.Request[pb.GetSleeveRuntimeRequest]) (*connect.Response[pb.GetSleeveRuntimeResponse], error) {
+	r := &pb.GetSleeveRuntimeResponse{}
+	if h.sleeves != nil {
+		c := h.sleeves.Runtime()
+		r.BwrapPath, r.BwrapVersion, r.Overlays = c.BwrapPath, c.BwrapVersion, c.Overlays
+		r.GoBuildCache = c.GoCache
+		cache := h.sleeves.GoCacheStatus()
+		r.GoBuildLower, r.SnapshotBytes, r.SnapshotEntries = cache.Lower, cache.Bytes, cache.Entries
+		r.SnapshotPreparing, r.SnapshotError, r.SnapshotLimitBytes = cache.Preparing, cache.Error, cache.LimitBytes
+		if !cache.Prepared.IsZero() {
+			r.SnapshotPreparedAt = timestamppb.New(cache.Prepared)
+		}
+	}
+	return connect.NewResponse(r), nil
+}
+
 // sleeveProto is sleeveToProto with the live chat status laid over the
 // persisted one.
 func (h *Hub) sleeveProto(i sleeve.Info) *pb.Sleeve {
