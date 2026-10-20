@@ -70,6 +70,9 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     $core.String? arch,
     $fixnum.Int64? uptimeSeconds,
     $0.Timestamp? startedAt,
+    $core.String? availableVersion,
+    $core.String? updateChannel,
+    $core.String? releaseNotesUrl,
   }) {
     final result = GetStatusResponse._();
     if (version != null) result.version = version;
@@ -78,6 +81,9 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     if (arch != null) result.arch = arch;
     if (uptimeSeconds != null) result.uptimeSeconds = uptimeSeconds;
     if (startedAt != null) result.startedAt = startedAt;
+    if (availableVersion != null) result.availableVersion = availableVersion;
+    if (updateChannel != null) result.updateChannel = updateChannel;
+    if (releaseNotesUrl != null) result.releaseNotesUrl = releaseNotesUrl;
     return result;
   }
 
@@ -102,6 +108,9 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     ..aInt64(5, _omitFieldNames ? '' : 'uptimeSeconds')
     ..aOM<$0.Timestamp>(6, _omitFieldNames ? '' : 'startedAt',
         subBuilder: $0.Timestamp.$_createMessage)
+    ..aOS(7, _omitFieldNames ? '' : 'availableVersion')
+    ..aOS(8, _omitFieldNames ? '' : 'updateChannel')
+    ..aOS(9, _omitFieldNames ? '' : 'releaseNotesUrl')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -183,6 +192,33 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   void clearStartedAt() => $_clearField(6);
   @$pb.TagNumber(6)
   $0.Timestamp ensureStartedAt() => $_ensure(5);
+
+  @$pb.TagNumber(7)
+  $core.String get availableVersion => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set availableVersion($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasAvailableVersion() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearAvailableVersion() => $_clearField(7);
+
+  @$pb.TagNumber(8)
+  $core.String get updateChannel => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set updateChannel($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasUpdateChannel() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearUpdateChannel() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  $core.String get releaseNotesUrl => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set releaseNotesUrl($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasReleaseNotesUrl() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearReleaseNotesUrl() => $_clearField(9);
 }
 
 class GetSleeveRuntimeRequest extends $pb.GeneratedMessage {

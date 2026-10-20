@@ -55,8 +55,15 @@ func (c *cluster) runtimeScenario(t *testing.T) {
 	}
 	c.call("SleeveService", "SpawnSleeve", map[string]any{"name": "isolation", "harness": "HARNESS_SHELL", "workspace": workspace, "args": []string{"sh", "-c", "printf isolated > proof; sleep 20"}})
 	t.Cleanup(func() { c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "isolation"}, nil) })
+	started := time.Now()
+	diagnosed := false
 	c.eventually(func() bool {
 		b, e := os.ReadFile(filepath.Join(workspace, "proof"))
+		if e != nil && !diagnosed && time.Since(started) > 13*time.Second {
+			diagnosed = true
+			t.Logf("isolation sleeve state: %v", c.call("SleeveService", "GetSleeve", map[string]any{"name": "isolation"}))
+			t.Logf("isolation pane: %v", c.call("SessionService", "CapturePane", map[string]any{"name": "sleeve-isolation", "lines": 80}))
+		}
 		return e == nil && string(b) == "isolated"
 	})
 	for _, forbidden := range []string{c.home, filepath.Join(c.home, "workspaces", "other"), filepath.Join(c.root, ".ssh")} {

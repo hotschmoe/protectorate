@@ -3,7 +3,6 @@
 # no system packages, nothing is deleted. Re-run to upgrade.
 set -euo pipefail
 
-DEFAULT_VERSION=v0.4.1
 REPO=hotschmoe/protectorate
 
 say() { printf '%s\n' "$*"; }
@@ -71,28 +70,36 @@ check_prereqs() {
 }
 
 main() {
-  local version=$DEFAULT_VERSION listen="" public_url="" phome="" base="" dry=0
+  local version="" listen="" public_url="" phome="" base="" dry=0 channel=stable repo=$REPO release_root=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --version|--listen|--public-url|--home|--base-url)
+      --version|--listen|--public-url|--home|--base-url|--channel|--release-repo|--release-dir)
         [[ $# -ge 2 && -n "$2" ]] || die "missing value for $1"
         case "$1" in
           --version) version=$2 ;; --listen) listen=$2 ;; --public-url) public_url=$2 ;;
           --home) phome=$2 ;; --base-url) base=$2 ;;
+          --channel) channel=$2 ;; --release-repo) repo=$2 ;; --release-dir) release_root=$2 ;;
         esac
         shift 2 ;;
       --dry-run) dry=1; shift ;;
       --help|-h)
-        say "Usage: bash install-hub.sh [--version vX.Y.Z] [--listen ADDR] [--public-url URL] [--home DIR] [--dry-run]"
-        say "Defaults: version $DEFAULT_VERSION, listen 127.0.0.1:7470, home ~/.protectorate."
+        say "Usage: bash install-hub.sh [--channel stable|dev] [--version TAG] [--release-repo OWNER/REPO] [--release-dir DIR] [--listen ADDR] [--public-url URL] [--home DIR] [--dry-run]"
+        say "Defaults: latest stable release, repository $REPO, listen 127.0.0.1:7470, home ~/.protectorate."
         say "--dry-run downloads and verifies into a temporary directory, installs nothing."
         return 0 ;;
       *) die "unknown option: $1" ;;
     esac
   done
-  [[ "$version" == v* ]] || die "version must be a tag such as $DEFAULT_VERSION"
-  [[ -n "$base" ]] || base="https://github.com/$REPO/releases/download/$version"
+  [[ "$channel" == stable || "$channel" == dev ]] || die "--channel must be stable or dev"
+  [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "--release-repo must be OWNER/REPO"
+  [[ -z "$version" || "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "--version must be a release tag"
+  if [[ -z "$base" ]]; then
+    if [[ -n "$version" ]]; then base="https://github.com/$repo/releases/download/$version"
+    elif [[ "$channel" == dev ]]; then base="https://github.com/$repo/releases/download/dev"
+    else base="https://github.com/$repo/releases/latest/download"; fi
+  fi
   [[ -z "$phome" || "$phome" == /* ]] || die "--home must be an absolute path"
+  [[ -z "$release_root" || "$release_root" == /* ]] || die "--release-dir must be an absolute path"
 
   [[ "$(uname -s)" == Linux ]] || die "the hub runs on Linux only (sleeves need bwrap)"
   local arch
@@ -113,11 +120,21 @@ main() {
     fi
   fi
 
-  local bin_dir="$HOME/.local/bin" data="$HOME/.local/share/protectorate" cache
-  if [[ $dry == 1 ]]; then cache=$(mktemp -d "${TMPDIR:-/tmp}/protectorate-install.XXXXXXXX"); else cache="$data/downloads/$version"; fi
-  mkdir -p -- "$cache"
-  say "protectorate hub $version for linux-$arch"
+  local bin_dir="$HOME/.local/bin" data="${XDG_DATA_HOME:-$HOME/.local/share}/protectorate" cache
+  [[ -n "$release_root" ]] || release_root="$data/releases"
+  cache=$(mktemp -d "${TMPDIR:-/tmp}/protectorate-install.XXXXXXXX")
   download "$base/SHA256SUMS" "$cache/SHA256SUMS"
+  fetch VERSION
+  local build_version
+  build_version=$(cat "$cache/VERSION")
+  [[ "$build_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid release VERSION"
+  [[ "$build_version" != current && "$build_version" != previous ]] || die "reserved release VERSION"
+  [[ "$build_version" != *-dirty ]] || die "refusing a dirty release build"
+  [[ -z "$version" || "$version" == dev || "$version" == "$build_version" ]] || die "release VERSION differs from requested tag $version"
+  local release_tag=${version:-$build_version}
+  [[ "$channel" != dev || -n "$version" ]] || release_tag=dev
+  version=$build_version
+  say "protectorate hub $version ($channel) for linux-$arch"
 
   local bin_name="protectorate-linux-$arch" web_name="protectorate-web-$version.tar.gz"
   fetch "$bin_name"
@@ -129,13 +146,29 @@ main() {
   done
   for t in "${others[@]}"; do fetch "$t"; done
 
-  local bin="$bin_dir/protectorate" web="$data/web" web_version="$data/web-$version"
-  if [[ -e "$web" && ! -L "$web" ]]; then die "$web exists and is not a symlink; move it aside, the installer manages it"; fi
-  act mkdir -p -- "$bin_dir" "$data/bin" "$web_version"
-  act install -m 755 "$cache/$bin_name" "$bin"
-  for t in "${others[@]}"; do act install -m 755 "$cache/$t" "$data/bin/$t"; done
-  act tar -xzf "$cache/$web_name" -C "$web_version"
-  act ln -sfn "web-$version" "$web"
+  local prerelease=false
+  [[ "$channel" != dev ]] || prerelease=true
+  printf '{"version":"%s","channel":"%s","tag_name":"%s","name":"%s","prerelease":%s,"html_url":"https://github.com/%s/releases/tag/%s"}\n' "$version" "$channel" "$release_tag" "$version" "$prerelease" "$repo" "$release_tag" > "$cache/release.json"
+
+  local bin="$bin_dir/protectorate" release="$release_root/$version"
+  act mkdir -p -- "$bin_dir" "$release/web"
+  act install -m 755 "$cache/$bin_name" "$release/$bin_name"
+  for t in "${others[@]}"; do act install -m 755 "$cache/$t" "$release/$t"; done
+  act install -m 644 "$cache/SHA256SUMS" "$release/SHA256SUMS"
+  act install -m 644 "$cache/VERSION" "$release/VERSION"
+  act install -m 644 "$cache/release.json" "$release/release.json"
+  act install -m 644 "$cache/$web_name" "$release/$web_name"
+  act tar -xzf "$cache/$web_name" -C "$release/web"
+  local next="$release_root/.current-install-$$" binary_next="$bin_dir/.protectorate-install-$$"
+  act ln -s "$version" "$next"
+  if [[ -L "$release_root/current" && "$(readlink "$release_root/current")" != "$version" ]]; then
+    act ln -s "$(readlink "$release_root/current")" "$release_root/.previous-install-$$"
+    act mv -Tf -- "$release_root/.previous-install-$$" "$release_root/previous"
+  fi
+  act mv -Tf -- "$next" "$release_root/current"
+  act install -m 755 "$release/$bin_name" "$binary_next"
+  if [[ -f "$bin" ]]; then act cp -p -- "$bin" "$bin.previous"; fi
+  act mv -Tf -- "$binary_next" "$bin"
 
   [[ -z "$phome" ]] || export PROTECTORATE_HOME=$phome
   if [[ $dry == 1 ]]; then
@@ -144,12 +177,15 @@ main() {
     "$bin" hub tailnet install
   fi
 
-  local unit="$HOME/.config/systemd/user/protectorate-hub.service" serve=(--listen "$listen" --web "$web")
+  local unit="$HOME/.config/systemd/user/protectorate-hub.service" serve=(--listen "$listen" --release-repo "$repo" --update-channel "$channel" --release-dir "$release_root")
   [[ -z "$public_url" ]] || serve+=(--public-url "$public_url")
   local svc=(service systemd hub --binary "$bin" --install)
   [[ -z "$phome" ]] || svc+=(--home "$phome")
   if [[ -e "$unit" ]]; then
     say "unit $unit exists and is left as it is (edit it to change flags); restarting the hub on the new binary"
+    if grep -Eq -- '--(web|binary-dir)([=[:space:]]|$)' "$unit"; then
+      warn "Remove explicit --web and --binary-dir from $unit to serve installs and updates from $release_root/current, then run systemctl --user daemon-reload."
+    fi
     act systemctl --user daemon-reload
     if systemctl --user is-active --quiet protectorate-hub 2>/dev/null; then act systemctl --user restart protectorate-hub; else act systemctl --user enable --now protectorate-hub; fi
   else

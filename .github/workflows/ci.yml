@@ -65,13 +65,66 @@ jobs:
       - run: make app-check
       - run: make app-build-web
       - run: make apk
+      - name: Assemble release assets
+        run: |
+          version=$(make -s version)
+          mkdir -p dist
+          cp bin/protectorate-* dist/
+          tar -czf "dist/protectorate-web-$version.tar.gz" -C app/build/web .
+          printf '%s\n' "$version" > dist/VERSION
+          cp app/build/app/outputs/flutter-apk/app-release.apk "dist/protectorate-$version.apk"
+          cd dist
+          sha256sum * > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: protectorate-${{ github.sha }}
-          path: |
-            bin/protectorate-*
-            app/build/web
-            app/build/app/outputs/flutter-apk/app-release.apk
+          path: dist/*
 
   desktop-windows:
     uses: ./.github/workflows/desktop-windows.yml
+
+  dev-release:
+    needs: [race, check, desktop-windows]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev-hotschmoe'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: protectorate-dev-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: protectorate-${{ github.sha }}
+          path: dist
+      - name: Publish rolling development release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          published=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/dev" --jq .object.sha 2>/dev/null || true)
+          if [ -n "$published" ] && [ "$published" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" "$published"; then
+            echo "A newer green push superseded this build; leaving dev unchanged."
+            exit 0
+          fi
+          version=$(make -s version)
+          test "$(cat dist/VERSION)" = "$version"
+          (cd dist && sha256sum --check SHA256SUMS)
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/dev" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" -f sha="$GITHUB_SHA" -F force=true
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/tags/dev -f sha="$GITHUB_SHA"
+          fi
+          notes="Rolling development build $version from $GITHUB_SHA."
+          if gh release view dev >/dev/null 2>&1; then
+            gh release edit dev --title "$version" --notes "$notes" --prerelease --latest=false
+            gh release view dev --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+              gh release delete-asset dev "$asset" --yes
+            done
+            gh release upload dev dist/*
+          else
+            gh release create dev dist/* --title "$version" --notes "$notes" --prerelease --latest=false --verify-tag
+          fi

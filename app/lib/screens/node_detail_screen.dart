@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:connectrpc/connect.dart';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
+import '../gen/protectorate/v1/release.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
@@ -46,6 +48,8 @@ class NodeDetailScreen extends StatefulWidget {
 }
 
 class _NodeDetailScreenState extends State<NodeDetailScreen> {
+  final _permissionAbort = CancelableSignal();
+  bool _canUpdate = false;
   NodeStatus? _status;
   List<Lease> _leases = const [];
   DateTime _receivedAt = DateTime.now();
@@ -73,14 +77,31 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
       if (mounted) setState(() {});
     });
     _refresh();
+    _loadUpdatePermission();
   }
 
   @override
   void dispose() {
+    _permissionAbort.cancel();
     _sub?.cancel();
     _poll?.cancel();
     _tick?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadUpdatePermission() async {
+    try {
+      final release = await widget.client.releases.checkRelease(
+        CheckReleaseRequest(),
+        signal: TimeoutSignal(
+          const Duration(seconds: 15),
+          parent: _permissionAbort,
+        ),
+      );
+      if (mounted) setState(() => _canUpdate = release.canUpdate);
+    } on Object {
+      return;
+    }
   }
 
   Future<void> _loadLeases() async {
@@ -150,7 +171,7 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
               memHistory: _history.mem(widget.name),
               versions: widget.versions,
               gpuHolders: gpuHolders(_leases, widget.name),
-              onUpdate: s.node.local
+              onUpdate: s.node.local || !_canUpdate
                   ? null
                   : () => showNodeUpdate(
                       context,

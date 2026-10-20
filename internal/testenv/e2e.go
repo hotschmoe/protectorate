@@ -3,6 +3,7 @@ package testenv
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -29,4 +30,23 @@ func E2E(t testing.TB) string {
 		}
 	}
 	return binary
+}
+
+// TmuxDir keeps Unix socket paths short even with disk-backed test fixtures.
+func TmuxDir(t testing.TB) string {
+	t.Helper()
+	root := "/tmp"
+	if runtime.GOOS == "windows" {
+		root = os.TempDir()
+	}
+	dir, err := os.MkdirTemp(root, "pt-tmux-")
+	if err != nil {
+		t.Fatalf("create private tmux directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("clean private tmux directory: %v", err)
+		}
+	})
+	return dir
 }

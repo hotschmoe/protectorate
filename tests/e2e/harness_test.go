@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -32,6 +33,7 @@ type cluster struct {
 	ctx                                     context.Context
 	binary, root, home, url, token, nodeURL string
 	env                                     []string
+	hubArgs                                 []string
 	hub                                     *process
 	node                                    *process
 	client                                  *http.Client
@@ -95,10 +97,7 @@ func newCluster(t *testing.T) *cluster {
 	if dir := os.Getenv("GOCOVERDIR"); dir != "" {
 		c.env = append(c.env, "GOCOVERDIR="+dir)
 	}
-	tmuxDir := filepath.Join(c.root, "tmux")
-	if err := os.Mkdir(tmuxDir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	tmuxDir := testenv.TmuxDir(t)
 	c.env = append(c.env, "TMUX_TMPDIR="+tmuxDir)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -127,6 +126,13 @@ func newCluster(t *testing.T) *cluster {
 	if err := os.WriteFile(nodeBinary, b, 0700); err != nil {
 		t.Fatal(err)
 	}
+	platformBinary := filepath.Join(binDir, "protectorate-"+runtime.GOOS+"-"+runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		platformBinary += ".exe"
+	}
+	if err := os.WriteFile(platformBinary, b, 0700); err != nil {
+		t.Fatal(err)
+	}
 	nodeCluster := *c
 	nodeCluster.binary = nodeBinary
 	c.node = nodeCluster.start("node", append(c.env, "PROTECTORATE_HOME="+filepath.Join(c.root, "node"), "INVOCATION_ID=e2e"), "node", "serve", "--listen", strings.TrimPrefix(c.nodeURL, "http://"))
@@ -152,6 +158,17 @@ func loopback(t *testing.T) string {
 }
 func (c *cluster) start(name string, env []string, args ...string) *process {
 	c.t.Helper()
+	if len(args) >= 2 && args[0] == "hub" && args[1] == "serve" {
+		configured := false
+		for _, arg := range args {
+			if arg == "--release-api-url" || strings.HasPrefix(arg, "--release-api-url=") {
+				configured = true
+			}
+		}
+		if !configured {
+			args = append(append([]string(nil), args...), "--release-api-url", "http://127.0.0.1:1")
+		}
+	}
 	// Test contexts cancel before cleanup; stop must reap graceful exits first.
 	ctx := context.WithoutCancel(c.ctx)
 	if deadline, ok := c.ctx.Deadline(); ok {
@@ -200,7 +217,8 @@ func (c *cluster) stop(p *process) {
 	}
 }
 func (c *cluster) boot(extra ...string) {
-	args := []string{"hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-" + filepath.Base(c.root)}
+	args := []string{"hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-" + filepath.Base(c.root), "--release-api-url", "http://127.0.0.1:1", "--binary-dir", filepath.Dir(c.binary)}
+	args = append(args, c.hubArgs...)
 	c.hub = c.start("hub", c.env, append(args, extra...)...)
 	c.eventually(func() bool {
 		b, e := os.ReadFile(filepath.Join(c.home, "token"))

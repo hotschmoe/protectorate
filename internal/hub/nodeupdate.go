@@ -105,6 +105,9 @@ func (h *Hub) UpdateNode(ctx context.Context, req *connect.Request[pb.UpdateNode
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s is not reachable", name))
 	}
 	prev := st.Metrics.AgentVersion
+	if h.Releases != nil && h.BinaryDir == "" && h.Releases.Current().Version != h.Version {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("current fleet release does not match hub %s; run `protectorate hub update` to fetch its release assets", h.Version))
+	}
 	if ok, why := NeedsUpdate(prev, h.Version, req.Msg.Force); !ok {
 		return stream.Send(&pb.UpdateNodeProgress{Phase: pb.UpdatePhase_UPDATE_PHASE_SKIPPED, Version: prev, PreviousVersion: prev, Message: why})
 	}
@@ -112,7 +115,7 @@ func (h *Hub) UpdateNode(ctx context.Context, req *connect.Request[pb.UpdateNode
 	bin := h.binaryPath(st.Node.Os, st.Node.Arch)
 	size, sum, err := fileDigest(bin)
 	if err != nil {
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("read %s (run `make cross`, or start the hub with --binary-dir): %w", bin, err))
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("read current release binary %s (run `protectorate hub update`): %w", bin, err))
 	}
 	send := func(p *pb.UpdateNodeProgress) error { return stream.Send(p) }
 	if err := send(&pb.UpdateNodeProgress{Phase: pb.UpdatePhase_UPDATE_PHASE_SENDING, TotalBytes: size, Message: filepath.Base(bin)}); err != nil {

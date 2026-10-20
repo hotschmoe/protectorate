@@ -124,10 +124,27 @@ scopes. The RPC form covers anything that runs code as the hub's OS user or
 aims the hub's credentials: `CreateSession` and `RespawnSession` (the command
 is unsandboxed and could read `$PROTECTORATE_HOME/token`), `AddNode` (the
 hub polls the address with the node token), `InviteNode` (it issues a tailnet
-enrollment key), `RemoveNode` (it revokes a node and can make it uninstall)
-and `SetNodeTier` (it decides which machines jobs may reach). Owner-only RPCs match no scope
+enrollment key), `RemoveNode` (it revokes a node and can make it uninstall),
+`SetNodeTier` (it decides which machines jobs may reach), `UpdateNode` (it
+replaces executable code on a node), and `ReleaseService.UpdateHub` (it
+replaces the hub executable and its fleet release). Owner-only RPCs match no scope
 glob, so granting them is rejected at token creation; `*` and `session_*` do
 not include them.
+
+`ReleaseService.CheckRelease` is read-only (`read` or
+`release_check_release`). Its `can_update` response is computed by authorizing
+the authenticated caller for `ReleaseService.UpdateHub`; the app uses it to
+show update controls. The update handler still checks authorization on every
+new request. `UpdateHub` is an audited server stream with subject `hub` and
+detail naming the resolved channel and version. A disconnect before
+replacement cancels the fetch; after replacement is committed the hub
+restarts and completes its health trial independently of the client. The
+stream ends at restart, so clients reconnect and read `GetStatus` to establish
+the resulting running version. See [install.md](install.md#update-the-hub-and-nodes).
+
+The device-authorization integration grants these update actions to approved
+Full device tokens as well as the owner. Scoped tokens, including `*`, do not
+become Full devices by acquiring an update-shaped scope.
 
 The terminal is the same hole by another door. Typing into a session that runs
 as the hub user is code execution as that user, so a `terminal` token may

@@ -12,7 +12,7 @@
 #   BUILD_NUMBER  the app's --build-number (Android versionCode): commits on
 #                 HEAD, which only grows, so every build sorts after the last.
 #                 CI needs a full clone (fetch-depth: 0).
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 BUILD_NAME ?= $(or $(shell printf '%s' '$(VERSION)' | sed -nE 's/^v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'),0.0.0)
 BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 APP_VERSION_FLAGS := --build-name=$(BUILD_NAME) --build-number=$(BUILD_NUMBER) --dart-define=PROTECTORATE_VERSION=$(VERSION)

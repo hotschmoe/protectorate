@@ -141,7 +141,7 @@ class _NodeUpdateDialogState extends State<NodeUpdateDialog> {
             const SizedBox(height: 14),
             if (!_started)
               const NoteStrip(
-                'The hub sends its build to the node, which verifies it, swaps it in and restarts. The node puts its old binary back if the hub does not reach the new one.',
+                'The hub sends its current release to the node, which verifies it, swaps it in and restarts. The node puts its old binary back if the hub does not reach the new one.',
                 tone: Tone.info,
               )
             else ...[
