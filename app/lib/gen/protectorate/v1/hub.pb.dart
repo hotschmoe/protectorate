@@ -185,6 +185,159 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   $0.Timestamp ensureStartedAt() => $_ensure(5);
 }
 
+class GetSleeveRuntimeRequest extends $pb.GeneratedMessage {
+  factory GetSleeveRuntimeRequest() => GetSleeveRuntimeRequest._();
+
+  GetSleeveRuntimeRequest._();
+
+  factory GetSleeveRuntimeRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeRequest()..mergeFromBuffer(data, registry);
+  factory GetSleeveRuntimeRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetSleeveRuntimeRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetSleeveRuntimeRequest.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeRequest copyWith(
+          void Function(GetSleeveRuntimeRequest) updates) =>
+      super.copyWith((message) => updates(message as GetSleeveRuntimeRequest))
+          as GetSleeveRuntimeRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetSleeveRuntimeRequest() / GetSleeveRuntimeRequest.new instead')
+  static GetSleeveRuntimeRequest create() => GetSleeveRuntimeRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetSleeveRuntimeRequest._();
+  @$core.override
+  GetSleeveRuntimeRequest createEmptyInstance() => GetSleeveRuntimeRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetSleeveRuntimeRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetSleeveRuntimeRequest>(
+          GetSleeveRuntimeRequest.$_createMessage);
+  static GetSleeveRuntimeRequest? _defaultInstance;
+}
+
+class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
+  factory GetSleeveRuntimeResponse({
+    $core.String? bwrapPath,
+    $core.String? bwrapVersion,
+    $core.bool? overlays,
+    $core.String? goBuildCache,
+    $core.String? goBuildLower,
+  }) {
+    final result = GetSleeveRuntimeResponse._();
+    if (bwrapPath != null) result.bwrapPath = bwrapPath;
+    if (bwrapVersion != null) result.bwrapVersion = bwrapVersion;
+    if (overlays != null) result.overlays = overlays;
+    if (goBuildCache != null) result.goBuildCache = goBuildCache;
+    if (goBuildLower != null) result.goBuildLower = goBuildLower;
+    return result;
+  }
+
+  GetSleeveRuntimeResponse._();
+
+  factory GetSleeveRuntimeResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeResponse()..mergeFromBuffer(data, registry);
+  factory GetSleeveRuntimeResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetSleeveRuntimeResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetSleeveRuntimeResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetSleeveRuntimeResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'bwrapPath')
+    ..aOS(2, _omitFieldNames ? '' : 'bwrapVersion')
+    ..aOB(3, _omitFieldNames ? '' : 'overlays')
+    ..aOS(4, _omitFieldNames ? '' : 'goBuildCache')
+    ..aOS(5, _omitFieldNames ? '' : 'goBuildLower')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetSleeveRuntimeResponse copyWith(
+          void Function(GetSleeveRuntimeResponse) updates) =>
+      super.copyWith((message) => updates(message as GetSleeveRuntimeResponse))
+          as GetSleeveRuntimeResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetSleeveRuntimeResponse() / GetSleeveRuntimeResponse.new instead')
+  static GetSleeveRuntimeResponse create() => GetSleeveRuntimeResponse._();
+  static $pb.GeneratedMessage $_createMessage() => GetSleeveRuntimeResponse._();
+  @$core.override
+  GetSleeveRuntimeResponse createEmptyInstance() =>
+      GetSleeveRuntimeResponse._();
+  @$core.pragma('dart2js:noInline')
+  static GetSleeveRuntimeResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetSleeveRuntimeResponse>(
+          GetSleeveRuntimeResponse.$_createMessage);
+  static GetSleeveRuntimeResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get bwrapPath => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set bwrapPath($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasBwrapPath() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearBwrapPath() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get bwrapVersion => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set bwrapVersion($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasBwrapVersion() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearBwrapVersion() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get overlays => $_getBF(2);
+  @$pb.TagNumber(3)
+  set overlays($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasOverlays() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearOverlays() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get goBuildCache => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set goBuildCache($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasGoBuildCache() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearGoBuildCache() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get goBuildLower => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set goBuildLower($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasGoBuildLower() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearGoBuildLower() => $_clearField(5);
+}
+
 /// HubService reports on the hub process itself.
 class HubServiceApi {
   final $pb.RpcClient _client;
@@ -196,6 +349,12 @@ class HubServiceApi {
           $pb.ClientContext? ctx, GetStatusRequest request) =>
       _client.invoke<GetStatusResponse>(
           ctx, 'HubService', 'GetStatus', request, GetStatusResponse());
+
+  /// GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+  $async.Future<GetSleeveRuntimeResponse> getSleeveRuntime(
+          $pb.ClientContext? ctx, GetSleeveRuntimeRequest request) =>
+      _client.invoke<GetSleeveRuntimeResponse>(ctx, 'HubService',
+          'GetSleeveRuntime', request, GetSleeveRuntimeResponse());
 }
 
 const $core.bool _omitFieldNames =

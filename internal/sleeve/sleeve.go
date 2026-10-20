@@ -115,6 +115,11 @@ type Config struct {
 	// known workspace's references/ directory.
 	ReferenceDirs  []string
 	WorkspaceRoots []string
+	BwrapPath      string
+	BwrapVersion   string
+	Overlays       bool
+	GoCache        string
+	GoModCache     string
 }
 
 // Names of the orchestrator sleeve and the state subdirectory that is its
@@ -213,6 +218,7 @@ func DefaultConfig(home string, toolDirs []string) (Config, error) {
 		}
 	}
 	c.readGitIdentity()
+	c.probeRuntime()
 	return c, nil
 }
 
@@ -305,6 +311,21 @@ func (c Config) protectedDirs() []string {
 // contain, lexically and resolved.
 func (c Config) workspaceDenied() []string {
 	out := c.protectedDirs()
+	cacheDirs := []string{c.GoCache, c.GoModCache}
+	for _, d := range c.ToolDirs {
+		if _, err := os.Stat(filepath.Join(d, "bin/flutter")); err == nil {
+			cacheDirs = append(cacheDirs, filepath.Join(d, "bin/cache"))
+		}
+	}
+	for _, p := range cacheDirs {
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+		if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+			out = append(out, r)
+		}
+	}
 	for _, d := range secretPaths {
 		p := filepath.Join(c.UserHome, d)
 		out = append(out, p)

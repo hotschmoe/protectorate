@@ -51,7 +51,7 @@ func (c Config) Preflight() error {
 	if runtime.GOOS != "linux" {
 		return ErrUnsupported
 	}
-	for _, b := range []string{"bwrap", "systemd-run", "systemctl"} {
+	for _, b := range []string{c.bwrap(), "systemd-run", "systemctl"} {
 		if _, err := exec.LookPath(b); err != nil {
 			return fmt.Errorf("%w: %s not found in PATH", ErrUnavailable, b)
 		}

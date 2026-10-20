@@ -54,6 +54,34 @@ final $typed_data.Uint8List getStatusResponseDescriptor = $convert.base64Decode(
     'Cg51cHRpbWVfc2Vjb25kcxgFIAEoA1INdXB0aW1lU2Vjb25kcxI5CgpzdGFydGVkX2F0GAYgAS'
     'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJc3RhcnRlZEF0');
 
+@$core.Deprecated('Use getSleeveRuntimeRequestDescriptor instead')
+const GetSleeveRuntimeRequest$json = {
+  '1': 'GetSleeveRuntimeRequest',
+};
+
+/// Descriptor for `GetSleeveRuntimeRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List getSleeveRuntimeRequestDescriptor =
+    $convert.base64Decode('ChdHZXRTbGVldmVSdW50aW1lUmVxdWVzdA==');
+
+@$core.Deprecated('Use getSleeveRuntimeResponseDescriptor instead')
+const GetSleeveRuntimeResponse$json = {
+  '1': 'GetSleeveRuntimeResponse',
+  '2': [
+    {'1': 'bwrap_path', '3': 1, '4': 1, '5': 9, '10': 'bwrapPath'},
+    {'1': 'bwrap_version', '3': 2, '4': 1, '5': 9, '10': 'bwrapVersion'},
+    {'1': 'overlays', '3': 3, '4': 1, '5': 8, '10': 'overlays'},
+    {'1': 'go_build_cache', '3': 4, '4': 1, '5': 9, '10': 'goBuildCache'},
+    {'1': 'go_build_lower', '3': 5, '4': 1, '5': 9, '10': 'goBuildLower'},
+  ],
+};
+
+/// Descriptor for `GetSleeveRuntimeResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List getSleeveRuntimeResponseDescriptor = $convert.base64Decode(
+    'ChhHZXRTbGVldmVSdW50aW1lUmVzcG9uc2USHQoKYndyYXBfcGF0aBgBIAEoCVIJYndyYXBQYX'
+    'RoEiMKDWJ3cmFwX3ZlcnNpb24YAiABKAlSDGJ3cmFwVmVyc2lvbhIaCghvdmVybGF5cxgDIAEo'
+    'CFIIb3ZlcmxheXMSJAoOZ29fYnVpbGRfY2FjaGUYBCABKAlSDGdvQnVpbGRDYWNoZRIkCg5nb1'
+    '9idWlsZF9sb3dlchgFIAEoCVIMZ29CdWlsZExvd2Vy');
+
 const $core.Map<$core.String, $core.dynamic> HubServiceBase$json = {
   '1': 'HubService',
   '2': [
@@ -61,6 +89,12 @@ const $core.Map<$core.String, $core.dynamic> HubServiceBase$json = {
       '1': 'GetStatus',
       '2': '.protectorate.v1.GetStatusRequest',
       '3': '.protectorate.v1.GetStatusResponse',
+      '4': {'34': 1},
+    },
+    {
+      '1': 'GetSleeveRuntime',
+      '2': '.protectorate.v1.GetSleeveRuntimeRequest',
+      '3': '.protectorate.v1.GetSleeveRuntimeResponse',
       '4': {'34': 1},
     },
   ],
@@ -72,9 +106,13 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetStatusRequest': GetStatusRequest$json,
   '.protectorate.v1.GetStatusResponse': GetStatusResponse$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
+  '.protectorate.v1.GetSleeveRuntimeRequest': GetSleeveRuntimeRequest$json,
+  '.protectorate.v1.GetSleeveRuntimeResponse': GetSleeveRuntimeResponse$json,
 };
 
 /// Descriptor for `HubService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List hubServiceDescriptor = $convert.base64Decode(
     'CgpIdWJTZXJ2aWNlElcKCUdldFN0YXR1cxIhLnByb3RlY3RvcmF0ZS52MS5HZXRTdGF0dXNSZX'
-    'F1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkdldFN0YXR1c1Jlc3BvbnNlIgOQAgE=');
+    'F1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkdldFN0YXR1c1Jlc3BvbnNlIgOQAgESbAoQR2V0U2xl'
+    'ZXZlUnVudGltZRIoLnByb3RlY3RvcmF0ZS52MS5HZXRTbGVldmVSdW50aW1lUmVxdWVzdBopLn'
+    'Byb3RlY3RvcmF0ZS52MS5HZXRTbGVldmVSdW50aW1lUmVzcG9uc2UiA5ACAQ==');

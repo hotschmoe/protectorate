@@ -335,6 +335,7 @@ func checkEnv(env map[string]string) error {
 type Box struct {
 	Mounts         []Mount
 	WritableMounts []Mount
+	Overlays       []Overlay
 
 	Unit     string
 	Hostname string
@@ -370,7 +371,7 @@ func (c Config) BoxArgv(b Box) []string {
 	}
 	argv = append(argv, "-p", "TasksMax="+strconv.Itoa(c.TasksMax), "-p", "OOMPolicy=continue", "--")
 
-	argv = append(argv, "bwrap", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
+	argv = append(argv, c.bwrap(), "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent",
 		"--hostname", b.Hostname, "--tmpfs", "/")
 	argv = append(argv, c.System...)
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp")
@@ -400,6 +401,9 @@ func (c Config) BoxArgv(b Box) []string {
 	}
 	for _, m := range b.WritableMounts {
 		argv = append(argv, "--bind", m.Source, m.Target)
+	}
+	for _, m := range b.Overlays {
+		argv = append(argv, "--overlay-src", m.Lower, "--overlay", m.Upper, m.Work, m.Target)
 	}
 	argv = append(argv, "--chdir", b.Chdir, "--clearenv")
 	for _, kv := range b.Env {
@@ -499,8 +503,9 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 	argv := c.BoxArgv(Box{
 		Unit: unit, Hostname: spec.Name, Limits: spec.Limits, Home: c.sleeveHome(spec.Name),
 		RO: bin.RO, ROFiles: bin.Files, Symlinks: bin.Symlinks,
-		Mounts:         mounts,
+		Mounts:         append(mounts, lay.ReadOnly...),
 		WritableMounts: lay.CacheCopies,
+		Overlays:       lay.Overlays,
 		RW:             append(append([]string(nil), lay.Binds...), spec.Workspace), Chdir: spec.Workspace,
 		Env: c.launchEnv(spec, lay), EnvFD: len(envArgs) > 0, Command: command,
 	})

@@ -26,4 +26,22 @@ extension type HubServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.
+  Future<protectoratev1hub.GetSleeveRuntimeResponse> getSleeveRuntime(
+    protectoratev1hub.GetSleeveRuntimeRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.HubService.getSleeveRuntime,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }

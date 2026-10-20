@@ -322,12 +322,18 @@ func statusCmd(o *opts) *command {
 				return err
 			}
 			s := res.Msg
+			runtime, err := protectoratev1connect.NewHubServiceClient(hc, o.hubURL).
+				GetSleeveRuntime(cmd.Context(), connect.NewRequest(&pb.GetSleeveRuntimeRequest{}))
+			if err != nil {
+				return err
+			}
 			return o.out(cmd).print(s, func(w io.Writer) {
 				fmt.Fprintf(w, "version\t%s\n", s.Version)
 				fmt.Fprintf(w, "hostname\t%s\n", s.Hostname)
 				fmt.Fprintf(w, "platform\t%s/%s\n", s.Os, s.Arch)
 				fmt.Fprintf(w, "uptime\t%s\n", (time.Duration(s.UptimeSeconds) * time.Second))
 				fmt.Fprintf(w, "started\t%s\n", s.StartedAt.AsTime().Local().Format(time.RFC3339))
+				fmt.Fprintf(w, "bwrap\t%s (%s)\noverlays\t%t\n", runtime.Msg.BwrapPath, runtime.Msg.BwrapVersion, runtime.Msg.Overlays)
 			})
 		},
 	}

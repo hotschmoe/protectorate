@@ -150,7 +150,7 @@ func (c Config) gitArgv(name, dir string, args []string) ([]string, error) {
 		}
 		binds = append(binds, d)
 	}
-	argv := []string{"bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--tmpfs", "/"}
+	argv := []string{c.bwrap(), "--unshare-all", "--die-with-parent", "--new-session", "--tmpfs", "/"}
 	argv = append(argv, c.System...)
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
 	for _, d := range binds {

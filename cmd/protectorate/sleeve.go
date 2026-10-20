@@ -35,6 +35,9 @@ func attachSleeves(ctx context.Context, h *hub.Hub, toolDirs, refDirs, workspace
 	if err != nil {
 		return err
 	}
+	if err := cfg.PrepareCaches(ctx); err != nil {
+		return err
+	}
 	cfg.ReferenceDirs = refDirs
 	if workspaceRoots == nil {
 		if ownerHome, err := os.UserHomeDir(); err == nil {

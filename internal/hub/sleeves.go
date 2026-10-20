@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +43,19 @@ func (h *Hub) SetSleeves(m *sleeve.Manager) {
 	h.dropHelpers(context.Background())
 	h.chat.recover()
 	h.migrateEnvoyTokens(time.Now())
+}
+
+func (h *Hub) GetSleeveRuntime(context.Context, *connect.Request[pb.GetSleeveRuntimeRequest]) (*connect.Response[pb.GetSleeveRuntimeResponse], error) {
+	r := &pb.GetSleeveRuntimeResponse{}
+	if h.sleeves != nil {
+		c := h.sleeves.Runtime()
+		r.BwrapPath, r.BwrapVersion, r.Overlays = c.BwrapPath, c.BwrapVersion, c.Overlays
+		r.GoBuildCache = c.GoCache
+		if c.Overlays && c.GoCache != "" {
+			r.GoBuildLower = filepath.Join(c.Home, "cache", "go-build-lower")
+		}
+	}
+	return connect.NewResponse(r), nil
 }
 
 // sleeveProto is sleeveToProto with the live chat status laid over the

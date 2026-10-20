@@ -57,6 +57,22 @@ including resume, approvals, interruption, usage, tools, selection, compaction,
 process exit and ownership. Sleeve scenarios retain real cgroup limits,
 lifecycle, warm git clone, toolchain/cache and jailed repository execution.
 
+`TestBinarySleeveCaches` starts private real hubs and shell sleeves on hosts
+with a systemd user manager. Its overlay lane uses a non-Dart workspace,
+writes Flutter/Pub/Go caches, verifies host lower bytes and paths are unchanged,
+checks small persistent upper deltas and respawn reuse, and requires spawn
+under one second. A second sleeve must still see clean cached data after the
+first poisons an existing Go output. A private owner Go build prewarms the
+cache; replacing an owner output after snapshot publication must still allow
+the sleeve build without compiler invocations. The copy lane puts `/usr/bin/bwrap` first on
+PATH, requires its lack of overlay options, and exercises the writable Dart
+cache copies and respawn persistence. Fixtures use private synthetic Flutter
+and Pub trees plus the installed Go toolchain; provider logins are not used.
+Capability detection, corrupt-output rejection and snapshot persistence across
+hub restart run before the optional systemd runtime gate.
+The runtime also refuses host cache workspaces and cache-directory symlinks
+that would escape the private sleeve home during a respawn.
+
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
 A forced kill can leave a server within its private directory; it cannot leave
@@ -199,6 +215,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
 | tests/e2e/backlog_test.go | TestBinaryNoteLifecycle | Real hub/CLI/MCP note completion, filters, reopen, persistence and sleeve authorization | unmeasured | KEEP-E2E | note lifecycle regression scenario |
+| tests/e2e/cache_test.go | TestBinarySleeveCaches | Real hub/shell overlay and bwrap 0.8 fallback, lower integrity, delta size, warm Go reuse and respawn | host runtime required | KEEP-E2E | cache isolation and spawn regression scenario |
 
 ## Deleted files
 

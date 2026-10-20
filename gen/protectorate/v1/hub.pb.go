@@ -144,6 +144,118 @@ func (x *GetStatusResponse) GetStartedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type GetSleeveRuntimeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSleeveRuntimeRequest) Reset() {
+	*x = GetSleeveRuntimeRequest{}
+	mi := &file_protectorate_v1_hub_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSleeveRuntimeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSleeveRuntimeRequest) ProtoMessage() {}
+
+func (x *GetSleeveRuntimeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_hub_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSleeveRuntimeRequest.ProtoReflect.Descriptor instead.
+func (*GetSleeveRuntimeRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_hub_proto_rawDescGZIP(), []int{2}
+}
+
+type GetSleeveRuntimeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BwrapPath     string                 `protobuf:"bytes,1,opt,name=bwrap_path,json=bwrapPath,proto3" json:"bwrap_path,omitempty"`
+	BwrapVersion  string                 `protobuf:"bytes,2,opt,name=bwrap_version,json=bwrapVersion,proto3" json:"bwrap_version,omitempty"`
+	Overlays      bool                   `protobuf:"varint,3,opt,name=overlays,proto3" json:"overlays,omitempty"`
+	GoBuildCache  string                 `protobuf:"bytes,4,opt,name=go_build_cache,json=goBuildCache,proto3" json:"go_build_cache,omitempty"`
+	GoBuildLower  string                 `protobuf:"bytes,5,opt,name=go_build_lower,json=goBuildLower,proto3" json:"go_build_lower,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSleeveRuntimeResponse) Reset() {
+	*x = GetSleeveRuntimeResponse{}
+	mi := &file_protectorate_v1_hub_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSleeveRuntimeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSleeveRuntimeResponse) ProtoMessage() {}
+
+func (x *GetSleeveRuntimeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_hub_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSleeveRuntimeResponse.ProtoReflect.Descriptor instead.
+func (*GetSleeveRuntimeResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_hub_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetSleeveRuntimeResponse) GetBwrapPath() string {
+	if x != nil {
+		return x.BwrapPath
+	}
+	return ""
+}
+
+func (x *GetSleeveRuntimeResponse) GetBwrapVersion() string {
+	if x != nil {
+		return x.BwrapVersion
+	}
+	return ""
+}
+
+func (x *GetSleeveRuntimeResponse) GetOverlays() bool {
+	if x != nil {
+		return x.Overlays
+	}
+	return false
+}
+
+func (x *GetSleeveRuntimeResponse) GetGoBuildCache() string {
+	if x != nil {
+		return x.GoBuildCache
+	}
+	return ""
+}
+
+func (x *GetSleeveRuntimeResponse) GetGoBuildLower() string {
+	if x != nil {
+		return x.GoBuildLower
+	}
+	return ""
+}
+
 var File_protectorate_v1_hub_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_hub_proto_rawDesc = "" +
@@ -157,10 +269,19 @@ const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"\x04arch\x18\x04 \x01(\tR\x04arch\x12%\n" +
 	"\x0euptime_seconds\x18\x05 \x01(\x03R\ruptimeSeconds\x129\n" +
 	"\n" +
-	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt2e\n" +
+	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"\x19\n" +
+	"\x17GetSleeveRuntimeRequest\"\xc6\x01\n" +
+	"\x18GetSleeveRuntimeResponse\x12\x1d\n" +
+	"\n" +
+	"bwrap_path\x18\x01 \x01(\tR\tbwrapPath\x12#\n" +
+	"\rbwrap_version\x18\x02 \x01(\tR\fbwrapVersion\x12\x1a\n" +
+	"\boverlays\x18\x03 \x01(\bR\boverlays\x12$\n" +
+	"\x0ego_build_cache\x18\x04 \x01(\tR\fgoBuildCache\x12$\n" +
+	"\x0ego_build_lower\x18\x05 \x01(\tR\fgoBuildLower2\xd3\x01\n" +
 	"\n" +
 	"HubService\x12W\n" +
-	"\tGetStatus\x12!.protectorate.v1.GetStatusRequest\x1a\".protectorate.v1.GetStatusResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
+	"\tGetStatus\x12!.protectorate.v1.GetStatusRequest\x1a\".protectorate.v1.GetStatusResponse\"\x03\x90\x02\x01\x12l\n" +
+	"\x10GetSleeveRuntime\x12(.protectorate.v1.GetSleeveRuntimeRequest\x1a).protectorate.v1.GetSleeveRuntimeResponse\"\x03\x90\x02\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 
 var (
 	file_protectorate_v1_hub_proto_rawDescOnce sync.Once
@@ -174,18 +295,22 @@ func file_protectorate_v1_hub_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_hub_proto_rawDescData
 }
 
-var file_protectorate_v1_hub_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_protectorate_v1_hub_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_protectorate_v1_hub_proto_goTypes = []any{
-	(*GetStatusRequest)(nil),      // 0: protectorate.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),     // 1: protectorate.v1.GetStatusResponse
-	(*timestamppb.Timestamp)(nil), // 2: google.protobuf.Timestamp
+	(*GetStatusRequest)(nil),         // 0: protectorate.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),        // 1: protectorate.v1.GetStatusResponse
+	(*GetSleeveRuntimeRequest)(nil),  // 2: protectorate.v1.GetSleeveRuntimeRequest
+	(*GetSleeveRuntimeResponse)(nil), // 3: protectorate.v1.GetSleeveRuntimeResponse
+	(*timestamppb.Timestamp)(nil),    // 4: google.protobuf.Timestamp
 }
 var file_protectorate_v1_hub_proto_depIdxs = []int32{
-	2, // 0: protectorate.v1.GetStatusResponse.started_at:type_name -> google.protobuf.Timestamp
+	4, // 0: protectorate.v1.GetStatusResponse.started_at:type_name -> google.protobuf.Timestamp
 	0, // 1: protectorate.v1.HubService.GetStatus:input_type -> protectorate.v1.GetStatusRequest
-	1, // 2: protectorate.v1.HubService.GetStatus:output_type -> protectorate.v1.GetStatusResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
+	2, // 2: protectorate.v1.HubService.GetSleeveRuntime:input_type -> protectorate.v1.GetSleeveRuntimeRequest
+	1, // 3: protectorate.v1.HubService.GetStatus:output_type -> protectorate.v1.GetStatusResponse
+	3, // 4: protectorate.v1.HubService.GetSleeveRuntime:output_type -> protectorate.v1.GetSleeveRuntimeResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -202,7 +327,7 @@ func file_protectorate_v1_hub_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_hub_proto_rawDesc), len(file_protectorate_v1_hub_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

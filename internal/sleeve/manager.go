@@ -140,6 +140,8 @@ type Manager struct {
 	runCtx   context.Context
 }
 
+func (m *Manager) Runtime() Config { return m.cfg }
+
 type fileFormat struct {
 	Sleeves []Info `json:"sleeves"`
 }
