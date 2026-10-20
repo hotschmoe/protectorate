@@ -176,6 +176,37 @@ decision to free the GPUs is made by a person, never by the scheduler.
   kill the whole tree on cancel: the Windows equivalent of a cgroup, so P8
   holds). Creating the account is one elevated step at install
   (`node install --runner`).
+- **Windows (built, not yet run on a real machine):** every job runs in a
+  Job Object with kill-on-close and the job's caps: `--cpu` becomes a hard
+  CPU rate (`JOBOBJECT_CPU_RATE_CONTROL_INFORMATION`, percent of one core
+  divided by the logical cores), `--mem` the job's committed-memory limit
+  (`JobMemoryLimit`; committed, not resident, memory). `node install
+  --runner`, run once from an elevated prompt as the user the agent runs as,
+  prints each step and then: makes a random 32-character password; creates
+  the local standard user `protectorate-runner` (Users only, password never
+  expires and cannot be changed) or resets its password; hides it from the
+  sign-in screen (`Winlogon\SpecialAccounts\UserList`); creates
+  `%ProgramData%\protectorate\runner` with a protected ACL (SYSTEM,
+  Administrators and the agent's user full control, the runner modify,
+  inherited); signs in as the runner once to check; seals the password with
+  DPAPI for the agent's user (`CryptProtectData`, user scope, with entropy)
+  into `$PROTECTORATE_HOME/runner.json`. DPAPI and not LSA secrets because
+  the agent runs unelevated and LSA private data needs an administrator to
+  read. `--dry-run` only prints the steps. The agent then uses that
+  directory as its job dir, and runs a sandboxed job with
+  `CreateProcessWithLogonW(protectorate-runner, LOGON_WITH_PROFILE,
+  CREATE_SUSPENDED|CREATE_NEW_CONSOLE, hidden window)`: the documented call
+  for a process without SeAssignPrimaryTokenPrivilege, which rules out
+  `LogonUser` + `CreateProcessAsUser` for an agent that is not a service.
+  The process gets the runner's own environment (`LogonUser` +
+  `CreateEnvironmentBlock`) plus the job's variables, never the agent's;
+  output comes back through an inheritable pipe; it is assigned to the job
+  object (nested inside the secondary logon service's) and only then
+  resumed. Until a node has a runner, jobs run as the agent's account in the
+  job object and the node reports `sandbox job-object` with "unisolated" in
+  its metrics. Tested here: the argv and command-line quoting, environment
+  block, CPU rate, password, ACL and the printed plan; the Windows calls
+  compile for amd64 and arm64 and wait for a real Windows node.
 - **Not Docker on Windows.** Docker Desktop runs Linux containers in a WSL2
   VM: a large resident daemon, Docker Desktop licensing for larger
   companies, and it only gives us Linux, which a Linux node already provides.

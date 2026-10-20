@@ -487,6 +487,10 @@ func envKeys(req *pb.RunJobRequest) []string {
 	return append(append([]string(nil), jobEnvKeys...), keys...)
 }
 
+func sandboxed(m pb.JobMode) bool {
+	return m == pb.JobMode_JOB_MODE_SANDBOXED || m == pb.JobMode_JOB_MODE_UNSPECIFIED
+}
+
 // jobEnv is the job's own variables in envKeys order.
 func jobEnv(req *pb.RunJobRequest, jobDir string) [][2]string {
 	env := [][2]string{{"PROTECTORATE_JOB_ID", req.JobId}, {"PROTECTORATE_JOB_DIR", jobDir}}
@@ -536,46 +540,89 @@ func limitsLabel(l *pb.JobLimits) string {
 	return ", " + strings.Join(parts, ", ")
 }
 
-func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
+// running is a started job: its whole process tree.
+type running interface {
+	// wait blocks until the command exits and returns its exit code, -1
+	// when it was killed or gave none.
+	wait() int
+	// interrupt asks the tree to stop politely and reports whether it could.
+	interrupt() bool
+	kill()
+	close()
+}
+
+type execRunning struct {
+	cmd  *exec.Cmd
+	tree *procTree
+}
+
+func (e execRunning) wait() int {
+	_ = e.cmd.Wait()
+	if e.cmd.ProcessState == nil {
+		return -1
+	}
+	return e.cmd.ProcessState.ExitCode()
+}
+
+func (e execRunning) interrupt() bool { return e.tree.interrupt() }
+func (e execRunning) kill()           { e.tree.kill() }
+func (e execRunning) close()          { e.tree.close() }
+
+// startExec starts argv as the agent's child: with the agent's environment
+// plus the job's, or, for a sandbox, with the job's environment as
+// arguments on fd 3 (envArgs).
+func startExec(req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, w io.Writer) (running, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = workdir
 	cmd.Env = os.Environ()
+	cmd.Stdout, cmd.Stderr = w, w
+	cmd.WaitDelay = waitDelay
 	if envArgs == nil {
 		for _, kv := range jobEnv(req, jobDir) {
 			cmd.Env = append(cmd.Env, kv[0]+"="+kv[1])
 		}
-	} else {
-		pr, pw, err := os.Pipe()
+		tree, err := startTree(cmd, req.Limits)
 		if err != nil {
-			return &pb.JobFinished{End: pb.JobEnd_JOB_END_ERROR, ExitCode: -1, Error: fmt.Sprintf("sandbox env pipe: %v", err)}
+			return nil, err
 		}
-		defer pr.Close()
-		cmd.ExtraFiles = []*os.File{pr}
-		go func() {
-			_, _ = pw.Write(envArgs)
-			pw.Close()
-		}()
+		return execRunning{cmd, tree}, nil
 	}
-	w := &logWriter{send: send, onFail: r.cancel}
-	cmd.Stdout, cmd.Stderr = w, w
-	cmd.WaitDelay = waitDelay
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("sandbox env pipe: %w", err)
+	}
+	defer pr.Close()
+	cmd.ExtraFiles = []*os.File{pr}
+	go func() {
+		_, _ = pw.Write(envArgs)
+		pw.Close()
+	}()
+	tree, err := startTree(cmd, req.Limits)
+	if err != nil {
+		return nil, err
+	}
+	return execRunning{cmd, tree}, nil
+}
 
+func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, timeout time.Duration, send func(*pb.JobEvent) error) *pb.JobFinished {
+	w := &logWriter{send: send, onFail: r.cancel}
 	start := time.Now()
-	tree, err := startTree(cmd)
+	p, err := j.launch(req, argv, envArgs, workdir, jobDir, w)
 	if err != nil {
 		return &pb.JobFinished{End: pb.JobEnd_JOB_END_ERROR, ExitCode: -1, Error: fmt.Sprintf("start %q: %v", req.Command[0], err)}
 	}
-	defer tree.close()
+	defer p.close()
 
 	tctx, stop := context.WithTimeout(ctx, timeout)
 	defer stop()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan int, 1)
+	go func() { done <- p.wait() }()
 
 	end := pb.JobEnd_JOB_END_EXITED
 	var errText string
+	code := -1
 	select {
-	case <-done:
+	case code = <-done:
 	case <-tctx.Done():
 		switch {
 		case r.canceled.Load():
@@ -588,24 +635,20 @@ func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, ar
 			errText = fmt.Sprintf("timed out after %s", timeout)
 		}
 		exited := false
-		if tree.interrupt() {
+		if p.interrupt() {
 			select {
-			case <-done:
+			case code = <-done:
 				exited = true
 			case <-time.After(killGrace):
 			}
 		}
-		tree.kill()
+		p.kill()
 		if !exited {
-			<-done
+			code = <-done
 		}
 	}
-	tree.kill()
-	code := int32(-1)
-	if cmd.ProcessState != nil {
-		code = int32(cmd.ProcessState.ExitCode())
-	}
-	return &pb.JobFinished{End: end, ExitCode: code, Error: errText, RunTime: durationpb.New(time.Since(start))}
+	p.kill()
+	return &pb.JobFinished{End: end, ExitCode: int32(code), Error: errText, RunTime: durationpb.New(time.Since(start))}
 }
 
 // logWriter forwards merged stdout and stderr as output events. Output past

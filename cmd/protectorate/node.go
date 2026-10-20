@@ -300,6 +300,9 @@ func nodeServeCmd() *cobra.Command {
 			if jobSlots > 0 {
 				if jobDir == "" {
 					jobDir = filepath.Join(home, "node-jobs")
+					if d, ok := node.RunnerJobDir(home); ok {
+						jobDir = d
+					}
 				}
 				if a.Jobs, err = node.NewJobs(jobDir, jobSlots); err != nil {
 					return err
@@ -375,7 +378,7 @@ func nodeServeCmd() *cobra.Command {
 	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
 	f.StringVar(&tokenFile, "node-token-file", "", "file holding the bearer token the hub must present when not enrolled in a tailnet (or the token itself in env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")
-	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs)")
+	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs, or the runner's directory on Windows after node install --runner)")
 	f.StringVar(&fileRoot, "file-root", "", "directory file transfers are confined to (default $PROTECTORATE_HOME/node-files)")
 	f.BoolVar(&fileUnconfined, "file-unconfined", false, "let file transfers touch any path this user can, like a job can; --file-root then only anchors relative paths")
 	f.IntVar(&jobSlots, "job-concurrency", 1, "jobs that may run at once; 0 refuses jobs")

@@ -6,18 +6,24 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 )
 
 // procTree is a started command and everything it spawned: a process group.
 type procTree struct{ pid int }
 
-func startTree(cmd *exec.Cmd) (*procTree, error) {
+// startTree starts cmd as a process group leader. Limits are enforced by
+// the sandbox's scope, not here.
+func startTree(cmd *exec.Cmd, _ *pb.JobLimits) (*procTree, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -98,4 +104,14 @@ func adminArgv(admin string, command, envKeys []string) ([]string, error) {
 		return append([]string{"sudo", "-n", "--preserve-env=" + strings.Join(envKeys, ","), "--"}, command...), nil
 	}
 	return nil, fmt.Errorf("unknown elevation %q", admin)
+}
+
+// launch starts a job's argv.
+func (j *Jobs) launch(req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, w io.Writer) (running, error) {
+	return startExec(req, argv, envArgs, workdir, jobDir, w)
+}
+
+// InstallRunner is Windows only: elsewhere jobs are sandboxed with bwrap.
+func InstallRunner(string, io.Writer) error {
+	return fmt.Errorf("--runner is for Windows nodes; on %s, jobs are sandboxed with bwrap when it is installed", runtime.GOOS)
 }

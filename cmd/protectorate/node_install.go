@@ -323,9 +323,9 @@ func lingerValue(out string) string {
 
 func nodeInstallCmd() *cobra.Command {
 	var control, key, keyFile, name, homeDir string
-	var elevated, dryRun bool
+	var elevated, dryRun, runner bool
 	c := &cobra.Command{
-		Use:   "install --control <headscale url> --key <enrollment key> [flags] [-- serve-flags]",
+		Use:   "install --control <headscale url> --key <enrollment key> [flags] [-- serve-flags] | install --runner",
 		Short: "Install this machine as a node: binary, enrollment, start at login",
 		Long: `One command per machine. It copies this binary to a stable per-user place,
 enrolls with the hub (node join), registers the agent to start at login and
@@ -341,13 +341,24 @@ The control URL and key are what 'node invite <name>' prints. The key is short
 lived; pass it in env PROTECTORATE_ENROLL_KEY or --key-file to keep it out of
 the process list. An existing enrollment is kept and needs no key.
 --dry-run prints every action and changes nothing. Arguments after -- go to
-'node serve'.`,
+'node serve'.
+
+--runner (Windows, once, from an elevated prompt as the user the agent runs
+as) instead creates the local account protectorate-runner that sandboxed jobs
+run as, inside a job object, without access to your profile. It prints each
+step as it goes (with --dry-run, only prints them). Restart the agent after.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if homeDir != "" {
 				if err := os.Setenv("PROTECTORATE_HOME", homeDir); err != nil {
 					return fmt.Errorf("set home: %w", err)
 				}
+			}
+			if runner {
+				return installRunner(cmd.OutOrStdout(), dryRun)
+			}
+			if control == "" {
+				return errors.New(`required flag(s) "control" not set`)
 			}
 			in, err := currentInstallInput()
 			if err != nil {
@@ -390,8 +401,27 @@ the process list. An existing enrollment is kept and needs no key.
 	f.StringVar(&homeDir, "home", "", "PROTECTORATE_HOME for this node (default: env, then ~/.protectorate)")
 	f.BoolVar(&elevated, "elevated", false, "Windows: run the task with the highest privileges, to drive elevated windows; needs an elevated prompt")
 	f.BoolVar(&dryRun, "dry-run", false, "print every action without doing it")
-	_ = c.MarkFlagRequired("control")
+	f.BoolVar(&runner, "runner", false, "Windows, elevated, once: create the protectorate-runner account that sandboxed jobs run as")
 	return c
+}
+
+func installRunner(w io.Writer, dryRun bool) error {
+	home, err := hub.Home()
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		fmt.Fprintln(w, "dry run: nothing will be changed")
+		for i, s := range node.RunnerSteps(home, node.RunnerDir()) {
+			fmt.Fprintf(w, "%d. %s\n", i+1, s)
+		}
+		return nil
+	}
+	if err := node.InstallRunner(home, w); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "done: restart the agent (sign out and in, or node install again) so jobs run as "+node.RunnerUser)
+	return nil
 }
 
 func nodeUninstallCmd() *cobra.Command {
