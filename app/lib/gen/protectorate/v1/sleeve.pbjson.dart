@@ -763,6 +763,7 @@ const PruneSleevesRequest$json = {
     {'1': 'homes', '3': 3, '4': 1, '5': 8, '10': 'homes'},
     {'1': 'workspaces', '3': 4, '4': 1, '5': 8, '10': 'workspaces'},
     {'1': 'running', '3': 5, '4': 1, '5': 8, '10': 'running'},
+    {'1': 'ignored', '3': 6, '4': 1, '5': 8, '10': 'ignored'},
   ],
 };
 
@@ -770,7 +771,8 @@ const PruneSleevesRequest$json = {
 final $typed_data.Uint8List pruneSleevesRequestDescriptor = $convert.base64Decode(
     'ChNQcnVuZVNsZWV2ZXNSZXF1ZXN0EhAKA3llcxgBIAEoCFIDeWVzEhYKBmNhY2hlcxgCIAEoCF'
     'IGY2FjaGVzEhQKBWhvbWVzGAMgASgIUgVob21lcxIeCgp3b3Jrc3BhY2VzGAQgASgIUgp3b3Jr'
-    'c3BhY2VzEhgKB3J1bm5pbmcYBSABKAhSB3J1bm5pbmc=');
+    'c3BhY2VzEhgKB3J1bm5pbmcYBSABKAhSB3J1bm5pbmcSGAoHaWdub3JlZBgGIAEoCFIHaWdub3'
+    'JlZA==');
 
 @$core.Deprecated('Use pruneSleevesResponseDescriptor instead')
 const PruneSleevesResponse$json = {

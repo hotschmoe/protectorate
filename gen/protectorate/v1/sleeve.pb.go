@@ -1832,7 +1832,10 @@ type PruneSleevesRequest struct {
 	Homes      bool `protobuf:"varint,3,opt,name=homes,proto3" json:"homes,omitempty"`
 	Workspaces bool `protobuf:"varint,4,opt,name=workspaces,proto3" json:"workspaces,omitempty"`
 	// Running sleeves are inventoried but always kept.
-	Running       bool `protobuf:"varint,5,opt,name=running,proto3" json:"running,omitempty"`
+	Running bool `protobuf:"varint,5,opt,name=running,proto3" json:"running,omitempty"`
+	// With workspaces, files ignored by the clone's tracked .gitignore rules
+	// (build output) do not keep a clone; other untracked files still do.
+	Ignored       bool `protobuf:"varint,6,opt,name=ignored,proto3" json:"ignored,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1898,6 +1901,13 @@ func (x *PruneSleevesRequest) GetWorkspaces() bool {
 func (x *PruneSleevesRequest) GetRunning() bool {
 	if x != nil {
 		return x.Running
+	}
+	return false
+}
+
+func (x *PruneSleevesRequest) GetIgnored() bool {
+	if x != nil {
+		return x.Ignored
 	}
 	return false
 }
@@ -2199,7 +2209,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x05token\x18\x02 \x01(\v2\x1a.protectorate.v1.TokenInfoR\x05token\x12\x1c\n" +
 	"\tworkspace\x18\x03 \x01(\tR\tworkspace\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x1a\n" +
-	"\breplaced\x18\x05 \x01(\bR\breplaced\"\x8f\x01\n" +
+	"\breplaced\x18\x05 \x01(\bR\breplaced\"\xa9\x01\n" +
 	"\x13PruneSleevesRequest\x12\x10\n" +
 	"\x03yes\x18\x01 \x01(\bR\x03yes\x12\x16\n" +
 	"\x06caches\x18\x02 \x01(\bR\x06caches\x12\x14\n" +
@@ -2207,7 +2217,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\n" +
 	"workspaces\x18\x04 \x01(\bR\n" +
 	"workspaces\x12\x18\n" +
-	"\arunning\x18\x05 \x01(\bR\arunning\"R\n" +
+	"\arunning\x18\x05 \x01(\bR\arunning\x12\x18\n" +
+	"\aignored\x18\x06 \x01(\bR\aignored\"R\n" +
 	"\x14PruneSleevesResponse\x12:\n" +
 	"\aentries\x18\x01 \x03(\v2 .protectorate.v1.SleeveDiskEntryR\aentries\"\xb5\x01\n" +
 	"\x0fSleeveDiskEntry\x12\x16\n" +

@@ -371,6 +371,9 @@ message PruneSleevesRequest {
   bool workspaces = 4;
   // Running sleeves are inventoried but always kept.
   bool running = 5;
+  // With workspaces, files ignored by the clone's tracked .gitignore rules
+  // (build output) do not keep a clone; other untracked files still do.
+  bool ignored = 6;
 }
 
 message PruneSleevesResponse {

@@ -2395,6 +2395,7 @@ class PruneSleevesRequest extends $pb.GeneratedMessage {
     $core.bool? homes,
     $core.bool? workspaces,
     $core.bool? running,
+    $core.bool? ignored,
   }) {
     final result = PruneSleevesRequest._();
     if (yes != null) result.yes = yes;
@@ -2402,6 +2403,7 @@ class PruneSleevesRequest extends $pb.GeneratedMessage {
     if (homes != null) result.homes = homes;
     if (workspaces != null) result.workspaces = workspaces;
     if (running != null) result.running = running;
+    if (ignored != null) result.ignored = ignored;
     return result;
   }
 
@@ -2424,6 +2426,7 @@ class PruneSleevesRequest extends $pb.GeneratedMessage {
     ..aOB(3, _omitFieldNames ? '' : 'homes')
     ..aOB(4, _omitFieldNames ? '' : 'workspaces')
     ..aOB(5, _omitFieldNames ? '' : 'running')
+    ..aOB(6, _omitFieldNames ? '' : 'ignored')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2495,6 +2498,17 @@ class PruneSleevesRequest extends $pb.GeneratedMessage {
   $core.bool hasRunning() => $_has(4);
   @$pb.TagNumber(5)
   void clearRunning() => $_clearField(5);
+
+  /// With workspaces, files ignored by the clone's tracked .gitignore rules
+  /// (build output) do not keep a clone; other untracked files still do.
+  @$pb.TagNumber(6)
+  $core.bool get ignored => $_getBF(5);
+  @$pb.TagNumber(6)
+  set ignored($core.bool value) => $_setBool(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasIgnored() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearIgnored() => $_clearField(6);
 }
 
 class PruneSleevesResponse extends $pb.GeneratedMessage {

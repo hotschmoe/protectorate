@@ -48,10 +48,11 @@ gen:
 	buf lint
 	buf generate
 	buf build -o internal/mcpbridge/image.binpb
+	go run ./cmd/protectorate mcp --allow '*' --list > tests/e2e/testdata/mcp_tools.json
 
 check-gen: gen
-	@git diff --exit-code --stat -- gen app/lib/gen internal/mcpbridge/image.binpb || (echo "generated code is stale: commit the output of make gen"; exit 1)
-	@test -z "$$(git status --porcelain -- gen app/lib/gen)" || (echo "untracked generated files: commit the output of make gen"; exit 1)
+	@git diff --exit-code --stat -- gen app/lib/gen internal/mcpbridge/image.binpb tests/e2e/testdata/mcp_tools.json || (echo "generated code is stale: commit the output of make gen"; exit 1)
+	@test -z "$$(git status --porcelain -- gen app/lib/gen tests/e2e/testdata/mcp_tools.json)" || (echo "untracked generated files: commit the output of make gen"; exit 1)
 
 build:
 	CGO_ENABLED=0 go build -trimpath -tags '$(TAILSCALE_TAGS)' -ldflags '$(LDFLAGS)' -o bin/protectorate ./cmd/protectorate

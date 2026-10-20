@@ -491,7 +491,7 @@ func (h *Hub) ownsSleeve(p *auth.Principal, msg any) bool {
 
 func (h *Hub) PruneSleeves(ctx context.Context, req *connect.Request[pb.PruneSleevesRequest]) (*connect.Response[pb.PruneSleevesResponse], error) {
 	r := req.Msg
-	entries, err := h.sleeves.Prune(ctx, sleeve.PruneOptions{Yes: r.Yes, Caches: r.Caches, Homes: r.Homes, Workspaces: r.Workspaces, Running: r.Running})
+	entries, err := h.sleeves.Prune(ctx, sleeve.PruneOptions{Yes: r.Yes, Caches: r.Caches, Homes: r.Homes, Workspaces: r.Workspaces, Running: r.Running, Ignored: r.Ignored})
 	if err != nil {
 		return nil, sleeveErr(err)
 	}

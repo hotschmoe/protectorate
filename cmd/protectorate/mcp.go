@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 func mcpCmd(o *opts) *command {
 	var httpAddr string
+	var list bool
 	var f mcpbridge.Filter
 	c := &command{
 		Use:   "mcp",
@@ -26,9 +28,22 @@ with glob patterns over tool names (use '*' for everything); --deny removes
 matches and always wins. These filters only limit what the client is offered.
 What the bridge may actually do is set by its token: run it with a scoped token
 (--token-file, or env PROTECTORATE_TOKEN) created by 'protectorate token
-create'. See docs/mcp.md and docs/auth.md.`,
+create'. See docs/mcp.md and docs/auth.md. --list prints the catalog the
+bridge would serve as JSON and exits, without contacting the hub.`,
 		Args: noArgs,
 		RunE: func(cmd *command, _ []string) error {
+			if list {
+				srv, err := mcpbridge.NewServer(mcpbridge.Config{Version: version, Filter: f})
+				if err != nil {
+					return err
+				}
+				b, err := json.MarshalIndent(srv.Tools(), "", "  ")
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", b)
+				return err
+			}
 			tok, err := o.token()
 			if err != nil {
 				return err
@@ -69,6 +84,7 @@ create'. See docs/mcp.md and docs/auth.md.`,
 	c.Flags().StringVar(&httpAddr, "http", "", "serve streamable HTTP on a loopback or tailnet address instead of stdio, e.g. 127.0.0.1:7471; clients must send the bridge's token as a bearer")
 	c.Flags().StringSliceVar(&f.Allow, "allow", nil, "glob of tool names to serve (default: read-only tools); repeatable")
 	c.Flags().StringSliceVar(&f.Deny, "deny", nil, "glob of tool names to hide; wins over --allow; repeatable")
+	c.Flags().BoolVar(&list, "list", false, "print the served tool catalog as JSON and exit")
 	return c
 }
 

@@ -1,0 +1,1780 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "CreateNote adds a note and returns it with its id.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "body is markdown text.",
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "project": {
+          "description": "project is an optional tag such as \"hotschmoe/protectorate\".",
+          "type": "string"
+        },
+        "title": {
+          "description": "title is a single line, up to 200 characters.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_create_note"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "DeleteNote removes a note for good.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_delete_note"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetNote returns one note by id.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_get_note"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListNotes returns notes, pinned first and then most recently updated, open by default, optionally filtered by project tag and a text query. Set state to \"done\" for completed notes or \"all\" for both states.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "description": "project keeps notes with exactly this tag.",
+          "type": "string"
+        },
+        "query": {
+          "description": "query keeps notes whose title or body contains it, ignoring case.",
+          "type": "string"
+        },
+        "state": {
+          "description": "state is \"open\" (also the default), \"done\", or \"all\".",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_list_notes"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "UpdateNote changes the fields that are set and leaves the others alone. Set state to \"done\" with an optional resolution line to close a note, or \"open\" to reopen it and clear completion. Requires backlog_update_note.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "body replaces the whole markdown body when set; send the full text.",
+          "type": "string"
+        },
+        "id": {
+          "description": "id of the note to change.",
+          "type": "string"
+        },
+        "pinned": {
+          "description": "pinned pins or unpins the note when set.",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "project replaces the project tag when set; \"\" clears it.",
+          "type": "string"
+        },
+        "resolution": {
+          "description": "resolution is an optional single line, up to 200 characters, for a done note.",
+          "type": "string"
+        },
+        "state": {
+          "description": "state closes (\"done\") or reopens (\"open\") the note when set.",
+          "type": "string"
+        },
+        "title": {
+          "description": "title replaces the title when set.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "backlog_update_note"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Compact runs the harness's own native compaction between turns. It fails with failed_precondition while a turn is running or an approval is pending, and returns after the harness has confirmed the compaction.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_compact"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Interrupt cancels the running turn. It is a no-op when the harness is idle.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_interrupt"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Native catalog; no inference turn is started. Select by sleeve or harness.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "claude, codex, grok or pi; used when sleeve is empty, e.g. at creation.",
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_list_models"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Report replaces this sleeve's result for its current brief. Only the sleeve's own identity token may report, never the owner or another sleeve.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "description": "Empty selects the authenticated sleeve. An explicit name must be its own.",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "REPORT_STATUS_UNSPECIFIED",
+            "REPORT_STATUS_COMPLETE",
+            "REPORT_STATUS_PARTIAL",
+            "REPORT_STATUS_BLOCKED"
+          ],
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_report"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Respond answers a pending approval.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_respond"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Send delivers a user message. It starts a turn when the harness is idle; during a turn it steers that turn on harnesses that support it and fails with failed_precondition on the rest. Retrying with the same request_id returns the original result instead of sending twice.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "sleeve": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_send"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Replace the requested selection between turns, without restarting. Empty fields restore the captured native defaults. Unsupported drivers fail.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "effort": {
+              "description": "Native effort value, validated against the selected model's catalog.",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "sleeve": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_set_selection"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Wait blocks on hub events until a sleeve is idle without pending mail, or has reported for its current brief. Exits and timeouts fail the call. Available as the read-only MCP tool chat_wait; no polling is needed.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Unset defaults to ten minutes. Zero waits until cancellation.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        },
+        "until": {
+          "enum": [
+            "WAIT_UNTIL_UNSPECIFIED",
+            "WAIT_UNTIL_IDLE",
+            "WAIT_UNTIL_REPORT"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "chat_wait"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Click moves the pointer and clicks. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "button": {
+          "description": "button is \"left\" (default), \"right\" or \"middle\".",
+          "type": "string"
+        },
+        "double": {
+          "type": "boolean"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_click"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Foreground reports the window that receives keystrokes now, with its process and integrity level. Read-only. Windows drops input injected into a window of a higher integrity level than the agent's without any error, so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the foreground window (or, for the mouse, the window under the pointer) is higher; this shows what is in the way.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_foreground"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Key presses a chord such as \"ctrl+s\", \"alt+f4\" or \"enter\". Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "chord": {
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_key"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "ListWindows lists visible top-level windows, topmost first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_list_windows"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Move puts the pointer at a position. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_move"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Run starts a program in the interactive session and returns at once. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "program": {
+          "type": "string"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_run"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Screenshot captures the whole virtual screen as a PNG.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "maxWidth": {
+          "description": "max_width scales the image down, keeping its aspect ratio, to at most this many pixels wide, for viewing over a slow link; 0 keeps full size. Input coordinates stay screen pixels: scale by width / the PNG's width.",
+          "type": "integer"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_screenshot"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Type enters text as key presses into the focused window. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "type": "string"
+            },
+            "name": {
+              "description": "name is the node name.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "desk_type"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetProject returns one project by id, \"owner/repo\" or bare name. A name that several projects share is an error that lists them.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "directory_get_project"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListProjects returns every known project, optionally only those a sleeve works on.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "sleeve": {
+          "description": "sleeve keeps only the projects this sleeve works on.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "directory_list_projects"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Admin mints a grant. The secret is returned once.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "node is a node name, or (owner only) a path.Match glob over node names.",
+          "type": "string"
+        },
+        "task": {
+          "description": "task says what the grant is for, e.g. \"update the kids' machine\". It is stored with the token and written to every audit line the grant causes.",
+          "type": "string"
+        },
+        "ttl": {
+          "description": "ttl is the grant's lifetime; unset means 4h, at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "grant_admin"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetSleeveRuntime reports the detected sandbox runtime and shared cache lower.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "hub_get_sleeve_runtime"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetStatus returns the hub version, host platform and uptime.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "hub_get_status"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "CancelJob stops a job and its whole process tree, named by id or by the SubmitJob request_id. Cancelling a finished job is a no-op that returns its record.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "id names the job. Set exactly one of id and request_id.",
+          "type": "string"
+        },
+        "requestId": {
+          "description": "request_id names the job by the SubmitJob key, for a caller that never saw the response. A submit still in flight is awaited and then canceled. When no submit with the key has reached the hub, the key is remembered as canceled for 1h so a late submit is refused (aborted), and the call fails with not_found.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_cancel_job"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetJob returns one job record.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_get_job"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListJobs returns job records, newest first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "limit caps the result; zero means 50.",
+          "type": "integer"
+        },
+        "state": {
+          "description": "state, when set, keeps only jobs in that state.",
+          "enum": [
+            "JOB_STATE_UNSPECIFIED",
+            "JOB_STATE_PREPARING",
+            "JOB_STATE_RUNNING",
+            "JOB_STATE_SUCCEEDED",
+            "JOB_STATE_FAILED",
+            "JOB_STATE_CANCELED",
+            "JOB_STATE_TIMED_OUT"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_list_jobs"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "SubmitJob queues a job and returns at once with its id. Follow it with WatchJob.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "admin": {
+          "description": "admin runs the command elevated (sudo -n on Linux, the agent's own elevated token on Windows). It needs a named node or a lease (not a selector), a node that reports it can elevate, and the owner token or a node_admin grant for the node. Admin jobs are never sandboxed.",
+          "type": "boolean"
+        },
+        "artifactGlobs": {
+          "description": "artifact_globs select files, relative to the working directory, that are sent back to $PROTECTORATE_HOME/jobs/\u003cid\u003e/artifacts/. A glob that matches a directory takes the files below it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "command is the argv to execute; argv[0] is resolved on the node, relative to the working directory when it contains a path separator.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "description": "limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox is \"bwrap\" or a Windows job object); unset means no cap.",
+          "properties": {
+            "cpuPercent": {
+              "description": "cpu_percent is CPU time as a share of one core: 200 is two cores.",
+              "type": "integer"
+            },
+            "memoryBytes": {
+              "description": "memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "requestId": {
+          "description": "request_id is a client-chosen idempotency key, 8 to 128 characters of [A-Za-z0-9._-]. The hub remembers it for 1h after the first submit with it: a repeat returns the same job instead of creating another, and waits if the first call is still in flight. Pick it with enough entropy to be unique among callers (a UUID or 16 random bytes in hex). With it, a caller that lost the response can still find or cancel the job (CancelJob request_id). Empty means no deduplication.",
+          "type": "string"
+        },
+        "source": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact": {
+              "additionalProperties": false,
+              "description": "artifact runs in a fresh job directory holding the file.",
+              "properties": {
+                "path": {
+                  "description": "path is a file or directory on the hub.",
+                  "type": "string"
+                },
+                "workdir": {
+                  "description": "workdir is the directory, relative to the job directory, the command runs in; empty means the job directory itself. Directories only.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "git": {
+              "additionalProperties": false,
+              "description": "git checks the commit out in a per-repo worktree on the node that is reused by later jobs, so build caches stay warm.",
+              "properties": {
+                "commit": {
+                  "description": "commit is any revision the repository resolves; empty means HEAD. The job record holds the full id.",
+                  "type": "string"
+                },
+                "repo": {
+                  "description": "repo is a path to a git repository on the hub.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "target": {
+          "additionalProperties": false,
+          "properties": {
+            "leaseId": {
+              "description": "lease_id runs on the node of a live lease (and on its GPU, if any).",
+              "type": "string"
+            },
+            "node": {
+              "description": "node is a node name.",
+              "type": "string"
+            },
+            "selector": {
+              "additionalProperties": false,
+              "description": "selector picks the least-loaded fresh matching node of tier \"shared\" that is not leased.",
+              "properties": {
+                "arch": {
+                  "type": "string"
+                },
+                "gpu": {
+                  "description": "gpu requires a GPU whose vendor or name contains this text, ignoring case (e.g. \"adreno\", \"intel\"); with gpu_vram_bytes the reserved GPU must match it too.",
+                  "type": "string"
+                },
+                "gpuVramBytes": {
+                  "description": "gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease then reserves that GPU instead of the whole node.",
+                  "type": "integer"
+                },
+                "minFreeMemoryBytes": {
+                  "description": "min_free_memory_bytes is the least available memory the node must report.",
+                  "type": "integer"
+                },
+                "npu": {
+                  "description": "npu requires an NPU whose vendor or name contains this text, ignoring case (e.g. \"hexagon\").",
+                  "type": "string"
+                },
+                "os": {
+                  "description": "os and arch are Go GOOS/GOARCH values such as \"windows\" and \"arm64\".",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "timeout": {
+          "description": "timeout bounds the command's run time; zero means 1h, at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "job_submit_job"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased, except their desktop (\"desk:\u003cnode\u003e\") under the owner token or a node_admin grant. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "holder": {
+          "description": "holder labels who holds the lease, e.g. a sleeve or agent name.",
+          "type": "string"
+        },
+        "priority": {
+          "description": "priority orders the queue: larger first, then first come first served.",
+          "type": "integer"
+        },
+        "resource": {
+          "description": "resource is a node name or \"\u003cnode\u003e:gpu\u003cindex\u003e\".",
+          "type": "string"
+        },
+        "selector": {
+          "additionalProperties": false,
+          "properties": {
+            "arch": {
+              "type": "string"
+            },
+            "gpu": {
+              "description": "gpu requires a GPU whose vendor or name contains this text, ignoring case (e.g. \"adreno\", \"intel\"); with gpu_vram_bytes the reserved GPU must match it too.",
+              "type": "string"
+            },
+            "gpuVramBytes": {
+              "description": "gpu_vram_bytes asks for one GPU with at least this much free VRAM; a lease then reserves that GPU instead of the whole node.",
+              "type": "integer"
+            },
+            "minFreeMemoryBytes": {
+              "description": "min_free_memory_bytes is the least available memory the node must report.",
+              "type": "integer"
+            },
+            "npu": {
+              "description": "npu requires an NPU whose vendor or name contains this text, ignoring case (e.g. \"hexagon\").",
+              "type": "string"
+            },
+            "os": {
+              "description": "os and arch are Go GOOS/GOARCH values such as \"windows\" and \"arm64\".",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "ttl": {
+          "description": "ttl is how long the lease lives without a renewal; at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        },
+        "wait": {
+          "description": "wait queues the caller when the resource is held instead of failing.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "lease_acquire_lease"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListLeases returns every live lease, then every queued ticket.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "lease_list_leases"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "ReleaseLease frees a lease at once. Releasing an unknown or expired lease is an error.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "lease_release_lease"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RenewLease pushes the expiry of a live lease to now plus a TTL.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ttl": {
+          "description": "ttl replaces the lease's TTL; zero keeps the current one.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "lease_renew_lease"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Ack confirms a message. It stops the ack timer.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "as": {
+          "description": "as acks on behalf of a recipient; only the owner may.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_ack"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Inbox lists the messages addressed to the caller, oldest first, and marks them read unless peek is set. The owner may read another mailbox with as.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "as": {
+          "description": "as reads another mailbox; only the owner may.",
+          "type": "string"
+        },
+        "peek": {
+          "description": "peek lists without marking read.",
+          "type": "boolean"
+        },
+        "threadId": {
+          "description": "thread_id keeps only the messages of this thread.",
+          "type": "string"
+        },
+        "unreadOnly": {
+          "description": "unread_only leaves out messages already injected, shown or acked.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_inbox"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListThreads summarizes threads, most recently active first: who takes part, the last message, and what is still open. Unread counts are the caller's own.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "limit is the most threads returned: 0 means 100, at most 500.",
+          "type": "integer"
+        },
+        "project": {
+          "description": "project keeps the threads addressed to or sent from this project (id, \"owner/repo\" or bare name, as in DirectoryService.GetProject).",
+          "type": "string"
+        },
+        "sleeve": {
+          "description": "sleeve keeps the threads this sleeve sent to or received in.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_list_threads"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Reply answers a message in the same thread, addressed to its sender, and acks the original.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_reply"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Send addresses a message to a sleeve name, \"project:\u003cid-or-name\u003e\", \"orchestrator\" or \"owner\". Retrying with the same request_id returns the original message instead of sending twice.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "ackRequired": {
+          "description": "ack_required starts the ack timer. Unset, a request asks for an ack and other kinds do not; set false, even a request asks for none.",
+          "type": "boolean"
+        },
+        "body": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "MESSAGE_KIND_UNSPECIFIED",
+            "MESSAGE_KIND_NOTE",
+            "MESSAGE_KIND_REQUEST",
+            "MESSAGE_KIND_NOTICE"
+          ],
+          "type": "string"
+        },
+        "requestId": {
+          "description": "request_id (8-128 chars) makes a retry return the original message.",
+          "type": "string"
+        },
+        "threadId": {
+          "description": "thread_id continues an existing thread; empty starts a new one.",
+          "type": "string"
+        },
+        "to": {
+          "description": "to is a sleeve name, \"project:\u003cid-or-name\u003e\", \"orchestrator\" or \"owner\".",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_send"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Thread returns every message of a thread in the order sent.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_thread"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Wait blocks until a reply or ack to an outgoing message, or incoming mail or an outgoing ack in a thread. Existing outcomes return immediately.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string"
+        },
+        "timeout": {
+          "description": "Default 10 minutes; positive and at most 24 hours.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "message_wait"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "GetDeskPolicy returns a node's policy, its current evaluation and who holds the desktop lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_get_desk_policy"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetNode returns one node with full metrics: filesystems, GPUs, containers, engine disk usage and watched directories.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_get_node"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListNodes returns every node with its latest metrics summary, freshness and alerts.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "node_list_nodes"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "PutFile copies a file or directory to a node, one chunk per call so it works over plain HTTP/1.1. A transfer is a sequence of calls sharing a transfer_id with consecutive offsets; the call with last set carries the size and SHA-256 of the whole (uncompressed) stream, and only then is the destination replaced, atomically. The hub relays chunks without storing them. The remote path is confined to the node's file root unless the node agent was started unconfined.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk": {
+          "additionalProperties": false,
+          "properties": {
+            "compressed": {
+              "type": "boolean"
+            },
+            "data": {
+              "contentEncoding": "base64",
+              "type": "string"
+            },
+            "rawSize": {
+              "description": "raw_size is the length after decompression.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "FILE_KIND_UNSPECIFIED",
+            "FILE_KIND_FILE",
+            "FILE_KIND_DIRECTORY"
+          ],
+          "type": "string"
+        },
+        "last": {
+          "description": "last ends the transfer; trailer is then required.",
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "mode holds the permission bits of a file; ignored for directories.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "name is the node name.",
+          "type": "string"
+        },
+        "offset": {
+          "description": "offset is the number of uncompressed bytes sent in earlier calls.",
+          "type": "integer"
+        },
+        "overwrite": {
+          "description": "overwrite replaces an existing destination instead of failing with ALREADY_EXISTS.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "path, kind, mode and overwrite are read on the first call (offset 0). A relative path is under the node's file root; the path names the destination itself, not a directory to put it in.",
+          "type": "string"
+        },
+        "trailer": {
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string"
+            },
+            "size": {
+              "description": "size and sha256 (hex) cover the uncompressed stream.",
+              "type": "integer"
+            },
+            "skipped": {
+              "description": "skipped counts directory entries that were not sent (symlinks, devices).",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "transferId": {
+          "description": "transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_put_file"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetQuota returns the usage windows, resets and freshness of every provider subscription (Claude, Codex, Grok, Antigravity, local LLMs).",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "refresh": {
+          "description": "refresh forces an immediate read of each provider, rate-limited per provider; providers read too recently keep their cached data.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "name": "quota_get_quota"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Suggest ranks the harnesses a sleeve can run (claude, codex, grok and pi) by usable spare capacity before reset, best first. Only FRESH quota data counts as capacity: STALE and UNKNOWN providers are listed as not recommended. A harness scores the capacity that is usable now (the tightest window) and expected to expire unused at a reset, weighted toward the sooner reset. pi on the local LLM has no quota and is always recommended as the fallback, ranked below any subscription with real capacity to burn. Antigravity has no sleeve harness and is not listed.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "refresh": {
+          "description": "refresh forces an immediate quota read first, as in GetQuotaRequest.",
+          "type": "boolean"
+        },
+        "taskSize": {
+          "description": "task_size is a hint for how much headroom the work needs; a harness with less usable capacity than that is not recommended. Unset means medium.",
+          "enum": [
+            "TASK_SIZE_UNSPECIFIED",
+            "TASK_SIZE_SMALL",
+            "TASK_SIZE_MEDIUM",
+            "TASK_SIZE_LARGE"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "quota_suggest"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "CapturePane returns the current text of a session's active pane. It also works on exited sessions, which is how a crash is diagnosed. Include at least one history line to see the whole final screen of an exited session.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "description": "Number of history lines above the visible screen to include. Values above 10000 are clamped to 10000.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "name of the session to read.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "session_capture_pane"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "KillSession terminates a session and every process in it. It also removes an exited session, discarding its final screen.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "name of the session to kill.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "session_kill_session"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListSessions returns all sessions, running and exited.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "session_list_sessions"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "BrowseWorkspaces lists configured roots when path is empty, otherwise subdirectories of path. Resolved paths must stay inside a configured root. Sleeve identity tokens cannot call this RPC, even with read scope.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_browse_workspaces"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetSleeve returns one sleeve with its latest resource usage.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_get_sleeve"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "KillSleeve stops a sleeve's harness and every process in its sandbox and retains its exited record. The workspace and the sleeve's home directory are kept on disk unless drop_caches removes regenerable caches.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "dropCaches": {
+          "description": "Owner only: remove regenerable home caches after stopping the sleeve.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_kill_sleeve"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListSleeves returns every known sleeve, running or exited, with its latest resource usage.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "sleeve_list_sleeves"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListWorkspaces returns the directories SpawnSleeve would accept as an existing workspace: git checkouts and other directories under the hub's workspaces directory (cloned or created by earlier sleeves), and the workspaces of known sleeves elsewhere on disk. Read-only reference entries are also returned with read_only set. It never walks the rest of the filesystem; any other absolute path can still be given to SpawnSleeve directly.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "sleeve_list_workspaces"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "ResleeveSleeve moves a chat sleeve to another harness on the same workspace, under the same name, without asking the outgoing harness anything. The hub takes the chat over (no other sender can start a turn), waits for it to be IDLE (interrupting a turn that runs past wait), composes facts in code (git status, diff --stat, recent commits, backlog and mail, the last user messages and the final assistant message from the outgoing harness's own transcript), has a separate model write a Goal/State/Unfinished/Next/Gotchas summary (the subscription with the most spare quota other than the outgoing harness, else pi with the local LLM), overwrites \u003cworkspace\u003e/.protectorate/HANDOFF.md (kept out of git through .git/info/exclude, archived under the hub's state directory), replaces the harness and sends it one plain user message naming the handoff. The summary runs while the outgoing turn winds down. The old native session stays on disk for a later resume. If the new harness cannot start, the old one is respawned on its own session. Announced as \"sleeve.resleeved\"; a summary by the fallback model, or none, also emits \"resleeve.warning\".",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "interrupt": {
+          "description": "interrupt cancels a running turn at once instead of waiting for it.",
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nativeDefaults": {
+          "description": "Explicitly discard the outgoing selection when switching harnesses.",
+          "type": "boolean"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "effort": {
+              "description": "Native effort value, validated against the selected model's catalog.",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "to": {
+          "description": "to is the new harness. UNSPECIFIED means auto: the top recommendation of QuotaService.Suggest other than the current harness.",
+          "enum": [
+            "HARNESS_UNSPECIFIED",
+            "HARNESS_CLAUDE",
+            "HARNESS_CODEX",
+            "HARNESS_GROK",
+            "HARNESS_PI",
+            "HARNESS_SHELL"
+          ],
+          "type": "string"
+        },
+        "wait": {
+          "description": "wait bounds how long a running turn may continue before it is interrupted. Default 5 minutes.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_resleeve_sleeve"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "SpawnSleeve starts a harness in a new isolated sleeve on the hub. The workspace is an existing directory (bound read-write at the same path) or a git URL cloned into the hub's workspaces directory. Branch options clone local checkouts too; brief is delivered as the first chat message. Respawning the name of an exited sleeve reuses its home directory and workspace and replaces its kept session.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "description": "args are extra arguments for the harness, or the whole command for shell.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "branch": {
+          "description": "Branch to clone; local sources default to their current branch.",
+          "type": "string"
+        },
+        "brief": {
+          "description": "First chat message, delivered before spawn succeeds. Chat mode only.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "env holds extra environment variables for the harness.",
+          "type": "object"
+        },
+        "exitAfterIdle": {
+          "description": "Zero disables automatic removal. Applies only to chat sleeves.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        },
+        "harness": {
+          "enum": [
+            "HARNESS_UNSPECIFIED",
+            "HARNESS_CLAUDE",
+            "HARNESS_CODEX",
+            "HARNESS_GROK",
+            "HARNESS_PI",
+            "HARNESS_SHELL"
+          ],
+          "type": "string"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "cpuPercent": {
+              "description": "cpu_percent caps CPU time; 100 is one core, 200 two cores. 0 means unlimited.",
+              "type": "integer"
+            },
+            "memoryBytes": {
+              "description": "memory_bytes caps memory including page cache and tmpfs; swap is disabled when set. 0 means unlimited.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "mode": {
+          "enum": [
+            "SLEEVE_MODE_UNSPECIFIED",
+            "SLEEVE_MODE_CHAT",
+            "SLEEVE_MODE_TERMINAL"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "description": "name is 1-40 of a-z 0-9 and '-', starting with a letter or digit.",
+          "type": "string"
+        },
+        "nested": {
+          "description": "Delegates a private cgroup subtree; requires CPU and memory limits.",
+          "type": "boolean"
+        },
+        "newBranch": {
+          "description": "Create and check out this branch from branch in a fresh clone.",
+          "type": "string"
+        },
+        "readOnly": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "target": {
+                "description": "Defaults to source when omitted.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "description": "Codex chat selection; omitted effort uses the hub's sleeve effort default. Other drivers reject explicit selection.",
+          "properties": {
+            "effort": {
+              "description": "Native effort value, validated against the selected model's catalog.",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "supervised": {
+          "description": "supervised runs a chat sleeve's harness in its asking permission mode instead of autonomous: Claude --permission-mode default, Codex approvalPolicy untrusted with its workspace-write sandbox, Grok /always-approve off. pi has no gate and ignores it.",
+          "type": "boolean"
+        },
+        "workspace": {
+          "description": "workspace is an absolute directory path on the hub, or a git URL to clone.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_spawn_sleeve"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "GetStatus returns the hub's tailnet identity and every peer it knows. FAILED_PRECONDITION when the tailnet is not enabled on this hub.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "tailnet_get_status"
+  }
+]

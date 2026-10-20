@@ -180,7 +180,7 @@ func readPlainGitFile(gd, path string) ([]byte, error) {
 	return root.ReadFile(path)
 }
 
-func verifyPruneWorkspace(ctx context.Context, path, workspaces string) error {
+func verifyPruneWorkspace(ctx context.Context, path, workspaces string, ignored bool) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	g, err := newPruneGit(ctx)
@@ -225,8 +225,24 @@ func verifyPruneWorkspace(ctx context.Context, path, workspaces string) error {
 	if err != nil {
 		return err
 	}
-	if untracked != "" {
+	if untracked != "" && !ignored {
 		return fmt.Errorf("untracked or ignored files")
+	}
+	if untracked != "" {
+		// Ignore rules must come from tracked files, which match HEAD: an
+		// untracked .gitignore could hide real work as ignored output.
+		for _, f := range strings.Split(strings.TrimSuffix(untracked, "\x00"), "\x00") {
+			if filepath.Base(f) == ".gitignore" {
+				return fmt.Errorf("untracked .gitignore %s", f)
+			}
+		}
+		unignored, err := g.run(ctx, "--work-tree="+path, "ls-files", "--others", "--exclude-standard", "-z", "--")
+		if err != nil {
+			return err
+		}
+		if unignored != "" {
+			return fmt.Errorf("untracked files")
+		}
 	}
 	remote, _ := gitDetails(path)
 	if remote == "" || strings.HasPrefix(remote, "-") || strings.ContainsAny(remote, "\n\r") {

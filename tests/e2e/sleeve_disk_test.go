@@ -40,6 +40,7 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 	git("init", "--initial-branch=main", source)
 	write(filepath.Join(source, "file.txt"), "committed\n")
 	write(filepath.Join(source, ".gitattributes"), "*.txt filter=trap diff=trap\n")
+	write(filepath.Join(source, ".gitignore"), "build/\n")
 	git("-C", source, "add", ".")
 	git("-C", source, "commit", "-m", "Published work")
 	git("-C", source, "remote", "add", "origin", bare)
@@ -62,6 +63,17 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 	git("-C", dirty, "update-index", "--assume-unchanged", "file.txt")
 	untracked := clone("untracked")
 	write(filepath.Join(untracked, "new.txt"), "untracked\n")
+	built := clone("built")
+	if err := os.MkdirAll(filepath.Join(built, "build"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(built, "build", "out.bin"), "build output\n")
+	hidden := clone("hidden")
+	if err := os.MkdirAll(filepath.Join(hidden, "scratch"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(hidden, "scratch", ".gitignore"), "*\n")
+	write(filepath.Join(hidden, "scratch", "work.txt"), "uncommitted work\n")
 	staged := clone("staged")
 	write(filepath.Join(staged, "file.txt"), "staged\n")
 	git("-C", staged, "add", "file.txt")
@@ -201,12 +213,18 @@ func TestBinarySleeveDiskPrune(t *testing.T) {
 	for _, path := range []string{clean, local, filepath.Join(home("stopped"), ".cache", "go-mod"), filepath.Join(home("leftover"), ".cache", "pub"), filepath.Join(home("stopped"), ".cache", "overlays"), filepath.Join(home("leftover"), ".cache", "overlays")} {
 		assertExists(path, false)
 	}
-	for _, path := range []string{unpushed, dirty, untracked, staged, mounted, filepath.Join(outside, "valuable"), filepath.Join(outside, "go-build", "valuable"), filepath.Join(home("active"), ".cache", "go-build", "data"), filepath.Join(home("stopped"), ".codex", "auth.json"), filepath.Join(home("stopped"), ".codex", "sessions", "history"), filepath.Join(home("stopped"), ".config", "settings")} {
+	for _, path := range []string{unpushed, dirty, untracked, staged, mounted, built, hidden, filepath.Join(outside, "valuable"), filepath.Join(outside, "go-build", "valuable"), filepath.Join(home("active"), ".cache", "go-build", "data"), filepath.Join(home("stopped"), ".codex", "auth.json"), filepath.Join(home("stopped"), ".codex", "sessions", "history"), filepath.Join(home("stopped"), ".config", "settings")} {
 		assertExists(path, true)
 	}
 	assertExists(marker, false)
 	assertExists(filepath.Join(home("active"), ".cache", "overlays", "go-build", "upper", "data"), true)
 	assertExists(filepath.Join(lower, "valuable"), true)
+	// --ignored lets tracked .gitignore rules excuse build output only.
+	prune("--workspaces", "--ignored", "--yes")
+	assertExists(built, false)
+	for _, path := range []string{hidden, untracked, unpushed, dirty, staged, mounted} {
+		assertExists(path, true)
+	}
 	prune("--homes", "--yes")
 	assertExists(home("stopped"), false)
 	assertExists(home("leftover"), false)

@@ -307,6 +307,7 @@ protectorate sleeve prune --homes
 protectorate sleeve prune --homes --yes
 protectorate sleeve prune --workspaces
 protectorate sleeve prune --workspaces --yes
+protectorate sleeve prune --workspaces --ignored --yes
 protectorate sleeve prune --caches --workspaces --yes
 protectorate sleeve kill worker --drop-caches
 ```
@@ -330,7 +331,10 @@ Workspace candidates are plain directories immediately under the hub's own
 paths, non-git directories, linked worktrees, shallow clones, stashes, submodules and
 repositories with object alternates are kept. A selected clone must have no
 staged, unstaged, untracked or ignored files; assume-unchanged/skip-worktree
-flags cannot conceal edits. Every local branch tip, local tag and HEAD must
+flags cannot conceal edits. `--ignored` excuses files the clone's tracked
+`.gitignore` rules ignore, such as build output; other untracked files still
+keep it, and so does any untracked `.gitignore`, which could otherwise hide
+real work as ignored. Every local branch tip, local tag and HEAD must
 be reachable from origin refs fetched by the hub with a 30-second timeout.
 Local origins must resolve outside the hub clone namespace. Unavailable or
 unverifiable origins mean keep. Private HTTPS origins requiring credential

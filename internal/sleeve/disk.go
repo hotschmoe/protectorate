@@ -66,7 +66,7 @@ func homeSize(ctx context.Context, home string) (total, caches, goBuild uint64, 
 }
 
 type PruneOptions struct {
-	Yes, Caches, Homes, Workspaces, Running bool
+	Yes, Caches, Homes, Workspaces, Running, Ignored bool
 }
 
 type DiskEntry struct {
@@ -202,7 +202,7 @@ func (m *Manager) pruneEntry(ctx context.Context, root *os.Root, parent, categor
 				row.Reason = "whole home, including auth, sessions, history and config"
 			}
 			if kind == "workspace" {
-				if err := verifyPruneWorkspace(ctx, p, m.cfg.workspacesDir()); err != nil {
+				if err := verifyPruneWorkspace(ctx, p, m.cfg.workspacesDir(), opts.Ignored); err != nil {
 					row.Eligible, row.Reason = false, err.Error()
 				} else {
 					row.Reason = "clean; all branch tips and HEAD verified outside clone"

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -152,20 +152,24 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 			if err := json.Unmarshal(listed.Result, &tools); err != nil {
 				t.Fatal(err)
 			}
-			var catalog struct {
-				Tools json.RawMessage `json:"tools"`
+			var served struct {
+				Tools []any `json:"tools"`
 			}
-			if err := json.Unmarshal(listed.Result, &catalog); err != nil {
+			if err := json.Unmarshal(listed.Result, &served); err != nil {
 				t.Fatal(err)
 			}
-			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, catalog.Tools, "", "  "); err != nil {
+			raw, err := os.ReadFile("testdata/mcp_tools.json")
+			if err != nil {
 				t.Fatal(err)
 			}
-			pretty.WriteByte('\n')
-			const goldenHash = "427efe9fa8c55d81ab33d29b86ad67bfd91c78e8151401a2734a588703d7a65f"
-			if got := fmt.Sprintf("%x", sha256.Sum256(pretty.Bytes())); got != goldenHash {
-				t.Fatalf("tools/list differs byte-for-byte from expected catalog: %s", got)
+			var golden []any
+			if err := json.Unmarshal(raw, &golden); err != nil {
+				t.Fatal(err)
+			}
+			// make gen writes the golden with mcp --list; a mismatch means the
+			// served catalog and --list diverged or make gen was not run.
+			if !reflect.DeepEqual(served.Tools, golden) {
+				t.Fatalf("tools/list differs from testdata/mcp_tools.json (run make gen)")
 			}
 			found := map[string]bool{}
 			for _, tool := range tools.Tools {

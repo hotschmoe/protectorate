@@ -107,6 +107,12 @@ remain available at capacity and release slots when their calls finish.
 
 ## Example tool list (`--allow '*'`)
 
+`protectorate mcp --list` prints the catalog the bridge would serve, with the
+same `--allow`/`--deny` filters, as JSON and exits without contacting the hub.
+`make gen` writes `tests/e2e/testdata/mcp_tools.json` from it, and the e2e
+suite checks the served `tools/list` against that file, so a schema change
+updates the golden like any other generated output.
+
 ```
 backlog_create_note     mutating
 backlog_delete_note     mutating, destructive

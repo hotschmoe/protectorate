@@ -64,6 +64,9 @@ func NewServer(cfg Config) (*Server, error) {
 	return srv, nil
 }
 
+// Tools is the catalog served by tools/list.
+func (s *Server) Tools() []Tool { return s.tools }
+
 func HTTPHandler(srv *Server, token string) http.Handler {
 	transport := srv.httpHandler()
 	want := sha256.Sum256([]byte(token))

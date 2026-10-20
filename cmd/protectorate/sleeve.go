@@ -550,6 +550,7 @@ func sleevePruneCmd(o *opts) *command {
 	c.Flags().BoolVar(&r.Caches, "caches", false, "drop regenerable caches (default when no category selected)")
 	c.Flags().BoolVar(&r.Homes, "homes", false, "remove whole non-running homes, including sessions and config")
 	c.Flags().BoolVar(&r.Workspaces, "workspaces", false, "remove clean hub clones with all local work verified outside the clone")
+	c.Flags().BoolVar(&r.Ignored, "ignored", false, "with --workspaces, files ignored by tracked .gitignore rules (build output) do not keep a clone")
 	c.Flags().BoolVar(&r.Running, "running", false, "include running sleeves in inventory; their data is always kept")
 	return c
 }
