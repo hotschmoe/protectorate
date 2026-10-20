@@ -120,12 +120,13 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=60, KEEP-FUZZ=5; total=65. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
 | File | Function / callback | Exercises | Runtime | Verdict | Replacement / reason |
 |---|---|---|---|---|---|
+| tests/e2e/node_artifact_security_test.go | TestBinaryJobArtifactsStayInWorkspace | Real node job artifacts: explicit and wildcard symlink-parent escapes refused; regular output retained | Unknown | KEEP-E2E | Prevent host-file disclosure during artifact collection |
 | internal/auth/scopes_fuzz_test.go | FuzzScopeNormalization | Scope Normalization | 0.010s pass | KEEP-FUZZ | seed corpus on commits; bounded campaigns separately |
 | internal/driver/driver_test.go | TestNewSession | New Session | 0.020s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | internal/driver/driver_test.go | TestEventDetails | Event Details | 0.020s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |

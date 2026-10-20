@@ -886,20 +886,25 @@ func collectArtifacts(workdir string, globs []string, dst string) ([]string, err
 	if len(globs) == 0 {
 		return nil, nil
 	}
-	files, err := matchArtifacts(workdir, globs)
+	root, err := os.OpenRoot(workdir)
+	if err != nil {
+		return nil, fmt.Errorf("open artifact workspace: %w", err)
+	}
+	defer root.Close()
+	files, err := matchArtifacts(root, globs)
 	if err != nil {
 		return nil, err
 	}
 	for _, rel := range files {
-		if err := copyArtifact(filepath.Join(workdir, filepath.FromSlash(rel)), filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+		if err := copyArtifact(root, rel, filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
 			return nil, fmt.Errorf("%s: %w", rel, err)
 		}
 	}
 	return files, nil
 }
 
-func copyArtifact(src, dst string) error {
-	in, err := os.Open(src)
+func copyArtifact(root *os.Root, src, dst string) error {
+	in, err := root.Open(filepath.FromSlash(src))
 	if err != nil {
 		return err
 	}
@@ -907,6 +912,9 @@ func copyArtifact(src, dst string) error {
 	fi, err := in.Stat()
 	if err != nil {
 		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("artifact %s is not a regular file", src)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
@@ -925,8 +933,8 @@ func copyArtifact(src, dst string) error {
 	return os.Chmod(dst, fi.Mode().Perm())
 }
 
-func matchArtifacts(workdir string, globs []string) ([]string, error) {
-	root := os.DirFS(workdir)
+func matchArtifacts(workspace *os.Root, globs []string) ([]string, error) {
+	root := workspace.FS()
 	seen := map[string]bool{}
 	for _, g := range globs {
 		matches, err := fs.Glob(root, g)
@@ -934,7 +942,7 @@ func matchArtifacts(workdir string, globs []string) ([]string, error) {
 			return nil, err
 		}
 		for _, m := range matches {
-			fi, err := os.Lstat(filepath.Join(workdir, filepath.FromSlash(m)))
+			fi, err := workspace.Lstat(filepath.FromSlash(m))
 			if err != nil {
 				continue
 			}
