@@ -48,6 +48,13 @@ func newReleaseServer(t *testing.T) *releaseServer {
 	return s
 }
 
+// set changes the served releases under the lock the handler holds.
+func (s *releaseServer) set(change func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	change()
+}
+
 func (s *releaseServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -190,7 +197,7 @@ func TestBinaryGitHubReleaseUpdates(t *testing.T) {
 	server.add(t, originalTag, initial, original)
 	bad := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = version ]; then printf '%%s\\n' '{\"version\":\"%s\",\"os\":\"%s\",\"arch\":\"%s\"}'; exit 0; fi\nexit 42\n", broken, runtime.GOOS, runtime.GOARCH)
 	server.add(t, "dev", broken, []byte(bad))
-	server.stable, server.dev = next, "dev"
+	server.set(func() { server.stable, server.dev = next, "dev" })
 	releases := filepath.Join(c.root, "releases")
 	c.stop(c.hub)
 	c.env = append(c.env, "INVOCATION_ID=inherited-session")
@@ -216,9 +223,7 @@ func TestBinaryGitHubReleaseUpdates(t *testing.T) {
 	if status["availableVersion"] != next || status["updateChannel"] != "stable" || status["releaseNotesUrl"] != server.server.URL+"/notes/"+next {
 		t.Fatalf("hub did not expose its release availability: %v", status)
 	}
-	server.mu.Lock()
-	server.corrupt = true
-	server.mu.Unlock()
+	server.set(func() { server.corrupt = true })
 	c.rejectedCLI("checksum", "hub", "update")
 	if got := c.call("HubService", "GetStatus", map[string]any{})["version"]; got != initial {
 		t.Fatalf("corrupt release changed running hub: %v", got)
@@ -229,9 +234,7 @@ func TestBinaryGitHubReleaseUpdates(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(releases, "current")); !os.IsNotExist(err) {
 		t.Fatalf("corrupt release activated a current pointer: %v", err)
 	}
-	server.mu.Lock()
-	server.corrupt = false
-	server.mu.Unlock()
+	server.set(func() { server.corrupt = false })
 	c.cli("hub", "update")
 	c.eventually(func() bool {
 		var status map[string]any
