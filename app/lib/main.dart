@@ -97,11 +97,8 @@ class _StartupErrorApp extends StatelessWidget {
   final Object error;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Protectorate',
-    theme: appTheme(Brightness.light),
-    darkTheme: appTheme(Brightness.dark),
-    home: Builder(
+  Widget build(BuildContext context) {
+    final home = Builder(
       builder: (context) {
         final t = Tokens.of(context);
         return Scaffold(
@@ -142,8 +139,20 @@ class _StartupErrorApp extends StatelessWidget {
           ),
         );
       },
-    ),
-  );
+    );
+    return MaterialApp(
+      title: 'Protectorate',
+      theme: appTheme(Brightness.light),
+      darkTheme: appTheme(Brightness.dark),
+      routes: {Navigator.defaultRouteName: (_) => home},
+      onGenerateInitialRoutes: (_) => [
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: Navigator.defaultRouteName),
+          builder: (_) => home,
+        ),
+      ],
+    );
+  }
 }
 
 class ProtectorateApp extends StatefulWidget {
@@ -230,6 +239,7 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
 
   @override
   Widget build(BuildContext context) {
+    final home = HubsScreen(store: widget.store, clientFactory: _factory);
     return MaterialApp(
       navigatorKey: _navKey,
       title: 'Protectorate',
@@ -237,7 +247,13 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
       theme: appTheme(Brightness.light),
       darkTheme: appTheme(Brightness.dark),
       builder: (context, child) => WarmUp(child: child ?? const SizedBox()),
-      home: HubsScreen(store: widget.store, clientFactory: _factory),
+      routes: {Navigator.defaultRouteName: (_) => home},
+      onGenerateInitialRoutes: (_) => [
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: Navigator.defaultRouteName),
+          builder: (_) => home,
+        ),
+      ],
     );
   }
 }
