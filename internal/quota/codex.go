@@ -105,28 +105,7 @@ func (c *Codex) Read(ctx context.Context) (Snapshot, error) {
 
 	rl, rpcErr := c.rpcRateLimits(ctx)
 	if rpcErr == nil {
-		snap.Source = "codex-app-server"
-		snap.Plan = rl.RateLimits.PlanType
-		addRPCWindows(&snap, "", rl.RateLimits)
-		by := rl.RateLimitsByLimit
-		if by == nil {
-			by = rl.RateLimitsByLimit2
-		}
-		keys := make([]string, 0, len(by))
-		for k := range by {
-			if k != "codex" && k != rl.RateLimits.LimitID {
-				keys = append(keys, k)
-			}
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			s := by[k]
-			label := s.LimitName
-			if label == "" {
-				label = k
-			}
-			addRPCWindows(&snap, label+" ", s)
-		}
+		applyRPCLimits(&snap, rl)
 	} else {
 		var u whamUsage
 		if err := getJSON(ctx, c.Client, c.base()+"/wham/usage", c.headers(auth), &u); err != nil {
@@ -137,18 +116,7 @@ func (c *Codex) Read(ctx context.Context) (Snapshot, error) {
 		}
 		snap.Source = "wham-usage"
 		snap.Plan = u.PlanType
-		if u.RateLimit != nil {
-			for _, w := range []*whamWindow{u.RateLimit.Primary, u.RateLimit.Secondary} {
-				if w == nil {
-					continue
-				}
-				snap.Windows = append(snap.Windows, Window{
-					Name:        windowLabel(w.LimitWindowSeconds / 60),
-					UsedPercent: clampPercent(w.UsedPercent),
-					ResetsAt:    time.Unix(w.ResetAt, 0).UTC(),
-				})
-			}
-		}
+		addWhamWindows(&snap, u)
 	}
 	snap.FetchedAt = now
 
@@ -164,6 +132,45 @@ func (c *Codex) Read(ctx context.Context) (Snapshot, error) {
 		sort.SliceStable(snap.Resets, func(i, j int) bool { return snap.Resets[i].ExpiresAt.Before(snap.Resets[j].ExpiresAt) })
 	}
 	return snap, nil
+}
+
+func applyRPCLimits(snap *Snapshot, rl rpcLimits) {
+	snap.Source, snap.Plan = "codex-app-server", rl.RateLimits.PlanType
+	addRPCWindows(snap, "", rl.RateLimits)
+	by := rl.RateLimitsByLimit
+	if by == nil {
+		by = rl.RateLimitsByLimit2
+	}
+	keys := make([]string, 0, len(by))
+	for k := range by {
+		if k != "codex" && k != rl.RateLimits.LimitID {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		s := by[k]
+		label := s.LimitName
+		if label == "" {
+			label = k
+		}
+		addRPCWindows(snap, label+" ", s)
+	}
+}
+
+func addWhamWindows(snap *Snapshot, u whamUsage) {
+	if u.RateLimit == nil {
+		return
+	}
+	for _, w := range []*whamWindow{u.RateLimit.Primary, u.RateLimit.Secondary} {
+		if w == nil {
+			continue
+		}
+		snap.Windows = append(snap.Windows, Window{
+			Name: windowLabel(w.LimitWindowSeconds / 60), UsedPercent: clampPercent(w.UsedPercent),
+			ResetsAt: time.Unix(w.ResetAt, 0).UTC(),
+		})
+	}
 }
 
 func (c *Codex) base() string {
@@ -252,18 +259,47 @@ func (c *Codex) rpcRateLimits(ctx context.Context) (rpcLimits, error) {
 	if bin == "" {
 		bin = "codex"
 	}
+	p, err := startQuotaRPC(ctx, bin)
+	if err != nil {
+		return out, err
+	}
+	defer p.close()
+	if _, err := p.call(ctx, 1, "initialize", map[string]any{"clientInfo": map[string]string{"name": "protectorate", "version": "0"}}); err != nil {
+		return out, err
+	}
+	if err := writeLine(p.stdin, map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
+		return out, err
+	}
+	res, err := p.call(ctx, 2, "account/rateLimits/read", nil)
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(res, &out); err != nil {
+		return out, fmt.Errorf("decode rate limits: %w", err)
+	}
+	return out, nil
+}
+
+type quotaRPC struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	lines <-chan []byte
+	stop  chan struct{}
+}
+
+func startQuotaRPC(ctx context.Context, bin string) (*quotaRPC, error) {
 	cmd := exec.CommandContext(ctx, bin, "-s", "read-only", "-a", "never", "app-server")
 	configureProc(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return out, err
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return out, err
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return out, fmt.Errorf("%w: cannot start codex", ErrUnavailable)
+		return nil, fmt.Errorf("%w: cannot start codex", ErrUnavailable)
 	}
 
 	lines := make(chan []byte)
@@ -281,68 +317,55 @@ func (c *Codex) rpcRateLimits(ctx context.Context) (rpcLimits, error) {
 			}
 		}
 	}()
-	defer func() {
-		close(stop)
-		_ = stdin.Close()
-		timer := time.NewTimer(3 * time.Second)
-		defer timer.Stop()
-	drain:
-		for {
-			select {
-			case _, ok := <-lines:
-				if !ok {
-					break drain
-				}
-			case <-timer.C:
-				killProc(cmd)
+	return &quotaRPC{cmd: cmd, stdin: stdin, lines: lines, stop: stop}, nil
+}
+
+func (p *quotaRPC) close() {
+	close(p.stop)
+	_ = p.stdin.Close()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+drain:
+	for {
+		select {
+		case _, ok := <-p.lines:
+			if !ok {
 				break drain
 			}
+		case <-timer.C:
+			killProc(p.cmd)
+			break drain
 		}
-		_ = cmd.Wait()
-	}()
+	}
+	_ = p.cmd.Wait()
+}
 
-	call := func(id int, method string, params any) (json.RawMessage, error) {
-		msg := map[string]any{"id": id, "method": method}
-		if params != nil {
-			msg["params"] = params
-		}
-		if err := writeLine(stdin, msg); err != nil {
-			return nil, err
-		}
-		for {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case line, ok := <-lines:
-				if !ok {
-					return nil, errors.New("codex app-server exited early")
-				}
-				var m rpcMessage
-				if json.Unmarshal(line, &m) != nil || m.ID == nil || *m.ID != id {
-					continue
-				}
-				if m.Error != nil {
-					return nil, fmt.Errorf("codex app-server error code %d", m.Error.Code)
-				}
-				return m.Result, nil
+func (p *quotaRPC) call(ctx context.Context, id int, method string, params any) (json.RawMessage, error) {
+	msg := map[string]any{"id": id, "method": method}
+	if params != nil {
+		msg["params"] = params
+	}
+	if err := writeLine(p.stdin, msg); err != nil {
+		return nil, err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case line, ok := <-p.lines:
+			if !ok {
+				return nil, errors.New("codex app-server exited early")
 			}
+			var m rpcMessage
+			if json.Unmarshal(line, &m) != nil || m.ID == nil || *m.ID != id {
+				continue
+			}
+			if m.Error != nil {
+				return nil, fmt.Errorf("codex app-server error code %d", m.Error.Code)
+			}
+			return m.Result, nil
 		}
 	}
-
-	if _, err := call(1, "initialize", map[string]any{"clientInfo": map[string]string{"name": "protectorate", "version": "0"}}); err != nil {
-		return out, err
-	}
-	if err := writeLine(stdin, map[string]any{"method": "initialized", "params": map[string]any{}}); err != nil {
-		return out, err
-	}
-	res, err := call(2, "account/rateLimits/read", nil)
-	if err != nil {
-		return out, err
-	}
-	if err := json.Unmarshal(res, &out); err != nil {
-		return out, fmt.Errorf("decode rate limits: %w", err)
-	}
-	return out, nil
 }
 
 func writeLine(w io.Writer, v any) error {
