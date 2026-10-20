@@ -478,30 +478,7 @@ func (s *chatSleeve) handle(sess driver.Session, ev driver.Event) {
 		})
 		s.refreshLocked()
 	case driver.KindUsage:
-		u := ev.Usage
-		if u.Model != "" {
-			s.model = u.Model
-		}
-		if u.Provider != "" {
-			s.provider = u.Provider
-			s.local = servedLocally(u.BaseURL, s.m.h.nodeHostnames())
-		}
-		if u.ContextWindow > 0 {
-			s.window = uint64(u.ContextWindow)
-		}
-		s.context = uint64(max(u.ContextTokens, 0))
-		s.cacheExp = u.CacheExpires
-		out := &pb.UsageUpdate{
-			ContextTokens: s.context, ContextWindow: s.window, InputTokens: uint64(max(u.InputTokens, 0)),
-			OutputTokens: uint64(max(u.OutputTokens, 0)), CacheReadTokens: uint64(max(u.CacheReadTokens, 0)),
-			CacheWriteTokens: uint64(max(u.CacheWriteTokens, 0)),
-		}
-		if !u.CacheExpires.IsZero() {
-			out.CacheExpiresAt = timestamppb.New(u.CacheExpires)
-		}
-		s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Usage{Usage: out} })
-		s.persistLocked(false)
-		s.publishLocked(false)
+		s.handleUsageLocked(ev.Usage)
 	case driver.KindCompaction:
 		c := ev.Compaction
 		s.context = uint64(max(c.TokensAfter, 0))
@@ -524,28 +501,58 @@ func (s *chatSleeve) handle(sess driver.Session, ev driver.Event) {
 		s.persistLocked(true)
 		s.publishLocked(true)
 	case driver.KindExited:
-		intentional := s.closing
-		if s.sess == sess {
-			s.sess = nil
-		}
-		s.turn, s.compacting = false, false
-		s.approvals = map[string]bool{}
-		st := pb.ChatState_CHAT_STATE_EXITED
-		if intentional {
-			st = pb.ChatState_CHAT_STATE_IDLE
-		} else {
-			text := fmt.Sprintf("harness exited (code %d)", ev.ExitCode)
-			if t := strings.TrimSpace(ev.Text); t != "" {
-				text += ": " + t
-			}
-			s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Error{Error: &pb.ChatError{Text: text}} })
-			if ev.ExitCode != 0 {
-				st = pb.ChatState_CHAT_STATE_FAILED
-			}
-		}
-		s.setStateLocked(st)
-		s.persistLocked(true)
+		s.handleExitLocked(sess, ev)
 	}
+}
+
+func (s *chatSleeve) handleUsageLocked(u *driver.Usage) {
+	if u.Model != "" {
+		s.model = u.Model
+	}
+	if u.Provider != "" {
+		s.provider = u.Provider
+		s.local = servedLocally(u.BaseURL, s.m.h.nodeHostnames())
+	}
+	if u.ContextWindow > 0 {
+		s.window = uint64(u.ContextWindow)
+	}
+	s.context = uint64(max(u.ContextTokens, 0))
+	s.cacheExp = u.CacheExpires
+	out := &pb.UsageUpdate{
+		ContextTokens: s.context, ContextWindow: s.window, InputTokens: uint64(max(u.InputTokens, 0)),
+		OutputTokens: uint64(max(u.OutputTokens, 0)), CacheReadTokens: uint64(max(u.CacheReadTokens, 0)),
+		CacheWriteTokens: uint64(max(u.CacheWriteTokens, 0)),
+	}
+	if !u.CacheExpires.IsZero() {
+		out.CacheExpiresAt = timestamppb.New(u.CacheExpires)
+	}
+	s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Usage{Usage: out} })
+	s.persistLocked(false)
+	s.publishLocked(false)
+}
+
+func (s *chatSleeve) handleExitLocked(sess driver.Session, ev driver.Event) {
+	intentional := s.closing
+	if s.sess == sess {
+		s.sess = nil
+	}
+	s.turn, s.compacting = false, false
+	s.approvals = map[string]bool{}
+	st := pb.ChatState_CHAT_STATE_EXITED
+	if intentional {
+		st = pb.ChatState_CHAT_STATE_IDLE
+	} else {
+		text := fmt.Sprintf("harness exited (code %d)", ev.ExitCode)
+		if t := strings.TrimSpace(ev.Text); t != "" {
+			text += ": " + t
+		}
+		s.appendLocked(func(e *pb.ChatEvent) { e.Body = &pb.ChatEvent_Error{Error: &pb.ChatError{Text: text}} })
+		if ev.ExitCode != 0 {
+			st = pb.ChatState_CHAT_STATE_FAILED
+		}
+	}
+	s.setStateLocked(st)
+	s.persistLocked(true)
 }
 
 func (s *chatSleeve) liveSession() driver.Session {
