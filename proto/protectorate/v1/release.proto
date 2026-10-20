@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "protectorate/v1/node.proto";
+import "protectorate/v1/options.proto";
+
+option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+
+service ReleaseService {
+  rpc CheckRelease(CheckReleaseRequest) returns (ReleaseInfo) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc UpdateHub(UpdateHubRequest) returns (stream UpdateHubProgress) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+}
+
+message CheckReleaseRequest {
+  string channel = 1;
+  string version = 2;
+}
+
+message ReleaseInfo {
+  string version = 1;
+  string channel = 2;
+  string notes_url = 3;
+  bool can_update = 4;
+}
+
+message UpdateHubRequest {
+  string channel = 1;
+  string version = 2;
+}
+
+message UpdateHubProgress {
+  UpdatePhase phase = 1;
+  string message = 2;
+  string version = 3;
+  string previous_version = 4;
+  uint64 sent_bytes = 5;
+  uint64 total_bytes = 6;
+}

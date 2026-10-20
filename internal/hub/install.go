@@ -184,9 +184,15 @@ func (h *Hub) handleInstallScript(kind string) http.HandlerFunc {
 	}
 }
 
-// binaryPath is where the hub finds the build for a platform: its own
-// executable for its own platform, otherwise --binary-dir.
+// binaryPath resolves a platform build from the current release or override.
 func (h *Hub) binaryPath(goos, arch string) string {
+	if h.Releases != nil {
+		dir := h.BinaryDir
+		if dir == "" {
+			dir = h.Releases.CurrentDir()
+		}
+		return filepath.Join(dir, BinaryName(goos, arch))
+	}
 	self, _ := os.Executable()
 	if h.SelfExe != "" {
 		self = h.SelfExe
@@ -244,7 +250,7 @@ func (h *Hub) handleDownload(w http.ResponseWriter, r *http.Request) {
 	path := h.binaryPath(goos, arch)
 	fh, err := os.Open(path)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("this hub has no %s build (run `make cross` and start the hub with --binary-dir)", name), http.StatusNotFound)
+		http.Error(w, fmt.Sprintf("this hub has no %s build in its current release; run `protectorate hub update`", name), http.StatusNotFound)
 		return
 	}
 	defer fh.Close()

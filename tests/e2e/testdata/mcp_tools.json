@@ -1590,6 +1590,27 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
+    "description": "",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "release_check_release"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "description": "CapturePane returns the current text of a session's active pane. It also works on exited sessions, which is how a crash is diagnosed. Include at least one history line to see the whole final screen of an exited session.",
     "inputSchema": {
       "additionalProperties": false,

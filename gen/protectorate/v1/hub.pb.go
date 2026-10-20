@@ -64,12 +64,15 @@ type GetStatusResponse struct {
 	Version  string `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
 	Hostname string `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	// os and arch are Go GOOS/GOARCH values of the hub host.
-	Os            string                 `protobuf:"bytes,3,opt,name=os,proto3" json:"os,omitempty"`
-	Arch          string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`
-	UptimeSeconds int64                  `protobuf:"varint,5,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Os               string                 `protobuf:"bytes,3,opt,name=os,proto3" json:"os,omitempty"`
+	Arch             string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`
+	UptimeSeconds    int64                  `protobuf:"varint,5,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
+	StartedAt        *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	AvailableVersion string                 `protobuf:"bytes,7,opt,name=available_version,json=availableVersion,proto3" json:"available_version,omitempty"`
+	UpdateChannel    string                 `protobuf:"bytes,8,opt,name=update_channel,json=updateChannel,proto3" json:"update_channel,omitempty"`
+	ReleaseNotesUrl  string                 `protobuf:"bytes,9,opt,name=release_notes_url,json=releaseNotesUrl,proto3" json:"release_notes_url,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetStatusResponse) Reset() {
@@ -142,6 +145,27 @@ func (x *GetStatusResponse) GetStartedAt() *timestamppb.Timestamp {
 		return x.StartedAt
 	}
 	return nil
+}
+
+func (x *GetStatusResponse) GetAvailableVersion() string {
+	if x != nil {
+		return x.AvailableVersion
+	}
+	return ""
+}
+
+func (x *GetStatusResponse) GetUpdateChannel() string {
+	if x != nil {
+		return x.UpdateChannel
+	}
+	return ""
+}
+
+func (x *GetStatusResponse) GetReleaseNotesUrl() string {
+	if x != nil {
+		return x.ReleaseNotesUrl
+	}
+	return ""
 }
 
 type GetSleeveRuntimeRequest struct {
@@ -309,7 +333,7 @@ var File_protectorate_v1_hub_proto protoreflect.FileDescriptor
 const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"\n" +
 	"\x19protectorate/v1/hub.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x12\n" +
-	"\x10GetStatusRequest\"\xcf\x01\n" +
+	"\x10GetStatusRequest\"\xcf\x02\n" +
 	"\x11GetStatusResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x0e\n" +
@@ -317,7 +341,10 @@ const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"\x04arch\x18\x04 \x01(\tR\x04arch\x12%\n" +
 	"\x0euptime_seconds\x18\x05 \x01(\x03R\ruptimeSeconds\x129\n" +
 	"\n" +
-	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"\x19\n" +
+	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12+\n" +
+	"\x11available_version\x18\a \x01(\tR\x10availableVersion\x12%\n" +
+	"\x0eupdate_channel\x18\b \x01(\tR\rupdateChannel\x12*\n" +
+	"\x11release_notes_url\x18\t \x01(\tR\x0freleaseNotesUrl\"\x19\n" +
 	"\x17GetSleeveRuntimeRequest\"\xee\x03\n" +
 	"\x18GetSleeveRuntimeResponse\x12\x1d\n" +
 	"\n" +

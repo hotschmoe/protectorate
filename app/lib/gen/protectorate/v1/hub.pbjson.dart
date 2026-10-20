@@ -44,6 +44,15 @@ const GetStatusResponse$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'startedAt'
     },
+    {
+      '1': 'available_version',
+      '3': 7,
+      '4': 1,
+      '5': 9,
+      '10': 'availableVersion'
+    },
+    {'1': 'update_channel', '3': 8, '4': 1, '5': 9, '10': 'updateChannel'},
+    {'1': 'release_notes_url', '3': 9, '4': 1, '5': 9, '10': 'releaseNotesUrl'},
   ],
 };
 
@@ -52,7 +61,10 @@ final $typed_data.Uint8List getStatusResponseDescriptor = $convert.base64Decode(
     'ChFHZXRTdGF0dXNSZXNwb25zZRIYCgd2ZXJzaW9uGAEgASgJUgd2ZXJzaW9uEhoKCGhvc3RuYW'
     '1lGAIgASgJUghob3N0bmFtZRIOCgJvcxgDIAEoCVICb3MSEgoEYXJjaBgEIAEoCVIEYXJjaBIl'
     'Cg51cHRpbWVfc2Vjb25kcxgFIAEoA1INdXB0aW1lU2Vjb25kcxI5CgpzdGFydGVkX2F0GAYgAS'
-    'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJc3RhcnRlZEF0');
+    'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJc3RhcnRlZEF0EisKEWF2YWlsYWJsZV92'
+    'ZXJzaW9uGAcgASgJUhBhdmFpbGFibGVWZXJzaW9uEiUKDnVwZGF0ZV9jaGFubmVsGAggASgJUg'
+    '11cGRhdGVDaGFubmVsEioKEXJlbGVhc2Vfbm90ZXNfdXJsGAkgASgJUg9yZWxlYXNlTm90ZXNV'
+    'cmw=');
 
 @$core.Deprecated('Use getSleeveRuntimeRequestDescriptor instead')
 const GetSleeveRuntimeRequest$json = {

@@ -131,6 +131,23 @@ PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
 delivery, denial and cancellation, alongside connection probing and useful
 unreachable-hub errors. It requires Dart and resolved app dependencies.
 
+`TestBinaryGitHubReleaseUpdates` builds one genuine versioned candidate and
+starts a private fake GitHub API and asset server. It verifies stable, rolling
+dev and pinned release selection, rejects a corrupt binary before activation,
+and updates a real hub while preserving its arguments. Its release contains
+all five platform binaries, checksums, VERSION and a web archive. The scenario
+checks web/download serving, updates a real node from that release, rolls back
+a candidate that reports its version but fails to serve, and retains only two
+release directories. All release requests stay on loopback; no GitHub access
+or installed service registration is needed. The rollback guardian PID comes
+from the private hub update journal and is stopped during test cleanup.
+
+`TestHubInstallerVerifiesFleetBeforeInstalling` runs the real shell installer
+with real binary assets on a loopback release server. It checks stable and dev
+versioned layouts, verifies every fleet asset, and requires a corrupt Android
+checksum to stop all installation commands. Dry runs create no installation
+directories.
+
 The loopback hub has no tailnet: `/install.sh` must return 503. The production
 installer template is separately run as a real shell process against that
 hub's `/dl/` endpoints; a checksum peer corrupts only the digest response and
@@ -190,8 +207,15 @@ the inner run skips. It also verifies actual memory OOM, CPU throttling, hidden
 parent state, persisted opt-in, unchanged outer limits and cgroup cleanup.
 Private test homes retain the selected bwrap binary, and the nested scenario
 asserts its version so a newer user-installed bwrap reaches the inner runtime.
-This host e2e remains unverified in the original non-delegated development
-sleeve; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
+The nested shell/protocol fixture explicitly mounts the installed Go toolchain
+and its private executable peers. It excludes unused Flutter caches: adding a
+third overlay over this sleeve's already overlaid SDK cache fails with
+`EINVAL` on the current host. General cache overlay depth fallback remains a
+runtime limitation; direct cache/toolchain scenarios still exercise the actual
+SDK overlays. The inner runner keeps temporary files under its private home
+on disk, avoiding the nested sandbox's memory-backed `/tmp`.
+The scenario passed in a nested-enabled development sleeve in 15.39 seconds
+with no inner skips; see [the runtime setup](sleeves.md#running-runtime-tests-inside-a-sleeve).
 
 Inside a sleeve, use a short physical disk-backed temporary directory such as
 `TMPDIR="$HOME/t"`; long paths can exceed tmux's Unix socket limit, and tmux
@@ -209,6 +233,9 @@ hidden limits and cleanup; the original inherited-overlay setup failed with
 
 All surviving session-manager tests set `TMUX_TMPDIR` to a test temp directory
 and kill their private server in cleanup. The binary harness does likewise.
+Socket directories use a short private `/tmp` path independently of disk-backed
+`TMPDIR`, keeping Unix socket names below their roughly 108-byte limit. Only
+the tiny sockets use `/tmp`; fixture homes and SDK copies remain on disk.
 A forced kill can leave a server within its private directory; it cannot leave
 new sockets in the production `/tmp/tmux-UID` directory. Ordinary exits clean
 up servers and temp directories. No production tmux defaults change.
@@ -410,6 +437,8 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 |---|---|---|---|---|---|
 | tests/e2e/node_artifact_security_test.go | TestBinaryJobArtifactsStayInWorkspace | Real node job artifacts: explicit and wildcard symlink-parent escapes refused; regular output retained | Unknown | KEEP-E2E | Prevent host-file disclosure during artifact collection |
 | tests/e2e/node_git_security_test.go | TestBinaryNodeRepositoryProgramsStayIsolated | Warm node checkout rejects job-written hooks; repository filters cannot read host credentials when sandboxing is available | Unknown | KEEP-E2E | Real binary jobs; filter authority subscenario needs bwrap and the user manager |
+| tests/e2e/release_update_test.go | TestBinaryGitHubReleaseUpdates | Release channels, checksum refusal, hub restart arguments and failed-health rollback, release-backed web/downloads and node update, two-release retention | 75.20s pass | KEEP-E2E | Private fake GitHub server and real hub/node binaries; includes candidate build under concurrent cross-compilation |
+| tests/e2e/install_release_test.go | TestHubInstallerVerifiesFleetBeforeInstalling | Shell installer verifies stable/dev fleet assets and versioned layout, refuses corruption before installation, dry run leaves installation absent | 4.38s pass | KEEP-E2E | Private loopback asset server and real production binary |
 | tests/e2e/mcp_sessions_test.go | TestBinaryMCPRejectedInitializeKeepsSession | Rejected HTTP initialization leaves existing hub tools usable | Unknown | KEEP-E2E | Real bridge and hub; no canceled session left in service |
 | tests/e2e/mcp_session_limits_test.go | TestBinaryMCPSessionsBoundedAndReusable | Session admission is bounded; existing tools work at capacity; DELETE releases capacity | Unknown | KEEP-E2E | Real HTTP bridge lifecycle under session churn |
 | tests/e2e/mcp_pending_limits_test.go | TestBinaryMCPPendingCallsBoundedAndCancelable | Pending hub waits are bounded; cancellation and subsequent calls keep working | Unknown | KEEP-E2E | Real stdio bridge and hub mailbox under load |
@@ -487,7 +516,7 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 | tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
 | tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
 | tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache/overlay cleanup, host-lower and running-data protection, owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
-| tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | host verification pending | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
+| tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | 15.39s pass | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
 | tests/e2e/race_reports_test.go | TestBinaryRaceReports | Real detector reports fail otherwise passing subprocess scenarios, including successful node artifact jobs and retained terminal panes | 6.81s race; skips non-race | KEEP-E2E | prevents silent loss of subprocess race reports |
 | tests/e2e/cli_mcp_test.go | TestBinaryCLIAndMCP | Binary CLI parsing, official MCP transports, filtering, authorization and cancellation | unmeasured | KEEP-E2E | existing scenario previously missing from this inventory |
 | tests/e2e/artifact_job_test.go | TestBinaryArtifactJobAndReplay | Directory/file artifact execution, workdir confinement, binary output, executable modes, env redaction and restart replay | unmeasured | KEEP-E2E | replaces deleted artifact-source job coverage |

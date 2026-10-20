@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/backup"
 	"github.com/hotschmoe/protectorate/internal/hub"
 	"github.com/hotschmoe/protectorate/internal/quota"
+	"github.com/hotschmoe/protectorate/internal/release"
 	"github.com/hotschmoe/protectorate/internal/session"
 )
 
@@ -117,7 +119,7 @@ func newRoot() *command {
 	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: saved device credential, then this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), devicesCmd(o), tokenCmd(o), grantCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), reportCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(o), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
+	root.AddCommand(hubCmd(o), pairCmd(o), devicesCmd(o), tokenCmd(o), grantCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), reportCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(o), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
 	return root
 }
 
@@ -128,31 +130,11 @@ func envOr(key, def string) string {
 	return def
 }
 
-// installedDir returns flag when set, else the directory install-hub.sh fills
-// (~/.local/share/protectorate/<name>) when it exists and holds marker (any
-// entry when marker is empty), else "".
-func installedDir(flag, name, marker string) string {
-	if flag != "" {
-		return flag
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	dir := filepath.Join(home, ".local", "share", "protectorate", name)
-	probe := dir
-	if marker != "" {
-		probe = filepath.Join(dir, marker)
-	}
-	if _, err := os.Stat(probe); err != nil {
-		return ""
-	}
-	return dir
-}
-
-func hubCmd() *command {
+func hubCmd(o *opts) *command {
 	c := &command{Use: "hub", Short: "Run the hub"}
 	var listen, tmuxSocket, webDir, binaryDir, publicURL string
+	var releaseRepo, updateChannel, releaseAPI, releaseDir string
+	var hubUpdateTimeout time.Duration
 	var quotaInterval, deadRetention time.Duration
 	var localURLs, localModelHosts []string
 	var nodeInterval, ackTimeout time.Duration
@@ -166,7 +148,22 @@ func hubCmd() *command {
 		Use:   "serve",
 		Short: "Serve the hub API",
 		Args:  noArgs,
-		RunE: func(cmd *command, _ []string) error {
+		RunE: func(cmd *command, _ []string) (retErr error) {
+			hubExe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("resolve hub executable: %w", err)
+			}
+			hubExe, err = filepath.EvalSymlinks(hubExe)
+			if err != nil {
+				return fmt.Errorf("resolve hub executable symlink: %w", err)
+			}
+			source, err := release.New(releaseRepo, updateChannel, releaseAPI, releaseDir)
+			if err != nil {
+				return err
+			}
+			if hubUpdateTimeout <= 0 {
+				return errors.New("--hub-update-timeout must be positive")
+			}
 			cacheLimit, err := parseSize(goCacheMax)
 			if err != nil {
 				return fmt.Errorf("parse sleeve Go cache limit: %w", err)
@@ -184,6 +181,19 @@ func hubCmd() *command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			ctx, cancelHub := context.WithCancel(ctx)
+			defer cancelHub()
+			var wantRestart atomic.Bool
+			defer func() {
+				if !wantRestart.Load() {
+					return
+				}
+				if os.Getenv("INVOCATION_ID") != "" {
+					retErr = &exitError{code: 75, msg: "restarting hub through supervisor"}
+					return
+				}
+				retErr = reexecHub(hubExe, os.Args[1:])
+			}()
 			fmt.Fprintf(cmd.ErrOrStderr(), "hub %s listening on %s\n", version, l.Addr())
 			readers := []quota.Reader{quota.NewClaude(), quota.NewCodex(), quota.NewGrok(), quota.NewAntigravity()}
 			for _, u := range localURLs {
@@ -215,8 +225,23 @@ func hubCmd() *command {
 			h.SetAuth(auth.New(tok, store, audit))
 			h.Sessions = session.New(tmuxSocket)
 			h.DeadRetention = deadRetention
-			h.WebDir = installedDir(webDir, "web", "index.html")
-			h.BinaryDir = installedDir(binaryDir, "bin", "")
+			h.WebDir = webDir
+			h.BinaryDir = binaryDir
+			h.Releases = source
+			h.SelfExe = hubExe
+			trial, trialErr := loadHubTrial(filepath.Join(home, "hub-update.json"))
+			if trialErr != nil && !errors.Is(trialErr, os.ErrNotExist) {
+				return trialErr
+			}
+			if trialErr != nil || trial.Phase != "trial" {
+				previous, _ := os.Readlink(filepath.Join(source.Dir, "previous"))
+				if err := source.Prune(previous); err != nil {
+					return fmt.Errorf("prune installed releases: %w", err)
+				}
+			}
+			h.ReplaceHub = func(ctx context.Context, path string, r release.Info) (func(), error) {
+				return prepareHubUpdate(ctx, h, filepath.Join(home, "token"), hubUpdateTimeout, cancelHub, &wantRestart, path, r)
+			}
 			h.PublicURL = publicURL
 			h.OrchestratorGrants = orchestratorGrants
 			h.LocalModelHosts = localModelHosts
@@ -291,13 +316,18 @@ func hubCmd() *command {
 	serve.Flags().StringSliceVar(&localModelHosts, "local-model-host", nil, "hostname of a model server of your own that the app flags as a local model, beyond private and tailnet addresses (repeatable)")
 	serve.Flags().StringVar(&tmuxSocket, "tmux-socket", envOr("PROTECTORATE_TMUX_SOCKET", session.DefaultSocket),
 		"tmux socket name (tmux -L) for harness sessions, kept apart from your default tmux server")
-	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at / (default: ~/.local/share/protectorate/web when it exists)")
-	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: ~/.local/share/protectorate/bin when it exists, else the directory of this executable)")
+	serve.Flags().StringVar(&webDir, "web", "", "web client directory (default: current verified release web directory)")
+	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "explicit platform binary directory (default: current verified release)")
+	serve.Flags().StringVar(&releaseRepo, "release-repo", "hotschmoe/protectorate", "GitHub releases repository (OWNER/REPO)")
+	serve.Flags().StringVar(&updateChannel, "update-channel", "stable", "release channel (stable or dev)")
+	serve.Flags().StringVar(&releaseAPI, "release-api-url", "", "GitHub API base URL (override for local release-server testing)")
+	serve.Flags().StringVar(&releaseDir, "release-dir", "", "verified release cache (default: $XDG_DATA_HOME/protectorate/releases or ~/.local/share/protectorate/releases)")
+	serve.Flags().DurationVar(&hubUpdateTimeout, "hub-update-timeout", 45*time.Second, "deadline for an updated hub to report healthy before rollback")
 	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
 	serve.Flags().BoolVar(&orchestratorGrants, "orchestrator-admin-grants", false, "let the orchestrator mint admin grants (job_* and node_admin) for shared nodes; care nodes are granted by the owner only")
 	serve.Flags().StringVar(&startEnvoy, "start-envoy", "", "at boot, start Envoy on this harness (auto, claude, codex, grok or pi) only if the hub has no Envoy yet; off by default, since the app starts it")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
-	c.AddCommand(serve, hubTailnetCmd(), hubBackupCmd(), hubRestoreCmd())
+	c.AddCommand(serve, hubTailnetCmd(), hubBackupCmd(), hubRestoreCmd(), hubUpdateCmd(o), hubUpdateGuardCmd())
 	return c
 }
 
@@ -348,6 +378,10 @@ func statusCmd(o *opts) *command {
 			}
 			return o.out(cmd).print(s, func(w io.Writer) {
 				fmt.Fprintf(w, "version\t%s\n", s.Version)
+				fmt.Fprintf(w, "available\t%s\nchannel\t%s\n", s.AvailableVersion, s.UpdateChannel)
+				if s.ReleaseNotesUrl != "" {
+					fmt.Fprintf(w, "release notes\t%s\n", s.ReleaseNotesUrl)
+				}
 				fmt.Fprintf(w, "hostname\t%s\n", s.Hostname)
 				fmt.Fprintf(w, "platform\t%s/%s\n", s.Os, s.Arch)
 				fmt.Fprintf(w, "uptime\t%s\n", (time.Duration(s.UptimeSeconds) * time.Second))

@@ -64,6 +64,59 @@ protectorate api call <Method> '<json>'   # generic escape hatch
   hub manages SSH certs, tmux, host metrics and the tailnet, and all of that is
   simpler on the host.
 
+## Releases and updates (`internal/release`, `internal/hub/releases.go`)
+
+GitHub releases define the hub and fleet builds. `hub serve --release-repo
+OWNER/REPO` defaults to `hotschmoe/protectorate`; `--update-channel stable|dev`
+defaults to stable. Stable resolves GitHub's latest non-prerelease release;
+dev resolves the rolling prerelease tagged `dev`. Green pushes to
+`dev-hotschmoe` publish all five platform binaries, the web archive, `VERSION`
+from `make version`, and `SHA256SUMS`. The moving `dev` tag does not define
+the build version. Checks use conditional requests roughly hourly, and
+`ReleaseService.CheckRelease` also checks on demand without installing.
+
+`HubService.GetStatus` reports the running `version`, `available_version`,
+`update_channel` and `release_notes_url`. Changes publish `release.available`
+events with those values. `CheckRelease` returns the resolved version,
+channel, notes URL and the caller's `can_update` capability; an ordinary
+channel check can return the last successful result while GitHub is offline.
+Explicit channel or version lookup failures remain errors.
+
+The release cache is `$XDG_DATA_HOME/protectorate/releases`, or
+`~/.local/share/protectorate/releases`, overridden by `--release-dir`.
+Downloads are staged under a versioned directory and every required binary,
+the web archive and `VERSION` when present must match `SHA256SUMS` before
+activation. An atomic `current` symlink selects the builds used by `/dl/`,
+the generated installers, node updates and the web client. Explicit
+`--binary-dir` and `--web` override those defaults for development. Verified
+releases retain their manifests; successful updates keep the current and
+previous release and prune older managed versions. Checksums fail closed;
+release signature verification remains a security-audit item.
+
+`ReleaseService.UpdateHub` (`protectorate hub update [--channel dev]
+[--version vX.Y.Z]`) is an owner-only, audited progress stream. It verifies
+the complete fleet release before atomically replacing the installed hub
+executable and selecting the release. A persisted health trial and a watchdog
+running the previous executable protect the restart: systemd-managed hubs
+exit 75 for `Restart=on-failure`; other hubs re-exec with the same arguments.
+If the new hub does not report the expected version before the health
+deadline, the watchdog restores the executable and release pointer and
+restarts the previous hub. Cancellation can stop work before replacement;
+once the replacement is committed, losing the client cannot prevent the
+restart and health check.
+
+The app's overview update card follows the stream and reconnects to check the
+running version; stream completion alone does not mean the new hub is healthy.
+The nodes view updates reachable remote nodes that differ from the hub,
+showing each node's progress and continuing after an individual failure.
+`NodeService.UpdateNode` and `node update --all` send the platform binary from
+the hub's current release and retain the node's staged update, health
+confirmation and rollback. Full device tokens gain the owner update
+capability through the device-authorization integration; arbitrary scope
+globs do not grant it. Installation and local fake-release-server testing
+are documented in [docs/install.md](docs/install.md) and
+[docs/testing.md](docs/testing.md).
+
 ## API: Connect-RPC, schema-first, JSON on the wire
 
 - `proto/protectorate/v1/*.proto` is the **only** API definition. `buf generate`

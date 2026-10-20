@@ -29,6 +29,9 @@ message GetStatusResponse {
   string arch = 4;
   int64 uptime_seconds = 5;
   google.protobuf.Timestamp started_at = 6;
+  string available_version = 7;
+  string update_channel = 8;
+  string release_notes_url = 9;
 }
 
 message GetSleeveRuntimeRequest {}

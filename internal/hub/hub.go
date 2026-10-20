@@ -29,6 +29,7 @@ import (
 	"github.com/hotschmoe/protectorate/internal/codec"
 	"github.com/hotschmoe/protectorate/internal/diagnostics"
 	"github.com/hotschmoe/protectorate/internal/node"
+	"github.com/hotschmoe/protectorate/internal/release"
 	"github.com/hotschmoe/protectorate/internal/session"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 )
@@ -49,15 +50,17 @@ type Hub struct {
 	// AckTimeout is how long an ack_required message may stay unacked before
 	// it is re-delivered, and again before it is escalated; 0 means 30m.
 	AckTimeout time.Duration
-	// BinaryDir holds the protectorate-<os>-<arch> builds UpdateNode sends to
-	// nodes of other platforms; empty means the directory of the hub's own
-	// executable. SelfExe overrides the path of that executable.
+	// BinaryDir overrides the current release's platform binaries.
 	BinaryDir string
 	SelfExe   string
 	// UpdateTimeout is how long UpdateNode waits for a node to report the
 	// new version; 0 means 3m.
 	UpdateTimeout time.Duration
 	updatePoll    time.Duration
+	Releases      *release.Source
+	// ReplaceHub commits a verified candidate and returns the restart action.
+	ReplaceHub     func(context.Context, string, release.Info) (func(), error)
+	releaseUpdates releaseUpdates
 
 	authz       *auth.Authorizer
 	started     time.Time
@@ -250,6 +253,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle("/debug/", diagnostics.Handler(h.authorizeDebug))
 	mux.Handle("GET /debug/nodes/{name}/{path...}", diagnostics.Protect(h.authorizeDebug, http.HandlerFunc(h.handleDebugNode)))
 	mux.Handle(protectoratev1connect.NewHubServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewReleaseServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewEventServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
@@ -279,8 +283,14 @@ func (h *Hub) Handler() http.Handler {
 		mux.Handle(protectoratev1connect.NewJobServiceHandler(h, opts))
 		mux.Handle(protectoratev1connect.NewDeskServiceHandler(h, opts))
 	}
-	if h.WebDir != "" {
-		mux.Handle("/", http.FileServer(http.Dir(h.WebDir)))
+	if h.WebDir != "" || h.Releases != nil {
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			dir := h.WebDir
+			if dir == "" {
+				dir = filepath.Join(h.Releases.CurrentDir(), "web")
+			}
+			http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
+		}))
 	}
 	return withRequestBase(h.withDeviceIP(mux))
 }
@@ -370,6 +380,9 @@ func startWorker(ctx context.Context, run func(context.Context)) func() {
 
 func (h *Hub) startWorkers(ctx context.Context) func() {
 	stops := []func(){startWorker(ctx, h.quota.Run), startWorker(ctx, h.WatchSessions), startWorker(ctx, h.sweepDeviceAuth)}
+	if h.Releases != nil {
+		stops = append(stops, startWorker(ctx, h.watchReleases))
+	}
 	if h.chat != nil {
 		stops = append(stops, h.chat.shutdown)
 	}
@@ -406,13 +419,22 @@ func (h *Hub) startWorkers(ctx context.Context) func() {
 
 func (h *Hub) GetStatus(context.Context, *connect.Request[pb.GetStatusRequest]) (*connect.Response[pb.GetStatusResponse], error) {
 	host, _ := os.Hostname()
+	var available release.Info
+	channel := ""
+	if h.Releases != nil {
+		available = h.Releases.Available()
+		channel = h.Releases.Channel
+	}
 	return connect.NewResponse(&pb.GetStatusResponse{
-		Version:       h.Version,
-		Hostname:      host,
-		Os:            runtime.GOOS,
-		Arch:          runtime.GOARCH,
-		UptimeSeconds: int64(time.Since(h.started).Seconds()),
-		StartedAt:     timestamppb.New(h.started),
+		Version:          h.Version,
+		Hostname:         host,
+		Os:               runtime.GOOS,
+		Arch:             runtime.GOARCH,
+		UptimeSeconds:    int64(time.Since(h.started).Seconds()),
+		StartedAt:        timestamppb.New(h.started),
+		AvailableVersion: available.Version,
+		UpdateChannel:    channel,
+		ReleaseNotesUrl:  available.NotesURL,
 	}), nil
 }
 

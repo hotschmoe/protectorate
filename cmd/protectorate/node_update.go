@@ -72,19 +72,18 @@ func nodeUpdateCmd(o *opts) *command {
 	var f updateFlags
 	c := &command{
 		Use:   "update <node> | --all",
-		Short: "Push the hub's build to a node and restart it onto it",
+		Short: "Push the hub's current release to a node and restart it",
 		Long: `Ask the hub to bring a node to the hub's version. The hub sends the right
 binary over the file transfer, the node verifies it (size, SHA-256, and that
 it runs), swaps it in and restarts itself: through its systemd unit, Windows
 logon task or Termux service when it has one, by re-executing otherwise. The
-hub sends its own executable to nodes of its own OS and architecture, and the
-protectorate-<os>-<arch> files that 'make cross' writes into its --binary-dir
-(default: the directory of the hub's executable) to the rest.
+hub sends the verified platform binary from its current GitHub release.
+An explicit hub serve --binary-dir overrides the release directory.
 
 The node keeps exactly one previous binary (protectorate.exe.old, or
 protectorate.old) and puts it back if the hub does not reach the new one within
 a few minutes. Nodes already at the hub's version are skipped unless --force.
-The hub's own node is updated by replacing its binary and restarting the hub.`,
+Update the hub's own node with 'protectorate hub update'.`,
 		Args: func(cmd *command, args []string) error {
 			if f.all == (len(args) == 1) {
 				return errors.New("name one node, or pass --all")
