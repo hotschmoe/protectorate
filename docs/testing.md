@@ -120,7 +120,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=62, KEEP-FUZZ=5; total=67. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=63, KEEP-FUZZ=5; total=68. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -190,6 +190,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/cache_confinement_test.go | TestBinarySleeveCacheConfinement | Production bwrap cache seeding and sleeve-written Flutter/Pub/parent symlinks cannot expose the private hub token on relaunch | 1.530s pass | KEEP-E2E | exercises filesystem isolation without a systemd user manager |
 | tests/e2e/backup_manifest_test.go | TestBinaryBackupManifestCoverage | Real-binary restore rejects duplicate manifest entries hiding altered state and changed file permissions before creating the destination | 1.430s pass | KEEP-E2E | complete manifest verification regression |
 | tests/e2e/quota_cleanup_test.go | TestBinaryQuotaReapsClosedStdoutPeer | Hub polls a synthetic Codex peer that closes stdout and ignores TERM, publishes quota promptly and reaps the process | 4.350s pass | KEEP-E2E | process lifetime, rather than stdout EOF, bounds cleanup |
 | tests/e2e/workspace_metadata_test.go | TestBinaryWorkspaceMetadataIsBounded | Real hub list/browser reads refuse FIFO, oversized and escaping git metadata without hanging or leaking file contents | 1.270s pass | KEEP-E2E | hostile workspace metadata regression |

@@ -14,6 +14,7 @@ import (
 // ARCHITECTURE.md: shared auth directories bound read-write at their host
 // path, per-sleeve config directories inside the sleeve's home.
 type Layout struct {
+	home        string
 	CacheCopies []Mount
 	Dirs        []string
 	Links       []Link
@@ -50,7 +51,7 @@ const sleevePathEnv = "PROTECTORATE_SLEEVE_PATH"
 func (c Config) layout(name string, h Harness, workspace string) Layout {
 	host := func(rel string) string { return filepath.Join(c.sleeveHome(name), rel) }
 	inside := func(rel string) string { return filepath.Join(c.UserHome, rel) }
-	l := Layout{Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
+	l := Layout{home: c.sleeveHome(name), Dirs: []string{c.sleeveHome(name)}, Seeds: []Seed{{host(".profile"), profileSeed}}}
 	dart := dartWorkspace(workspace)
 	cacheCopy := func(m Mount) {
 		if _, err := os.Stat(m.Source); dart || err == nil {
@@ -126,9 +127,43 @@ func dartWorkspace(dir string) bool {
 	return len(m) > 0
 }
 
+// The sleeve can replace paths below its mounted home between launches.
+// Managed directories must never follow its symlinks on the host.
+func (l Layout) validate() error {
+	paths := append([]string(nil), l.Dirs...)
+	for _, m := range l.CacheCopies {
+		paths = append(paths, m.Source)
+	}
+	for _, s := range l.Seeds {
+		paths = append(paths, filepath.Dir(s.Path))
+	}
+	for _, link := range l.Links {
+		paths = append(paths, filepath.Dir(link.Path))
+	}
+	for _, p := range paths {
+		for within(p, l.home) {
+			fi, err := os.Lstat(p)
+			if err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("inspect sleeve directory %s: %w", p, err)
+			}
+			if err == nil && !fi.IsDir() {
+				return fmt.Errorf("%w: sleeve directory %s must be a directory without symlinks", ErrInvalid, p)
+			}
+			if p == l.home {
+				break
+			}
+			p = filepath.Dir(p)
+		}
+	}
+	return nil
+}
+
 // Apply creates the directories, symlinks and seed files. It is idempotent
 // and never deletes: a file that is in the way of a symlink is renamed aside.
 func (l Layout) Apply(ctx context.Context) error {
+	if err := l.validate(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	for _, m := range l.CacheCopies {

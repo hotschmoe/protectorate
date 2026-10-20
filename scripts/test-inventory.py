@@ -90,6 +90,7 @@ TestNodeRestartRecovery
 TestDERPRelay
 TestBinaryClusterRestartAndRestore
 TestBinaryWorkspaceBrowser
+TestBinarySleeveCacheConfinement
 TestBinaryBackupManifestCoverage
 TestBinaryQuotaReapsClosedStdoutPeer
 TestBinaryWorkspaceMetadataIsBounded

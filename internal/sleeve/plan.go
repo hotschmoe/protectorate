@@ -484,6 +484,9 @@ func (c Config) Plan(spec Spec, bin Binary) (Launch, error) {
 		return Launch{}, err
 	}
 	lay := c.layout(spec.Name, spec.Harness, spec.Workspace)
+	if err := lay.validate(); err != nil {
+		return Launch{}, err
+	}
 	unit := c.UnitName(spec.Name)
 	var callerEnv [][2]string
 	for _, k := range slices.Sorted(maps.Keys(spec.Env)) {
