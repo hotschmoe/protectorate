@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -117,7 +118,6 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err != nil {
 		return sleeve.Info{}, err
 	}
-	// 1. the hub owns the chat from here: nobody else starts a turn
 	if !cs.takeOver() {
 		return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s is already being resleeved", info.Name))
 	}
@@ -129,7 +129,7 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	}()
 	h.emitMap("resleeve.started", info.Name, map[string]any{"from": string(info.Harness), "to": string(to)})
 
-	// 3 runs while the outgoing turn winds down, on the facts known now
+	// Start the summary from the current facts while the outgoing turn winds down.
 	sctx, cancelSummary := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelSummary()
 	idle := cs.status().State == pb.ChatState_CHAT_STATE_IDLE
@@ -142,7 +142,6 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err := cs.quiesce(ctx, interrupt, wait); err != nil {
 		return sleeve.Info{}, connect.NewError(connect.CodeCanceled, fmt.Errorf("resleeve %s: %w", info.Name, err))
 	}
-	// 2. the facts in the file are read after the turn ended
 	if !idle {
 		facts = h.handoffFacts(ctx, info, cs, to)
 	}
@@ -153,18 +152,9 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 		return sleeve.Info{}, connect.NewError(connect.CodeCanceled, ctx.Err())
 	}
 
-	// 4. the handoff; nothing of ours may reach a commit, so exclude first
-	if _, err := handoff.Exclude(info.Workspace); err != nil {
-		return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("keep %s out of git: %w", handoff.Dir, err))
-	}
-	doc := []byte(handoff.Document(facts, sum, handoff.DefaultBudget))
-	path, err := handoff.Write(info.Workspace, doc)
+	path, archive, err := h.writeHandoff(info, to, facts, sum)
 	if err != nil {
-		return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, err)
-	}
-	archive, err := handoff.Archive(filepath.Join(h.sleeves.StateDir(), "handoffs"), info.Name, string(info.Harness), string(to), facts.At, doc)
-	if err != nil {
-		log.Printf("resleeve %s: %v", info.Name, err)
+		return sleeve.Info{}, err
 	}
 
 	// 5. replace the harness; from here the request may go away
@@ -174,18 +164,9 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 	if err != nil {
 		log.Printf("resleeve %s: read env: %v", info.Name, err)
 	}
-	out, err := h.replaceHarness(bg, info, to, env, spawnOpts{keepLog: true, hold: true, selection: selection})
+	out, err := h.switchHarness(bg, info, to, env, selection, facts.SessionID)
 	if err != nil {
-		original := driver.Selection{}
-		defaults := driver.Selection{}
-		if info.Chat != nil {
-			original = info.Chat.Requested
-			defaults = info.Chat.Defaults
-		}
-		if _, rerr := h.replaceHarness(bg, info, info.Harness, env, spawnOpts{keepLog: true, resume: facts.SessionID, selection: original, defaults: defaults}); rerr != nil {
-			return sleeve.Info{}, connect.NewError(connect.CodeInternal, fmt.Errorf("start %s: %v; restoring %s also failed: %w", to, err, info.Harness, rerr))
-		}
-		return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("start %s: %w; %s is back on its own session", to, err, info.Harness))
+		return sleeve.Info{}, err
 	}
 
 	rec := sleeve.Handoff{
@@ -214,6 +195,37 @@ func (h *Hub) resleeve(ctx context.Context, info sleeve.Info, to sleeve.Harness,
 		out = fresh
 	}
 	return out, nil
+}
+
+func (h *Hub) writeHandoff(info sleeve.Info, to sleeve.Harness, facts handoff.Facts, sum handoff.Summary) (string, string, error) {
+	if _, err := handoff.Exclude(info.Workspace); err != nil {
+		return "", "", connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("keep %s out of git: %w", handoff.Dir, err))
+	}
+	doc := []byte(handoff.Document(facts, sum, handoff.DefaultBudget))
+	path, err := handoff.Write(info.Workspace, doc)
+	if err != nil {
+		return "", "", connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	archive, err := handoff.Archive(filepath.Join(h.sleeves.StateDir(), "handoffs"), info.Name, string(info.Harness), string(to), facts.At, doc)
+	if err != nil {
+		log.Printf("resleeve %s: %v", info.Name, err)
+	}
+	return path, archive, nil
+}
+
+func (h *Hub) switchHarness(ctx context.Context, info sleeve.Info, to sleeve.Harness, env map[string]string, selection driver.Selection, resume string) (sleeve.Info, error) {
+	out, err := h.replaceHarness(ctx, info, to, env, spawnOpts{keepLog: true, hold: true, selection: selection})
+	if err == nil {
+		return out, nil
+	}
+	original, defaults := driver.Selection{}, driver.Selection{}
+	if info.Chat != nil {
+		original, defaults = info.Chat.Requested, info.Chat.Defaults
+	}
+	if _, rerr := h.replaceHarness(ctx, info, info.Harness, env, spawnOpts{keepLog: true, resume: resume, selection: original, defaults: defaults}); rerr != nil {
+		return sleeve.Info{}, connect.NewError(connect.CodeInternal, fmt.Errorf("start %s: %v; restoring %s also failed: %w", to, err, info.Harness, rerr))
+	}
+	return sleeve.Info{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("start %s: %w; %s is back on its own session", to, err, info.Harness))
 }
 
 func handoffPrompt(from, to sleeve.Harness) string {
@@ -427,6 +439,10 @@ func (h *Hub) runSummary(ctx context.Context, owner sleeve.Info, hs sleeve.Harne
 	if err := sess.Send(ctx, prompt); err != nil {
 		return handoff.Summary{}, err
 	}
+	return h.summaryAnswer(ctx, sess, owner.Name, hs)
+}
+
+func (h *Hub) summaryAnswer(ctx context.Context, sess driver.Session, owner string, hs sleeve.Harness) (handoff.Summary, error) {
 	out := handoff.Summary{Harness: string(hs)}
 	var baseURL, lastErr, msgID string
 	var text strings.Builder
@@ -450,7 +466,7 @@ func (h *Hub) runSummary(ctx context.Context, owner sleeve.Info, hs sleeve.Harne
 				text.WriteString(ev.Text)
 			case driver.KindApproval:
 				if err := sess.Respond(ctx, ev.Approval.ID, false, "Do not use tools: answer from the facts in the prompt."); err != nil {
-					log.Printf("resleeve %s: deny summarizer tool: %v", owner.Name, err)
+					log.Printf("resleeve %s: deny summarizer tool: %v", owner, err)
 				}
 			case driver.KindUsage:
 				if ev.Usage.Model != "" {
@@ -464,22 +480,15 @@ func (h *Hub) runSummary(ctx context.Context, owner sleeve.Info, hs sleeve.Harne
 			case driver.KindSettled:
 				out.Text = strings.TrimSpace(text.String())
 				if out.Text == "" {
-					return handoff.Summary{}, fmt.Errorf("empty answer (%s)", orStr(lastErr, ev.StopReason))
+					return handoff.Summary{}, fmt.Errorf("empty answer (%s)", cmp.Or(lastErr, ev.StopReason))
 				}
 				out.Local = hs == sleeve.Pi && servedLocally(baseURL, h.nodeHostnames())
 				return out, nil
 			case driver.KindExited:
-				return handoff.Summary{}, fmt.Errorf("the harness exited: %s", orStr(lastErr, ev.Text))
+				return handoff.Summary{}, fmt.Errorf("the harness exited: %s", cmp.Or(lastErr, ev.Text))
 			}
 		}
 	}
-}
-
-func orStr(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
 }
 
 // dropHelpers removes hub-internal sleeves a crash left behind.
