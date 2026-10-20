@@ -35,6 +35,8 @@ class _BacklogTabState extends State<BacklogTab> {
   List<Note> _notes = const [];
   Object? _error;
   bool _loading = true;
+  bool _showDone = false;
+  bool _changingState = false;
   String? _filter;
   NoteDraft? _open;
   final _background = <NoteDraft>{};
@@ -75,7 +77,9 @@ class _BacklogTabState extends State<BacklogTab> {
 
   Future<void> _refresh() async {
     try {
-      final r = await widget.client.backlog.listNotes(ListNotesRequest());
+      final r = await widget.client.backlog.listNotes(
+        ListNotesRequest(state: 'all'),
+      );
       if (!mounted) return;
       setState(() {
         _notes = r.notes;
@@ -104,7 +108,9 @@ class _BacklogTabState extends State<BacklogTab> {
   List<Note> get _sorted {
     final shown = [
       for (final n in _notes)
-        if (_filter == null || n.project == _filter) n,
+        if ((_showDone || n.state != 'done') &&
+            (_filter == null || n.project == _filter))
+          n,
     ];
     shown.sort((a, b) {
       if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
@@ -159,6 +165,64 @@ class _BacklogTabState extends State<BacklogTab> {
     final previous = _open;
     setState(() => _open = _draft());
     if (previous != null) _retire(previous);
+  }
+
+  Future<void> _changeState(NoteDraft d) async {
+    final done = d.noteState != 'done';
+    String? resolution;
+    if (done) {
+      var entered = '';
+      resolution = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Mark note done', style: Tokens.of(context).title()),
+          content: TextField(
+            autofocus: true,
+            onChanged: (value) => entered = value,
+            maxLength: 200,
+            inputFormatters: [_SingleLine()],
+            style: Tokens.of(context).data(),
+            decoration: const InputDecoration(
+              labelText: 'Resolution (optional)',
+              hintText: 'implemented in 8b98d58',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(entered),
+              child: const Text('DONE'),
+            ),
+          ],
+        ),
+      );
+      if (resolution == null || !mounted) return;
+    }
+    if (!mounted) return;
+    setState(() => _changingState = true);
+    try {
+      await d.flush();
+      if (d.id == null || d.hasUnsaved) {
+        throw StateError('Save the note before changing its state.');
+      }
+      final r = await widget.client.backlog.updateNote(
+        UpdateNoteRequest(
+          id: d.id,
+          state: done ? 'done' : 'open',
+          resolution: resolution,
+        ),
+      );
+      if (!mounted) return;
+      d.adopt(r.note);
+      _saved(r.note);
+    } on Object catch (e) {
+      if (mounted) setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _changingState = false);
+    }
   }
 
   Future<void> _delete(NoteDraft d) async {
@@ -270,6 +334,12 @@ class _BacklogTabState extends State<BacklogTab> {
           96,
         ),
         children: [
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: Text('SHOW DONE', style: t.legend()),
+            value: _showDone,
+            onChanged: (value) => setState(() => _showDone = value),
+          ),
           if (wide)
             Padding(
               padding: const EdgeInsets.only(bottom: Tokens.gap),
@@ -321,7 +391,7 @@ class _BacklogTabState extends State<BacklogTab> {
                                 ? ''
                                 : _filter != null
                                 ? 'No notes tagged $_filter.'
-                                : 'No notes yet. Start one.',
+                                : 'No ${_showDone ? '' : 'open '}notes. Start one.',
                             style: t.small(),
                           ),
                         ),
@@ -393,12 +463,16 @@ class _BacklogTabState extends State<BacklogTab> {
                         overflow: TextOverflow.ellipsis,
                         style: t.small(),
                       ),
+                    if (n.state == 'done' && n.completion.resolution.isNotEmpty)
+                      Text(n.completion.resolution, style: t.small()),
                     const SizedBox(height: 4),
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
+                        if (n.state == 'done')
+                          Text('DONE', style: t.small(t.tone(Tone.ok))),
                         if (n.project.isNotEmpty) TagChip(label: n.project),
                         if (from.isNotEmpty)
                           Text(from, style: t.small(t.tone(Tone.info))),
@@ -443,6 +517,7 @@ class _BacklogTabState extends State<BacklogTab> {
       wide: wide,
       onBack: _close,
       onDelete: () => _delete(d),
+      onChangeState: _changingState ? null : () => _changeState(d),
     );
   }
 }
@@ -504,6 +579,7 @@ class NoteEditor extends StatefulWidget {
     required this.wide,
     required this.onBack,
     required this.onDelete,
+    required this.onChangeState,
   });
 
   final NoteDraft draft;
@@ -511,6 +587,7 @@ class NoteEditor extends StatefulWidget {
   final bool wide;
   final VoidCallback onBack;
   final VoidCallback onDelete;
+  final VoidCallback? onChangeState;
 
   @override
   State<NoteEditor> createState() => _NoteEditorState();
@@ -633,6 +710,33 @@ class _NoteEditorState extends State<NoteEditor> {
                       ],
                     ),
                     const SizedBox(height: Tokens.gapS),
+                    Wrap(
+                      spacing: Tokens.gapS,
+                      runSpacing: Tokens.gapS,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(_d.noteState.toUpperCase(), style: t.legend()),
+                        TextButton.icon(
+                          onPressed: widget.onChangeState,
+                          icon: Icon(
+                            _d.noteState == 'done' ? Icons.undo : Icons.check,
+                          ),
+                          label: Text(
+                            _d.noteState == 'done' ? 'REOPEN' : 'DONE',
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_d.completion case final completion?) ...[
+                      Text(
+                        'Done by ${completion.doneBy} at '
+                        '${completion.doneAt.toDateTime().toLocal()}',
+                        style: t.small(),
+                      ),
+                      if (completion.resolution.isNotEmpty)
+                        Text(completion.resolution, style: t.data()),
+                      const SizedBox(height: Tokens.gapS),
+                    ],
                     TextField(
                       key: const ValueKey('note-body'),
                       controller: _body,

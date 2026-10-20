@@ -44,6 +44,15 @@ const Note$json = {
     {'1': 'pinned', '3': 6, '4': 1, '5': 8, '10': 'pinned'},
     {'1': 'project', '3': 7, '4': 1, '5': 9, '10': 'project'},
     {'1': 'source', '3': 8, '4': 1, '5': 9, '10': 'source'},
+    {'1': 'state', '3': 9, '4': 1, '5': 9, '10': 'state'},
+    {
+      '1': 'completion',
+      '3': 10,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.NoteCompletion',
+      '10': 'completion'
+    },
   ],
 };
 
@@ -53,7 +62,9 @@ final $typed_data.Uint8List noteDescriptor = $convert.base64Decode(
     'EoCVIEYm9keRI5CgpjcmVhdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFt'
     'cFIJY3JlYXRlZEF0EjkKCnVwZGF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZX'
     'N0YW1wUgl1cGRhdGVkQXQSFgoGcGlubmVkGAYgASgIUgZwaW5uZWQSGAoHcHJvamVjdBgHIAEo'
-    'CVIHcHJvamVjdBIWCgZzb3VyY2UYCCABKAlSBnNvdXJjZQ==');
+    'CVIHcHJvamVjdBIWCgZzb3VyY2UYCCABKAlSBnNvdXJjZRIUCgVzdGF0ZRgJIAEoCVIFc3RhdG'
+    'USPwoKY29tcGxldGlvbhgKIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Ob3RlQ29tcGxldGlvblIK'
+    'Y29tcGxldGlvbg==');
 
 @$core.Deprecated('Use listNotesRequestDescriptor instead')
 const ListNotesRequest$json = {
@@ -61,13 +72,14 @@ const ListNotesRequest$json = {
   '2': [
     {'1': 'project', '3': 1, '4': 1, '5': 9, '10': 'project'},
     {'1': 'query', '3': 2, '4': 1, '5': 9, '10': 'query'},
+    {'1': 'state', '3': 3, '4': 1, '5': 9, '10': 'state'},
   ],
 };
 
 /// Descriptor for `ListNotesRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List listNotesRequestDescriptor = $convert.base64Decode(
     'ChBMaXN0Tm90ZXNSZXF1ZXN0EhgKB3Byb2plY3QYASABKAlSB3Byb2plY3QSFAoFcXVlcnkYAi'
-    'ABKAlSBXF1ZXJ5');
+    'ABKAlSBXF1ZXJ5EhQKBXN0YXRlGAMgASgJUgVzdGF0ZQ==');
 
 @$core.Deprecated('Use listNotesResponseDescriptor instead')
 const ListNotesResponse$json = {
@@ -174,12 +186,24 @@ const UpdateNoteRequest$json = {
       '10': 'project',
       '17': true
     },
+    {'1': 'state', '3': 6, '4': 1, '5': 9, '9': 4, '10': 'state', '17': true},
+    {
+      '1': 'resolution',
+      '3': 7,
+      '4': 1,
+      '5': 9,
+      '9': 5,
+      '10': 'resolution',
+      '17': true
+    },
   ],
   '8': [
     {'1': '_title'},
     {'1': '_body'},
     {'1': '_pinned'},
     {'1': '_project'},
+    {'1': '_state'},
+    {'1': '_resolution'},
   ],
 };
 
@@ -187,8 +211,10 @@ const UpdateNoteRequest$json = {
 final $typed_data.Uint8List updateNoteRequestDescriptor = $convert.base64Decode(
     'ChFVcGRhdGVOb3RlUmVxdWVzdBIOCgJpZBgBIAEoCVICaWQSGQoFdGl0bGUYAiABKAlIAFIFdG'
     'l0bGWIAQESFwoEYm9keRgDIAEoCUgBUgRib2R5iAEBEhsKBnBpbm5lZBgEIAEoCEgCUgZwaW5u'
-    'ZWSIAQESHQoHcHJvamVjdBgFIAEoCUgDUgdwcm9qZWN0iAEBQggKBl90aXRsZUIHCgVfYm9keU'
-    'IJCgdfcGlubmVkQgoKCF9wcm9qZWN0');
+    'ZWSIAQESHQoHcHJvamVjdBgFIAEoCUgDUgdwcm9qZWN0iAEBEhkKBXN0YXRlGAYgASgJSARSBX'
+    'N0YXRliAEBEiMKCnJlc29sdXRpb24YByABKAlIBVIKcmVzb2x1dGlvbogBAUIICgZfdGl0bGVC'
+    'BwoFX2JvZHlCCQoHX3Bpbm5lZEIKCghfcHJvamVjdEIICgZfc3RhdGVCDQoLX3Jlc29sdXRpb2'
+    '4=');
 
 @$core.Deprecated('Use updateNoteResponseDescriptor instead')
 const UpdateNoteResponse$json = {
@@ -231,6 +257,29 @@ const DeleteNoteResponse$json = {
 final $typed_data.Uint8List deleteNoteResponseDescriptor =
     $convert.base64Decode('ChJEZWxldGVOb3RlUmVzcG9uc2U=');
 
+@$core.Deprecated('Use noteCompletionDescriptor instead')
+const NoteCompletion$json = {
+  '1': 'NoteCompletion',
+  '2': [
+    {
+      '1': 'done_at',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'doneAt'
+    },
+    {'1': 'done_by', '3': 2, '4': 1, '5': 9, '10': 'doneBy'},
+    {'1': 'resolution', '3': 3, '4': 1, '5': 9, '10': 'resolution'},
+  ],
+};
+
+/// Descriptor for `NoteCompletion`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List noteCompletionDescriptor = $convert.base64Decode(
+    'Cg5Ob3RlQ29tcGxldGlvbhIzCgdkb25lX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbW'
+    'VzdGFtcFIGZG9uZUF0EhcKB2RvbmVfYnkYAiABKAlSBmRvbmVCeRIeCgpyZXNvbHV0aW9uGAMg'
+    'ASgJUgpyZXNvbHV0aW9u');
+
 const $core.Map<$core.String, $core.dynamic> BacklogServiceBase$json = {
   '1': 'BacklogService',
   '2': [
@@ -272,6 +321,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ListNotesResponse': ListNotesResponse$json,
   '.protectorate.v1.Note': Note$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
+  '.protectorate.v1.NoteCompletion': NoteCompletion$json,
   '.protectorate.v1.GetNoteRequest': GetNoteRequest$json,
   '.protectorate.v1.GetNoteResponse': GetNoteResponse$json,
   '.protectorate.v1.CreateNoteRequest': CreateNoteRequest$json,

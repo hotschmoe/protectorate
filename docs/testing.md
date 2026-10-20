@@ -95,6 +95,14 @@ origins, paired-device acceptance and sleeve-identity denial. A persisted
 exited sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
 text and JSON, without needing the host user manager.
 
+`TestBinaryNoteLifecycle` drives a real hub, CLI and stdio MCP bridge through
+loading an existing note without a state, creating and closing with a
+resolution, open-only defaults, done/all/project/query filters, invalid
+updates, idempotent close, reopen and hub restarts in both states. It verifies
+read-only denial and a sleeve identity with the production backlog scopes
+closing a note with the same actor recorded in audit, then lists open notes
+and closes an existing note through MCP. It needs no host user manager.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -190,6 +198,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/backlog_test.go | TestBinaryNoteLifecycle | Real hub/CLI/MCP note completion, filters, reopen, persistence and sleeve authorization | unmeasured | KEEP-E2E | note lifecycle regression scenario |
 
 ## Deleted files
 

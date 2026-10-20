@@ -90,6 +90,7 @@ TestNodeRestartRecovery
 TestDERPRelay
 TestBinaryClusterRestartAndRestore
 TestBinaryWorkspaceBrowser
+TestBinaryNoteLifecycle
 """.split())
 DELETE = set()
 

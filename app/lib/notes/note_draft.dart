@@ -39,6 +39,8 @@ class NoteDraft extends ChangeNotifier {
   String project = '';
   bool pinned = false;
   String source = '';
+  String noteState = 'open';
+  NoteCompletion? completion;
   DateTime? created;
   DateTime? updated;
   SaveState state = SaveState.saved;
@@ -62,6 +64,8 @@ class NoteDraft extends ChangeNotifier {
     project = n.project;
     pinned = n.pinned;
     source = n.source;
+    noteState = n.state;
+    completion = n.hasCompletion() ? n.completion : null;
     created = n.hasCreatedAt() ? n.createdAt.toDateTime() : null;
     updated = n.hasUpdatedAt() ? n.updatedAt.toDateTime() : null;
   }
@@ -73,6 +77,8 @@ class NoteDraft extends ChangeNotifier {
     project: project,
     pinned: pinned,
     source: source,
+    state: noteState,
+    completion: completion,
   );
 
   void edit({String? title, String? body, String? project, bool? pinned}) {
@@ -155,6 +161,8 @@ class NoteDraft extends ChangeNotifier {
       }
       id = n.id;
       source = n.source;
+      noteState = n.state;
+      completion = n.hasCompletion() ? n.completion : null;
       created = n.createdAt.toDateTime();
       updated = n.updatedAt.toDateTime();
       _failures = 0;

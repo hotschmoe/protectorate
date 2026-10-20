@@ -12,7 +12,8 @@ import "backlog.connect.spec.dart" as specs;
 /// through the same API. Mutations publish note.* events on EventService.
 extension type BacklogServiceClient (connect.Transport _transport) {
   /// ListNotes returns notes, pinned first and then most recently updated,
-  /// optionally filtered by project tag and a text query.
+  /// open by default, optionally filtered by project tag and a text query.
+  /// Set state to "done" for completed notes or "all" for both states.
   Future<protectoratev1backlog.ListNotesResponse> listNotes(
     protectoratev1backlog.ListNotesRequest input, {
     connect.Headers? headers,
@@ -67,6 +68,8 @@ extension type BacklogServiceClient (connect.Transport _transport) {
   }
 
   /// UpdateNote changes the fields that are set and leaves the others alone.
+  /// Set state to "done" with an optional resolution line to close a note,
+  /// or "open" to reopen it and clear completion. Requires backlog_update_note.
   Future<protectoratev1backlog.UpdateNoteResponse> updateNote(
     protectoratev1backlog.UpdateNoteRequest input, {
     connect.Headers? headers,

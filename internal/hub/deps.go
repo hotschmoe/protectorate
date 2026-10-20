@@ -121,7 +121,7 @@ func (c *coordinator) fileRelease(up, down directory.View, ch directory.Change, 
 		return
 	}
 	title := fmt.Sprintf("%s %s: review changes (uses %s)", up.Display, releaseHeadline(ch), strings.Join(via, ", "))
-	existing, err := c.h.backlog.List(backlog.Filter{Project: down.Display})
+	existing, err := c.h.backlog.List(backlog.Filter{Project: down.Display, State: "all"})
 	if err != nil {
 		log.Printf("coordination: read notes: %v", err)
 		return

@@ -30,6 +30,8 @@ class Note extends $pb.GeneratedMessage {
     $core.bool? pinned,
     $core.String? project,
     $core.String? source,
+    $core.String? state,
+    NoteCompletion? completion,
   }) {
     final result = Note._();
     if (id != null) result.id = id;
@@ -40,6 +42,8 @@ class Note extends $pb.GeneratedMessage {
     if (pinned != null) result.pinned = pinned;
     if (project != null) result.project = project;
     if (source != null) result.source = source;
+    if (state != null) result.state = state;
+    if (completion != null) result.completion = completion;
     return result;
   }
 
@@ -67,6 +71,9 @@ class Note extends $pb.GeneratedMessage {
     ..aOB(6, _omitFieldNames ? '' : 'pinned')
     ..aOS(7, _omitFieldNames ? '' : 'project')
     ..aOS(8, _omitFieldNames ? '' : 'source')
+    ..aOS(9, _omitFieldNames ? '' : 'state')
+    ..aOM<NoteCompletion>(10, _omitFieldNames ? '' : 'completion',
+        subBuilder: NoteCompletion.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -170,16 +177,40 @@ class Note extends $pb.GeneratedMessage {
   $core.bool hasSource() => $_has(7);
   @$pb.TagNumber(8)
   void clearSource() => $_clearField(8);
+
+  /// state is "open" or "done".
+  @$pb.TagNumber(9)
+  $core.String get state => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set state($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasState() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearState() => $_clearField(9);
+
+  /// completion is present only while the note is done.
+  @$pb.TagNumber(10)
+  NoteCompletion get completion => $_getN(9);
+  @$pb.TagNumber(10)
+  set completion(NoteCompletion value) => $_setField(10, value);
+  @$pb.TagNumber(10)
+  $core.bool hasCompletion() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearCompletion() => $_clearField(10);
+  @$pb.TagNumber(10)
+  NoteCompletion ensureCompletion() => $_ensure(9);
 }
 
 class ListNotesRequest extends $pb.GeneratedMessage {
   factory ListNotesRequest({
     $core.String? project,
     $core.String? query,
+    $core.String? state,
   }) {
     final result = ListNotesRequest._();
     if (project != null) result.project = project;
     if (query != null) result.query = query;
+    if (state != null) result.state = state;
     return result;
   }
 
@@ -199,6 +230,7 @@ class ListNotesRequest extends $pb.GeneratedMessage {
       createEmptyInstance: ListNotesRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'project')
     ..aOS(2, _omitFieldNames ? '' : 'query')
+    ..aOS(3, _omitFieldNames ? '' : 'state')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -242,6 +274,16 @@ class ListNotesRequest extends $pb.GeneratedMessage {
   $core.bool hasQuery() => $_has(1);
   @$pb.TagNumber(2)
   void clearQuery() => $_clearField(2);
+
+  /// state is "open" (also the default), "done", or "all".
+  @$pb.TagNumber(3)
+  $core.String get state => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set state($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasState() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearState() => $_clearField(3);
 }
 
 class ListNotesResponse extends $pb.GeneratedMessage {
@@ -585,6 +627,8 @@ class UpdateNoteRequest extends $pb.GeneratedMessage {
     $core.String? body,
     $core.bool? pinned,
     $core.String? project,
+    $core.String? state,
+    $core.String? resolution,
   }) {
     final result = UpdateNoteRequest._();
     if (id != null) result.id = id;
@@ -592,6 +636,8 @@ class UpdateNoteRequest extends $pb.GeneratedMessage {
     if (body != null) result.body = body;
     if (pinned != null) result.pinned = pinned;
     if (project != null) result.project = project;
+    if (state != null) result.state = state;
+    if (resolution != null) result.resolution = resolution;
     return result;
   }
 
@@ -614,6 +660,8 @@ class UpdateNoteRequest extends $pb.GeneratedMessage {
     ..aOS(3, _omitFieldNames ? '' : 'body')
     ..aOB(4, _omitFieldNames ? '' : 'pinned')
     ..aOS(5, _omitFieldNames ? '' : 'project')
+    ..aOS(6, _omitFieldNames ? '' : 'state')
+    ..aOS(7, _omitFieldNames ? '' : 'resolution')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -687,6 +735,26 @@ class UpdateNoteRequest extends $pb.GeneratedMessage {
   $core.bool hasProject() => $_has(4);
   @$pb.TagNumber(5)
   void clearProject() => $_clearField(5);
+
+  /// state closes ("done") or reopens ("open") the note when set.
+  @$pb.TagNumber(6)
+  $core.String get state => $_getSZ(5);
+  @$pb.TagNumber(6)
+  set state($core.String value) => $_setString(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasState() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearState() => $_clearField(6);
+
+  /// resolution is an optional single line, up to 200 characters, for a done note.
+  @$pb.TagNumber(7)
+  $core.String get resolution => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set resolution($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasResolution() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearResolution() => $_clearField(7);
 }
 
 class UpdateNoteResponse extends $pb.GeneratedMessage {
@@ -850,6 +918,93 @@ class DeleteNoteResponse extends $pb.GeneratedMessage {
   static DeleteNoteResponse? _defaultInstance;
 }
 
+/// NoteCompletion records the latest close; reopening clears it.
+class NoteCompletion extends $pb.GeneratedMessage {
+  factory NoteCompletion({
+    $0.Timestamp? doneAt,
+    $core.String? doneBy,
+    $core.String? resolution,
+  }) {
+    final result = NoteCompletion._();
+    if (doneAt != null) result.doneAt = doneAt;
+    if (doneBy != null) result.doneBy = doneBy;
+    if (resolution != null) result.resolution = resolution;
+    return result;
+  }
+
+  NoteCompletion._();
+
+  factory NoteCompletion.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NoteCompletion()..mergeFromBuffer(data, registry);
+  factory NoteCompletion.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NoteCompletion()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NoteCompletion',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: NoteCompletion.$_createMessage)
+    ..aOM<$0.Timestamp>(1, _omitFieldNames ? '' : 'doneAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOS(2, _omitFieldNames ? '' : 'doneBy')
+    ..aOS(3, _omitFieldNames ? '' : 'resolution')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NoteCompletion clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NoteCompletion copyWith(void Function(NoteCompletion) updates) =>
+      super.copyWith((message) => updates(message as NoteCompletion))
+          as NoteCompletion;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use NoteCompletion() / NoteCompletion.new instead')
+  static NoteCompletion create() => NoteCompletion._();
+  static $pb.GeneratedMessage $_createMessage() => NoteCompletion._();
+  @$core.override
+  NoteCompletion createEmptyInstance() => NoteCompletion._();
+  @$core.pragma('dart2js:noInline')
+  static NoteCompletion getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<NoteCompletion>(
+          NoteCompletion.$_createMessage);
+  static NoteCompletion? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $0.Timestamp get doneAt => $_getN(0);
+  @$pb.TagNumber(1)
+  set doneAt($0.Timestamp value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasDoneAt() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearDoneAt() => $_clearField(1);
+  @$pb.TagNumber(1)
+  $0.Timestamp ensureDoneAt() => $_ensure(0);
+
+  /// done_by is the authenticated actor, exactly as named in the audit log.
+  @$pb.TagNumber(2)
+  $core.String get doneBy => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set doneBy($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasDoneBy() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearDoneBy() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get resolution => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set resolution($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasResolution() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearResolution() => $_clearField(3);
+}
+
 /// BacklogService keeps the owner's notes on the hub (docs/backlog.md). The
 /// owner writes them in the app or CLI; the orchestrator reads and edits them
 /// through the same API. Mutations publish note.* events on EventService.
@@ -859,7 +1014,8 @@ class BacklogServiceApi {
   BacklogServiceApi(this._client);
 
   /// ListNotes returns notes, pinned first and then most recently updated,
-  /// optionally filtered by project tag and a text query.
+  /// open by default, optionally filtered by project tag and a text query.
+  /// Set state to "done" for completed notes or "all" for both states.
   $async.Future<ListNotesResponse> listNotes(
           $pb.ClientContext? ctx, ListNotesRequest request) =>
       _client.invoke<ListNotesResponse>(
@@ -878,6 +1034,8 @@ class BacklogServiceApi {
           ctx, 'BacklogService', 'CreateNote', request, CreateNoteResponse());
 
   /// UpdateNote changes the fields that are set and leaves the others alone.
+  /// Set state to "done" with an optional resolution line to close a note,
+  /// or "open" to reopen it and clear completion. Requires backlog_update_note.
   $async.Future<UpdateNoteResponse> updateNote(
           $pb.ClientContext? ctx, UpdateNoteRequest request) =>
       _client.invoke<UpdateNoteResponse>(

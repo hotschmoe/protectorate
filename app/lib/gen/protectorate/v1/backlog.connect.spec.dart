@@ -14,7 +14,8 @@ abstract final class BacklogService {
   static const name = 'protectorate.v1.BacklogService';
 
   /// ListNotes returns notes, pinned first and then most recently updated,
-  /// optionally filtered by project tag and a text query.
+  /// open by default, optionally filtered by project tag and a text query.
+  /// Set state to "done" for completed notes or "all" for both states.
   static const listNotes = connect.Spec(
     '/$name/ListNotes',
     connect.StreamType.unary,
@@ -41,6 +42,8 @@ abstract final class BacklogService {
   );
 
   /// UpdateNote changes the fields that are set and leaves the others alone.
+  /// Set state to "done" with an optional resolution line to close a note,
+  /// or "open" to reopen it and clear completion. Requires backlog_update_note.
   static const updateNote = connect.Spec(
     '/$name/UpdateNote',
     connect.StreamType.unary,
