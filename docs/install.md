@@ -36,6 +36,8 @@ sudo loginctl enable-linger $USER                                    # keep runn
 
 The unit uses `KillMode=control-group` so a killed hub cannot orphan headscale. Prefer the user unit when the hub runs sleeves (they use `systemd-run --user`). For a headless box without a user session, `--user-name NAME` renders a system unit for `/etc/systemd/system`.
 
+Upgrading a v0.3 hub: since v0.4 the hub keeps `nodes`, `tokens`, `sleeves`, `leases` and `desk-policies` state in `.json` files (durations as integer nanoseconds) and ignores the old `.yaml` files, so an unconverted hub starts with no nodes, tokens or sleeves. Stop the hub and convert each file before starting v0.4 (the one known v0.3 hub was converted with a one-off tool that keeps the originals as `*.yaml.pre-json`).
+
 Log in to each harness once on the hub. This runs the harness's own login in your terminal and stores the credential in `~/.protectorate/auth/<harness>`, which every sleeve shares:
 
 ```
