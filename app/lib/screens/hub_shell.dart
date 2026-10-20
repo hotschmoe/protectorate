@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/events.pb.dart';
@@ -20,9 +21,16 @@ import 'node_detail_screen.dart';
 import 'nodes_tab.dart';
 import 'orchestrator_tab.dart';
 import 'overview_tab.dart';
+import 'phone_devices_tab.dart';
+import 'phone_nodes_tab.dart';
+import 'quota_tab.dart';
 import 'sleeves_screen.dart';
 
 const phoneBreakpoint = 600.0;
+
+bool get usesPhoneShell =>
+    (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ||
+    (kIsWeb && kDebugMode && const bool.fromEnvironment('DEBUG_PHONE_SHELL'));
 
 class _Destination {
   const _Destination(this.id, this.label, this.icon);
@@ -37,6 +45,13 @@ const _destinations = [
   _Destination('sleeves', 'SLEEVES', Icons.smart_toy_outlined),
   _Destination('nodes', 'NODES', Icons.memory),
   _Destination('notes', 'NOTES', Icons.sticky_note_2_outlined),
+];
+
+const _phoneDestinations = [
+  _Destination('orchestrator', 'ENVOY', Icons.support_agent),
+  _Destination('quotas', 'QUOTAS', Icons.speed),
+  _Destination('nodes', 'NODES', Icons.memory),
+  _Destination('devices', 'DEVICES', Icons.phonelink_lock),
 ];
 
 // The mail view lives in the orchestrator tab; its link id lands there.
@@ -77,7 +92,11 @@ class _HubShellState extends State<HubShell> {
   late final EventFeed _feed = EventFeed(
     (signal) => _client.events.subscribe(SubscribeRequest(), signal: signal),
   )..start();
-  late int _index = tabIndex(widget.initialTab);
+  late int _index = usesPhoneShell
+      ? _phoneDestinations
+            .indexWhere((d) => d.id == widget.initialTab)
+            .clamp(0, 3)
+      : tabIndex(widget.initialTab);
   final _history = NodeHistory();
   String _orchestratorSleeve = orchestratorSleeve;
   late bool _orchestratorMail = widget.initialTab == mailTab;
@@ -91,9 +110,11 @@ class _HubShellState extends State<HubShell> {
     super.initState();
     _loadHubVersion();
     _feed.addListener(_feedChanged);
-    _tick = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted) setState(() => _clock = DateTime.now());
-    });
+    if (!usesPhoneShell) {
+      _tick = Timer.periodic(const Duration(seconds: 15), (_) {
+        if (mounted) setState(() => _clock = DateTime.now());
+      });
+    }
     final node = widget.openNode;
     if (node != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -109,6 +130,7 @@ class _HubShellState extends State<HubShell> {
               name: node,
               history: _history,
               versions: _versions,
+              phone: usesPhoneShell,
             ),
           ),
         );
@@ -178,11 +200,39 @@ class _HubShellState extends State<HubShell> {
     _ => BacklogTab(client: _client, feed: _feed),
   };
 
-  void _go(int i) => setState(() => _index = i);
+  Widget _phoneBody(String id) => switch (id) {
+    'orchestrator' => OrchestratorTab(
+      client: _client,
+      feed: _feed,
+      selected: orchestratorSleeve,
+      onSelect: (_) {},
+      mail: false,
+      onMail: (_) {},
+      envoyOnly: true,
+    ),
+    'quotas' => QuotaTab(client: _client, feed: _feed),
+    'nodes' => PhoneNodesTab(
+      hub: widget.hub,
+      client: _client,
+      feed: _feed,
+      history: _history,
+      versions: _versions,
+    ),
+    _ => PhoneDevicesTab(
+      client: _client,
+      devices: const Center(child: Text('DEVICES')),
+    ),
+  };
+
+  void _go(int i) {
+    FocusScope.of(context).unfocus();
+    setState(() => _index = i);
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
+    if (usesPhoneShell) return _phoneScaffold(context);
     final wide = MediaQuery.sizeOf(context).width >= phoneBreakpoint;
     final hh = _clock.hour.toString().padLeft(2, '0');
     final mm = _clock.minute.toString().padLeft(2, '0');
@@ -237,6 +287,63 @@ class _HubShellState extends State<HubShell> {
       bottomNavigationBar: wide
           ? null
           : _BottomBar(index: _index, onSelect: _go),
+    );
+  }
+
+  Widget _phoneScaffold(BuildContext context) {
+    final t = Tokens.of(context);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            Image.asset('assets/protectorate.png', width: 28, height: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                widget.hub.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.title(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ListenableBuilder(
+            listenable: _feed,
+            builder: (context, _) => Tooltip(
+              message: 'Hub connection: ${_feed.state.name}',
+              child: Semantics(
+                label: 'Hub connection ${_feed.state.name}',
+                child: Lamp(
+                  tone: switch (_feed.state) {
+                    FeedState.connecting => Tone.info,
+                    FeedState.live => Tone.ok,
+                    FeedState.retrying => Tone.alarm,
+                  },
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 20),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: IndexedStack(
+          index: _index,
+          children: [for (final d in _phoneDestinations) _phoneBody(d.id)],
+        ),
+      ),
+      bottomNavigationBar: keyboard
+          ? null
+          : _BottomBar(
+              index: _index,
+              onSelect: _go,
+              destinations: _phoneDestinations,
+            ),
     );
   }
 }
@@ -296,10 +403,15 @@ class _NavKey extends StatelessWidget {
 }
 
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.index, required this.onSelect});
+  const _BottomBar({
+    required this.index,
+    required this.onSelect,
+    this.destinations = _destinations,
+  });
 
   final int index;
   final void Function(int) onSelect;
+  final List<_Destination> destinations;
 
   @override
   Widget build(BuildContext context) {
@@ -316,10 +428,10 @@ class _BottomBar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: Row(
             children: [
-              for (var i = 0; i < _destinations.length; i++)
+              for (var i = 0; i < destinations.length; i++)
                 Expanded(
                   child: _NavKey(
-                    d: _destinations[i],
+                    d: destinations[i],
                     selected: i == index,
                     onTap: () => onSelect(i),
                     height: 64,

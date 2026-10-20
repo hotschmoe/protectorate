@@ -579,6 +579,19 @@ sleeve stays in the mode it was spawned in.
 
 Setup, scoping and widening: `docs/orchestrator.md`.
 
+The native Android client uses an Envoy-first shell: ENVOY, QUOTAS, NODES and
+DEVICES. Envoy is its only chat target. Streaming messages and supervised
+permission responses use the same ChatService as desktop. Node details remain
+available, but the phone exposes no sleeve chat, terminal, sessions or notes
+navigation. Emergency stop on DEVICES lists sleeves and calls KillSleeve for
+each name except Envoy directly, so it works when Envoy is unavailable. Native
+desktop and web share the full responsive shell; window width and browser
+user agent never select the Android experience.
+
+Phone node cards put the oldest observed problems first. Stale and unreachable
+nodes use their last sample age; alerts use their first observation in the
+current shell because NodeStatus has no historical alert onset timestamp.
+
 - The orchestrator ("Envoy") is **a sleeve**, not engine code. Its harness is
   whichever subscription has quota left, and its tool is the `protectorate`
   CLI with a scoped hub token.

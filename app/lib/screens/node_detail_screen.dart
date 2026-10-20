@@ -33,9 +33,11 @@ class NodeDetailScreen extends StatefulWidget {
     this.now,
     this.history,
     this.versions = const Versions(),
+    this.phone = false,
   });
 
   final Versions versions;
+  final bool phone;
   final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
@@ -201,7 +203,7 @@ class _NodeDetailScreenState extends State<NodeDetailScreen> {
                   ),
                 ),
               ),
-              onManageSleeves: s.node.local
+              onManageSleeves: s.node.local && !widget.phone
                   ? () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => SleevesScreen(

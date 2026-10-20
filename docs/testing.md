@@ -16,6 +16,46 @@ CI uses this entry point. Release additionally runs `tests/e2e` against its
 cross-built linux/amd64 binary with the same release feature tags.
 `make app-check` runs `flutter analyze`; no Dart unit/widget tests remain.
 
+`TestBinaryPhoneEmergencyStop` exercises the phone's direct hub workflow with
+a scoped device token, real shell sleeve process trees and Envoy on an official
+protocol peer. It checks read-only denial, non-Envoy cgroup teardown and token
+revocation, then a streamed reply from the surviving Envoy. It repeats the
+stop with Envoy unavailable. This lane requires the host runtime or delegated
+nested runtime; it never calls the running hub.
+
+`TestBinaryTerminalLauncher` sends more than 40 KiB of literal shell arguments
+through a real terminal sleeve, checks argument fidelity and environment
+privacy, then restarts the hub and respawns that sleeve. Terminal launches use
+a private, atomically written launcher so tmux does not have to transport the
+full delegated namespace command. For nested runs, use a short disk-backed
+temporary root such as `TMPDIR="$HOME/.cache/pt"` to keep binary and cache
+fixtures off tmpfs. The binary harness isolates tmux sockets in short private
+directories under `/tmp`, independently of that root. The deeper nested
+scenario uses private synthetic SDK/cache lower trees to avoid stacking an
+overlay on the development sleeve's already overlaid SDK caches; it keeps
+all real namespace, cgroup, OOM and CPU throttling checks and rejects skips.
+
+The native Android shell has four tabs; web and native desktop retain the full
+shell at every viewport width. Build both shipping clients with `make apk` and
+`make app-build-web`. For visual review against a throwaway real hub, run:
+
+```sh
+E2E_PHONE=1 scripts/e2e-screens.sh
+scripts/e2e-screens.sh
+```
+
+The phone command builds debug web with `DEBUG_PHONE_SHELL=true`; the override
+is gated by `kDebugMode` and cannot enable the phone shell in a release web
+build. It captures 360 and 412 px widths in light and dark themes under
+`e2e-out/phone-*.png`, including the Envoy start state, streamed markdown/code
+and a pinned permission request. Its private executable speaks Claude's
+official protocol without invoking an installed AI CLI or executing requested
+commands. These screenshots verify the client approval display; they do not
+establish provider-specific supervised behavior. The default command captures
+the full responsive web shell at 412 and 1280 px. Both commands use private
+hub state and scrub inherited sleeve credentials. `E2E_ONLY` filters captures,
+`E2E_OUT` selects the output directory, and `CHROMIUM` selects the browser.
+
 Run `make test-race` to build `bin/protectorate-race` with `-race`, the same
 feature tags, trimpath and version ldflags as `make build`, and run the full
 Go e2e suite and fuzz seeds with `go test -race`. It forces `CGO_ENABLED=1`
@@ -523,7 +563,7 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 | tests/e2e/dispatch_test.go | TestBinaryBaseNotices | Real hub with persisted worker, packed base refs, coalesced mail, restart dedupe, own-advance suppression and repository-program confinement | unmeasured | KEEP-E2E | exercises polling and mailbox without the host user manager |
 | tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
 | tests/e2e/sleeve_disk_test.go | TestBinarySleeveDiskPrune | Real hub/CLI disk accounting, safe Git prune, cache/overlay cleanup, host-lower and running-data protection, owner audit | unmeasured | KEEP-E2E | disk cleanup regression scenario |
-| tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | 15.39s pass | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
+| tests/e2e/nested_runtime_test.go | TestBinaryNestedRuntime | Real nested sleeve runs the selected production binary's isolation, ownership, restart, chat, OOM and CPU throttling scenarios; verifies hidden ancestor limits and subtree cleanup | 10.81s pass in delegated sleeve | KEEP-E2E | requires host runtime or a nested-enabled sleeve; fails on inner skips |
 | tests/e2e/race_reports_test.go | TestBinaryRaceReports | Real detector reports fail otherwise passing subprocess scenarios, including successful node artifact jobs and retained terminal panes | 6.81s race; skips non-race | KEEP-E2E | prevents silent loss of subprocess race reports |
 | tests/e2e/cli_mcp_test.go | TestBinaryCLIAndMCP | Binary CLI parsing, official MCP transports, filtering, authorization and cancellation | unmeasured | KEEP-E2E | existing scenario previously missing from this inventory |
 | tests/e2e/artifact_job_test.go | TestBinaryArtifactJobAndReplay | Directory/file artifact execution, workdir confinement, binary output, executable modes, env redaction and restart replay | unmeasured | KEEP-E2E | replaces deleted artifact-source job coverage |
@@ -543,6 +583,8 @@ Runtime is the observed non-race test-function elapsed time, including skips, un
 | tests/e2e/workspace_metadata_test.go | TestBinaryWorkspaceMetadataIsBounded | Real hub list/browser reads refuse FIFO, oversized and escaping git metadata without hanging or leaking file contents | 1.270s pass | KEEP-E2E | hostile workspace metadata regression |
 | tests/e2e/device_auth_test.go | TestBinaryDeviceAuthorization | Real hub, CLI and streams exercise approval, denial, expiry, migration, metadata, persistence, single secret delivery, mailbox access and revocation | pass | KEEP-E2E | device trust lifecycle and secret redaction |
 | tests/e2e/device_auth_test.go | TestBinaryDeviceAuthorizationLimits | Real TCP source IPs exercise start/poll budgets, malformed requests and pending capacity | pass | KEEP-E2E | unauthenticated endpoint abuse limits |
+| tests/e2e/phone_emergency_test.go | TestBinaryPhoneEmergencyStop | Scoped phone stops real worker process trees and revokes their tokens, preserves Envoy streaming, repeats with Envoy unavailable | 1.78s pass | KEEP-E2E | direct hub emergency action independent of Envoy |
+| tests/e2e/terminal_launcher_test.go | TestBinaryTerminalLauncher | Large literal terminal argv and private environment survive launch, hub restart and supported sleeve respawn | 4.79s pass | KEEP-E2E | catches tmux message-size failure and shell argument injection |
 
 ## Deleted files
 
