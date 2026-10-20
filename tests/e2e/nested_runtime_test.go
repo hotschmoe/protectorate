@@ -15,6 +15,17 @@ import (
 func TestBinaryNestedRuntime(t *testing.T) {
 	c := newCluster(t)
 	c.requireRuntime(t)
+	goBinary, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goBinary, err = filepath.EvalSymlinks(goBinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.hubArgs = []string{"--sleeve-tool-dir", filepath.Dir(c.binary), "--sleeve-tool-dir", filepath.Dir(filepath.Dir(goBinary))}
+	c.stop(c.hub)
+	c.boot()
 	if os.Getenv("PROT_E2E_NESTED_CHILD") == "1" {
 		if _, err := os.Stat(filepath.Join(sleeve.DelegatedCgroupRoot, "cgroup.controllers")); err != nil {
 			t.Fatalf("nested sleeve has no delegated subtree: %v", err)
@@ -55,6 +66,8 @@ func TestBinaryNestedRuntime(t *testing.T) {
 	}
 	script := `
 set +e
+mkdir -p "$HOME/.cache/protectorate-tests"
+export TMPDIR="$HOME/.cache/protectorate-tests"
 bwrap --version > nested.bwrap-version
 env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN PROT_E2E=1 PROT_E2E_NESTED_CHILD=1 PROT_E2E_BINARY="$PWD/protectorate" ./runtime.test -test.run '^TestBinaryNestedRuntime$' -test.v > nested.log 2>&1
 status=$?

@@ -90,7 +90,7 @@ type chatRig struct {
 func newChatRig(t *testing.T) *chatRig {
 	t.Helper()
 	testenv.E2E(t)
-	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("TMUX_TMPDIR", testenv.TmuxDir(t))
 	bin := t.TempDir()
 	for _, h := range []string{"claude", "codex", "grok", "pi"} {
 		if err := os.WriteFile(filepath.Join(bin, h), []byte(fakeClaude), 0o755); err != nil {

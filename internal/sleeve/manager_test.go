@@ -53,7 +53,7 @@ type rig struct {
 func newRig(t *testing.T) *rig {
 	t.Helper()
 	testenv.E2E(t)
-	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("TMUX_TMPDIR", testenv.TmuxDir(t))
 	home := t.TempDir()
 	cfg, err := DefaultConfig(home, nil)
 	if err != nil {
