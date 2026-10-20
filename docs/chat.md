@@ -16,6 +16,20 @@ protectorate chat respond alice <approval-id> --allow
 protectorate chat compact alice
 ```
 
+The workspace is a directory on the hub or a git URL (cloned into
+`workspaces/<name>` in the hub's state directory; the hub has no git
+credentials, so the repository must be readable without a login). `protectorate
+sleeve workspaces` lists what the hub can reuse: directories under its
+`workspaces/` and the workspaces of known sleeves. A directory under
+`workspaces/` can only be used by a sleeve of the same name; any other absolute
+path outside the state directory is accepted if it passes the sandbox checks.
+
+In the app, SESSIONS has a START WORK button: choose EXISTING (the list above),
+CLONE (a git URL) or PATH (an absolute directory on the hub). The sleeve name is
+suggested from the repository or directory and the new sleeve opens when it
+starts. NEW RAW SESSION on the same tab is the owner-only unsandboxed tmux
+session.
+
 `--mode terminal` spawns the TUI under tmux instead (always for `shell`). A
 sleeve keeps its mode for life; a terminal sleeve has no chat.
 
