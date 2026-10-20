@@ -74,12 +74,13 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 	if err := inv.WriteHosts(); err != nil {
 		return fmt.Errorf("write hosts.md: %w", err)
 	}
-	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch})
-	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client, Peers: peers}))
 	local, err := node.NewJobs(filepath.Join(home, "local-jobs"), 1)
 	if err != nil {
 		return err
 	}
+	local.Home = home
+	col := node.NewCollector(node.Options{Version: version, WatchPaths: watch, Jobs: local})
+	h.SetNodes(hub.NewNodeMonitor(inv, self, col, hub.NodeOptions{Interval: interval, Token: token, Client: client, Peers: peers}))
 	files, err := node.NewFiles(filepath.Join(home, "node-files"), false)
 	if err != nil {
 		return err
@@ -90,7 +91,7 @@ func attachNodes(h *hub.Hub, interval time.Duration, token string, watch []strin
 
 func nodeCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Inventory and live metrics of machines"}
-	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o))
+	c.AddCommand(nodeLsCmd(o), nodeShowCmd(o), nodeAddCmd(o), nodeRmCmd(o), nodeServeCmd(), nodeMetricsCmd(o), nodePutCmd(o), nodeGetCmd(o), nodeInstallCmd(), nodeUninstallCmd(), nodeDoctorCmd(o), nodeUpdateCmd(o), nodeTierCmd(o), nodeMigrateTiersCmd())
 	c.AddCommand(nodeEnrollCmds(o)...)
 	return c
 }
@@ -165,11 +166,71 @@ func nodeAddCmd(o *opts) *cobra.Command {
 	f := c.Flags()
 	f.StringVar(&n.Address, "addr", "", "tailnet name or address of the node agent (port 7475 assumed)")
 	f.StringVar(&n.SshAlias, "ssh", "", "ssh host alias for break-glass access")
-	f.StringVar(&n.Tier, "tier", hub.TierServer, "policy tier: server or family")
+	f.StringVar(&n.Tier, "tier", hub.TierShared, "tier: shared (the compute pool) or care (a machine kept for a person, never scheduled)")
 	f.StringSliceVar(&n.Tags, "tag", nil, "tag (repeatable)")
 	f.StringVar(&n.Notes, "notes", "", "free-form notes")
 	_ = c.MarkFlagRequired("addr")
 	return c
+}
+
+func nodeTierCmd(o *opts) *cobra.Command {
+	return &cobra.Command{
+		Use:   "tier <name> shared|care",
+		Short: "Change a node's tier (owner only)",
+		Long: `Moves a node between the tiers: shared (the compute pool: jobs and leases,
+sandboxed) and care (a machine kept for a person: never scheduled or leased,
+used only under an admin grant for it). The hub retags the machine on the
+tailnet (tag:tier-<tier>) and then records the tier in its inventory.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cl, err := o.nodeClient()
+			if err != nil {
+				return err
+			}
+			res, err := cl.SetNodeTier(cmd.Context(), connect.NewRequest(&pb.SetNodeTierRequest{Name: args[0], Tier: args[1]}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) { fmt.Fprintf(w, "%s is now tier %s\n", res.Msg.Name, res.Msg.Tier) })
+		},
+	}
+}
+
+func nodeMigrateTiersCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate-tiers",
+		Short: "Rename the retired tiers in this hub's nodes.yaml (server to shared, family to care)",
+		Long: `Run once on the hub machine, with the hub stopped, when the hub refuses to
+start because nodes.yaml still names the tiers server or family. It copies
+nodes.yaml to nodes.yaml.pre-tiers (refusing if that copy exists), rewrites
+the tiers atomically and regenerates hosts.md. Then start the hub and retag
+each node on the tailnet with the printed node tier commands.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := hub.Home()
+			if err != nil {
+				return err
+			}
+			changes, err := hub.MigrateTiers(home, hub.LocalNodeInfo(localNodeName(), runtime.GOOS, runtime.GOARCH))
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			if len(changes) == 0 {
+				fmt.Fprintln(w, "nodes.yaml has no retired tiers; nothing to do")
+				return nil
+			}
+			for _, c := range changes {
+				fmt.Fprintf(w, "%s: %s -> %s\n", c.Node, c.From, c.To)
+			}
+			fmt.Fprintf(w, "\nkept the old file as %s\n", filepath.Join(home, "nodes.yaml.pre-tiers"))
+			fmt.Fprintln(w, "start the hub, then retag each node on the tailnet:")
+			for _, c := range changes {
+				fmt.Fprintf(w, "  protectorate node tier %s %s\n", c.Node, c.To)
+			}
+			return nil
+		},
+	}
 }
 
 var removeJobs = map[string]pb.RemoveJobs{
@@ -276,10 +337,14 @@ func nodeServeCmd() *cobra.Command {
 			if jobSlots > 0 {
 				if jobDir == "" {
 					jobDir = filepath.Join(home, "node-jobs")
+					if d, ok := node.RunnerJobDir(home); ok {
+						jobDir = d
+					}
 				}
 				if a.Jobs, err = node.NewJobs(jobDir, jobSlots); err != nil {
 					return err
 				}
+				a.Jobs.Home = home
 				watch = append(watch, a.Jobs.Dir())
 			}
 			if fileRoot == "" {
@@ -314,7 +379,7 @@ func nodeServeCmd() *cobra.Command {
 				fmt.Fprintln(cmd.ErrOrStderr(), "node agent: the updated binary never confirmed; rolled back to the previous one and restarting")
 				return nil
 			}
-			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow})
+			a.Collector = node.NewCollector(node.Options{Version: version, WatchPaths: watch, SlowInterval: slow, Jobs: a.Jobs})
 			tsDir := filepath.Join(home, "tsnet")
 			if tailnet.Joined(tsDir) {
 				n, err := tailnet.OpenNode(ctx, tsDir)
@@ -350,7 +415,7 @@ func nodeServeCmd() *cobra.Command {
 	f.StringVar(&listen, "listen", fmt.Sprintf("127.0.0.1:%d", node.DefaultPort), "address to listen on when not enrolled in a tailnet")
 	f.StringVar(&tokenFile, "node-token-file", "", "file holding the bearer token the hub must present when not enrolled in a tailnet (or the token itself in env "+nodeTokenEnv+")")
 	f.StringSliceVar(&watch, "watch", nil, "directory whose size is tracked, e.g. a build cache (repeatable)")
-	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs)")
+	f.StringVar(&jobDir, "job-dir", "", "where hub jobs run and git worktrees are cached (default $PROTECTORATE_HOME/node-jobs, or the runner's directory on Windows after node install --runner)")
 	f.StringVar(&fileRoot, "file-root", "", "directory file transfers are confined to (default $PROTECTORATE_HOME/node-files)")
 	f.BoolVar(&fileUnconfined, "file-unconfined", false, "let file transfers touch any path this user can, like a job can; --file-root then only anchors relative paths")
 	f.IntVar(&jobSlots, "job-concurrency", 1, "jobs that may run at once; 0 refuses jobs")

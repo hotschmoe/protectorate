@@ -55,7 +55,7 @@ func toProtoToken(t auth.Token) *pb.TokenInfo {
 	return &pb.TokenInfo{
 		Id: t.ID, Name: t.Name, Scopes: t.Scopes,
 		CreatedAt: timestamppb.New(t.Created), ExpiresAt: ts(t.Expires),
-		LastUsedAt: ts(t.LastUsed), RevokedAt: ts(t.RevokedAt),
+		LastUsedAt: ts(t.LastUsed), RevokedAt: ts(t.RevokedAt), Task: t.Task, MintedBy: t.MintedBy,
 	}
 }
 
@@ -96,7 +96,7 @@ func (h *Hub) ListAuditEntries(_ context.Context, req *connect.Request[pb.ListAu
 	for _, e := range page.Entries {
 		res.Entries = append(res.Entries, &pb.AuditEntry{
 			Time: timestamppb.New(e.Time), Actor: e.Actor, TokenId: e.TokenID, Tailnet: e.Tailnet,
-			Procedure: e.Procedure, Subject: e.Subject, Outcome: e.Outcome, Code: e.Code,
+			Procedure: e.Procedure, Subject: e.Subject, Outcome: e.Outcome, Code: e.Code, Task: e.Task, Detail: e.Detail,
 		})
 	}
 	res.NextPageToken = page.Next

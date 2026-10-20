@@ -16,7 +16,9 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 service LeaseService {
   // AcquireLease reserves one resource exclusively: a node name ("win1"), one
   // GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
-  // least-loaded fresh matching node that is not already leased. When the
+  // least-loaded fresh matching node of tier "shared" that is not already
+  // leased; nodes of tier "care" are never leased, except their desktop
+  // ("desk:<node>") under the owner token or a node_admin grant. When the
   // resource is held, the call fails with failed_precondition, unless the
   // request sets wait: then the caller is queued first in first out (highest
   // priority first) and gets a ticket, a Lease in state QUEUED. When the hub
@@ -69,8 +71,7 @@ message AcquireLeaseRequest {
   string holder = 3;
   // ttl is how long the lease lives without a renewal; at most 24h.
   google.protobuf.Duration ttl = 4;
-  // allow_family admits nodes of tier "family", which are skipped otherwise.
-  bool allow_family = 5;
+  reserved 5;
   // wait queues the caller when the resource is held instead of failing.
   bool wait = 6;
   // priority orders the queue: larger first, then first come first served.

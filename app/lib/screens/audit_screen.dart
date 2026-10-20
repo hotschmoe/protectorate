@@ -345,7 +345,11 @@ class AuditRow extends StatelessWidget {
             cell(e.actor, 1, style: t.data(t.p.emph)),
             cell(e.tailnet, 2, style: t.small()),
             cell(shortProcedure(e.procedure), 3),
-            cell(e.subject, 4, style: t.data(t.p.emph)),
+            cell(
+              e.task.isEmpty ? e.subject : '${e.subject} [task: ${e.task}]',
+              4,
+              style: t.data(t.p.emph),
+            ),
             Expanded(
               flex: _flex[5],
               child: Row(
@@ -411,6 +415,17 @@ class AuditRow extends StatelessWidget {
               ],
             ),
           ),
+          if (e.task.isNotEmpty || e.detail.isNotEmpty)
+            Text(
+              [
+                if (e.task.isNotEmpty) 'task: ${e.task}',
+                if (e.detail.isNotEmpty) e.detail,
+              ].join('  '),
+              key: ValueKey('audit-note-$index'),
+              style: t.small(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
         ],
       ),
     );

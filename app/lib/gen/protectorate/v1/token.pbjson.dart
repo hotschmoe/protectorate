@@ -16,9 +16,53 @@ import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
 import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
-    as $1;
-import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
+    as $1;
+
+@$core.Deprecated('Use grantServiceAdminRequestDescriptor instead')
+const GrantServiceAdminRequest$json = {
+  '1': 'GrantServiceAdminRequest',
+  '2': [
+    {'1': 'node', '3': 1, '4': 1, '5': 9, '10': 'node'},
+    {
+      '1': 'ttl',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Duration',
+      '10': 'ttl'
+    },
+    {'1': 'task', '3': 3, '4': 1, '5': 9, '10': 'task'},
+  ],
+};
+
+/// Descriptor for `GrantServiceAdminRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List grantServiceAdminRequestDescriptor = $convert.base64Decode(
+    'ChhHcmFudFNlcnZpY2VBZG1pblJlcXVlc3QSEgoEbm9kZRgBIAEoCVIEbm9kZRIrCgN0dGwYAi'
+    'ABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25SA3R0bBISCgR0YXNrGAMgASgJUgR0YXNr');
+
+@$core.Deprecated('Use grantServiceAdminResponseDescriptor instead')
+const GrantServiceAdminResponse$json = {
+  '1': 'GrantServiceAdminResponse',
+  '2': [
+    {
+      '1': 'token',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenInfo',
+      '10': 'token'
+    },
+    {'1': 'secret', '3': 2, '4': 1, '5': 9, '10': 'secret'},
+  ],
+};
+
+/// Descriptor for `GrantServiceAdminResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List grantServiceAdminResponseDescriptor =
+    $convert.base64Decode(
+        'ChlHcmFudFNlcnZpY2VBZG1pblJlc3BvbnNlEjAKBXRva2VuGAEgASgLMhoucHJvdGVjdG9yYX'
+        'RlLnYxLlRva2VuSW5mb1IFdG9rZW4SFgoGc2VjcmV0GAIgASgJUgZzZWNyZXQ=');
 
 @$core.Deprecated('Use tokenInfoDescriptor instead')
 const TokenInfo$json = {
@@ -59,6 +103,8 @@ const TokenInfo$json = {
       '6': '.google.protobuf.Timestamp',
       '10': 'revokedAt'
     },
+    {'1': 'task', '3': 8, '4': 1, '5': 9, '10': 'task'},
+    {'1': 'minted_by', '3': 9, '4': 1, '5': 9, '10': 'mintedBy'},
   ],
 };
 
@@ -69,7 +115,8 @@ final $typed_data.Uint8List tokenInfoDescriptor = $convert.base64Decode(
     'aW1lc3RhbXBSCWNyZWF0ZWRBdBI5CgpleHBpcmVzX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYn'
     'VmLlRpbWVzdGFtcFIJZXhwaXJlc0F0EjwKDGxhc3RfdXNlZF9hdBgGIAEoCzIaLmdvb2dsZS5w'
     'cm90b2J1Zi5UaW1lc3RhbXBSCmxhc3RVc2VkQXQSOQoKcmV2b2tlZF9hdBgHIAEoCzIaLmdvb2'
-    'dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSCXJldm9rZWRBdA==');
+    'dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSCXJldm9rZWRBdBISCgR0YXNrGAggASgJUgR0YXNrEhsK'
+    'CW1pbnRlZF9ieRgJIAEoCVIIbWludGVkQnk=');
 
 @$core.Deprecated('Use createTokenRequestDescriptor instead')
 const CreateTokenRequest$json = {
@@ -203,10 +250,10 @@ const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
 const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
     TokenServiceBase$messageJson = {
   '.protectorate.v1.CreateTokenRequest': CreateTokenRequest$json,
-  '.google.protobuf.Duration': $1.Duration$json,
+  '.google.protobuf.Duration': $0.Duration$json,
   '.protectorate.v1.CreateTokenResponse': CreateTokenResponse$json,
   '.protectorate.v1.TokenInfo': TokenInfo$json,
-  '.google.protobuf.Timestamp': $0.Timestamp$json,
+  '.google.protobuf.Timestamp': $1.Timestamp$json,
   '.protectorate.v1.ListTokensRequest': ListTokensRequest$json,
   '.protectorate.v1.ListTokensResponse': ListTokensResponse$json,
   '.protectorate.v1.RevokeTokenRequest': RevokeTokenRequest$json,
@@ -221,3 +268,29 @@ final $typed_data.Uint8List tokenServiceDescriptor = $convert.base64Decode(
     'F0ZS52MS5MaXN0VG9rZW5zUmVzcG9uc2UiA5ACARJeCgtSZXZva2VUb2tlbhIjLnByb3RlY3Rv'
     'cmF0ZS52MS5SZXZva2VUb2tlblJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuUmV2b2tlVG9rZW'
     '5SZXNwb25zZSIEiLUYARoEmLUYAQ==');
+
+const $core.Map<$core.String, $core.dynamic> GrantServiceBase$json = {
+  '1': 'GrantService',
+  '2': [
+    {
+      '1': 'Admin',
+      '2': '.protectorate.v1.GrantServiceAdminRequest',
+      '3': '.protectorate.v1.GrantServiceAdminResponse'
+    },
+  ],
+};
+
+@$core.Deprecated('Use grantServiceDescriptor instead')
+const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
+    GrantServiceBase$messageJson = {
+  '.protectorate.v1.GrantServiceAdminRequest': GrantServiceAdminRequest$json,
+  '.google.protobuf.Duration': $0.Duration$json,
+  '.protectorate.v1.GrantServiceAdminResponse': GrantServiceAdminResponse$json,
+  '.protectorate.v1.TokenInfo': TokenInfo$json,
+  '.google.protobuf.Timestamp': $1.Timestamp$json,
+};
+
+/// Descriptor for `GrantService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
+final $typed_data.Uint8List grantServiceDescriptor = $convert.base64Decode(
+    'CgxHcmFudFNlcnZpY2USXgoFQWRtaW4SKS5wcm90ZWN0b3JhdGUudjEuR3JhbnRTZXJ2aWNlQW'
+    'RtaW5SZXF1ZXN0GioucHJvdGVjdG9yYXRlLnYxLkdyYW50U2VydmljZUFkbWluUmVzcG9uc2U=');

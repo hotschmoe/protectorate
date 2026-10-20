@@ -170,7 +170,9 @@ func firstSentence(s string, limit int) string {
 // message_* lets Poe answer the escalations the mailbox sends it.
 // session_* is deliberately absent: session creation starts host processes
 // outside any sandbox. Poe starts work only through sandboxed sleeves.
-var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve"}
+// grant_admin works only on a hub started with --orchestrator-admin-grants,
+// and only for shared nodes.
+var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "grant_admin"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of

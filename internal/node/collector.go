@@ -37,6 +37,8 @@ type Options struct {
 	// MinAge is how long a Collect result is reused by concurrent callers,
 	// default 2s.
 	MinAge time.Duration
+	// Jobs, when set, reports how this node isolates and elevates jobs.
+	Jobs *Jobs
 }
 
 func (o Options) withDefaults() Options {
@@ -137,6 +139,9 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 	}
 	m := &pb.NodeMetrics{Os: runtime.GOOS, Arch: runtime.GOARCH, AgentVersion: c.opts.Version, CollectedAt: timestamppb.Now()}
 	m.Hostname = Hostname()
+	if c.opts.Jobs != nil {
+		m.Jobs = c.opts.Jobs.Isolation()
+	}
 
 	var (
 		mu sync.Mutex

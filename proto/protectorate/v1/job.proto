@@ -45,6 +45,34 @@ service JobService {
   }
 }
 
+// JobMode is how the node runs a job's command.
+enum JobMode {
+  // JOB_MODE_UNSPECIFIED is treated as JOB_MODE_SANDBOXED.
+  JOB_MODE_UNSPECIFIED = 0;
+  // JOB_MODE_SANDBOXED isolates the command as far as the node can (see
+  // JobIsolation): the job on a shared node.
+  JOB_MODE_SANDBOXED = 1;
+  // JOB_MODE_PLAIN runs it as the agent's user, unsandboxed: a job on a care
+  // node under a grant, which maintains that machine.
+  JOB_MODE_PLAIN = 2;
+  // JOB_MODE_ADMIN runs it elevated and unsandboxed.
+  JOB_MODE_ADMIN = 3;
+}
+
+// JobIsolation is what a node can do for jobs, reported in its metrics.
+message JobIsolation {
+  // sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "bwrap" (Linux:
+  // bwrap in a systemd user scope), "runner" (Windows: the
+  // protectorate-runner account in a job object), "job-object" (Windows:
+  // the agent's own account in a job object, unisolated) or "none".
+  string sandbox = 1;
+  // note says why isolation is missing or partial.
+  string note = 2;
+  // admin is how admin jobs elevate: "sudo", "root" or "elevated"; empty
+  // when this node cannot run them.
+  string admin = 3;
+}
+
 enum JobState {
   JOB_STATE_UNSPECIFIED = 0;
   // JOB_STATE_PREPARING: choosing a node, shipping the source, waiting for a
@@ -58,18 +86,20 @@ enum JobState {
   JOB_STATE_TIMED_OUT = 6;
 }
 
-// JobTarget says where a job runs.
+// JobTarget says where a job runs. Nodes of tier "care" are never picked
+// by a selector or leased; naming one needs the owner token or a token with
+// the scope node_admin:<node>.
 message JobTarget {
   oneof target {
     // lease_id runs on the node of a live lease (and on its GPU, if any).
     string lease_id = 1;
     // node is a node name.
     string node = 2;
-    // selector picks the least-loaded fresh matching node that is not leased.
+    // selector picks the least-loaded fresh matching node of tier "shared"
+    // that is not leased.
     NodeSelector selector = 3;
   }
-  // allow_family admits nodes of tier "family".
-  bool allow_family = 4;
+  reserved 4;
 }
 
 // GitSource ships one commit of a repository on the hub.
@@ -125,6 +155,22 @@ message SubmitJobRequest {
   // that lost the response can still find or cancel the job (CancelJob
   // request_id). Empty means no deduplication.
   string request_id = 7;
+  // admin runs the command elevated (sudo -n on Linux, the agent's own
+  // elevated token on Windows). It needs a named node or a lease (not a
+  // selector), a node that reports it can elevate, and the owner token or a
+  // node_admin grant for the node. Admin jobs are never sandboxed.
+  bool admin = 8;
+  // limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox
+  // is "bwrap" or a Windows job object); unset means no cap.
+  JobLimits limits = 9;
+}
+
+// JobLimits are cgroup (Linux) or job object (Windows) caps.
+message JobLimits {
+  // cpu_percent is CPU time as a share of one core: 200 is two cores.
+  uint32 cpu_percent = 1;
+  // memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.
+  uint64 memory_bytes = 2;
 }
 
 message GetJobRequest {
@@ -221,6 +267,13 @@ message Job {
   repeated JobArtifact artifacts = 20;
   uint64 artifact_bytes = 21;
   uint64 log_bytes = 22;
+  JobMode mode = 23;
+  // isolation is how the node ran the command, as it reported at start, e.g.
+  // "bwrap", "none: bwrap is not installed", "sudo".
+  string isolation = 24;
+  // task is the task of the admin grant the job was submitted with.
+  string task = 25;
+  JobLimits limits = 26;
 }
 
 message PrepareJobRequest {
@@ -271,10 +324,14 @@ message RunJobRequest {
   bool artifact_archive = 10;
   // workdir is relative to the job directory; only valid with an archive.
   string workdir = 11;
+  JobMode mode = 12;
+  JobLimits limits = 13;
 }
 
 message JobStarted {
   bool workspace_reused = 1;
+  // isolation is how the command runs, as in Job.isolation.
+  string isolation = 2;
 }
 
 message JobOutput {

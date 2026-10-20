@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -274,6 +275,45 @@ func TestInstallDryRunChangesNothing(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(home); len(entries) != 0 {
 		t.Errorf("dry run wrote %v", entries)
+	}
+}
+
+func TestInstallRunner(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    string
+		wantErr string
+	}{
+		{"dry run lists every step", []string{"--runner", "--dry-run"}, "protectorate-runner", ""},
+		{"windows only", []string{"--runner"}, "", "for Windows nodes"},
+		{"control still required without --runner", []string{"--key", "K"}, "", `"control" not set`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantErr == "for Windows nodes" && runtime.GOOS == "windows" {
+				t.Skip("would create the account")
+			}
+			home := t.TempDir()
+			root := newRoot()
+			var out bytes.Buffer
+			root.SetOut(&out)
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs(append([]string{"node", "install", "--home", home}, tt.args...))
+			err := root.Execute()
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(out.String(), tt.want) || !strings.Contains(out.String(), "8. ") {
+				t.Fatalf("err %v, output:\n%s", err, out.String())
+			}
+			if entries, _ := os.ReadDir(home); len(entries) != 0 {
+				t.Errorf("dry run wrote %v", entries)
+			}
+		})
 	}
 }
 

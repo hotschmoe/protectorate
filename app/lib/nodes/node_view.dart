@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/job.pb.dart';
 import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
@@ -97,25 +98,11 @@ GpuSummary? summarizeGpus(NodeMetrics m) {
 
 double? knownPercent(double v) => v >= 0 ? v : null;
 
-// A GPU counts as busy when another process holds most of its memory or it
-// is under heavy load (docs/node-work.md, "Busy GPUs"); an idle loaded model
-// still holds VRAM, so memory is the main signal.
-const busyVramShare = 0.5;
-const busyUtilPercent = 80.0;
-
-// Why a GPU is busy, or null when it is not. The one place that decides it:
-// switch it to the hub's busy flag once NodeStatus carries one.
-String? gpuBusy(GpuMetrics g) {
-  final total = g.memoryTotalBytes.toInt();
-  if (!g.integrated &&
-      total > 0 &&
-      g.hasMemoryUsedBytes() &&
-      g.memoryUsedBytes.toInt() >= total * busyVramShare) {
-    return 'VRAM HELD';
-  }
-  if (g.utilizationPercent >= busyUtilPercent) return 'LOADED';
-  return null;
-}
+// Why each GPU of a node is busy, by GPU index: the hub's judgement from the
+// node's recent polls (NodeStatus.busy_gpus, docs/node-work.md "Busy GPUs").
+Map<int, String> gpuBusy(NodeStatus s) => {
+  for (final b in s.busyGpus) b.index: b.reason,
+};
 
 // Who holds a lease on each GPU of a node, by GPU index.
 Map<int, String> gpuHolders(Iterable<Lease> leases, String node) => {
@@ -135,6 +122,7 @@ class GpuLines extends StatelessWidget {
     this.dim = false,
     this.detail = false,
     this.holder = '',
+    this.busy = '',
   });
 
   final GpuMetrics gpu;
@@ -142,6 +130,8 @@ class GpuLines extends StatelessWidget {
   final bool detail;
   // holder is who leases this GPU, when anyone does.
   final String holder;
+  // busy is why the hub counts this GPU as busy, empty when it does not.
+  final String busy;
 
   @override
   Widget build(BuildContext context) {
@@ -151,7 +141,6 @@ class GpuLines extends StatelessWidget {
     final total = g.memoryTotalBytes.toInt();
     final used = g.memoryUsedBytes.toInt();
     final valueChars = detail ? 17 : 12;
-    final busy = gpuBusy(g);
     return Padding(
       padding: EdgeInsets.symmetric(vertical: detail ? 4 : 2),
       child: Column(
@@ -179,7 +168,7 @@ class GpuLines extends StatelessWidget {
             ),
             overflow: TextOverflow.ellipsis,
           ),
-          if (busy != null || holder.isNotEmpty)
+          if (busy.isNotEmpty || holder.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Wrap(
@@ -187,13 +176,15 @@ class GpuLines extends StatelessWidget {
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  if (busy != null)
+                  if (busy.isNotEmpty) ...[
                     Annunciator(
                       key: ValueKey('gpu-busy-${g.index}'),
-                      label: 'BUSY $busy',
+                      label: 'BUSY',
                       tone: Tone.warn,
                       lit: !dim,
                     ),
+                    Text(busy, style: t.small()),
+                  ],
                   if (holder.isNotEmpty)
                     Annunciator(
                       key: ValueKey('gpu-holder-${g.index}'),
@@ -366,6 +357,23 @@ List<Sleeve> sleevesBySize(NodeMetrics m) {
   );
   return list;
 }
+
+// A care node is a machine kept for a person: never scheduled or leased.
+const tierCare = 'care';
+
+bool isCareNode(NodeStatus s) => s.node.tier == tierCare;
+
+// How a node isolates jobs ("bwrap", "runner", "job-object", "none") and
+// elevates admin jobs, one line each.
+List<String> jobIsolationLines(JobIsolation j) => [
+  'sandbox ${j.sandbox.isEmpty ? 'none' : j.sandbox}',
+  j.admin.isEmpty ? 'no admin jobs' : 'admin via ${j.admin}',
+  if (j.note.isNotEmpty) j.note,
+];
+
+// A node whose ordinary jobs run without isolation.
+bool jobsUnisolated(JobIsolation j) =>
+    j.sandbox == 'none' || j.sandbox == 'job-object';
 
 class AlertBadge {
   const AlertBadge(this.label, this.critical);

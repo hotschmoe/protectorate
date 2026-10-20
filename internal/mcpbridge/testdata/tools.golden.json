@@ -238,9 +238,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -277,9 +274,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -313,9 +307,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -346,9 +337,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -379,9 +367,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -427,9 +412,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -464,9 +446,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -497,9 +476,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
@@ -555,6 +531,35 @@
       "type": "object"
     },
     "name": "directory_list_projects"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Admin mints a grant. The secret is returned once.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "node is a node name, or (owner only) a path.Match glob over node names.",
+          "type": "string"
+        },
+        "task": {
+          "description": "task says what the grant is for, e.g. \"update the kids' machine\". It is stored with the token and written to every audit line the grant causes.",
+          "type": "string"
+        },
+        "ttl": {
+          "description": "ttl is the grant's lifetime; unset means 4h, at most 24h.",
+          "pattern": "^-?[0-9]+(\\.[0-9]+)?s$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "grant_admin"
   },
   {
     "annotations": {
@@ -655,6 +660,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "admin": {
+          "description": "admin runs the command elevated (sudo -n on Linux, the agent's own elevated token on Windows). It needs a named node or a lease (not a selector), a node that reports it can elevate, and the owner token or a node_admin grant for the node. Admin jobs are never sandboxed.",
+          "type": "boolean"
+        },
         "artifactGlobs": {
           "description": "artifact_globs select files, relative to the working directory, that are sent back to $PROTECTORATE_HOME/jobs/\u003cid\u003e/artifacts/. A glob that matches a directory takes the files below it.",
           "items": {
@@ -672,6 +681,21 @@
         "env": {
           "additionalProperties": {
             "type": "string"
+          },
+          "type": "object"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "description": "limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox is \"bwrap\" or a Windows job object); unset means no cap.",
+          "properties": {
+            "cpuPercent": {
+              "description": "cpu_percent is CPU time as a share of one core: 200 is two cores.",
+              "type": "integer"
+            },
+            "memoryBytes": {
+              "description": "memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.",
+              "type": "integer"
+            }
           },
           "type": "object"
         },
@@ -718,10 +742,6 @@
         "target": {
           "additionalProperties": false,
           "properties": {
-            "allowFamily": {
-              "description": "allow_family admits nodes of tier \"family\".",
-              "type": "boolean"
-            },
             "leaseId": {
               "description": "lease_id runs on the node of a live lease (and on its GPU, if any).",
               "type": "string"
@@ -732,7 +752,7 @@
             },
             "selector": {
               "additionalProperties": false,
-              "description": "selector picks the least-loaded fresh matching node that is not leased.",
+              "description": "selector picks the least-loaded fresh matching node of tier \"shared\" that is not leased.",
               "properties": {
                 "arch": {
                   "type": "string"
@@ -780,14 +800,10 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node that is not already leased. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased, except their desktop (\"desk:\u003cnode\u003e\") under the owner token or a node_admin grant. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowFamily": {
-          "description": "allow_family admits nodes of tier \"family\", which are skipped otherwise.",
-          "type": "boolean"
-        },
         "holder": {
           "description": "holder labels who holds the lease, e.g. a sleeve or agent name.",
           "type": "string"
@@ -1080,9 +1096,6 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowFamily": {
-          "type": "boolean"
-        },
         "name": {
           "type": "string"
         }
@@ -1134,9 +1147,6 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "allowFamily": {
-          "type": "boolean"
-        },
         "chunk": {
           "additionalProperties": false,
           "properties": {

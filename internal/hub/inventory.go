@@ -24,9 +24,11 @@ import (
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
+// Tiers. A shared node is part of the compute pool; a care node is a machine
+// kept for a person and is never scheduled or leased.
 const (
-	TierServer = "server"
-	TierFamily = "family"
+	TierShared = "shared"
+	TierCare   = "care"
 )
 
 var (
@@ -80,11 +82,12 @@ func OpenInventory(dir string, local *pb.NodeInfo) (*Inventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read inventory: %w", err)
 	}
-	var f inventoryFile
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("parse %s: %w", inv.path(), err)
+	f, err := parseInventory(inv.path(), raw)
+	if err != nil {
+		return nil, err
+	}
+	if n := retiredTiers(f.Nodes); n > 0 {
+		return nil, fmt.Errorf("%w: %s has %d node(s) with tier server or family; stop the hub and run `protectorate node migrate-tiers`", ErrRetiredTiers, inv.path(), n)
 	}
 	seen := map[string]bool{}
 	for i := range f.Nodes {
@@ -105,6 +108,92 @@ func OpenInventory(dir string, local *pb.NodeInfo) (*Inventory, error) {
 
 func (i *Inventory) path() string { return filepath.Join(i.dir, "nodes.yaml") }
 
+func parseInventory(path string, raw []byte) (inventoryFile, error) {
+	var f inventoryFile
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
+		return f, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return f, nil
+}
+
+// ErrRetiredTiers marks an inventory written before the tiers were renamed.
+var ErrRetiredTiers = errors.New("retired tier names")
+
+// retiredTierNames maps the tiers before 2026-10-20 to their new names.
+var retiredTierNames = map[string]string{"server": TierShared, "family": TierCare}
+
+func retiredTiers(nodes []nodeRecord) int {
+	n := 0
+	for _, r := range nodes {
+		if _, ok := retiredTierNames[strings.ToLower(strings.TrimSpace(r.Tier))]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// TierChange is one node MigrateTiers renamed.
+type TierChange struct{ Node, From, To string }
+
+// MigrateTiers rewrites the retired tiers in dir/nodes.yaml (server becomes
+// shared, family becomes care). It first copies the file to
+// nodes.yaml.pre-tiers, refusing to overwrite an earlier copy, then replaces
+// nodes.yaml atomically and regenerates hosts.md. An inventory without
+// retired tiers is left alone. The hub must not be running.
+func MigrateTiers(dir string, local *pb.NodeInfo) ([]TierChange, error) {
+	path := filepath.Join(dir, "nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read inventory: %w", err)
+	}
+	f, err := parseInventory(path, raw)
+	if err != nil {
+		return nil, err
+	}
+	var changes []TierChange
+	for i, r := range f.Nodes {
+		if to, ok := retiredTierNames[strings.ToLower(strings.TrimSpace(r.Tier))]; ok {
+			changes = append(changes, TierChange{Node: r.Name, From: r.Tier, To: to})
+			f.Nodes[i].Tier = to
+		}
+	}
+	if len(changes) == 0 {
+		return nil, nil
+	}
+	backup := path + ".pre-tiers"
+	bf, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("keep a copy of the old inventory: %w", err)
+	}
+	if _, err := bf.Write(raw); err != nil {
+		bf.Close()
+		return nil, fmt.Errorf("write %s: %w", backup, err)
+	}
+	if err := bf.Close(); err != nil {
+		return nil, fmt.Errorf("write %s: %w", backup, err)
+	}
+	inv := &Inventory{dir: dir, local: local}
+	next := make([]nodeRecord, len(f.Nodes))
+	for i := range f.Nodes {
+		n, err := normalize(&f.Nodes[i])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		next[i] = *n
+	}
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+	if err := inv.commit(next); err != nil {
+		return nil, err
+	}
+	return changes, nil
+}
+
 // normalize validates r in place semantics and returns the cleaned record.
 func normalize(r *nodeRecord) (*nodeRecord, error) {
 	n := *r
@@ -114,7 +203,7 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 	n.Tier = strings.ToLower(strings.TrimSpace(n.Tier))
 	n.Notes = strings.TrimSpace(n.Notes)
 	if n.Tier == "" {
-		n.Tier = TierServer
+		n.Tier = TierShared
 	}
 	switch {
 	case !nodeNameRe.MatchString(n.Name):
@@ -123,8 +212,8 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 		return nil, fmt.Errorf("%w: %s: address %q must be host, host:port or http(s)://host[:port] with no path or credentials", ErrInvalidNode, n.Name, n.Addr)
 	case n.SSH != "" && !sshAliasRe.MatchString(n.SSH):
 		return nil, fmt.Errorf("%w: %s: ssh alias %q has invalid characters", ErrInvalidNode, n.Name, n.SSH)
-	case n.Tier != TierServer && n.Tier != TierFamily:
-		return nil, fmt.Errorf("%w: %s: tier %q must be %q or %q", ErrInvalidNode, n.Name, n.Tier, TierServer, TierFamily)
+	case !ValidTier(n.Tier):
+		return nil, fmt.Errorf("%w: %s: tier %q must be %q or %q", ErrInvalidNode, n.Name, n.Tier, TierShared, TierCare)
 	}
 	tags := make([]string, 0, len(n.Tags))
 	seen := map[string]bool{}
@@ -142,6 +231,9 @@ func normalize(r *nodeRecord) (*nodeRecord, error) {
 	n.Tags = tags
 	return &n, nil
 }
+
+// ValidTier reports whether t names a tier.
+func ValidTier(t string) bool { return t == TierShared || t == TierCare }
 
 // validNodeAddr accepts only a bare host or IP with an optional port and an
 // optional http or https scheme. The node token is sent to this address, so
@@ -269,6 +361,28 @@ func (i *Inventory) Remove(name string) error {
 	return fmt.Errorf("%w: %s", ErrNodeNotFound, name)
 }
 
+// SetTier changes a stored node's tier.
+func (i *Inventory) SetTier(name, tier string) (*pb.NodeInfo, error) {
+	if !ValidTier(tier) {
+		return nil, fmt.Errorf("%w: tier %q must be %q or %q", ErrInvalidNode, tier, TierShared, TierCare)
+	}
+	name = strings.ToLower(name)
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for k, r := range i.nodes {
+		if r.Name != name {
+			continue
+		}
+		next := append([]nodeRecord(nil), i.nodes...)
+		next[k].Tier = tier
+		if err := i.commit(next); err != nil {
+			return nil, err
+		}
+		return next[k].info(), nil
+	}
+	return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, name)
+}
+
 // SetPlatform records the os/arch a node reported; it is a no-op when equal.
 func (i *Inventory) SetPlatform(name, osName, arch string) error {
 	i.mu.Lock()
@@ -341,7 +455,7 @@ func renderHosts(local *pb.NodeInfo, nodes []nodeRecord) []byte {
 	}
 	b.WriteString("\n")
 	b.WriteString("- Reach a node with `ssh <SSH alias>` when one is set.\n")
-	b.WriteString("- Tiers: `server` (machines for unattended work), `family` (machines used by people).\n")
+	b.WriteString("- Tiers: `shared` (the compute pool: jobs and leases, sandboxed), `care` (a machine kept for a person: never scheduled or leased).\n")
 	b.WriteString("- Live CPU, GPU, memory and disk per node: `protectorate node ls`, `protectorate node show <name>`.\n")
 	return b.Bytes()
 }

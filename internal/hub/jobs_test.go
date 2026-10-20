@@ -3,6 +3,9 @@ package hub
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,6 +61,13 @@ type jobEnv struct {
 // loopback and waits until both are fresh.
 func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	t.Helper()
+	return newJobEnvSandbox(t, peerSlots, false)
+}
+
+// newJobEnvSandbox is newJobEnv; with sandbox the peer probes the host and
+// runs its jobs in bwrap when the host can.
+func newJobEnvSandbox(t *testing.T, peerSlots int, sandbox bool) *jobEnv {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("PROTECTORATE_HOME", home)
 	remote, err := node.NewJobs(filepath.Join(t.TempDir(), "peer-jobs"), peerSlots)
@@ -68,6 +78,14 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// "root" elevation runs the command unchanged, so admin jobs run as the
+	// test user and never call sudo.
+	if sandbox {
+		remote.Home = t.TempDir()
+	} else {
+		remote.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Admin: "root"} }
+	}
+	local.Probe = func() *pb.JobIsolation { return &pb.JobIsolation{Sandbox: "none", Note: "no admin jobs: test"} }
 	peerFiles, err := node.NewFiles(filepath.Join(t.TempDir(), "peer-files"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +100,7 @@ func newJobEnv(t *testing.T, peerSlots int) *jobEnv {
 	peerClock.advance(24 * time.Hour)
 	e := &jobEnv{home: home, remote: remote, peerRoot: peerFiles.Root(), hubRoot: hubFiles.Root(), peerDesk: peerDesk, hubDesk: hubDesk, peerGuard: peerGuard, peerClock: peerClock, tn: newRecordingAdmin()}
 	agent := &node.Agent{
-		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+		Collector: node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock", Jobs: remote}),
 		Authorize: node.TokenAuthorizer(agentToken),
 		Jobs:      remote,
 		Files:     peerFiles,
@@ -117,7 +135,7 @@ func (e *jobEnv) bootHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New("test", testToken)
-	h.SetNodes(NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock"}),
+	h.SetNodes(NewNodeMonitor(inv, testSelf, node.NewCollector(node.Options{DockerHost: "unix:///nonexistent.sock", Jobs: e.local}),
 		NodeOptions{Interval: 100 * time.Millisecond, Token: agentToken}))
 	h.EnableNodeOps(e.hubF, &node.Desk{D: e.hubDesk})
 	if err := h.EnableJobs(e.home, e.local); err != nil {
@@ -620,6 +638,30 @@ func TestJobSurvivesHubRestart(t *testing.T) {
 	}
 }
 
+// TestSandboxedJobSurvivesHubRestart runs a job in the peer's bwrap sandbox
+// and restarts the hub under it: the agent's job runner owns the sandbox, so
+// the job goes on and the new hub reattaches to it.
+func TestSandboxedJobSurvivesHubRestart(t *testing.T) {
+	e := newJobEnvSandbox(t, 1, true)
+	if iso := e.remote.Isolation(); iso.Sandbox != "bwrap" {
+		t.Skipf("no sandbox on this host: %s", iso.Note)
+	}
+	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"sh", "-c", "echo up; sleep 2; echo down; exit 3"}, Limits: &pb.JobLimits{MemoryBytes: 256 << 20}})
+	waitUntil(t, 10*time.Second, "first output", func() bool { return strings.Contains(e.logOf(t, j.Id), "up") })
+	e.restart(t)
+	if got := e.get(t, j.Id); terminal(got.State) {
+		t.Fatalf("job ended with the hub: %v", got)
+	}
+	var last *pb.Job
+	waitUntil(t, 20*time.Second, "job end", func() bool {
+		last = e.get(t, j.Id)
+		return terminal(last.State)
+	})
+	if last.ExitCode != 3 || e.logOf(t, j.Id) != "up\ndown\n" || last.Isolation != "bwrap, memory 256 MiB" || last.Mode != pb.JobMode_JOB_MODE_SANDBOXED {
+		t.Fatalf("after restart: exit %d isolation %q mode %v log %q", last.ExitCode, last.Isolation, last.Mode, e.logOf(t, j.Id))
+	}
+}
+
 func TestRecoveredJobCanBeCanceled(t *testing.T) {
 	e := newJobEnv(t, 1)
 	j := e.submit(t, &pb.SubmitJobRequest{Target: onNode("peer"), Command: jobtest.Script("say:up", "sleep:300")})
@@ -902,6 +944,110 @@ func TestArtifactDirectoryRunsInWorkdirAndKeepsModes(t *testing.T) {
 		if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm()&0o111 != want&0o111) {
 			t.Fatalf("%s = %v, %v; want mode %v", name, fi, err, want)
 		}
+	}
+}
+
+func TestCareTierEnforcement(t *testing.T) {
+	e := newJobEnv(t, 1)
+	if _, err := e.h.nodes.inv.SetTier("peer", TierCare); err != nil {
+		t.Fatal(err)
+	}
+	// Real grants carry only job_* besides node_admin. These tokens are
+	// written as stored records so each also holds the scopes of the other
+	// gates, which checks the care gate alone on every path.
+	type stored struct {
+		secret, by string
+		scopes     []string
+	}
+	work := []string{"job_*", "lease_*", "desk_*", "node_put_*"}
+	toks := map[string]stored{
+		"plain":              {"ptk_plain", "", work},
+		"grant":              {"ptk_grant", auth.MintedByOwner, append([]string{"node_admin:pe*"}, work...)},
+		"other grant":        {"ptk_other", auth.MintedByOwner, append([]string{"node_admin:kidsbox"}, work...)},
+		"orchestrator grant": {"ptk_orch", "orchestrator-poe", append([]string{"node_admin:peer"}, work...)},
+	}
+	var yml strings.Builder
+	yml.WriteString("tokens:\n")
+	clients := map[string]*http.Client{"owner": {Transport: bearer{testToken}}}
+	i := 0
+	for who, tk := range toks {
+		i++
+		sum := sha256.Sum256([]byte(tk.secret))
+		fmt.Fprintf(&yml, "  - id: t%d\n    name: %q\n    hash: %s\n    scopes: [%s]\n    created: 2026-10-20T00:00:00Z\n    minted_by: %q\n    task: %q\n",
+			i, who, hex.EncodeToString(sum[:]), `"`+strings.Join(tk.scopes, `", "`)+`"`, tk.by, map[bool]string{true: "test", false: ""}[tk.by != ""])
+		clients[who] = &http.Client{Transport: bearer{tk.secret}}
+	}
+	path := filepath.Join(e.home, "tokens.yaml")
+	writeFile(t, path, []byte(yml.String()), 0o600)
+	store, err := auth.OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.h.SetAuth(auth.New(testToken, store, nil))
+	srv := httptest.NewServer(e.h.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	ttl := durationpb.New(time.Minute)
+	src := filepath.Join(t.TempDir(), "f.txt")
+	writeFile(t, src, []byte("x"), 0o644)
+	actions := map[string]func(c *http.Client) error{
+		"job on care": func(c *http.Client) error {
+			res, err := protectoratev1connect.NewJobServiceClient(c, srv.URL).SubmitJob(ctx, connect.NewRequest(&pb.SubmitJobRequest{Target: onNode("peer"), Command: []string{"true"}}))
+			if err == nil {
+				e.wait(t, res.Msg.Id)
+			}
+			return err
+		},
+		"selector job": func(c *http.Client) error {
+			res, err := protectoratev1connect.NewJobServiceClient(c, srv.URL).SubmitJob(ctx, connect.NewRequest(&pb.SubmitJobRequest{Target: &pb.JobTarget{Target: &pb.JobTarget_Selector{Selector: &pb.NodeSelector{}}}, Command: []string{"true"}}))
+			if err == nil {
+				if res.Msg.Node != "hubhost" {
+					t.Errorf("selector placed a job on %s", res.Msg.Node)
+				}
+				e.wait(t, res.Msg.Id)
+			}
+			return err
+		},
+		"lease care node": func(c *http.Client) error {
+			_, err := protectoratev1connect.NewLeaseServiceClient(c, srv.URL).AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "peer"}, Holder: "h", Ttl: ttl}))
+			return err
+		},
+		"lease care desktop": func(c *http.Client) error {
+			lc := protectoratev1connect.NewLeaseServiceClient(c, srv.URL)
+			res, err := lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Resource{Resource: "desk:peer"}, Holder: "h", Ttl: ttl}))
+			if err == nil {
+				_, err = lc.ReleaseLease(ctx, connect.NewRequest(&pb.ReleaseLeaseRequest{Id: res.Msg.Id}))
+			}
+			return err
+		},
+		"put file on care": func(c *http.Client) error {
+			_, err := putPath(t, protectoratev1connect.NewNodeServiceClient(c, srv.URL), "peer", src, "care/f.txt", true)
+			return err
+		},
+	}
+	ok, denied, refused := connect.Code(0), connect.CodePermissionDenied, connect.CodeFailedPrecondition
+	tests := []struct {
+		action string
+		want   map[string]connect.Code
+	}{
+		{"job on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied, "orchestrator grant": denied}},
+		{"selector job", map[string]connect.Code{"owner": ok, "plain": ok, "grant": ok, "other grant": ok, "orchestrator grant": ok}},
+		{"lease care node", map[string]connect.Code{"owner": refused, "plain": refused, "grant": refused, "other grant": refused}},
+		{"lease care desktop", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied, "orchestrator grant": denied}},
+		{"put file on care", map[string]connect.Code{"owner": ok, "plain": denied, "grant": ok, "other grant": denied, "orchestrator grant": denied}},
+	}
+	for _, tt := range tests {
+		for who, want := range tt.want {
+			t.Run(tt.action+"/"+who, func(t *testing.T) {
+				if err := actions[tt.action](clients[who]); code(err) != want {
+					t.Fatalf("err = %v, want %v", err, want)
+				}
+			})
+		}
+	}
+	sel, err := e.lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{}}, Holder: "h", Ttl: ttl}))
+	if err != nil || sel.Msg.Node != "hubhost" {
+		t.Fatalf("selector lease: %v %v", sel, err)
 	}
 }
 

@@ -208,7 +208,7 @@ new machines reach the hub at another address.`,
 			return nil
 		},
 	}
-	invite.Flags().StringVar(&tier, "tier", "server", "trust tier: "+strings.Join(tailnet.Tiers, "|"))
+	invite.Flags().StringVar(&tier, "tier", hub.TierShared, "tier: "+strings.Join(tailnet.Tiers, "|"))
 	invite.Flags().DurationVar(&expires, "expires", time.Hour, "how long the key can be redeemed (at most 24h)")
 	invite.Flags().StringSliceVar(&pools, "pool", nil, "build pool to join (repeatable)")
 	invite.Flags().StringVar(&installURL, "url", "", "hub URL the new machine downloads the installer from (default: the hub's --public-url, else --hub)")

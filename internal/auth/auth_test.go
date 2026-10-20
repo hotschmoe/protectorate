@@ -77,6 +77,7 @@ func TestValidateScopes(t *testing.T) {
 		{"bad glob", []string{"["}, nil, true},
 		{"empty scope", []string{""}, nil, true},
 		{"procedure form rejected", []string{"/protectorate.v1.HubService/GetStatus"}, nil, true},
+		{"node admin only by grant", []string{"node_admin:kidsbox", "job_*"}, nil, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +89,88 @@ func TestValidateScopes(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCreateGrant(t *testing.T) {
+	now := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		g          Grant
+		wantScopes []string
+		wantErr    bool
+	}{
+		{"node", Grant{Node: "kidsbox", Task: "update kids machine", MintedBy: MintedByOwner, TTL: 4 * time.Hour}, []string{"job_*", "node_admin:kidsbox"}, false},
+		{"glob", Grant{Node: "kids*", Task: "t", MintedBy: MintedByOwner, TTL: time.Hour}, []string{"job_*", "node_admin:kids*"}, false},
+		{"no task", Grant{Node: "kidsbox", Task: "  ", MintedBy: MintedByOwner, TTL: time.Hour}, nil, true},
+		{"too long", Grant{Node: "kidsbox", Task: "t", MintedBy: MintedByOwner, TTL: 25 * time.Hour}, nil, true},
+		{"no ttl", Grant{Node: "kidsbox", Task: "t", MintedBy: MintedByOwner}, nil, true},
+		{"no minter", Grant{Node: "kidsbox", Task: "t", TTL: time.Hour}, nil, true},
+		{"empty node", Grant{Task: "t", MintedBy: MintedByOwner, TTL: time.Hour}, nil, true},
+		{"upper case", Grant{Node: "Kidsbox", Task: "t", MintedBy: MintedByOwner, TTL: time.Hour}, nil, true},
+		{"path", Grant{Node: "a/b", Task: "t", MintedBy: MintedByOwner, TTL: time.Hour}, nil, true},
+		{"bad glob", Grant{Node: "[a", Task: "t", MintedBy: MintedByOwner, TTL: time.Hour}, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewMemoryStore()
+			tok, secret, err := s.CreateGrant(tt.g, now)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v", err)
+			}
+			if err != nil {
+				return
+			}
+			if strings.Join(tok.Scopes, ",") != strings.Join(tt.wantScopes, ",") || tok.Name != "grant:"+tt.g.Node || tok.Expires == nil || !tok.Expires.Equal(now.Add(tt.g.TTL)) {
+				t.Fatalf("token %+v", tok)
+			}
+			a := New("owner-secret", s, nil)
+			a.Now = func() time.Time { return now }
+			p, err := a.Authenticate(secret)
+			if err != nil || p.Task != strings.TrimSpace(tt.g.Task) || p.MintedBy != tt.g.MintedBy {
+				t.Fatalf("principal %+v %v", p, err)
+			}
+		})
+	}
+}
+
+func TestAdminOn(t *testing.T) {
+	tests := []struct {
+		name   string
+		p      *Principal
+		node   string
+		wanted bool
+	}{
+		{"owner", &Principal{Owner: true}, "kidsbox", true},
+		{"exact grant", &Principal{Scopes: []string{"job_*", "node_admin:kidsbox"}}, "kidsbox", true},
+		{"glob grant", &Principal{Scopes: []string{"node_admin:kids*"}}, "kidsbox", true},
+		{"other node", &Principal{Scopes: []string{"node_admin:kidsbox"}}, "officepc", false},
+		{"star is no grant", &Principal{Scopes: []string{"*"}}, "kidsbox", false},
+		{"no principal", nil, "kidsbox", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.p.AdminOn(tt.node); got != tt.wanted {
+				t.Fatalf("AdminOn(%s) = %v", tt.node, got)
+			}
+		})
+	}
+	care := []struct {
+		p    *Principal
+		want bool
+	}{
+		{&Principal{Owner: true}, true},
+		{&Principal{Scopes: []string{"node_admin:kidsbox"}, MintedBy: MintedByOwner}, true},
+		{&Principal{Scopes: []string{"node_admin:kidsbox"}, MintedBy: "orchestrator-poe"}, false},
+		{&Principal{Scopes: []string{"node_admin:other"}, MintedBy: MintedByOwner}, false},
+	}
+	for _, c := range care {
+		if got := c.p.CareAdmin("kidsbox"); got != c.want {
+			t.Errorf("CareAdmin(%+v) = %v", c.p, got)
+		}
+	}
+	if !scopesAllow([]string{"node_admin:kidsbox", "job_*"}, Method{Tool: "job_submit_job"}) || scopesAllow([]string{"node_admin:*"}, Method{Tool: "job_submit_job"}) {
+		t.Fatal("node_admin must grant no RPC by itself")
 	}
 }
 

@@ -227,6 +227,8 @@ class AuditEntry extends $pb.GeneratedMessage {
     $core.String? subject,
     $core.String? outcome,
     $core.String? code,
+    $core.String? task,
+    $core.String? detail,
   }) {
     final result = AuditEntry._();
     if (time != null) result.time = time;
@@ -237,6 +239,8 @@ class AuditEntry extends $pb.GeneratedMessage {
     if (subject != null) result.subject = subject;
     if (outcome != null) result.outcome = outcome;
     if (code != null) result.code = code;
+    if (task != null) result.task = task;
+    if (detail != null) result.detail = detail;
     return result;
   }
 
@@ -263,6 +267,8 @@ class AuditEntry extends $pb.GeneratedMessage {
     ..aOS(6, _omitFieldNames ? '' : 'subject')
     ..aOS(7, _omitFieldNames ? '' : 'outcome')
     ..aOS(8, _omitFieldNames ? '' : 'code')
+    ..aOS(9, _omitFieldNames ? '' : 'task')
+    ..aOS(10, _omitFieldNames ? '' : 'detail')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -363,6 +369,26 @@ class AuditEntry extends $pb.GeneratedMessage {
   $core.bool hasCode() => $_has(7);
   @$pb.TagNumber(8)
   void clearCode() => $_clearField(8);
+
+  /// task is the task of the admin grant that made the call.
+  @$pb.TagNumber(9)
+  $core.String get task => $_getSZ(8);
+  @$pb.TagNumber(9)
+  set task($core.String value) => $_setString(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasTask() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearTask() => $_clearField(9);
+
+  /// detail is what the handler added, such as a job's node and mode.
+  @$pb.TagNumber(10)
+  $core.String get detail => $_getSZ(9);
+  @$pb.TagNumber(10)
+  set detail($core.String value) => $_setString(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasDetail() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearDetail() => $_clearField(10);
 }
 
 /// AuditService reads the hub's audit log (docs/auth.md): every mutating call

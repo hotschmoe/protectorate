@@ -36,7 +36,7 @@ func TestInventory(t *testing.T) {
 		in      *pb.NodeInfo
 		wantErr error
 	}{
-		{"ok", &pb.NodeInfo{Name: "GPU-Box", Address: "gpu-box", SshAlias: "gpu", Tier: "server", Tags: []string{"GPU", "gpu", "cuda"}, Notes: "4090"}, nil},
+		{"ok", &pb.NodeInfo{Name: "GPU-Box", Address: "gpu-box", SshAlias: "gpu", Tier: "shared", Tags: []string{"GPU", "gpu", "cuda"}, Notes: "4090"}, nil},
 		{"default tier", &pb.NodeInfo{Name: "media", Address: "10.0.0.5:7475"}, nil},
 		{"duplicate", &pb.NodeInfo{Name: "gpu-box", Address: "x"}, ErrNodeExists},
 		{"hub name reserved", &pb.NodeInfo{Name: "hubhost", Address: "x"}, ErrNodeExists},
@@ -59,7 +59,7 @@ func TestInventory(t *testing.T) {
 	}
 
 	got := inv.List()
-	if len(got) != 2 || got[0].Name != "gpu-box" || got[1].Name != "media" || got[1].Tier != TierServer {
+	if len(got) != 2 || got[0].Name != "gpu-box" || got[1].Name != "media" || got[1].Tier != TierShared {
 		t.Fatalf("list = %v", got)
 	}
 	if strings.Join(got[0].Tags, ",") != "cuda,gpu" {
@@ -83,7 +83,7 @@ func TestInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"hubhost (this machine, hub)", "| gpu-box | linux/amd64 | gpu-box | gpu | server | cuda, gpu | 4090 |", "| media | ? |"} {
+	for _, want := range []string{"hubhost (this machine, hub)", "| gpu-box | linux/amd64 | gpu-box | gpu | shared | cuda, gpu | 4090 |", "| media | ? |"} {
 		if !strings.Contains(string(hosts), want) {
 			t.Errorf("hosts.md missing %q:\n%s", want, hosts)
 		}
@@ -351,7 +351,7 @@ func TestNodeServiceEndToEnd(t *testing.T) {
 		return connect.NewRequest(&pb.AddNodeRequest{Node: n})
 	}
 
-	if _, err := cl.AddNode(ctx, req(&pb.NodeInfo{Name: "peer", Address: strings.TrimPrefix(agentSrv.URL, "http://"), Tier: "family"})); err != nil {
+	if _, err := cl.AddNode(ctx, req(&pb.NodeInfo{Name: "peer", Address: strings.TrimPrefix(agentSrv.URL, "http://"), Tier: "care"})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cl.AddNode(ctx, req(&pb.NodeInfo{Name: "peer", Address: "x"})); connect.CodeOf(err) != connect.CodeAlreadyExists {
@@ -411,14 +411,14 @@ func TestInvitedNodeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Address: "box", Tier: "family", Tags: []string{"pool-gpu"}, Invited: true, InviteKeyId: 7, Notes: "n"}); err != nil {
+	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Address: "box", Tier: "care", Tags: []string{"pool-gpu"}, Invited: true, InviteKeyId: 7, Notes: "n"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Tier: "server", Invited: true, InviteKeyId: 8}); err != nil {
+	if _, err := inv.Upsert(&pb.NodeInfo{Name: "box", Tier: "shared", Invited: true, InviteKeyId: 8}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := inv.Get("box")
-	if got.Address != "box" || got.Tier != "server" || got.Notes != "n" || !got.Invited || got.InviteKeyId != 8 || len(got.Tags) != 0 {
+	if got.Address != "box" || got.Tier != "shared" || got.Notes != "n" || !got.Invited || got.InviteKeyId != 8 || len(got.Tags) != 0 {
 		t.Fatalf("upsert = %v", got)
 	}
 	reopened, err := OpenInventory(dir, testSelf)
@@ -663,5 +663,70 @@ func TestNodeTokenNotSentOnRedirect(t *testing.T) {
 	}
 	if leaked.Load() != 0 {
 		t.Fatalf("redirect was followed %d times", leaked.Load())
+	}
+}
+
+func TestMigrateTiers(t *testing.T) {
+	const old = "nodes:\n  - name: kidsbox\n    addr: kidsbox\n    tier: family\n  - name: agentworld\n    addr: agentworld\n    tier: server\n  - name: newer\n    addr: newer\n    tier: shared\n"
+	tests := []struct {
+		name        string
+		content     string
+		backup      bool
+		wantChanges []TierChange
+		wantErr     string
+	}{
+		{"renames and keeps a copy", old, false, []TierChange{{"kidsbox", "family", "care"}, {"agentworld", "server", "shared"}}, ""},
+		{"already migrated", "nodes:\n  - name: a\n    addr: a\n    tier: care\n", false, nil, ""},
+		{"no inventory", "", false, nil, ""},
+		{"never overwrites an earlier copy", old, true, nil, "keep a copy"},
+		{"corrupt file", "nodes: [", false, nil, "parse"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "nodes.yaml")
+			if tt.content != "" {
+				writeFile(t, path, []byte(tt.content), 0o600)
+				if _, err := OpenInventory(dir, testSelf); tt.wantChanges != nil && (!errors.Is(err, ErrRetiredTiers) || !strings.Contains(err.Error(), "protectorate node migrate-tiers")) {
+					t.Fatalf("open before migrating: %v", err)
+				}
+			}
+			if tt.backup {
+				writeFile(t, path+".pre-tiers", []byte("earlier"), 0o600)
+			}
+			got, err := MigrateTiers(dir, testSelf)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				if b, _ := os.ReadFile(path); string(b) != tt.content {
+					t.Fatalf("a failed migration changed nodes.yaml:\n%s", b)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(got, tt.wantChanges) {
+				t.Fatalf("changes %v %v, want %v", got, err, tt.wantChanges)
+			}
+			if tt.wantChanges == nil {
+				return
+			}
+			if b, _ := os.ReadFile(path + ".pre-tiers"); string(b) != tt.content {
+				t.Fatalf("backup %q", b)
+			}
+			inv, err := OpenInventory(dir, testSelf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tiers := map[string]string{}
+			for _, n := range inv.List() {
+				tiers[n.Name] = n.Tier
+			}
+			if tiers["kidsbox"] != TierCare || tiers["agentworld"] != TierShared || tiers["newer"] != TierShared {
+				t.Fatalf("tiers %v", tiers)
+			}
+			if again, err := MigrateTiers(dir, testSelf); err != nil || again != nil {
+				t.Fatalf("second run %v %v", again, err)
+			}
+		})
 	}
 }

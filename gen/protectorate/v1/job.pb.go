@@ -23,6 +23,65 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// JobMode is how the node runs a job's command.
+type JobMode int32
+
+const (
+	// JOB_MODE_UNSPECIFIED is treated as JOB_MODE_SANDBOXED.
+	JobMode_JOB_MODE_UNSPECIFIED JobMode = 0
+	// JOB_MODE_SANDBOXED isolates the command as far as the node can (see
+	// JobIsolation): the job on a shared node.
+	JobMode_JOB_MODE_SANDBOXED JobMode = 1
+	// JOB_MODE_PLAIN runs it as the agent's user, unsandboxed: a job on a care
+	// node under a grant, which maintains that machine.
+	JobMode_JOB_MODE_PLAIN JobMode = 2
+	// JOB_MODE_ADMIN runs it elevated and unsandboxed.
+	JobMode_JOB_MODE_ADMIN JobMode = 3
+)
+
+// Enum value maps for JobMode.
+var (
+	JobMode_name = map[int32]string{
+		0: "JOB_MODE_UNSPECIFIED",
+		1: "JOB_MODE_SANDBOXED",
+		2: "JOB_MODE_PLAIN",
+		3: "JOB_MODE_ADMIN",
+	}
+	JobMode_value = map[string]int32{
+		"JOB_MODE_UNSPECIFIED": 0,
+		"JOB_MODE_SANDBOXED":   1,
+		"JOB_MODE_PLAIN":       2,
+		"JOB_MODE_ADMIN":       3,
+	}
+)
+
+func (x JobMode) Enum() *JobMode {
+	p := new(JobMode)
+	*p = x
+	return p
+}
+
+func (x JobMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (JobMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_protectorate_v1_job_proto_enumTypes[0].Descriptor()
+}
+
+func (JobMode) Type() protoreflect.EnumType {
+	return &file_protectorate_v1_job_proto_enumTypes[0]
+}
+
+func (x JobMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use JobMode.Descriptor instead.
+func (JobMode) EnumDescriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{0}
+}
+
 type JobState int32
 
 const (
@@ -71,11 +130,11 @@ func (x JobState) String() string {
 }
 
 func (JobState) Descriptor() protoreflect.EnumDescriptor {
-	return file_protectorate_v1_job_proto_enumTypes[0].Descriptor()
+	return file_protectorate_v1_job_proto_enumTypes[1].Descriptor()
 }
 
 func (JobState) Type() protoreflect.EnumType {
-	return &file_protectorate_v1_job_proto_enumTypes[0]
+	return &file_protectorate_v1_job_proto_enumTypes[1]
 }
 
 func (x JobState) Number() protoreflect.EnumNumber {
@@ -84,7 +143,7 @@ func (x JobState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobState.Descriptor instead.
 func (JobState) EnumDescriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{0}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{1}
 }
 
 type JobEnd int32
@@ -127,11 +186,11 @@ func (x JobEnd) String() string {
 }
 
 func (JobEnd) Descriptor() protoreflect.EnumDescriptor {
-	return file_protectorate_v1_job_proto_enumTypes[1].Descriptor()
+	return file_protectorate_v1_job_proto_enumTypes[2].Descriptor()
 }
 
 func (JobEnd) Type() protoreflect.EnumType {
-	return &file_protectorate_v1_job_proto_enumTypes[1]
+	return &file_protectorate_v1_job_proto_enumTypes[2]
 }
 
 func (x JobEnd) Number() protoreflect.EnumNumber {
@@ -140,10 +199,80 @@ func (x JobEnd) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobEnd.Descriptor instead.
 func (JobEnd) EnumDescriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{1}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{2}
 }
 
-// JobTarget says where a job runs.
+// JobIsolation is what a node can do for jobs, reported in its metrics.
+type JobIsolation struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "bwrap" (Linux:
+	// bwrap in a systemd user scope), "runner" (Windows: the
+	// protectorate-runner account in a job object), "job-object" (Windows:
+	// the agent's own account in a job object, unisolated) or "none".
+	Sandbox string `protobuf:"bytes,1,opt,name=sandbox,proto3" json:"sandbox,omitempty"`
+	// note says why isolation is missing or partial.
+	Note string `protobuf:"bytes,2,opt,name=note,proto3" json:"note,omitempty"`
+	// admin is how admin jobs elevate: "sudo", "root" or "elevated"; empty
+	// when this node cannot run them.
+	Admin         string `protobuf:"bytes,3,opt,name=admin,proto3" json:"admin,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobIsolation) Reset() {
+	*x = JobIsolation{}
+	mi := &file_protectorate_v1_job_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobIsolation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobIsolation) ProtoMessage() {}
+
+func (x *JobIsolation) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_job_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobIsolation.ProtoReflect.Descriptor instead.
+func (*JobIsolation) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *JobIsolation) GetSandbox() string {
+	if x != nil {
+		return x.Sandbox
+	}
+	return ""
+}
+
+func (x *JobIsolation) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *JobIsolation) GetAdmin() string {
+	if x != nil {
+		return x.Admin
+	}
+	return ""
+}
+
+// JobTarget says where a job runs. Nodes of tier "care" are never picked
+// by a selector or leased; naming one needs the owner token or a token with
+// the scope node_admin:<node>.
 type JobTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Target:
@@ -151,16 +280,14 @@ type JobTarget struct {
 	//	*JobTarget_LeaseId
 	//	*JobTarget_Node
 	//	*JobTarget_Selector
-	Target isJobTarget_Target `protobuf_oneof:"target"`
-	// allow_family admits nodes of tier "family".
-	AllowFamily   bool `protobuf:"varint,4,opt,name=allow_family,json=allowFamily,proto3" json:"allow_family,omitempty"`
+	Target        isJobTarget_Target `protobuf_oneof:"target"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JobTarget) Reset() {
 	*x = JobTarget{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[0]
+	mi := &file_protectorate_v1_job_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -172,7 +299,7 @@ func (x *JobTarget) String() string {
 func (*JobTarget) ProtoMessage() {}
 
 func (x *JobTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[0]
+	mi := &file_protectorate_v1_job_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -185,7 +312,7 @@ func (x *JobTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobTarget.ProtoReflect.Descriptor instead.
 func (*JobTarget) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{0}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *JobTarget) GetTarget() isJobTarget_Target {
@@ -222,13 +349,6 @@ func (x *JobTarget) GetSelector() *NodeSelector {
 	return nil
 }
 
-func (x *JobTarget) GetAllowFamily() bool {
-	if x != nil {
-		return x.AllowFamily
-	}
-	return false
-}
-
 type isJobTarget_Target interface {
 	isJobTarget_Target()
 }
@@ -244,7 +364,8 @@ type JobTarget_Node struct {
 }
 
 type JobTarget_Selector struct {
-	// selector picks the least-loaded fresh matching node that is not leased.
+	// selector picks the least-loaded fresh matching node of tier "shared"
+	// that is not leased.
 	Selector *NodeSelector `protobuf:"bytes,3,opt,name=selector,proto3,oneof"`
 }
 
@@ -268,7 +389,7 @@ type GitSource struct {
 
 func (x *GitSource) Reset() {
 	*x = GitSource{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[1]
+	mi := &file_protectorate_v1_job_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -280,7 +401,7 @@ func (x *GitSource) String() string {
 func (*GitSource) ProtoMessage() {}
 
 func (x *GitSource) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[1]
+	mi := &file_protectorate_v1_job_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -293,7 +414,7 @@ func (x *GitSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GitSource.ProtoReflect.Descriptor instead.
 func (*GitSource) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{1}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GitSource) GetRepo() string {
@@ -326,7 +447,7 @@ type ArtifactSource struct {
 
 func (x *ArtifactSource) Reset() {
 	*x = ArtifactSource{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[2]
+	mi := &file_protectorate_v1_job_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -338,7 +459,7 @@ func (x *ArtifactSource) String() string {
 func (*ArtifactSource) ProtoMessage() {}
 
 func (x *ArtifactSource) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[2]
+	mi := &file_protectorate_v1_job_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -351,7 +472,7 @@ func (x *ArtifactSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactSource.ProtoReflect.Descriptor instead.
 func (*ArtifactSource) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{2}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ArtifactSource) GetPath() string {
@@ -383,7 +504,7 @@ type JobSource struct {
 
 func (x *JobSource) Reset() {
 	*x = JobSource{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[3]
+	mi := &file_protectorate_v1_job_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -395,7 +516,7 @@ func (x *JobSource) String() string {
 func (*JobSource) ProtoMessage() {}
 
 func (x *JobSource) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[3]
+	mi := &file_protectorate_v1_job_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -408,7 +529,7 @@ func (x *JobSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobSource.ProtoReflect.Descriptor instead.
 func (*JobSource) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{3}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *JobSource) GetKind() isJobSource_Kind {
@@ -476,14 +597,22 @@ type SubmitJobRequest struct {
 	// unique among callers (a UUID or 16 random bytes in hex). With it, a caller
 	// that lost the response can still find or cancel the job (CancelJob
 	// request_id). Empty means no deduplication.
-	RequestId     string `protobuf:"bytes,7,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestId string `protobuf:"bytes,7,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// admin runs the command elevated (sudo -n on Linux, the agent's own
+	// elevated token on Windows). It needs a named node or a lease (not a
+	// selector), a node that reports it can elevate, and the owner token or a
+	// node_admin grant for the node. Admin jobs are never sandboxed.
+	Admin bool `protobuf:"varint,8,opt,name=admin,proto3" json:"admin,omitempty"`
+	// limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox
+	// is "bwrap" or a Windows job object); unset means no cap.
+	Limits        *JobLimits `protobuf:"bytes,9,opt,name=limits,proto3" json:"limits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubmitJobRequest) Reset() {
 	*x = SubmitJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[4]
+	mi := &file_protectorate_v1_job_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +624,7 @@ func (x *SubmitJobRequest) String() string {
 func (*SubmitJobRequest) ProtoMessage() {}
 
 func (x *SubmitJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[4]
+	mi := &file_protectorate_v1_job_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,7 +637,7 @@ func (x *SubmitJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitJobRequest.ProtoReflect.Descriptor instead.
 func (*SubmitJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{4}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SubmitJobRequest) GetTarget() *JobTarget {
@@ -560,6 +689,75 @@ func (x *SubmitJobRequest) GetRequestId() string {
 	return ""
 }
 
+func (x *SubmitJobRequest) GetAdmin() bool {
+	if x != nil {
+		return x.Admin
+	}
+	return false
+}
+
+func (x *SubmitJobRequest) GetLimits() *JobLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
+// JobLimits are cgroup (Linux) or job object (Windows) caps.
+type JobLimits struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// cpu_percent is CPU time as a share of one core: 200 is two cores.
+	CpuPercent uint32 `protobuf:"varint,1,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	// memory_bytes caps resident memory, at least 64 MiB; no swap on Linux.
+	MemoryBytes   uint64 `protobuf:"varint,2,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobLimits) Reset() {
+	*x = JobLimits{}
+	mi := &file_protectorate_v1_job_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobLimits) ProtoMessage() {}
+
+func (x *JobLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_job_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobLimits.ProtoReflect.Descriptor instead.
+func (*JobLimits) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *JobLimits) GetCpuPercent() uint32 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *JobLimits) GetMemoryBytes() uint64 {
+	if x != nil {
+		return x.MemoryBytes
+	}
+	return 0
+}
+
 type GetJobRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -569,7 +767,7 @@ type GetJobRequest struct {
 
 func (x *GetJobRequest) Reset() {
 	*x = GetJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[5]
+	mi := &file_protectorate_v1_job_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +779,7 @@ func (x *GetJobRequest) String() string {
 func (*GetJobRequest) ProtoMessage() {}
 
 func (x *GetJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[5]
+	mi := &file_protectorate_v1_job_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +792,7 @@ func (x *GetJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetJobRequest.ProtoReflect.Descriptor instead.
 func (*GetJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{5}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetJobRequest) GetId() string {
@@ -616,7 +814,7 @@ type ListJobsRequest struct {
 
 func (x *ListJobsRequest) Reset() {
 	*x = ListJobsRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[6]
+	mi := &file_protectorate_v1_job_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -628,7 +826,7 @@ func (x *ListJobsRequest) String() string {
 func (*ListJobsRequest) ProtoMessage() {}
 
 func (x *ListJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[6]
+	mi := &file_protectorate_v1_job_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -641,7 +839,7 @@ func (x *ListJobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListJobsRequest.ProtoReflect.Descriptor instead.
 func (*ListJobsRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{6}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListJobsRequest) GetState() JobState {
@@ -667,7 +865,7 @@ type ListJobsResponse struct {
 
 func (x *ListJobsResponse) Reset() {
 	*x = ListJobsResponse{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[7]
+	mi := &file_protectorate_v1_job_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -679,7 +877,7 @@ func (x *ListJobsResponse) String() string {
 func (*ListJobsResponse) ProtoMessage() {}
 
 func (x *ListJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[7]
+	mi := &file_protectorate_v1_job_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -692,7 +890,7 @@ func (x *ListJobsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListJobsResponse.ProtoReflect.Descriptor instead.
 func (*ListJobsResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{7}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListJobsResponse) GetJobs() []*Job {
@@ -718,7 +916,7 @@ type CancelJobRequest struct {
 
 func (x *CancelJobRequest) Reset() {
 	*x = CancelJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[8]
+	mi := &file_protectorate_v1_job_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -730,7 +928,7 @@ func (x *CancelJobRequest) String() string {
 func (*CancelJobRequest) ProtoMessage() {}
 
 func (x *CancelJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[8]
+	mi := &file_protectorate_v1_job_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -743,7 +941,7 @@ func (x *CancelJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJobRequest.ProtoReflect.Descriptor instead.
 func (*CancelJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{8}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CancelJobRequest) GetId() string {
@@ -774,7 +972,7 @@ type WatchJobRequest struct {
 
 func (x *WatchJobRequest) Reset() {
 	*x = WatchJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[9]
+	mi := &file_protectorate_v1_job_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +984,7 @@ func (x *WatchJobRequest) String() string {
 func (*WatchJobRequest) ProtoMessage() {}
 
 func (x *WatchJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[9]
+	mi := &file_protectorate_v1_job_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +997,7 @@ func (x *WatchJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchJobRequest.ProtoReflect.Descriptor instead.
 func (*WatchJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{9}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *WatchJobRequest) GetId() string {
@@ -836,7 +1034,7 @@ type WatchJobResponse struct {
 
 func (x *WatchJobResponse) Reset() {
 	*x = WatchJobResponse{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[10]
+	mi := &file_protectorate_v1_job_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -848,7 +1046,7 @@ func (x *WatchJobResponse) String() string {
 func (*WatchJobResponse) ProtoMessage() {}
 
 func (x *WatchJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[10]
+	mi := &file_protectorate_v1_job_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -861,7 +1059,7 @@ func (x *WatchJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchJobResponse.ProtoReflect.Descriptor instead.
 func (*WatchJobResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{10}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *WatchJobResponse) GetEvent() isWatchJobResponse_Event {
@@ -917,7 +1115,7 @@ type JobLog struct {
 
 func (x *JobLog) Reset() {
 	*x = JobLog{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[11]
+	mi := &file_protectorate_v1_job_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -929,7 +1127,7 @@ func (x *JobLog) String() string {
 func (*JobLog) ProtoMessage() {}
 
 func (x *JobLog) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[11]
+	mi := &file_protectorate_v1_job_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -942,7 +1140,7 @@ func (x *JobLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobLog.ProtoReflect.Descriptor instead.
 func (*JobLog) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{11}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *JobLog) GetOffset() uint64 {
@@ -973,7 +1171,7 @@ type JobArtifact struct {
 
 func (x *JobArtifact) Reset() {
 	*x = JobArtifact{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[12]
+	mi := &file_protectorate_v1_job_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -985,7 +1183,7 @@ func (x *JobArtifact) String() string {
 func (*JobArtifact) ProtoMessage() {}
 
 func (x *JobArtifact) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[12]
+	mi := &file_protectorate_v1_job_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -998,7 +1196,7 @@ func (x *JobArtifact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobArtifact.ProtoReflect.Descriptor instead.
 func (*JobArtifact) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{12}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *JobArtifact) GetPath() string {
@@ -1059,13 +1257,20 @@ type Job struct {
 	Artifacts       []*JobArtifact `protobuf:"bytes,20,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	ArtifactBytes   uint64         `protobuf:"varint,21,opt,name=artifact_bytes,json=artifactBytes,proto3" json:"artifact_bytes,omitempty"`
 	LogBytes        uint64         `protobuf:"varint,22,opt,name=log_bytes,json=logBytes,proto3" json:"log_bytes,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	Mode            JobMode        `protobuf:"varint,23,opt,name=mode,proto3,enum=protectorate.v1.JobMode" json:"mode,omitempty"`
+	// isolation is how the node ran the command, as it reported at start, e.g.
+	// "bwrap", "none: bwrap is not installed", "sudo".
+	Isolation string `protobuf:"bytes,24,opt,name=isolation,proto3" json:"isolation,omitempty"`
+	// task is the task of the admin grant the job was submitted with.
+	Task          string     `protobuf:"bytes,25,opt,name=task,proto3" json:"task,omitempty"`
+	Limits        *JobLimits `protobuf:"bytes,26,opt,name=limits,proto3" json:"limits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Job) Reset() {
 	*x = Job{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[13]
+	mi := &file_protectorate_v1_job_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1077,7 +1282,7 @@ func (x *Job) String() string {
 func (*Job) ProtoMessage() {}
 
 func (x *Job) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[13]
+	mi := &file_protectorate_v1_job_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1090,7 +1295,7 @@ func (x *Job) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Job.ProtoReflect.Descriptor instead.
 func (*Job) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{13}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Job) GetId() string {
@@ -1247,6 +1452,34 @@ func (x *Job) GetLogBytes() uint64 {
 	return 0
 }
 
+func (x *Job) GetMode() JobMode {
+	if x != nil {
+		return x.Mode
+	}
+	return JobMode_JOB_MODE_UNSPECIFIED
+}
+
+func (x *Job) GetIsolation() string {
+	if x != nil {
+		return x.Isolation
+	}
+	return ""
+}
+
+func (x *Job) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *Job) GetLimits() *JobLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
 type PrepareJobRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -1259,7 +1492,7 @@ type PrepareJobRequest struct {
 
 func (x *PrepareJobRequest) Reset() {
 	*x = PrepareJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[14]
+	mi := &file_protectorate_v1_job_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1271,7 +1504,7 @@ func (x *PrepareJobRequest) String() string {
 func (*PrepareJobRequest) ProtoMessage() {}
 
 func (x *PrepareJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[14]
+	mi := &file_protectorate_v1_job_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1284,7 +1517,7 @@ func (x *PrepareJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PrepareJobRequest.ProtoReflect.Descriptor instead.
 func (*PrepareJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{14}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PrepareJobRequest) GetJobId() string {
@@ -1321,7 +1554,7 @@ type PrepareJobResponse struct {
 
 func (x *PrepareJobResponse) Reset() {
 	*x = PrepareJobResponse{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[15]
+	mi := &file_protectorate_v1_job_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1333,7 +1566,7 @@ func (x *PrepareJobResponse) String() string {
 func (*PrepareJobResponse) ProtoMessage() {}
 
 func (x *PrepareJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[15]
+	mi := &file_protectorate_v1_job_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1346,7 +1579,7 @@ func (x *PrepareJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PrepareJobResponse.ProtoReflect.Descriptor instead.
 func (*PrepareJobResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{15}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PrepareJobResponse) GetHasCommit() bool {
@@ -1378,7 +1611,7 @@ type UploadJobDataRequest struct {
 
 func (x *UploadJobDataRequest) Reset() {
 	*x = UploadJobDataRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[16]
+	mi := &file_protectorate_v1_job_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1390,7 +1623,7 @@ func (x *UploadJobDataRequest) String() string {
 func (*UploadJobDataRequest) ProtoMessage() {}
 
 func (x *UploadJobDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[16]
+	mi := &file_protectorate_v1_job_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1403,7 +1636,7 @@ func (x *UploadJobDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadJobDataRequest.ProtoReflect.Descriptor instead.
 func (*UploadJobDataRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{16}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UploadJobDataRequest) GetJobId() string {
@@ -1450,7 +1683,7 @@ type UploadJobDataResponse struct {
 
 func (x *UploadJobDataResponse) Reset() {
 	*x = UploadJobDataResponse{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[17]
+	mi := &file_protectorate_v1_job_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1462,7 +1695,7 @@ func (x *UploadJobDataResponse) String() string {
 func (*UploadJobDataResponse) ProtoMessage() {}
 
 func (x *UploadJobDataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[17]
+	mi := &file_protectorate_v1_job_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1475,7 +1708,7 @@ func (x *UploadJobDataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadJobDataResponse.ProtoReflect.Descriptor instead.
 func (*UploadJobDataResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{17}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UploadJobDataResponse) GetReceived() uint64 {
@@ -1504,14 +1737,16 @@ type RunJobRequest struct {
 	// directory instead of a single file named artifact_name.
 	ArtifactArchive bool `protobuf:"varint,10,opt,name=artifact_archive,json=artifactArchive,proto3" json:"artifact_archive,omitempty"`
 	// workdir is relative to the job directory; only valid with an archive.
-	Workdir       string `protobuf:"bytes,11,opt,name=workdir,proto3" json:"workdir,omitempty"`
+	Workdir       string     `protobuf:"bytes,11,opt,name=workdir,proto3" json:"workdir,omitempty"`
+	Mode          JobMode    `protobuf:"varint,12,opt,name=mode,proto3,enum=protectorate.v1.JobMode" json:"mode,omitempty"`
+	Limits        *JobLimits `protobuf:"bytes,13,opt,name=limits,proto3" json:"limits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunJobRequest) Reset() {
 	*x = RunJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[18]
+	mi := &file_protectorate_v1_job_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1523,7 +1758,7 @@ func (x *RunJobRequest) String() string {
 func (*RunJobRequest) ProtoMessage() {}
 
 func (x *RunJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[18]
+	mi := &file_protectorate_v1_job_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1536,7 +1771,7 @@ func (x *RunJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunJobRequest.ProtoReflect.Descriptor instead.
 func (*RunJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{18}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RunJobRequest) GetJobId() string {
@@ -1616,16 +1851,32 @@ func (x *RunJobRequest) GetWorkdir() string {
 	return ""
 }
 
+func (x *RunJobRequest) GetMode() JobMode {
+	if x != nil {
+		return x.Mode
+	}
+	return JobMode_JOB_MODE_UNSPECIFIED
+}
+
+func (x *RunJobRequest) GetLimits() *JobLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
 type JobStarted struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceReused bool                   `protobuf:"varint,1,opt,name=workspace_reused,json=workspaceReused,proto3" json:"workspace_reused,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// isolation is how the command runs, as in Job.isolation.
+	Isolation     string `protobuf:"bytes,2,opt,name=isolation,proto3" json:"isolation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JobStarted) Reset() {
 	*x = JobStarted{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[19]
+	mi := &file_protectorate_v1_job_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1637,7 +1888,7 @@ func (x *JobStarted) String() string {
 func (*JobStarted) ProtoMessage() {}
 
 func (x *JobStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[19]
+	mi := &file_protectorate_v1_job_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1650,7 +1901,7 @@ func (x *JobStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobStarted.ProtoReflect.Descriptor instead.
 func (*JobStarted) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{19}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *JobStarted) GetWorkspaceReused() bool {
@@ -1658,6 +1909,13 @@ func (x *JobStarted) GetWorkspaceReused() bool {
 		return x.WorkspaceReused
 	}
 	return false
+}
+
+func (x *JobStarted) GetIsolation() string {
+	if x != nil {
+		return x.Isolation
+	}
+	return ""
 }
 
 type JobOutput struct {
@@ -1669,7 +1927,7 @@ type JobOutput struct {
 
 func (x *JobOutput) Reset() {
 	*x = JobOutput{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[20]
+	mi := &file_protectorate_v1_job_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1681,7 +1939,7 @@ func (x *JobOutput) String() string {
 func (*JobOutput) ProtoMessage() {}
 
 func (x *JobOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[20]
+	mi := &file_protectorate_v1_job_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1694,7 +1952,7 @@ func (x *JobOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobOutput.ProtoReflect.Descriptor instead.
 func (*JobOutput) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{20}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *JobOutput) GetData() []byte {
@@ -1719,7 +1977,7 @@ type JobArtifactChunk struct {
 
 func (x *JobArtifactChunk) Reset() {
 	*x = JobArtifactChunk{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[21]
+	mi := &file_protectorate_v1_job_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1731,7 +1989,7 @@ func (x *JobArtifactChunk) String() string {
 func (*JobArtifactChunk) ProtoMessage() {}
 
 func (x *JobArtifactChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[21]
+	mi := &file_protectorate_v1_job_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1744,7 +2002,7 @@ func (x *JobArtifactChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobArtifactChunk.ProtoReflect.Descriptor instead.
 func (*JobArtifactChunk) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{21}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *JobArtifactChunk) GetPath() string {
@@ -1787,7 +2045,7 @@ type JobFinished struct {
 
 func (x *JobFinished) Reset() {
 	*x = JobFinished{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[22]
+	mi := &file_protectorate_v1_job_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1799,7 +2057,7 @@ func (x *JobFinished) String() string {
 func (*JobFinished) ProtoMessage() {}
 
 func (x *JobFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[22]
+	mi := &file_protectorate_v1_job_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1812,7 +2070,7 @@ func (x *JobFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobFinished.ProtoReflect.Descriptor instead.
 func (*JobFinished) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{22}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *JobFinished) GetEnd() JobEnd {
@@ -1858,7 +2116,7 @@ type JobEvent struct {
 
 func (x *JobEvent) Reset() {
 	*x = JobEvent{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[23]
+	mi := &file_protectorate_v1_job_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1870,7 +2128,7 @@ func (x *JobEvent) String() string {
 func (*JobEvent) ProtoMessage() {}
 
 func (x *JobEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[23]
+	mi := &file_protectorate_v1_job_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1883,7 +2141,7 @@ func (x *JobEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobEvent.ProtoReflect.Descriptor instead.
 func (*JobEvent) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{23}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *JobEvent) GetEvent() isJobEvent_Event {
@@ -1966,7 +2224,7 @@ type NodeAgentServiceCancelJobRequest struct {
 
 func (x *NodeAgentServiceCancelJobRequest) Reset() {
 	*x = NodeAgentServiceCancelJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[24]
+	mi := &file_protectorate_v1_job_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1978,7 +2236,7 @@ func (x *NodeAgentServiceCancelJobRequest) String() string {
 func (*NodeAgentServiceCancelJobRequest) ProtoMessage() {}
 
 func (x *NodeAgentServiceCancelJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[24]
+	mi := &file_protectorate_v1_job_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1991,7 +2249,7 @@ func (x *NodeAgentServiceCancelJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeAgentServiceCancelJobRequest.ProtoReflect.Descriptor instead.
 func (*NodeAgentServiceCancelJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{24}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *NodeAgentServiceCancelJobRequest) GetJobId() string {
@@ -2011,7 +2269,7 @@ type NodeAgentServiceCancelJobResponse struct {
 
 func (x *NodeAgentServiceCancelJobResponse) Reset() {
 	*x = NodeAgentServiceCancelJobResponse{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[25]
+	mi := &file_protectorate_v1_job_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2023,7 +2281,7 @@ func (x *NodeAgentServiceCancelJobResponse) String() string {
 func (*NodeAgentServiceCancelJobResponse) ProtoMessage() {}
 
 func (x *NodeAgentServiceCancelJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[25]
+	mi := &file_protectorate_v1_job_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2036,7 +2294,7 @@ func (x *NodeAgentServiceCancelJobResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use NodeAgentServiceCancelJobResponse.ProtoReflect.Descriptor instead.
 func (*NodeAgentServiceCancelJobResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{25}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *NodeAgentServiceCancelJobResponse) GetFound() bool {
@@ -2054,7 +2312,7 @@ type NodeAgentServiceListJobsRequest struct {
 
 func (x *NodeAgentServiceListJobsRequest) Reset() {
 	*x = NodeAgentServiceListJobsRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[26]
+	mi := &file_protectorate_v1_job_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2066,7 +2324,7 @@ func (x *NodeAgentServiceListJobsRequest) String() string {
 func (*NodeAgentServiceListJobsRequest) ProtoMessage() {}
 
 func (x *NodeAgentServiceListJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[26]
+	mi := &file_protectorate_v1_job_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2079,7 +2337,7 @@ func (x *NodeAgentServiceListJobsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeAgentServiceListJobsRequest.ProtoReflect.Descriptor instead.
 func (*NodeAgentServiceListJobsRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{26}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{28}
 }
 
 type NodeAgentServiceListJobsResponse struct {
@@ -2091,7 +2349,7 @@ type NodeAgentServiceListJobsResponse struct {
 
 func (x *NodeAgentServiceListJobsResponse) Reset() {
 	*x = NodeAgentServiceListJobsResponse{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[27]
+	mi := &file_protectorate_v1_job_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2103,7 +2361,7 @@ func (x *NodeAgentServiceListJobsResponse) String() string {
 func (*NodeAgentServiceListJobsResponse) ProtoMessage() {}
 
 func (x *NodeAgentServiceListJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[27]
+	mi := &file_protectorate_v1_job_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2116,7 +2374,7 @@ func (x *NodeAgentServiceListJobsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeAgentServiceListJobsResponse.ProtoReflect.Descriptor instead.
 func (*NodeAgentServiceListJobsResponse) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{27}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *NodeAgentServiceListJobsResponse) GetJobs() []*NodeJob {
@@ -2145,7 +2403,7 @@ type NodeJob struct {
 
 func (x *NodeJob) Reset() {
 	*x = NodeJob{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[28]
+	mi := &file_protectorate_v1_job_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2157,7 +2415,7 @@ func (x *NodeJob) String() string {
 func (*NodeJob) ProtoMessage() {}
 
 func (x *NodeJob) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[28]
+	mi := &file_protectorate_v1_job_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2170,7 +2428,7 @@ func (x *NodeJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeJob.ProtoReflect.Descriptor instead.
 func (*NodeJob) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{28}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *NodeJob) GetJobId() string {
@@ -2219,7 +2477,7 @@ type AttachJobRequest struct {
 
 func (x *AttachJobRequest) Reset() {
 	*x = AttachJobRequest{}
-	mi := &file_protectorate_v1_job_proto_msgTypes[29]
+	mi := &file_protectorate_v1_job_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2231,7 +2489,7 @@ func (x *AttachJobRequest) String() string {
 func (*AttachJobRequest) ProtoMessage() {}
 
 func (x *AttachJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_protectorate_v1_job_proto_msgTypes[29]
+	mi := &file_protectorate_v1_job_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2244,7 +2502,7 @@ func (x *AttachJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachJobRequest.ProtoReflect.Descriptor instead.
 func (*AttachJobRequest) Descriptor() ([]byte, []int) {
-	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{29}
+	return file_protectorate_v1_job_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AttachJobRequest) GetJobId() string {
@@ -2265,13 +2523,16 @@ var File_protectorate_v1_job_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\n" +
-	"\x19protectorate/v1/job.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bprotectorate/v1/lease.proto\"\xa8\x01\n" +
+	"\x19protectorate/v1/job.proto\x12\x0fprotectorate.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bprotectorate/v1/lease.proto\"R\n" +
+	"\fJobIsolation\x12\x18\n" +
+	"\asandbox\x18\x01 \x01(\tR\asandbox\x12\x12\n" +
+	"\x04note\x18\x02 \x01(\tR\x04note\x12\x14\n" +
+	"\x05admin\x18\x03 \x01(\tR\x05admin\"\x8b\x01\n" +
 	"\tJobTarget\x12\x1b\n" +
 	"\blease_id\x18\x01 \x01(\tH\x00R\aleaseId\x12\x14\n" +
 	"\x04node\x18\x02 \x01(\tH\x00R\x04node\x12;\n" +
-	"\bselector\x18\x03 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselector\x12!\n" +
-	"\fallow_family\x18\x04 \x01(\bR\vallowFamilyB\b\n" +
-	"\x06target\"7\n" +
+	"\bselector\x18\x03 \x01(\v2\x1d.protectorate.v1.NodeSelectorH\x00R\bselectorB\b\n" +
+	"\x06targetJ\x04\b\x04\x10\x05\"7\n" +
 	"\tGitSource\x12\x12\n" +
 	"\x04repo\x18\x01 \x01(\tR\x04repo\x12\x16\n" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\">\n" +
@@ -2281,7 +2542,7 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\tJobSource\x12.\n" +
 	"\x03git\x18\x01 \x01(\v2\x1a.protectorate.v1.GitSourceH\x00R\x03git\x12=\n" +
 	"\bartifact\x18\x02 \x01(\v2\x1f.protectorate.v1.ArtifactSourceH\x00R\bartifactB\x06\n" +
-	"\x04kind\"\x85\x03\n" +
+	"\x04kind\"\xcf\x03\n" +
 	"\x10SubmitJobRequest\x122\n" +
 	"\x06target\x18\x01 \x01(\v2\x1a.protectorate.v1.JobTargetR\x06target\x122\n" +
 	"\x06source\x18\x02 \x01(\v2\x1a.protectorate.v1.JobSourceR\x06source\x12\x18\n" +
@@ -2290,10 +2551,16 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\atimeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12%\n" +
 	"\x0eartifact_globs\x18\x06 \x03(\tR\rartifactGlobs\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\a \x01(\tR\trequestId\x1a6\n" +
+	"request_id\x18\a \x01(\tR\trequestId\x12\x14\n" +
+	"\x05admin\x18\b \x01(\bR\x05admin\x122\n" +
+	"\x06limits\x18\t \x01(\v2\x1a.protectorate.v1.JobLimitsR\x06limits\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1f\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"O\n" +
+	"\tJobLimits\x12\x1f\n" +
+	"\vcpu_percent\x18\x01 \x01(\rR\n" +
+	"cpuPercent\x12!\n" +
+	"\fmemory_bytes\x18\x02 \x01(\x04R\vmemoryBytes\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"X\n" +
 	"\x0fListJobsRequest\x12/\n" +
@@ -2321,7 +2588,7 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x12\n" +
-	"\x04mode\x18\x03 \x01(\rR\x04mode\"\xb1\a\n" +
+	"\x04mode\x18\x03 \x01(\rR\x04mode\"\xc5\b\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12/\n" +
 	"\x05state\x18\x02 \x01(\x0e2\x19.protectorate.v1.JobStateR\x05state\x122\n" +
@@ -2347,7 +2614,11 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x10workspace_reused\x18\x13 \x01(\bR\x0fworkspaceReused\x12:\n" +
 	"\tartifacts\x18\x14 \x03(\v2\x1c.protectorate.v1.JobArtifactR\tartifacts\x12%\n" +
 	"\x0eartifact_bytes\x18\x15 \x01(\x04R\rartifactBytes\x12\x1b\n" +
-	"\tlog_bytes\x18\x16 \x01(\x04R\blogBytesB\f\n" +
+	"\tlog_bytes\x18\x16 \x01(\x04R\blogBytes\x12,\n" +
+	"\x04mode\x18\x17 \x01(\x0e2\x18.protectorate.v1.JobModeR\x04mode\x12\x1c\n" +
+	"\tisolation\x18\x18 \x01(\tR\tisolation\x12\x12\n" +
+	"\x04task\x18\x19 \x01(\tR\x04task\x122\n" +
+	"\x06limits\x18\x1a \x01(\v2\x1a.protectorate.v1.JobLimitsR\x06limitsB\f\n" +
 	"\n" +
 	"_gpu_index\"]\n" +
 	"\x11PrepareJobRequest\x12\x15\n" +
@@ -2365,7 +2636,7 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x04last\x18\x04 \x01(\bR\x04last\x12\x16\n" +
 	"\x06sha256\x18\x05 \x01(\tR\x06sha256\"3\n" +
 	"\x15UploadJobDataResponse\x12\x1a\n" +
-	"\breceived\x18\x01 \x01(\x04R\breceived\"\xd5\x03\n" +
+	"\breceived\x18\x01 \x01(\x04R\breceived\"\xb7\x04\n" +
 	"\rRunJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x19\n" +
 	"\brepo_key\x18\x02 \x01(\tR\arepoKey\x12\x16\n" +
@@ -2378,13 +2649,16 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x0eartifact_globs\x18\t \x03(\tR\rartifactGlobs\x12)\n" +
 	"\x10artifact_archive\x18\n" +
 	" \x01(\bR\x0fartifactArchive\x12\x18\n" +
-	"\aworkdir\x18\v \x01(\tR\aworkdir\x1a6\n" +
+	"\aworkdir\x18\v \x01(\tR\aworkdir\x12,\n" +
+	"\x04mode\x18\f \x01(\x0e2\x18.protectorate.v1.JobModeR\x04mode\x122\n" +
+	"\x06limits\x18\r \x01(\v2\x1a.protectorate.v1.JobLimitsR\x06limits\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"7\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"U\n" +
 	"\n" +
 	"JobStarted\x12)\n" +
-	"\x10workspace_reused\x18\x01 \x01(\bR\x0fworkspaceReused\"\x1f\n" +
+	"\x10workspace_reused\x18\x01 \x01(\bR\x0fworkspaceReused\x12\x1c\n" +
+	"\tisolation\x18\x02 \x01(\tR\tisolation\"\x1f\n" +
 	"\tJobOutput\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"b\n" +
 	"\x10JobArtifactChunk\x12\x12\n" +
@@ -2420,7 +2694,12 @@ const file_protectorate_v1_job_proto_rawDesc = "" +
 	"\x10AttachJobRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1f\n" +
 	"\vfrom_offset\x18\x02 \x01(\x04R\n" +
-	"fromOffset*\xb5\x01\n" +
+	"fromOffset*c\n" +
+	"\aJobMode\x12\x18\n" +
+	"\x14JOB_MODE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12JOB_MODE_SANDBOXED\x10\x01\x12\x12\n" +
+	"\x0eJOB_MODE_PLAIN\x10\x02\x12\x12\n" +
+	"\x0eJOB_MODE_ADMIN\x10\x03*\xb5\x01\n" +
 	"\bJobState\x12\x19\n" +
 	"\x15JOB_STATE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13JOB_STATE_PREPARING\x10\x01\x12\x15\n" +
@@ -2455,95 +2734,103 @@ func file_protectorate_v1_job_proto_rawDescGZIP() []byte {
 	return file_protectorate_v1_job_proto_rawDescData
 }
 
-var file_protectorate_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_protectorate_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_protectorate_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_protectorate_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_protectorate_v1_job_proto_goTypes = []any{
-	(JobState)(0),                             // 0: protectorate.v1.JobState
-	(JobEnd)(0),                               // 1: protectorate.v1.JobEnd
-	(*JobTarget)(nil),                         // 2: protectorate.v1.JobTarget
-	(*GitSource)(nil),                         // 3: protectorate.v1.GitSource
-	(*ArtifactSource)(nil),                    // 4: protectorate.v1.ArtifactSource
-	(*JobSource)(nil),                         // 5: protectorate.v1.JobSource
-	(*SubmitJobRequest)(nil),                  // 6: protectorate.v1.SubmitJobRequest
-	(*GetJobRequest)(nil),                     // 7: protectorate.v1.GetJobRequest
-	(*ListJobsRequest)(nil),                   // 8: protectorate.v1.ListJobsRequest
-	(*ListJobsResponse)(nil),                  // 9: protectorate.v1.ListJobsResponse
-	(*CancelJobRequest)(nil),                  // 10: protectorate.v1.CancelJobRequest
-	(*WatchJobRequest)(nil),                   // 11: protectorate.v1.WatchJobRequest
-	(*WatchJobResponse)(nil),                  // 12: protectorate.v1.WatchJobResponse
-	(*JobLog)(nil),                            // 13: protectorate.v1.JobLog
-	(*JobArtifact)(nil),                       // 14: protectorate.v1.JobArtifact
-	(*Job)(nil),                               // 15: protectorate.v1.Job
-	(*PrepareJobRequest)(nil),                 // 16: protectorate.v1.PrepareJobRequest
-	(*PrepareJobResponse)(nil),                // 17: protectorate.v1.PrepareJobResponse
-	(*UploadJobDataRequest)(nil),              // 18: protectorate.v1.UploadJobDataRequest
-	(*UploadJobDataResponse)(nil),             // 19: protectorate.v1.UploadJobDataResponse
-	(*RunJobRequest)(nil),                     // 20: protectorate.v1.RunJobRequest
-	(*JobStarted)(nil),                        // 21: protectorate.v1.JobStarted
-	(*JobOutput)(nil),                         // 22: protectorate.v1.JobOutput
-	(*JobArtifactChunk)(nil),                  // 23: protectorate.v1.JobArtifactChunk
-	(*JobFinished)(nil),                       // 24: protectorate.v1.JobFinished
-	(*JobEvent)(nil),                          // 25: protectorate.v1.JobEvent
-	(*NodeAgentServiceCancelJobRequest)(nil),  // 26: protectorate.v1.NodeAgentServiceCancelJobRequest
-	(*NodeAgentServiceCancelJobResponse)(nil), // 27: protectorate.v1.NodeAgentServiceCancelJobResponse
-	(*NodeAgentServiceListJobsRequest)(nil),   // 28: protectorate.v1.NodeAgentServiceListJobsRequest
-	(*NodeAgentServiceListJobsResponse)(nil),  // 29: protectorate.v1.NodeAgentServiceListJobsResponse
-	(*NodeJob)(nil),                           // 30: protectorate.v1.NodeJob
-	(*AttachJobRequest)(nil),                  // 31: protectorate.v1.AttachJobRequest
-	nil,                                       // 32: protectorate.v1.SubmitJobRequest.EnvEntry
-	nil,                                       // 33: protectorate.v1.RunJobRequest.EnvEntry
-	(*NodeSelector)(nil),                      // 34: protectorate.v1.NodeSelector
-	(*durationpb.Duration)(nil),               // 35: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil),             // 36: google.protobuf.Timestamp
+	(JobMode)(0),                              // 0: protectorate.v1.JobMode
+	(JobState)(0),                             // 1: protectorate.v1.JobState
+	(JobEnd)(0),                               // 2: protectorate.v1.JobEnd
+	(*JobIsolation)(nil),                      // 3: protectorate.v1.JobIsolation
+	(*JobTarget)(nil),                         // 4: protectorate.v1.JobTarget
+	(*GitSource)(nil),                         // 5: protectorate.v1.GitSource
+	(*ArtifactSource)(nil),                    // 6: protectorate.v1.ArtifactSource
+	(*JobSource)(nil),                         // 7: protectorate.v1.JobSource
+	(*SubmitJobRequest)(nil),                  // 8: protectorate.v1.SubmitJobRequest
+	(*JobLimits)(nil),                         // 9: protectorate.v1.JobLimits
+	(*GetJobRequest)(nil),                     // 10: protectorate.v1.GetJobRequest
+	(*ListJobsRequest)(nil),                   // 11: protectorate.v1.ListJobsRequest
+	(*ListJobsResponse)(nil),                  // 12: protectorate.v1.ListJobsResponse
+	(*CancelJobRequest)(nil),                  // 13: protectorate.v1.CancelJobRequest
+	(*WatchJobRequest)(nil),                   // 14: protectorate.v1.WatchJobRequest
+	(*WatchJobResponse)(nil),                  // 15: protectorate.v1.WatchJobResponse
+	(*JobLog)(nil),                            // 16: protectorate.v1.JobLog
+	(*JobArtifact)(nil),                       // 17: protectorate.v1.JobArtifact
+	(*Job)(nil),                               // 18: protectorate.v1.Job
+	(*PrepareJobRequest)(nil),                 // 19: protectorate.v1.PrepareJobRequest
+	(*PrepareJobResponse)(nil),                // 20: protectorate.v1.PrepareJobResponse
+	(*UploadJobDataRequest)(nil),              // 21: protectorate.v1.UploadJobDataRequest
+	(*UploadJobDataResponse)(nil),             // 22: protectorate.v1.UploadJobDataResponse
+	(*RunJobRequest)(nil),                     // 23: protectorate.v1.RunJobRequest
+	(*JobStarted)(nil),                        // 24: protectorate.v1.JobStarted
+	(*JobOutput)(nil),                         // 25: protectorate.v1.JobOutput
+	(*JobArtifactChunk)(nil),                  // 26: protectorate.v1.JobArtifactChunk
+	(*JobFinished)(nil),                       // 27: protectorate.v1.JobFinished
+	(*JobEvent)(nil),                          // 28: protectorate.v1.JobEvent
+	(*NodeAgentServiceCancelJobRequest)(nil),  // 29: protectorate.v1.NodeAgentServiceCancelJobRequest
+	(*NodeAgentServiceCancelJobResponse)(nil), // 30: protectorate.v1.NodeAgentServiceCancelJobResponse
+	(*NodeAgentServiceListJobsRequest)(nil),   // 31: protectorate.v1.NodeAgentServiceListJobsRequest
+	(*NodeAgentServiceListJobsResponse)(nil),  // 32: protectorate.v1.NodeAgentServiceListJobsResponse
+	(*NodeJob)(nil),                           // 33: protectorate.v1.NodeJob
+	(*AttachJobRequest)(nil),                  // 34: protectorate.v1.AttachJobRequest
+	nil,                                       // 35: protectorate.v1.SubmitJobRequest.EnvEntry
+	nil,                                       // 36: protectorate.v1.RunJobRequest.EnvEntry
+	(*NodeSelector)(nil),                      // 37: protectorate.v1.NodeSelector
+	(*durationpb.Duration)(nil),               // 38: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil),             // 39: google.protobuf.Timestamp
 }
 var file_protectorate_v1_job_proto_depIdxs = []int32{
-	34, // 0: protectorate.v1.JobTarget.selector:type_name -> protectorate.v1.NodeSelector
-	3,  // 1: protectorate.v1.JobSource.git:type_name -> protectorate.v1.GitSource
-	4,  // 2: protectorate.v1.JobSource.artifact:type_name -> protectorate.v1.ArtifactSource
-	2,  // 3: protectorate.v1.SubmitJobRequest.target:type_name -> protectorate.v1.JobTarget
-	5,  // 4: protectorate.v1.SubmitJobRequest.source:type_name -> protectorate.v1.JobSource
-	32, // 5: protectorate.v1.SubmitJobRequest.env:type_name -> protectorate.v1.SubmitJobRequest.EnvEntry
-	35, // 6: protectorate.v1.SubmitJobRequest.timeout:type_name -> google.protobuf.Duration
-	0,  // 7: protectorate.v1.ListJobsRequest.state:type_name -> protectorate.v1.JobState
-	15, // 8: protectorate.v1.ListJobsResponse.jobs:type_name -> protectorate.v1.Job
-	15, // 9: protectorate.v1.WatchJobResponse.job:type_name -> protectorate.v1.Job
-	13, // 10: protectorate.v1.WatchJobResponse.log:type_name -> protectorate.v1.JobLog
-	0,  // 11: protectorate.v1.Job.state:type_name -> protectorate.v1.JobState
-	2,  // 12: protectorate.v1.Job.target:type_name -> protectorate.v1.JobTarget
-	5,  // 13: protectorate.v1.Job.source:type_name -> protectorate.v1.JobSource
-	35, // 14: protectorate.v1.Job.timeout:type_name -> google.protobuf.Duration
-	36, // 15: protectorate.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
-	36, // 16: protectorate.v1.Job.started_at:type_name -> google.protobuf.Timestamp
-	36, // 17: protectorate.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	35, // 18: protectorate.v1.Job.transfer_time:type_name -> google.protobuf.Duration
-	35, // 19: protectorate.v1.Job.run_time:type_name -> google.protobuf.Duration
-	14, // 20: protectorate.v1.Job.artifacts:type_name -> protectorate.v1.JobArtifact
-	33, // 21: protectorate.v1.RunJobRequest.env:type_name -> protectorate.v1.RunJobRequest.EnvEntry
-	35, // 22: protectorate.v1.RunJobRequest.timeout:type_name -> google.protobuf.Duration
-	1,  // 23: protectorate.v1.JobFinished.end:type_name -> protectorate.v1.JobEnd
-	35, // 24: protectorate.v1.JobFinished.run_time:type_name -> google.protobuf.Duration
-	21, // 25: protectorate.v1.JobEvent.started:type_name -> protectorate.v1.JobStarted
-	22, // 26: protectorate.v1.JobEvent.output:type_name -> protectorate.v1.JobOutput
-	23, // 27: protectorate.v1.JobEvent.artifact:type_name -> protectorate.v1.JobArtifactChunk
-	24, // 28: protectorate.v1.JobEvent.finished:type_name -> protectorate.v1.JobFinished
-	30, // 29: protectorate.v1.NodeAgentServiceListJobsResponse.jobs:type_name -> protectorate.v1.NodeJob
-	24, // 30: protectorate.v1.NodeJob.finished:type_name -> protectorate.v1.JobFinished
-	36, // 31: protectorate.v1.NodeJob.finished_at:type_name -> google.protobuf.Timestamp
-	6,  // 32: protectorate.v1.JobService.SubmitJob:input_type -> protectorate.v1.SubmitJobRequest
-	7,  // 33: protectorate.v1.JobService.GetJob:input_type -> protectorate.v1.GetJobRequest
-	8,  // 34: protectorate.v1.JobService.ListJobs:input_type -> protectorate.v1.ListJobsRequest
-	10, // 35: protectorate.v1.JobService.CancelJob:input_type -> protectorate.v1.CancelJobRequest
-	11, // 36: protectorate.v1.JobService.WatchJob:input_type -> protectorate.v1.WatchJobRequest
-	15, // 37: protectorate.v1.JobService.SubmitJob:output_type -> protectorate.v1.Job
-	15, // 38: protectorate.v1.JobService.GetJob:output_type -> protectorate.v1.Job
-	9,  // 39: protectorate.v1.JobService.ListJobs:output_type -> protectorate.v1.ListJobsResponse
-	15, // 40: protectorate.v1.JobService.CancelJob:output_type -> protectorate.v1.Job
-	12, // 41: protectorate.v1.JobService.WatchJob:output_type -> protectorate.v1.WatchJobResponse
-	37, // [37:42] is the sub-list for method output_type
-	32, // [32:37] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	37, // 0: protectorate.v1.JobTarget.selector:type_name -> protectorate.v1.NodeSelector
+	5,  // 1: protectorate.v1.JobSource.git:type_name -> protectorate.v1.GitSource
+	6,  // 2: protectorate.v1.JobSource.artifact:type_name -> protectorate.v1.ArtifactSource
+	4,  // 3: protectorate.v1.SubmitJobRequest.target:type_name -> protectorate.v1.JobTarget
+	7,  // 4: protectorate.v1.SubmitJobRequest.source:type_name -> protectorate.v1.JobSource
+	35, // 5: protectorate.v1.SubmitJobRequest.env:type_name -> protectorate.v1.SubmitJobRequest.EnvEntry
+	38, // 6: protectorate.v1.SubmitJobRequest.timeout:type_name -> google.protobuf.Duration
+	9,  // 7: protectorate.v1.SubmitJobRequest.limits:type_name -> protectorate.v1.JobLimits
+	1,  // 8: protectorate.v1.ListJobsRequest.state:type_name -> protectorate.v1.JobState
+	18, // 9: protectorate.v1.ListJobsResponse.jobs:type_name -> protectorate.v1.Job
+	18, // 10: protectorate.v1.WatchJobResponse.job:type_name -> protectorate.v1.Job
+	16, // 11: protectorate.v1.WatchJobResponse.log:type_name -> protectorate.v1.JobLog
+	1,  // 12: protectorate.v1.Job.state:type_name -> protectorate.v1.JobState
+	4,  // 13: protectorate.v1.Job.target:type_name -> protectorate.v1.JobTarget
+	7,  // 14: protectorate.v1.Job.source:type_name -> protectorate.v1.JobSource
+	38, // 15: protectorate.v1.Job.timeout:type_name -> google.protobuf.Duration
+	39, // 16: protectorate.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
+	39, // 17: protectorate.v1.Job.started_at:type_name -> google.protobuf.Timestamp
+	39, // 18: protectorate.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
+	38, // 19: protectorate.v1.Job.transfer_time:type_name -> google.protobuf.Duration
+	38, // 20: protectorate.v1.Job.run_time:type_name -> google.protobuf.Duration
+	17, // 21: protectorate.v1.Job.artifacts:type_name -> protectorate.v1.JobArtifact
+	0,  // 22: protectorate.v1.Job.mode:type_name -> protectorate.v1.JobMode
+	9,  // 23: protectorate.v1.Job.limits:type_name -> protectorate.v1.JobLimits
+	36, // 24: protectorate.v1.RunJobRequest.env:type_name -> protectorate.v1.RunJobRequest.EnvEntry
+	38, // 25: protectorate.v1.RunJobRequest.timeout:type_name -> google.protobuf.Duration
+	0,  // 26: protectorate.v1.RunJobRequest.mode:type_name -> protectorate.v1.JobMode
+	9,  // 27: protectorate.v1.RunJobRequest.limits:type_name -> protectorate.v1.JobLimits
+	2,  // 28: protectorate.v1.JobFinished.end:type_name -> protectorate.v1.JobEnd
+	38, // 29: protectorate.v1.JobFinished.run_time:type_name -> google.protobuf.Duration
+	24, // 30: protectorate.v1.JobEvent.started:type_name -> protectorate.v1.JobStarted
+	25, // 31: protectorate.v1.JobEvent.output:type_name -> protectorate.v1.JobOutput
+	26, // 32: protectorate.v1.JobEvent.artifact:type_name -> protectorate.v1.JobArtifactChunk
+	27, // 33: protectorate.v1.JobEvent.finished:type_name -> protectorate.v1.JobFinished
+	33, // 34: protectorate.v1.NodeAgentServiceListJobsResponse.jobs:type_name -> protectorate.v1.NodeJob
+	27, // 35: protectorate.v1.NodeJob.finished:type_name -> protectorate.v1.JobFinished
+	39, // 36: protectorate.v1.NodeJob.finished_at:type_name -> google.protobuf.Timestamp
+	8,  // 37: protectorate.v1.JobService.SubmitJob:input_type -> protectorate.v1.SubmitJobRequest
+	10, // 38: protectorate.v1.JobService.GetJob:input_type -> protectorate.v1.GetJobRequest
+	11, // 39: protectorate.v1.JobService.ListJobs:input_type -> protectorate.v1.ListJobsRequest
+	13, // 40: protectorate.v1.JobService.CancelJob:input_type -> protectorate.v1.CancelJobRequest
+	14, // 41: protectorate.v1.JobService.WatchJob:input_type -> protectorate.v1.WatchJobRequest
+	18, // 42: protectorate.v1.JobService.SubmitJob:output_type -> protectorate.v1.Job
+	18, // 43: protectorate.v1.JobService.GetJob:output_type -> protectorate.v1.Job
+	12, // 44: protectorate.v1.JobService.ListJobs:output_type -> protectorate.v1.ListJobsResponse
+	18, // 45: protectorate.v1.JobService.CancelJob:output_type -> protectorate.v1.Job
+	15, // 46: protectorate.v1.JobService.WatchJob:output_type -> protectorate.v1.WatchJobResponse
+	42, // [42:47] is the sub-list for method output_type
+	37, // [37:42] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_job_proto_init() }
@@ -2552,21 +2839,21 @@ func file_protectorate_v1_job_proto_init() {
 		return
 	}
 	file_protectorate_v1_lease_proto_init()
-	file_protectorate_v1_job_proto_msgTypes[0].OneofWrappers = []any{
+	file_protectorate_v1_job_proto_msgTypes[1].OneofWrappers = []any{
 		(*JobTarget_LeaseId)(nil),
 		(*JobTarget_Node)(nil),
 		(*JobTarget_Selector)(nil),
 	}
-	file_protectorate_v1_job_proto_msgTypes[3].OneofWrappers = []any{
+	file_protectorate_v1_job_proto_msgTypes[4].OneofWrappers = []any{
 		(*JobSource_Git)(nil),
 		(*JobSource_Artifact)(nil),
 	}
-	file_protectorate_v1_job_proto_msgTypes[10].OneofWrappers = []any{
+	file_protectorate_v1_job_proto_msgTypes[12].OneofWrappers = []any{
 		(*WatchJobResponse_Job)(nil),
 		(*WatchJobResponse_Log)(nil),
 	}
-	file_protectorate_v1_job_proto_msgTypes[13].OneofWrappers = []any{}
-	file_protectorate_v1_job_proto_msgTypes[23].OneofWrappers = []any{
+	file_protectorate_v1_job_proto_msgTypes[15].OneofWrappers = []any{}
+	file_protectorate_v1_job_proto_msgTypes[25].OneofWrappers = []any{
 		(*JobEvent_Started)(nil),
 		(*JobEvent_Output)(nil),
 		(*JobEvent_Artifact)(nil),
@@ -2577,8 +2864,8 @@ func file_protectorate_v1_job_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_job_proto_rawDesc), len(file_protectorate_v1_job_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   32,
+			NumEnums:      3,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

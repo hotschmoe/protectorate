@@ -146,7 +146,7 @@ func TestTailnetEndToEnd(t *testing.T) {
 	}()
 
 	control := cfg.ServerURL
-	alpha := enroll(ctx, t, svc.Admin, control, "alpha", []string{tailnet.TagNode, tailnet.TierTag("server")}, true)
+	alpha := enroll(ctx, t, svc.Admin, control, "alpha", []string{tailnet.TagNode, tailnet.TierTag("shared")}, true)
 	beta := enroll(ctx, t, svc.Admin, control, "beta", []string{tailnet.TagNode, tailnet.PoolTag("build")}, true)
 	gamma := enroll(ctx, t, svc.Admin, control, "gamma", []string{tailnet.TagNode, tailnet.PoolTag("build")}, true)
 	phone := enroll(ctx, t, svc.Admin, control, "phone", []string{tailnet.TagClient}, false)
@@ -181,6 +181,26 @@ func TestTailnetEndToEnd(t *testing.T) {
 			}
 		}
 		t.Fatalf("alpha not in status: %v", st.Peers)
+	})
+
+	t.Run("retier keeps the other tags", func(t *testing.T) {
+		ok, err := svc.Admin.SetTier(ctx, "alpha", "care")
+		if err != nil || !ok {
+			t.Fatalf("set tier: %v %v", ok, err)
+		}
+		nodes, err := svc.Admin.Nodes(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range nodes {
+			if n.GivenName == "alpha" {
+				if !slices.Contains(n.Tags, tailnet.TierTag("care")) || slices.Contains(n.Tags, tailnet.TierTag("shared")) || !slices.Contains(n.Tags, tailnet.TagNode) {
+					t.Fatalf("alpha tags %v", n.Tags)
+				}
+				return
+			}
+		}
+		t.Fatal("alpha not enrolled")
 	})
 
 	t.Run("node rejects tag:node callers", func(t *testing.T) {
@@ -272,7 +292,7 @@ func TestTailnetEndToEnd(t *testing.T) {
 	}
 
 	t.Run("invite key is single-use", func(t *testing.T) {
-		key, _, err := svc.Admin.InviteNode(ctx, "delta", "server", nil, 5*time.Minute)
+		key, _, err := svc.Admin.InviteNode(ctx, "delta", "shared", nil, 5*time.Minute)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -367,7 +387,7 @@ func TestNodeRestartRecovery(t *testing.T) {
 	}
 	defer svc.Close()
 
-	key, _, err := svc.Admin.Invite(ctx, "alpha", []string{tailnet.TagNode, tailnet.TierTag("server")}, 5*time.Minute)
+	key, _, err := svc.Admin.Invite(ctx, "alpha", []string{tailnet.TagNode, tailnet.TierTag("shared")}, 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +486,7 @@ func TestDERPRelay(t *testing.T) {
 				t.Fatalf("start: %v", err)
 			}
 			defer svc.Close()
-			enroll(ctx, t, svc.Admin, cfg.ServerURL, "alpha", []string{tailnet.TagNode, tailnet.TierTag("server")}, true)
+			enroll(ctx, t, svc.Admin, cfg.ServerURL, "alpha", []string{tailnet.TagNode, tailnet.TierTag("shared")}, true)
 
 			hc := svc.Net.HTTPClient()
 			deadline := time.Now().Add(90 * time.Second)

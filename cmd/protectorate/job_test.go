@@ -32,7 +32,7 @@ func TestParseTarget(t *testing.T) {
 			s := j.GetSelector()
 			return s.Os == "windows" && s.Arch == "amd64" && s.MinFreeMemoryBytes == 8<<30 && s.GpuVramBytes == 24<<30
 		}, false},
-		{"os=windows", func(j *pb.JobTarget) bool { return j.AllowFamily }, false},
+		{"os=windows", func(j *pb.JobTarget) bool { return j.GetSelector().GetOs() == "windows" }, false},
 		{"gpu:adreno", func(j *pb.JobTarget) bool { return j.GetSelector().GetGpu() == "adreno" }, false},
 		{"os=windows,npu:hexagon,gpu:Arc Pro", func(j *pb.JobTarget) bool {
 			s := j.GetSelector()
@@ -46,7 +46,7 @@ func TestParseTarget(t *testing.T) {
 		{"mem=lots", nil, true},
 	}
 	for _, tt := range tests {
-		got, err := parseTarget(tt.on, tt.on == "os=windows")
+		got, err := parseTarget(tt.on)
 		if (err != nil) != tt.wantErr || (err == nil && !tt.check(got)) {
 			t.Errorf("parseTarget(%q) = %v, %v", tt.on, got, err)
 		}

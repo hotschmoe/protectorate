@@ -66,7 +66,7 @@ func finishRestart(k node.RestartKind, exe string, args []string) error {
 }
 
 type updateFlags struct {
-	all, force, allowFamily, noWait bool
+	all, force, noWait bool
 }
 
 func nodeUpdateCmd(o *opts) *cobra.Command {
@@ -108,7 +108,6 @@ The hub's own node is updated by replacing its binary and restarting the hub.`,
 	fl.BoolVar(&f.all, "all", false, "update every node")
 	fl.BoolVar(&f.force, "force", false, "push even when the node already reports the hub's version")
 	fl.BoolVar(&f.noWait, "no-wait", false, "return once the node swapped the binary, without waiting for it to report the new version")
-	fl.BoolVar(&f.allowFamily, "allow-family", false, "allow nodes of tier family")
 	return c
 }
 
@@ -184,7 +183,7 @@ func updateNode(cmd *cobra.Command, cl protectoratev1connect.NodeServiceClient, 
 	if why := unreachableReason(s); why != "" {
 		return errors.New(why)
 	}
-	stream, err := cl.UpdateNode(cmd.Context(), connect.NewRequest(&pb.UpdateNodeRequest{Name: name, AllowFamily: f.allowFamily, Force: f.force}))
+	stream, err := cl.UpdateNode(cmd.Context(), connect.NewRequest(&pb.UpdateNodeRequest{Name: name, Force: f.force}))
 	if err != nil {
 		return err
 	}

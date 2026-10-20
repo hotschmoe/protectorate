@@ -79,6 +79,8 @@ const AuditEntry$json = {
     {'1': 'subject', '3': 6, '4': 1, '5': 9, '10': 'subject'},
     {'1': 'outcome', '3': 7, '4': 1, '5': 9, '10': 'outcome'},
     {'1': 'code', '3': 8, '4': 1, '5': 9, '10': 'code'},
+    {'1': 'task', '3': 9, '4': 1, '5': 9, '10': 'task'},
+    {'1': 'detail', '3': 10, '4': 1, '5': 9, '10': 'detail'},
   ],
 };
 
@@ -88,7 +90,8 @@ final $typed_data.Uint8List auditEntryDescriptor = $convert.base64Decode(
     'R0aW1lEhQKBWFjdG9yGAIgASgJUgVhY3RvchIZCgh0b2tlbl9pZBgDIAEoCVIHdG9rZW5JZBIY'
     'Cgd0YWlsbmV0GAQgASgJUgd0YWlsbmV0EhwKCXByb2NlZHVyZRgFIAEoCVIJcHJvY2VkdXJlEh'
     'gKB3N1YmplY3QYBiABKAlSB3N1YmplY3QSGAoHb3V0Y29tZRgHIAEoCVIHb3V0Y29tZRISCgRj'
-    'b2RlGAggASgJUgRjb2Rl');
+    'b2RlGAggASgJUgRjb2RlEhIKBHRhc2sYCSABKAlSBHRhc2sSFgoGZGV0YWlsGAogASgJUgZkZX'
+    'RhaWw=');
 
 const $core.Map<$core.String, $core.dynamic> AuditServiceBase$json = {
   '1': 'AuditService',

@@ -119,7 +119,8 @@ hub is SIGKILLed the child is not reaped: run the hub under systemd
 protectorate hub tailnet install
 protectorate hub tailnet init --server-url https://hs.example.com [--pool build] [--key-expiry-days 180]
 protectorate hub serve                       # starts headscale + joins as tag:hub
-protectorate node invite <name> [--tier server|family] [--pool build] [--expires 1h]
+protectorate node invite <name> [--tier shared|care] [--pool build] [--expires 1h]
+protectorate node tier <name> shared|care   # owner only: inventory and tag:tier-<tier>
 PROTECTORATE_ENROLL_KEY=KEY protectorate node join --control URL [--name N]   # on the node, then `node serve`
 protectorate node rm <name> [--jobs wait|cancel] [--uninstall]
 protectorate node revoke|renew <name>
@@ -150,8 +151,9 @@ protectorate client invite --name phone      # stock Tailscale app, tag:client
 - ACL (everything else is denied): `tag:hub -> tag:node:7475,22`,
   `tag:client -> tag:hub:7470`, and `tag:pool-X -> tag:pool-X:*` for each
   configured pool. Pools are the knob that lets chosen nodes reach each
-  other (`init --pool`, `node invite --pool`). `tag:tier-server|family`
-  records the trust tier on the node for hub policy.
+  other (`init --pool`, `node invite --pool`). `tag:tier-shared|care`
+  records the node's tier (docs/node-work.md); `node tier` changes it through
+  headscale's API and the inventory together.
 - Enrollment keys are single-use, tagged and short-lived, created through
   headscale's REST API with an API key (0600, auto-recreated on expiry).
 - Key expiry: headscale leaves tagged nodes unexpiring, so the hub applies
@@ -249,7 +251,7 @@ explicitly.
 - Nodes serve their own Connect API on their tailnet address, and the hub calls
   them directly. No reverse channels.
 - `WhoIs` on each request gives the caller's identity, so a node only obeys
-  the hub. Headscale ACLs add network-level rules (family PCs can't reach each
+  the hub. Headscale ACLs add network-level rules (`care` PCs can't reach each
   other, nodes can't reach the hub's admin API).
 - Phones and laptops can join the same tailnet with the stock Tailscale app
   pointed at Headscale, so the office VPN isn't needed.
@@ -345,9 +347,11 @@ node) executes.
   job it created; a key the hub has not seen yet is recorded as canceled, so a
   submit still on its way is refused (aborted); that record is kept too.
 - **Selection** (leases and selector-targeted jobs): fresh nodes only, never
-  unreachable, never tier `family` unless `allow_family`, matching os, arch,
+  unreachable, never tier `care` (a care node is never leased, and a job naming one needs the
+  owner token or a `node_admin:<node>` grant), matching os, arch,
   free memory, a GPU or NPU whose vendor or name contains the `gpu:`/`npu:`
-  text, (for GPUs) free VRAM, and not under a conflicting lease.
+  text, (for GPUs) free VRAM, no busy GPU (another holder by VRAM, sustained
+  load or heat; docs/node-work.md), and not under a conflicting lease.
   Load is `(cpu% + mem%)/2` plus one core's worth per job already placed, so a
   burst of submits spreads out; a node that already ran a job from the same
   repo counts 20 points lighter, because its `target/` is warm.
@@ -379,6 +383,11 @@ node) executes.
   per-package `--timeout` bounds how long a run can hold the node. The hub creates no
   leases of its own for jobs (a selector or node target pins nothing), so
   there is no job-scoped lease to release server-side.
+- **Sandbox:** on Linux nodes with bwrap and a systemd user manager a job on
+  a `shared` node runs in the sleeve sandbox (bwrap in a `prot-job-<id>`
+  user scope, cgroup caps from `job run --cpu/--mem`, only the job directory
+  and worktree writable, the node's job home instead of the real one);
+  elsewhere unsandboxed, said in the node's metrics. See docs/node-work.md.
 - **Node limits:** `node serve --job-concurrency N` (default 1, 0 refuses jobs)
   and `--job-dir`. Timeout and cancel signal the process group (SIGTERM, then
   SIGKILL after 3s); on Windows the command runs in a job object that kills the

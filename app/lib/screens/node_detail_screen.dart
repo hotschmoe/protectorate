@@ -354,6 +354,12 @@ class NodeDetail extends StatelessWidget {
             age: age,
           ),
           if (badges.isNotEmpty) AlertStrip(badges: badges),
+          if (isCareNode(status))
+            const Annunciator(
+              key: ValueKey('tier-care'),
+              label: 'CARE',
+              tone: Tone.info,
+            ),
           Text(
             [
               status.node.address,
@@ -405,10 +411,24 @@ class NodeDetail extends StatelessWidget {
       left.addAll([
         _HostPanel(
           m: m,
+          busy: gpuBusy(status),
           dim: dim,
           cpuHistory: cpuHistory,
           memHistory: memHistory,
         ),
+        if (m.hasJobs())
+          Panel(
+            key: const ValueKey('jobs-isolation'),
+            legend: 'JOBS',
+            tone: jobsUnisolated(m.jobs) ? Tone.warn : null,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final l in jobIsolationLines(m.jobs))
+                  Text(l, style: t.data()),
+              ],
+            ),
+          ),
         if (m.warnings.isNotEmpty)
           Panel(
             legend: 'COLLECTION WARNINGS',
@@ -479,6 +499,7 @@ class NodeDetail extends StatelessWidget {
                         dim: dim,
                         detail: true,
                         holder: gpuHolders[g.index] ?? '',
+                        busy: gpuBusy(status)[g.index] ?? '',
                       ),
                   ],
                 ),
@@ -622,12 +643,14 @@ class NodeDetail extends StatelessWidget {
 class _HostPanel extends StatelessWidget {
   const _HostPanel({
     required this.m,
+    required this.busy,
     required this.dim,
     required this.cpuHistory,
     required this.memHistory,
   });
 
   final NodeMetrics m;
+  final Map<int, String> busy;
   final bool dim;
   final List<double?> cpuHistory;
   final List<double?> memHistory;
@@ -730,7 +753,7 @@ class _HostPanel extends StatelessWidget {
                 ],
               ),
             ),
-          ...nodeMeters(m, dim: dim, detail: true),
+          ...nodeMeters(m, dim: dim, detail: true, gpuBusy: busy),
           if (cpuHistory.length > 1) hist('CPU', cpuHistory),
           if (memHistory.length > 1) hist('MEM', memHistory),
         ],

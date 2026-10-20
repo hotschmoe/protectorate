@@ -13,7 +13,7 @@ import (
 
 func TestStatusProto(t *testing.T) {
 	hs := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	tags := views.SliceOf([]string{"tag:node", "tag:tier-server"})
+	tags := views.SliceOf([]string{"tag:node", "tag:tier-shared"})
 	pk := func() key.NodePublic { return key.NewNode().Public() }
 	tests := []struct {
 		name string
@@ -28,7 +28,7 @@ func TestStatusProto(t *testing.T) {
 					Online: true, CurAddr: "10.0.0.2:41641", Relay: "protectorate", LastHandshake: hs, RxBytes: 10, TxBytes: 20},
 			}},
 			self: "hub.ts.net",
-			want: []peerWant{{name: "alpha.ts.net", tags: []string{"tag:node", "tag:tier-server"}, ips: []string{"100.64.0.2"}, online: true,
+			want: []peerWant{{name: "alpha.ts.net", tags: []string{"tag:node", "tag:tier-shared"}, ips: []string{"100.64.0.2"}, online: true,
 				direct: "10.0.0.2:41641", relay: "protectorate", handshake: hs, rx: 10, tx: 20}},
 		},
 		{

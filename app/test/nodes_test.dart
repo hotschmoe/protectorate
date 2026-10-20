@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/job.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/lease.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/lease.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
@@ -74,8 +75,9 @@ NodeStatus _status(
   NodeMetrics? metrics,
   List<NodeAlert> alerts = const [],
   String error = '',
+  String tier = 'shared',
 }) => NodeStatus(
-  node: NodeInfo(name: name, address: '$name:7475'),
+  node: NodeInfo(name: name, address: '$name:7475', tier: tier),
   metrics: metrics,
   freshness: f,
   alerts: alerts,
@@ -111,6 +113,29 @@ void main() {
       expect(find.text('docker: 2 containers'), findsOneWidget);
       expect(find.textContaining('DISK'), findsOneWidget);
       expect(find.byKey(const ValueKey('alert-DISK 40% /data')), findsNothing);
+    });
+
+    testWidgets('tier badge marks care nodes only', (t) async {
+      for (final (tier, want) in [
+        ('care', findsOneWidget),
+        ('shared', findsNothing),
+      ]) {
+        await t.pumpWidget(
+          _host(
+            NodeCard(
+              status: _status(
+                'kidsbox',
+                NodeFreshness.NODE_FRESHNESS_FRESH,
+                metrics: _metrics(),
+                tier: tier,
+              ),
+              age: const Duration(seconds: 3),
+              onTap: () {},
+            ),
+          ),
+        );
+        expect(find.byKey(const ValueKey('tier-care')), want, reason: tier);
+      }
     });
 
     testWidgets('stale node is labeled with its age', (t) async {
@@ -316,6 +341,36 @@ void main() {
       t.getTopLeft(find.byKey(ValueKey(rows[0]))).dy,
       lessThan(t.getTopLeft(find.byKey(ValueKey(rows[1]))).dy),
     );
+  });
+
+  testWidgets('detail says how the node isolates jobs', (t) async {
+    t.view.physicalSize = const Size(500, 3000);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final m = _metrics()
+      ..jobs = JobIsolation(
+        sandbox: 'none',
+        note: 'jobs run as the agent\'s user, unsandboxed: bwrap not found',
+      );
+    await t.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: NodeDetail(
+            status: _status(
+              'phone',
+              NodeFreshness.NODE_FRESHNESS_FRESH,
+              metrics: m,
+            ),
+            age: Duration.zero,
+            now: DateTime(2026),
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(const ValueKey('jobs-isolation')), findsOneWidget);
+    expect(find.text('sandbox none'), findsOneWidget);
+    expect(find.text('no admin jobs'), findsOneWidget);
+    expect(find.textContaining('bwrap not found'), findsOneWidget);
   });
 
   test('sleeve workspaces count as offenders', () {
@@ -539,24 +594,13 @@ void main() {
       temperatureCelsius: -1,
     );
 
-    test('busy is held VRAM or heavy load', () {
-      final cases = [
-        (gpu(usedGb: 20), 'VRAM HELD'),
-        (gpu(usedGb: 12), 'VRAM HELD'),
-        (gpu(usedGb: 11), null),
-        (gpu(util: 95, usedGb: 1), 'LOADED'),
-        (gpu(util: -1), null),
-        (gpu(util: 79.9), null),
-        (gpu(totalGb: 0, usedGb: 0), null),
-        (gpu(integrated: true, util: 90), 'LOADED'),
-      ];
-      for (final (g, want) in cases) {
-        expect(
-          gpuBusy(g),
-          want,
-          reason: '${g.utilizationPercent} ${g.memoryUsedBytes}',
-        );
-      }
+    test('busy comes from the hub, by GPU index', () {
+      final s = _status('nas', NodeFreshness.NODE_FRESHNESS_FRESH)
+        ..busyGpus.addAll([
+          GpuBusy(index: 1, reason: 'utilization at least 90% for 3m0s'),
+        ]);
+      expect(gpuBusy(s), {1: 'utilization at least 90% for 3m0s'});
+      expect(gpuBusy(_status('x', NodeFreshness.NODE_FRESHNESS_FRESH)), {});
     });
 
     test('holders come from live GPU leases of the node', () {
@@ -589,7 +633,10 @@ void main() {
             NodeService.listNodes,
             (ListNodesRequest r, ctx) => ListNodesResponse(
               nodes: [
-                _status('nas', NodeFreshness.NODE_FRESHNESS_FRESH, metrics: m),
+                _status('nas', NodeFreshness.NODE_FRESHNESS_FRESH, metrics: m)
+                  ..busyGpus.add(
+                    GpuBusy(index: 0, reason: '66% of its VRAM is in use'),
+                  ),
               ],
             ),
           )
@@ -614,7 +661,8 @@ void main() {
       await t.pump();
       await t.pump();
       expect(find.byKey(const ValueKey('gpu-busy-0')), findsOneWidget);
-      expect(find.text('BUSY VRAM HELD'), findsOneWidget);
+      expect(find.text('BUSY'), findsOneWidget);
+      expect(find.text('66% of its VRAM is in use'), findsOneWidget);
       expect(find.byKey(const ValueKey('gpu-busy-1')), findsNothing);
       expect(find.text('LEASED BY sleeve:llm'), findsOneWidget);
       await t.pumpWidget(const SizedBox());

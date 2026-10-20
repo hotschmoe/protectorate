@@ -542,4 +542,24 @@ extension type NodeServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// SetNodeTier changes a node's tier in the inventory and its
+  /// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+  /// owner token may call it. The hub's own node is always "shared".
+  Future<protectoratev1node.NodeInfo> setNodeTier(
+    protectoratev1node.SetNodeTierRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeService.setNodeTier,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }

@@ -297,6 +297,7 @@ List<Widget> nodeMeters(
   required bool dim,
   bool detail = false,
   Map<int, String> gpuHolders = const {},
+  Map<int, String> gpuBusy = const {},
 }) {
   final rows = <Widget>[
     MeterRow(
@@ -350,6 +351,7 @@ List<Widget> nodeMeters(
         gpu: g,
         dim: dim,
         holder: gpuHolders[g.index] ?? '',
+        busy: gpuBusy[g.index] ?? '',
       ),
     );
   }
@@ -414,6 +416,14 @@ class NodeCard extends StatelessWidget {
                       const SizedBox(width: 8),
                       const Annunciator(label: 'REMOVING', tone: Tone.warn),
                     ],
+                    if (isCareNode(status)) ...[
+                      const SizedBox(width: 8),
+                      const Annunciator(
+                        key: ValueKey('tier-care'),
+                        label: 'CARE',
+                        tone: Tone.info,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -457,7 +467,12 @@ class NodeCard extends StatelessWidget {
           else if (m == null)
             Text('No metrics yet.', style: t.small())
           else ...[
-            ...nodeMeters(m, dim: stale, gpuHolders: gpuHolders),
+            ...nodeMeters(
+              m,
+              dim: stale,
+              gpuHolders: gpuHolders,
+              gpuBusy: gpuBusy(status),
+            ),
             if (cpuHistory.length > 1) ...[
               const SizedBox(height: 8),
               Row(

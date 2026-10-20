@@ -181,8 +181,12 @@ type AuditEntry struct {
 	// subject is the request's name or id, nothing else from the body.
 	Subject string `protobuf:"bytes,6,opt,name=subject,proto3" json:"subject,omitempty"`
 	// outcome is "ok", "denied" or "error"; code is the Connect code.
-	Outcome       string `protobuf:"bytes,7,opt,name=outcome,proto3" json:"outcome,omitempty"`
-	Code          string `protobuf:"bytes,8,opt,name=code,proto3" json:"code,omitempty"`
+	Outcome string `protobuf:"bytes,7,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Code    string `protobuf:"bytes,8,opt,name=code,proto3" json:"code,omitempty"`
+	// task is the task of the admin grant that made the call.
+	Task string `protobuf:"bytes,9,opt,name=task,proto3" json:"task,omitempty"`
+	// detail is what the handler added, such as a job's node and mode.
+	Detail        string `protobuf:"bytes,10,opt,name=detail,proto3" json:"detail,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,6 +277,20 @@ func (x *AuditEntry) GetCode() string {
 	return ""
 }
 
+func (x *AuditEntry) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *AuditEntry) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_protectorate_v1_audit_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_audit_proto_rawDesc = "" +
@@ -288,7 +306,7 @@ const file_protectorate_v1_audit_proto_rawDesc = "" +
 	"\aoutcome\x18\x06 \x01(\tR\aoutcome\"y\n" +
 	"\x18ListAuditEntriesResponse\x125\n" +
 	"\aentries\x18\x01 \x03(\v2\x1b.protectorate.v1.AuditEntryR\aentries\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xed\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x99\x02\n" +
 	"\n" +
 	"AuditEntry\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x14\n" +
@@ -298,7 +316,10 @@ const file_protectorate_v1_audit_proto_rawDesc = "" +
 	"\tprocedure\x18\x05 \x01(\tR\tprocedure\x12\x18\n" +
 	"\asubject\x18\x06 \x01(\tR\asubject\x12\x18\n" +
 	"\aoutcome\x18\a \x01(\tR\aoutcome\x12\x12\n" +
-	"\x04code\x18\b \x01(\tR\x04code2\x82\x01\n" +
+	"\x04code\x18\b \x01(\tR\x04code\x12\x12\n" +
+	"\x04task\x18\t \x01(\tR\x04task\x12\x16\n" +
+	"\x06detail\x18\n" +
+	" \x01(\tR\x06detail2\x82\x01\n" +
 	"\fAuditService\x12l\n" +
 	"\x10ListAuditEntries\x12(.protectorate.v1.ListAuditEntriesRequest\x1a).protectorate.v1.ListAuditEntriesResponse\"\x03\x90\x02\x01\x1a\x04\x98\xb5\x18\x01BFZDgithub.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1b\x06proto3"
 

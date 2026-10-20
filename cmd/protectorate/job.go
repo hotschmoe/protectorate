@@ -53,8 +53,8 @@ func jobCmd(o *opts) *cobra.Command {
 
 // parseTarget reads --on: a lease id, a selector such as os=windows,arch=amd64
 // or gpu:adreno, or a node name. Node names have no '=' or ':'.
-func parseTarget(on string, allowFamily bool) (*pb.JobTarget, error) {
-	t := &pb.JobTarget{AllowFamily: allowFamily}
+func parseTarget(on string) (*pb.JobTarget, error) {
+	t := &pb.JobTarget{}
 	switch {
 	case on == "":
 		return nil, errors.New("--on is required: a node, a lease id or a selector like os=windows,arch=amd64")
@@ -143,7 +143,9 @@ func jobRunCmd(o *opts) *cobra.Command {
 	var on, gitSrc, artifact, workdir string
 	var globs, envPairs []string
 	var timeout time.Duration
-	var allowFamily bool
+	var admin bool
+	var cpu uint32
+	var mem string
 	c := &cobra.Command{
 		Use:   "run --on <node|lease|selector> [--git <repo>[@<commit>] | --artifact <file|dir>] [--artifact-glob 'dist/*'] -- <cmd...>",
 		Short: "Run a command on a node and stream its output",
@@ -167,11 +169,18 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 			if cmd.ArgsLenAtDash() != 0 {
 				return errors.New("usage: job run [flags] -- <cmd...>")
 			}
-			target, err := parseTarget(on, allowFamily)
+			target, err := parseTarget(on)
 			if err != nil {
 				return err
 			}
-			req := &pb.SubmitJobRequest{Target: target, Command: args, ArtifactGlobs: globs, Timeout: durationpb.New(timeout)}
+			req := &pb.SubmitJobRequest{Target: target, Command: args, ArtifactGlobs: globs, Timeout: durationpb.New(timeout), Admin: admin}
+			memBytes, err := parseOptSize(mem)
+			if err != nil {
+				return err
+			}
+			if cpu > 0 || memBytes > 0 {
+				req.Limits = &pb.JobLimits{CpuPercent: cpu, MemoryBytes: memBytes}
+			}
 			if req.Env, err = parseEnv(envPairs); err != nil {
 				return err
 			}
@@ -210,7 +219,9 @@ copied back to $PROTECTORATE_HOME/jobs/<id>/artifacts/ on the hub.`,
 	f.StringArrayVar(&globs, "artifact-glob", nil, "fetch files matching this glob back to the hub (repeatable)")
 	f.StringArrayVarP(&envPairs, "env", "e", nil, "environment variable KEY=VALUE (repeatable)")
 	f.DurationVar(&timeout, "timeout", time.Hour, "kill the command after this long (at most 24h)")
-	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")
+	f.Uint32Var(&cpu, "cpu", 0, "cap a sandboxed job's CPU, in percent of one core (200 = two cores)")
+	f.StringVar(&mem, "mem", "", "cap a sandboxed job's memory, e.g. 4G (at least 64M)")
+	f.BoolVar(&admin, "admin", false, "run elevated (sudo -n on Linux, the agent's elevated token on Windows), unsandboxed; needs a named node and an admin grant for it")
 	return c
 }
 
@@ -440,6 +451,10 @@ func jobShowCmd(o *opts) *cobra.Command {
 			j := res.Msg
 			return o.out(cmd).print(j, func(w io.Writer) {
 				fmt.Fprintf(w, "id\t%s\nstate\t%s\nnode\t%s\ncommand\t%s\n", j.Id, jobStateName(j.State), j.Node, strings.Join(j.Command, " "))
+				fmt.Fprintf(w, "mode\t%s\nisolation\t%s\n", jobModeName(j.Mode), orDash(j.Isolation))
+				if j.Task != "" {
+					fmt.Fprintf(w, "task\t%s\n", j.Task)
+				}
 				switch k := j.Source.GetKind().(type) {
 				case *pb.JobSource_Git:
 					fmt.Fprintf(w, "source\tgit %s@%s\n", k.Git.Repo, k.Git.Commit)
@@ -456,6 +471,13 @@ func jobShowCmd(o *opts) *cobra.Command {
 			})
 		},
 	}
+}
+
+func jobModeName(m pb.JobMode) string {
+	if m == pb.JobMode_JOB_MODE_UNSPECIFIED {
+		m = pb.JobMode_JOB_MODE_SANDBOXED
+	}
+	return strings.ToLower(strings.TrimPrefix(m.String(), "JOB_MODE_"))
 }
 
 func jobCancelCmd(o *opts) *cobra.Command {
@@ -516,7 +538,6 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 func jobTestCrossCmd(o *opts) *cobra.Command {
 	var goos, goarch, on string
 	var timeout time.Duration
-	var allowFamily bool
 	c := &cobra.Command{
 		Use:   "test-cross --goos <os> --goarch <arch> <packages...> [-- <test flags>]",
 		Short: "Compile Go tests here and run the test binaries on a matching node",
@@ -538,7 +559,7 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 			if len(pkgArgs) == 0 {
 				return errors.New("name at least one package")
 			}
-			return testCross(cmd, o, goos, goarch, on, timeout, allowFamily, pkgArgs, testArgs)
+			return testCross(cmd, o, goos, goarch, on, timeout, pkgArgs, testArgs)
 		},
 	}
 	f := c.Flags()
@@ -546,13 +567,12 @@ after -- go to the test binaries, e.g. -test.run TestX -test.v.`,
 	f.StringVar(&goarch, "goarch", "", "target GOARCH (required)")
 	f.StringVar(&on, "on", "", "run on this node or lease instead of picking a matching node")
 	f.DurationVar(&timeout, "timeout", 10*time.Minute, "per-package run timeout")
-	f.BoolVar(&allowFamily, "allow-family", false, "allow nodes of tier family")
 	_ = c.MarkFlagRequired("goos")
 	_ = c.MarkFlagRequired("goarch")
 	return c
 }
 
-func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout time.Duration, allowFamily bool, patterns, testArgs []string) error {
+func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout time.Duration, patterns, testArgs []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	jobCtx, lose := context.WithCancelCause(ctx)
@@ -604,7 +624,7 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout tim
 	}
 	var target *pb.JobTarget
 	if on != "" {
-		if target, err = parseTarget(on, allowFamily); err != nil {
+		if target, err = parseTarget(on); err != nil {
 			return err
 		}
 	} else {
@@ -614,7 +634,7 @@ func testCross(cmd *cobra.Command, o *opts, goos, goarch, on string, timeout tim
 		}
 		res, err := lc.AcquireLease(ctx, connect.NewRequest(&pb.AcquireLeaseRequest{
 			Target: &pb.AcquireLeaseRequest_Selector{Selector: &pb.NodeSelector{Os: goos, Arch: goarch}},
-			Holder: defaultHolder() + " test-cross", Ttl: durationpb.New(testCrossLeaseTTL), AllowFamily: allowFamily,
+			Holder: defaultHolder() + " test-cross", Ttl: durationpb.New(testCrossLeaseTTL),
 		}))
 		if err != nil {
 			return fmt.Errorf("find a %s/%s node: %w", goos, goarch, err)

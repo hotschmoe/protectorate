@@ -240,7 +240,7 @@ func TestSubmitKeyWaitHonorsContext(t *testing.T) {
 }
 
 func TestExpiredLeaseIsReselectable(t *testing.T) {
-	statuses := []*pb.NodeStatus{status("win1", TierServer, pb.NodeFreshness_NODE_FRESHNESS_FRESH, "windows", "amd64", 10, 10, 8, 8<<30)}
+	statuses := []*pb.NodeStatus{status("win1", TierShared, pb.NodeFreshness_NODE_FRESHNESS_FRESH, "windows", "amd64", 10, 10, 8, 8<<30)}
 	sel := &pb.NodeSelector{Os: "windows"}
 	tests := []struct {
 		name    string
@@ -256,7 +256,7 @@ func TestExpiredLeaseIsReselectable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tb, clk, _ := newTable(t, filepath.Join(t.TempDir(), "leases.yaml"))
 			choose := func(blocked func(string, *int) *pb.Lease) (string, *int, error) {
-				return pickNode(statuses, sel, false, func(string) int { return 0 }, blocked, nil)
+				return pickNode(statuses, sel, func(string) int { return 0 }, blocked, nil)
 			}
 			l, err := tb.Acquire("a", time.Minute, choose)
 			if err != nil {

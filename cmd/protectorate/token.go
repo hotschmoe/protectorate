@@ -15,6 +15,7 @@ import (
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/auth"
+	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/hub"
 )
 
@@ -101,7 +102,7 @@ func tokenLsCmd(o *opts) *cobra.Command {
 				return err
 			}
 			return o.out(cmd).print(res.Msg, func(w io.Writer) {
-				fmt.Fprintln(w, "ID\tNAME\tSTATE\tEXPIRES\tLAST USED\tSCOPES")
+				fmt.Fprintln(w, "ID\tNAME\tSTATE\tEXPIRES\tLAST USED\tSCOPES\tTASK")
 				now := time.Now()
 				for _, t := range res.Msg.Tokens {
 					state := "active"
@@ -111,8 +112,12 @@ func tokenLsCmd(o *opts) *cobra.Command {
 					case t.ExpiresAt != nil && !now.Before(t.ExpiresAt.AsTime()):
 						state = "expired"
 					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%v\n", t.Id, t.Name, state,
-						fmtStamp(t.ExpiresAt, "never"), fmtStamp(t.LastUsedAt, "-"), t.Scopes)
+					task := "-"
+					if t.Task != "" {
+						task = t.Task + " (by " + t.MintedBy + ")"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%v\t%s\n", t.Id, t.Name, state,
+						fmtStamp(t.ExpiresAt, "never"), fmtStamp(t.LastUsedAt, "-"), t.Scopes, task)
 				}
 			})
 		},
@@ -138,6 +143,68 @@ func tokenRevokeCmd(o *opts) *cobra.Command {
 			})
 		},
 	}
+}
+
+func (o *opts) grantClient() (protectoratev1connect.GrantServiceClient, error) {
+	hc, err := o.httpClient()
+	if err != nil {
+		return nil, err
+	}
+	return protectoratev1connect.NewGrantServiceClient(hc, o.hubURL), nil
+}
+
+func grantCmd(o *opts) *cobra.Command {
+	c := &cobra.Command{Use: "grant", Short: "Mint task-scoped grants"}
+	var node, task, out string
+	var ttl time.Duration
+	admin := &cobra.Command{
+		Use:   "admin --node <node|glob> --task <text> [--ttl 4h]",
+		Short: "Mint a short-lived token for one task: job_* and node_admin:<node>",
+		Long: `Mints a token whose scopes are job_* and node_admin:<node>: jobs on that node,
+including a care node and admin jobs (job run --admin). It expires after --ttl
+(default 4h, at most 24h), records the task, and every call made with it is
+audited with the task. The owner may name a glob over node names; the
+orchestrator may grant one shared node by name when the hub runs with
+--orchestrator-admin-grants. Revoke early with protectorate token revoke <id>.`,
+		Example: `  protectorate grant admin --node kidsbox --ttl 4h --task "update kids machine"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cl, err := o.grantClient()
+			if err != nil {
+				return err
+			}
+			res, err := cl.Admin(cmd.Context(), connect.NewRequest(&pb.GrantServiceAdminRequest{Node: node, Task: task, Ttl: durationpb.New(ttl)}))
+			if err != nil {
+				return err
+			}
+			use := "PROTECTORATE_TOKEN=" + res.Msg.Secret + " protectorate"
+			if out != "" {
+				if err := fsutil.WriteFile(out, []byte(res.Msg.Secret+"\n"), 0o600); err != nil {
+					return fmt.Errorf("write %s: %w", out, err)
+				}
+				use = "protectorate --token-file " + out
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				t := res.Msg.Token
+				fmt.Fprintf(w, "grant\t%s (%s)\n", t.Id, t.Name)
+				fmt.Fprintf(w, "task\t%s\n", t.Task)
+				fmt.Fprintf(w, "scopes\t%v\n", t.Scopes)
+				fmt.Fprintf(w, "expires\t%s\n", fmtStamp(t.ExpiresAt, "never"))
+				fmt.Fprintf(w, "\nUse: %s job run --on %s [--admin] -- <cmd>\n", use, node)
+				if out == "" {
+					fmt.Fprintln(w, "This is the only time the secret is shown.")
+				}
+			})
+		},
+	}
+	admin.Flags().StringVar(&node, "node", "", "node name, or (owner) a glob over node names (required)")
+	admin.Flags().StringVar(&task, "task", "", "what the grant is for; recorded with the token and in the audit log (required)")
+	admin.Flags().DurationVar(&ttl, "ttl", 4*time.Hour, "lifetime, at most 24h")
+	admin.Flags().StringVar(&out, "out", "", "write the secret to this file (mode 0600) instead of printing it")
+	_ = admin.MarkFlagRequired("node")
+	_ = admin.MarkFlagRequired("task")
+	c.AddCommand(admin)
+	return c
 }
 
 func auditCmd(o *opts) *cobra.Command {
@@ -170,6 +237,12 @@ func auditCmd(o *opts) *cobra.Command {
 				fmt.Fprintf(w, "%s  %s  %s  %s  %s", e.Time.Local().Format(time.RFC3339), who, e.Procedure, e.Subject, e.Outcome)
 				if e.Code != "" {
 					fmt.Fprintf(w, " (%s)", e.Code)
+				}
+				if e.Detail != "" {
+					fmt.Fprintf(w, "  %s", e.Detail)
+				}
+				if e.Task != "" {
+					fmt.Fprintf(w, "  [task: %s]", e.Task)
 				}
 				fmt.Fprintln(w)
 			}

@@ -91,6 +91,10 @@ type Hub struct {
 	// user's own server even when they do not look private.
 	LocalModelHosts []string
 
+	// OrchestratorGrants lets the orchestrator's token mint admin grants for
+	// shared nodes. Care nodes are granted by the owner only.
+	OrchestratorGrants bool
+
 	// PublicURL is the URL new machines reach this hub at, baked into the
 	// install scripts and commands; empty means the URL each request came in
 	// on.
@@ -235,6 +239,7 @@ func (h *Hub) Handler() http.Handler {
 	mux.Handle(protectoratev1connect.NewQuotaServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewSessionServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTokenServiceHandler(h, opts))
+	mux.Handle(protectoratev1connect.NewGrantServiceHandler(grantService{h}, opts))
 	mux.Handle(protectoratev1connect.NewAuditServiceHandler(h, opts))
 	mux.Handle(protectoratev1connect.NewTailnetServiceHandler(tailnetService{h}, opts))
 	mux.HandleFunc("GET /ws/terminal/{name}", h.handleTerminal)
@@ -456,13 +461,17 @@ func bearerToken(header http.Header) string {
 	return ""
 }
 
-// admit authenticates and authorizes one call, auditing mutations. finish
-// must be called with the call's result.
+// admit authenticates and authorizes one call, auditing mutations and every
+// call an admin grant makes. finish must be called with the call's result.
 func (i authInterceptor) admit(ctx context.Context, procedure string, header http.Header, msg any) (context.Context, func(error), error) {
 	m, known := i.a.Method(procedure)
 	audited := !known || m.Mutating()
 	subject := auth.Subject(msg)
 	p, err := i.a.Authenticate(bearerToken(header))
+	if p != nil && p.Task != "" {
+		audited = true
+	}
+	ctx = auth.WithNote(ctx)
 	if err == nil {
 		err = i.a.AuthorizeProcedure(p, procedure)
 	}

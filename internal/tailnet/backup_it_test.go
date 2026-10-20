@@ -41,7 +41,7 @@ func TestBackupRestoreWithLiveHeadscale(t *testing.T) {
 			svc.Close()
 		}
 	}()
-	enroll(ctx, t, svc.Admin, cfg.ServerURL, "alpha", []string{tailnet.TagNode, tailnet.TierTag("server")}, false)
+	enroll(ctx, t, svc.Admin, cfg.ServerURL, "alpha", []string{tailnet.TagNode, tailnet.TierTag("shared")}, false)
 
 	file, err := backup.Create(ctx, backup.Options{Home: home, Dir: t.TempDir(), Version: "it"})
 	if err != nil {

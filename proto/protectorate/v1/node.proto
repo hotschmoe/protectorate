@@ -182,6 +182,19 @@ service NodeService {
   // GetDeskPolicy returns a node's policy, its current evaluation and who
   // holds the desktop lease.
   rpc GetDeskPolicy(GetDeskPolicyRequest) returns (DeskPolicyStatus);
+
+  // SetNodeTier changes a node's tier in the inventory and its
+  // tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+  // owner token may call it. The hub's own node is always "shared".
+  rpc SetNodeTier(SetNodeTierRequest) returns (NodeInfo) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
+}
+
+message SetNodeTierRequest {
+  string name = 1;
+  // tier is "shared" or "care".
+  string tier = 2;
 }
 
 message GetDeskStateRequest {
@@ -194,14 +207,14 @@ message GetDeskStateRequest {
 
 message SetDeskPolicyRequest {
   string name = 1;
-  bool allow_family = 2;
+  reserved 2;
   // policy unset clears the policy: the desktop is always available again.
   DeskPolicy policy = 3;
 }
 
 message GetDeskPolicyRequest {
   string name = 1;
-  bool allow_family = 2;
+  reserved 2;
 }
 
 message DeskPolicyStatus {
@@ -237,7 +250,7 @@ enum UpdatePhase {
 
 message UpdateNodeRequest {
   string name = 1;
-  bool allow_family = 2;
+  reserved 2;
   // force sends the binary even when the node reports the hub's version.
   bool force = 3;
 }
@@ -262,7 +275,7 @@ message UpdateNodeProgress {
 message ApplyUpdateRequest {
   // name is the node name; the agent ignores it.
   string name = 1;
-  bool allow_family = 2;
+  reserved 2;
   // path is where PutFile put the new binary, as PutFile reported it.
   string path = 3;
   // size and sha256 (hex) are what the node must find at path.
@@ -309,7 +322,7 @@ message FileTrailer {
 message PutFileRequest {
   // name is the node name.
   string name = 1;
-  bool allow_family = 2;
+  reserved 2;
   // transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
   string transfer_id = 3;
   // path, kind, mode and overwrite are read on the first call (offset 0).
@@ -339,7 +352,7 @@ message PutFileResponse {
 
 message GetFileRequest {
   string name = 1;
-  bool allow_family = 2;
+  reserved 2;
   string path = 3;
   // no_compress sends every chunk as is.
   bool no_compress = 4;
@@ -393,6 +406,9 @@ message NodeMetrics {
   repeated Sleeve sleeves = 15;
   // npus lists neural processing units.
   repeated AcceleratorMetrics npus = 16;
+  // jobs is how this node isolates and elevates jobs; unset when it runs
+  // none.
+  JobIsolation jobs = 17;
 }
 
 message CpuMetrics {
@@ -568,7 +584,8 @@ message NodeInfo {
   repeated string tags = 5;
   // ssh_alias is the break-glass `ssh` host alias.
   string ssh_alias = 6;
-  // tier is "server" or "family" and drives future command gating.
+  // tier is "shared" (the compute pool) or "care" (a machine kept for a
+  // person, never scheduled or leased).
   string tier = 7;
   string notes = 8;
   // local marks the hub's own node, which is not stored in the inventory.
@@ -599,6 +616,17 @@ message NodeStatus {
   repeated DeskUse desk_inputs = 10;
   // draining marks a node being removed: no new jobs or leases go to it.
   bool draining = 11;
+  // busy_gpus are the node's GPUs that something outside protectorate's
+  // leases is using, as the hub judges from the node's recent polls:
+  // automatic placement skips them, explicit requests are refused.
+  repeated GpuBusy busy_gpus = 12;
+}
+
+message GpuBusy {
+  // index is GpuMetrics.index.
+  int32 index = 1;
+  // reason says what makes it busy, e.g. "92% of its VRAM is in use".
+  string reason = 2;
 }
 
 message ListNodesRequest {}
@@ -668,7 +696,7 @@ message UninstallResponse {
 message InviteNodeRequest {
   // name must be a lowercase DNS label (a-z, 0-9, '-'), at most 63 long.
   string name = 1;
-  // tier is "server" (default) or "family".
+  // tier is "shared" (default) or "care".
   string tier = 2;
   // pools are build pools configured on the hub's tailnet.
   repeated string pools = 3;

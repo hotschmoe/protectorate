@@ -2,6 +2,7 @@ package hub
 
 import (
 	"archive/zip"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -30,6 +31,7 @@ import (
 
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
 	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
+	"github.com/hotschmoe/protectorate/internal/auth"
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 	"github.com/hotschmoe/protectorate/internal/keylog"
 	"github.com/hotschmoe/protectorate/internal/node"
@@ -42,6 +44,7 @@ const (
 	cancelBackstop    = 10 * time.Second
 	cancelWait        = 8 * time.Second
 	logReadChunk      = 64 << 10
+	minJobMemory      = 64 << 20
 	// reconnectWindow bounds how long a stream that lost its node is retried
 	// before the job is failed.
 	reconnectWindow = 5 * time.Minute
@@ -256,7 +259,7 @@ func (m *JobManager) load(dir string) (*jobEntry, error) {
 		return nil, err
 	}
 	j := &pb.Job{}
-	if err := protojson.Unmarshal(raw, j); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, j); err != nil {
 		return nil, err
 	}
 	if fi, err := os.Stat(filepath.Join(dir, "job.log")); err == nil {
@@ -379,6 +382,9 @@ func validateSubmit(req *pb.SubmitJobRequest) (time.Duration, error) {
 			return 0, invalid("invalid artifact glob %q", g)
 		}
 	}
+	if m := req.GetLimits().GetMemoryBytes(); m != 0 && m < minJobMemory {
+		return 0, invalid("a memory limit must be at least 64 MiB")
+	}
 	return timeout, nil
 }
 
@@ -430,8 +436,10 @@ func (m *JobManager) planSource(ctx context.Context, src *pb.JobSource) (*source
 	return nil, nil, invalid("unknown source kind")
 }
 
-// place picks the node for a target. The caller holds submitMu.
-func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, gpu *int, err error) {
+// place picks the node for a target. The caller holds submitMu. A named
+// node or a lease's node of tier care needs the caller in ctx to be admitted
+// by careGate; a selector never picks one.
+func (m *JobManager) place(ctx context.Context, target *pb.JobTarget, repo string) (n *pb.NodeInfo, gpu *int, err error) {
 	var name string
 	switch t := target.GetTarget().(type) {
 	case *pb.JobTarget_LeaseId:
@@ -447,12 +455,18 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 			g := int(*l.GpuIndex)
 			gpu = &g
 		}
-		if err := m.nodes.namedNode(name, gpu, true); err != nil {
+		if err := m.nodes.namedNode(name, gpu); err != nil {
+			return nil, nil, err
+		}
+		if err := m.nodes.careGate(ctx, name); err != nil {
 			return nil, nil, err
 		}
 	case *pb.JobTarget_Node:
 		name = strings.ToLower(t.Node)
-		if err := m.nodes.namedNode(name, nil, target.AllowFamily); err != nil {
+		if err := m.nodes.namedNode(name, nil); err != nil {
+			return nil, nil, err
+		}
+		if err := m.nodes.careGate(ctx, name); err != nil {
 			return nil, nil, err
 		}
 		if l := m.leases.NodeLease(name); l != nil {
@@ -465,7 +479,7 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 			}
 			return m.leases.Blocked(node, gpu)
 		}
-		name, gpu, err = pickNode(m.nodes.Statuses(), t.Selector, target.AllowFamily, m.busy, blocked, m.warmNodes(repo))
+		name, gpu, err = pickNode(m.nodes.Statuses(), t.Selector, m.busy, blocked, m.warmNodes(repo))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -477,6 +491,63 @@ func (m *JobManager) place(target *pb.JobTarget, repo string) (n *pb.NodeInfo, g
 		return nil, nil, nodeErr(err)
 	}
 	return n, gpu, nil
+}
+
+// jobMode decides how the node runs the command: admin when asked for and
+// allowed, plain (the agent's user, unsandboxed) on a care node, which the
+// job maintains, sandboxed everywhere else.
+func (m *JobManager) jobMode(ctx context.Context, req *pb.SubmitJobRequest, n *pb.NodeInfo) (pb.JobMode, error) {
+	if !req.Admin {
+		if n.Tier == TierCare {
+			return pb.JobMode_JOB_MODE_PLAIN, nil
+		}
+		return pb.JobMode_JOB_MODE_SANDBOXED, nil
+	}
+	if req.Target.GetSelector() != nil {
+		return 0, invalid("an admin job names its node (or a lease), not a selector")
+	}
+	if p := auth.PrincipalFrom(ctx); !p.AdminOn(n.Name) {
+		return 0, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("admin jobs on %s need an admin grant for it (protectorate grant admin --node %s --task \"...\")", n.Name, n.Name))
+	}
+	st, err := m.nodes.Status(n.Name)
+	if err != nil {
+		return 0, nodeErr(err)
+	}
+	iso := st.Metrics.GetJobs()
+	if iso == nil {
+		return 0, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s does not report whether it can run admin jobs: update its agent", n.Name))
+	}
+	if iso.Admin == "" {
+		return 0, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("node %s cannot run admin jobs: %s", n.Name, cmp.Or(iso.Note, "it has no way to elevate")))
+	}
+	return pb.JobMode_JOB_MODE_ADMIN, nil
+}
+
+// maxAuditCommand bounds the command text kept in an audit line.
+const maxAuditCommand = 512
+
+// jobAudit is the audit detail of a submitted job. The command is kept for
+// admin jobs and for jobs under a grant, whose every command is audited.
+func jobAudit(node string, mode pb.JobMode, command []string, withCommand bool) string {
+	d := "node " + node + ", " + modeLabel(mode)
+	if withCommand {
+		c := strconv.Quote(strings.Join(command, " "))
+		if len(c) > maxAuditCommand {
+			c = c[:maxAuditCommand] + "..."
+		}
+		d += ", command " + c
+	}
+	return d
+}
+
+func modeLabel(mode pb.JobMode) string {
+	switch mode {
+	case pb.JobMode_JOB_MODE_ADMIN:
+		return "admin (elevated, unsandboxed)"
+	case pb.JobMode_JOB_MODE_PLAIN:
+		return "plain (agent user, unsandboxed)"
+	}
+	return "sandboxed"
 }
 
 func newJobID() (string, error) {
@@ -511,14 +582,25 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 
 	m.submitMu.Lock()
 	defer m.submitMu.Unlock()
-	n, gpu, err := m.place(req.Target, plan.repo)
+	n, gpu, err := m.place(ctx, req.Target, plan.repo)
 	if err != nil {
 		return nil, err
 	}
+	mode, err := m.jobMode(ctx, req, n)
+	if err != nil {
+		return nil, err
+	}
+	if _, named := req.Target.GetTarget().(*pb.JobTarget_Node); named && mode != pb.JobMode_JOB_MODE_ADMIN {
+		if err := m.nodes.gpuFree(n.Name, nil); err != nil {
+			return nil, err
+		}
+	}
+	p := auth.PrincipalFrom(ctx)
 	id, err := newJobID()
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	auth.Annotate(ctx, id, jobAudit(n.Name, mode, req.Command, mode == pb.JobMode_JOB_MODE_ADMIN || p.GetTask() != ""))
 	dir := filepath.Join(m.dir, id)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -535,7 +617,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	job := &pb.Job{
 		Id: id, State: pb.JobState_JOB_STATE_PREPARING, Target: req.Target, Node: n.Name, Source: src,
 		Command: req.Command, EnvKeys: envKeys, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
-		SubmittedAt: timestamppb.Now(),
+		SubmittedAt: timestamppb.Now(), Mode: mode, Task: p.GetTask(), Limits: req.Limits,
 	}
 	if gpu != nil {
 		g := int32(*gpu)
@@ -567,7 +649,7 @@ func (m *JobManager) submit(ctx context.Context, req *pb.SubmitJobRequest) (*pb.
 	run := &pb.RunJobRequest{
 		JobId: id, Command: req.Command, Env: env, Timeout: durationpb.New(timeout), ArtifactGlobs: req.ArtifactGlobs,
 		RepoKey: plan.key, Commit: plan.commit, ArtifactName: plan.name,
-		ArtifactArchive: plan.dir != "", Workdir: plan.workdir,
+		ArtifactArchive: plan.dir != "", Workdir: plan.workdir, Mode: mode, Limits: req.Limits,
 	}
 	snap := proto.Clone(job).(*pb.Job)
 	m.wg.Add(1)
@@ -879,7 +961,7 @@ func (m *JobManager) stream(ctx context.Context, e *jobEntry, ex nodeExec, run *
 		switch v := ev.Event.(type) {
 		case *pb.JobEvent_Started:
 			m.update(e, func(j *pb.Job) {
-				j.State, j.WorkspaceReused = pb.JobState_JOB_STATE_RUNNING, v.Started.WorkspaceReused
+				j.State, j.WorkspaceReused, j.Isolation = pb.JobState_JOB_STATE_RUNNING, v.Started.WorkspaceReused, v.Started.Isolation
 				if j.StartedAt == nil {
 					j.StartedAt = timestamppb.Now()
 				}

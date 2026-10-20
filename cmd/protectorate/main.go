@@ -117,7 +117,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&o.tokenFile, "token-file", "", "file holding the bearer token (env "+tokenFileEnv+", or the token itself in env "+tokenEnv+"; default: this machine's owner token)")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "print proto-JSON, one object per line")
 
-	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
+	root.AddCommand(hubCmd(), pairCmd(o), tokenCmd(o), grantCmd(o), auditCmd(o), statusCmd(o), quotaCmd(o), nodeCmd(o), clientCmd(), tailnetCmd(o), backlogCmd(o), orchestratorCmd(o), serviceCmd(), eventsCmd(o), sessionCmd(o), sleeveCmd(o), chatCmd(o), leaseCmd(o), deskCmd(o), whoCmd(o), msgCmd(o), loginCmd(), jobCmd(o), apiCmd(o), mcpCmd(o), driverCmd(), versionCmd(o))
 	return root
 }
 
@@ -159,6 +159,7 @@ func hubCmd() *cobra.Command {
 	var nodeTokenFile, backupDir string
 	var backupEvery time.Duration
 	var watch, toolDirs []string
+	var orchestratorGrants bool
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the hub API",
@@ -203,6 +204,7 @@ func hubCmd() *cobra.Command {
 			h.WebDir = installedDir(webDir, "web", "index.html")
 			h.BinaryDir = installedDir(binaryDir, "bin", "")
 			h.PublicURL = publicURL
+			h.OrchestratorGrants = orchestratorGrants
 			h.LocalModelHosts = localModelHosts
 			h.SetQuota(hub.NewQuotaCache(readers, hub.QuotaOptions{Interval: quotaInterval}))
 			ts, err := startTailnet(ctx, cmd.ErrOrStderr())
@@ -256,6 +258,7 @@ func hubCmd() *cobra.Command {
 	serve.Flags().StringVar(&webDir, "web", "", "serve a built web client directory (e.g. app/build/web) at / (default: ~/.local/share/protectorate/web when it exists)")
 	serve.Flags().StringVar(&binaryDir, "binary-dir", "", "directory with the protectorate-<os>-<arch> builds from `make cross` that node updates send to nodes of other platforms (default: ~/.local/share/protectorate/bin when it exists, else the directory of this executable)")
 	serve.Flags().StringVar(&publicURL, "public-url", "", "URL new machines reach this hub at, used in the install scripts and the Add node commands (default: the URL each request came in on)")
+	serve.Flags().BoolVar(&orchestratorGrants, "orchestrator-admin-grants", false, "let the orchestrator mint admin grants (job_* and node_admin) for shared nodes; care nodes are granted by the owner only")
 	serve.Flags().DurationVar(&deadRetention, "dead-retention", 24*time.Hour, "keep exited sessions this long before the hub kills them (0 keeps them until killed or respawned)")
 	c.AddCommand(serve, hubTailnetCmd(), hubBackupCmd(), hubRestoreCmd())
 	return c

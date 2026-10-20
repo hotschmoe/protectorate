@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -58,6 +59,13 @@ var (
 // A job runs independently of whoever started it: the hub can disconnect,
 // restart and attach again.
 type Jobs struct {
+	// Probe, when set before the first job or metrics poll, replaces probing
+	// the host for isolation and elevation (tests).
+	Probe func() *pb.JobIsolation
+	// Home is the agent's PROTECTORATE_HOME. A sandbox never exposes it;
+	// empty means jobs are not sandboxed.
+	Home string
+
 	dir   string
 	slots chan struct{}
 	now   func() time.Time
@@ -66,6 +74,23 @@ type Jobs struct {
 	uploads map[string]*upload
 	runs    map[string]*jobRun
 	repos   map[string]chan struct{}
+
+	isoOnce sync.Once
+	iso     *pb.JobIsolation
+	// box runs sandboxed jobs; nil when the node cannot sandbox.
+	box *sandbox
+}
+
+// Isolation reports how this node isolates and elevates jobs, probed once.
+func (j *Jobs) Isolation() *pb.JobIsolation {
+	j.isoOnce.Do(func() {
+		if j.Probe != nil {
+			j.iso = j.Probe()
+		} else {
+			j.iso = j.probeIsolation()
+		}
+	})
+	return proto.Clone(j.iso).(*pb.JobIsolation)
 }
 
 type upload struct {
@@ -439,6 +464,9 @@ func (j *Jobs) exec(ctx context.Context, cancel context.CancelFunc, r *jobRun, r
 	delete(j.uploads, req.JobId)
 	j.mu.Unlock()
 	os.RemoveAll(jobDir)
+	if j.Isolation(); j.box != nil {
+		j.box.forget(jobDir)
+	}
 	r.finish(fin, j.now())
 }
 
@@ -468,13 +496,17 @@ func (j *Jobs) runJob(ctx context.Context, r *jobRun, req *pb.RunJobRequest, job
 	if err != nil {
 		return setupFailed(err)
 	}
-	r.setStarted(&pb.JobStarted{WorkspaceReused: reused})
+	argv, envArgs, label, err := j.commandFor(req, workdir, jobDir)
+	if err != nil {
+		return setupFailed(err)
+	}
+	r.setStarted(&pb.JobStarted{WorkspaceReused: reused, Isolation: label})
 
 	timeout := req.Timeout.AsDuration()
 	if timeout <= 0 {
 		timeout = defaultJobTimeout
 	}
-	fin := j.execute(ctx, r, req, workdir, jobDir, timeout)
+	fin := j.execute(ctx, r, req, argv, envArgs, workdir, jobDir, timeout)
 	if fin.End == pb.JobEnd_JOB_END_EXITED || fin.End == pb.JobEnd_JOB_END_TIMED_OUT {
 		files, err := collectArtifacts(workdir, req.ArtifactGlobs, filepath.Join(r.dir, "artifacts"))
 		if err != nil && fin.Error == "" {
@@ -631,38 +663,155 @@ func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
-func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, workdir, jobDir string, timeout time.Duration) *pb.JobFinished {
-	cmd := exec.Command(req.Command[0], req.Command[1:]...)
-	cmd.Dir = workdir
-	cmd.Env = append(os.Environ(), "PROTECTORATE_JOB_ID="+req.JobId, "PROTECTORATE_JOB_DIR="+jobDir)
+// jobEnvKeys are the variables every job gets besides the requested ones.
+var jobEnvKeys = []string{"PROTECTORATE_JOB_ID", "PROTECTORATE_JOB_DIR"}
+
+// envKeys returns the job's variable names, sorted, the node's own first.
+func envKeys(req *pb.RunJobRequest) []string {
 	keys := make([]string, 0, len(req.Env))
 	for k := range req.Env {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	for _, k := range keys {
-		cmd.Env = append(cmd.Env, k+"="+req.Env[k])
+	return append(append([]string(nil), jobEnvKeys...), keys...)
+}
+
+func sandboxed(m pb.JobMode) bool {
+	return m == pb.JobMode_JOB_MODE_SANDBOXED || m == pb.JobMode_JOB_MODE_UNSPECIFIED
+}
+
+// jobEnv is the job's own variables in envKeys order.
+func jobEnv(req *pb.RunJobRequest, jobDir string) [][2]string {
+	env := [][2]string{{"PROTECTORATE_JOB_ID", req.JobId}, {"PROTECTORATE_JOB_DIR", jobDir}}
+	for _, k := range envKeys(req)[len(jobEnvKeys):] {
+		env = append(env, [2]string{k, req.Env[k]})
 	}
-	w := &logWriter{r: r}
+	return env
+}
+
+// commandFor returns the argv that runs req's command in its mode, the
+// arguments a sandbox reads from fd 3 (nil outside one) and the isolation
+// label reported to the hub.
+func (j *Jobs) commandFor(req *pb.RunJobRequest, workdir, jobDir string) (argv []string, envArgs []byte, label string, err error) {
+	iso := j.Isolation()
+	switch req.Mode {
+	case pb.JobMode_JOB_MODE_ADMIN:
+		if iso.Admin == "" {
+			return nil, nil, "", fmt.Errorf("this node cannot run admin jobs: %s", iso.Note)
+		}
+		argv, err := adminArgv(iso.Admin, req.Command, envKeys(req))
+		return argv, nil, iso.Admin, err
+	case pb.JobMode_JOB_MODE_PLAIN:
+		return req.Command, nil, "plain", nil
+	}
+	if j.box != nil {
+		argv, envArgs, err := j.box.plan(req, workdir, jobDir, jobEnv(req, jobDir))
+		return argv, envArgs, iso.Sandbox + limitsLabel(req.Limits), err
+	}
+	label = iso.Sandbox
+	if iso.Note != "" {
+		label += ": " + iso.Note
+	}
+	return req.Command, nil, label, nil
+}
+
+func limitsLabel(l *pb.JobLimits) string {
+	var parts []string
+	if l.GetCpuPercent() > 0 {
+		parts = append(parts, fmt.Sprintf("cpu %d%%", l.CpuPercent))
+	}
+	if l.GetMemoryBytes() > 0 {
+		parts = append(parts, fmt.Sprintf("memory %d MiB", l.MemoryBytes>>20))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ", " + strings.Join(parts, ", ")
+}
+
+// running is a started job: its whole process tree.
+type running interface {
+	// wait blocks until the command exits and returns its exit code, -1
+	// when it was killed or gave none.
+	wait() int
+	// interrupt asks the tree to stop politely and reports whether it could.
+	interrupt() bool
+	kill()
+	close()
+}
+
+type execRunning struct {
+	cmd  *exec.Cmd
+	tree *procTree
+}
+
+func (e execRunning) wait() int {
+	_ = e.cmd.Wait()
+	if e.cmd.ProcessState == nil {
+		return -1
+	}
+	return e.cmd.ProcessState.ExitCode()
+}
+
+func (e execRunning) interrupt() bool { return e.tree.interrupt() }
+func (e execRunning) kill()           { e.tree.kill() }
+func (e execRunning) close()          { e.tree.close() }
+
+// startExec starts argv as the agent's child: with the agent's environment
+// plus the job's, or, for a sandbox, with the job's environment as
+// arguments on fd 3 (envArgs).
+func startExec(req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, w io.Writer) (running, error) {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = workdir
+	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = w, w
 	cmd.WaitDelay = waitDelay
+	if envArgs == nil {
+		for _, kv := range jobEnv(req, jobDir) {
+			cmd.Env = append(cmd.Env, kv[0]+"="+kv[1])
+		}
+		tree, err := startTree(cmd, req.Limits)
+		if err != nil {
+			return nil, err
+		}
+		return execRunning{cmd, tree}, nil
+	}
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("sandbox env pipe: %w", err)
+	}
+	defer pr.Close()
+	cmd.ExtraFiles = []*os.File{pr}
+	go func() {
+		_, _ = pw.Write(envArgs)
+		pw.Close()
+	}()
+	tree, err := startTree(cmd, req.Limits)
+	if err != nil {
+		return nil, err
+	}
+	return execRunning{cmd, tree}, nil
+}
 
+func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, argv []string, envArgs []byte, workdir, jobDir string, timeout time.Duration) *pb.JobFinished {
+	w := &logWriter{r: r}
 	start := time.Now()
-	tree, err := startTree(cmd)
+	p, err := j.launch(req, argv, envArgs, workdir, jobDir, w)
 	if err != nil {
 		return &pb.JobFinished{End: pb.JobEnd_JOB_END_ERROR, ExitCode: -1, Error: fmt.Sprintf("start %q: %v", req.Command[0], err)}
 	}
-	defer tree.close()
+	defer p.close()
 
 	tctx, stop := context.WithTimeout(ctx, timeout)
 	defer stop()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan int, 1)
+	go func() { done <- p.wait() }()
 
 	end := pb.JobEnd_JOB_END_EXITED
 	var errText string
+	code := -1
 	select {
-	case <-done:
+	case code = <-done:
 	case <-tctx.Done():
 		switch {
 		case r.canceled.Load():
@@ -672,24 +821,20 @@ func (j *Jobs) execute(ctx context.Context, r *jobRun, req *pb.RunJobRequest, wo
 			errText = fmt.Sprintf("timed out after %s", timeout)
 		}
 		exited := false
-		if tree.interrupt() {
+		if p.interrupt() {
 			select {
-			case <-done:
+			case code = <-done:
 				exited = true
 			case <-time.After(killGrace):
 			}
 		}
-		tree.kill()
+		p.kill()
 		if !exited {
-			<-done
+			code = <-done
 		}
 	}
-	tree.kill()
-	code := int32(-1)
-	if cmd.ProcessState != nil {
-		code = int32(cmd.ProcessState.ExitCode())
-	}
-	return &pb.JobFinished{End: end, ExitCode: code, Error: errText, RunTime: durationpb.New(time.Since(start))}
+	p.kill()
+	return &pb.JobFinished{End: end, ExitCode: int32(code), Error: errText, RunTime: durationpb.New(time.Since(start))}
 }
 
 // logWriter appends merged stdout and stderr to the job's output file.

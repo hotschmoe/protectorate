@@ -282,7 +282,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (Info, error) {
 	if _, err := ParseHarness(string(req.Harness)); err != nil {
 		return Info{}, err
 	}
-	if err := req.Limits.validate(); err != nil {
+	if err := req.Limits.Validate(); err != nil {
 		return Info{}, err
 	}
 	mode, err := resolveMode(req.Harness, req.Mode, req.Args)

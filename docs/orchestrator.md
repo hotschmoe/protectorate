@@ -52,11 +52,15 @@ The orchestrator can read and edit the owner's notes with `protectorate backlog 
 
 Default scopes are `read`, `events` and the explicit names of the mutating,
 non-destructive tools matching `backlog_*`, `lease_*`, `message_*`,
-`sleeve_spawn_sleeve` and `sleeve_resleeve_sleeve`. In practice: read
-everything, stream events, create and update notes, send, reply to and ack
-mailbox messages (escalations land in Poe's chat and must be answerable),
-spawn sleeves, and move a sleeve to another harness (`sleeve resleeve`, see
-[chat.md](chat.md#resleeve)), which Poe may do without asking. Not granted by
+`sleeve_spawn_sleeve`, `sleeve_resleeve_sleeve` and `grant_admin`. In
+practice: read everything, stream events, create and update notes, send,
+reply to and ack mailbox messages (escalations land in Poe's chat and must be
+answerable), spawn sleeves, and move a sleeve to another harness (`sleeve
+resleeve`, see [chat.md](chat.md#resleeve)), which Poe may do without asking.
+`grant_admin` mints a task grant (`job_*` and `node_admin:<node>`, at most
+24h) for one `shared` node by name, and only when the hub runs with
+`--orchestrator-admin-grants` (off by default); `care` nodes are granted by
+the owner only ([node-work.md](node-work.md)). Not granted by
 default:
 
 - token management, raw session creation, respawn and node add (owner-only

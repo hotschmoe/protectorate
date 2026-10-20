@@ -59,4 +59,8 @@ message AuditEntry {
   // outcome is "ok", "denied" or "error"; code is the Connect code.
   string outcome = 7;
   string code = 8;
+  // task is the task of the admin grant that made the call.
+  string task = 9;
+  // detail is what the handler added, such as a job's node and mode.
+  string detail = 10;
 }

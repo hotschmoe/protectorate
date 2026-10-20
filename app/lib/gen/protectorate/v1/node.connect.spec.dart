@@ -293,4 +293,14 @@ abstract final class NodeService {
     protectoratev1node.GetDeskPolicyRequest.new,
     protectoratev1node.DeskPolicyStatus.new,
   );
+
+  /// SetNodeTier changes a node's tier in the inventory and its
+  /// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+  /// owner token may call it. The hub's own node is always "shared".
+  static const setNodeTier = connect.Spec(
+    '/$name/SetNodeTier',
+    connect.StreamType.unary,
+    protectoratev1node.SetNodeTierRequest.new,
+    protectoratev1node.NodeInfo.new,
+  );
 }

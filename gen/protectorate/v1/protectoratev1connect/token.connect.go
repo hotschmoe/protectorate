@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// TokenServiceName is the fully-qualified name of the TokenService service.
 	TokenServiceName = "protectorate.v1.TokenService"
+	// GrantServiceName is the fully-qualified name of the GrantService service.
+	GrantServiceName = "protectorate.v1.GrantService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -41,6 +43,8 @@ const (
 	// TokenServiceRevokeTokenProcedure is the fully-qualified name of the TokenService's RevokeToken
 	// RPC.
 	TokenServiceRevokeTokenProcedure = "/protectorate.v1.TokenService/RevokeToken"
+	// GrantServiceAdminProcedure is the fully-qualified name of the GrantService's Admin RPC.
+	GrantServiceAdminProcedure = "/protectorate.v1.GrantService/Admin"
 )
 
 // TokenServiceClient is a client for the protectorate.v1.TokenService service.
@@ -177,4 +181,76 @@ func (UnimplementedTokenServiceHandler) ListTokens(context.Context, *connect.Req
 
 func (UnimplementedTokenServiceHandler) RevokeToken(context.Context, *connect.Request[v1.RevokeTokenRequest]) (*connect.Response[v1.RevokeTokenResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.TokenService.RevokeToken is not implemented"))
+}
+
+// GrantServiceClient is a client for the protectorate.v1.GrantService service.
+type GrantServiceClient interface {
+	// Admin mints a grant. The secret is returned once.
+	Admin(context.Context, *connect.Request[v1.GrantServiceAdminRequest]) (*connect.Response[v1.GrantServiceAdminResponse], error)
+}
+
+// NewGrantServiceClient constructs a client for the protectorate.v1.GrantService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewGrantServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) GrantServiceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	grantServiceMethods := v1.File_protectorate_v1_token_proto.Services().ByName("GrantService").Methods()
+	return &grantServiceClient{
+		admin: connect.NewClient[v1.GrantServiceAdminRequest, v1.GrantServiceAdminResponse](
+			httpClient,
+			baseURL+GrantServiceAdminProcedure,
+			connect.WithSchema(grantServiceMethods.ByName("Admin")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// grantServiceClient implements GrantServiceClient.
+type grantServiceClient struct {
+	admin *connect.Client[v1.GrantServiceAdminRequest, v1.GrantServiceAdminResponse]
+}
+
+// Admin calls protectorate.v1.GrantService.Admin.
+func (c *grantServiceClient) Admin(ctx context.Context, req *connect.Request[v1.GrantServiceAdminRequest]) (*connect.Response[v1.GrantServiceAdminResponse], error) {
+	return c.admin.CallUnary(ctx, req)
+}
+
+// GrantServiceHandler is an implementation of the protectorate.v1.GrantService service.
+type GrantServiceHandler interface {
+	// Admin mints a grant. The secret is returned once.
+	Admin(context.Context, *connect.Request[v1.GrantServiceAdminRequest]) (*connect.Response[v1.GrantServiceAdminResponse], error)
+}
+
+// NewGrantServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewGrantServiceHandler(svc GrantServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	grantServiceMethods := v1.File_protectorate_v1_token_proto.Services().ByName("GrantService").Methods()
+	grantServiceAdminHandler := connect.NewUnaryHandler(
+		GrantServiceAdminProcedure,
+		svc.Admin,
+		connect.WithSchema(grantServiceMethods.ByName("Admin")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/protectorate.v1.GrantService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case GrantServiceAdminProcedure:
+			grantServiceAdminHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedGrantServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedGrantServiceHandler struct{}
+
+func (UnimplementedGrantServiceHandler) Admin(context.Context, *connect.Request[v1.GrantServiceAdminRequest]) (*connect.Response[v1.GrantServiceAdminResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.GrantService.Admin is not implemented"))
 }

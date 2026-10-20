@@ -67,3 +67,27 @@ extension type TokenServiceClient (connect.Transport _transport) {
     );
   }
 }
+/// GrantService mints task-scoped admin grants: short-lived tokens whose
+/// scopes are job_* and node_admin:<node>. The owner may grant any node (or a
+/// glob over node names); the orchestrator's token may grant one shared node
+/// by name, and only when the hub runs with --orchestrator-admin-grants. Every
+/// call made with a grant is audited with its task.
+extension type GrantServiceClient (connect.Transport _transport) {
+  /// Admin mints a grant. The secret is returned once.
+  Future<protectoratev1token.GrantServiceAdminResponse> admin(
+    protectoratev1token.GrantServiceAdminRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.GrantService.admin,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+}

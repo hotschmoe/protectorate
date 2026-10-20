@@ -16,18 +16,89 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
-    as $3;
+    as $4;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $1;
 
 import 'desk.pb.dart' as $0;
-import 'job.pb.dart' as $4;
+import 'job.pb.dart' as $3;
 import 'node.pbenum.dart';
 import 'sleeve.pb.dart' as $2;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'node.pbenum.dart';
+
+class SetNodeTierRequest extends $pb.GeneratedMessage {
+  factory SetNodeTierRequest({
+    $core.String? name,
+    $core.String? tier,
+  }) {
+    final result = SetNodeTierRequest._();
+    if (name != null) result.name = name;
+    if (tier != null) result.tier = tier;
+    return result;
+  }
+
+  SetNodeTierRequest._();
+
+  factory SetNodeTierRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetNodeTierRequest()..mergeFromBuffer(data, registry);
+  factory SetNodeTierRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SetNodeTierRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SetNodeTierRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SetNodeTierRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'tier')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetNodeTierRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SetNodeTierRequest copyWith(void Function(SetNodeTierRequest) updates) =>
+      super.copyWith((message) => updates(message as SetNodeTierRequest))
+          as SetNodeTierRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SetNodeTierRequest() / SetNodeTierRequest.new instead')
+  static SetNodeTierRequest create() => SetNodeTierRequest._();
+  static $pb.GeneratedMessage $_createMessage() => SetNodeTierRequest._();
+  @$core.override
+  SetNodeTierRequest createEmptyInstance() => SetNodeTierRequest._();
+  @$core.pragma('dart2js:noInline')
+  static SetNodeTierRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<SetNodeTierRequest>(
+          SetNodeTierRequest.$_createMessage);
+  static SetNodeTierRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  /// tier is "shared" or "care".
+  @$pb.TagNumber(2)
+  $core.String get tier => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set tier($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTier() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTier() => $_clearField(2);
+}
 
 class GetDeskStateRequest extends $pb.GeneratedMessage {
   factory GetDeskStateRequest({
@@ -109,12 +180,10 @@ class GetDeskStateRequest extends $pb.GeneratedMessage {
 class SetDeskPolicyRequest extends $pb.GeneratedMessage {
   factory SetDeskPolicyRequest({
     $core.String? name,
-    $core.bool? allowFamily,
     $0.DeskPolicy? policy,
   }) {
     final result = SetDeskPolicyRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
     if (policy != null) result.policy = policy;
     return result;
   }
@@ -134,7 +203,6 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: SetDeskPolicyRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
     ..aOM<$0.DeskPolicy>(3, _omitFieldNames ? '' : 'policy',
         subBuilder: $0.DeskPolicy.$_createMessage)
     ..hasRequiredFields = false;
@@ -171,36 +239,25 @@ class SetDeskPolicyRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
-
   /// policy unset clears the policy: the desktop is always available again.
   @$pb.TagNumber(3)
-  $0.DeskPolicy get policy => $_getN(2);
+  $0.DeskPolicy get policy => $_getN(1);
   @$pb.TagNumber(3)
   set policy($0.DeskPolicy value) => $_setField(3, value);
   @$pb.TagNumber(3)
-  $core.bool hasPolicy() => $_has(2);
+  $core.bool hasPolicy() => $_has(1);
   @$pb.TagNumber(3)
   void clearPolicy() => $_clearField(3);
   @$pb.TagNumber(3)
-  $0.DeskPolicy ensurePolicy() => $_ensure(2);
+  $0.DeskPolicy ensurePolicy() => $_ensure(1);
 }
 
 class GetDeskPolicyRequest extends $pb.GeneratedMessage {
   factory GetDeskPolicyRequest({
     $core.String? name,
-    $core.bool? allowFamily,
   }) {
     final result = GetDeskPolicyRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
     return result;
   }
 
@@ -219,7 +276,6 @@ class GetDeskPolicyRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetDeskPolicyRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -253,15 +309,6 @@ class GetDeskPolicyRequest extends $pb.GeneratedMessage {
   $core.bool hasName() => $_has(0);
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
 }
 
 class DeskPolicyStatus extends $pb.GeneratedMessage {
@@ -366,12 +413,10 @@ class DeskPolicyStatus extends $pb.GeneratedMessage {
 class UpdateNodeRequest extends $pb.GeneratedMessage {
   factory UpdateNodeRequest({
     $core.String? name,
-    $core.bool? allowFamily,
     $core.bool? force,
   }) {
     final result = UpdateNodeRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
     if (force != null) result.force = force;
     return result;
   }
@@ -391,7 +436,6 @@ class UpdateNodeRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: UpdateNodeRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
     ..aOB(3, _omitFieldNames ? '' : 'force')
     ..hasRequiredFields = false;
 
@@ -426,22 +470,13 @@ class UpdateNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
-
   /// force sends the binary even when the node reports the hub's version.
   @$pb.TagNumber(3)
-  $core.bool get force => $_getBF(2);
+  $core.bool get force => $_getBF(1);
   @$pb.TagNumber(3)
-  set force($core.bool value) => $_setBool(2, value);
+  set force($core.bool value) => $_setBool(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasForce() => $_has(2);
+  $core.bool hasForce() => $_has(1);
   @$pb.TagNumber(3)
   void clearForce() => $_clearField(3);
 }
@@ -591,14 +626,12 @@ class UpdateNodeProgress extends $pb.GeneratedMessage {
 class ApplyUpdateRequest extends $pb.GeneratedMessage {
   factory ApplyUpdateRequest({
     $core.String? name,
-    $core.bool? allowFamily,
     $core.String? path,
     $fixnum.Int64? size,
     $core.String? sha256,
   }) {
     final result = ApplyUpdateRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
     if (path != null) result.path = path;
     if (size != null) result.size = size;
     if (sha256 != null) result.sha256 = sha256;
@@ -620,7 +653,6 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ApplyUpdateRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
     ..aOS(3, _omitFieldNames ? '' : 'path')
     ..a<$fixnum.Int64>(4, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
@@ -659,41 +691,32 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
-
   /// path is where PutFile put the new binary, as PutFile reported it.
   @$pb.TagNumber(3)
-  $core.String get path => $_getSZ(2);
+  $core.String get path => $_getSZ(1);
   @$pb.TagNumber(3)
-  set path($core.String value) => $_setString(2, value);
+  set path($core.String value) => $_setString(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasPath() => $_has(2);
+  $core.bool hasPath() => $_has(1);
   @$pb.TagNumber(3)
   void clearPath() => $_clearField(3);
 
   /// size and sha256 (hex) are what the node must find at path.
   @$pb.TagNumber(4)
-  $fixnum.Int64 get size => $_getI64(3);
+  $fixnum.Int64 get size => $_getI64(2);
   @$pb.TagNumber(4)
-  set size($fixnum.Int64 value) => $_setInt64(3, value);
+  set size($fixnum.Int64 value) => $_setInt64(2, value);
   @$pb.TagNumber(4)
-  $core.bool hasSize() => $_has(3);
+  $core.bool hasSize() => $_has(2);
   @$pb.TagNumber(4)
   void clearSize() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  $core.String get sha256 => $_getSZ(4);
+  $core.String get sha256 => $_getSZ(3);
   @$pb.TagNumber(5)
-  set sha256($core.String value) => $_setString(4, value);
+  set sha256($core.String value) => $_setString(3, value);
   @$pb.TagNumber(5)
-  $core.bool hasSha256() => $_has(4);
+  $core.bool hasSha256() => $_has(3);
   @$pb.TagNumber(5)
   void clearSha256() => $_clearField(5);
 }
@@ -958,7 +981,6 @@ class FileTrailer extends $pb.GeneratedMessage {
 class PutFileRequest extends $pb.GeneratedMessage {
   factory PutFileRequest({
     $core.String? name,
-    $core.bool? allowFamily,
     $core.String? transferId,
     $core.String? path,
     FileKind? kind,
@@ -971,7 +993,6 @@ class PutFileRequest extends $pb.GeneratedMessage {
   }) {
     final result = PutFileRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
     if (transferId != null) result.transferId = transferId;
     if (path != null) result.path = path;
     if (kind != null) result.kind = kind;
@@ -999,7 +1020,6 @@ class PutFileRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: PutFileRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
     ..aOS(3, _omitFieldNames ? '' : 'transferId')
     ..aOS(4, _omitFieldNames ? '' : 'path')
     ..aE<FileKind>(5, _omitFieldNames ? '' : 'kind',
@@ -1047,22 +1067,13 @@ class PutFileRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
-
   /// transfer_id is chosen by the caller: 8 to 80 characters of [A-Za-z0-9._-].
   @$pb.TagNumber(3)
-  $core.String get transferId => $_getSZ(2);
+  $core.String get transferId => $_getSZ(1);
   @$pb.TagNumber(3)
-  set transferId($core.String value) => $_setString(2, value);
+  set transferId($core.String value) => $_setString(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasTransferId() => $_has(2);
+  $core.bool hasTransferId() => $_has(1);
   @$pb.TagNumber(3)
   void clearTransferId() => $_clearField(3);
 
@@ -1070,85 +1081,85 @@ class PutFileRequest extends $pb.GeneratedMessage {
   /// A relative path is under the node's file root; the path names the
   /// destination itself, not a directory to put it in.
   @$pb.TagNumber(4)
-  $core.String get path => $_getSZ(3);
+  $core.String get path => $_getSZ(2);
   @$pb.TagNumber(4)
-  set path($core.String value) => $_setString(3, value);
+  set path($core.String value) => $_setString(2, value);
   @$pb.TagNumber(4)
-  $core.bool hasPath() => $_has(3);
+  $core.bool hasPath() => $_has(2);
   @$pb.TagNumber(4)
   void clearPath() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  FileKind get kind => $_getN(4);
+  FileKind get kind => $_getN(3);
   @$pb.TagNumber(5)
   set kind(FileKind value) => $_setField(5, value);
   @$pb.TagNumber(5)
-  $core.bool hasKind() => $_has(4);
+  $core.bool hasKind() => $_has(3);
   @$pb.TagNumber(5)
   void clearKind() => $_clearField(5);
 
   /// mode holds the permission bits of a file; ignored for directories.
   @$pb.TagNumber(6)
-  $core.int get mode => $_getIZ(5);
+  $core.int get mode => $_getIZ(4);
   @$pb.TagNumber(6)
-  set mode($core.int value) => $_setUnsignedInt32(5, value);
+  set mode($core.int value) => $_setUnsignedInt32(4, value);
   @$pb.TagNumber(6)
-  $core.bool hasMode() => $_has(5);
+  $core.bool hasMode() => $_has(4);
   @$pb.TagNumber(6)
   void clearMode() => $_clearField(6);
 
   /// overwrite replaces an existing destination instead of failing with
   /// ALREADY_EXISTS.
   @$pb.TagNumber(7)
-  $core.bool get overwrite => $_getBF(6);
+  $core.bool get overwrite => $_getBF(5);
   @$pb.TagNumber(7)
-  set overwrite($core.bool value) => $_setBool(6, value);
+  set overwrite($core.bool value) => $_setBool(5, value);
   @$pb.TagNumber(7)
-  $core.bool hasOverwrite() => $_has(6);
+  $core.bool hasOverwrite() => $_has(5);
   @$pb.TagNumber(7)
   void clearOverwrite() => $_clearField(7);
 
   /// offset is the number of uncompressed bytes sent in earlier calls.
   @$pb.TagNumber(8)
-  $fixnum.Int64 get offset => $_getI64(7);
+  $fixnum.Int64 get offset => $_getI64(6);
   @$pb.TagNumber(8)
-  set offset($fixnum.Int64 value) => $_setInt64(7, value);
+  set offset($fixnum.Int64 value) => $_setInt64(6, value);
   @$pb.TagNumber(8)
-  $core.bool hasOffset() => $_has(7);
+  $core.bool hasOffset() => $_has(6);
   @$pb.TagNumber(8)
   void clearOffset() => $_clearField(8);
 
   @$pb.TagNumber(9)
-  FileChunk get chunk => $_getN(8);
+  FileChunk get chunk => $_getN(7);
   @$pb.TagNumber(9)
   set chunk(FileChunk value) => $_setField(9, value);
   @$pb.TagNumber(9)
-  $core.bool hasChunk() => $_has(8);
+  $core.bool hasChunk() => $_has(7);
   @$pb.TagNumber(9)
   void clearChunk() => $_clearField(9);
   @$pb.TagNumber(9)
-  FileChunk ensureChunk() => $_ensure(8);
+  FileChunk ensureChunk() => $_ensure(7);
 
   /// last ends the transfer; trailer is then required.
   @$pb.TagNumber(10)
-  $core.bool get last => $_getBF(9);
+  $core.bool get last => $_getBF(8);
   @$pb.TagNumber(10)
-  set last($core.bool value) => $_setBool(9, value);
+  set last($core.bool value) => $_setBool(8, value);
   @$pb.TagNumber(10)
-  $core.bool hasLast() => $_has(9);
+  $core.bool hasLast() => $_has(8);
   @$pb.TagNumber(10)
   void clearLast() => $_clearField(10);
 
   @$pb.TagNumber(11)
-  FileTrailer get trailer => $_getN(10);
+  FileTrailer get trailer => $_getN(9);
   @$pb.TagNumber(11)
   set trailer(FileTrailer value) => $_setField(11, value);
   @$pb.TagNumber(11)
-  $core.bool hasTrailer() => $_has(10);
+  $core.bool hasTrailer() => $_has(9);
   @$pb.TagNumber(11)
   void clearTrailer() => $_clearField(11);
   @$pb.TagNumber(11)
-  FileTrailer ensureTrailer() => $_ensure(10);
+  FileTrailer ensureTrailer() => $_ensure(9);
 }
 
 class PutFileResponse extends $pb.GeneratedMessage {
@@ -1239,13 +1250,11 @@ class PutFileResponse extends $pb.GeneratedMessage {
 class GetFileRequest extends $pb.GeneratedMessage {
   factory GetFileRequest({
     $core.String? name,
-    $core.bool? allowFamily,
     $core.String? path,
     $core.bool? noCompress,
   }) {
     final result = GetFileRequest._();
     if (name != null) result.name = name;
-    if (allowFamily != null) result.allowFamily = allowFamily;
     if (path != null) result.path = path;
     if (noCompress != null) result.noCompress = noCompress;
     return result;
@@ -1266,7 +1275,6 @@ class GetFileRequest extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetFileRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
-    ..aOB(2, _omitFieldNames ? '' : 'allowFamily')
     ..aOS(3, _omitFieldNames ? '' : 'path')
     ..aOB(4, _omitFieldNames ? '' : 'noCompress')
     ..hasRequiredFields = false;
@@ -1302,31 +1310,22 @@ class GetFileRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  @$pb.TagNumber(2)
-  $core.bool get allowFamily => $_getBF(1);
-  @$pb.TagNumber(2)
-  set allowFamily($core.bool value) => $_setBool(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasAllowFamily() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearAllowFamily() => $_clearField(2);
-
   @$pb.TagNumber(3)
-  $core.String get path => $_getSZ(2);
+  $core.String get path => $_getSZ(1);
   @$pb.TagNumber(3)
-  set path($core.String value) => $_setString(2, value);
+  set path($core.String value) => $_setString(1, value);
   @$pb.TagNumber(3)
-  $core.bool hasPath() => $_has(2);
+  $core.bool hasPath() => $_has(1);
   @$pb.TagNumber(3)
   void clearPath() => $_clearField(3);
 
   /// no_compress sends every chunk as is.
   @$pb.TagNumber(4)
-  $core.bool get noCompress => $_getBF(3);
+  $core.bool get noCompress => $_getBF(2);
   @$pb.TagNumber(4)
-  set noCompress($core.bool value) => $_setBool(3, value);
+  set noCompress($core.bool value) => $_setBool(2, value);
   @$pb.TagNumber(4)
-  $core.bool hasNoCompress() => $_has(3);
+  $core.bool hasNoCompress() => $_has(2);
   @$pb.TagNumber(4)
   void clearNoCompress() => $_clearField(4);
 }
@@ -1657,6 +1656,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? warnings,
     $core.Iterable<$2.Sleeve>? sleeves,
     $core.Iterable<AcceleratorMetrics>? npus,
+    $3.JobIsolation? jobs,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -1675,6 +1675,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     if (warnings != null) result.warnings.addAll(warnings);
     if (sleeves != null) result.sleeves.addAll(sleeves);
     if (npus != null) result.npus.addAll(npus);
+    if (jobs != null) result.jobs = jobs;
     return result;
   }
 
@@ -1717,6 +1718,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
         subBuilder: $2.Sleeve.$_createMessage)
     ..pPM<AcceleratorMetrics>(16, _omitFieldNames ? '' : 'npus',
         subBuilder: AcceleratorMetrics.$_createMessage)
+    ..aOM<$3.JobIsolation>(17, _omitFieldNames ? '' : 'jobs',
+        subBuilder: $3.JobIsolation.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1864,6 +1867,19 @@ class NodeMetrics extends $pb.GeneratedMessage {
   /// npus lists neural processing units.
   @$pb.TagNumber(16)
   $pb.PbList<AcceleratorMetrics> get npus => $_getList(15);
+
+  /// jobs is how this node isolates and elevates jobs; unset when it runs
+  /// none.
+  @$pb.TagNumber(17)
+  $3.JobIsolation get jobs => $_getN(16);
+  @$pb.TagNumber(17)
+  set jobs($3.JobIsolation value) => $_setField(17, value);
+  @$pb.TagNumber(17)
+  $core.bool hasJobs() => $_has(16);
+  @$pb.TagNumber(17)
+  void clearJobs() => $_clearField(17);
+  @$pb.TagNumber(17)
+  $3.JobIsolation ensureJobs() => $_ensure(16);
 }
 
 class CpuMetrics extends $pb.GeneratedMessage {
@@ -3086,7 +3102,7 @@ class DirSize extends $pb.GeneratedMessage {
     $core.String? path,
     $fixnum.Int64? sizeBytes,
     $1.Timestamp? measuredAt,
-    $3.Duration? took,
+    $4.Duration? took,
     $core.bool? complete,
     $core.String? error,
   }) {
@@ -3118,8 +3134,8 @@ class DirSize extends $pb.GeneratedMessage {
     ..aInt64(2, _omitFieldNames ? '' : 'sizeBytes')
     ..aOM<$1.Timestamp>(3, _omitFieldNames ? '' : 'measuredAt',
         subBuilder: $1.Timestamp.$_createMessage)
-    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'took',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(4, _omitFieldNames ? '' : 'took',
+        subBuilder: $4.Duration.$_createMessage)
     ..aOB(5, _omitFieldNames ? '' : 'complete')
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..hasRequiredFields = false;
@@ -3174,15 +3190,15 @@ class DirSize extends $pb.GeneratedMessage {
   $1.Timestamp ensureMeasuredAt() => $_ensure(2);
 
   @$pb.TagNumber(4)
-  $3.Duration get took => $_getN(3);
+  $4.Duration get took => $_getN(3);
   @$pb.TagNumber(4)
-  set took($3.Duration value) => $_setField(4, value);
+  set took($4.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasTook() => $_has(3);
   @$pb.TagNumber(4)
   void clearTook() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureTook() => $_ensure(3);
+  $4.Duration ensureTook() => $_ensure(3);
 
   /// complete is false when the time budget ended the walk early; size_bytes
   /// is then a lower bound.
@@ -3441,7 +3457,8 @@ class NodeInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   void clearSshAlias() => $_clearField(6);
 
-  /// tier is "server" or "family" and drives future command gating.
+  /// tier is "shared" (the compute pool) or "care" (a machine kept for a
+  /// person, never scheduled or leased).
   @$pb.TagNumber(7)
   $core.String get tier => $_getSZ(6);
   @$pb.TagNumber(7)
@@ -3499,13 +3516,14 @@ class NodeStatus extends $pb.GeneratedMessage {
     NodeMetrics? metrics,
     NodeFreshness? freshness,
     $1.Timestamp? fetchedAt,
-    $3.Duration? age,
+    $4.Duration? age,
     $core.String? error,
     $core.Iterable<NodeAlert>? alerts,
     $0.DeskState? desk,
     $core.String? deskHolder,
     $core.Iterable<$0.DeskUse>? deskInputs,
     $core.bool? draining,
+    $core.Iterable<GpuBusy>? busyGpus,
   }) {
     final result = NodeStatus._();
     if (node != null) result.node = node;
@@ -3519,6 +3537,7 @@ class NodeStatus extends $pb.GeneratedMessage {
     if (deskHolder != null) result.deskHolder = deskHolder;
     if (deskInputs != null) result.deskInputs.addAll(deskInputs);
     if (draining != null) result.draining = draining;
+    if (busyGpus != null) result.busyGpus.addAll(busyGpus);
     return result;
   }
 
@@ -3544,8 +3563,8 @@ class NodeStatus extends $pb.GeneratedMessage {
         enumValues: NodeFreshness.values)
     ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'fetchedAt',
         subBuilder: $1.Timestamp.$_createMessage)
-    ..aOM<$3.Duration>(5, _omitFieldNames ? '' : 'age',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(5, _omitFieldNames ? '' : 'age',
+        subBuilder: $4.Duration.$_createMessage)
     ..aOS(6, _omitFieldNames ? '' : 'error')
     ..pPM<NodeAlert>(7, _omitFieldNames ? '' : 'alerts',
         subBuilder: NodeAlert.$_createMessage)
@@ -3555,6 +3574,8 @@ class NodeStatus extends $pb.GeneratedMessage {
     ..pPM<$0.DeskUse>(10, _omitFieldNames ? '' : 'deskInputs',
         subBuilder: $0.DeskUse.$_createMessage)
     ..aOB(11, _omitFieldNames ? '' : 'draining')
+    ..pPM<GpuBusy>(12, _omitFieldNames ? '' : 'busyGpus',
+        subBuilder: GpuBusy.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3621,15 +3642,15 @@ class NodeStatus extends $pb.GeneratedMessage {
   $1.Timestamp ensureFetchedAt() => $_ensure(3);
 
   @$pb.TagNumber(5)
-  $3.Duration get age => $_getN(4);
+  $4.Duration get age => $_getN(4);
   @$pb.TagNumber(5)
-  set age($3.Duration value) => $_setField(5, value);
+  set age($4.Duration value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasAge() => $_has(4);
   @$pb.TagNumber(5)
   void clearAge() => $_clearField(5);
   @$pb.TagNumber(5)
-  $3.Duration ensureAge() => $_ensure(4);
+  $4.Duration ensureAge() => $_ensure(4);
 
   /// error is the failure of the most recent poll, empty if it succeeded.
   @$pb.TagNumber(6)
@@ -3679,6 +3700,82 @@ class NodeStatus extends $pb.GeneratedMessage {
   $core.bool hasDraining() => $_has(10);
   @$pb.TagNumber(11)
   void clearDraining() => $_clearField(11);
+
+  /// busy_gpus are the node's GPUs that something outside protectorate's
+  /// leases is using, as the hub judges from the node's recent polls:
+  /// automatic placement skips them, explicit requests are refused.
+  @$pb.TagNumber(12)
+  $pb.PbList<GpuBusy> get busyGpus => $_getList(11);
+}
+
+class GpuBusy extends $pb.GeneratedMessage {
+  factory GpuBusy({
+    $core.int? index,
+    $core.String? reason,
+  }) {
+    final result = GpuBusy._();
+    if (index != null) result.index = index;
+    if (reason != null) result.reason = reason;
+    return result;
+  }
+
+  GpuBusy._();
+
+  factory GpuBusy.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GpuBusy()..mergeFromBuffer(data, registry);
+  factory GpuBusy.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GpuBusy()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GpuBusy',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GpuBusy.$_createMessage)
+    ..aI(1, _omitFieldNames ? '' : 'index')
+    ..aOS(2, _omitFieldNames ? '' : 'reason')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GpuBusy clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GpuBusy copyWith(void Function(GpuBusy) updates) =>
+      super.copyWith((message) => updates(message as GpuBusy)) as GpuBusy;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use GpuBusy() / GpuBusy.new instead')
+  static GpuBusy create() => GpuBusy._();
+  static $pb.GeneratedMessage $_createMessage() => GpuBusy._();
+  @$core.override
+  GpuBusy createEmptyInstance() => GpuBusy._();
+  @$core.pragma('dart2js:noInline')
+  static GpuBusy getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GpuBusy>(GpuBusy.$_createMessage);
+  static GpuBusy? _defaultInstance;
+
+  /// index is GpuMetrics.index.
+  @$pb.TagNumber(1)
+  $core.int get index => $_getIZ(0);
+  @$pb.TagNumber(1)
+  set index($core.int value) => $_setSignedInt32(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasIndex() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearIndex() => $_clearField(1);
+
+  /// reason says what makes it busy, e.g. "92% of its VRAM is in use".
+  @$pb.TagNumber(2)
+  $core.String get reason => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set reason($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasReason() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearReason() => $_clearField(2);
 }
 
 class ListNodesRequest extends $pb.GeneratedMessage {
@@ -3914,7 +4011,7 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
     $core.String? name,
     RemoveJobs? jobs,
     $core.bool? uninstall,
-    $3.Duration? waitTimeout,
+    $4.Duration? waitTimeout,
   }) {
     final result = RemoveNodeRequest._();
     if (name != null) result.name = name;
@@ -3942,8 +4039,8 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
     ..aE<RemoveJobs>(2, _omitFieldNames ? '' : 'jobs',
         enumValues: RemoveJobs.values)
     ..aOB(3, _omitFieldNames ? '' : 'uninstall')
-    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'waitTimeout',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(4, _omitFieldNames ? '' : 'waitTimeout',
+        subBuilder: $4.Duration.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3999,15 +4096,15 @@ class RemoveNodeRequest extends $pb.GeneratedMessage {
 
   /// wait_timeout bounds REMOVE_JOBS_WAIT; unset means 1h.
   @$pb.TagNumber(4)
-  $3.Duration get waitTimeout => $_getN(3);
+  $4.Duration get waitTimeout => $_getN(3);
   @$pb.TagNumber(4)
-  set waitTimeout($3.Duration value) => $_setField(4, value);
+  set waitTimeout($4.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasWaitTimeout() => $_has(3);
   @$pb.TagNumber(4)
   void clearWaitTimeout() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureWaitTimeout() => $_ensure(3);
+  $4.Duration ensureWaitTimeout() => $_ensure(3);
 }
 
 class RemoveNodeProgress extends $pb.GeneratedMessage {
@@ -4202,7 +4299,7 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
     $core.String? name,
     $core.String? tier,
     $core.Iterable<$core.String>? pools,
-    $3.Duration? ttl,
+    $4.Duration? ttl,
     $core.String? installUrl,
   }) {
     final result = InviteNodeRequest._();
@@ -4231,8 +4328,8 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aOS(2, _omitFieldNames ? '' : 'tier')
     ..pPS(3, _omitFieldNames ? '' : 'pools')
-    ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'ttl',
-        subBuilder: $3.Duration.$_createMessage)
+    ..aOM<$4.Duration>(4, _omitFieldNames ? '' : 'ttl',
+        subBuilder: $4.Duration.$_createMessage)
     ..aOS(5, _omitFieldNames ? '' : 'installUrl')
     ..hasRequiredFields = false;
 
@@ -4268,7 +4365,7 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  /// tier is "server" (default) or "family".
+  /// tier is "shared" (default) or "care".
   @$pb.TagNumber(2)
   $core.String get tier => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -4284,15 +4381,15 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
 
   /// ttl is how long the key can be redeemed; unset means 1h, at most 24h.
   @$pb.TagNumber(4)
-  $3.Duration get ttl => $_getN(3);
+  $4.Duration get ttl => $_getN(3);
   @$pb.TagNumber(4)
-  set ttl($3.Duration value) => $_setField(4, value);
+  set ttl($4.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasTtl() => $_has(3);
   @$pb.TagNumber(4)
   void clearTtl() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureTtl() => $_ensure(3);
+  $4.Duration ensureTtl() => $_ensure(3);
 
   /// install_url is the hub URL the new machine downloads from. Empty means
   /// the hub's --public-url, else the URL this request was sent to.
@@ -4708,56 +4805,56 @@ class NodeAgentServiceApi {
   /// PrepareJob tells the hub what the node already holds for a git job: whether
   /// it has the commit and which commits it knows, so the hub can send a
   /// smaller bundle.
-  $async.Future<$4.PrepareJobResponse> prepareJob(
-          $pb.ClientContext? ctx, $4.PrepareJobRequest request) =>
-      _client.invoke<$4.PrepareJobResponse>(ctx, 'NodeAgentService',
-          'PrepareJob', request, $4.PrepareJobResponse());
+  $async.Future<$3.PrepareJobResponse> prepareJob(
+          $pb.ClientContext? ctx, $3.PrepareJobRequest request) =>
+      _client.invoke<$3.PrepareJobResponse>(ctx, 'NodeAgentService',
+          'PrepareJob', request, $3.PrepareJobResponse());
 
   /// UploadJobData appends one chunk of a job's source (a git bundle or an
   /// artifact file). Chunks must arrive in order; the last one carries the
   /// SHA-256 of the whole upload.
-  $async.Future<$4.UploadJobDataResponse> uploadJobData(
-          $pb.ClientContext? ctx, $4.UploadJobDataRequest request) =>
-      _client.invoke<$4.UploadJobDataResponse>(ctx, 'NodeAgentService',
-          'UploadJobData', request, $4.UploadJobDataResponse());
+  $async.Future<$3.UploadJobDataResponse> uploadJobData(
+          $pb.ClientContext? ctx, $3.UploadJobDataRequest request) =>
+      _client.invoke<$3.UploadJobDataResponse>(ctx, 'NodeAgentService',
+          'UploadJobData', request, $3.UploadJobDataResponse());
 
   /// RunJob checks the source out, runs the command and streams its output;
   /// matching artifacts follow the exit. The job does not depend on the
   /// stream: if the caller disconnects it keeps running (bounded by its
   /// timeout) and AttachJob picks the stream up again.
-  $async.Future<$4.JobEvent> runJob(
-          $pb.ClientContext? ctx, $4.RunJobRequest request) =>
-      _client.invoke<$4.JobEvent>(
-          ctx, 'NodeAgentService', 'RunJob', request, $4.JobEvent());
+  $async.Future<$3.JobEvent> runJob(
+          $pb.ClientContext? ctx, $3.RunJobRequest request) =>
+      _client.invoke<$3.JobEvent>(
+          ctx, 'NodeAgentService', 'RunJob', request, $3.JobEvent());
 
   /// AttachJob streams a job again from an output offset: started, the output
   /// from from_offset, then artifacts and the result once it ended. A finished
   /// job is kept for an hour. NOT_FOUND when the node never had the job.
-  $async.Future<$4.JobEvent> attachJob(
-          $pb.ClientContext? ctx, $4.AttachJobRequest request) =>
-      _client.invoke<$4.JobEvent>(
-          ctx, 'NodeAgentService', 'AttachJob', request, $4.JobEvent());
+  $async.Future<$3.JobEvent> attachJob(
+          $pb.ClientContext? ctx, $3.AttachJobRequest request) =>
+      _client.invoke<$3.JobEvent>(
+          ctx, 'NodeAgentService', 'AttachJob', request, $3.JobEvent());
 
   /// ListJobs lists the jobs the node is running or still holds the result of.
-  $async.Future<$4.NodeAgentServiceListJobsResponse> listJobs(
-          $pb.ClientContext? ctx, $4.NodeAgentServiceListJobsRequest request) =>
-      _client.invoke<$4.NodeAgentServiceListJobsResponse>(
+  $async.Future<$3.NodeAgentServiceListJobsResponse> listJobs(
+          $pb.ClientContext? ctx, $3.NodeAgentServiceListJobsRequest request) =>
+      _client.invoke<$3.NodeAgentServiceListJobsResponse>(
           ctx,
           'NodeAgentService',
           'ListJobs',
           request,
-          $4.NodeAgentServiceListJobsResponse());
+          $3.NodeAgentServiceListJobsResponse());
 
   /// CancelJob kills a running job's process tree.
-  $async.Future<$4.NodeAgentServiceCancelJobResponse> cancelJob(
+  $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
           $pb.ClientContext? ctx,
-          $4.NodeAgentServiceCancelJobRequest request) =>
-      _client.invoke<$4.NodeAgentServiceCancelJobResponse>(
+          $3.NodeAgentServiceCancelJobRequest request) =>
+      _client.invoke<$3.NodeAgentServiceCancelJobResponse>(
           ctx,
           'NodeAgentService',
           'CancelJob',
           request,
-          $4.NodeAgentServiceCancelJobResponse());
+          $3.NodeAgentServiceCancelJobResponse());
 
   /// PutFile receives one chunk of a file or directory transfer into the
   /// node's file root. The hub relays the caller's chunks unchanged.
@@ -4924,6 +5021,14 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, GetDeskPolicyRequest request) =>
       _client.invoke<DeskPolicyStatus>(
           ctx, 'NodeService', 'GetDeskPolicy', request, DeskPolicyStatus());
+
+  /// SetNodeTier changes a node's tier in the inventory and its
+  /// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
+  /// owner token may call it. The hub's own node is always "shared".
+  $async.Future<NodeInfo> setNodeTier(
+          $pb.ClientContext? ctx, SetNodeTierRequest request) =>
+      _client.invoke<NodeInfo>(
+          ctx, 'NodeService', 'SetNodeTier', request, NodeInfo());
 }
 
 const $core.bool _omitFieldNames =

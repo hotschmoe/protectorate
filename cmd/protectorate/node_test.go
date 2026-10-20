@@ -47,6 +47,8 @@ func (f *fakeTailnet) ExpireKey(_ context.Context, id uint64) error {
 
 func (f *fakeTailnet) Revoke(context.Context, string) (bool, error) { return false, nil }
 
+func (f *fakeTailnet) SetTier(context.Context, string, string) (bool, error) { return false, nil }
+
 func (f *fakeTailnet) expiredKeys() []uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -110,10 +112,13 @@ func TestNodeCLI(t *testing.T) {
 		want    []string
 		wantErr bool
 	}{
-		{"add", []string{"node", "add", "peer", "--addr", al.Addr().String(), "--ssh", "peer-ssh", "--tier", "family", "--tag", "lab"}, []string{"added peer"}, false},
+		{"add", []string{"node", "add", "peer", "--addr", al.Addr().String(), "--ssh", "peer-ssh", "--tier", "care", "--tag", "lab"}, []string{"added peer"}, false},
 		{"add duplicate", []string{"node", "add", "peer", "--addr", "x"}, nil, true},
 		{"add without addr", []string{"node", "add", "other"}, nil, true},
 		{"add bad tier", []string{"node", "add", "other", "--addr", "x", "--tier", "root"}, nil, true},
+		{"tier unknown node", []string{"node", "tier", "ghost", "care"}, nil, true},
+		{"tier bad value", []string{"node", "tier", "peer", "family"}, nil, true},
+		{"tier self", []string{"node", "tier", localNodeName(), "care"}, nil, true},
 		{"rm unknown", []string{"node", "rm", "ghost"}, nil, true},
 		{"rm self", []string{"node", "rm", localNodeName()}, nil, true},
 		{"show unknown", []string{"node", "show", "ghost"}, nil, true},
@@ -147,10 +152,19 @@ func TestNodeCLI(t *testing.T) {
 	})
 	t.Run("show", func(t *testing.T) {
 		out := waitFor(t, []string{"node", "show", "peer"}, "FILESYSTEM")
-		for _, w := range []string{"tier", "family", "peer-ssh", "memory", "cpu"} {
+		for _, w := range []string{"tier", "care", "peer-ssh", "memory", "cpu"} {
 			if !strings.Contains(out, w) {
 				t.Fatalf("show output missing %q:\n%s", w, out)
 			}
+		}
+	})
+	t.Run("tier", func(t *testing.T) {
+		out, err := run(t, "node", "tier", "peer", "shared")
+		if err != nil || !strings.Contains(out, "peer is now tier shared") {
+			t.Fatalf("err=%v\n%s", err, out)
+		}
+		if out, _ := run(t, "node", "show", "peer"); !strings.Contains(out, "shared") || strings.Contains(out, "care") {
+			t.Fatalf("show after tier change:\n%s", out)
 		}
 	})
 	t.Run("metrics local", func(t *testing.T) {
@@ -164,7 +178,7 @@ func TestNodeCLI(t *testing.T) {
 		}
 	})
 	t.Run("invite recorded", func(t *testing.T) {
-		out, err := run(t, "node", "invite", "newbox", "--tier", "family", "--pool", "gpu", "--url", "http://hub.lan:7470")
+		out, err := run(t, "node", "invite", "newbox", "--tier", "care", "--pool", "gpu", "--url", "http://hub.lan:7470")
 		for _, w := range []string{
 			"WINDOWS (PowerShell):\n  $env:PROTECTORATE_ENROLL_KEY='hskey-auth-1-test'; $env:PROTECTORATE_NODE_NAME='newbox'; irm 'http://hub.lan:7470/install.ps1' | iex",
 			"LINUX (sh):\n  curl -fsSL 'http://hub.lan:7470/install.sh' | PROTECTORATE_ENROLL_KEY='hskey-auth-1-test' sh -s -- --name 'newbox'",
@@ -182,7 +196,7 @@ func TestNodeCLI(t *testing.T) {
 			t.Fatalf("err=%v\n%s", err, ls)
 		}
 		show, err := run(t, "node", "show", "newbox")
-		if err != nil || !strings.Contains(show, "server") {
+		if err != nil || !strings.Contains(show, "shared") {
 			t.Fatalf("err=%v\n%s", err, show)
 		}
 		if out, err := run(t, "node", "rm", "newbox"); err != nil || !strings.Contains(out, "expired the invite key") {
@@ -356,5 +370,25 @@ func TestNoSecretFlags(t *testing.T) {
 				t.Errorf("missing --%s", tt.has)
 			}
 		})
+	}
+}
+
+func TestNodeMigrateTiers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PROTECTORATE_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "nodes.yaml"), []byte("nodes:\n  - name: kidsbox\n    addr: kidsbox\n    tier: family\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := newRoot()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"node", "migrate-tiers"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"kidsbox: family -> care", "protectorate node tier kidsbox care", "nodes.yaml.pre-tiers"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
 	}
 }

@@ -29,7 +29,7 @@ func (o *opts) deskClient() (protectoratev1connect.DeskServiceClient, error) {
 
 type deskFlags struct {
 	lease, button, output string
-	double, allowFamily   bool
+	double                bool
 	maxWidth              int32
 }
 
@@ -82,7 +82,6 @@ arguments or negative numbers: desk win1 --lease L run -- notepad.exe a.txt`,
 	fl.Int32Var(&f.maxWidth, "max-width", 0, "scale the screenshot down to at most this many pixels wide (coordinates stay screen pixels)")
 	fl.StringVar(&f.button, "button", "left", "mouse button for click: left, right or middle")
 	fl.BoolVar(&f.double, "double", false, "double-click")
-	fl.BoolVar(&f.allowFamily, "allow-family", false, "allow nodes of tier family")
 	return c
 }
 
@@ -155,7 +154,7 @@ func parseDeskArgs(verb string, args []string, f deskFlags) (*pb.DeskActionReque
 
 func runDesk(cmd *cobra.Command, o *opts, cl protectoratev1connect.DeskServiceClient, node string, act *pb.DeskActionRequest, f deskFlags) error {
 	ctx := cmd.Context()
-	t := &pb.DeskTarget{Name: node, LeaseId: f.lease, AllowFamily: f.allowFamily}
+	t := &pb.DeskTarget{Name: node, LeaseId: f.lease}
 	switch a := act.Action.(type) {
 	case *pb.DeskActionRequest_Screenshot:
 		a.Screenshot.Target = t

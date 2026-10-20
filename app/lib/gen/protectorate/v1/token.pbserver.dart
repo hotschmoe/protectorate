@@ -59,3 +59,31 @@ abstract class TokenServiceBase extends $pb.GeneratedService {
   $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
       get $messageJson => TokenServiceBase$messageJson;
 }
+
+abstract class GrantServiceBase extends $pb.GeneratedService {
+  $async.Future<$2.GrantServiceAdminResponse> admin(
+      $pb.ServerContext ctx, $2.GrantServiceAdminRequest request);
+
+  $pb.GeneratedMessage createRequest($core.String methodName) {
+    switch (methodName) {
+      case 'Admin':
+        return $2.GrantServiceAdminRequest();
+      default:
+        throw $core.ArgumentError('Unknown method: $methodName');
+    }
+  }
+
+  $async.Future<$pb.GeneratedMessage> handleCall($pb.ServerContext ctx,
+      $core.String methodName, $pb.GeneratedMessage request) {
+    switch (methodName) {
+      case 'Admin':
+        return admin(ctx, request as $2.GrantServiceAdminRequest);
+      default:
+        throw $core.ArgumentError('Unknown method: $methodName');
+    }
+  }
+
+  $core.Map<$core.String, $core.dynamic> get $json => GrantServiceBase$json;
+  $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
+      get $messageJson => GrantServiceBase$messageJson;
+}

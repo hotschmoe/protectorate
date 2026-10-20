@@ -14,6 +14,41 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
+/// JobMode is how the node runs a job's command.
+class JobMode extends $pb.ProtobufEnum {
+  /// JOB_MODE_UNSPECIFIED is treated as JOB_MODE_SANDBOXED.
+  static const JobMode JOB_MODE_UNSPECIFIED =
+      JobMode._(0, _omitEnumNames ? '' : 'JOB_MODE_UNSPECIFIED');
+
+  /// JOB_MODE_SANDBOXED isolates the command as far as the node can (see
+  /// JobIsolation): the job on a shared node.
+  static const JobMode JOB_MODE_SANDBOXED =
+      JobMode._(1, _omitEnumNames ? '' : 'JOB_MODE_SANDBOXED');
+
+  /// JOB_MODE_PLAIN runs it as the agent's user, unsandboxed: a job on a care
+  /// node under a grant, which maintains that machine.
+  static const JobMode JOB_MODE_PLAIN =
+      JobMode._(2, _omitEnumNames ? '' : 'JOB_MODE_PLAIN');
+
+  /// JOB_MODE_ADMIN runs it elevated and unsandboxed.
+  static const JobMode JOB_MODE_ADMIN =
+      JobMode._(3, _omitEnumNames ? '' : 'JOB_MODE_ADMIN');
+
+  static const $core.List<JobMode> values = <JobMode>[
+    JOB_MODE_UNSPECIFIED,
+    JOB_MODE_SANDBOXED,
+    JOB_MODE_PLAIN,
+    JOB_MODE_ADMIN,
+  ];
+
+  static final $core.List<JobMode?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
+  static JobMode? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const JobMode._(super.value, super.name);
+}
+
 class JobState extends $pb.ProtobufEnum {
   static const JobState JOB_STATE_UNSPECIFIED =
       JobState._(0, _omitEnumNames ? '' : 'JOB_STATE_UNSPECIFIED');
