@@ -40,6 +40,20 @@ abstract final class SleeveService {
     idempotency: connect.Idempotency.noSideEffects,
   );
 
+  /// ListWorkspaces returns the directories SpawnSleeve would accept as an
+  /// existing workspace: git checkouts and other directories under the hub's
+  /// workspaces directory (cloned or created by earlier sleeves), and the
+  /// workspaces of known sleeves elsewhere on disk. It never walks the rest of
+  /// the filesystem; any other absolute path can still be given to
+  /// SpawnSleeve directly.
+  static const listWorkspaces = connect.Spec(
+    '/$name/ListWorkspaces',
+    connect.StreamType.unary,
+    protectoratev1sleeve.ListWorkspacesRequest.new,
+    protectoratev1sleeve.ListWorkspacesResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
   /// GetSleeve returns one sleeve with its latest resource usage.
   static const getSleeve = connect.Spec(
     '/$name/GetSleeve',

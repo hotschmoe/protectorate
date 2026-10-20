@@ -59,7 +59,7 @@ func sleeveClient(o *opts) (protectoratev1connect.SleeveServiceClient, error) {
 
 func sleeveCmd(o *opts) *cobra.Command {
 	c := &cobra.Command{Use: "sleeve", Aliases: []string{"sleeves"}, Short: "Run harnesses in isolated workspaces"}
-	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
+	c.AddCommand(sleeveSpawnCmd(o), sleeveLsCmd(o), sleeveWorkspacesCmd(o), sleeveShowCmd(o), sleeveKillCmd(o), sleeveAttachCmd(o), sleeveResleeveCmd(o))
 	return c
 }
 
@@ -258,6 +258,40 @@ func sleeveLsCmd(o *opts) *cobra.Command {
 					u := s.Usage
 					fmt.Fprintf(w, "%s\t%s\t%s\t%.0f%%\t%s\t%s\t%s\t%s\n", s.Name, harnessName(s.Harness), sleeveRowState(s),
 						u.CpuPercent, fmtBytes(u.MemoryCurrentBytes), fmtBytes(u.MemoryPeakBytes), limitLabel(s.Limits), s.Workspace)
+				}
+			})
+		},
+	}
+}
+
+func sleeveWorkspacesCmd(o *opts) *cobra.Command {
+	return &cobra.Command{
+		Use:     "workspaces",
+		Aliases: []string{"ws"},
+		Short:   "List workspaces on the hub that a sleeve can start in",
+		Long: `List the existing workspaces on the hub: checkouts and directories under its
+workspaces directory and the workspaces of known sleeves. Pass a PATH to
+'sleeve spawn --workspace'. A workspace marked with a required name can only be
+used by a sleeve of that name. Any other absolute directory, or a git URL to
+clone, can also be given to spawn.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cl, err := sleeveClient(o)
+			if err != nil {
+				return err
+			}
+			res, err := cl.ListWorkspaces(cmd.Context(), connect.NewRequest(&pb.ListWorkspacesRequest{}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				fmt.Fprintln(w, "NAME\tBRANCH\tREMOTE\tSLEEVE\tNAME REQUIRED\tPATH")
+				for _, ws := range res.Msg.Workspaces {
+					use := ws.Sleeve
+					if ws.Busy {
+						use += " (running)"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", ws.Name, ws.GitBranch, ws.GitRemote, use, ws.RequiredName, ws.Path)
 				}
 			})
 		},

@@ -291,6 +291,17 @@ func (h *Hub) ListSleeves(context.Context, *connect.Request[pb.ListSleevesReques
 	return connect.NewResponse(res), nil
 }
 
+func (h *Hub) ListWorkspaces(context.Context, *connect.Request[pb.ListWorkspacesRequest]) (*connect.Response[pb.ListWorkspacesResponse], error) {
+	res := &pb.ListWorkspacesResponse{}
+	for _, w := range h.sleeves.Workspaces() {
+		res.Workspaces = append(res.Workspaces, &pb.Workspace{
+			Name: w.Name, Path: w.Path, GitRemote: w.Remote, GitBranch: w.Branch,
+			Sleeve: w.Sleeve, Busy: w.Busy, RequiredName: w.RequiredName,
+		})
+	}
+	return connect.NewResponse(res), nil
+}
+
 func (h *Hub) GetSleeve(_ context.Context, req *connect.Request[pb.GetSleeveRequest]) (*connect.Response[pb.GetSleeveResponse], error) {
 	i, err := h.sleeves.Get(req.Msg.Name)
 	if err != nil {

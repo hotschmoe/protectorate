@@ -1380,6 +1380,20 @@
   },
   {
     "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListWorkspaces returns the directories SpawnSleeve would accept as an existing workspace: git checkouts and other directories under the hub's workspaces directory (cloned or created by earlier sleeves), and the workspaces of known sleeves elsewhere on disk. It never walks the rest of the filesystem; any other absolute path can still be given to SpawnSleeve directly.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "sleeve_list_workspaces"
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false,
