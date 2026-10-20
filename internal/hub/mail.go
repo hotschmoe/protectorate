@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -541,7 +542,7 @@ func (s messageService) Inbox(ctx context.Context, req *connect.Request[pb.Inbox
 	if err != nil {
 		return nil, err
 	}
-	msgs, err := s.c.mail.Inbox(who, req.Msg.UnreadOnly, req.Msg.Peek)
+	msgs, err := s.c.mail.Inbox(who, req.Msg.ThreadId, req.Msg.UnreadOnly, req.Msg.Peek)
 	if err != nil {
 		return nil, mailErr(err)
 	}
@@ -608,6 +609,46 @@ func (s messageService) Thread(_ context.Context, req *connect.Request[pb.Thread
 	res := &pb.ThreadResponse{}
 	for _, m := range msgs {
 		res.Messages = append(res.Messages, mailToProto(m))
+	}
+	return connect.NewResponse(res), nil
+}
+
+const (
+	defaultThreads = 100
+	maxThreads     = 500
+)
+
+func (s messageService) ListThreads(ctx context.Context, req *connect.Request[pb.ListThreadsRequest]) (*connect.Response[pb.ListThreadsResponse], error) {
+	limit := int(req.Msg.Limit)
+	switch {
+	case limit < 0:
+		return nil, invalid("limit must not be negative")
+	case limit == 0:
+		limit = defaultThreads
+	case limit > maxThreads:
+		limit = maxThreads
+	}
+	var project string
+	if p := strings.TrimSpace(req.Msg.Project); p != "" {
+		v, err := s.c.dir.Get(strings.TrimPrefix(p, projectPrefix))
+		if err != nil {
+			return nil, directoryErr(err)
+		}
+		project = v.ID
+	}
+	sleeveName := strings.TrimSpace(req.Msg.Sleeve)
+	res := &pb.ListThreadsResponse{}
+	for _, ti := range s.c.mail.Threads(identity(ctx)) {
+		if len(res.Threads) == limit {
+			break
+		}
+		if (sleeveName != "" && !slices.Contains(ti.Participants, sleeveName)) || (project != "" && !slices.Contains(ti.Projects, project)) {
+			continue
+		}
+		res.Threads = append(res.Threads, &pb.ThreadSummary{
+			ThreadId: ti.ID, Participants: ti.Participants, MessageCount: uint32(ti.Messages), Last: mailToProto(ti.Last),
+			Unread: uint32(ti.Unread), OpenAcks: uint32(ti.OpenAcks), Escalated: uint32(ti.Escalated), Projects: ti.Projects,
+		})
 	}
 	return connect.NewResponse(res), nil
 }

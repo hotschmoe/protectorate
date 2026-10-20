@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -62,11 +63,12 @@ func (e *authEnv) mint(t *testing.T, name string, ttl time.Duration, scopes ...s
 
 func (e *authEnv) entries(t *testing.T) []auth.Entry {
 	t.Helper()
-	es, err := auth.Tail(e.audit, 1000)
+	p, err := auth.ReadPage(e.audit, auth.Query{Limit: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return es
+	slices.Reverse(p.Entries)
+	return p.Entries
 }
 
 func code(err error) connect.Code {
@@ -568,5 +570,56 @@ func TestChatScopes(t *testing.T) {
 		if (err == nil) != tc.ok {
 			t.Errorf("%s as %s: err = %v, want ok=%v", tc.method, tc.p.Name, err, tc.ok)
 		}
+	}
+}
+
+func TestListAuditEntriesOwnerOnly(t *testing.T) {
+	e := newAuthEnv(t)
+	ctx := context.Background()
+	owner := protectoratev1connect.NewAuditServiceClient(&http.Client{Transport: bearer{testToken}}, e.srv.URL)
+	tok := protectoratev1connect.NewTokenServiceClient(&http.Client{Transport: bearer{testToken}}, e.srv.URL)
+	for _, name := range []string{"a", "b", "c"} {
+		if _, err := tok.CreateToken(ctx, connect.NewRequest(&pb.CreateTokenRequest{Name: name, Scopes: []string{"read"}})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader := protectoratev1connect.NewTokenServiceClient(&http.Client{Transport: bearer{e.mint(t, "reader", time.Hour, "read")}}, e.srv.URL)
+	reader.RevokeToken(ctx, connect.NewRequest(&pb.RevokeTokenRequest{Id: "x"}))
+
+	first, err := owner.ListAuditEntries(ctx, connect.NewRequest(&pb.ListAuditEntriesRequest{Limit: 2}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	es := first.Msg.Entries
+	if len(es) != 2 || es[0].Actor != "token:reader" || es[0].Outcome != auth.OutcomeDenied || es[1].Subject != "c" || first.Msg.NextPageToken == "" {
+		t.Fatalf("first page = %v", first.Msg)
+	}
+	rest, err := owner.ListAuditEntries(ctx, connect.NewRequest(&pb.ListAuditEntriesRequest{PageToken: first.Msg.NextPageToken}))
+	if err != nil || len(rest.Msg.Entries) != 2 || rest.Msg.Entries[1].Subject != "a" || rest.Msg.NextPageToken != "" {
+		t.Fatalf("second page = %v %v", rest, err)
+	}
+	denied, err := owner.ListAuditEntries(ctx, connect.NewRequest(&pb.ListAuditEntriesRequest{Outcome: auth.OutcomeDenied, Actor: "READER"}))
+	if err != nil || len(denied.Msg.Entries) != 1 || !strings.HasSuffix(denied.Msg.Entries[0].Procedure, "/RevokeToken") {
+		t.Fatalf("filtered = %v %v", denied, err)
+	}
+
+	tests := []struct {
+		name string
+		c    protectoratev1connect.AuditServiceClient
+		req  *pb.ListAuditEntriesRequest
+		want connect.Code
+	}{
+		{"read scope", protectoratev1connect.NewAuditServiceClient(&http.Client{Transport: bearer{e.mint(t, "r2", time.Hour, "read")}}, e.srv.URL), &pb.ListAuditEntriesRequest{}, connect.CodePermissionDenied},
+		{"star scope", protectoratev1connect.NewAuditServiceClient(&http.Client{Transport: bearer{e.mint(t, "star", time.Hour, "*", "read")}}, e.srv.URL), &pb.ListAuditEntriesRequest{}, connect.CodePermissionDenied},
+		{"bad outcome", owner, &pb.ListAuditEntriesRequest{Outcome: "maybe"}, connect.CodeInvalidArgument},
+		{"bad cursor", owner, &pb.ListAuditEntriesRequest{PageToken: "../token:1"}, connect.CodeInvalidArgument},
+		{"negative limit", owner, &pb.ListAuditEntriesRequest{Limit: -1}, connect.CodeInvalidArgument},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := tt.c.ListAuditEntries(ctx, connect.NewRequest(tt.req)); code(err) != tt.want {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }

@@ -154,8 +154,12 @@ func (x *DeskTarget) GetAllowFamily() bool {
 }
 
 type ScreenshotRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Target        *DeskTarget            `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Target *DeskTarget            `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	// max_width scales the image down, keeping its aspect ratio, to at most this
+	// many pixels wide, for viewing over a slow link; 0 keeps full size. Input
+	// coordinates stay screen pixels: scale by width / the PNG's width.
+	MaxWidth      int32 `protobuf:"varint,2,opt,name=max_width,json=maxWidth,proto3" json:"max_width,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -197,11 +201,20 @@ func (x *ScreenshotRequest) GetTarget() *DeskTarget {
 	return nil
 }
 
+func (x *ScreenshotRequest) GetMaxWidth() int32 {
+	if x != nil {
+		return x.MaxWidth
+	}
+	return 0
+}
+
 type ScreenshotResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Png           []byte                 `protobuf:"bytes,1,opt,name=png,proto3" json:"png,omitempty"`
-	Width         int32                  `protobuf:"varint,2,opt,name=width,proto3" json:"width,omitempty"`
-	Height        int32                  `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Png   []byte                 `protobuf:"bytes,1,opt,name=png,proto3" json:"png,omitempty"`
+	// width and height are the virtual screen's size in pixels, the coordinate
+	// space of input commands; the PNG is smaller when max_width scaled it.
+	Width         int32 `protobuf:"varint,2,opt,name=width,proto3" json:"width,omitempty"`
+	Height        int32 `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1496,9 +1509,10 @@ const file_protectorate_v1_desk_proto_rawDesc = "" +
 	"DeskTarget\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
 	"\blease_id\x18\x02 \x01(\tR\aleaseId\x12!\n" +
-	"\fallow_family\x18\x03 \x01(\bR\vallowFamily\"H\n" +
+	"\fallow_family\x18\x03 \x01(\bR\vallowFamily\"e\n" +
 	"\x11ScreenshotRequest\x123\n" +
-	"\x06target\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskTargetR\x06target\"T\n" +
+	"\x06target\x18\x01 \x01(\v2\x1b.protectorate.v1.DeskTargetR\x06target\x12\x1b\n" +
+	"\tmax_width\x18\x02 \x01(\x05R\bmaxWidth\"T\n" +
 	"\x12ScreenshotResponse\x12\x10\n" +
 	"\x03png\x18\x01 \x01(\fR\x03png\x12\x14\n" +
 	"\x05width\x18\x02 \x01(\x05R\x05width\x12\x16\n" +

@@ -43,6 +43,13 @@ service MessageService {
   rpc Thread(ThreadRequest) returns (ThreadResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // ListThreads summarizes threads, most recently active first: who takes
+  // part, the last message, and what is still open. Unread counts are the
+  // caller's own.
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 enum MessageKind {
@@ -90,6 +97,8 @@ message InboxRequest {
   bool peek = 2;
   // as reads another mailbox; only the owner may.
   string as = 3;
+  // thread_id keeps only the messages of this thread.
+  string thread_id = 4;
 }
 
 message InboxResponse {
@@ -122,6 +131,42 @@ message ThreadRequest {
 
 message ThreadResponse {
   repeated MailMessage messages = 1;
+}
+
+message ListThreadsRequest {
+  // sleeve keeps the threads this sleeve sent to or received in.
+  string sleeve = 1;
+  // project keeps the threads addressed to or sent from this project (id,
+  // "owner/repo" or bare name, as in DirectoryService.GetProject).
+  string project = 2;
+  // limit is the most threads returned: 0 means 100, at most 500.
+  int32 limit = 3;
+}
+
+message ListThreadsResponse {
+  repeated ThreadSummary threads = 1;
+}
+
+// ThreadSummary is one thread at a glance.
+message ThreadSummary {
+  string thread_id = 1;
+  // participants are the senders and recipients, in order of first
+  // appearance. A message still waiting for a project's sleeves adds its
+  // address ("project:<id>").
+  repeated string participants = 2;
+  uint32 message_count = 3;
+  // last is the most recent message.
+  MailMessage last = 4;
+  // unread counts messages to the caller it has not been shown, read or
+  // acked.
+  uint32 unread = 5;
+  // open_acks counts messages that require an ack no recipient has given.
+  uint32 open_acks = 6;
+  // escalated counts escalated messages no recipient has acked yet.
+  uint32 escalated = 7;
+  // projects are the ids of the projects the thread was addressed to or sent
+  // from.
+  repeated string projects = 8;
 }
 
 // MailMessage is one message with each recipient's delivery state.

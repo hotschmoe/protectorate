@@ -3,10 +3,15 @@ package auth
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -94,6 +99,14 @@ func (a *Audit) append(e Entry) error {
 	return err
 }
 
+// Page reads the log this Audit writes; a nil Audit has no entries.
+func (a *Audit) Page(q Query) (Page, error) {
+	if a == nil {
+		return Page{}, nil
+	}
+	return ReadPage(a.dir, q)
+}
+
 // Close releases the open log file.
 func (a *Audit) Close() error {
 	if a == nil {
@@ -109,52 +122,124 @@ func (a *Audit) Close() error {
 	return err
 }
 
-// Tail returns the last n entries under dir, oldest first.
-func Tail(dir string, n int) ([]Entry, error) {
+// Query selects audit entries. Text filters match a substring of the field,
+// ignoring case; Outcome matches exactly.
+type Query struct {
+	Limit     int
+	Before    string
+	Actor     string
+	Procedure string
+	Subject   string
+	Outcome   string
+}
+
+func (q Query) match(e Entry) bool {
+	has := func(field, want string) bool {
+		return want == "" || strings.Contains(strings.ToLower(field), strings.ToLower(want))
+	}
+	return has(e.Actor, q.Actor) && has(e.Procedure, q.Procedure) && has(e.Subject, q.Subject) && (q.Outcome == "" || e.Outcome == q.Outcome)
+}
+
+// Page is a run of entries, newest first. Next continues with older entries
+// (Query.Before); it is empty once the start of the log is reached.
+type Page struct {
+	Entries []Entry
+	Next    string
+}
+
+// ErrCursor marks a Before cursor this log did not hand out.
+var ErrCursor = errors.New("invalid audit cursor")
+
+// pageScanBudget bounds the lines one call reads: a filter that matches
+// rarely returns a short page and a cursor instead of reading every month.
+const pageScanBudget = 200_000
+
+// ReadPage returns up to q.Limit entries under dir matching q, newest first,
+// older than q.Before. A cursor is "<file>:<line>", the entries before that
+// line of that monthly file, or "<file>:*" for the whole file.
+func ReadPage(dir string, q Query) (Page, error) {
+	if q.Limit <= 0 {
+		return Page{}, nil
+	}
 	files, err := filepath.Glob(filepath.Join(dir, "audit-*.jsonl"))
 	if err != nil {
-		return nil, err
+		return Page{}, err
 	}
 	sort.Strings(files)
-	if n <= 0 {
-		return nil, nil
-	}
-	var out []Entry
-	for i := len(files) - 1; i >= 0 && len(out) < n; i-- {
-		es, err := readEntries(files[i], n)
-		if err != nil {
-			return nil, err
+	i, bound := len(files)-1, -1
+	if q.Before != "" {
+		name, line, ok := strings.Cut(q.Before, ":")
+		i = slices.Index(files, filepath.Join(dir, name))
+		if !ok || i < 0 || filepath.Base(name) != name {
+			return Page{}, fmt.Errorf("%w: %q", ErrCursor, q.Before)
 		}
-		out = append(es, out...)
+		if line != "*" {
+			if bound, err = strconv.Atoi(line); err != nil || bound < 0 {
+				return Page{}, fmt.Errorf("%w: %q", ErrCursor, q.Before)
+			}
+		}
 	}
-	if len(out) > n {
-		out = out[len(out)-n:]
+	var out Page
+	scanned := 0
+	for ; i >= 0; i-- {
+		need := q.Limit - len(out.Entries)
+		got, lines, more, err := scanFile(files[i], bound, need, q)
+		if err != nil {
+			return Page{}, err
+		}
+		for j := len(got) - 1; j >= 0; j-- {
+			out.Entries = append(out.Entries, got[j].e)
+		}
+		if more {
+			out.Next = fmt.Sprintf("%s:%d", filepath.Base(files[i]), got[0].line)
+			return out, nil
+		}
+		scanned += lines
+		bound = -1
+		if i > 0 && (len(out.Entries) == q.Limit || scanned >= pageScanBudget) {
+			out.Next = filepath.Base(files[i-1]) + ":*"
+			return out, nil
+		}
 	}
 	return out, nil
 }
 
-// readEntries returns the last n entries of path, holding at most 2n at a time.
-func readEntries(path string, n int) ([]Entry, error) {
+type lineEntry struct {
+	e    Entry
+	line int
+}
+
+// scanFile returns the last n matching entries of path before line bound
+// (all lines when bound is negative), oldest first, how many lines it read,
+// and whether earlier lines held more matches. Only complete lines count, so
+// a line being appended is left for the next read.
+func scanFile(path string, bound, n int, q Query) ([]lineEntry, int, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, err
 	}
 	defer f.Close()
-	var out []Entry
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for sc.Scan() {
+	r := bufio.NewReaderSize(f, 64<<10)
+	var keep []lineEntry
+	dropped := false
+	line := 0
+	for ; bound < 0 || line < bound; line++ {
+		b, err := r.ReadBytes('\n')
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, line, false, err
+		}
 		var e Entry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
+		if json.Unmarshal(b, &e) != nil || !q.match(e) {
 			continue
 		}
-		out = append(out, e)
-		if len(out) >= 2*n {
-			out = append(out[:0], out[len(out)-n:]...)
+		keep = append(keep, lineEntry{e, line})
+		if len(keep) > n {
+			keep = keep[1:]
+			dropped = true
 		}
 	}
-	if len(out) > n {
-		out = append(out[:0], out[len(out)-n:]...)
-	}
-	return out, sc.Err()
+	return keep, line, dropped, nil
 }

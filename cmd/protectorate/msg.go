@@ -30,7 +30,7 @@ names the sleeve). A message to a sleeve in chat mode appears in its chat as a
 user message when the turn in progress ends; a sleeve in terminal mode reads
 'msg inbox'. Addresses: a sleeve name, project:<id-or-name>, orchestrator, owner.`,
 	}
-	c.AddCommand(msgSendCmd(o), msgReplyCmd(o), msgAckCmd(o), msgInboxCmd(o), msgThreadCmd(o))
+	c.AddCommand(msgSendCmd(o), msgReplyCmd(o), msgAckCmd(o), msgInboxCmd(o), msgThreadCmd(o), msgThreadsCmd(o))
 	return c
 }
 
@@ -158,7 +158,7 @@ func msgAckCmd(o *opts) *cobra.Command {
 
 func msgInboxCmd(o *opts) *cobra.Command {
 	var unread, peek bool
-	var as string
+	var as, thread string
 	c := &cobra.Command{
 		Use:   "inbox",
 		Short: "List messages addressed to you, oldest first, and mark them read",
@@ -168,7 +168,7 @@ func msgInboxCmd(o *opts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := cl.Inbox(cmd.Context(), connect.NewRequest(&pb.InboxRequest{UnreadOnly: unread, Peek: peek, As: as}))
+			res, err := cl.Inbox(cmd.Context(), connect.NewRequest(&pb.InboxRequest{UnreadOnly: unread, Peek: peek, As: as, ThreadId: thread}))
 			if err != nil {
 				return err
 			}
@@ -178,6 +178,48 @@ func msgInboxCmd(o *opts) *cobra.Command {
 	c.Flags().BoolVar(&unread, "unread", false, "only messages not yet delivered, read or acked")
 	c.Flags().BoolVar(&peek, "peek", false, "do not mark the messages read")
 	c.Flags().StringVar(&as, "as", "", "owner only: read this recipient's mailbox")
+	c.Flags().StringVar(&thread, "thread", "", "only messages of this thread")
+	return c
+}
+
+func msgThreadsCmd(o *opts) *cobra.Command {
+	var sleeveName, project string
+	var limit int32
+	c := &cobra.Command{
+		Use:   "threads",
+		Short: "List threads, most recently active first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cl, err := o.messageClient()
+			if err != nil {
+				return err
+			}
+			res, err := cl.ListThreads(cmd.Context(), connect.NewRequest(&pb.ListThreadsRequest{Sleeve: sleeveName, Project: project, Limit: limit}))
+			if err != nil {
+				return err
+			}
+			return o.out(cmd).print(res.Msg, func(w io.Writer) {
+				if len(res.Msg.Threads) == 0 {
+					fmt.Fprintln(w, "no threads")
+				}
+				for _, t := range res.Msg.Threads {
+					var flags []string
+					for _, f := range []struct {
+						n    uint32
+						name string
+					}{{t.Unread, "unread"}, {t.OpenAcks, "open-acks"}, {t.Escalated, "escalated"}} {
+						if f.n > 0 {
+							flags = append(flags, fmt.Sprintf("%d %s", f.n, f.name))
+						}
+					}
+					fmt.Fprintf(w, "%s\t%d msgs\t%s\t%s\t%s\n", t.ThreadId, t.MessageCount, strings.Join(t.Participants, ","), strings.Join(flags, ", "), fmtStamp(t.Last.GetCreatedAt(), "-"))
+				}
+			})
+		},
+	}
+	c.Flags().StringVar(&sleeveName, "sleeve", "", "only threads this sleeve takes part in")
+	c.Flags().StringVar(&project, "project", "", "only threads addressed to or sent from this project")
+	c.Flags().Int32Var(&limit, "limit", 0, "most threads to list (default 100, at most 500)")
 	return c
 }
 

@@ -417,16 +417,17 @@ func (s *Store) Thread(thread string) []Message {
 	return out
 }
 
-// Inbox returns the messages addressed to rcpt, oldest first. With
-// unreadOnly it leaves out those already injected, shown or acked. Unless
-// peek is set, the returned messages are marked read.
-func (s *Store) Inbox(rcpt string, unreadOnly, peek bool) ([]Message, error) {
+// Inbox returns the messages addressed to rcpt, oldest first, only those of
+// thread unless it is empty. With unreadOnly it leaves out those already
+// injected, shown or acked. Unless peek is set, the returned messages are
+// marked read.
+func (s *Store) Inbox(rcpt, thread string, unreadOnly, peek bool) ([]Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []Message
 	for _, id := range s.order {
 		m := s.msgs[id]
-		if m.Deliveries[rcpt] == nil || (unreadOnly && !m.Unread(rcpt)) {
+		if m.Deliveries[rcpt] == nil || (thread != "" && m.Thread != thread) || (unreadOnly && !m.Unread(rcpt)) {
 			continue
 		}
 		c := m.clone()
@@ -438,6 +439,81 @@ func (s *Store) Inbox(rcpt string, unreadOnly, peek bool) ([]Message, error) {
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// ThreadInfo summarizes one thread.
+type ThreadInfo struct {
+	ID string
+	// Participants are senders and recipients in order of first appearance;
+	// a message with no recipients yet adds "project:<id>" for its project.
+	Participants []string
+	Messages     int
+	Last         Message
+	// Unread, OpenAcks and Escalated count messages: unread by the reader,
+	// requiring an ack nobody gave, and escalated without an ack since.
+	Unread    int
+	OpenAcks  int
+	Escalated int
+	Projects  []string
+}
+
+// Threads summarizes every thread, most recently active first, counting
+// unread messages for reader.
+func (s *Store) Threads(reader string) []ThreadInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byID := map[string]*ThreadInfo{}
+	last := map[string]string{}
+	var list []*ThreadInfo
+	add := func(xs []string, v string) []string {
+		for _, x := range xs {
+			if x == v {
+				return xs
+			}
+		}
+		return append(xs, v)
+	}
+	for _, id := range s.order {
+		m := s.msgs[id]
+		ti := byID[m.Thread]
+		if ti == nil {
+			ti = &ThreadInfo{ID: m.Thread}
+			byID[m.Thread] = ti
+			list = append(list, ti)
+		}
+		ti.Messages++
+		last[m.Thread] = m.ID
+		ti.Participants = add(ti.Participants, m.From)
+		for _, r := range m.Recipients {
+			ti.Participants = add(ti.Participants, r)
+		}
+		if len(m.Recipients) == 0 && m.Project != "" {
+			ti.Participants = add(ti.Participants, "project:"+m.Project)
+		}
+		for _, p := range []string{m.Project, m.FromProject} {
+			if p != "" {
+				ti.Projects = add(ti.Projects, p)
+			}
+		}
+		if m.Unread(reader) {
+			ti.Unread++
+		}
+		if m.Open() && m.AckRequired {
+			ti.OpenAcks++
+		}
+		if m.Open() && m.Escalated != nil {
+			ti.Escalated++
+		}
+	}
+	out := make([]ThreadInfo, len(list))
+	for i, ti := range list {
+		ti.Last = s.msgs[last[ti.ID]].clone()
+		out[i] = *ti
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return idNumber(out[i].Last.ID) > idNumber(out[j].Last.ID)
+	})
+	return out
 }
 
 // Unresolved returns the messages that have no recipients yet.

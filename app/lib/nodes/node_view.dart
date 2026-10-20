@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../gen/protectorate/v1/lease.pb.dart';
 import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../theme/tokens.dart';
+import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 
 String formatBytes(num bytes) {
@@ -95,6 +97,35 @@ GpuSummary? summarizeGpus(NodeMetrics m) {
 
 double? knownPercent(double v) => v >= 0 ? v : null;
 
+// A GPU counts as busy when another process holds most of its memory or it
+// is under heavy load (docs/node-work.md, "Busy GPUs"); an idle loaded model
+// still holds VRAM, so memory is the main signal.
+const busyVramShare = 0.5;
+const busyUtilPercent = 80.0;
+
+// Why a GPU is busy, or null when it is not. The one place that decides it:
+// switch it to the hub's busy flag once NodeStatus carries one.
+String? gpuBusy(GpuMetrics g) {
+  final total = g.memoryTotalBytes.toInt();
+  if (!g.integrated &&
+      total > 0 &&
+      g.hasMemoryUsedBytes() &&
+      g.memoryUsedBytes.toInt() >= total * busyVramShare) {
+    return 'VRAM HELD';
+  }
+  if (g.utilizationPercent >= busyUtilPercent) return 'LOADED';
+  return null;
+}
+
+// Who holds a lease on each GPU of a node, by GPU index.
+Map<int, String> gpuHolders(Iterable<Lease> leases, String node) => {
+  for (final l in leases)
+    if (l.node == node &&
+        l.hasGpuIndex() &&
+        l.state == LeaseState.LEASE_STATE_UNSPECIFIED)
+      l.gpuIndex: l.holder,
+};
+
 // One GPU: name, integrated or discrete and driver, then a utilization meter
 // when the device reports one and a VRAM meter for dedicated memory.
 class GpuLines extends StatelessWidget {
@@ -103,11 +134,14 @@ class GpuLines extends StatelessWidget {
     required this.gpu,
     this.dim = false,
     this.detail = false,
+    this.holder = '',
   });
 
   final GpuMetrics gpu;
   final bool dim;
   final bool detail;
+  // holder is who leases this GPU, when anyone does.
+  final String holder;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +151,7 @@ class GpuLines extends StatelessWidget {
     final total = g.memoryTotalBytes.toInt();
     final used = g.memoryUsedBytes.toInt();
     final valueChars = detail ? 17 : 12;
+    final busy = gpuBusy(g);
     return Padding(
       padding: EdgeInsets.symmetric(vertical: detail ? 4 : 2),
       child: Column(
@@ -144,6 +179,31 @@ class GpuLines extends StatelessWidget {
             ),
             overflow: TextOverflow.ellipsis,
           ),
+          if (busy != null || holder.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (busy != null)
+                    Annunciator(
+                      key: ValueKey('gpu-busy-${g.index}'),
+                      label: 'BUSY $busy',
+                      tone: Tone.warn,
+                      lit: !dim,
+                    ),
+                  if (holder.isNotEmpty)
+                    Annunciator(
+                      key: ValueKey('gpu-holder-${g.index}'),
+                      label: 'LEASED BY $holder',
+                      tone: Tone.info,
+                      lit: !dim,
+                    ),
+                ],
+              ),
+            ),
           if (util != null)
             MeterRow(
               key: ValueKey('gpu-util-${g.index}'),

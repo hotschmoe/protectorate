@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:protectorate/gen/protectorate/v1/events.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/events.pb.dart';
+import 'package:protectorate/gen/protectorate/v1/lease.connect.spec.dart';
+import 'package:protectorate/gen/protectorate/v1/lease.pb.dart';
 import 'package:protectorate/gen/protectorate/v1/node.connect.spec.dart';
 import 'package:protectorate/gen/protectorate/v1/node.pb.dart';
 import 'package:protectorate/hubs/event_feed.dart';
@@ -517,6 +519,105 @@ void main() {
       )!;
       expect(xe.vramPercent, isNull);
       expect(summarizeGpus(NodeMetrics()), isNull);
+    });
+  });
+
+  group('busy GPUs', () {
+    GpuMetrics gpu({
+      int index = 0,
+      double util = 5,
+      int? usedGb,
+      int totalGb = 24,
+      bool integrated = false,
+    }) => GpuMetrics(
+      index: index,
+      name: 'Arc Pro B70',
+      utilizationPercent: util,
+      memoryUsedBytes: usedGb == null ? null : Int64(usedGb << 30),
+      memoryTotalBytes: Int64(totalGb << 30),
+      integrated: integrated,
+      temperatureCelsius: -1,
+    );
+
+    test('busy is held VRAM or heavy load', () {
+      final cases = [
+        (gpu(usedGb: 20), 'VRAM HELD'),
+        (gpu(usedGb: 12), 'VRAM HELD'),
+        (gpu(usedGb: 11), null),
+        (gpu(util: 95, usedGb: 1), 'LOADED'),
+        (gpu(util: -1), null),
+        (gpu(util: 79.9), null),
+        (gpu(totalGb: 0, usedGb: 0), null),
+        (gpu(integrated: true, util: 90), 'LOADED'),
+      ];
+      for (final (g, want) in cases) {
+        expect(
+          gpuBusy(g),
+          want,
+          reason: '${g.utilizationPercent} ${g.memoryUsedBytes}',
+        );
+      }
+    });
+
+    test('holders come from live GPU leases of the node', () {
+      final leases = [
+        Lease(node: 'nas', gpuIndex: 1, holder: 'sleeve:llm'),
+        Lease(node: 'nas', holder: 'whole-node'),
+        Lease(
+          node: 'nas',
+          gpuIndex: 0,
+          holder: 'waiter',
+          state: LeaseState.LEASE_STATE_QUEUED,
+        ),
+        Lease(node: 'other', gpuIndex: 0, holder: 'x'),
+      ];
+      expect(gpuHolders(leases, 'nas'), {1: 'sleeve:llm'});
+    });
+
+    testWidgets('cards light BUSY per GPU and name the holder', (t) async {
+      final m = _metrics()
+        ..gpus.addAll([
+          gpu(index: 0, usedGb: 21, util: 2),
+          gpu(index: 1, usedGb: 1, util: 3),
+        ]);
+      final events = StreamController<Event>.broadcast();
+      addTearDown(events.close);
+      final feed = EventFeed(() => events.stream)..start();
+      addTearDown(feed.dispose);
+      final transport = FakeTransportBuilder()
+          .unary(
+            NodeService.listNodes,
+            (ListNodesRequest r, ctx) => ListNodesResponse(
+              nodes: [
+                _status('nas', NodeFreshness.NODE_FRESHNESS_FRESH, metrics: m),
+              ],
+            ),
+          )
+          .unary(
+            LeaseService.listLeases,
+            (ListLeasesRequest r, ctx) => ListLeasesResponse(
+              leases: [Lease(node: 'nas', gpuIndex: 0, holder: 'sleeve:llm')],
+            ),
+          )
+          .build();
+      await t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NodesTab(
+              hub: _hub,
+              client: HubClient.withTransport(transport),
+              feed: feed,
+            ),
+          ),
+        ),
+      );
+      await t.pump();
+      await t.pump();
+      expect(find.byKey(const ValueKey('gpu-busy-0')), findsOneWidget);
+      expect(find.text('BUSY VRAM HELD'), findsOneWidget);
+      expect(find.byKey(const ValueKey('gpu-busy-1')), findsNothing);
+      expect(find.text('LEASED BY sleeve:llm'), findsOneWidget);
+      await t.pumpWidget(const SizedBox());
     });
   });
 }

@@ -87,6 +87,63 @@ func TestEncodePNG(t *testing.T) {
 	}
 }
 
+func TestDownscale(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 8, 4))
+	for y := range 4 {
+		for x := range 8 {
+			v := uint8(0)
+			if x >= 4 {
+				v = 200
+			}
+			src.SetRGBA(x, y, color.RGBA{R: v, G: v / 2, B: 10, A: 255})
+		}
+	}
+	tests := []struct {
+		name     string
+		maxWidth int
+		w, h     int
+	}{
+		{"off", 0, 8, 4},
+		{"no wider", 8, 8, 4},
+		{"half", 4, 4, 2},
+		{"odd", 3, 3, 2},
+		{"one pixel", 1, 1, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Downscale(src, tt.maxWidth)
+			if got.Bounds().Dx() != tt.w || got.Bounds().Dy() != tt.h {
+				t.Fatalf("size = %v", got.Bounds())
+			}
+			b, err := EncodePNG(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scaled, err := DownscalePNG(b, tt.maxWidth)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := png.DecodeConfig(bytes.NewReader(scaled))
+			if err != nil || cfg.Width != tt.w || cfg.Height != tt.h {
+				t.Fatalf("png = %+v %v", cfg, err)
+			}
+		})
+	}
+	half := Downscale(src, 4)
+	if c := half.RGBAAt(0, 0); c.R != 0 || c.B != 10 {
+		t.Fatalf("left = %v", c)
+	}
+	if c := half.RGBAAt(3, 1); c.R != 200 || c.G != 100 {
+		t.Fatalf("right = %v", c)
+	}
+	if c := Downscale(src, 1).RGBAAt(0, 0); c.R != 100 || c.A != 255 {
+		t.Fatalf("average = %v", c)
+	}
+	if _, err := DownscalePNG([]byte("not a png"), 4); err == nil {
+		t.Fatal("garbage accepted")
+	}
+}
+
 func TestCheckInteractive(t *testing.T) {
 	tests := []struct {
 		name     string
