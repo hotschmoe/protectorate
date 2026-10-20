@@ -342,7 +342,9 @@ type Sleeve struct {
 	ReadOnly      []*ReadOnlyMount     `protobuf:"bytes,18,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	ExitAfterIdle *durationpb.Duration `protobuf:"bytes,19,opt,name=exit_after_idle,json=exitAfterIdle,proto3" json:"exit_after_idle,omitempty"`
 	// Current branch read from .git files; empty for non-git and worktrees.
-	GitBranch     string `protobuf:"bytes,21,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
+	GitBranch string `protobuf:"bytes,21,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
+	// Latest self-reported result for the current brief, independent of mail turns.
+	Result        *SleeveResult `protobuf:"bytes,25,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -522,6 +524,13 @@ func (x *Sleeve) GetGitBranch() string {
 		return x.GitBranch
 	}
 	return ""
+}
+
+func (x *Sleeve) GetResult() *SleeveResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
 }
 
 type BrowseWorkspacesRequest struct {
@@ -1724,7 +1733,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\x8c\a\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xc3\a\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -1753,7 +1762,8 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tread_only\x18\x12 \x03(\v2\x1e.protectorate.v1.ReadOnlyMountR\breadOnly\x12A\n" +
 	"\x0fexit_after_idle\x18\x13 \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x12\x1d\n" +
 	"\n" +
-	"git_branch\x18\x15 \x01(\tR\tgitBranchB\f\n" +
+	"git_branch\x18\x15 \x01(\tR\tgitBranch\x125\n" +
+	"\x06result\x18\x19 \x01(\v2\x1d.protectorate.v1.SleeveResultR\x06resultB\f\n" +
 	"\n" +
 	"_exit_code\"-\n" +
 	"\x17BrowseWorkspacesRequest\x12\x12\n" +
@@ -1916,8 +1926,9 @@ var file_protectorate_v1_sleeve_proto_goTypes = []any{
 	(*ChatStatus)(nil),               // 27: protectorate.v1.ChatStatus
 	(*Handoff)(nil),                  // 28: protectorate.v1.Handoff
 	(*durationpb.Duration)(nil),      // 29: google.protobuf.Duration
-	(*ModelSelection)(nil),           // 30: protectorate.v1.ModelSelection
-	(*TokenInfo)(nil),                // 31: protectorate.v1.TokenInfo
+	(*SleeveResult)(nil),             // 30: protectorate.v1.SleeveResult
+	(*ModelSelection)(nil),           // 31: protectorate.v1.ModelSelection
+	(*TokenInfo)(nil),                // 32: protectorate.v1.TokenInfo
 }
 var file_protectorate_v1_sleeve_proto_depIdxs = []int32{
 	25, // 0: protectorate.v1.SleeveUsage.sampled_at:type_name -> google.protobuf.Timestamp
@@ -1933,48 +1944,49 @@ var file_protectorate_v1_sleeve_proto_depIdxs = []int32{
 	28, // 10: protectorate.v1.Sleeve.handoff:type_name -> protectorate.v1.Handoff
 	8,  // 11: protectorate.v1.Sleeve.read_only:type_name -> protectorate.v1.ReadOnlyMount
 	29, // 12: protectorate.v1.Sleeve.exit_after_idle:type_name -> google.protobuf.Duration
-	6,  // 13: protectorate.v1.BrowseWorkspacesResponse.directories:type_name -> protectorate.v1.WorkspaceDirectory
-	0,  // 14: protectorate.v1.SpawnSleeveRequest.harness:type_name -> protectorate.v1.Harness
-	2,  // 15: protectorate.v1.SpawnSleeveRequest.limits:type_name -> protectorate.v1.SleeveLimits
-	24, // 16: protectorate.v1.SpawnSleeveRequest.env:type_name -> protectorate.v1.SpawnSleeveRequest.EnvEntry
-	26, // 17: protectorate.v1.SpawnSleeveRequest.mode:type_name -> protectorate.v1.SleeveMode
-	30, // 18: protectorate.v1.SpawnSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
-	8,  // 19: protectorate.v1.SpawnSleeveRequest.read_only:type_name -> protectorate.v1.ReadOnlyMount
-	29, // 20: protectorate.v1.SpawnSleeveRequest.exit_after_idle:type_name -> google.protobuf.Duration
-	4,  // 21: protectorate.v1.SpawnSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	4,  // 22: protectorate.v1.ListSleevesResponse.sleeves:type_name -> protectorate.v1.Sleeve
-	14, // 23: protectorate.v1.ListWorkspacesResponse.workspaces:type_name -> protectorate.v1.Workspace
-	4,  // 24: protectorate.v1.GetSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	0,  // 25: protectorate.v1.ResleeveSleeveRequest.to:type_name -> protectorate.v1.Harness
-	29, // 26: protectorate.v1.ResleeveSleeveRequest.wait:type_name -> google.protobuf.Duration
-	30, // 27: protectorate.v1.ResleeveSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
-	4,  // 28: protectorate.v1.ResleeveSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	0,  // 29: protectorate.v1.SpawnEnvoyRequest.harness:type_name -> protectorate.v1.Harness
-	29, // 30: protectorate.v1.SpawnEnvoyRequest.ttl:type_name -> google.protobuf.Duration
-	30, // 31: protectorate.v1.SpawnEnvoyRequest.selection:type_name -> protectorate.v1.ModelSelection
-	4,  // 32: protectorate.v1.SpawnEnvoyResponse.sleeve:type_name -> protectorate.v1.Sleeve
-	31, // 33: protectorate.v1.SpawnEnvoyResponse.token:type_name -> protectorate.v1.TokenInfo
-	9,  // 34: protectorate.v1.SleeveService.SpawnSleeve:input_type -> protectorate.v1.SpawnSleeveRequest
-	11, // 35: protectorate.v1.SleeveService.ListSleeves:input_type -> protectorate.v1.ListSleevesRequest
-	13, // 36: protectorate.v1.SleeveService.ListWorkspaces:input_type -> protectorate.v1.ListWorkspacesRequest
-	5,  // 37: protectorate.v1.SleeveService.BrowseWorkspaces:input_type -> protectorate.v1.BrowseWorkspacesRequest
-	16, // 38: protectorate.v1.SleeveService.GetSleeve:input_type -> protectorate.v1.GetSleeveRequest
-	18, // 39: protectorate.v1.SleeveService.KillSleeve:input_type -> protectorate.v1.KillSleeveRequest
-	20, // 40: protectorate.v1.SleeveService.ResleeveSleeve:input_type -> protectorate.v1.ResleeveSleeveRequest
-	22, // 41: protectorate.v1.SleeveService.SpawnEnvoy:input_type -> protectorate.v1.SpawnEnvoyRequest
-	10, // 42: protectorate.v1.SleeveService.SpawnSleeve:output_type -> protectorate.v1.SpawnSleeveResponse
-	12, // 43: protectorate.v1.SleeveService.ListSleeves:output_type -> protectorate.v1.ListSleevesResponse
-	15, // 44: protectorate.v1.SleeveService.ListWorkspaces:output_type -> protectorate.v1.ListWorkspacesResponse
-	7,  // 45: protectorate.v1.SleeveService.BrowseWorkspaces:output_type -> protectorate.v1.BrowseWorkspacesResponse
-	17, // 46: protectorate.v1.SleeveService.GetSleeve:output_type -> protectorate.v1.GetSleeveResponse
-	19, // 47: protectorate.v1.SleeveService.KillSleeve:output_type -> protectorate.v1.KillSleeveResponse
-	21, // 48: protectorate.v1.SleeveService.ResleeveSleeve:output_type -> protectorate.v1.ResleeveSleeveResponse
-	23, // 49: protectorate.v1.SleeveService.SpawnEnvoy:output_type -> protectorate.v1.SpawnEnvoyResponse
-	42, // [42:50] is the sub-list for method output_type
-	34, // [34:42] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	30, // 13: protectorate.v1.Sleeve.result:type_name -> protectorate.v1.SleeveResult
+	6,  // 14: protectorate.v1.BrowseWorkspacesResponse.directories:type_name -> protectorate.v1.WorkspaceDirectory
+	0,  // 15: protectorate.v1.SpawnSleeveRequest.harness:type_name -> protectorate.v1.Harness
+	2,  // 16: protectorate.v1.SpawnSleeveRequest.limits:type_name -> protectorate.v1.SleeveLimits
+	24, // 17: protectorate.v1.SpawnSleeveRequest.env:type_name -> protectorate.v1.SpawnSleeveRequest.EnvEntry
+	26, // 18: protectorate.v1.SpawnSleeveRequest.mode:type_name -> protectorate.v1.SleeveMode
+	31, // 19: protectorate.v1.SpawnSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
+	8,  // 20: protectorate.v1.SpawnSleeveRequest.read_only:type_name -> protectorate.v1.ReadOnlyMount
+	29, // 21: protectorate.v1.SpawnSleeveRequest.exit_after_idle:type_name -> google.protobuf.Duration
+	4,  // 22: protectorate.v1.SpawnSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	4,  // 23: protectorate.v1.ListSleevesResponse.sleeves:type_name -> protectorate.v1.Sleeve
+	14, // 24: protectorate.v1.ListWorkspacesResponse.workspaces:type_name -> protectorate.v1.Workspace
+	4,  // 25: protectorate.v1.GetSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	0,  // 26: protectorate.v1.ResleeveSleeveRequest.to:type_name -> protectorate.v1.Harness
+	29, // 27: protectorate.v1.ResleeveSleeveRequest.wait:type_name -> google.protobuf.Duration
+	31, // 28: protectorate.v1.ResleeveSleeveRequest.selection:type_name -> protectorate.v1.ModelSelection
+	4,  // 29: protectorate.v1.ResleeveSleeveResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	0,  // 30: protectorate.v1.SpawnEnvoyRequest.harness:type_name -> protectorate.v1.Harness
+	29, // 31: protectorate.v1.SpawnEnvoyRequest.ttl:type_name -> google.protobuf.Duration
+	31, // 32: protectorate.v1.SpawnEnvoyRequest.selection:type_name -> protectorate.v1.ModelSelection
+	4,  // 33: protectorate.v1.SpawnEnvoyResponse.sleeve:type_name -> protectorate.v1.Sleeve
+	32, // 34: protectorate.v1.SpawnEnvoyResponse.token:type_name -> protectorate.v1.TokenInfo
+	9,  // 35: protectorate.v1.SleeveService.SpawnSleeve:input_type -> protectorate.v1.SpawnSleeveRequest
+	11, // 36: protectorate.v1.SleeveService.ListSleeves:input_type -> protectorate.v1.ListSleevesRequest
+	13, // 37: protectorate.v1.SleeveService.ListWorkspaces:input_type -> protectorate.v1.ListWorkspacesRequest
+	5,  // 38: protectorate.v1.SleeveService.BrowseWorkspaces:input_type -> protectorate.v1.BrowseWorkspacesRequest
+	16, // 39: protectorate.v1.SleeveService.GetSleeve:input_type -> protectorate.v1.GetSleeveRequest
+	18, // 40: protectorate.v1.SleeveService.KillSleeve:input_type -> protectorate.v1.KillSleeveRequest
+	20, // 41: protectorate.v1.SleeveService.ResleeveSleeve:input_type -> protectorate.v1.ResleeveSleeveRequest
+	22, // 42: protectorate.v1.SleeveService.SpawnEnvoy:input_type -> protectorate.v1.SpawnEnvoyRequest
+	10, // 43: protectorate.v1.SleeveService.SpawnSleeve:output_type -> protectorate.v1.SpawnSleeveResponse
+	12, // 44: protectorate.v1.SleeveService.ListSleeves:output_type -> protectorate.v1.ListSleevesResponse
+	15, // 45: protectorate.v1.SleeveService.ListWorkspaces:output_type -> protectorate.v1.ListWorkspacesResponse
+	7,  // 46: protectorate.v1.SleeveService.BrowseWorkspaces:output_type -> protectorate.v1.BrowseWorkspacesResponse
+	17, // 47: protectorate.v1.SleeveService.GetSleeve:output_type -> protectorate.v1.GetSleeveResponse
+	19, // 48: protectorate.v1.SleeveService.KillSleeve:output_type -> protectorate.v1.KillSleeveResponse
+	21, // 49: protectorate.v1.SleeveService.ResleeveSleeve:output_type -> protectorate.v1.ResleeveSleeveResponse
+	23, // 50: protectorate.v1.SleeveService.SpawnEnvoy:output_type -> protectorate.v1.SpawnEnvoyResponse
+	43, // [43:51] is the sub-list for method output_type
+	35, // [35:43] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_sleeve_proto_init() }

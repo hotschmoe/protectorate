@@ -180,6 +180,8 @@ message Sleeve {
   google.protobuf.Duration exit_after_idle = 19;
   // Current branch read from .git files; empty for non-git and worktrees.
   string git_branch = 21;
+  // Latest self-reported result for the current brief, independent of mail turns.
+  SleeveResult result = 25;
 }
 
 message BrowseWorkspacesRequest {

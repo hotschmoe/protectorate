@@ -45,6 +45,7 @@ var Workflow = []struct{ Command, Purpose string }{
 	{"backlog show", "read one note in full"},
 	{"sleeve ls", "running sleeves with CPU, memory and workspace"},
 	{"sleeve spawn", "start a harness in an isolated workspace"},
+	{"chat wait", "wait with --until report for sleeve results without polling; partial and blocked mean work remains"},
 	{"sleeve resleeve", "move a sleeve to another harness with a hub-written handoff (no confirmation needed)"},
 	{"session capture", "read what a sleeve's pane shows right now"},
 	{"backlog edit", "update a note, e.g. --append or --body, when the owner asks"},
@@ -98,7 +99,7 @@ func RenderAgents(din DocInput) []byte {
 	for _, s := range Workflow {
 		w("- `protectorate %s`: %s\n", s.Command, s.Purpose)
 	}
-	w("\nTypical loop: read the notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, watch the sleeve, then report back and update the note.\n\n")
+	w("\nTypical loop: read the notes for what the owner wants done, ask `quota suggest` which harness has capacity that would otherwise expire, spawn a sleeve on it for one piece of work, wait with `chat wait <name> --until report`, then report back and update the note. Partial and blocked results mean work remains.\n\n")
 
 	w("## Coordination\n\n")
 	w("%s\n\n", mailbox.ConciseGuidance)
@@ -177,7 +178,7 @@ func firstSentence(s string, limit int) string {
 // outside any sandbox. Envoy starts work only through sandboxed sleeves.
 // grant_admin works only on a hub started with --orchestrator-admin-grants,
 // and only for shared nodes.
-var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "grant_admin"}
+var DefaultGrants = []string{"backlog_*", "lease_*", "message_*", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve", "chat_report", "grant_admin"}
 
 // DefaultScopes is read, events and the explicit names of the mutating,
 // non-destructive tools matched by DefaultGrants. Naming tools instead of

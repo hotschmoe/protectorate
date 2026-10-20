@@ -266,17 +266,41 @@ func (h *Hub) emitMap(kind, subject string, payload map[string]any) {
 // name, workspace and limits on harness to, continuing its chat log.
 func (h *Hub) replaceHarness(ctx context.Context, info sleeve.Info, to sleeve.Harness, env map[string]string, o spawnOpts) (sleeve.Info, error) {
 	h.chat.remove(info.Name)
+	latest, err := h.sleeves.Get(info.Name)
+	if err == nil {
+		info = latest
+	}
 	if err := h.sleeves.Kill(ctx, info.Name); err != nil && !errors.Is(err, sleeve.ErrNotFound) {
 		return sleeve.Info{}, fmt.Errorf("stop %s: %w", info.Harness, err)
 	}
 	h.dropIdentity(info.Name, "")
-	return h.spawn(ctx, sleeve.SpawnRequest{
+	out, err := h.spawn(ctx, sleeve.SpawnRequest{
 		Parent: info.Parent, ParentID: info.ParentID,
 		ReadOnly: info.ReadOnly, ExitAfterIdle: info.ExitAfterIdle,
 		Name: info.Name, Workspace: info.Workspace, Harness: to, Mode: sleeve.ModeChat,
 		Limits: info.Limits(), Env: env, Supervised: info.Supervised,
 		Selection: o.selection,
 	}, o)
+	if err != nil {
+		return sleeve.Info{}, err
+	}
+	if info.Chat != nil {
+		s, err := h.chat.get(info.Name, false)
+		if err != nil {
+			return sleeve.Info{}, err
+		}
+		s.mu.Lock()
+		s.briefSeq = info.Chat.BriefSeq
+		err = s.persistLocked(true)
+		s.mu.Unlock()
+		if err != nil {
+			return sleeve.Info{}, fmt.Errorf("restore brief after resleeve: %w", err)
+		}
+	}
+	if err := h.sleeves.SetResult(info.Name, info.Result); err != nil {
+		return sleeve.Info{}, fmt.Errorf("restore result after resleeve: %w", err)
+	}
+	return out, nil
 }
 
 // quiesce returns once the chat is idle. A turn that runs past wait, or any

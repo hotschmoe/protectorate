@@ -399,6 +399,9 @@ func sleeveShowCmd(o *opts) *command {
 				fmt.Fprintf(w, "name\t%s\nharness\t%s\nstate\t%s\nworkspace\t%s\nsession\t%s\n", s.Name, harnessName(s.Harness), sleeveStateLabel(s.State), s.Workspace, s.Session)
 				fmt.Fprintf(w, "branch\t%s\n", s.GitBranch)
 				fmt.Fprintf(w, "parent\t%s\n", s.Parent)
+				if s.Result != nil {
+					fmt.Fprintf(w, "report\t%s (chat seq %d, %s)\n%s\n", reportStatusLabel(s.Result.Status), s.Result.ChatSeq, s.Result.Time.AsTime().Format(time.RFC3339), s.Result.Summary)
+				}
 				fmt.Fprintf(w, "created\t%s\n", s.CreatedAt.AsTime().Local().Format(time.RFC3339))
 				if s.ExitedAt != nil {
 					fmt.Fprintf(w, "exited\t%s\n", s.ExitedAt.AsTime().Local().Format(time.RFC3339))

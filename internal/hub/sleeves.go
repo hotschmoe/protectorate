@@ -135,6 +135,7 @@ func sleeveToProto(i sleeve.Info) *pb.Sleeve {
 		Chat:       chatToProto(i.Chat),
 		Supervised: i.Supervised,
 		Handoff:    handoffToProto(i.Handoff),
+		Result:     resultToProto(i.Result),
 		Limits:     &pb.SleeveLimits{CpuPercent: i.CPU, MemoryBytes: i.Memory},
 		State:      pb.SleeveState_SLEEVE_STATE_RUNNING,
 		Usage: &pb.SleeveUsage{
@@ -372,8 +373,7 @@ func (c *coordinator) reapIdle(ctx context.Context) {
 			continue
 		}
 		s.mu.Lock()
-		pending := len(c.mail.Pending()[info.Name]) > 0
-		idle := s.state == pb.ChatState_CHAT_STATE_IDLE && !s.hubOwned && !pending
+		idle := c.h.chatIdleLocked(s)
 		if !idle {
 			s.idleSince = time.Time{}
 		} else if s.idleSince.IsZero() {
@@ -408,6 +408,7 @@ func (h *Hub) KillSleeve(ctx context.Context, req *connect.Request[pb.KillSleeve
 		return nil, sleeveErr(err)
 	}
 	h.dropIdentity(req.Msg.Name, "")
+	h.emit("sleeve.removed", req.Msg.Name, nil)
 	h.scanSessions(ctx)
 	h.pokeCoord()
 	return connect.NewResponse(&pb.KillSleeveResponse{}), nil

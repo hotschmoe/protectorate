@@ -124,6 +124,19 @@ never follow redirects.
 
 ## Entry points
 
+`ChatService.Report` authenticates the sleeve identity independently of tool
+scopes and permits only its own sleeve (an empty `sleeve` selects that identity).
+The owner, arbitrary scoped tokens even with `chat_*` or `*`, and identities
+targeting another sleeve receive `permission_denied`. Envoy's orchestrator
+identity may report only for `envoy`. New sleeve tokens list `chat_report`;
+existing sleeve identities may report without token replacement. Reports are
+audited with the authenticated sleeve as subject, without their summary.
+
+`ChatService.Wait` is read-only (`read` or `chat_wait`), available to the owner,
+Envoy and MCP. Sleeve identities can wait only for themselves, matching chat
+history access; they cannot read another sleeve's result through a wait. It
+subscribes to hub events internally, so `events` scope is not required.
+
 `SleeveService.BrowseWorkspaces` requires `read` or its explicit tool scope
 (`sleeve_browse_workspaces`); the owner and owner-paired devices can call it.
 As with the existing per-sleeve chat/session read restrictions, the handler

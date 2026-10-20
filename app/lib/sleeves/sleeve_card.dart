@@ -144,6 +144,29 @@ class SleeveCard extends StatelessWidget {
                             style: t.legend(t.p.emph),
                           ),
                         Text(chatMode ? 'CHAT' : 'TERMINAL', style: t.legend()),
+                        if (sleeve.hasResult())
+                          TextButton(
+                            onPressed: () => showDialog<void>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: Text(
+                                  '${sleeve.name}: ${sleeve.result.status.name.replaceFirst('REPORT_STATUS_', '')}',
+                                ),
+                                content: SingleChildScrollView(
+                                  child: SelectableText(sleeve.result.summary),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('CLOSE'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            child: Text(
+                              'REPORT: ${sleeve.result.status.name.replaceFirst('REPORT_STATUS_', '')}',
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),

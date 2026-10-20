@@ -15,6 +15,8 @@ import 'dart:core' as $core;
 
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
+import 'package:protobuf/well_known_types/google/protobuf/duration.pb.dart'
+    as $1;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
@@ -812,6 +814,7 @@ enum ChatEvent_Body {
   state,
   handoff,
   settings,
+  report,
   notSet
 }
 
@@ -832,6 +835,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     StateChange? state,
     Handoff? handoff,
     ModelSettings? settings,
+    SleeveResult? report,
   }) {
     final result = ChatEvent._();
     if (seq != null) result.seq = seq;
@@ -849,6 +853,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     if (state != null) result.state = state;
     if (handoff != null) result.handoff = handoff;
     if (settings != null) result.settings = settings;
+    if (report != null) result.report = report;
     return result;
   }
 
@@ -875,6 +880,7 @@ class ChatEvent extends $pb.GeneratedMessage {
     20: ChatEvent_Body.state,
     21: ChatEvent_Body.handoff,
     22: ChatEvent_Body.settings,
+    23: ChatEvent_Body.report,
     0: ChatEvent_Body.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -882,7 +888,7 @@ class ChatEvent extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ChatEvent.$_createMessage)
-    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22])
+    ..oo(0, [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
     ..a<$fixnum.Int64>(1, _omitFieldNames ? '' : 'seq', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOM<$0.Timestamp>(2, _omitFieldNames ? '' : 'time',
@@ -913,6 +919,8 @@ class ChatEvent extends $pb.GeneratedMessage {
         subBuilder: Handoff.$_createMessage)
     ..aOM<ModelSettings>(22, _omitFieldNames ? '' : 'settings',
         subBuilder: ModelSettings.$_createMessage)
+    ..aOM<SleeveResult>(23, _omitFieldNames ? '' : 'report',
+        subBuilder: SleeveResult.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -948,6 +956,7 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(20)
   @$pb.TagNumber(21)
   @$pb.TagNumber(22)
+  @$pb.TagNumber(23)
   ChatEvent_Body whichBody() => _ChatEvent_BodyByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(10)
   @$pb.TagNumber(11)
@@ -962,6 +971,7 @@ class ChatEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(20)
   @$pb.TagNumber(21)
   @$pb.TagNumber(22)
+  @$pb.TagNumber(23)
   void clearBody() => $_clearField($_whichOneof(0));
 
   /// seq increases by one per event within a sleeve, starting at 1. All text
@@ -1130,6 +1140,17 @@ class ChatEvent extends $pb.GeneratedMessage {
   void clearSettings() => $_clearField(22);
   @$pb.TagNumber(22)
   ModelSettings ensureSettings() => $_ensure(14);
+
+  @$pb.TagNumber(23)
+  SleeveResult get report => $_getN(15);
+  @$pb.TagNumber(23)
+  set report(SleeveResult value) => $_setField(23, value);
+  @$pb.TagNumber(23)
+  $core.bool hasReport() => $_has(15);
+  @$pb.TagNumber(23)
+  void clearReport() => $_clearField(23);
+  @$pb.TagNumber(23)
+  SleeveResult ensureReport() => $_ensure(15);
 }
 
 class UserMessage extends $pb.GeneratedMessage {
@@ -2792,20 +2813,441 @@ class CompactResponse extends $pb.GeneratedMessage {
   Compaction ensureCompaction() => $_ensure(0);
 }
 
+class SleeveResult extends $pb.GeneratedMessage {
+  factory SleeveResult({
+    ReportStatus? status,
+    $core.String? summary,
+    $0.Timestamp? time,
+    $fixnum.Int64? chatSeq,
+    $fixnum.Int64? briefSeq,
+  }) {
+    final result = SleeveResult._();
+    if (status != null) result.status = status;
+    if (summary != null) result.summary = summary;
+    if (time != null) result.time = time;
+    if (chatSeq != null) result.chatSeq = chatSeq;
+    if (briefSeq != null) result.briefSeq = briefSeq;
+    return result;
+  }
+
+  SleeveResult._();
+
+  factory SleeveResult.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SleeveResult()..mergeFromBuffer(data, registry);
+  factory SleeveResult.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      SleeveResult()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'SleeveResult',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: SleeveResult.$_createMessage)
+    ..aE<ReportStatus>(1, _omitFieldNames ? '' : 'status',
+        enumValues: ReportStatus.values)
+    ..aOS(2, _omitFieldNames ? '' : 'summary')
+    ..aOM<$0.Timestamp>(3, _omitFieldNames ? '' : 'time',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..a<$fixnum.Int64>(4, _omitFieldNames ? '' : 'chatSeq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        5, _omitFieldNames ? '' : 'briefSeq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SleeveResult clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  SleeveResult copyWith(void Function(SleeveResult) updates) =>
+      super.copyWith((message) => updates(message as SleeveResult))
+          as SleeveResult;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use SleeveResult() / SleeveResult.new instead')
+  static SleeveResult create() => SleeveResult._();
+  static $pb.GeneratedMessage $_createMessage() => SleeveResult._();
+  @$core.override
+  SleeveResult createEmptyInstance() => SleeveResult._();
+  @$core.pragma('dart2js:noInline')
+  static SleeveResult getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SleeveResult>(
+          SleeveResult.$_createMessage);
+  static SleeveResult? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  ReportStatus get status => $_getN(0);
+  @$pb.TagNumber(1)
+  set status(ReportStatus value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasStatus() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearStatus() => $_clearField(1);
+
+  /// At most 32 KiB, the same limit as mail bodies.
+  @$pb.TagNumber(2)
+  $core.String get summary => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set summary($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSummary() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSummary() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $0.Timestamp get time => $_getN(2);
+  @$pb.TagNumber(3)
+  set time($0.Timestamp value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTime() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTime() => $_clearField(3);
+  @$pb.TagNumber(3)
+  $0.Timestamp ensureTime() => $_ensure(2);
+
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get chatSeq => $_getI64(3);
+  @$pb.TagNumber(4)
+  set chatSeq($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasChatSeq() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearChatSeq() => $_clearField(4);
+
+  /// The latest non-mail user message; zero for the initial spawn brief.
+  @$pb.TagNumber(5)
+  $fixnum.Int64 get briefSeq => $_getI64(4);
+  @$pb.TagNumber(5)
+  set briefSeq($fixnum.Int64 value) => $_setInt64(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasBriefSeq() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearBriefSeq() => $_clearField(5);
+}
+
+class ReportRequest extends $pb.GeneratedMessage {
+  factory ReportRequest({
+    $core.String? sleeve,
+    ReportStatus? status,
+    $core.String? summary,
+  }) {
+    final result = ReportRequest._();
+    if (sleeve != null) result.sleeve = sleeve;
+    if (status != null) result.status = status;
+    if (summary != null) result.summary = summary;
+    return result;
+  }
+
+  ReportRequest._();
+
+  factory ReportRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportRequest()..mergeFromBuffer(data, registry);
+  factory ReportRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ReportRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ReportRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
+    ..aE<ReportStatus>(2, _omitFieldNames ? '' : 'status',
+        enumValues: ReportStatus.values)
+    ..aOS(3, _omitFieldNames ? '' : 'summary')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportRequest copyWith(void Function(ReportRequest) updates) =>
+      super.copyWith((message) => updates(message as ReportRequest))
+          as ReportRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ReportRequest() / ReportRequest.new instead')
+  static ReportRequest create() => ReportRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ReportRequest._();
+  @$core.override
+  ReportRequest createEmptyInstance() => ReportRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ReportRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ReportRequest>(
+          ReportRequest.$_createMessage);
+  static ReportRequest? _defaultInstance;
+
+  /// Empty selects the authenticated sleeve. An explicit name must be its own.
+  @$pb.TagNumber(1)
+  $core.String get sleeve => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sleeve($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  ReportStatus get status => $_getN(1);
+  @$pb.TagNumber(2)
+  set status(ReportStatus value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasStatus() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearStatus() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get summary => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set summary($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSummary() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSummary() => $_clearField(3);
+}
+
+class ReportResponse extends $pb.GeneratedMessage {
+  factory ReportResponse({
+    SleeveResult? result,
+  }) {
+    final result$ = ReportResponse._();
+    if (result != null) result$.result = result;
+    return result$;
+  }
+
+  ReportResponse._();
+
+  factory ReportResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportResponse()..mergeFromBuffer(data, registry);
+  factory ReportResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ReportResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ReportResponse.$_createMessage)
+    ..aOM<SleeveResult>(1, _omitFieldNames ? '' : 'result',
+        subBuilder: SleeveResult.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportResponse copyWith(void Function(ReportResponse) updates) =>
+      super.copyWith((message) => updates(message as ReportResponse))
+          as ReportResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ReportResponse() / ReportResponse.new instead')
+  static ReportResponse create() => ReportResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ReportResponse._();
+  @$core.override
+  ReportResponse createEmptyInstance() => ReportResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ReportResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<ReportResponse>(
+          ReportResponse.$_createMessage);
+  static ReportResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  SleeveResult get result => $_getN(0);
+  @$pb.TagNumber(1)
+  set result(SleeveResult value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasResult() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearResult() => $_clearField(1);
+  @$pb.TagNumber(1)
+  SleeveResult ensureResult() => $_ensure(0);
+}
+
+class WaitRequest extends $pb.GeneratedMessage {
+  factory WaitRequest({
+    $core.String? sleeve,
+    WaitUntil? until,
+    $1.Duration? timeout,
+  }) {
+    final result = WaitRequest._();
+    if (sleeve != null) result.sleeve = sleeve;
+    if (until != null) result.until = until;
+    if (timeout != null) result.timeout = timeout;
+    return result;
+  }
+
+  WaitRequest._();
+
+  factory WaitRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WaitRequest()..mergeFromBuffer(data, registry);
+  factory WaitRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WaitRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'WaitRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: WaitRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
+    ..aE<WaitUntil>(2, _omitFieldNames ? '' : 'until',
+        enumValues: WaitUntil.values)
+    ..aOM<$1.Duration>(3, _omitFieldNames ? '' : 'timeout',
+        subBuilder: $1.Duration.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WaitRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WaitRequest copyWith(void Function(WaitRequest) updates) =>
+      super.copyWith((message) => updates(message as WaitRequest))
+          as WaitRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use WaitRequest() / WaitRequest.new instead')
+  static WaitRequest create() => WaitRequest._();
+  static $pb.GeneratedMessage $_createMessage() => WaitRequest._();
+  @$core.override
+  WaitRequest createEmptyInstance() => WaitRequest._();
+  @$core.pragma('dart2js:noInline')
+  static WaitRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<WaitRequest>(
+          WaitRequest.$_createMessage);
+  static WaitRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get sleeve => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sleeve($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  WaitUntil get until => $_getN(1);
+  @$pb.TagNumber(2)
+  set until(WaitUntil value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasUntil() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearUntil() => $_clearField(2);
+
+  /// Unset defaults to ten minutes. Zero waits until cancellation.
+  @$pb.TagNumber(3)
+  $1.Duration get timeout => $_getN(2);
+  @$pb.TagNumber(3)
+  set timeout($1.Duration value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasTimeout() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearTimeout() => $_clearField(3);
+  @$pb.TagNumber(3)
+  $1.Duration ensureTimeout() => $_ensure(2);
+}
+
+class WaitResponse extends $pb.GeneratedMessage {
+  factory WaitResponse({
+    $core.String? sleeve,
+    SleeveResult? result,
+  }) {
+    final result$ = WaitResponse._();
+    if (sleeve != null) result$.sleeve = sleeve;
+    if (result != null) result$.result = result;
+    return result$;
+  }
+
+  WaitResponse._();
+
+  factory WaitResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WaitResponse()..mergeFromBuffer(data, registry);
+  factory WaitResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      WaitResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'WaitResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: WaitResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'sleeve')
+    ..aOM<SleeveResult>(2, _omitFieldNames ? '' : 'result',
+        subBuilder: SleeveResult.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WaitResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  WaitResponse copyWith(void Function(WaitResponse) updates) =>
+      super.copyWith((message) => updates(message as WaitResponse))
+          as WaitResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use WaitResponse() / WaitResponse.new instead')
+  static WaitResponse create() => WaitResponse._();
+  static $pb.GeneratedMessage $_createMessage() => WaitResponse._();
+  @$core.override
+  WaitResponse createEmptyInstance() => WaitResponse._();
+  @$core.pragma('dart2js:noInline')
+  static WaitResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<WaitResponse>(
+          WaitResponse.$_createMessage);
+  static WaitResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get sleeve => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set sleeve($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasSleeve() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearSleeve() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  SleeveResult get result => $_getN(1);
+  @$pb.TagNumber(2)
+  set result(SleeveResult value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasResult() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearResult() => $_clearField(2);
+  @$pb.TagNumber(2)
+  SleeveResult ensureResult() => $_ensure(1);
+}
+
 /// ChatService drives a sleeve in chat mode: the harness runs its own official
 /// headless protocol inside the sleeve and the hub normalizes what it emits
 /// into ChatEvents. The hub keeps each sleeve's events in an append-only log,
 /// so any number of clients can watch and a reconnecting client resumes from
 /// the last seq it saw. The harness's own session store stays the full record;
 /// the log is the view. A sleeve is in chat mode for life, or in terminal mode
-/// and then has no chat.
+/// and then has only self-reported result events in this log.
 class ChatServiceApi {
   final $pb.RpcClient _client;
 
   ChatServiceApi(this._client);
 
   /// Watch replays the sleeve's events after after_seq, then streams new ones
-  /// until the client disconnects or the sleeve is killed.
+  /// until the client disconnects or the sleeve is killed. Terminal sleeves
+  /// expose their result history without starting a headless harness.
   $async.Future<ChatEvent> watch(
           $pb.ClientContext? ctx, WatchRequest request) =>
       _client.invoke<ChatEvent>(
@@ -2852,6 +3294,21 @@ class ChatServiceApi {
           $pb.ClientContext? ctx, SetSelectionRequest request) =>
       _client.invoke<SetSelectionResponse>(
           ctx, 'ChatService', 'SetSelection', request, SetSelectionResponse());
+
+  /// Report replaces this sleeve's result for its current brief. Only the
+  /// sleeve's own identity token may report, never the owner or another sleeve.
+  $async.Future<ReportResponse> report(
+          $pb.ClientContext? ctx, ReportRequest request) =>
+      _client.invoke<ReportResponse>(
+          ctx, 'ChatService', 'Report', request, ReportResponse());
+
+  /// Wait blocks on hub events until a sleeve is idle without pending mail,
+  /// or has reported for its current brief. Exits and timeouts fail the call.
+  /// Available as the read-only MCP tool chat_wait; no polling is needed.
+  $async.Future<WaitResponse> wait(
+          $pb.ClientContext? ctx, WaitRequest request) =>
+      _client.invoke<WaitResponse>(
+          ctx, 'ChatService', 'Wait', request, WaitResponse());
 }
 
 const $core.bool _omitFieldNames =

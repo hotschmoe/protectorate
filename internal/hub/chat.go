@@ -81,6 +81,7 @@ type chatSleeve struct {
 	window     uint64
 	cacheExp   time.Time
 	activity   time.Time
+	briefSeq   uint64
 	turn       bool
 	// used is set once a turn was sent: the harness stores a session only
 	// then, so only then is its id worth resuming.
@@ -100,9 +101,6 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	info, err := m.h.sleeves.Get(name)
 	if err != nil {
 		return nil, sleeveErr(err)
-	}
-	if info.Mode != sleeve.ModeChat {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s runs in terminal mode, which has no chat", name))
 	}
 	if info.Helper != "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s is the hub's own (%s) and has no chat", name, info.Helper))
@@ -142,6 +140,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 		s.provider, s.local = c.Provider, c.LocalModel
 		s.effort, s.requested, s.defaults = c.Effort, c.Requested, c.Defaults
 		s.cacheExp, s.activity = c.CacheExpires, c.LastActivity
+		s.briefSeq = c.BriefSeq
 		s.used = c.SessionID != ""
 	}
 	if info.Chat != nil {
@@ -149,7 +148,7 @@ func (m *chatManager) get(name string, fresh bool) (*chatSleeve, error) {
 	}
 	// no driver runs after a hub restart: a harness that was in a turn is
 	// reported failed, anything else is idle
-	if prev := s.state; prev != pb.ChatState_CHAT_STATE_IDLE {
+	if prev := s.state; info.Mode == sleeve.ModeChat && prev != pb.ChatState_CHAT_STATE_IDLE {
 		s.mu.Lock()
 		switch prev {
 		case pb.ChatState_CHAT_STATE_WORKING, pb.ChatState_CHAT_STATE_AWAITING_APPROVAL, pb.ChatState_CHAT_STATE_COMPACTING:
@@ -291,6 +290,7 @@ func (s *chatSleeve) persistLocked(force bool) error {
 		c.Provider, c.LocalModel = st.Provider, st.LocalModel
 		c.Effort, c.Requested, c.Defaults = s.effort, s.requested, s.defaults
 		c.CacheExpires, c.LastActivity, c.LastSeq = s.cacheExp, s.activity, st.LastSeq
+		c.BriefSeq = s.briefSeq
 		if c.SessionID == "" && s.used {
 			c.SessionID = s.sessionID
 		}
@@ -593,6 +593,7 @@ func (s *chatSleeve) takeOver() bool {
 func (s *chatSleeve) giveBack() {
 	s.mu.Lock()
 	s.hubOwned = false
+	s.publishLocked(true)
 	s.mu.Unlock()
 }
 
@@ -643,6 +644,13 @@ func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner, idl
 	seq, err := s.log.Append(&pb.ChatEvent{Body: &pb.ChatEvent_User{User: &pb.UserMessage{Text: text, From: from}}})
 	if err != nil {
 		return 0, connect.NewError(connect.CodeInternal, err)
+	}
+	if !idleOnly && !owner {
+		s.briefSeq = seq
+		if err := s.m.h.sleeves.SetResult(s.name, nil); err != nil {
+			return 0, connect.NewError(connect.CodeInternal, fmt.Errorf("clear previous brief result: %w", err))
+		}
+		s.m.h.emit("sleeve.brief", s.name, nil)
 	}
 	s.activity = time.Now()
 	s.used = true
@@ -815,6 +823,13 @@ func (c chatService) sleeve(name string) (*chatSleeve, error) {
 	if c.h.chat == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("sleeves are not enabled on this hub"))
 	}
+	i, err := c.h.sleeves.Get(name)
+	if err != nil {
+		return nil, sleeveErr(err)
+	}
+	if i.Mode != sleeve.ModeChat {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("sleeve %s runs in terminal mode, which has no chat", name))
+	}
 	return c.h.chat.get(name, false)
 }
 
@@ -829,7 +844,10 @@ func (c chatService) Watch(ctx context.Context, req *connect.Request[pb.WatchReq
 	if err := ownSleeveOnly(ctx, req.Msg.Sleeve); err != nil {
 		return err
 	}
-	s, err := c.sleeve(req.Msg.Sleeve)
+	if c.h.chat == nil {
+		return connect.NewError(connect.CodeUnimplemented, errors.New("sleeves are not enabled on this hub"))
+	}
+	s, err := c.h.chat.get(req.Msg.Sleeve, false)
 	if err != nil {
 		return err
 	}

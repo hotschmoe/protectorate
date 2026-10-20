@@ -95,6 +95,16 @@ origins, paired-device acceptance and sleeve-identity denial. A persisted
 exited sleeve verifies branch refresh in `sleeve ls` and `sleeve show`, in
 text and JSON, without needing the host user manager.
 
+`TestBinarySleeveReports` uses persisted chat sleeve records and identity tokens
+minted by the temporary hub, so no AI CLI or user manager is needed. It checks
+own-sleeve reporting, cross-sleeve and owner/scoped forgery denial, status/size
+validation, timeout, exit and removal failures, immediate idle waits, concurrent CLI
+waits printing each summary as it lands, owner report events, replacement
+history, read-scoped waits, cross-sleeve wait denial, MCP wait-for-report and
+restart persistence. The host-only binary chat subscenario also checks that
+pending mail drains before idle, mail leaves a result intact, a retried brief
+preserves it and a new brief clears it.
+
 Before/after baseline: wave 1 reported 59.57s non-race on two cores with warm
 caches; the owner's earlier race baseline was 277s. Neither is remeasured here.
 Phase 2's final tagged suite measured 14.02s from first to last Go JSON event
@@ -120,7 +130,7 @@ unreviewed tests appear as CONVERT rather than automatically accepting them.
 
 ## Inventory
 
-Snapshot counts: KEEP-E2E=59, KEEP-FUZZ=5; total=64. TestMain rows are infrastructure, not scenarios.
+Snapshot counts: KEEP-E2E=60, KEEP-FUZZ=5; total=65. TestMain rows are infrastructure, not scenarios.
 
 Runtime is the observed non-race test-function elapsed time, including skips. It excludes build time and is not a race-suite prediction. Unknown means unmeasured, never zero. Dart callback labels include source lines to distinguish repeated labels.
 
@@ -190,6 +200,7 @@ Runtime is the observed non-race test-function elapsed time, including skips. It
 | internal/tailnet/integration_test.go | TestDERPRelay | DERPRelay | 0.000s skip | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workflow_test.go | TestBinaryClusterRestartAndRestore | Binary Cluster Restart And Restore | 10.490s pass | KEEP-E2E | existing real process/HTTP workflow; do not delete without replacement |
 | tests/e2e/workspace_browser_test.go | TestBinaryWorkspaceBrowser | Real hub/CLI workspace discovery, confinement, identity denial and live branch refresh | unmeasured | KEEP-E2E | directory browser regression scenario |
+| tests/e2e/report_test.go | TestBinarySleeveReports | Real hub/CLI self-report authorization, multi-sleeve event waits, history and restart persistence | unmeasured | KEEP-E2E | marked completion regression scenario |
 
 ## Deleted files
 

@@ -57,7 +57,8 @@ type Info struct {
 	// sleeve from before modes existed.
 	Mode Mode `json:"mode,omitempty"`
 	// Chat is set for sleeves in chat mode.
-	Chat *Chat `json:"chat,omitempty"`
+	Chat   *Chat   `json:"chat,omitempty"`
+	Result *Result `json:"result,omitempty"`
 	// Supervised chat sleeves run the harness in its asking permission mode.
 	Supervised bool `json:"supervised,omitempty"`
 	// Handoff is set when a resleeve produced this sleeve's harness.
