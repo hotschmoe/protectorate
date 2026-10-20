@@ -235,14 +235,19 @@ func plan(home string) ([]source, error) {
 				}
 				return err
 			}
-			if !d.Type().IsRegular() {
-				return nil
-			}
 			rel, err := filepath.Rel(home, p)
 			if err != nil {
 				return err
 			}
 			rel = filepath.ToSlash(rel)
+			// Chat logs sit directly in sleeves/<name>; sleeve homes hold
+			// harness state and caches that are not backed up.
+			if d.IsDir() && dir == "sleeves" && strings.Count(rel, "/") >= 2 {
+				return fs.SkipDir
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
 			if keep(rel) {
 				add(rel)
 			}
