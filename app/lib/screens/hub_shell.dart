@@ -16,12 +16,10 @@ import '../vfd/panel.dart';
 import '../mail/thread_view.dart' show orchestratorSleeve;
 import 'audit_screen.dart';
 import 'backlog_tab.dart';
-import 'messages_tab.dart';
 import 'node_detail_screen.dart';
 import 'nodes_tab.dart';
 import 'orchestrator_tab.dart';
 import 'overview_tab.dart';
-import 'quota_tab.dart';
 import 'sleeves_screen.dart';
 
 const phoneBreakpoint = 600.0;
@@ -36,15 +34,18 @@ class _Destination {
 const _destinations = [
   _Destination('orchestrator', 'POE', Icons.support_agent),
   _Destination('overview', 'OVERVIEW', Icons.grid_view),
-  _Destination('nodes', 'NODES', Icons.memory),
-  _Destination('quota', 'QUOTA', Icons.speed),
   _Destination('sleeves', 'SLEEVES', Icons.smart_toy_outlined),
-  _Destination('messages', 'MESSAGES', Icons.mail_outline),
-  _Destination('backlog', 'BACKLOG', Icons.checklist),
+  _Destination('nodes', 'NODES', Icons.memory),
+  _Destination('notes', 'NOTES', Icons.sticky_note_2_outlined),
 ];
 
+// The mail view lives in the orchestrator tab; its link id lands there.
+const mailTab = 'mail';
+
 int tabIndex(String? id) {
-  final i = _destinations.indexWhere((d) => d.id == id);
+  final i = _destinations.indexWhere(
+    (d) => d.id == (id == mailTab ? 'orchestrator' : id),
+  );
   return i < 0 ? 0 : i;
 }
 
@@ -79,6 +80,7 @@ class _HubShellState extends State<HubShell> {
   late int _index = tabIndex(widget.initialTab);
   final _history = NodeHistory();
   String _orchestratorSleeve = orchestratorSleeve;
+  late bool _orchestratorMail = widget.initialTab == mailTab;
   String _hubVersion = '';
   FeedState _lastFeedState = FeedState.connecting;
   DateTime _clock = DateTime.now();
@@ -149,6 +151,8 @@ class _HubShellState extends State<HubShell> {
       feed: _feed,
       selected: _orchestratorSleeve,
       onSelect: (n) => setState(() => _orchestratorSleeve = n),
+      mail: _orchestratorMail,
+      onMail: (m) => setState(() => _orchestratorMail = m),
     ),
     'overview' => OverviewTab(
       hub: widget.hub,
@@ -164,7 +168,6 @@ class _HubShellState extends State<HubShell> {
       history: _history,
       versions: _versions,
     ),
-    'quota' => QuotaTab(client: _client, feed: _feed),
     'sleeves' => SleevesScreen(
       hub: widget.hub,
       client: _client,
@@ -172,7 +175,6 @@ class _HubShellState extends State<HubShell> {
       embedded: true,
       openSession: widget.openSession,
     ),
-    'messages' => MessagesTab(client: _client, feed: _feed),
     _ => BacklogTab(client: _client, feed: _feed),
   };
 

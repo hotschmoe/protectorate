@@ -180,11 +180,45 @@ void main() {
       expect(find.byKey(const ValueKey('session-work')), findsOneWidget);
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('QUOTA'));
+      await tester.tap(find.text('OVERVIEW'));
       await tester.pumpAndSettle();
-      expect(find.bySemanticsLabel('5h: 40% used'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const ValueKey('open-quota')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('open-quota')));
+      await tester.pumpAndSettle();
+      expect(find.byType(QuotaTab), findsOneWidget);
+      expect(find.bySemanticsLabel('5h: 40% used'), findsWidgets);
       expect(find.text('No data. This is not spare capacity.'), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-5h')), findsOneWidget);
+    });
+
+    testWidgets('five destinations in order, on phone and desktop', (
+      tester,
+    ) async {
+      for (final width in [400.0, 1200.0]) {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await openHub(tester);
+        const ids = ['orchestrator', 'overview', 'sleeves', 'nodes', 'notes'];
+        final xs = [
+          for (final id in ids)
+            tester.getCenter(find.byKey(ValueKey('nav-$id'))),
+        ];
+        final horizontal = width < 600;
+        for (var i = 1; i < xs.length; i++) {
+          expect(
+            horizontal ? xs[i].dx : xs[i].dy,
+            greaterThan(horizontal ? xs[i - 1].dx : xs[i - 1].dy),
+          );
+        }
+        for (final gone in ['quota', 'messages', 'backlog']) {
+          expect(find.byKey(ValueKey('nav-$gone')), findsNothing);
+        }
+        expect(find.text('NOTES'), findsOneWidget);
+        expect(find.text('BACKLOG'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      }
     });
 
     testWidgets('desktop width uses navigation rail', (tester) async {
@@ -194,7 +228,7 @@ void main() {
       await openHub(tester);
       expect(find.byKey(const ValueKey('nav-rail')), findsOneWidget);
       expect(find.byKey(const ValueKey('nav-bar')), findsNothing);
-      await tester.tap(find.text('BACKLOG'));
+      await tester.tap(find.text('NOTES'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tag-acme/app')), findsOneWidget);
       expect(find.text('fix login'), findsOneWidget);
