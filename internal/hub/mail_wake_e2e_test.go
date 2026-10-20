@@ -4,12 +4,14 @@ package hub
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	pb "github.com/hotschmoe/protectorate/gen/protectorate/v1"
+	"github.com/hotschmoe/protectorate/gen/protectorate/v1/protectoratev1connect"
 	"github.com/hotschmoe/protectorate/internal/sleeve"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -20,7 +22,13 @@ func TestMailWakeWaitE2E(t *testing.T) {
 	r.spawnNamed(sleeve.OrchestratorName, pb.SleeveMode_SLEEVE_MODE_CHAT, "")
 	r.waitIdle(r.name)
 	r.waitIdle(sleeve.OrchestratorName)
-	worker, envoy := r.as(r.name), r.as(sleeve.OrchestratorName)
+	// spawnNamed stands in for SpawnEnvoy without its token; mint the one SpawnEnvoy would.
+	_, secret, err := r.h.authz.Store().Create(sleeve.OrchestratorTokenName, []string{"message_*"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := r.as(r.name)
+	envoy := protectoratev1connect.NewMessageServiceClient(&http.Client{Transport: bearer{secret}}, r.url)
 	ctx, cancel := context.WithTimeout(r.ctx, 20*time.Second)
 	defer cancel()
 	// Use the production clock and delivery loop, not manually driven passes.
