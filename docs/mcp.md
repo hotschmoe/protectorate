@@ -97,6 +97,14 @@ in cleartext over plain HTTP, `--http` accepts only loopback and tailnet IPs
 (100.64.0.0/10, fd7a:115c:a1e0::/48), where WireGuard encrypts it; any other
 address, including an empty host, is refused.
 
+HTTP bridges retain at most 128 sessions. Clients should close their session
+with `DELETE` when finished; a full bridge returns HTTP 503 for a new session
+while existing clients keep working. Sessions idle for an hour are expired
+on the next request. Active requests are allowed to finish.
+Each session admits at most 128 requests in progress, on stdio and HTTP;
+excess requests receive JSON-RPC error -32000. Cancellation notifications
+remain available at capacity and release slots when their calls finish.
+
 ## Example tool list (`--allow '*'`)
 
 ```
