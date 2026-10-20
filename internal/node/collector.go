@@ -134,37 +134,45 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 	if c.opts.Jobs != nil {
 		m.Jobs = c.opts.Jobs.Isolation()
 	}
+	c.collectMetrics(ctx, m)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	c.slowMu.RLock()
+	m.WatchDirs = c.dirs
+	c.slowMu.RUnlock()
+	sort.Strings(m.Warnings)
+	c.last, c.lastAt = m, time.Now()
+	return m, nil
+}
 
+func (c *Collector) collectMetrics(ctx context.Context, m *pb.NodeMetrics) {
 	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
+		warningsMu sync.Mutex
+		wg         sync.WaitGroup
 	)
 	warn := func(section string, err error) {
-		mu.Lock()
+		warningsMu.Lock()
 		m.Warnings = append(m.Warnings, fmt.Sprintf("%s: %v", section, err))
-		mu.Unlock()
+		warningsMu.Unlock()
 	}
 	wg.Go(func() {
 		info, err := hostInfo(ctx)
 		if err != nil {
 			warn("host", err)
 		}
-		mu.Lock()
 		m.Platform = strings.TrimSpace(info.Platform + " " + info.PlatformVersion)
 		m.UptimeSeconds = int64(info.Uptime)
 		if m.Hostname == "" {
 			m.Hostname = info.Hostname
 		}
-		mu.Unlock()
 	})
 	wg.Go(func() {
 		cm, err := c.cpuMetrics(ctx)
 		if err != nil {
 			warn("cpu", err)
 		}
-		mu.Lock()
 		m.Cpu = cm
-		mu.Unlock()
 	})
 	wg.Go(func() {
 		mm, err := memMetrics(ctx)
@@ -172,45 +180,27 @@ func (c *Collector) Collect(ctx context.Context) (*pb.NodeMetrics, error) {
 			warn("memory", err)
 			return
 		}
-		mu.Lock()
 		m.Memory = mm
-		mu.Unlock()
 	})
 	wg.Go(func() {
 		fs, errs := filesystemMetrics(ctx, c.probes)
-		mu.Lock()
 		m.Filesystems = fs
-		mu.Unlock()
 		for _, err := range errs {
 			warn("disk", err)
 		}
 	})
 	wg.Go(func() {
 		g, n := c.accelMetrics(ctx)
-		mu.Lock()
 		m.Gpus, m.Npus = g, n
-		mu.Unlock()
 	})
 	wg.Go(func() {
 		eng, err := c.engineMetrics(ctx)
 		if err != nil {
 			warn("container engine", err)
 		}
-		mu.Lock()
 		m.Engine = eng
-		mu.Unlock()
 	})
 	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	c.slowMu.RLock()
-	m.WatchDirs = c.dirs
-	c.slowMu.RUnlock()
-	sort.Strings(m.Warnings)
-	c.last, c.lastAt = m, time.Now()
-	return m, nil
 }
 
 func (c *Collector) cpuMetrics(ctx context.Context) (*pb.CpuMetrics, error) {

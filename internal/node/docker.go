@@ -266,6 +266,29 @@ func parseDF(body []byte) *dockerDF {
 	return out
 }
 
+type dockerContainer struct {
+	ID      string `json:"Id"`
+	Names   []string
+	Image   string
+	State   string
+	Created int64
+}
+
+func (ct dockerContainer) metrics(df *dockerDF) *pb.ContainerMetrics {
+	cm := &pb.ContainerMetrics{Id: shortID(ct.ID), Image: ct.Image, State: ct.State}
+	if ct.Created > 0 {
+		cm.CreatedAt = timestamppb.New(time.Unix(ct.Created, 0))
+	}
+	if len(ct.Names) > 0 {
+		cm.Name = strings.TrimPrefix(ct.Names[0], "/")
+	}
+	if df != nil {
+		sz := df.containers[ct.ID]
+		cm.WritableLayerBytes, cm.RootfsBytes = sz.rw, sz.rootfs
+	}
+	return cm
+}
+
 // engineMetrics returns nil without error when no engine is reachable.
 func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, error) {
 	d := c.docker
@@ -282,13 +305,7 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 		return nil, fmt.Errorf("docker: %w", err)
 	}
 
-	var list []struct {
-		ID      string `json:"Id"`
-		Names   []string
-		Image   string
-		State   string
-		Created int64
-	}
+	var list []dockerContainer
 	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	err = d.get(lctx, prefix+"/containers/json?all=1", &list)
 	cancel()
@@ -308,17 +325,7 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 	sem := make(chan struct{}, statsConcurrency)
 	var wg sync.WaitGroup
 	for i, ct := range list {
-		cm := &pb.ContainerMetrics{Id: shortID(ct.ID), Image: ct.Image, State: ct.State}
-		if ct.Created > 0 {
-			cm.CreatedAt = timestamppb.New(time.Unix(ct.Created, 0))
-		}
-		if len(ct.Names) > 0 {
-			cm.Name = strings.TrimPrefix(ct.Names[0], "/")
-		}
-		if df != nil {
-			sz := df.containers[ct.ID]
-			cm.WritableLayerBytes, cm.RootfsBytes = sz.rw, sz.rootfs
-		}
+		cm := ct.metrics(df)
 		eng.Containers[i] = cm
 		if ct.State != "running" {
 			continue
@@ -326,14 +333,7 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 		sem <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-sem }()
-			sctx, cancel := context.WithTimeout(ctx, statsTimeout)
-			defer cancel()
-			body, err := d.getRaw(sctx, prefix+"/containers/"+ct.ID+"/stats?stream=false")
-			if err != nil {
-				cm.StatsError = err.Error()
-				return
-			}
-			if err := applyStats(cm, body); err != nil {
+			if err := d.containerStats(ctx, prefix, ct.ID, cm); err != nil {
 				cm.StatsError = err.Error()
 			}
 		})
@@ -341,6 +341,16 @@ func (c *Collector) engineMetrics(ctx context.Context) (*pb.ContainerEngine, err
 	wg.Wait()
 	sort.Slice(eng.Containers, func(i, j int) bool { return eng.Containers[i].Name < eng.Containers[j].Name })
 	return eng, nil
+}
+
+func (d *dockerClient) containerStats(ctx context.Context, prefix, id string, cm *pb.ContainerMetrics) error {
+	ctx, cancel := context.WithTimeout(ctx, statsTimeout)
+	defer cancel()
+	body, err := d.getRaw(ctx, prefix+"/containers/"+id+"/stats?stream=false")
+	if err != nil {
+		return err
+	}
+	return applyStats(cm, body)
 }
 
 func shortID(id string) string {

@@ -131,9 +131,8 @@ func listDir(dir string) []string {
 	return out
 }
 
-func (p *sysfsProbe) inventory(context.Context) []accelDevice {
+func (p *sysfsProbe) pciGPUs() ([]accelDevice, []pciNamed) {
 	var out []accelDevice
-	names := map[[2]uint64]string{}
 	var pending []pciNamed
 
 	pciDir := p.path("bus", "pci", "devices")
@@ -158,11 +157,82 @@ func (p *sysfsProbe) inventory(context.Context) []accelDevice {
 		d := accelDevice{gpu: g}
 		p.gpuSources(&d, dev, drv)
 		id := [2]uint64{vendor, device}
-		names[id] = ""
 		pending = append(pending, pciNamed{len(out), id, g.Vendor + " GPU [" + pciKey(id) + "]"})
 		out = append(out, d)
 	}
+	return out, pending
+}
 
+func (p *sysfsProbe) inventory(context.Context) []accelDevice {
+	out, pending := p.pciGPUs()
+	platform, seen := p.platformAccels()
+	out = append(out, platform...)
+
+	classDir := p.path("class", "accel")
+	for _, a := range listDir(classDir) {
+		dev := filepath.Join(classDir, a, "device")
+		real := realPath(dev)
+		if seen[real] {
+			continue
+		}
+		seen[real] = true
+		d, id := p.classAccel(dev, real)
+		if id != nil {
+			pending = append(pending, pciNamed{len(out), *id, d.npu.Name})
+		}
+		out = append(out, d)
+	}
+
+	names := map[[2]uint64]string{}
+	for _, pn := range pending {
+		names[pn.id] = ""
+	}
+	p.lookupPCINames(names)
+	for _, pn := range pending {
+		name := names[pn.id]
+		if name == "" {
+			name = pn.fallback
+		}
+		if g := out[pn.i].gpu; g != nil {
+			g.Name = name
+		} else {
+			out[pn.i].npu.Name = name
+		}
+	}
+	return out
+}
+
+func (p *sysfsProbe) classAccel(dev, real string) (accelDevice, *[2]uint64) {
+	drv, driver := p.driverOf(dev)
+	s, known := accelDrivers[drv]
+	n := &pb.AcceleratorMetrics{Kind: "npu", Vendor: s.vendor, Name: s.name, Driver: driver, BusId: filepath.Base(real), UtilizationPercent: -1}
+	vendor, isPCI := readHex(filepath.Join(dev, "vendor"))
+	device, _ := readHex(filepath.Join(dev, "device"))
+	if isPCI && !known {
+		n.Vendor = pciVendor(vendor)
+	}
+	if n.Vendor == "" {
+		n.Vendor = drv
+	}
+	if n.Name == "" {
+		n.Name = n.Vendor + " NPU"
+	}
+	d := accelDevice{npu: n}
+	if f := filepath.Join(dev, "npu_busy_time_us"); exists(f) {
+		d.busyUsFile = f
+	}
+	if f := filepath.Join(dev, "npu_current_frequency_mhz"); exists(f) {
+		d.freqMHzFile = f
+	}
+	p.devfreqSources(&d, dev)
+	if isPCI {
+		return d, &[2]uint64{vendor, device}
+	}
+	return d, nil
+}
+
+func (p *sysfsProbe) platformAccels() ([]accelDevice, map[string]bool) {
+	var out []accelDevice
 	seen := map[string]bool{}
 	platDir := p.path("bus", "platform", "devices")
 	for _, name := range listDir(platDir) {
@@ -186,58 +256,7 @@ func (p *sysfsProbe) inventory(context.Context) []accelDevice {
 			out = append(out, d)
 		}
 	}
-
-	classDir := p.path("class", "accel")
-	for _, a := range listDir(classDir) {
-		dev := filepath.Join(classDir, a, "device")
-		real := realPath(dev)
-		if seen[real] {
-			continue
-		}
-		seen[real] = true
-		drv, driver := p.driverOf(dev)
-		s, known := accelDrivers[drv]
-		n := &pb.AcceleratorMetrics{Kind: "npu", Vendor: s.vendor, Name: s.name, Driver: driver, BusId: filepath.Base(real), UtilizationPercent: -1}
-		vendor, isPCI := readHex(filepath.Join(dev, "vendor"))
-		device, _ := readHex(filepath.Join(dev, "device"))
-		if isPCI && !known {
-			n.Vendor = pciVendor(vendor)
-		}
-		if n.Vendor == "" {
-			n.Vendor = drv
-		}
-		if n.Name == "" {
-			n.Name = n.Vendor + " NPU"
-		}
-		d := accelDevice{npu: n}
-		if f := filepath.Join(dev, "npu_busy_time_us"); exists(f) {
-			d.busyUsFile = f
-		}
-		if f := filepath.Join(dev, "npu_current_frequency_mhz"); exists(f) {
-			d.freqMHzFile = f
-		}
-		p.devfreqSources(&d, dev)
-		if isPCI {
-			id := [2]uint64{vendor, device}
-			names[id] = ""
-			pending = append(pending, pciNamed{len(out), id, n.Name})
-		}
-		out = append(out, d)
-	}
-
-	p.lookupPCINames(names)
-	for _, pn := range pending {
-		name := names[pn.id]
-		if name == "" {
-			name = pn.fallback
-		}
-		if g := out[pn.i].gpu; g != nil {
-			g.Name = name
-		} else {
-			out[pn.i].npu.Name = name
-		}
-	}
-	return out
+	return out, seen
 }
 
 // pciNamed is an inventory entry whose name comes from pci.ids.
