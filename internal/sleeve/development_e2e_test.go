@@ -64,8 +64,12 @@ fi
 	if err := os.WriteFile(filepath.Join(ws, "pubspec.yaml"), []byte("name: environment_probe\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	probe := filepath.Join(ws, "development-probe.sh")
+	if err := os.WriteFile(probe, []byte(script), 0600); err != nil {
+		t.Fatal(err)
+	}
 	_, err := r.m.Spawn(context.Background(), SpawnRequest{
-		Name: name, Workspace: ws, Harness: Shell, Args: []string{"bash", "-c", script},
+		Name: name, Workspace: ws, Harness: Shell, Args: []string{"bash", probe},
 	})
 	if err != nil {
 		t.Fatal(err)
