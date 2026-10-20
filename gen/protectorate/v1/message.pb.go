@@ -9,6 +9,7 @@ package protectoratev1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -1079,11 +1080,116 @@ func (x *MailDelivery) GetReminders() uint32 {
 	return 0
 }
 
+type MessageServiceWaitRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Target string                 `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	// Default 10 minutes; positive and at most 24 hours.
+	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageServiceWaitRequest) Reset() {
+	*x = MessageServiceWaitRequest{}
+	mi := &file_protectorate_v1_message_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageServiceWaitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageServiceWaitRequest) ProtoMessage() {}
+
+func (x *MessageServiceWaitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_message_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageServiceWaitRequest.ProtoReflect.Descriptor instead.
+func (*MessageServiceWaitRequest) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MessageServiceWaitRequest) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *MessageServiceWaitRequest) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+type MessageServiceWaitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *MailMessage           `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	TimedOut      bool                   `protobuf:"varint,2,opt,name=timed_out,json=timedOut,proto3" json:"timed_out,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MessageServiceWaitResponse) Reset() {
+	*x = MessageServiceWaitResponse{}
+	mi := &file_protectorate_v1_message_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageServiceWaitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageServiceWaitResponse) ProtoMessage() {}
+
+func (x *MessageServiceWaitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_protectorate_v1_message_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageServiceWaitResponse.ProtoReflect.Descriptor instead.
+func (*MessageServiceWaitResponse) Descriptor() ([]byte, []int) {
+	return file_protectorate_v1_message_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *MessageServiceWaitResponse) GetMessage() *MailMessage {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *MessageServiceWaitResponse) GetTimedOut() bool {
+	if x != nil {
+		return x.TimedOut
+	}
+	return false
+}
+
 var File_protectorate_v1_message_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"\x1dprotectorate/v1/message.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe6\x01\n" +
+	"\x1dprotectorate/v1/message.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/duration.proto\"\xe6\x01\n" +
 	"\x19MessageServiceSendRequest\x12\x0e\n" +
 	"\x02to\x18\x01 \x01(\tR\x02to\x12\x12\n" +
 	"\x04body\x18\x02 \x01(\tR\x04body\x12\x1b\n" +
@@ -1160,13 +1266,20 @@ const file_protectorate_v1_message_proto_rawDesc = "" +
 	"\fdelivered_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vdeliveredAt\x123\n" +
 	"\aread_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x06readAt\x125\n" +
 	"\backed_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\aackedAt\x12\x1c\n" +
-	"\treminders\x18\x05 \x01(\rR\treminders*u\n" +
+	"\treminders\x18\x05 \x01(\rR\treminders\"h\n" +
+	"\x19MessageServiceWaitRequest\x12\x16\n" +
+	"\x06target\x18\x01 \x01(\tR\x06target\x123\n" +
+	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"q\n" +
+	"\x1aMessageServiceWaitResponse\x126\n" +
+	"\amessage\x18\x01 \x01(\v2\x1c.protectorate.v1.MailMessageR\amessage\x12\x1b\n" +
+	"\ttimed_out\x18\x02 \x01(\bR\btimedOut*u\n" +
 	"\vMessageKind\x12\x1c\n" +
 	"\x18MESSAGE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11MESSAGE_KIND_NOTE\x10\x01\x12\x18\n" +
 	"\x14MESSAGE_KIND_REQUEST\x10\x02\x12\x17\n" +
-	"\x13MESSAGE_KIND_NOTICE\x10\x032\xf2\x03\n" +
-	"\x0eMessageService\x12_\n" +
+	"\x13MESSAGE_KIND_NOTICE\x10\x032\xd8\x04\n" +
+	"\x0eMessageService\x12d\n" +
+	"\x04Wait\x12*.protectorate.v1.MessageServiceWaitRequest\x1a+.protectorate.v1.MessageServiceWaitResponse\"\x03\x90\x02\x01\x12_\n" +
 	"\x04Send\x12*.protectorate.v1.MessageServiceSendRequest\x1a+.protectorate.v1.MessageServiceSendResponse\x12F\n" +
 	"\x05Inbox\x12\x1d.protectorate.v1.InboxRequest\x1a\x1e.protectorate.v1.InboxResponse\x12@\n" +
 	"\x03Ack\x12\x1b.protectorate.v1.AckRequest\x1a\x1c.protectorate.v1.AckResponse\x12F\n" +
@@ -1187,7 +1300,7 @@ func file_protectorate_v1_message_proto_rawDescGZIP() []byte {
 }
 
 var file_protectorate_v1_message_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protectorate_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_protectorate_v1_message_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_protectorate_v1_message_proto_goTypes = []any{
 	(MessageKind)(0),                   // 0: protectorate.v1.MessageKind
 	(*MessageServiceSendRequest)(nil),  // 1: protectorate.v1.MessageServiceSendRequest
@@ -1205,7 +1318,10 @@ var file_protectorate_v1_message_proto_goTypes = []any{
 	(*ThreadSummary)(nil),              // 13: protectorate.v1.ThreadSummary
 	(*MailMessage)(nil),                // 14: protectorate.v1.MailMessage
 	(*MailDelivery)(nil),               // 15: protectorate.v1.MailDelivery
-	(*timestamppb.Timestamp)(nil),      // 16: google.protobuf.Timestamp
+	(*MessageServiceWaitRequest)(nil),  // 16: protectorate.v1.MessageServiceWaitRequest
+	(*MessageServiceWaitResponse)(nil), // 17: protectorate.v1.MessageServiceWaitResponse
+	(*timestamppb.Timestamp)(nil),      // 18: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),        // 19: google.protobuf.Duration
 }
 var file_protectorate_v1_message_proto_depIdxs = []int32{
 	0,  // 0: protectorate.v1.MessageServiceSendRequest.kind:type_name -> protectorate.v1.MessageKind
@@ -1217,29 +1333,33 @@ var file_protectorate_v1_message_proto_depIdxs = []int32{
 	13, // 6: protectorate.v1.ListThreadsResponse.threads:type_name -> protectorate.v1.ThreadSummary
 	14, // 7: protectorate.v1.ThreadSummary.last:type_name -> protectorate.v1.MailMessage
 	0,  // 8: protectorate.v1.MailMessage.kind:type_name -> protectorate.v1.MessageKind
-	16, // 9: protectorate.v1.MailMessage.created_at:type_name -> google.protobuf.Timestamp
+	18, // 9: protectorate.v1.MailMessage.created_at:type_name -> google.protobuf.Timestamp
 	15, // 10: protectorate.v1.MailMessage.deliveries:type_name -> protectorate.v1.MailDelivery
-	16, // 11: protectorate.v1.MailMessage.escalated_at:type_name -> google.protobuf.Timestamp
-	16, // 12: protectorate.v1.MailDelivery.delivered_at:type_name -> google.protobuf.Timestamp
-	16, // 13: protectorate.v1.MailDelivery.read_at:type_name -> google.protobuf.Timestamp
-	16, // 14: protectorate.v1.MailDelivery.acked_at:type_name -> google.protobuf.Timestamp
-	1,  // 15: protectorate.v1.MessageService.Send:input_type -> protectorate.v1.MessageServiceSendRequest
-	3,  // 16: protectorate.v1.MessageService.Inbox:input_type -> protectorate.v1.InboxRequest
-	5,  // 17: protectorate.v1.MessageService.Ack:input_type -> protectorate.v1.AckRequest
-	7,  // 18: protectorate.v1.MessageService.Reply:input_type -> protectorate.v1.ReplyRequest
-	9,  // 19: protectorate.v1.MessageService.Thread:input_type -> protectorate.v1.ThreadRequest
-	11, // 20: protectorate.v1.MessageService.ListThreads:input_type -> protectorate.v1.ListThreadsRequest
-	2,  // 21: protectorate.v1.MessageService.Send:output_type -> protectorate.v1.MessageServiceSendResponse
-	4,  // 22: protectorate.v1.MessageService.Inbox:output_type -> protectorate.v1.InboxResponse
-	6,  // 23: protectorate.v1.MessageService.Ack:output_type -> protectorate.v1.AckResponse
-	8,  // 24: protectorate.v1.MessageService.Reply:output_type -> protectorate.v1.ReplyResponse
-	10, // 25: protectorate.v1.MessageService.Thread:output_type -> protectorate.v1.ThreadResponse
-	12, // 26: protectorate.v1.MessageService.ListThreads:output_type -> protectorate.v1.ListThreadsResponse
-	21, // [21:27] is the sub-list for method output_type
-	15, // [15:21] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	18, // 11: protectorate.v1.MailMessage.escalated_at:type_name -> google.protobuf.Timestamp
+	18, // 12: protectorate.v1.MailDelivery.delivered_at:type_name -> google.protobuf.Timestamp
+	18, // 13: protectorate.v1.MailDelivery.read_at:type_name -> google.protobuf.Timestamp
+	18, // 14: protectorate.v1.MailDelivery.acked_at:type_name -> google.protobuf.Timestamp
+	19, // 15: protectorate.v1.MessageServiceWaitRequest.timeout:type_name -> google.protobuf.Duration
+	14, // 16: protectorate.v1.MessageServiceWaitResponse.message:type_name -> protectorate.v1.MailMessage
+	16, // 17: protectorate.v1.MessageService.Wait:input_type -> protectorate.v1.MessageServiceWaitRequest
+	1,  // 18: protectorate.v1.MessageService.Send:input_type -> protectorate.v1.MessageServiceSendRequest
+	3,  // 19: protectorate.v1.MessageService.Inbox:input_type -> protectorate.v1.InboxRequest
+	5,  // 20: protectorate.v1.MessageService.Ack:input_type -> protectorate.v1.AckRequest
+	7,  // 21: protectorate.v1.MessageService.Reply:input_type -> protectorate.v1.ReplyRequest
+	9,  // 22: protectorate.v1.MessageService.Thread:input_type -> protectorate.v1.ThreadRequest
+	11, // 23: protectorate.v1.MessageService.ListThreads:input_type -> protectorate.v1.ListThreadsRequest
+	17, // 24: protectorate.v1.MessageService.Wait:output_type -> protectorate.v1.MessageServiceWaitResponse
+	2,  // 25: protectorate.v1.MessageService.Send:output_type -> protectorate.v1.MessageServiceSendResponse
+	4,  // 26: protectorate.v1.MessageService.Inbox:output_type -> protectorate.v1.InboxResponse
+	6,  // 27: protectorate.v1.MessageService.Ack:output_type -> protectorate.v1.AckResponse
+	8,  // 28: protectorate.v1.MessageService.Reply:output_type -> protectorate.v1.ReplyResponse
+	10, // 29: protectorate.v1.MessageService.Thread:output_type -> protectorate.v1.ThreadResponse
+	12, // 30: protectorate.v1.MessageService.ListThreads:output_type -> protectorate.v1.ListThreadsResponse
+	24, // [24:31] is the sub-list for method output_type
+	17, // [17:24] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_protectorate_v1_message_proto_init() }
@@ -1254,7 +1374,7 @@ func file_protectorate_v1_message_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protectorate_v1_message_proto_rawDesc), len(file_protectorate_v1_message_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

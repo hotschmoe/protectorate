@@ -3,6 +3,7 @@ syntax = "proto3";
 package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
 
 option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
 
@@ -23,6 +24,12 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 // Changes are announced on EventService as "msg.sent", "msg.delivered",
 // "msg.acked", "msg.reminded" and "msg.escalated" (subject = message id).
 service MessageService {
+  // Wait blocks until a reply or ack to an outgoing message, or incoming mail
+  // or an outgoing ack in a thread. Existing outcomes return immediately.
+  rpc Wait(MessageServiceWaitRequest) returns (MessageServiceWaitResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // Send addresses a message to a sleeve name, "project:<id-or-name>",
   // "orchestrator" or "owner". Retrying with the same request_id returns the
   // original message instead of sending twice.
@@ -196,4 +203,15 @@ message MailDelivery {
   google.protobuf.Timestamp read_at = 3;
   google.protobuf.Timestamp acked_at = 4;
   uint32 reminders = 5;
+}
+
+message MessageServiceWaitRequest {
+  string target = 1;
+  // Default 10 minutes; positive and at most 24 hours.
+  google.protobuf.Duration timeout = 2;
+}
+
+message MessageServiceWaitResponse {
+  MailMessage message = 1;
+  bool timed_out = 2;
 }

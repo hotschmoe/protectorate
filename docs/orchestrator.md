@@ -33,9 +33,14 @@ the token, including its expiry.
 4. Starts the sleeve in chat mode. If anything fails after the token was
    minted, the new token is revoked.
 
-Chat mode is what lets the hub reach Envoy: escalations (an ack-required message
-that stayed unacked) and other mailbox notices are injected into its chat as
-ordinary user messages at its next idle (see [coordination.md](coordination.md)).
+All unread mail wakes idle Envoy automatically after a two-second coalescing
+window, as one ordinary user message (see [coordination.md](coordination.md)).
+After sending a request, Envoy ends its turn; replies arrive as a new turn.
+It never sleep-polls, and sends no progress checks for tasks younger than about
+10 minutes. Every brief states a reply word limit and uses real paths from
+`protectorate sleeve workspaces`; when no reply is needed, it says "no reply
+needed". Explicit blocking workflows can use `protectorate msg wait
+<message-id|thread> --timeout 10m`, backed by a server-side wait.
 The app's ENVOY tab (the first one) is a dedicated chat with Envoy and a selector for any other chat-mode sleeve. Watch it with `protectorate chat watch envoy`, and answer its approval requests
 with `chat respond`. There is no terminal mode for Envoy.
 
@@ -169,13 +174,14 @@ to watch in the audit log.
 ## Always available
 
 Envoy's record outlives its harness. After a hub restart or a harness exit
-nothing is restarted on a timer: the next owner message, or an escalation,
-reopens the same native session (`--resume`) with the same AGENTS.md, so the
+the next owner message or unread mailbox delivery reopens the same native
+session (`--resume`) with the same AGENTS.md, so the
 provider's cache prefix still matches while it is warm. Nothing is compacted
 automatically. `hub serve --start-envoy auto|claude|codex|grok|pi` starts
 Envoy at boot only when the hub has no Envoy at all; it is off by default,
-because starting happens from the app. Low-priority mail waits for the owner's
-next message instead of starting turns ([coordination.md](coordination.md#delivery)).
+because initial creation happens from the app. All unread mail can wake an
+existing Envoy; failed starts retry once a minute
+([coordination.md](coordination.md#delivery)).
 
 ## Renaming from Poe
 

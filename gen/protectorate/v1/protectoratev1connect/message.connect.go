@@ -33,6 +33,8 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// MessageServiceWaitProcedure is the fully-qualified name of the MessageService's Wait RPC.
+	MessageServiceWaitProcedure = "/protectorate.v1.MessageService/Wait"
 	// MessageServiceSendProcedure is the fully-qualified name of the MessageService's Send RPC.
 	MessageServiceSendProcedure = "/protectorate.v1.MessageService/Send"
 	// MessageServiceInboxProcedure is the fully-qualified name of the MessageService's Inbox RPC.
@@ -50,6 +52,9 @@ const (
 
 // MessageServiceClient is a client for the protectorate.v1.MessageService service.
 type MessageServiceClient interface {
+	// Wait blocks until a reply or ack to an outgoing message, or incoming mail
+	// or an outgoing ack in a thread. Existing outcomes return immediately.
+	Wait(context.Context, *connect.Request[v1.MessageServiceWaitRequest]) (*connect.Response[v1.MessageServiceWaitResponse], error)
 	// Send addresses a message to a sleeve name, "project:<id-or-name>",
 	// "orchestrator" or "owner". Retrying with the same request_id returns the
 	// original message instead of sending twice.
@@ -81,6 +86,13 @@ func NewMessageServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 	baseURL = strings.TrimRight(baseURL, "/")
 	messageServiceMethods := v1.File_protectorate_v1_message_proto.Services().ByName("MessageService").Methods()
 	return &messageServiceClient{
+		wait: connect.NewClient[v1.MessageServiceWaitRequest, v1.MessageServiceWaitResponse](
+			httpClient,
+			baseURL+MessageServiceWaitProcedure,
+			connect.WithSchema(messageServiceMethods.ByName("Wait")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		send: connect.NewClient[v1.MessageServiceSendRequest, v1.MessageServiceSendResponse](
 			httpClient,
 			baseURL+MessageServiceSendProcedure,
@@ -124,12 +136,18 @@ func NewMessageServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // messageServiceClient implements MessageServiceClient.
 type messageServiceClient struct {
+	wait        *connect.Client[v1.MessageServiceWaitRequest, v1.MessageServiceWaitResponse]
 	send        *connect.Client[v1.MessageServiceSendRequest, v1.MessageServiceSendResponse]
 	inbox       *connect.Client[v1.InboxRequest, v1.InboxResponse]
 	ack         *connect.Client[v1.AckRequest, v1.AckResponse]
 	reply       *connect.Client[v1.ReplyRequest, v1.ReplyResponse]
 	thread      *connect.Client[v1.ThreadRequest, v1.ThreadResponse]
 	listThreads *connect.Client[v1.ListThreadsRequest, v1.ListThreadsResponse]
+}
+
+// Wait calls protectorate.v1.MessageService.Wait.
+func (c *messageServiceClient) Wait(ctx context.Context, req *connect.Request[v1.MessageServiceWaitRequest]) (*connect.Response[v1.MessageServiceWaitResponse], error) {
+	return c.wait.CallUnary(ctx, req)
 }
 
 // Send calls protectorate.v1.MessageService.Send.
@@ -164,6 +182,9 @@ func (c *messageServiceClient) ListThreads(ctx context.Context, req *connect.Req
 
 // MessageServiceHandler is an implementation of the protectorate.v1.MessageService service.
 type MessageServiceHandler interface {
+	// Wait blocks until a reply or ack to an outgoing message, or incoming mail
+	// or an outgoing ack in a thread. Existing outcomes return immediately.
+	Wait(context.Context, *connect.Request[v1.MessageServiceWaitRequest]) (*connect.Response[v1.MessageServiceWaitResponse], error)
 	// Send addresses a message to a sleeve name, "project:<id-or-name>",
 	// "orchestrator" or "owner". Retrying with the same request_id returns the
 	// original message instead of sending twice.
@@ -191,6 +212,13 @@ type MessageServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewMessageServiceHandler(svc MessageServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	messageServiceMethods := v1.File_protectorate_v1_message_proto.Services().ByName("MessageService").Methods()
+	messageServiceWaitHandler := connect.NewUnaryHandler(
+		MessageServiceWaitProcedure,
+		svc.Wait,
+		connect.WithSchema(messageServiceMethods.ByName("Wait")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	messageServiceSendHandler := connect.NewUnaryHandler(
 		MessageServiceSendProcedure,
 		svc.Send,
@@ -231,6 +259,8 @@ func NewMessageServiceHandler(svc MessageServiceHandler, opts ...connect.Handler
 	)
 	return "/protectorate.v1.MessageService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case MessageServiceWaitProcedure:
+			messageServiceWaitHandler.ServeHTTP(w, r)
 		case MessageServiceSendProcedure:
 			messageServiceSendHandler.ServeHTTP(w, r)
 		case MessageServiceInboxProcedure:
@@ -251,6 +281,10 @@ func NewMessageServiceHandler(svc MessageServiceHandler, opts ...connect.Handler
 
 // UnimplementedMessageServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedMessageServiceHandler struct{}
+
+func (UnimplementedMessageServiceHandler) Wait(context.Context, *connect.Request[v1.MessageServiceWaitRequest]) (*connect.Response[v1.MessageServiceWaitResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.MessageService.Wait is not implemented"))
+}
 
 func (UnimplementedMessageServiceHandler) Send(context.Context, *connect.Request[v1.MessageServiceSendRequest]) (*connect.Response[v1.MessageServiceSendResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("protectorate.v1.MessageService.Send is not implemented"))

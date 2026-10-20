@@ -183,8 +183,8 @@ func TestResolveOnce(t *testing.T) {
 	if err := s.Arm(m.ID, "x"); err != nil {
 		t.Fatal(err)
 	}
-	if p := s.Pending()["x"]; len(p) != 0 {
-		t.Fatalf("an armed recipient is not injected: %v", p)
+	if p := s.Pending()["x"]; len(p) != 1 {
+		t.Fatalf("armed mail must remain available for chat delivery: %v", p)
 	}
 }
 

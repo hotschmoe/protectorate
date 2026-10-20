@@ -550,14 +550,20 @@ func (s *chatSleeve) liveSession() driver.Session {
 
 func (s *chatSleeve) send(ctx context.Context, from, text, requestID string) (uint64, error) {
 	if requestID == "" {
-		return s.sendOnce(ctx, from, text, false)
+		return s.sendOnce(ctx, from, text, false, false)
 	}
-	return s.keys.do(ctx, requestID, func() (uint64, error) { return s.sendOnce(ctx, from, text, false) })
+	return s.keys.do(ctx, requestID, func() (uint64, error) { return s.sendOnce(ctx, from, text, false, false) })
+}
+
+func (s *chatSleeve) sendMailbox(ctx context.Context, from, text, requestID string) (uint64, error) {
+	return s.keys.do(ctx, requestID, func() (uint64, error) {
+		return s.sendOnce(ctx, from, text, false, true)
+	})
 }
 
 // sendAsOwner is the hub's own send into a chat it has taken over.
 func (s *chatSleeve) sendAsOwner(ctx context.Context, text string) (uint64, error) {
-	return s.sendOnce(ctx, hubName, text, true)
+	return s.sendOnce(ctx, hubName, text, true, false)
 }
 
 // takeOver claims the chat for a resleeve; false if one already has it.
@@ -585,7 +591,7 @@ func (s *chatSleeve) owned() bool {
 	return s.hubOwned
 }
 
-func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner bool) (uint64, error) {
+func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner, idleOnly bool) (uint64, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if s.owned() && !owner {
@@ -605,12 +611,11 @@ func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner bool
 	if sess == nil {
 		return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("the harness exited; send again to restart it"))
 	}
+	if idleOnly && s.status().State != pb.ChatState_CHAT_STATE_IDLE {
+		return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("mail delivery requires an idle chat"))
+	}
 	if busy && !sess.Caps().Steer {
 		return 0, connect.NewError(connect.CodeFailedPrecondition, errors.New("a turn is running and this harness cannot take a message during one; interrupt it first"))
-	}
-	commit := func() {}
-	if from == ownerName && s.name == sleeve.OrchestratorName && s.m.h.coord != nil {
-		text, commit = s.m.h.coord.rideAlong(text)
 	}
 	sctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
@@ -620,7 +625,6 @@ func (s *chatSleeve) sendOnce(ctx context.Context, from, text string, owner bool
 		}
 		return 0, connect.NewError(connect.CodeInternal, err)
 	}
-	commit()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seq, err := s.log.Append(&pb.ChatEvent{Body: &pb.ChatEvent_User{User: &pb.UserMessage{Text: text, From: from}}})
