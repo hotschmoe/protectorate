@@ -301,6 +301,9 @@ class Sleeve extends $pb.GeneratedMessage {
     $2.Duration? exitAfterIdle,
     $core.String? parent,
     $core.String? gitBranch,
+    $core.String? baseRepo,
+    $core.String? baseBranch,
+    $core.String? baseTip,
   }) {
     final result = Sleeve._();
     if (name != null) result.name = name;
@@ -324,6 +327,9 @@ class Sleeve extends $pb.GeneratedMessage {
     if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
     if (parent != null) result.parent = parent;
     if (gitBranch != null) result.gitBranch = gitBranch;
+    if (baseRepo != null) result.baseRepo = baseRepo;
+    if (baseBranch != null) result.baseBranch = baseBranch;
+    if (baseTip != null) result.baseTip = baseTip;
     return result;
   }
 
@@ -373,6 +379,9 @@ class Sleeve extends $pb.GeneratedMessage {
         subBuilder: $2.Duration.$_createMessage)
     ..aOS(20, _omitFieldNames ? '' : 'parent')
     ..aOS(21, _omitFieldNames ? '' : 'gitBranch')
+    ..aOS(22, _omitFieldNames ? '' : 'baseRepo')
+    ..aOS(23, _omitFieldNames ? '' : 'baseBranch')
+    ..aOS(24, _omitFieldNames ? '' : 'baseTip')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -602,6 +611,33 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasGitBranch() => $_has(20);
   @$pb.TagNumber(21)
   void clearGitBranch() => $_clearField(21);
+
+  @$pb.TagNumber(22)
+  $core.String get baseRepo => $_getSZ(21);
+  @$pb.TagNumber(22)
+  set baseRepo($core.String value) => $_setString(21, value);
+  @$pb.TagNumber(22)
+  $core.bool hasBaseRepo() => $_has(21);
+  @$pb.TagNumber(22)
+  void clearBaseRepo() => $_clearField(22);
+
+  @$pb.TagNumber(23)
+  $core.String get baseBranch => $_getSZ(22);
+  @$pb.TagNumber(23)
+  set baseBranch($core.String value) => $_setString(22, value);
+  @$pb.TagNumber(23)
+  $core.bool hasBaseBranch() => $_has(22);
+  @$pb.TagNumber(23)
+  void clearBaseBranch() => $_clearField(23);
+
+  @$pb.TagNumber(24)
+  $core.String get baseTip => $_getSZ(23);
+  @$pb.TagNumber(24)
+  set baseTip($core.String value) => $_setString(23, value);
+  @$pb.TagNumber(24)
+  $core.bool hasBaseTip() => $_has(23);
+  @$pb.TagNumber(24)
+  void clearBaseTip() => $_clearField(24);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {
@@ -983,6 +1019,9 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $1.ModelSelection? selection,
     $core.Iterable<ReadOnlyMount>? readOnly,
     $2.Duration? exitAfterIdle,
+    $core.String? branch,
+    $core.String? newBranch,
+    $core.String? brief,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -996,6 +1035,9 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (selection != null) result.selection = selection;
     if (readOnly != null) result.readOnly.addAll(readOnly);
     if (exitAfterIdle != null) result.exitAfterIdle = exitAfterIdle;
+    if (branch != null) result.branch = branch;
+    if (newBranch != null) result.newBranch = newBranch;
+    if (brief != null) result.brief = brief;
     return result;
   }
 
@@ -1034,6 +1076,9 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
         subBuilder: ReadOnlyMount.$_createMessage)
     ..aOM<$2.Duration>(11, _omitFieldNames ? '' : 'exitAfterIdle',
         subBuilder: $2.Duration.$_createMessage)
+    ..aOS(12, _omitFieldNames ? '' : 'branch')
+    ..aOS(13, _omitFieldNames ? '' : 'newBranch')
+    ..aOS(14, _omitFieldNames ? '' : 'brief')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1154,6 +1199,36 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   void clearExitAfterIdle() => $_clearField(11);
   @$pb.TagNumber(11)
   $2.Duration ensureExitAfterIdle() => $_ensure(10);
+
+  /// Branch to clone; local sources default to their current branch.
+  @$pb.TagNumber(12)
+  $core.String get branch => $_getSZ(11);
+  @$pb.TagNumber(12)
+  set branch($core.String value) => $_setString(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasBranch() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearBranch() => $_clearField(12);
+
+  /// Create and check out this branch from branch in a fresh clone.
+  @$pb.TagNumber(13)
+  $core.String get newBranch => $_getSZ(12);
+  @$pb.TagNumber(13)
+  set newBranch($core.String value) => $_setString(12, value);
+  @$pb.TagNumber(13)
+  $core.bool hasNewBranch() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearNewBranch() => $_clearField(13);
+
+  /// First chat message, delivered before spawn succeeds. Chat mode only.
+  @$pb.TagNumber(14)
+  $core.String get brief => $_getSZ(13);
+  @$pb.TagNumber(14)
+  set brief($core.String value) => $_setString(13, value);
+  @$pb.TagNumber(14)
+  $core.bool hasBrief() => $_has(13);
+  @$pb.TagNumber(14)
+  void clearBrief() => $_clearField(14);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -2216,7 +2291,9 @@ class SleeveServiceApi {
 
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
-  /// a git URL cloned into the hub's workspaces directory. Respawning the name
+  /// a git URL cloned into the hub's workspaces directory. Branch options clone
+  /// local checkouts too; brief is delivered as the first chat message.
+  /// Respawning the name
   /// of an exited sleeve reuses its home directory and workspace and replaces
   /// its kept session.
   $async.Future<SpawnSleeveResponse> spawnSleeve(

@@ -343,6 +343,9 @@ type Sleeve struct {
 	ExitAfterIdle *durationpb.Duration `protobuf:"bytes,19,opt,name=exit_after_idle,json=exitAfterIdle,proto3" json:"exit_after_idle,omitempty"`
 	// Current branch read from .git files; empty for non-git and worktrees.
 	GitBranch     string `protobuf:"bytes,21,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"`
+	BaseRepo      string `protobuf:"bytes,22,opt,name=base_repo,json=baseRepo,proto3" json:"base_repo,omitempty"`
+	BaseBranch    string `protobuf:"bytes,23,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
+	BaseTip       string `protobuf:"bytes,24,opt,name=base_tip,json=baseTip,proto3" json:"base_tip,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -520,6 +523,27 @@ func (x *Sleeve) GetExitAfterIdle() *durationpb.Duration {
 func (x *Sleeve) GetGitBranch() string {
 	if x != nil {
 		return x.GitBranch
+	}
+	return ""
+}
+
+func (x *Sleeve) GetBaseRepo() string {
+	if x != nil {
+		return x.BaseRepo
+	}
+	return ""
+}
+
+func (x *Sleeve) GetBaseBranch() string {
+	if x != nil {
+		return x.BaseBranch
+	}
+	return ""
+}
+
+func (x *Sleeve) GetBaseTip() string {
+	if x != nil {
+		return x.BaseTip
 	}
 	return ""
 }
@@ -813,6 +837,12 @@ type SpawnSleeveRequest struct {
 	ReadOnly  []*ReadOnlyMount `protobuf:"bytes,10,rep,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
 	// Zero disables automatic removal. Applies only to chat sleeves.
 	ExitAfterIdle *durationpb.Duration `protobuf:"bytes,11,opt,name=exit_after_idle,json=exitAfterIdle,proto3" json:"exit_after_idle,omitempty"`
+	// Branch to clone; local sources default to their current branch.
+	Branch string `protobuf:"bytes,12,opt,name=branch,proto3" json:"branch,omitempty"`
+	// Create and check out this branch from branch in a fresh clone.
+	NewBranch string `protobuf:"bytes,13,opt,name=new_branch,json=newBranch,proto3" json:"new_branch,omitempty"`
+	// First chat message, delivered before spawn succeeds. Chat mode only.
+	Brief         string `protobuf:"bytes,14,opt,name=brief,proto3" json:"brief,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -922,6 +952,27 @@ func (x *SpawnSleeveRequest) GetExitAfterIdle() *durationpb.Duration {
 		return x.ExitAfterIdle
 	}
 	return nil
+}
+
+func (x *SpawnSleeveRequest) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *SpawnSleeveRequest) GetNewBranch() string {
+	if x != nil {
+		return x.NewBranch
+	}
+	return ""
+}
+
+func (x *SpawnSleeveRequest) GetBrief() string {
+	if x != nil {
+		return x.Brief
+	}
+	return ""
 }
 
 type SpawnSleeveResponse struct {
@@ -1724,7 +1775,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\x14workspace_disk_bytes\x18\a \x01(\x04R\x12workspaceDiskBytes\x129\n" +
 	"\n" +
 	"sampled_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12B\n" +
-	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\x8c\a\n" +
+	"\x0fdisk_sampled_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rdiskSampledAt\"\xe5\a\n" +
 	"\x06Sleeve\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x122\n" +
 	"\aharness\x18\x02 \x01(\x0e2\x18.protectorate.v1.HarnessR\aharness\x12\x1c\n" +
@@ -1753,7 +1804,11 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tread_only\x18\x12 \x03(\v2\x1e.protectorate.v1.ReadOnlyMountR\breadOnly\x12A\n" +
 	"\x0fexit_after_idle\x18\x13 \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x12\x1d\n" +
 	"\n" +
-	"git_branch\x18\x15 \x01(\tR\tgitBranchB\f\n" +
+	"git_branch\x18\x15 \x01(\tR\tgitBranch\x12\x1b\n" +
+	"\tbase_repo\x18\x16 \x01(\tR\bbaseRepo\x12\x1f\n" +
+	"\vbase_branch\x18\x17 \x01(\tR\n" +
+	"baseBranch\x12\x19\n" +
+	"\bbase_tip\x18\x18 \x01(\tR\abaseTipB\f\n" +
 	"\n" +
 	"_exit_code\"-\n" +
 	"\x17BrowseWorkspacesRequest\x12\x12\n" +
@@ -1778,7 +1833,7 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"?\n" +
 	"\rReadOnlyMount\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x16\n" +
-	"\x06target\x18\x02 \x01(\tR\x06target\"\xcd\x04\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\"\x9a\x05\n" +
 	"\x12SpawnSleeveRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tworkspace\x18\x02 \x01(\tR\tworkspace\x122\n" +
@@ -1793,7 +1848,11 @@ const file_protectorate_v1_sleeve_proto_rawDesc = "" +
 	"\tselection\x18\t \x01(\v2\x1f.protectorate.v1.ModelSelectionR\tselection\x12;\n" +
 	"\tread_only\x18\n" +
 	" \x03(\v2\x1e.protectorate.v1.ReadOnlyMountR\breadOnly\x12A\n" +
-	"\x0fexit_after_idle\x18\v \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x1a6\n" +
+	"\x0fexit_after_idle\x18\v \x01(\v2\x19.google.protobuf.DurationR\rexitAfterIdle\x12\x16\n" +
+	"\x06branch\x18\f \x01(\tR\x06branch\x12\x1d\n" +
+	"\n" +
+	"new_branch\x18\r \x01(\tR\tnewBranch\x12\x14\n" +
+	"\x05brief\x18\x0e \x01(\tR\x05brief\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +

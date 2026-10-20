@@ -21,7 +21,9 @@ option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;prote
 service SleeveService {
   // SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   // workspace is an existing directory (bound read-write at the same path) or
-  // a git URL cloned into the hub's workspaces directory. Respawning the name
+  // a git URL cloned into the hub's workspaces directory. Branch options clone
+  // local checkouts too; brief is delivered as the first chat message.
+  // Respawning the name
   // of an exited sleeve reuses its home directory and workspace and replaces
   // its kept session.
   rpc SpawnSleeve(SpawnSleeveRequest) returns (SpawnSleeveResponse);
@@ -180,6 +182,9 @@ message Sleeve {
   google.protobuf.Duration exit_after_idle = 19;
   // Current branch read from .git files; empty for non-git and worktrees.
   string git_branch = 21;
+  string base_repo = 22;
+  string base_branch = 23;
+  string base_tip = 24;
 }
 
 message BrowseWorkspacesRequest {
@@ -233,6 +238,12 @@ message SpawnSleeveRequest {
   repeated ReadOnlyMount read_only = 10;
   // Zero disables automatic removal. Applies only to chat sleeves.
   google.protobuf.Duration exit_after_idle = 11;
+  // Branch to clone; local sources default to their current branch.
+  string branch = 12;
+  // Create and check out this branch from branch in a fresh clone.
+  string new_branch = 13;
+  // First chat message, delivered before spawn succeeds. Chat mode only.
+  string brief = 14;
 }
 
 message SpawnSleeveResponse {
