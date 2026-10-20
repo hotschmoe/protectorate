@@ -31,17 +31,9 @@ lock (a `.notes.json.lock` sidecar), so concurrent hub and CLI writers never
 lose each other's changes and a reader never sees a partial file. Back it up
 with the rest of the hub home.
 
-### Migration
-
-A hub that still has the earlier markdown backlog converts it on first load:
-every `- [ ] title  #p2 @codex id:ab12` item becomes a note with the same id,
-tagged with its `## project` heading (source `owner`, both timestamps the
-file's modification time). Indented lines become the start of the body;
-issue link, priority, harness preference and claimed or done state are
-appended to the body as plain lines (`Issue:`, `Priority:`, `Harness:`,
-`Status:`). The old file is then renamed to `backlog.md.migrated` and never
-read again. Messages that referenced an item id keep working because ids are
-preserved.
+The hub reads only `notes.json`. The pre-notes markdown backlog converter has
+been removed; an installation still using that retired format must convert
+its notes before upgrading.
 
 ## What files notes by itself
 

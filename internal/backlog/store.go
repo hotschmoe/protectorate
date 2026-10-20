@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,18 +12,11 @@ import (
 	"github.com/hotschmoe/protectorate/internal/fsutil"
 )
 
-const (
-	notesFile  = "notes.json"
-	legacyFile = "backlog.md"
-	// legacyDone is where the pre-notes markdown backlog is moved after its
-	// items have been converted.
-	legacyDone = "backlog.md.migrated"
-)
+const notesFile = "notes.json"
 
 // Store keeps the notes in $home/notes.json. Every change reads the fresh
 // file under an OS file lock and replaces it by temp file and rename, so a
-// reader never sees a partial file. The first load of a hub that still has
-// the old markdown backlog converts its items into notes.
+// reader never sees a partial file.
 type Store struct {
 	dir string
 	mu  sync.Mutex
@@ -162,47 +154,10 @@ func decode(raw []byte) ([]Note, error) {
 // snapshot reads the notes without the lock; the file is replaced atomically.
 func (s *Store) snapshot() ([]Note, error) {
 	raw, err := readFile(s.path())
-	if err != nil {
+	if err != nil || raw == nil {
 		return nil, err
 	}
-	if raw != nil {
-		return decode(raw)
-	}
-	unlock, err := lock(s.path())
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	return s.loadLocked()
-}
-
-// loadLocked returns the stored notes, converting the legacy markdown backlog
-// first when no notes file exists yet.
-func (s *Store) loadLocked() ([]Note, error) {
-	raw, err := readFile(s.path())
-	if err != nil {
-		return nil, err
-	}
-	if raw != nil {
-		return decode(raw)
-	}
-	legacy := filepath.Join(s.dir, legacyFile)
-	text, err := readFile(legacy)
-	if err != nil || text == nil {
-		return nil, err
-	}
-	modTime := s.now().UTC()
-	if fi, err := os.Stat(legacy); err == nil {
-		modTime = fi.ModTime().UTC()
-	}
-	notes := convertLegacy(string(text), modTime)
-	if err := s.write(notes); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(legacy, filepath.Join(s.dir, legacyDone)); err != nil {
-		log.Printf("notes: converted %s but could not rename it to %s: %v", legacy, legacyDone, err)
-	}
-	return notes, nil
+	return decode(raw)
 }
 
 func (s *Store) modify(fn func([]Note) ([]Note, error)) error {
@@ -215,7 +170,7 @@ func (s *Store) modify(fn func([]Note) ([]Note, error)) error {
 		return err
 	}
 	defer unlock()
-	notes, err := s.loadLocked()
+	notes, err := s.snapshot()
 	if err != nil {
 		return err
 	}
