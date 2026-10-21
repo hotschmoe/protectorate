@@ -1,7 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Release builds need network access; Flutter grants it only in debug
+         and profile manifests. Cleartext is allowed because LAN and VPN hubs
+         are commonly reached as http://<private address>:7470. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="protectorate"
+        android:label="Protectorate"
         android:name="${applicationName}"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
