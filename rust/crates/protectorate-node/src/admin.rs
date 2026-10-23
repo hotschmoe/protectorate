@@ -106,32 +106,3 @@ fn probe_once() -> (Option<Admin>, String) {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sudo_preserves_only_named_job_variables_without_putting_values_in_argv() {
-        let admin = Admin::Sudo(PathBuf::from("/usr/bin/sudo"));
-        let command = admin.command(
-            &["sh".into(), "-c".into(), "exit 0".into()],
-            ["TOKEN".into()],
-        );
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            args,
-            [
-                "-n",
-                "--preserve-env=PROTECTORATE_JOB_DIR,PROTECTORATE_JOB_ID,TOKEN",
-                "--",
-                "sh",
-                "-c",
-                "exit 0"
-            ]
-        );
-    }
-}

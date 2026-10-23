@@ -1,0 +1,2 @@
+{"method":"thread/settings/updated","params":{"threadSettings":{"model":"gpt-alt","effort":"high"},"threadId":"fuzz-thread"}}
+{"method":"model/rerouted","params":{"fromModel":"gpt","toModel":"gpt-mini","threadId":"fuzz-thread"}}

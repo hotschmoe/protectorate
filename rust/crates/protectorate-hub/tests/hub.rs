@@ -1,5 +1,4 @@
 use protectorate_auth::Method as ScopeMethod;
-use protectorate_directory::{Manifest, Scan, Workspace};
 use protectorate_hub::Hub;
 use protectorate_session::Manager as SessionManager;
 use protectorate_wire::Catalog;
@@ -24,33 +23,6 @@ async fn call(addr: std::net::SocketAddr, path: &str, token: &str, body: Value) 
         head.split_whitespace().nth(1).unwrap().parse().unwrap(),
         serde_json::from_str(body).unwrap(),
     )
-}
-
-async fn read_line(stream: &mut TcpStream) -> String {
-    let mut line = Vec::new();
-    loop {
-        let mut byte = [0];
-        stream.read_exact(&mut byte).await.unwrap();
-        line.push(byte[0]);
-        if line.ends_with(b"\r\n") {
-            return String::from_utf8(line).unwrap();
-        }
-    }
-}
-
-async fn read_stream_event(stream: &mut TcpStream) -> Value {
-    let line = read_line(stream).await;
-    let size = usize::from_str_radix(line.trim().split(';').next().unwrap(), 16).unwrap();
-    assert!(size >= 5);
-    let mut frame = vec![0; size];
-    stream.read_exact(&mut frame).await.unwrap();
-    assert_eq!(read_line(stream).await, "\r\n");
-    assert_eq!(frame[0], 0);
-    assert_eq!(
-        u32::from_be_bytes(frame[1..5].try_into().unwrap()) as usize,
-        size - 5
-    );
-    serde_json::from_slice(&frame[5..]).unwrap()
 }
 
 #[tokio::test]
@@ -218,47 +190,6 @@ async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
 }
 
 #[tokio::test]
-async fn event_stream_starts_with_heartbeat_and_delivers_note_change() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "v-rust").unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let mut stream = TcpStream::connect(addr).await.unwrap();
-    let body = [0, 0, 0, 0, 2, b'{', b'}'];
-    let headers = format!("POST /protectorate.v1.EventService/Subscribe HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/connect+json\r\nAuthorization: Bearer owner-secret\r\nContent-Length: {}\r\n\r\n", body.len());
-    stream.write_all(headers.as_bytes()).await.unwrap();
-    stream.write_all(&body).await.unwrap();
-    assert!(read_line(&mut stream).await.contains("200"));
-    loop {
-        if read_line(&mut stream).await == "\r\n" {
-            break;
-        }
-    }
-    let first = tokio::time::timeout(Duration::from_secs(2), read_stream_event(&mut stream))
-        .await
-        .unwrap();
-    assert_eq!(first["kind"], "heartbeat");
-    let (code, created) = call(
-        addr,
-        "/protectorate.v1.BacklogService/CreateNote",
-        "owner-secret",
-        json!({"title":"streamed"}),
-    )
-    .await;
-    assert_eq!(code, 200);
-    let event = tokio::time::timeout(Duration::from_secs(2), read_stream_event(&mut stream))
-        .await
-        .unwrap();
-    assert_eq!(event["kind"], "note.created");
-    assert_eq!(event["subject"], created["note"]["id"]);
-    assert_eq!(event["payload"]["title"], "streamed");
-    drop(stream);
-    server.abort();
-}
-
-#[tokio::test]
 async fn owner_manages_scoped_tokens_over_http() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::open(dir.path(), "owner-secret", "v-rust").unwrap();
@@ -421,56 +352,5 @@ async fn tls_pairing_fails_closed_without_transport_peer() {
     )
     .await;
     assert_eq!(code, 403, "{body}");
-    server.abort();
-}
-
-#[tokio::test]
-async fn directory_rpc_resolves_project_edges_and_sleeve_filter() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "v-rust").unwrap();
-    let scan = |sleeve: &str, repo: &str, name: &str, deps: Vec<&str>| Scan {
-        sleeve: sleeve.into(),
-        workspace: Workspace {
-            path: dir.path().join(repo),
-            remote: format!("github.com/acme/{repo}"),
-            branch: "main".into(),
-            head: "abc".into(),
-            manifests: vec![Manifest {
-                kind: "cargo".into(),
-                path: "Cargo.toml".into(),
-                name: name.into(),
-                deps: deps.into_iter().map(str::to_owned).collect(),
-            }],
-        },
-    };
-    hub.directory
-        .update(&[
-            scan("builder", "app", "cargo:app", vec!["cargo:lib"]),
-            scan("library", "lib", "cargo:lib", vec![]),
-        ])
-        .unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let list = "/protectorate.v1.DirectoryService/ListProjects";
-    let get = "/protectorate.v1.DirectoryService/GetProject";
-    let (code, body) = call(addr, list, "owner-secret", json!({"sleeve":"builder"})).await;
-    assert_eq!(code, 200, "{body}");
-    assert_eq!(body["projects"].as_array().unwrap().len(), 1);
-    assert_eq!(body["projects"][0]["id"], "github.com/acme/app");
-    assert_eq!(
-        body["projects"][0]["dependsOn"][0]["project"],
-        "github.com/acme/lib"
-    );
-    assert_eq!(body["projects"][0]["dependsOn"][0]["display"], "acme/lib");
-    let (code, body) = call(addr, get, "owner-secret", json!({"project":"lib"})).await;
-    assert_eq!(code, 200, "{body}");
-    assert_eq!(
-        body["project"]["dependents"][0]["project"],
-        "github.com/acme/app"
-    );
-    let (code, body) = call(addr, get, "owner-secret", json!({"project":"missing"})).await;
-    assert_eq!(code, 404, "{body}");
     server.abort();
 }

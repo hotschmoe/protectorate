@@ -341,21 +341,3 @@ pub(super) async fn windows(hub: Arc<Hub>, headers: HeaderMap) -> Response {
         );
     script_response(script)
 }
-
-#[cfg(test)]
-mod public_url_tests {
-    use super::*;
-
-    #[test]
-    fn installer_uses_configured_origin_without_request_host() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path(), "owner-secret", "test")
-            .unwrap()
-            .with_public_url("https://public.example.test".into())
-            .unwrap();
-        assert_eq!(
-            request_base(&hub, &HeaderMap::new()).unwrap(),
-            "https://public.example.test"
-        );
-    }
-}

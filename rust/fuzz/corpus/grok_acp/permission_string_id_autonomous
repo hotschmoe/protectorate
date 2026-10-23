@@ -1,0 +1,2 @@
+#autonomous
+{"jsonrpc":"2.0","id":"p-1","method":"session/request_permission","params":{"sessionId":"fuzz-session","toolCall":{"toolCallId":"call-1","kind":"edit","title":"Write `/x/hello.txt`"},"options":[{"optionId":"allow-edits-session","kind":"allow_always"},{"optionId":"allow-once","kind":"allow_once"},{"optionId":"reject-once","kind":"reject_once"}]}}

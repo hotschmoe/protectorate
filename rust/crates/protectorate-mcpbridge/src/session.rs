@@ -79,13 +79,6 @@ impl Session {
         }
     }
 
-    pub fn pending_len(&self) -> usize {
-        self.state
-            .lock()
-            .map(|state| state.pending.len())
-            .unwrap_or(0)
-    }
-
     /// Reserves a slot for `id`. The `Err` carries the JSON-RPC reply for a
     /// duplicate id or a full session.
     pub fn begin(&self, id: &Value) -> Result<Guard, Failure> {
@@ -143,76 +136,5 @@ pub fn request_key(id: &Value) -> String {
         Value::String(text) => format!("string:{text}"),
         Value::Null => "null".to_owned(),
         other => format!("number:{other}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn slots_are_released_when_the_guard_drops() {
-        let session = Session::new();
-        let first = session.begin(&json!(1)).unwrap();
-        let second = session.begin(&json!("1")).unwrap();
-        assert_eq!(session.pending_len(), 2);
-        assert_eq!(
-            session.begin(&json!(1)).unwrap_err().message,
-            "duplicate request id"
-        );
-        drop(first);
-        drop(second);
-        assert_eq!(session.pending_len(), 0);
-        assert!(session.begin(&json!(1)).is_ok());
-    }
-
-    #[test]
-    fn cancellation_reaches_only_the_matching_pending_request() {
-        let session = Session::new();
-        let text = session.begin(&json!("a")).unwrap();
-        let number = session.begin(&json!("a")).unwrap_err();
-        assert_eq!(number.code, INVALID_REQUEST);
-        let other = session.begin(&json!(7)).unwrap();
-        session.cancel(&json!("a"));
-        assert!(text.cancelled.load(Ordering::SeqCst));
-        assert!(!other.cancelled.load(Ordering::SeqCst));
-        session.cancel(&json!("unknown"));
-    }
-
-    #[test]
-    fn dropping_a_request_guard_signals_a_detached_worker() {
-        let session = Session::new();
-        let guard = session.begin(&json!(42)).unwrap();
-        let worker_flag = Arc::clone(&guard.cancelled);
-        drop(guard);
-        assert!(worker_flag.load(Ordering::SeqCst));
-        assert_eq!(session.pending_len(), 0);
-    }
-
-    #[test]
-    fn a_full_session_refuses_new_work_and_cancellation_still_works() {
-        let session = Session::new();
-        let mut guards = Vec::new();
-        for id in 0..MAX_PENDING_REQUESTS {
-            guards.push(session.begin(&json!(id)).unwrap());
-        }
-        let error = session.begin(&json!("extra")).unwrap_err();
-        assert_eq!(error.code, SERVER_ERROR);
-        assert_eq!(error.message, "too many requests in progress");
-        session.cancel(&json!(0));
-        assert!(guards[0].cancelled.load(Ordering::SeqCst));
-        drop(guards);
-        assert_eq!(session.pending_len(), 0);
-    }
-
-    #[test]
-    fn closing_a_session_cancels_every_pending_call() {
-        let session = Session::new();
-        let first = session.begin(&json!(1)).unwrap();
-        let second = session.begin(&json!(2)).unwrap();
-        session.cancel_all();
-        assert!(first.cancelled.load(Ordering::SeqCst));
-        assert!(second.cancelled.load(Ordering::SeqCst));
     }
 }

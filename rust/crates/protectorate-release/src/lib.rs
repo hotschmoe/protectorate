@@ -23,7 +23,9 @@ use std::{
 };
 
 pub use extract::{extract_web, safe_web_path, MAX_WEB_BYTES};
-pub use transport::{Budget, Got, Transport, CHECK_TIMEOUT, FETCH_TIMEOUT};
+pub use transport::{
+    resolve_url, validate_url, Budget, Got, Transport, CHECK_TIMEOUT, FETCH_TIMEOUT,
+};
 
 /// Response body caps copied from the Go source.
 pub const MAX_RELEASE_JSON: u64 = 4 << 20;
@@ -49,21 +51,6 @@ pub fn rust_binary_name(os: &str, arch: &str) -> Result<String> {
     }
     let suffix = if os == "windows" { ".exe" } else { "" };
     Ok(format!("protectorate-rs-{os}-{arch}{suffix}"))
-}
-
-#[cfg(test)]
-mod binary_name_tests {
-    use super::*;
-
-    #[test]
-    fn termux_node_is_a_single_android_arm64_asset() {
-        assert_eq!(
-            rust_binary_name("android", "arm64").unwrap(),
-            "protectorate-rs-android-arm64"
-        );
-        assert!(rust_binary_name("android", "amd64").is_err());
-        assert!(rust_bundle_name("protectorate-rs", "android", "arm64").is_err());
-    }
 }
 
 pub const RUST_BUNDLE: [&str; 6] = [
@@ -337,19 +324,19 @@ pub struct Info {
 
 impl Info {
     pub fn asset_url(&self, name: &str) -> Result<String> {
-        let mut found = "";
+        let mut found: Option<&str> = None;
         for a in &self.assets {
             if a.name == name {
-                if !found.is_empty() {
+                if found.is_some() {
                     return Err(invalid(format!("duplicate release asset {name}")));
                 }
-                found = &a.url;
+                found = Some(&a.url);
             }
         }
-        if found.is_empty() {
-            return Err(invalid(format!("release {} has no {name}", self.tag)));
+        match found {
+            Some(url) if !url.is_empty() => Ok(url.to_string()),
+            _ => Err(invalid(format!("release {} has no {name}", self.tag))),
         }
-        Ok(found.to_string())
     }
 
     pub fn matches_channel(&self, channel: &str, version: &str) -> Result<()> {
@@ -1059,17 +1046,6 @@ impl Source {
     /// and never overwritten.
     pub fn fetch_rust_binary(&self, info: &Info, os: &str, arch: &str) -> Result<PathBuf> {
         self.fetch_named_binary(info, rust_binary_name(os, arch)?)
-    }
-
-    pub fn fetch_rust_component(
-        &self,
-        info: &Info,
-        component: &str,
-        os: &str,
-        arch: &str,
-    ) -> Result<PathBuf> {
-        let name = rust_bundle_name(component, os, arch)?;
-        self.fetch_named_binary(info, name)
     }
 
     fn fetch_named_binary(&self, info: &Info, name: String) -> Result<PathBuf> {

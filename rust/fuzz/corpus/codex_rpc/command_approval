@@ -1,0 +1,2 @@
+{"method":"turn/started","params":{"turn":{"id":"fuzz-turn"},"threadId":"fuzz-thread"}}
+{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"fuzz-thread","command":"printf ok"}}

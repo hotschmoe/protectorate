@@ -1,0 +1,4 @@
+#autonomous
+{"type":"system","subtype":"init","session_id":"fuzz-session"}
+{"type":"control_request","request_id":"perm-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"printf ok"}}}
+{"type":"result","session_id":"fuzz-session","subtype":"success","is_error":false,"modelUsage":{"claude-test":{"contextWindow":200000}}}

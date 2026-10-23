@@ -1,6 +1,6 @@
 //! Android/Termux node executable, without the Linux hub and sleeve runtime.
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(target_os = "android")]
 mod lifecycle;
 
 #[cfg(target_os = "android")]

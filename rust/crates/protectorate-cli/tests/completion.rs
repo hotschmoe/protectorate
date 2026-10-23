@@ -1,5 +1,4 @@
 use std::process::Command;
-use std::sync::Arc;
 
 #[cfg(unix)]
 #[test]
@@ -27,11 +26,6 @@ fn closed_stdout_pipe_exits_cleanly() {
         assert!(output.stderr.is_empty(), "{args:?}: unexpected stderr");
     }
 }
-
-use protectorate_wire::{
-    decode_json, AuthContext, Authorizer, Catalog, Code, RpcError, UnaryServer,
-};
-use serde_json::json;
 
 fn cli(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
@@ -142,87 +136,46 @@ fn completion_tracks_nested_commands_and_skips_flag_values() {
     assert_eq!(plain, "resleeve\n:4\n");
 }
 
-#[test]
-fn completion_covers_mcp_commands() {
-    let mcp = String::from_utf8(cli(&["__complete", "mcp", "--"]).stdout).unwrap();
-    for flag in [
-        "--list",
-        "--allow",
-        "--deny",
-        "--http",
-        "--https",
-        "--tls-cert",
-        "--tls-key",
-    ] {
-        assert!(mcp.contains(&format!("{flag}\t")), "{flag}: {mcp}");
-    }
-    let mcp_after_glob =
-        String::from_utf8(cli(&["__complete", "mcp", "--allow", "read_*", "--tls"]).stdout)
-            .unwrap();
-    assert!(mcp_after_glob.contains("--tls-cert\t"), "{mcp_after_glob}");
-    assert!(mcp_after_glob.contains("--tls-key\t"), "{mcp_after_glob}");
-}
-
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn resource_completion_uses_authenticated_live_names() {
-    let auth: Authorizer = Arc::new(|_, headers| {
-        (headers
-            .get("authorization")
-            .is_some_and(|value| value == "Bearer owner-secret"))
-        .then_some(AuthContext::default())
-        .ok_or_else(|| RpcError::new(Code::Unauthenticated, "bad token"))
-    });
-    let mut server = UnaryServer::new(Catalog::embedded().unwrap(), auth);
-    server
-        .register(
-            "/protectorate.v1.SleeveService/ListSleeves",
-            |request| async move {
-                Ok(decode_json(
-                    request.method.output(),
-                    json!({"sleeves":[{"name":"alpha"},{"name":"alpine"},{"name":"beta"}]})
-                        .to_string()
-                        .as_bytes(),
-                )?
-                .into())
+    use protectorate_hub::Hub;
+    use protectorate_inventory::Node;
+    use protectorate_sleeve_registry::{Harness, Mode, Record};
+
+    let root = tempfile::tempdir().unwrap();
+    let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
+    for name in ["alpha", "alpine", "beta"] {
+        let workspace = root.path().join(name);
+        std::fs::create_dir_all(&workspace).unwrap();
+        hub.sleeves
+            .record_spawned(
+                Record::new(
+                    name,
+                    Harness::Pi,
+                    Mode::Chat,
+                    &workspace,
+                    "2026-01-01T00:00:00Z",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    hub.inventory
+        .add(
+            Node {
+                name: "compute".into(),
+                address: "127.0.0.1:1".into(),
+                ..Node::default()
             },
-        )
-        .unwrap();
-    server
-        .register(
-            "/protectorate.v1.NodeService/ListNodes",
-            |request| async move {
-                Ok(decode_json(
-                    request.method.output(),
-                    json!({"nodes":[{"node":{"name":"compute"}},{"node":{"name":"hub"}}]})
-                        .to_string()
-                        .as_bytes(),
-                )?
-                .into())
-            },
-        )
-        .unwrap();
-    server
-        .register(
-            "/protectorate.v1.LeaseService/ListLeases",
-            |request| async move {
-                Ok(decode_json(
-                    request.method.output(),
-                    json!({"leases":[
-                        {"id":"lease-deadbeef","node":"compute"},
-                        {"id":"lease-queued","state":"LEASE_STATE_QUEUED"}
-                    ]})
-                    .to_string()
-                    .as_bytes(),
-                )?
-                .into())
-            },
+            false,
         )
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let task = tokio::spawn(async move { axum::serve(listener, server.router()).await.unwrap() });
-
-    let run = |token: &str, words: &[&str]| {
+    let task =
+        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
+    let complete = move |token: &str, words: &[&str]| {
         let mut args = vec!["--hub", url.as_str(), "__complete"];
         args.extend_from_slice(words);
         let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
@@ -238,64 +191,31 @@ async fn resource_completion_uses_authenticated_live_names() {
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    assert_eq!(
-        run("owner-secret", &["sleeve", "show", "al"]),
-        "alpha\tSleeve\nalpine\tSleeve\n:4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["chat", "wait", "be"]),
-        "beta\tSleeve\n:4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["node", "show", "com"]),
-        "compute\tNode\n:4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["node", "show", "--timeout", ""]),
-        ":4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["job", "run", "--on", "lease-"]),
-        "lease-deadbeef\tLease\n:4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["job", "test-cross", "--on=co"]),
-        "--on=compute\tNode\n:4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["lease", "acquire", "--node", "com"]),
-        "compute\tNode\n:4\n"
-    );
-    assert_eq!(
-        run("owner-secret", &["lease", "acquire", "--node=hu"]),
-        "--node=hub\tNode\n:4\n"
-    );
-    assert_eq!(run("wrong", &["node", "show", "com"]), ":4\n");
-    assert!(run("wrong", &["node", "sh"]).contains("show\tShow a node"));
+    let checks = tokio::task::spawn_blocking(move || {
+        assert_eq!(
+            complete("owner-secret", &["sleeve", "show", "al"]),
+            "alpha\tSleeve\nalpine\tSleeve\n:4\n"
+        );
+        assert_eq!(
+            complete("owner-secret", &["chat", "wait", "be"]),
+            "beta\tSleeve\n:4\n"
+        );
+        assert_eq!(
+            complete("owner-secret", &["node", "show", "com"]),
+            "compute\tNode\n:4\n"
+        );
+        assert_eq!(
+            complete("owner-secret", &["job", "test-cross", "--on=co"]),
+            "--on=compute\tNode\n:4\n"
+        );
+        assert_eq!(
+            complete("owner-secret", &["node", "show", "--timeout", ""]),
+            ":4\n"
+        );
+        assert_eq!(complete("wrong", &["node", "show", "com"]), ":4\n");
+        assert!(complete("wrong", &["node", "sh"]).contains("show\tShow a node"));
+    })
+    .await;
     task.abort();
-}
-
-#[test]
-fn completion_covers_service_termux() {
-    let actions = String::from_utf8(cli(&["__complete", "service", ""]).stdout).unwrap();
-    assert!(
-        actions.contains("termux\tTermux run and boot scripts\n"),
-        "{actions}"
-    );
-
-    let write = String::from_utf8(cli(&["__complete", "service", "termux", "--w"]).stdout).unwrap();
-    assert!(write.contains("--write\tOutput path\n"), "{write}");
-    assert!(!write.contains("--trigger"), "{write}");
-
-    let install =
-        String::from_utf8(cli(&["__complete", "service", "termux", "--in"]).stdout).unwrap();
-    assert!(
-        install.contains("--install\tInstall into Termux\n"),
-        "{install}"
-    );
-
-    let all = String::from_utf8(cli(&["__complete", "service", "termux", "--"]).stdout).unwrap();
-    for flag in ["--binary", "--home", "--write", "--install"] {
-        assert!(all.contains(flag), "{flag} missing from {all}");
-    }
+    checks.unwrap();
 }

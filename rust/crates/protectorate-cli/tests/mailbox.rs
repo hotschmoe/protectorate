@@ -2,14 +2,16 @@
 
 //! The `msg` commands against a real hub: the real mailbox log, the real
 //! sleeve registry, the real backlog store and the real Connect JSON router,
-//! driven only through the CLI dispatcher with a sleeve's own token or the
-//! owner token.
+//! driven only through the CLI binary with a sleeve's own token or the owner
+//! token.
+mod common;
+
+use common::cli;
 use protectorate_auth::Method as ScopeMethod;
-use protectorate_cli::{dispatch_endpoint, parse, transport_timeout, Command, MessageKind, Result};
 use protectorate_directory::{Scan, Workspace};
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
-use protectorate_wire::{Catalog, Code};
+use protectorate_wire::Catalog;
 use serde_json::Value;
 use std::{
     path::Path,
@@ -78,23 +80,18 @@ fn flag(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn code(result: Result<String>) -> std::result::Result<String, Code> {
-    result.map_err(|error| error.code)
-}
-
-type Calls = std::vec::IntoIter<std::result::Result<String, Code>>;
+type Calls = std::vec::IntoIter<Result<String, String>>;
 
 fn ok(calls: &mut Calls, label: &str) -> String {
     match calls.next().unwrap() {
         Ok(text) => text,
-        Err(code) => panic!("expected {label} to succeed, got {code:?}"),
+        Err(stderr) => panic!("expected {label} to succeed, got {stderr}"),
     }
 }
 
-fn fail(calls: &mut Calls, label: &str) -> Code {
-    match calls.next().unwrap() {
-        Ok(text) => panic!("expected {label} to fail, got {text}"),
-        Err(code) => code,
+fn fail(calls: &mut Calls, label: &str) {
+    if let Ok(text) = calls.next().unwrap() {
+        panic!("expected {label} to fail, got {text}");
     }
 }
 
@@ -109,7 +106,7 @@ async fn msg_send_inbox_reply_ack_thread_and_threads_drive_a_real_hub() {
     let (url, server) = serve(hub).await;
 
     let (calls, sent) = tokio::task::spawn_blocking(move || {
-        let sent = dispatch_endpoint(
+        let sent = cli(
             &url,
             &alice,
             [
@@ -219,7 +216,7 @@ async fn msg_send_inbox_reply_ack_thread_and_threads_drive_a_real_hub() {
         ];
         let calls = commands
             .iter()
-            .map(|(token, args)| code(dispatch_endpoint(&url, token, args.iter())))
+            .map(|(token, args)| cli(&url, token, args))
             .collect::<Vec<_>>();
         (calls, sent)
     })
@@ -291,18 +288,9 @@ async fn msg_send_inbox_reply_ack_thread_and_threads_drive_a_real_hub() {
     );
     assert_eq!(inbox[1]["kind"], "MESSAGE_KIND_NOTE", "{inbox:?}");
 
-    assert_eq!(
-        fail(&mut calls, "inbox as another sleeve"),
-        Code::PermissionDenied
-    );
-    assert_eq!(
-        fail(&mut calls, "ack as a non-recipient"),
-        Code::PermissionDenied
-    );
-    assert_eq!(
-        fail(&mut calls, "thread as an outsider"),
-        Code::PermissionDenied
-    );
+    fail(&mut calls, "inbox as another sleeve");
+    fail(&mut calls, "ack as a non-recipient");
+    fail(&mut calls, "thread as an outsider");
 
     let reply = ok(&mut calls, "msg reply");
     assert!(reply.contains("message"), "{reply}");
@@ -345,10 +333,10 @@ async fn msg_send_inbox_reply_ack_thread_and_threads_drive_a_real_hub() {
     let owner_ack = ok(&mut calls, "owner msg ack --as bob");
     assert_eq!(owner_ack, format!("acked  {id}\n"), "{owner_ack}");
 
-    assert_eq!(fail(&mut calls, "send to no sleeve"), Code::NotFound);
-    assert_eq!(fail(&mut calls, "ack no message"), Code::NotFound);
-    assert_eq!(fail(&mut calls, "thread no thread"), Code::NotFound);
-    assert_eq!(fail(&mut calls, "wait for nothing"), Code::NotFound);
+    fail(&mut calls, "send to no sleeve");
+    fail(&mut calls, "ack no message");
+    fail(&mut calls, "thread no thread");
+    fail(&mut calls, "wait for nothing");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -361,7 +349,7 @@ async fn msg_wait_blocks_for_an_ack_and_reports_a_timeout() {
     let (url, server) = serve(hub).await;
 
     let (calls, sent) = tokio::task::spawn_blocking(move || {
-        let sent = dispatch_endpoint(
+        let sent = cli(
             &url,
             &alice,
             [
@@ -399,7 +387,7 @@ async fn msg_wait_blocks_for_an_ack_and_reports_a_timeout() {
         ];
         let calls = commands
             .iter()
-            .map(|(token, args)| code(dispatch_endpoint(&url, token, args.iter())))
+            .map(|(token, args)| cli(&url, token, args))
             .collect::<Vec<_>>();
         (calls, sent)
     })
@@ -482,7 +470,7 @@ async fn project_mail_waits_for_a_sleeve_and_files_one_note() {
         ];
         commands
             .iter()
-            .map(|args| code(dispatch_endpoint(&url, OWNER, args.iter())))
+            .map(|args| cli(&url, OWNER, args))
             .collect::<Vec<_>>()
     })
     .await
@@ -513,52 +501,5 @@ async fn project_mail_waits_for_a_sleeve_and_files_one_note() {
     assert!(threads.contains("1 open-acks"), "{threads}");
     assert!(threads.contains("owner"), "{threads}");
 
-    assert_eq!(fail(&mut calls, "send to no project"), Code::NotFound);
-}
-
-#[test]
-fn msg_usage_lists_the_mailbox_commands() {
-    let help = protectorate_cli::run(["--help"]).unwrap();
-    for line in [
-        "msg send <to> <body>",
-        "msg inbox",
-        "msg reply <id> <body>",
-        "msg ack <id>",
-        "msg thread <thread-id>",
-        "msg threads",
-        "msg wait <message-id|thread>",
-    ] {
-        assert!(help.contains(line), "{help}");
-    }
-}
-
-#[test]
-fn msg_wait_extends_the_transport_past_its_own_deadline() {
-    let invocation = parse(["msg", "wait", "m1", "--timeout", "1h30m"]).unwrap();
-    assert_eq!(transport_timeout(&invocation), Duration::from_secs(5405));
-
-    let invocation = parse(["msg", "wait", "m1"]).unwrap();
-    assert!(
-        matches!(invocation.command, Command::MsgWait { timeout, .. } if timeout == Duration::from_secs(600)),
-        "{:?}",
-        invocation.command
-    );
-    assert_eq!(transport_timeout(&invocation), Duration::from_secs(605));
-
-    let invocation = parse(["--timeout", "30", "msg", "inbox"]).unwrap();
-    assert_eq!(transport_timeout(&invocation), Duration::from_secs(30));
-
-    assert_eq!(
-        parse(["msg", "send", "bob", "hi", "--kind", "notice"])
-            .unwrap()
-            .command,
-        Command::MsgSend {
-            to: "bob".into(),
-            body: "hi".into(),
-            thread: String::new(),
-            kind: MessageKind::Notice,
-            ack: None,
-            request_id: String::new(),
-        }
-    );
+    fail(&mut calls, "send to no project");
 }

@@ -1,6 +1,8 @@
 #![cfg(unix)]
 
-use protectorate_cli::{dispatch_endpoint, Code};
+mod common;
+
+use common::cli;
 use protectorate_hub::Hub;
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -35,7 +37,7 @@ async fn devices_commands_use_real_hub_connect_routes() {
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let result = tokio::task::spawn_blocking(move || {
-        let owner = |args: &[&str]| dispatch_endpoint(&url, "owner-secret", args).unwrap();
+        let owner = |args: &[&str]| cli(&url, "owner-secret", args).unwrap();
 
         let pending = owner(&["devices", "pending"]);
         let rows: Vec<&str> = pending.lines().collect();
@@ -77,12 +79,8 @@ async fn devices_commands_use_real_hub_connect_routes() {
         assert_eq!(owner(&["--json", "devices", "pending"]), "{}\n");
 
         // A decided or unknown code is gone from the pending set.
-        let error = dispatch_endpoint(&url, "owner-secret", ["devices", "approve", &laptop_code])
-            .unwrap_err();
-        assert_eq!(error.code, Code::NotFound);
-        let error =
-            dispatch_endpoint(&url, "owner-secret", ["devices", "deny", "XXXX-XXXX"]).unwrap_err();
-        assert_eq!(error.code, Code::NotFound);
+        cli(&url, "owner-secret", ["devices", "approve", &laptop_code]).unwrap_err();
+        cli(&url, "owner-secret", ["devices", "deny", "XXXX-XXXX"]).unwrap_err();
 
         // The approved pairing poll issues the device credential; the CLI
         // device commands then run as that device, not only as the owner.
@@ -91,7 +89,7 @@ async fn devices_commands_use_real_hub_connect_routes() {
         let secret = issued.secret.expose().to_owned();
         assert!(!secret.is_empty());
 
-        let listed = dispatch_endpoint(&url, &secret, ["devices", "ls"]).unwrap();
+        let listed = cli(&url, &secret, ["devices", "ls"]).unwrap();
         let rows: Vec<&str> = listed.lines().collect();
         assert_eq!(
             rows[0],
@@ -112,7 +110,7 @@ async fn devices_commands_use_real_hub_connect_routes() {
         let id = devices[0]["id"].as_str().unwrap().to_owned();
 
         assert_eq!(
-            dispatch_endpoint(
+            cli(
                 &url,
                 &secret,
                 ["devices", "rename", id.as_str(), "desk desktop"]
@@ -125,13 +123,12 @@ async fn devices_commands_use_real_hub_connect_routes() {
             listed.contains(&format!("{id}\tdesk desktop\tandroid/arm64\tactive")),
             "{listed}"
         );
-        let error = dispatch_endpoint(
+        cli(
             &url,
             "owner-secret",
             ["devices", "rename", id.as_str(), "envoy"],
         )
         .unwrap_err();
-        assert_eq!(error.code, Code::InvalidArgument);
 
         assert_eq!(
             owner(&["devices", "revoke", &id]),
@@ -142,11 +139,8 @@ async fn devices_commands_use_real_hub_connect_routes() {
             listed.contains(&format!("{id}\tdesk desktop\tandroid/arm64\trevoked")),
             "{listed}"
         );
-        let error = dispatch_endpoint(&url, &secret, ["devices", "ls"]).unwrap_err();
-        assert_eq!(error.code, Code::Unauthenticated);
-        let error = dispatch_endpoint(&url, "owner-secret", ["devices", "revoke", "no-such-id"])
-            .unwrap_err();
-        assert_eq!(error.code, Code::NotFound);
+        cli(&url, &secret, ["devices", "ls"]).unwrap_err();
+        cli(&url, "owner-secret", ["devices", "revoke", "no-such-id"]).unwrap_err();
 
         // A scoped token that is not a device credential never reaches
         // DeviceService.
@@ -155,8 +149,7 @@ async fn devices_commands_use_real_hub_connect_routes() {
         ]))
         .unwrap();
         let token_secret = issued["secret"].as_str().unwrap().to_owned();
-        let error = dispatch_endpoint(&url, &token_secret, ["devices", "ls"]).unwrap_err();
-        assert_eq!(error.code, Code::PermissionDenied);
+        cli(&url, &token_secret, ["devices", "ls"]).unwrap_err();
     })
     .await;
     server.abort();

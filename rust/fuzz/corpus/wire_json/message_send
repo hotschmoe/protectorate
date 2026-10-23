@@ -1,0 +1,2 @@
+/protectorate.v1.MessageService/Send
+{"from":"a","to":"proj:p2","kind":"request","ackRequired":true,"body":"queued"}

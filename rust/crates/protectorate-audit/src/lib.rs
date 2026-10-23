@@ -9,9 +9,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
-pub const OUTCOME_OK: &str = "ok";
-pub const OUTCOME_DENIED: &str = "denied";
-pub const OUTCOME_ERROR: &str = "error";
 pub const PAGE_SCAN_BUDGET: usize = 200_000;
 #[derive(Debug)]
 pub enum Error {

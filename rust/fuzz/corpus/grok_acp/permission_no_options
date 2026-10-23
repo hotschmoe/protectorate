@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":100,"method":"session/request_permission","params":{"sessionId":"fuzz-session","toolCall":{"toolCallId":"call-1","kind":"edit","title":"Write `/x/hello.txt`"},"options":[]}}

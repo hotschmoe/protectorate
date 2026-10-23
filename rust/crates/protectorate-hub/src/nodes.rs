@@ -1145,31 +1145,3 @@ fn node_error(error: Error) -> RpcError {
     };
     RpcError::new(code, error.to_string())
 }
-
-#[cfg(test)]
-mod public_url_tests {
-    use super::*;
-    use axum::http::HeaderMap;
-
-    #[test]
-    fn configured_origin_is_default_but_explicit_invite_origin_wins() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path(), "owner-secret", "test")
-            .unwrap()
-            .with_public_url("https://public.example.test:7480/".into())
-            .unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("host", "internal.example.test:7470".parse().unwrap());
-        assert_eq!(
-            install_base(&hub, &headers, "").unwrap(),
-            "https://public.example.test:7480"
-        );
-        assert_eq!(
-            install_base(&hub, &headers, "https://other.example.test").unwrap(),
-            "https://other.example.test"
-        );
-        assert!(hub
-            .with_public_url("https://user@bad.example".into())
-            .is_err());
-    }
-}

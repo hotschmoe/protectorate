@@ -1,0 +1,1 @@
+{"op":"send","at":"2026-10-19T14:34:56.5+02:00","msg":{"id":"m1","thread":"t1","from":"a","to":"b","kind":"note","body":"hi","created":"2026-10-19T14:34:56.5+02:00","recipients":["b"],"deliveries":{"b":{"since":"2026-10-19T14:34:56.500000000+02:00"}}}}

@@ -7,3 +7,7 @@ __pycache__/
 
 /e2e-out/
 *.exe
+/rust/fuzz/target/
+/rust/fuzz/artifacts/
+/rust/fuzz/coverage/
+/rust/fuzz/Cargo.lock

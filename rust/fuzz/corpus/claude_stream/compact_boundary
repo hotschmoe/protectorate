@@ -1,0 +1,2 @@
+{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":120,"post_tokens":30,"trigger":"auto"}}
+{"type":"result","session_id":"fuzz-session","subtype":"success","is_error":false,"modelUsage":{"claude-test":{"contextWindow":200000}}}

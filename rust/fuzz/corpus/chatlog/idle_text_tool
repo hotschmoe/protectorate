@@ -1,0 +1,4 @@
+{"seq":1,"time_ms":1700000000001,"payload":{"state":{"state":"CHAT_STATE_IDLE"}}}
+{"seq":2,"time_ms":1700000000002,"payload":{"user":{"text":"hi","from":"owner","requestId":"r1"}}}
+{"seq":3,"time_ms":1700000000003,"payload":{"text":{"messageId":"m1","delta":"hello","thinking":false}}}
+{"seq":4,"time_ms":1700000000004,"payload":{"toolCall":{"id":"t1","name":"Bash","input":"ls"}}}

@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"fuzz-session"}
+{"type":"assistant","message":{"id":"msg-c","model":"m","content":[{"type":"text","text":"po"},{"type":"tool_use","id":"t","name":"Bash","input":{"command":"true"}}]}}
+{"type":"assistant","message":{"id":"msg-c","model":"m","content":[{"type":"text","text":"ng"},{"type":"tool_use","id":"t","name":"Bash","input":{"command":"true"}}]}}
+{"type":"result","session_id":"fuzz-session","subtype":"success","is_error":false,"modelUsage":{"claude-test":{"contextWindow":200000}}}

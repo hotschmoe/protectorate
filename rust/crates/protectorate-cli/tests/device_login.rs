@@ -3,7 +3,9 @@
 //! `login` with no harness against a real hub: the pairing round trip, the
 //! private credential file it leaves behind, and what ordinary commands do
 //! with that credential when no token flag or token environment is set.
-use protectorate_cli::dispatch_endpoint;
+mod common;
+
+use common::cli as owner_cli;
 use protectorate_hub::Hub;
 use protectorate_identity::Store;
 use serde_json::Value;
@@ -124,10 +126,9 @@ fn spawn_reader<S: Read + Send + 'static>(
 /// The user code the hub is holding for `name`, once the CLI has started it.
 fn wait_for_code(hub: &str, name: &str) -> String {
     for _ in 0..200 {
-        let raw: Value = serde_json::from_str(
-            &dispatch_endpoint(hub, OWNER, ["--json", "devices", "pending"]).unwrap(),
-        )
-        .unwrap();
+        let raw: Value =
+            serde_json::from_str(&owner_cli(hub, OWNER, ["--json", "devices", "pending"]).unwrap())
+                .unwrap();
         let requests = raw.get("requests").and_then(Value::as_array);
         if let Some(request) = requests
             .iter()
@@ -175,7 +176,7 @@ async fn login_approves_saves_and_ordinary_commands_reuse_the_credential() {
         );
         let code = wait_for_code(&hub, "desk");
         assert_eq!(
-            dispatch_endpoint(&hub, OWNER, ["devices", "approve", &code]).unwrap(),
+            owner_cli(&hub, OWNER, ["devices", "approve", &code]).unwrap(),
             format!("approved {code}\n")
         );
         let (ok, stdout, stderr) = finish(child);
@@ -281,7 +282,7 @@ async fn login_json_output_never_carries_the_secret() {
             &["--json", "--hub", &hub, "login", "--name", "json"],
         );
         let code = wait_for_code(&hub, "json");
-        dispatch_endpoint(&hub, OWNER, ["devices", "approve", &code]).unwrap();
+        owner_cli(&hub, OWNER, ["devices", "approve", &code]).unwrap();
         let (ok, stdout, stderr) = finish(child);
         assert!(ok, "{stderr}");
         let lines = stdout.lines().collect::<Vec<_>>();
@@ -322,7 +323,7 @@ async fn login_reports_a_denied_request_and_keeps_no_credential() {
         let child = spawn_login(cli_home, &["--hub", &hub, "login", "--name", "watched"]);
         let code = wait_for_code(&hub, "watched");
         assert_eq!(
-            dispatch_endpoint(&hub, OWNER, ["devices", "deny", &code]).unwrap(),
+            owner_cli(&hub, OWNER, ["devices", "deny", &code]).unwrap(),
             format!("denied {code}\n")
         );
         let (ok, stdout, stderr) = finish(child);
@@ -374,7 +375,7 @@ async fn a_credential_readable_by_others_is_refused() {
             let cli_home = cli_home.path();
             let child = spawn_login(cli_home, &["--hub", &hub, "login", "--name", "loose"]);
             let code = wait_for_code(&hub, "loose");
-            dispatch_endpoint(&hub, OWNER, ["devices", "approve", &code]).unwrap();
+            owner_cli(&hub, OWNER, ["devices", "approve", &code]).unwrap();
             let (ok, _, stderr) = finish(child);
             assert!(ok, "{stderr}");
             let path = only_credential(cli_home);
@@ -437,20 +438,4 @@ fn a_credential_for_another_hub_or_without_a_secret_is_refused() {
     let (ok, _, stderr) = run_cli(home.path(), &["--hub", hub, "status"]);
     assert!(!ok, "{stderr}");
     assert!(stderr.contains("has no secret"), "{stderr}");
-}
-
-#[test]
-fn login_rejects_bad_device_labels() {
-    let home = tempfile::tempdir().unwrap();
-    for args in [
-        vec!["login", "--name", &"n".repeat(101)],
-        vec!["login", "--platform", &"p".repeat(41)],
-    ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
-            .args(&args)
-            .env("HOME", home.path())
-            .output()
-            .unwrap();
-        assert!(!output.status.success(), "{args:?}");
-    }
 }

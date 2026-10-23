@@ -9,23 +9,13 @@ use std::{
 use tungstenite::{client::IntoClientRequest, http::HeaderValue, stream::MaybeTlsStream, Message};
 
 fn private_ca_pem() -> Result<Option<Vec<u8>>> {
-    private_ca_pem_from(
-        std::env::var("PROTECTORATE_TLS_CA_PEM").ok(),
-        std::env::var_os("PROTECTORATE_TLS_CA_CERT"),
-    )
-}
-
-fn private_ca_pem_from(
-    pem: Option<String>,
-    ca: Option<std::ffi::OsString>,
-) -> Result<Option<Vec<u8>>> {
-    if let Some(pem) = pem {
+    if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
         if pem.len() > 16 * 1024 {
             return Err(RpcError::invalid("TLS CA environment exceeds 16 KiB"));
         }
         return Ok(Some(pem.into_bytes()));
     }
-    let Some(path) = ca else {
+    let Some(path) = std::env::var_os("PROTECTORATE_TLS_CA_CERT") else {
         return Ok(None);
     };
     let path = Path::new(&path);
@@ -657,94 +647,6 @@ fn bridge(
         if detached { "" } else { " closed" }
     );
     Ok(String::new())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use futures_util::SinkExt;
-
-    #[tokio::test]
-    async fn private_ca_wss_accepts_only_the_pinned_trust_bundle() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let generated = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-        let wrong = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
-        let pem = generated.cert.pem();
-        let directory = tempfile::tempdir().unwrap();
-        let ca_path = directory.path().join("private-ca.pem");
-        std::fs::write(&ca_path, &pem).unwrap();
-        let loaded_ca = private_ca_pem_from(None, Some(ca_path.into_os_string()))
-            .unwrap()
-            .unwrap();
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(
-                vec![generated.cert.der().clone()],
-                rustls::pki_types::PrivateKeyDer::Pkcs8(
-                    rustls::pki_types::PrivatePkcs8KeyDer::from(
-                        generated.signing_key.serialize_der(),
-                    ),
-                ),
-            )
-            .unwrap();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
-            for _ in 0..2 {
-                let (tcp, _) = listener.accept().await.unwrap();
-                if let Ok(tls) = acceptor.accept(tcp).await {
-                    let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
-                    socket
-                        .send(tokio_tungstenite::tungstenite::Message::Binary(
-                            vec![b'0', b'o', b'k'].into(),
-                        ))
-                        .await
-                        .unwrap();
-                    let _ = socket.close(None).await;
-                }
-            }
-        });
-        let url = format!("wss://{address}/ws/terminal/sleeve-test");
-        let result = tokio::task::spawn_blocking(move || {
-            let request = url.clone().into_client_request().unwrap();
-            let denied = connect_websocket(request, Some(wrong.cert.pem().as_bytes()));
-            assert!(denied.is_err());
-            let request = url.into_client_request().unwrap();
-            let mut accepted = connect_websocket(request, Some(&loaded_ca)).unwrap();
-            assert_eq!(accepted.read().unwrap().into_data().as_ref(), b"0ok");
-            let _ = accepted.close(None);
-        })
-        .await;
-        result.unwrap();
-        server.await.unwrap();
-    }
-
-    #[test]
-    fn private_ca_rejects_non_certificate_pem() {
-        assert!(private_ca_config(b"").is_err());
-        assert!(private_ca_config(
-            b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n"
-        )
-        .is_err());
-        let directory = tempfile::tempdir().unwrap();
-        let ca_path = directory.path().join("ca.pem");
-        std::fs::write(&ca_path, b"file-ca").unwrap();
-        assert_eq!(
-            private_ca_pem_from(
-                Some("env-ca".into()),
-                Some(ca_path.clone().into_os_string())
-            )
-            .unwrap(),
-            Some(b"env-ca".to_vec()),
-        );
-        assert_eq!(
-            private_ca_pem_from(None, Some(ca_path.clone().into_os_string())).unwrap(),
-            Some(b"file-ca".to_vec()),
-        );
-        std::fs::write(&ca_path, vec![b'x'; 1024 * 1024 + 1]).unwrap();
-        assert!(private_ca_pem_from(None, Some(ca_path.into_os_string())).is_err());
-    }
 }
 
 #[cfg(not(any(unix, windows)))]

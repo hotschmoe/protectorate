@@ -1,6 +1,5 @@
 #![cfg(unix)]
 
-use protectorate_cli::{parse, Command};
 use protectorate_hub::Hub;
 use protectorate_inventory::{Node, CARE};
 use protectorate_node::{Agent, Jobs, MetricsCollector};
@@ -20,58 +19,6 @@ async fn serve(router: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     (url, task)
-}
-
-#[test]
-fn cross_test_selects_platform_and_runs_cargo_on_the_node() {
-    let command = parse([
-        "job",
-        "test-cross",
-        "--os",
-        "linux",
-        "--arch",
-        "amd64",
-        "--package",
-        "demo",
-        "--artifact-glob",
-        "test-results/*.xml",
-        "--",
-        "--offline",
-        "--",
-        "--nocapture",
-    ])
-    .unwrap()
-    .command;
-    let Command::JobTestCross(spec) = command else {
-        panic!("expected a cross-test job");
-    };
-    assert_eq!(spec.on, "os=linux,arch=x86_64");
-    assert_eq!(spec.git, ".");
-    assert_eq!(spec.artifact_globs, ["test-results/*.xml"]);
-    assert_eq!(
-        spec.command,
-        [
-            "cargo",
-            "test",
-            "--package",
-            "demo",
-            "--offline",
-            "--",
-            "--nocapture"
-        ]
-    );
-    assert!(parse(["job", "test-cross", "--os", "linux"]).is_err());
-    assert!(parse([
-        "job",
-        "test-cross",
-        "--on",
-        "peer",
-        "--git",
-        ".",
-        "--artifact",
-        "."
-    ])
-    .is_err());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

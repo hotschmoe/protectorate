@@ -1151,7 +1151,6 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1168,7 +1167,6 @@ dependencies = [
  "protectorate-fsutil",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1178,7 +1176,6 @@ dependencies = [
  "cap-std",
  "chrono",
  "fs2",
- "protectorate-tailnet",
  "serde",
  "serde_json",
  "sha2",
@@ -1191,7 +1188,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1212,18 +1208,15 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "futures-util",
  "getrandom 0.2.17",
  "libc",
  "protectorate-auth",
- "protectorate-backlog",
  "protectorate-connect-client",
  "protectorate-directory",
  "protectorate-fsutil",
  "protectorate-hub",
  "protectorate-identity",
  "protectorate-inventory",
- "protectorate-lease",
  "protectorate-mailbox",
  "protectorate-node",
  "protectorate-node-metrics",
@@ -1233,15 +1226,12 @@ dependencies = [
  "protectorate-svcgen",
  "protectorate-wire",
  "protectorate-xfer",
- "rcgen",
  "rustls",
  "rustls-pemfile",
  "serde_json",
  "sha2",
  "tempfile",
  "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
  "tungstenite",
  "windows-sys 0.61.2",
 ]
@@ -1260,12 +1250,10 @@ dependencies = [
 name = "protectorate-connect-client"
 version = "0.1.0"
 dependencies = [
- "axum",
  "getrandom 0.2.17",
  "protectorate-wire",
  "rustls",
  "serde_json",
- "tokio",
  "ureq",
  "zeroize",
 ]
@@ -1304,13 +1292,38 @@ dependencies = [
  "protectorate-fsutil",
  "serde",
  "serde_json",
- "tempfile",
  "toml",
 ]
 
 [[package]]
 name = "protectorate-fsutil"
 version = "0.1.0"
+
+[[package]]
+name = "protectorate-fuzz"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "protectorate-backlog",
+ "protectorate-chatlog",
+ "protectorate-claude-driver",
+ "protectorate-cli",
+ "protectorate-codex-driver",
+ "protectorate-directory",
+ "protectorate-grok-driver",
+ "protectorate-identity",
+ "protectorate-mailbox",
+ "protectorate-mcpbridge",
+ "protectorate-pi-driver",
+ "protectorate-quota",
+ "protectorate-release",
+ "protectorate-sandbox",
+ "protectorate-wire",
+ "protectorate-xfer",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
 
 [[package]]
 name = "protectorate-grok-driver"
@@ -1320,7 +1333,6 @@ dependencies = [
  "protectorate-chatlog",
  "protectorate-sandbox",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1331,7 +1343,6 @@ dependencies = [
  "chrono",
  "getrandom 0.2.17",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1398,7 +1409,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
- "tempfile",
  "zeroize",
 ]
 
@@ -1409,7 +1419,6 @@ dependencies = [
  "protectorate-fsutil",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1420,7 +1429,6 @@ dependencies = [
  "protectorate-fsutil",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1442,11 +1450,9 @@ dependencies = [
  "prost-reflect",
  "protectorate-connect-client",
  "protectorate-wire",
- "rcgen",
  "rustls-pemfile",
  "serde_json",
  "subtle",
- "tempfile",
  "tokio",
  "tokio-rustls",
  "windows-sys 0.61.2",
@@ -1462,7 +1468,6 @@ dependencies = [
  "getrandom 0.2.17",
  "glob",
  "libc",
- "protectorate-connect-client",
  "protectorate-fsutil",
  "protectorate-node-metrics",
  "protectorate-sandbox",
@@ -1483,17 +1488,12 @@ dependencies = [
 name = "protectorate-node-client"
 version = "0.1.0"
 dependencies = [
- "axum",
  "base64 0.22.1",
  "getrandom 0.2.17",
  "protectorate-connect-client",
- "protectorate-node",
- "protectorate-node-metrics",
  "protectorate-wire",
  "protectorate-xfer",
  "serde_json",
- "tempfile",
- "tokio",
 ]
 
 [[package]]
@@ -1504,7 +1504,6 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "tempfile",
  "windows-sys 0.61.2",
 ]
 
@@ -1517,7 +1516,6 @@ dependencies = [
  "protectorate-inventory",
  "protectorate-node-metrics",
  "serde_json",
- "tempfile",
  "zeroize",
 ]
 
@@ -1603,7 +1601,6 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "tempfile",
  "ureq",
  "windows-sys 0.61.2",
 ]
@@ -1617,7 +1614,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tempfile",
  "ureq",
 ]
 
@@ -1637,7 +1633,6 @@ name = "protectorate-server"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
  "chrono",
  "futures-util",
  "libc",
@@ -1650,7 +1645,6 @@ dependencies = [
  "protectorate-fsutil",
  "protectorate-grok-driver",
  "protectorate-hub",
- "protectorate-inventory",
  "protectorate-node",
  "protectorate-node-client",
  "protectorate-node-metrics",
@@ -1665,14 +1659,10 @@ dependencies = [
  "protectorate-tailnet-admin",
  "protectorate-tailnet-discovery",
  "protectorate-tailnet-install",
- "protectorate-tailnet-map",
  "protectorate-tailnet-member",
- "protectorate-tailnet-poll",
  "protectorate-tailnet-runtime",
  "protectorate-tailnet-stream",
- "protectorate-tailnet-tcp",
  "protectorate-wire",
- "rcgen",
  "rustls-pemfile",
  "serde_json",
  "sha2",
@@ -1695,7 +1685,6 @@ name = "protectorate-sleeve-layout"
 version = "0.1.0"
 dependencies = [
  "libc",
- "tempfile",
 ]
 
 [[package]]
@@ -1705,7 +1694,6 @@ dependencies = [
  "protectorate-fsutil",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -1897,7 +1885,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tower",
 ]
 
 [[package]]

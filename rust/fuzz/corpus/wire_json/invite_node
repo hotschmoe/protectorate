@@ -1,0 +1,2 @@
+/protectorate.v1.NodeService/InviteNode
+{"name":"gpu1","tier":"NODE_TIER_SHARED","pools":["gpu"],"ttl":"5400s"}

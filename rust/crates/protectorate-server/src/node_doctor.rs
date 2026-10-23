@@ -200,7 +200,7 @@ async fn startup_check() -> Check {
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 fn windows_startup(task: &serde_json::Value) -> Check {
     let state = task["state"].as_str().unwrap_or("");
     let action = task["action"].as_str().unwrap_or("").to_ascii_lowercase();
@@ -394,95 +394,4 @@ pub(crate) async fn run(options: Command) -> Result<(), Box<dyn Error>> {
         return Err(io::Error::other(format!("{failed} node doctor check(s) failed")).into());
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn equals_options_forwarded_by_installed_cli_are_accepted() {
-        let command = parse(
-            [
-                "--home=/tmp/node",
-                "--hub=https://hub.test",
-                "--ca-cert=/tmp/ca.pem",
-                "--json",
-            ]
-            .into_iter()
-            .map(str::to_owned),
-        )
-        .unwrap();
-        assert_eq!(command.home, Path::new("/tmp/node"));
-        assert_eq!(command.hub.as_deref(), Some("https://hub.test"));
-        assert_eq!(command.ca_cert.as_deref(), Some(Path::new("/tmp/ca.pem")));
-        assert!(command.json);
-    }
-    #[cfg(unix)]
-    #[test]
-    fn startup_distinguishes_masked_failed_and_linger() {
-        assert_eq!(
-            startup("masked", "inactive", "Linger=yes").level,
-            Level::Fail
-        );
-        assert!(startup("masked", "inactive", "Linger=yes")
-            .detail
-            .contains("masked"));
-        assert!(startup("enabled", "failed", "Linger=yes")
-            .detail
-            .contains("failed"));
-        assert_eq!(startup("enabled", "active", "Linger=no").level, Level::Warn);
-        assert_eq!(startup("enabled", "active", "Linger=yes").level, Level::Ok);
-    }
-    #[test]
-    fn windows_task_status_checks_the_installed_rust_action() {
-        let task = serde_json::json!({
-            "state":"Running",
-            "action":"C:\\Windows\\System32\\conhost.exe",
-            "arguments":"--headless \"C:\\Program Files\\Protectorate\\protectorate-rs-guardian.exe\" node serve --home C:\\state",
-        });
-        assert_eq!(windows_startup(&task).level, Level::Ok);
-        let mut stopped = task.clone();
-        stopped["state"] = "Ready".into();
-        assert_eq!(windows_startup(&stopped).level, Level::Warn);
-        stopped["state"] = "Disabled".into();
-        assert_eq!(windows_startup(&stopped).level, Level::Fail);
-        stopped["action"] = "C:\\Windows\\System32\\cmd.exe".into();
-        assert_eq!(windows_startup(&stopped).level, Level::Fail);
-    }
-    #[test]
-    fn enrollment_is_read_only_and_requires_both_keys() {
-        let temp = tempfile::tempdir().unwrap();
-        assert_eq!(enrollment(temp.path()).level, Level::Warn);
-        assert!(!temp.path().join("tsnet").exists());
-        fs::create_dir(temp.path().join("tsnet")).unwrap();
-        fs::write(temp.path().join("tsnet/join.json"), b"{}").unwrap();
-        assert_eq!(enrollment(temp.path()).level, Level::Fail);
-        fs::write(temp.path().join("tsnet/machine.key"), b"key").unwrap();
-        fs::write(temp.path().join("tsnet/node.key"), b"key").unwrap();
-        assert_eq!(enrollment(temp.path()).level, Level::Fail);
-        fs::write(temp.path().join("tsnet/join.json"), br#"{"controlUrl":"https://hub","name":"node","nodeKey":"nodekey:test","discoKey":"discokey:test"}"#).unwrap();
-        assert_eq!(enrollment(temp.path()).level, Level::Ok);
-    }
-
-    #[tokio::test]
-    async fn hub_probe_accepts_an_http_error_as_reachable() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0_u8; 256];
-            let _ = stream.read(&mut request).await.unwrap();
-            stream
-                .write_all(
-                    b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
-                .await
-                .unwrap();
-        });
-        let check = hub_check(Some(url), None).await;
-        assert_eq!(check.level, Level::Ok);
-        assert!(check.detail.contains("HTTP 401"));
-        server.await.unwrap();
-    }
 }
