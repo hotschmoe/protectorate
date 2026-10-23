@@ -223,6 +223,7 @@ const Lease$json = {
       '10': 'state'
     },
     {'1': 'queue_position', '3': 10, '4': 1, '5': 5, '10': 'queuePosition'},
+    {'1': 'run_id', '3': 11, '4': 1, '5': 9, '10': 'runId'},
   ],
   '8': [
     {'1': '_gpu_index'},
@@ -237,8 +238,8 @@ final $typed_data.Uint8List leaseDescriptor = $convert.base64Decode(
     'lvblIDdHRsEjsKC2FjcXVpcmVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFt'
     'cFIKYWNxdWlyZWRBdBI5CgpleHBpcmVzX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbW'
     'VzdGFtcFIJZXhwaXJlc0F0EjEKBXN0YXRlGAkgASgOMhsucHJvdGVjdG9yYXRlLnYxLkxlYXNl'
-    'U3RhdGVSBXN0YXRlEiUKDnF1ZXVlX3Bvc2l0aW9uGAogASgFUg1xdWV1ZVBvc2l0aW9uQgwKCl'
-    '9ncHVfaW5kZXg=');
+    'U3RhdGVSBXN0YXRlEiUKDnF1ZXVlX3Bvc2l0aW9uGAogASgFUg1xdWV1ZVBvc2l0aW9uEhUKBn'
+    'J1bl9pZBgLIAEoCVIFcnVuSWRCDAoKX2dwdV9pbmRleA==');
 
 const $core.Map<$core.String, $core.dynamic> LeaseServiceBase$json = {
   '1': 'LeaseService',

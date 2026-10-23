@@ -242,3 +242,58 @@ pub fn directory_state(data: &[u8]) {
         .and_then(|p| p.refs);
     assert_eq!(stored, Some(refs));
 }
+
+/// Any audit directory verifies or reports a break without panicking. A
+/// write always extends the chain, a chain that verified still verifies
+/// afterwards, and then changing any one byte of the log breaks it.
+pub fn audit_log(data: &[u8]) {
+    let [log, head, flip] = fields(data, 3)[..] else {
+        unreachable!()
+    };
+    let dir = scratch();
+    let file = dir.path().join("audit-2026-01.jsonl");
+    fs::write(&file, log).unwrap();
+    if !head.is_empty() {
+        fs::write(dir.path().join("head.json"), head).unwrap();
+    }
+    let audit = protectorate_audit::Audit::new(dir.path());
+    let before = audit.verify();
+    let _ = audit.page(protectorate_audit::Query {
+        limit: 3,
+        ..Default::default()
+    });
+    let Ok(written) = audit.try_write(protectorate_audit::Entry {
+        actor: "fuzz".into(),
+        procedure: "probe".into(),
+        ..Default::default()
+    }) else {
+        return;
+    };
+    let Ok(before) = before else {
+        return;
+    };
+    let after = audit.verify().expect("a write extends a verified chain");
+    assert_eq!(after.entries, before.entries + 1);
+    assert_eq!(after.head, written);
+    assert_eq!(after.beyond_head, 0);
+    let target = if fs::metadata(&file).unwrap().len() > 0 {
+        file
+    } else {
+        fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p != &file && p.extension().is_some_and(|x| x == "jsonl"))
+            .unwrap()
+    };
+    let mut bytes = fs::read(&target).unwrap();
+    let at = flip
+        .iter()
+        .fold(0usize, |n, b| n.wrapping_mul(31).wrapping_add(*b as usize))
+        % bytes.len();
+    bytes[at] ^= flip.first().copied().filter(|b| *b != 0).unwrap_or(1);
+    fs::write(&target, &bytes).unwrap();
+    assert!(
+        audit.verify().is_err(),
+        "a changed byte at {at} still verified"
+    );
+}

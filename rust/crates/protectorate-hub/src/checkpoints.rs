@@ -29,7 +29,7 @@ const TIMEOUT: Duration = Duration::from_secs(300);
 const SCRIPT: &str = r#"set -eu
 export GIT_DIR="$HOME/store" GIT_INDEX_FILE="$HOME/index"
 refs=refs/protectorate/checkpoints
-format='%(refname:lstrip=3) %(objectname) %(creatordate:unix) %(contents:subject)'
+format='%(refname:lstrip=3) %(objectname) %(creatordate:unix) %(trailers:key=Run-Id,valueonly,separator=) %(contents:subject)'
 test -e .git || { echo "workspace is not a git repository" >&2; exit 3; }
 if ! test -d "$GIT_DIR"; then
   git init -q --bare "$GIT_DIR"
@@ -50,7 +50,9 @@ snapshot() {
     printf 'same '; show "$last"; return
   fi
   id=$(( ${last:-0} + 1 ))
-  git update-ref "$refs/$id" "$(printf '%s\n' "$1" | git commit-tree "$tree")"
+  msg=$1
+  test -z "$RUN_ID" || msg=$(printf '%s\n\nRun-Id: %s' "$1" "$RUN_ID")
+  git update-ref "$refs/$id" "$(printf '%s\n' "$msg" | git commit-tree "$tree")"
   old=$(ids | head -n -"$KEEP")
   for gone in $old; do git update-ref -d "$refs/$gone"; done
   test -z "$old" || git prune --expire=now
@@ -80,16 +82,18 @@ pub(crate) struct Checkpoint {
     pub id: u64,
     pub commit: String,
     pub created: i64,
+    pub run_id: String,
     pub reason: String,
 }
 
 impl Checkpoint {
     fn parse(line: &str) -> Option<Self> {
-        let mut parts = line.splitn(4, ' ');
+        let mut parts = line.splitn(5, ' ');
         Some(Self {
             id: parts.next()?.parse().ok()?,
             commit: parts.next()?.to_owned(),
             created: parts.next()?.parse().ok()?,
+            run_id: parts.next()?.to_owned(),
             reason: parts.next().unwrap_or_default().to_owned(),
         })
     }
@@ -102,6 +106,7 @@ impl Checkpoint {
                 .unwrap_or_default()
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             "reason": self.reason,
+            "runId": self.run_id,
         })
     }
 }
@@ -142,32 +147,28 @@ impl Store {
     /// sleeve was running and `wait` was false.
     pub(crate) fn create(
         &self,
-        sleeve: &str,
-        workspace: &Path,
+        row: &Record,
         reason: &str,
         wait: bool,
     ) -> std::result::Result<Option<(Checkpoint, bool)>, String> {
-        let Some(output) = self.run(sleeve, workspace, &["create", reason], wait)? else {
+        let Some(output) = self.run(row, &["create", reason], wait)? else {
             return Ok(None);
         };
         snapshot_line(&output).map(Some)
     }
 
-    fn list(&self, sleeve: &str, workspace: &Path) -> std::result::Result<Vec<Checkpoint>, String> {
-        let output = self
-            .run(sleeve, workspace, &["list"], true)?
-            .unwrap_or_default();
+    fn list(&self, row: &Record) -> std::result::Result<Vec<Checkpoint>, String> {
+        let output = self.run(row, &["list"], true)?.unwrap_or_default();
         Ok(output.lines().filter_map(Checkpoint::parse).collect())
     }
 
     fn run(
         &self,
-        sleeve: &str,
-        workspace: &Path,
+        row: &Record,
         args: &[&str],
         wait: bool,
     ) -> std::result::Result<Option<String>, String> {
-        self.run_bounded(sleeve, workspace, args, wait)
+        self.run_bounded(row, args, wait)
             .map(|output| output.map(|(text, _)| text))
     }
 
@@ -175,11 +176,11 @@ impl Store {
     /// and process. Output beyond the limit is dropped and reported.
     fn run_bounded(
         &self,
-        sleeve: &str,
-        workspace: &Path,
+        row: &Record,
         args: &[&str],
         wait: bool,
     ) -> std::result::Result<Option<(String, bool)>, String> {
+        let (sleeve, workspace) = (row.name.as_str(), Path::new(&row.workspace));
         let root = self
             .state_root
             .join("helpers")
@@ -240,6 +241,7 @@ impl Store {
         options.environment = BTreeMap::from([
             ("PATH".into(), "/usr/bin:/bin".into()),
             ("KEEP".into(), KEEP.to_string()),
+            ("RUN_ID".into(), row.run_id.clone()),
             ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
             ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
             ("GIT_TERMINAL_PROMPT".into(), "0".into()),
@@ -299,20 +301,20 @@ fn snapshot_line(output: &str) -> std::result::Result<(Checkpoint, bool), String
 
 /// Checkpoint a chat sleeve after a turn settles, skipping if one is already
 /// running. Failures are reported, never raised into the chat.
-pub(crate) fn after_turn(store: Store, sleeve: String, workspace: PathBuf) {
-    if !workspace.join(".git").exists() {
+pub(crate) fn after_turn(store: Store, row: Record) {
+    if !Path::new(&row.workspace).join(".git").exists() {
         return;
     }
     thread::spawn(move || {
-        if let Err(error) = store.create(&sleeve, &workspace, "turn", false) {
-            eprintln!("checkpoint {sleeve}: {error}");
+        if let Err(error) = store.create(&row, "turn", false) {
+            eprintln!("checkpoint {}: {error}", row.name);
         }
     });
 }
 
 pub(crate) fn before_resleeve(hub: &Hub, row: &Record) {
     if let Some(store) = Store::for_hub(hub) {
-        if let Err(error) = store.create(&row.name, Path::new(&row.workspace), "resleeve", true) {
+        if let Err(error) = store.create(row, "resleeve", true) {
             eprintln!("checkpoint {}: {error}", row.name);
         }
     }
@@ -385,11 +387,10 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let result = tokio::task::spawn_blocking(move || {
                     let name = string(&value, "name");
                     let (store, row) = authorize(&hub, &auth, &name)?;
-                    let workspace = PathBuf::from(&row.workspace);
                     match method.as_str() {
                         "CreateCheckpoint" => {
                             let (checkpoint, unchanged) = store
-                                .create(&name, &workspace, "manual", true)
+                                .create(&row, "manual", true)
                                 .map_err(failed)?
                                 .ok_or_else(|| {
                                     RpcError::new(Code::Internal, "checkpoint lock was not taken")
@@ -398,7 +399,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         }
                         "ListCheckpoints" => Ok(json!({
                             "checkpoints": store
-                                .list(&name, &workspace)
+                                .list(&row)
                                 .map_err(failed)?
                                 .iter()
                                 .map(Checkpoint::json)
@@ -411,8 +412,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             }
                             let (diff, truncated) = store
                                 .run_bounded(
-                                    &name,
-                                    &workspace,
+                                    &row,
                                     &["diff", &from.to_string(), &to.to_string()],
                                     true,
                                 )
@@ -432,7 +432,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                                 ));
                             }
                             let output = store
-                                .run(&name, &workspace, &["restore", &target.to_string()], true)
+                                .run(&row, &["restore", &target.to_string()], true)
                                 .map_err(failed)?
                                 .unwrap_or_default();
                             let (before, _) = snapshot_line(&output).map_err(failed)?;

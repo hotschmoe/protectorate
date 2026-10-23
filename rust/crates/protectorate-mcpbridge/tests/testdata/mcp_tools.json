@@ -1772,6 +1772,10 @@
           "description": "supervised runs a chat sleeve's harness in its asking permission mode instead of autonomous: Claude --permission-mode default, Codex approvalPolicy untrusted with its workspace-write sandbox, Grok /always-approve off. pi has no gate and ignores it.",
           "type": "boolean"
         },
+        "tokenBudget": {
+          "description": "token_budget caps the run's weighted tokens, counted from the harness's usage reports: input + output + 0.1 x cache reads + 1.25 x cache writes. At 90% the hub posts a chat notice; at 100% it interrupts the turn and refuses new ones. Zero means no cap. A sleeve spawned by Envoy or another sleeve with a budget gets at most that parent's remaining budget (all of it when zero), and its usage counts against the parent too. Chat mode only.",
+          "type": "integer"
+        },
         "workspace": {
           "description": "workspace is an absolute directory path on the hub, or a git URL to clone.",
           "type": "string"

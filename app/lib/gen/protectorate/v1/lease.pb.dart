@@ -591,6 +591,7 @@ class Lease extends $pb.GeneratedMessage {
     $1.Timestamp? expiresAt,
     LeaseState? state,
     $core.int? queuePosition,
+    $core.String? runId,
   }) {
     final result = Lease._();
     if (id != null) result.id = id;
@@ -603,6 +604,7 @@ class Lease extends $pb.GeneratedMessage {
     if (expiresAt != null) result.expiresAt = expiresAt;
     if (state != null) result.state = state;
     if (queuePosition != null) result.queuePosition = queuePosition;
+    if (runId != null) result.runId = runId;
     return result;
   }
 
@@ -634,6 +636,7 @@ class Lease extends $pb.GeneratedMessage {
     ..aE<LeaseState>(9, _omitFieldNames ? '' : 'state',
         enumValues: LeaseState.values)
     ..aI(10, _omitFieldNames ? '' : 'queuePosition')
+    ..aOS(11, _omitFieldNames ? '' : 'runId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -754,6 +757,16 @@ class Lease extends $pb.GeneratedMessage {
   $core.bool hasQueuePosition() => $_has(9);
   @$pb.TagNumber(10)
   void clearQueuePosition() => $_clearField(10);
+
+  /// run_id is the holding sleeve's run.
+  @$pb.TagNumber(11)
+  $core.String get runId => $_getSZ(10);
+  @$pb.TagNumber(11)
+  set runId($core.String value) => $_setString(10, value);
+  @$pb.TagNumber(11)
+  $core.bool hasRunId() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearRunId() => $_clearField(11);
 }
 
 /// LeaseService reserves nodes and GPUs for a holder. A lease that is not

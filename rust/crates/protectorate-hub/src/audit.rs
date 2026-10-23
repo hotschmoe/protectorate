@@ -1,15 +1,16 @@
 use super::{input, respond, string, Hub};
 use prost_reflect::Value as FieldValue;
-use protectorate_audit::{Audit, Entry, Error, Query};
+use protectorate_audit::{Audit, Entry, Error, Head, Query};
 use protectorate_wire::{AuthContext, Code, DynamicMessage, Method, Result, RpcError, UnaryServer};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
+    let list = Arc::clone(&hub);
     server.register(
         "/protectorate.v1.AuditService/ListAuditEntries",
         move |request| {
-            let hub = Arc::clone(&hub);
+            let hub = Arc::clone(&list);
             async move {
                 let value = input(&request)?;
                 let limit = value.get("limit").and_then(Value::as_i64).unwrap_or(0);
@@ -31,14 +32,17 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     procedure: string(&value, "procedure"),
                     subject: string(&value, "subject"),
                     outcome,
+                    run_id: string(&value, "runId"),
                 };
-                let page = tokio::task::spawn_blocking(move || hub.audit.page(query))
-                    .await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                    .map_err(|e| match e {
-                        Error::Cursor(_) => RpcError::invalid(e.to_string()),
-                        _ => RpcError::new(Code::Internal, e.to_string()),
-                    })?;
+                let (page, head) = tokio::task::spawn_blocking(move || {
+                    Ok::<_, Error>((hub.audit.page(query)?, hub.audit.head()?))
+                })
+                .await
+                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
+                .map_err(|e| match e {
+                    Error::Cursor(_) => RpcError::invalid(e.to_string()),
+                    _ => RpcError::new(Code::Internal, e.to_string()),
+                })?;
                 respond(
                     &request,
                     json!({
@@ -52,13 +56,45 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             "code": entry.code,
                             "task": entry.task,
                             "detail": entry.detail,
+                            "runId": entry.run_id,
+                            "seq": entry.seq.to_string(),
+                            "prevHash": entry.prev,
+                            "hash": entry.hash,
                         })).collect::<Vec<_>>(),
                         "nextPageToken": page.next,
+                        "head": head_json(head.unwrap_or_default()),
                     }),
                 )
             }
         },
+    )?;
+    let verify = Arc::clone(&hub);
+    server.register(
+        "/protectorate.v1.AuditService/VerifyAudit",
+        move |request| {
+            let hub = Arc::clone(&verify);
+            async move {
+                let result = tokio::task::spawn_blocking(move || hub.audit.verify())
+                    .await
+                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                let response = match result {
+                    Ok(report) => json!({
+                        "ok": true,
+                        "entries": report.entries.to_string(),
+                        "head": head_json(report.head),
+                        "beyondHead": report.beyond_head.to_string(),
+                    }),
+                    Err(Error::Broken(reason)) => json!({"ok": false, "error": reason}),
+                    Err(error) => return Err(RpcError::new(Code::Internal, error.to_string())),
+                };
+                respond(&request, response)
+            }
+        },
     )
+}
+
+pub(super) fn head_json(head: Head) -> Value {
+    json!({"seq": head.seq.to_string(), "hash": head.hash})
 }
 
 pub(super) fn record_completion(
@@ -79,13 +115,13 @@ pub(super) fn record_completion(
                 | "/protectorate.v1.TokenService/UpdateTokenScopes"
                 | "/protectorate.v1.ReleaseService/UpdateHub"
                 | "/protectorate.v1.SleeveService/SpawnEnvoy"
+                | "/protectorate.v1.ApprovalService/DecideApproval"
         )
     {
         return;
     }
-    // A node file download is sensitive even though it does not mutate state.
-    // The Go hub records this stream explicitly because generic read-only
-    // calls are normally omitted from the audit log.
+    // A node file download is sensitive even though it does not mutate
+    // state, so it is recorded though reads normally are not.
     if !audited_method(method, auth) {
         return;
     }
@@ -121,8 +157,7 @@ pub(super) fn record_completion(
         subject,
         detail,
         // Admission failures are recorded by record_denied. Once a handler
-        // runs, even a permission_denied response is a failed operation; Go's
-        // audit log also distinguishes this from a rejected credential/scope.
+        // runs, even a permission_denied response is a failed operation.
         outcome: if error.is_some() { "error" } else { "ok" }.into(),
         code: error.map(|error| code(error.code)).unwrap_or_default(),
         ..Entry::default()
@@ -136,21 +171,34 @@ fn field_string(message: &DynamicMessage, key: &str) -> String {
     }
 }
 
-fn subject(method: &Method, auth: &AuthContext, request: &DynamicMessage, success: bool) -> String {
-    let subject = ["name", "id", "job_id", "node", "resource", "transfer_id"]
-        .iter()
-        .find_map(|key| {
-            request
-                .get_field_by_name(key)
-                .and_then(|value| match value.as_ref() {
-                    FieldValue::String(value) => Some(value.clone()),
-                    FieldValue::I64(value) => Some(value.to_string()),
-                    FieldValue::U64(value) => Some(value.to_string()),
-                    FieldValue::Message(value) => Some(field_string(value, "name")),
-                    _ => None,
-                })
-        })
-        .unwrap_or_default();
+pub(super) fn subject(
+    method: &Method,
+    auth: &AuthContext,
+    request: &DynamicMessage,
+    success: bool,
+) -> String {
+    let subject = [
+        "name",
+        "sleeve",
+        "id",
+        "job_id",
+        "node",
+        "resource",
+        "transfer_id",
+    ]
+    .iter()
+    .find_map(|key| {
+        request
+            .get_field_by_name(key)
+            .and_then(|value| match value.as_ref() {
+                FieldValue::String(value) => Some(value.clone()),
+                FieldValue::I64(value) => Some(value.to_string()),
+                FieldValue::U64(value) => Some(value.to_string()),
+                FieldValue::Message(value) => Some(field_string(value, "name")),
+                _ => None,
+            })
+    })
+    .unwrap_or_default();
     let subject = if method.procedure == "/protectorate.v1.ReleaseService/UpdateHub" {
         "hub".to_owned()
     } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
@@ -164,12 +212,7 @@ fn subject(method: &Method, auth: &AuthContext, request: &DynamicMessage, succes
     } else if method.procedure == "/protectorate.v1.GrantService/Admin" && success {
         field_string(request, "node").trim().to_ascii_lowercase()
     } else if method.procedure == "/protectorate.v1.ChatService/Report" {
-        let self_name = if auth.actor == "token:orchestrator-envoy" {
-            Some("envoy")
-        } else {
-            auth.actor.strip_prefix("token:sleeve:")
-        };
-        self_name
+        super::actor_sleeve(&auth.actor)
             .filter(|self_name| {
                 let target = field_string(request, "sleeve");
                 target.is_empty() || target == *self_name
@@ -206,8 +249,8 @@ pub(super) fn record_denied(
             String::new()
         },
         // Public pairing admission can reject a LAN peer or throttle a busy
-        // source without authenticating a credential. Go records these as
-        // operation errors; only credential and scope failures are denials.
+        // source without authenticating a credential: an operation error.
+        // Only credential and scope failures are denials.
         outcome: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
             "error"
         } else {
@@ -259,8 +302,8 @@ fn pairing_detail(auth: &AuthContext) -> String {
 
 fn audited_method(method: &Method, auth: &AuthContext) -> bool {
     // The public poll request contains a bearer-like device code and may be
-    // repeated frequently while the user approves pairing. Go only records
-    // StartDeviceAuth on this public path.
+    // repeated frequently while the user approves pairing; only
+    // StartDeviceAuth is recorded on this public path.
     if method.procedure == "/protectorate.v1.DeviceService/PollDeviceAuth" {
         return false;
     }

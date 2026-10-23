@@ -1,4 +1,5 @@
-//! Initial Rust hub service wiring for the existing Connect API.
+//! The hub: its Connect services over the state under PROTECTORATE_HOME.
+mod approvals;
 mod audit;
 mod chat;
 mod checkpoints;
@@ -90,14 +91,13 @@ impl EventBus {
     }
 }
 
-/// The first service slice: hub status and persistent backlog notes. The
-/// remaining services can register on the same descriptor-backed server.
 pub struct Hub {
     pub version: String,
     pub hostname: String,
     owner_token: Arc<Zeroizing<String>>,
     pub identity: Arc<IdentityStore>,
     pub audit: Arc<Audit>,
+    approvals: approvals::Approvals,
     pub backlog: Arc<BacklogStore>,
     pub sessions: Arc<SessionManager>,
     session_monitor: Arc<session_monitor::Monitor>,
@@ -278,14 +278,27 @@ impl Hub {
             quotas::QuotaOptions::default(),
         ));
         quota::publish_updates(&quota, Arc::clone(&events));
+        let run_sleeves = Arc::clone(&sleeves);
+        let audit = Audit::new(home.join("audit"))
+            .with_on_error(|error| eprintln!("hub audit write failed: {error}"))
+            .with_run_ids(move |entry| {
+                let concerns_sleeve = ["SleeveService", "ChatService"].iter().any(|service| {
+                    entry
+                        .procedure
+                        .starts_with(&format!("/protectorate.v1.{service}/"))
+                });
+                actor_sleeve(&entry.actor)
+                    .or_else(|| concerns_sleeve.then_some(entry.subject.as_str()))
+                    .map(|name| run_of(&run_sleeves, name))
+                    .unwrap_or_default()
+            });
         Ok(Self {
             version: version.into(),
             hostname,
             owner_token: Arc::new(Zeroizing::new(owner_token.into())),
             identity,
-            audit: Arc::new(Audit::new(home.join("audit")).with_on_error(|error| {
-                eprintln!("hub audit write failed: {error}");
-            })),
+            audit: Arc::new(audit),
+            approvals: approvals::Approvals::new(approvals::DEFAULT_TTL),
             backlog: Arc::new(BacklogStore::new(home.clone())),
             sessions: Arc::new(SessionManager::new("")),
             session_monitor: Arc::new(session_monitor::Monitor::new(
@@ -523,6 +536,11 @@ impl Hub {
         self.public_url = Some(nodes::validate_install_base(&url)?);
         Ok(self)
     }
+    /// How long an approval request waits for the owner.
+    pub fn with_approval_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.approvals = approvals::Approvals::new(ttl);
+        self
+    }
     /// Allows the orchestrator token to mint task grants for one shared node.
     pub fn with_orchestrator_admin_grants(mut self) -> Self {
         self.orchestrator_admin_grants = true;
@@ -598,7 +616,7 @@ impl Hub {
         // A 4 MiB file chunk expands to about 5.6 MiB in Connect JSON's
         // base64 field. Keep the hub relay's request bound above that while
         // preserving a fixed ceiling for every request.
-        let mut server = UnaryServer::new_with_peer(catalog, authorize)
+        let server = UnaryServer::new_with_peer(catalog, authorize)
             .with_max_request_bytes(8 << 20)
             .with_max_stream_message_bytes(8 << 20)
             .with_admission_denial_observer(Arc::new(
@@ -633,6 +651,9 @@ impl Hub {
             }));
         let all_methods = Arc::new(server.catalog().methods().cloned().collect::<Vec<_>>());
         let hub = Arc::new(self);
+        let gate_hub = Arc::clone(&hub);
+        let mut server =
+            server.with_gate(Arc::new(move |request| approvals::gate(&gate_hub, request)));
         let weak = Arc::downgrade(&hub);
         hub.node_monitor.set_event_sink(Arc::new(move |event| {
             if let Some(hub) = weak.upgrade() {
@@ -644,6 +665,7 @@ impl Hub {
         hub.jobs.resume();
         let downloads = Arc::clone(&hub);
         audit::register(&mut server, Arc::clone(&hub))?;
+        approvals::register(&mut server, Arc::clone(&hub))?;
         device::register(&mut server, Arc::clone(&hub))?;
         grants::register(&mut server, Arc::clone(&hub), Arc::clone(&all_methods))?;
         directory::register(&mut server, Arc::clone(&hub))?;
@@ -741,6 +763,7 @@ impl Hub {
                         "availableVersion": available.version,
                         "updateChannel": channel,
                         "releaseNotesUrl": available.notes_url,
+                        "auditHead": audit::head_json(hub.audit.head().ok().flatten().unwrap_or_default()),
                     }),
                 )
             }
@@ -797,7 +820,7 @@ impl Hub {
                     ttl,
                     now_unix(),
                     &methods,
-                ).map_err(token_create_error)?;
+                ).map_err(token_error)?;
                 respond(&request, json!({"token": token_json(&issued.token), "secret": issued.secret.expose()}))
             }
         })?;
@@ -1427,9 +1450,6 @@ fn token_error(error: identity::Error) -> RpcError {
     };
     RpcError::new(code, error.to_string())
 }
-fn token_create_error(error: identity::Error) -> RpcError {
-    token_error(error)
-}
 fn optional_string(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
@@ -1437,16 +1457,24 @@ fn boolean(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 fn sender(actor: &str) -> String {
-    if actor == "owner" {
-        return "owner".into();
-    }
+    actor_sleeve(actor).unwrap_or(actor).into()
+}
+/// The sleeve an actor authenticates as: a sleeve token or Envoy's.
+fn actor_sleeve(actor: &str) -> Option<&str> {
     if actor == "token:orchestrator-envoy" {
-        return "envoy".into();
+        Some("envoy")
+    } else {
+        actor.strip_prefix("token:sleeve:")
     }
-    if let Some(sleeve) = actor.strip_prefix("token:sleeve:") {
-        return sleeve.into();
-    }
-    actor.into()
+}
+fn run_of(sleeves: &SleeveRegistry, name: &str) -> String {
+    sleeves.get(name).map(|row| row.run_id).unwrap_or_default()
+}
+/// The run of the sleeve an actor authenticates as, empty for anyone else.
+fn actor_run(hub: &Hub, actor: &str) -> String {
+    actor_sleeve(actor)
+        .map(|name| run_of(&hub.sleeves, name))
+        .unwrap_or_default()
 }
 fn sleeve_session(actor: &str) -> Option<String> {
     actor

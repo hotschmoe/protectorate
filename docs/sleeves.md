@@ -302,6 +302,37 @@ every rule, which one decided, and the lines examined. A screen no rule
 recognizes reads as unknown. When a harness changes its TUI, add the new pane
 to `rust/fuzz/corpus/terminal_pane/` and adjust the rule.
 
+## Harness pinning
+
+Every launch records, per mode and harness (`chat/claude`, `terminal/shell`),
+the SHA-256 of the harness executable that runs and of its profile: tool
+roots, read-only mounts, limits, environment, the egress allowlist and the
+sleeve token's scopes (its MCP tool allowlist). `sleeve show` and the API
+report them as `harness_sha256` and `profile_sha256`. When a later spawn,
+resleeve or restart of the same sleeve would launch something different,
+for example after the harness updated itself, the hub compares before it
+stops anything: a launch the owner asked for is recorded as
+`harness.pin_changed` in the audit log and announced as `sleeve.pin_changed`;
+one Envoy, a sleeve or the hub itself (recovery after a restart, Envoy woken
+by mail) asked for opens an approval request (`harness.pin`, see
+[auth.md](auth.md#approval-gates)) naming the old and new hashes and does not
+launch until the owner approves exactly those hashes.
+
+## Token budgets
+
+`sleeve spawn --budget N` (and `sleeve envoy --budget N`) caps a chat run at
+N weighted tokens, counted from the usage the harness reports through its
+headless protocol: input + output + 0.1 x cache reads + 1.25 x cache writes,
+the provider pricing of a cached prefix. At 90% the hub posts a notice in the
+chat and audits `budget.warning`; at 100% it interrupts the running turn,
+posts a notice, audits `budget.exhausted`, announces `sleeve.budget` and
+refuses further turns, mail injection included. A resleeve or restart keeps
+the run's count; respawning starts a new run. A sleeve that Envoy or another
+sleeve spawns gets at most its parent's remaining budget (all of it when it
+asks for none), its usage counts against the parent's run too, and a parent
+with nothing left cannot spawn. Terminal sleeves have no usage reports and
+take no budget.
+
 ## Disk
 
 `sleeve ls` includes HOME; `sleeve show` and sleeve cards report total home

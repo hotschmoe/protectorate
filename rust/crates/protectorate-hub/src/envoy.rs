@@ -61,7 +61,7 @@ pub(super) fn renew(hub: &Hub, now: i64) -> Result<()> {
         let issued = if old.is_active(now) {
             hub.identity
                 .renew(&old.id, ttl, now)
-                .map_err(super::token_create_error)?
+                .map_err(super::token_error)?
         } else {
             let catalog = Catalog::embedded()?;
             let methods = catalog.methods().cloned().collect::<Vec<_>>();
@@ -74,7 +74,7 @@ pub(super) fn renew(hub: &Hub, now: i64) -> Result<()> {
                     now,
                     &scope_methods,
                 )
-                .map_err(super::token_create_error)?
+                .map_err(super::token_error)?
         };
         let token_path = workspace.join(".protectorate-token");
         if let Err(error) = sleeves::envoy_write_if_changed(

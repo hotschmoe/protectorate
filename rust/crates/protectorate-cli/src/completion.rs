@@ -7,6 +7,7 @@ type Candidate = (&'static str, &'static str);
 
 const ROOT: &[Candidate] = &[
     ("api", "Raw API access"),
+    ("approvals", "Decide gated agent calls"),
     ("audit", "Inspect the audit log"),
     ("backlog", "Manage notes"),
     ("chat", "Talk to a sleeve"),
@@ -144,7 +145,11 @@ fn children(path: &str) -> &'static [Candidate] {
     match path {
         "" => ROOT,
         "api" => &[("call", "Call a unary RPC")],
-        "audit" => &[("ls", "List entries"), ("tail", "Follow entries")],
+        "audit" => &[
+            ("ls", "List entries"),
+            ("tail", "Follow entries"),
+            ("verify", "Check the hash chain"),
+        ],
         "backlog" => &[
             ("ls", "List notes"),
             ("show", "Show a note"),
@@ -171,6 +176,11 @@ fn children(path: &str) -> &'static [Candidate] {
             ("fish", "Fish script"),
             ("zsh", "Zsh script"),
             ("powershell", "PowerShell script"),
+        ],
+        "approvals" => &[
+            ("ls", "List pending calls"),
+            ("approve", "Approve a call"),
+            ("deny", "Deny a call"),
         ],
         "devices" => &[
             ("ls", "List devices"),
@@ -412,6 +422,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--exit-after-idle", "Exit after idle"),
             ("--model", "Model"),
             ("--effort", "Reasoning effort"),
+            ("--budget", "Token budget"),
         ],
         "sleeve resleeve" => &[
             ("--to", "Target harness"),
@@ -453,6 +464,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--ttl", "Grant lifetime"),
             ("--model", "Model"),
             ("--effort", "Reasoning effort"),
+            ("--budget", "Token budget"),
         ],
         "sleeve attach" | "session attach" => {
             &[("--readonly", "Read only"), ("--escape", "Detach key")]
@@ -536,12 +548,14 @@ fn local_flags(path: &str) -> &'static [Candidate] {
         "token scopes" | "orchestrator scopes" => {
             &[("--add", "Add scope"), ("--remove", "Remove scope")]
         }
+        "approvals ls" => &[("--all", "Include decided calls")],
         "audit ls" | "audit tail" => &[
             ("--lines", "Line count"),
             ("--actor", "Actor"),
             ("--procedure", "Procedure"),
             ("--subject", "Subject"),
             ("--outcome", "Outcome"),
+            ("--run", "Run id"),
             ("--page-token", "Page token"),
         ],
         "grant admin" => &[

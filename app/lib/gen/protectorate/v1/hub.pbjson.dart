@@ -18,6 +18,8 @@ import 'dart:typed_data' as $typed_data;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
+import 'audit.pbjson.dart' as $1;
+
 @$core.Deprecated('Use getStatusRequestDescriptor instead')
 const GetStatusRequest$json = {
   '1': 'GetStatusRequest',
@@ -60,6 +62,14 @@ const GetStatusResponse$json = {
       '5': 8,
       '10': 'releaseConfirmed'
     },
+    {
+      '1': 'audit_head',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.AuditHead',
+      '10': 'auditHead'
+    },
   ],
 };
 
@@ -71,7 +81,8 @@ final $typed_data.Uint8List getStatusResponseDescriptor = $convert.base64Decode(
     'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJc3RhcnRlZEF0EisKEWF2YWlsYWJsZV92'
     'ZXJzaW9uGAcgASgJUhBhdmFpbGFibGVWZXJzaW9uEiUKDnVwZGF0ZV9jaGFubmVsGAggASgJUg'
     '11cGRhdGVDaGFubmVsEioKEXJlbGVhc2Vfbm90ZXNfdXJsGAkgASgJUg9yZWxlYXNlTm90ZXNV'
-    'cmwSKwoRcmVsZWFzZV9jb25maXJtZWQYCiABKAhSEHJlbGVhc2VDb25maXJtZWQ=');
+    'cmwSKwoRcmVsZWFzZV9jb25maXJtZWQYCiABKAhSEHJlbGVhc2VDb25maXJtZWQSOQoKYXVkaX'
+    'RfaGVhZBgLIAEoCzIaLnByb3RlY3RvcmF0ZS52MS5BdWRpdEhlYWRSCWF1ZGl0SGVhZA==');
 
 @$core.Deprecated('Use getSleeveRuntimeRequestDescriptor instead')
 const GetSleeveRuntimeRequest$json = {
@@ -86,53 +97,22 @@ final $typed_data.Uint8List getSleeveRuntimeRequestDescriptor =
 const GetSleeveRuntimeResponse$json = {
   '1': 'GetSleeveRuntimeResponse',
   '2': [
-    {'1': 'bwrap_path', '3': 1, '4': 1, '5': 9, '10': 'bwrapPath'},
-    {'1': 'bwrap_version', '3': 2, '4': 1, '5': 9, '10': 'bwrapVersion'},
     {'1': 'overlays', '3': 3, '4': 1, '5': 8, '10': 'overlays'},
-    {'1': 'go_build_cache', '3': 4, '4': 1, '5': 9, '10': 'goBuildCache'},
-    {'1': 'go_build_lower', '3': 5, '4': 1, '5': 9, '10': 'goBuildLower'},
-    {'1': 'snapshot_bytes', '3': 6, '4': 1, '5': 4, '10': 'snapshotBytes'},
-    {'1': 'snapshot_entries', '3': 7, '4': 1, '5': 4, '10': 'snapshotEntries'},
-    {
-      '1': 'snapshot_prepared_at',
-      '3': 8,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'snapshotPreparedAt'
-    },
-    {
-      '1': 'snapshot_preparing',
-      '3': 9,
-      '4': 1,
-      '5': 8,
-      '10': 'snapshotPreparing'
-    },
-    {'1': 'snapshot_error', '3': 10, '4': 1, '5': 9, '10': 'snapshotError'},
-    {
-      '1': 'snapshot_limit_bytes',
-      '3': 11,
-      '4': 1,
-      '5': 4,
-      '10': 'snapshotLimitBytes'
-    },
     {'1': 'runtime', '3': 12, '4': 1, '5': 9, '10': 'runtime'},
     {'1': 'helper_path', '3': 13, '4': 1, '5': 9, '10': 'helperPath'},
+  ],
+  '9': [
+    {'1': 1, '2': 2},
+    {'1': 2, '2': 3},
+    {'1': 4, '2': 12},
   ],
 };
 
 /// Descriptor for `GetSleeveRuntimeResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List getSleeveRuntimeResponseDescriptor = $convert.base64Decode(
-    'ChhHZXRTbGVldmVSdW50aW1lUmVzcG9uc2USHQoKYndyYXBfcGF0aBgBIAEoCVIJYndyYXBQYX'
-    'RoEiMKDWJ3cmFwX3ZlcnNpb24YAiABKAlSDGJ3cmFwVmVyc2lvbhIaCghvdmVybGF5cxgDIAEo'
-    'CFIIb3ZlcmxheXMSJAoOZ29fYnVpbGRfY2FjaGUYBCABKAlSDGdvQnVpbGRDYWNoZRIkCg5nb1'
-    '9idWlsZF9sb3dlchgFIAEoCVIMZ29CdWlsZExvd2VyEiUKDnNuYXBzaG90X2J5dGVzGAYgASgE'
-    'Ug1zbmFwc2hvdEJ5dGVzEikKEHNuYXBzaG90X2VudHJpZXMYByABKARSD3NuYXBzaG90RW50cm'
-    'llcxJMChRzbmFwc2hvdF9wcmVwYXJlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1l'
-    'c3RhbXBSEnNuYXBzaG90UHJlcGFyZWRBdBItChJzbmFwc2hvdF9wcmVwYXJpbmcYCSABKAhSEX'
-    'NuYXBzaG90UHJlcGFyaW5nEiUKDnNuYXBzaG90X2Vycm9yGAogASgJUg1zbmFwc2hvdEVycm9y'
-    'EjAKFHNuYXBzaG90X2xpbWl0X2J5dGVzGAsgASgEUhJzbmFwc2hvdExpbWl0Qnl0ZXMSGAoHcn'
-    'VudGltZRgMIAEoCVIHcnVudGltZRIfCgtoZWxwZXJfcGF0aBgNIAEoCVIKaGVscGVyUGF0aA==');
+    'ChhHZXRTbGVldmVSdW50aW1lUmVzcG9uc2USGgoIb3ZlcmxheXMYAyABKAhSCG92ZXJsYXlzEh'
+    'gKB3J1bnRpbWUYDCABKAlSB3J1bnRpbWUSHwoLaGVscGVyX3BhdGgYDSABKAlSCmhlbHBlclBh'
+    'dGhKBAgBEAJKBAgCEANKBAgEEAw=');
 
 const $core.Map<$core.String, $core.dynamic> HubServiceBase$json = {
   '1': 'HubService',
@@ -158,6 +138,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetStatusRequest': GetStatusRequest$json,
   '.protectorate.v1.GetStatusResponse': GetStatusResponse$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
+  '.protectorate.v1.AuditHead': $1.AuditHead$json,
   '.protectorate.v1.GetSleeveRuntimeRequest': GetSleeveRuntimeRequest$json,
   '.protectorate.v1.GetSleeveRuntimeResponse': GetSleeveRuntimeResponse$json,
 };

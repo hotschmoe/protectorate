@@ -115,4 +115,6 @@ message Lease {
   LeaseState state = 9;
   // queue_position is 1 for the next ticket to be granted; set when QUEUED.
   int32 queue_position = 10;
+  // run_id is the holding sleeve's run.
+  string run_id = 11;
 }

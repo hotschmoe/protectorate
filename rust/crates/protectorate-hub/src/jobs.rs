@@ -857,6 +857,7 @@ impl Jobs {
         value: Value,
         monitor: &Monitor,
         leases: &LeaseTable,
+        run_id: String,
     ) -> Result<Value> {
         let command = value
             .get("command")
@@ -1023,6 +1024,9 @@ impl Jobs {
         let mut job = json!({"id":id,"state":"JOB_STATE_PREPARING","target":target,"node":placement.node,"command":command,"envKeys":env_keys,"timeout":timeout,"submittedAt":timestamp(Utc::now()),"mode":placement.mode,"limits":limits});
         if !request.auth.task.is_empty() {
             job["task"] = json!(request.auth.task);
+        }
+        if !run_id.is_empty() {
+            job["runId"] = json!(run_id);
         }
         if let Some(record) = source.record() {
             job["source"] = record;
@@ -1588,8 +1592,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let monitor = Arc::clone(&hub.node_monitor);
             let leases = Arc::clone(&hub.leases);
             let request2 = request.clone();
+            let run_id = super::actor_run(&hub, &request.auth.actor);
             let job = tokio::task::spawn_blocking(move || {
-                jobs.submit(&request2, value, &monitor, &leases)
+                jobs.submit(&request2, value, &monitor, &leases, run_id)
             })
             .await
             .map_err(super::join_error)??;

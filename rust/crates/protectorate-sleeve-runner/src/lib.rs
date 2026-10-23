@@ -61,6 +61,7 @@ pub struct Config {
     pub nested: bool,
     pub ready_file: PathBuf,
     pub egress: Option<Egress>,
+    pub run_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -167,6 +168,7 @@ pub fn run(config: &Config) -> Result<i32, Box<dyn std::error::Error>> {
     options.egress_log = Some(egress_audit(
         Arc::new(Audit::new(config.state_root.join("audit"))),
         format!("sleeve:{}", config.name),
+        config.run_id.clone(),
     ));
     let child = runtime::spawn(&plan, &options)?;
     // The ready file is created only after the sandbox reports successful setup.
@@ -296,10 +298,11 @@ pub fn plan(config: &Config) -> Result<ValidatedPlan, Box<dyn std::error::Error>
 }
 
 /// Record each egress decision of one sandbox in the hub audit log.
-pub fn egress_audit(audit: Arc<Audit>, actor: String) -> egress::Log {
+pub fn egress_audit(audit: Arc<Audit>, actor: String, run_id: String) -> egress::Log {
     Arc::new(move |decision: &Decision| {
         audit.write(Entry {
             actor: actor.clone(),
+            run_id: run_id.clone(),
             procedure: "egress".into(),
             subject: format!("{}:{}", decision.host, decision.port),
             outcome: match decision.verdict {

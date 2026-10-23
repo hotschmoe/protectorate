@@ -160,6 +160,7 @@ pub struct Message {
     pub deliveries: BTreeMap<String, Delivery>,
     pub escalated: Option<Time>,
     pub note_id: String,
+    pub run_id: String,
 }
 
 impl Message {
@@ -207,6 +208,7 @@ pub struct NewMessage {
     pub recipients: Vec<String>,
     /// Footer, if set, is appended to the body once the thread id is known.
     pub footer: Option<Footer>,
+    pub run_id: String,
 }
 
 impl Default for NewMessage {
@@ -224,6 +226,7 @@ impl Default for NewMessage {
             project: String::new(),
             recipients: Vec::new(),
             footer: None,
+            run_id: String::new(),
         }
     }
 }
@@ -412,6 +415,7 @@ impl Store {
             project: n.project,
             created: Utc::now(),
             recipients: n.recipients.clone(),
+            run_id: n.run_id,
             ..Default::default()
         };
         if msg.thread.is_empty() {

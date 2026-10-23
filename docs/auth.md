@@ -201,6 +201,35 @@ Terminal attach audits use `terminal.attach` for interactive requests and
 `terminal.attach.readonly` when `?readonly=1` is requested, including denied
 attempts.
 
+## Approval gates
+
+Agents are Envoy (`token:orchestrator-envoy`), sleeves (`token:sleeve:<name>`)
+and grants Envoy minted. When an agent makes a high-impact call the hub opens
+an approval request instead of running it: any RPC marked `destructive` in
+the proto (`DeleteNote`, `KillSleeve` even of its own children,
+`RestoreCheckpoint` and the rest), minting an admin grant (after the grant's
+own checks pass), an admin job, and launching a sleeve whose harness
+executable or profile changed (see harness pinning in `docs/sleeves.md`).
+Agents cannot reach care nodes at all: placement refuses them without an
+owner-minted grant. Calls by the owner, approved devices and tokens the owner
+issued are never gated.
+
+The call fails with `aborted` and a detail naming the request id. Repeating
+the same call with header `protectorate-approval: <id>` runs it once after the
+owner approves, and fails with `permission_denied` after a denial or expiry;
+the CLI and MCP bridge repeat it every two seconds and print the id once. An
+approval binds to the caller and the exact request bytes and admits one
+execution. A call identical to a denied one is denied again for ten minutes.
+Requests expire after ten minutes and live only in hub memory.
+
+The owner decides from an approved device (the app's ACTION APPROVAL banner,
+fed by `approval.requested` and `approval.decided` events) or with
+`protectorate approvals ls | approve <id> | deny <id>`
+(`ApprovalService`, owner and devices only). The audit log records each
+request (`approval.request`), decision (`DecideApproval`, with the decider and
+what was decided) and expiry (`approval.expired`), and the call's own entry
+when it runs.
+
 ## Audit log
 
 `$PROTECTORATE_HOME/audit/audit-YYYY-MM.jsonl`, JSON lines opened `O_APPEND`
@@ -211,24 +240,38 @@ terminal attach. Not logged: reads and event streams. Fields: `time`, `actor`
 `procedure`, `subject` (the request's `name` or `id`, nothing else from the
 body, or what the handler names, such as a new job's id), `outcome` (`ok`,
 `denied`, `error`), `code` (Connect code), `task` (the admin grant's task)
-and `detail` (what the handler adds: a job's node and mode, and for admin
-jobs and jobs under a grant the command, cut at 512 bytes). Secrets, env
-values and other request bodies are never written. Calls made with an admin
+`detail` (what the handler adds: a job's node and mode, and for admin
+jobs and jobs under a grant the command, cut at 512 bytes), `run_id` (the run
+of the sleeve that made the call or that it concerns), `seq`, `prev` and
+`hash`. Secrets, env values and other request bodies are never written.
+
+The log is a hash chain. `seq` numbers entries from 1 across every monthly
+file, `prev` is the previous entry's hash, and `hash` is SHA-256 over the
+line's exact bytes with an empty `hash` value. After each append the writer
+records the newest `seq` and `hash` in `audit/head.json`; writers in every
+process (the hub and terminal sleeve runners) serialize on `audit/.lock` and
+continue from the last line on disk. `protectorate audit verify`
+(`AuditService.VerifyAudit`) walks the chain from entry 1 and fails, naming
+the file and line, when an entry was edited, removed or reordered, when the
+log ends before the recorded head (truncation), or when the head is missing.
+`GetStatus` and `ListAuditEntries` report the head, so a client can remember
+it. A writer that dies between appending and recording the head leaves the
+log one entry ahead; verify reports this, and the next write records it. Calls made with an admin
 grant are logged whether or not they mutate. `protectorate audit tail [-n 50]`
 reads it on the hub machine. `AuditService.ListAuditEntries` (owner only,
 like `TokenService`) serves it to the app's AUDIT view: newest first, pages of
 at most 500 with a cursor to older entries, filtered by actor, procedure and
-subject (substring, any case) and outcome. One page reads at most about
+subject (substring, any case), outcome and run id (exact). One page reads at most about
 200,000 lines, so a rare filter can return a short page and a cursor.
 
 Limits to keep in mind:
 
-- Append-only is a convention of the hub process, not enforced. Anything
-  running as the same OS user can edit or truncate the file. True tamper
-  resistance needs the log shipped off-host or to a root-owned append-only
-  location (for example `chattr +a` on the directory, or forwarding to a
-  separate machine). Sleeves only see their workspace mounts, so an agent in a
-  sleeve cannot reach `$PROTECTORATE_HOME`.
+- The chain makes tampering evident, not impossible. Anything running as the
+  same OS user can rewrite the whole log and recompute every hash and the
+  head; only a head remembered elsewhere (the app, another machine) or a
+  root-owned append-only location (for example `chattr +a`) catches that.
+  Sleeves only see their workspace mounts, so an agent in a sleeve cannot
+  reach `$PROTECTORATE_HOME`.
 - Entries are written after the call returns, so a hub crash mid-call can lose
   the line. A failed write is reported on the hub's stderr and does not undo
   the call.
@@ -243,6 +286,10 @@ protectorate token ls
 protectorate token revoke <id>
 protectorate token scopes <id|name> --add sleeve_spawn_sleeve --remove events
 protectorate audit tail -n 50
+protectorate audit ls --run RUN_ID
+protectorate audit verify
+protectorate approvals ls
+protectorate approvals approve ID
 protectorate login --hub https://hub.example --name officepc --platform linux-cli
 protectorate devices ls
 protectorate devices approve KJ7-4QX

@@ -277,6 +277,8 @@ message Job {
   // task is the task of the admin grant the job was submitted with.
   string task = 25;
   JobLimits limits = 26;
+  // run_id is the submitting sleeve's run.
+  string run_id = 27;
 }
 
 message PrepareJobRequest {

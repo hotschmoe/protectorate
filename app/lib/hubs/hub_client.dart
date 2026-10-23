@@ -2,6 +2,7 @@ import 'package:connectrpc/connect.dart';
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
 
+import '../gen/protectorate/v1/approval.connect.client.dart';
 import '../gen/protectorate/v1/audit.connect.client.dart';
 import '../gen/protectorate/v1/backlog.connect.client.dart';
 import '../gen/protectorate/v1/chat.connect.client.dart';
@@ -60,6 +61,7 @@ class HubClient {
       directory = DirectoryServiceClient(transport),
       devices = DeviceServiceClient(transport),
       audit = AuditServiceClient(transport),
+      approvals = ApprovalServiceClient(transport),
       leases = LeaseServiceClient(transport);
 
   final HubServiceClient hub;
@@ -75,5 +77,6 @@ class HubClient {
   final DirectoryServiceClient directory;
   final DeviceServiceClient devices;
   final AuditServiceClient audit;
+  final ApprovalServiceClient approvals;
   final LeaseServiceClient leases;
 }

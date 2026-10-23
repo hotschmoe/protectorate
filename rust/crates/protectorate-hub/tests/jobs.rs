@@ -783,7 +783,7 @@ async fn selector_uses_fresh_shared_metrics_and_lease_conflicts() {
         .unwrap()
         .as_millis() as i64;
     let gpu_lease = leases
-        .acquire("test", Duration::from_secs(60), "alpha:gpu0", now)
+        .acquire("test", "", Duration::from_secs(60), "alpha:gpu0", now)
         .unwrap();
     let (status, blocked_named) = rpc(
         addr,
@@ -812,7 +812,7 @@ async fn selector_uses_fresh_shared_metrics_and_lease_conflicts() {
     assert_eq!(picked["node"], "beta");
     leases.release(&gpu_lease.id, now).unwrap();
     leases
-        .acquire("test", Duration::from_secs(60), "alpha", now)
+        .acquire("test", "", Duration::from_secs(60), "alpha", now)
         .unwrap();
     let (status, blocked_gpu) = rpc(
         addr,
@@ -922,7 +922,7 @@ async fn lease_target_uses_live_gpu_lease_and_rejects_released_or_expired_ids() 
         .unwrap()
         .as_millis() as i64;
     let expired = leases
-        .acquire("test", Duration::from_secs(1), "alpha", now - 120_000)
+        .acquire("test", "", Duration::from_secs(1), "alpha", now - 120_000)
         .unwrap();
     let (status, after_expiry) = rpc(
         addr,
