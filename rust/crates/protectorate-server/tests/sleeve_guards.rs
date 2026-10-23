@@ -343,3 +343,81 @@ fn disk_limit_stops_the_harness() {
         thread::sleep(Duration::from_millis(100));
     }
 }
+
+const CAPABILITY_PROBE: &str = r#"
+import json, os, socket, time
+port = int(os.environ["HUB_PORT"])
+def call(procedure, token):
+    s = socket.create_connection(("127.0.0.1", port), timeout=20)
+    s.sendall((f"POST {procedure} HTTP/1.1\r\nHost: hub\r\nContent-Type: application/json\r\n"
+               f"Authorization: Bearer {token}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").encode())
+    data = b""
+    while chunk := s.recv(65536):
+        data += chunk
+    head, _, body = data.partition(b"\r\n\r\n")
+    return int(head.split(b" ")[1]), body.decode()
+status = "/protectorate.v1.HubService/GetStatus"
+tokens, codes = [], set()
+end = time.time() + 10
+while time.time() < end:
+    token = open(os.environ["PROTECTORATE_TOKEN_FILE"]).read().strip()
+    if not tokens or tokens[-1] != token:
+        tokens.append(token)
+    codes.add(call(status, token)[0])
+    time.sleep(0.25)
+code, body = call("/protectorate.v1.TokenService/RenewToken", tokens[-1])
+renewed = json.loads(body)["secret"] if code == 200 else ""
+result = {"tokens": tokens, "codes": sorted(codes), "renew": code, "renewed": renewed,
+          "renewedStatus": call(status, renewed)[0] if renewed else 0}
+open("capability.json.tmp", "w").write(json.dumps(result))
+os.rename("capability.json.tmp", "capability.json")
+"#;
+
+/// A sleeve's capability lives an hour in production; here four seconds. The
+/// hub refreshes the token file while the sleeve runs, the sleeve renews its
+/// token itself through the egress relay, and killing the sleeve revokes both.
+#[test]
+fn sleeve_capability_renews_through_the_relay_and_dies_with_the_sleeve() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("capability-ws");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(workspace.join("probe.py"), CAPABILITY_PROBE).unwrap();
+    let (_hub, client, port) = start(root.path(), &["--capability-ttl", "4s"]);
+    let url = format!("http://127.0.0.1:{port}");
+    spawn_shell(
+        &client,
+        "holder",
+        &workspace,
+        &format!("HUB_PORT={port} /usr/bin/python3 probe.py; exec sleep 600"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !workspace.join("capability.json").is_file() {
+        assert!(Instant::now() < deadline, "the sleeve probe did not finish");
+        thread::sleep(Duration::from_millis(100));
+    }
+    let result: Value =
+        serde_json::from_str(&fs::read_to_string(workspace.join("capability.json")).unwrap())
+            .unwrap();
+    assert_eq!(result["codes"], json!([200]), "{result}");
+    let tokens = result["tokens"].as_array().unwrap();
+    assert!(tokens.len() >= 3, "the hub refreshed too rarely: {result}");
+    assert_eq!(result["renew"], 200, "{result}");
+    assert_eq!(result["renewedStatus"], 200, "{result}");
+    let status = |token: &str| {
+        Client::new(&url, token, Duration::from_secs(10))
+            .unwrap()
+            .call("/protectorate.v1.HubService/GetStatus", &json!({}))
+    };
+    let error = status(tokens[0].as_str().unwrap()).unwrap_err();
+    assert!(error.message.contains("expired"), "{error:?}");
+    client
+        .call(&format!("{SLEEVE}KillSleeve"), &json!({"name": "holder"}))
+        .unwrap();
+    for token in [
+        tokens.last().unwrap().as_str().unwrap(),
+        result["renewed"].as_str().unwrap(),
+    ] {
+        let error = status(token).unwrap_err();
+        assert!(error.message.contains("revoked"), "{error:?}");
+    }
+}

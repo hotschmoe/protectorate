@@ -81,6 +81,7 @@ pub struct Hub {
     pub client: Client,
     pub home: PathBuf,
     pub user_home: PathBuf,
+    pub plain: String,
     pub tls: String,
     args: Vec<String>,
     log: PathBuf,
@@ -88,6 +89,10 @@ pub struct Hub {
 
 impl Hub {
     pub fn start(root: &Path) -> Self {
+        Self::start_with(root, &[])
+    }
+
+    pub fn start_with(root: &Path, extra: &[&str]) -> Self {
         let user_home = root.join("user");
         let home = root.join("hub");
         fs::create_dir_all(&user_home).unwrap();
@@ -115,7 +120,9 @@ impl Hub {
             &format!("p-real-{}", std::process::id()),
         ]
         .map(str::to_owned)
-        .to_vec();
+        .into_iter()
+        .chain(extra.iter().map(|arg| (*arg).to_owned()))
+        .collect::<Vec<_>>();
         let client =
             Client::new(&format!("http://{plain}"), OWNER, Duration::from_secs(5)).unwrap();
         let mut hub = Self {
@@ -123,6 +130,7 @@ impl Hub {
             client,
             home,
             user_home,
+            plain: format!("http://{plain}"),
             tls: format!("https://{tls}"),
             args,
             log: root.join("hub.log"),
