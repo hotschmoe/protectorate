@@ -198,9 +198,6 @@ impl Audit {
         self.run_ids = Some(Arc::new(resolve));
         self
     }
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
     /// Best-effort append; errors go to the configured handler, outside the writer lock.
     pub fn write(&self, entry: Entry) {
         if let Err(e) = self.try_write(entry) {
