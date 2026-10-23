@@ -16,14 +16,13 @@ import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
 import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
-    as $4;
+    as $3;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
-    as $1;
+    as $0;
 
-import 'chat.pbjson.dart' as $5;
-import 'desk.pbjson.dart' as $0;
-import 'job.pbjson.dart' as $3;
-import 'sleeve.pbjson.dart' as $2;
+import 'chat.pbjson.dart' as $4;
+import 'job.pbjson.dart' as $2;
+import 'sleeve.pbjson.dart' as $1;
 
 @$core.Deprecated('Use updatePhaseDescriptor instead')
 const UpdatePhase$json = {
@@ -156,18 +155,20 @@ const NodeSetupStage$json = {
     {'1': 'NODE_SETUP_STAGE_UNSPECIFIED', '2': 0},
     {'1': 'NODE_SETUP_STAGE_INVITED', '2': 1},
     {'1': 'NODE_SETUP_STAGE_JOINED', '2': 2},
-    {'1': 'NODE_SETUP_STAGE_METRICS', '2': 3},
     {'1': 'NODE_SETUP_STAGE_READY', '2': 4},
     {'1': 'NODE_SETUP_STAGE_ATTENTION', '2': 5},
+  ],
+  '4': [
+    {'1': 3, '2': 3},
   ],
 };
 
 /// Descriptor for `NodeSetupStage`. Decode as a `google.protobuf.EnumDescriptorProto`.
 final $typed_data.Uint8List nodeSetupStageDescriptor = $convert.base64Decode(
     'Cg5Ob2RlU2V0dXBTdGFnZRIgChxOT0RFX1NFVFVQX1NUQUdFX1VOU1BFQ0lGSUVEEAASHAoYTk'
-    '9ERV9TRVRVUF9TVEFHRV9JTlZJVEVEEAESGwoXTk9ERV9TRVRVUF9TVEFHRV9KT0lORUQQAhIc'
-    'ChhOT0RFX1NFVFVQX1NUQUdFX01FVFJJQ1MQAxIaChZOT0RFX1NFVFVQX1NUQUdFX1JFQURZEA'
-    'QSHgoaTk9ERV9TRVRVUF9TVEFHRV9BVFRFTlRJT04QBQ==');
+    '9ERV9TRVRVUF9TVEFHRV9JTlZJVEVEEAESGwoXTk9ERV9TRVRVUF9TVEFHRV9KT0lORUQQAhIa'
+    'ChZOT0RFX1NFVFVQX1NUQUdFX1JFQURZEAQSHgoaTk9ERV9TRVRVUF9TVEFHRV9BVFRFTlRJT0'
+    '4QBSIECAMQAw==');
 
 @$core.Deprecated('Use setNodeTierRequestDescriptor instead')
 const SetNodeTierRequest$json = {
@@ -182,106 +183,6 @@ const SetNodeTierRequest$json = {
 final $typed_data.Uint8List setNodeTierRequestDescriptor = $convert.base64Decode(
     'ChJTZXROb2RlVGllclJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRISCgR0aWVyGAIgASgJUg'
     'R0aWVy');
-
-@$core.Deprecated('Use getDeskStateRequestDescriptor instead')
-const GetDeskStateRequest$json = {
-  '1': 'GetDeskStateRequest',
-  '2': [
-    {
-      '1': 'policy',
-      '3': 1,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.DeskPolicy',
-      '10': 'policy'
-    },
-    {'1': 'lease_ended', '3': 2, '4': 1, '5': 8, '10': 'leaseEnded'},
-  ],
-};
-
-/// Descriptor for `GetDeskStateRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List getDeskStateRequestDescriptor = $convert.base64Decode(
-    'ChNHZXREZXNrU3RhdGVSZXF1ZXN0EjMKBnBvbGljeRgBIAEoCzIbLnByb3RlY3RvcmF0ZS52MS'
-    '5EZXNrUG9saWN5UgZwb2xpY3kSHwoLbGVhc2VfZW5kZWQYAiABKAhSCmxlYXNlRW5kZWQ=');
-
-@$core.Deprecated('Use setDeskPolicyRequestDescriptor instead')
-const SetDeskPolicyRequest$json = {
-  '1': 'SetDeskPolicyRequest',
-  '2': [
-    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {
-      '1': 'policy',
-      '3': 3,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.DeskPolicy',
-      '10': 'policy'
-    },
-  ],
-  '9': [
-    {'1': 2, '2': 3},
-  ],
-};
-
-/// Descriptor for `SetDeskPolicyRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List setDeskPolicyRequestDescriptor = $convert.base64Decode(
-    'ChRTZXREZXNrUG9saWN5UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEjMKBnBvbGljeRgDIA'
-    'EoCzIbLnByb3RlY3RvcmF0ZS52MS5EZXNrUG9saWN5UgZwb2xpY3lKBAgCEAM=');
-
-@$core.Deprecated('Use getDeskPolicyRequestDescriptor instead')
-const GetDeskPolicyRequest$json = {
-  '1': 'GetDeskPolicyRequest',
-  '2': [
-    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-  ],
-  '9': [
-    {'1': 2, '2': 3},
-  ],
-};
-
-/// Descriptor for `GetDeskPolicyRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List getDeskPolicyRequestDescriptor =
-    $convert.base64Decode(
-        'ChRHZXREZXNrUG9saWN5UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lSgQIAhAD');
-
-@$core.Deprecated('Use deskPolicyStatusDescriptor instead')
-const DeskPolicyStatus$json = {
-  '1': 'DeskPolicyStatus',
-  '2': [
-    {
-      '1': 'policy',
-      '3': 1,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.DeskPolicy',
-      '10': 'policy'
-    },
-    {
-      '1': 'state',
-      '3': 2,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.DeskState',
-      '10': 'state'
-    },
-    {'1': 'holder', '3': 3, '4': 1, '5': 9, '10': 'holder'},
-    {
-      '1': 'inputs',
-      '3': 4,
-      '4': 3,
-      '5': 11,
-      '6': '.protectorate.v1.DeskUse',
-      '10': 'inputs'
-    },
-  ],
-};
-
-/// Descriptor for `DeskPolicyStatus`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List deskPolicyStatusDescriptor = $convert.base64Decode(
-    'ChBEZXNrUG9saWN5U3RhdHVzEjMKBnBvbGljeRgBIAEoCzIbLnByb3RlY3RvcmF0ZS52MS5EZX'
-    'NrUG9saWN5UgZwb2xpY3kSMAoFc3RhdGUYAiABKAsyGi5wcm90ZWN0b3JhdGUudjEuRGVza1N0'
-    'YXRlUgVzdGF0ZRIWCgZob2xkZXIYAyABKAlSBmhvbGRlchIwCgZpbnB1dHMYBCADKAsyGC5wcm'
-    '90ZWN0b3JhdGUudjEuRGVza1VzZVIGaW5wdXRz');
 
 @$core.Deprecated('Use updateNodeRequestDescriptor instead')
 const UpdateNodeRequest$json = {
@@ -1156,23 +1057,6 @@ const NodeStatus$json = {
       '6': '.protectorate.v1.NodeAlert',
       '10': 'alerts'
     },
-    {
-      '1': 'desk',
-      '3': 8,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.DeskState',
-      '10': 'desk'
-    },
-    {'1': 'desk_holder', '3': 9, '4': 1, '5': 9, '10': 'deskHolder'},
-    {
-      '1': 'desk_inputs',
-      '3': 10,
-      '4': 3,
-      '5': 11,
-      '6': '.protectorate.v1.DeskUse',
-      '10': 'deskInputs'
-    },
     {'1': 'draining', '3': 11, '4': 1, '5': 8, '10': 'draining'},
     {
       '1': 'busy_gpus',
@@ -1182,6 +1066,11 @@ const NodeStatus$json = {
       '6': '.protectorate.v1.GpuBusy',
       '10': 'busyGpus'
     },
+  ],
+  '9': [
+    {'1': 8, '2': 9},
+    {'1': 9, '2': 10},
+    {'1': 10, '2': 11},
   ],
 };
 
@@ -1193,11 +1082,9 @@ final $typed_data.Uint8List nodeStatusDescriptor = $convert.base64Decode(
     'IJZnJlc2huZXNzEjkKCmZldGNoZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0'
     'YW1wUglmZXRjaGVkQXQSKwoDYWdlGAUgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uUg'
     'NhZ2USFAoFZXJyb3IYBiABKAlSBWVycm9yEjIKBmFsZXJ0cxgHIAMoCzIaLnByb3RlY3RvcmF0'
-    'ZS52MS5Ob2RlQWxlcnRSBmFsZXJ0cxIuCgRkZXNrGAggASgLMhoucHJvdGVjdG9yYXRlLnYxLk'
-    'Rlc2tTdGF0ZVIEZGVzaxIfCgtkZXNrX2hvbGRlchgJIAEoCVIKZGVza0hvbGRlchI5CgtkZXNr'
-    'X2lucHV0cxgKIAMoCzIYLnByb3RlY3RvcmF0ZS52MS5EZXNrVXNlUgpkZXNrSW5wdXRzEhoKCG'
-    'RyYWluaW5nGAsgASgIUghkcmFpbmluZxI1CglidXN5X2dwdXMYDCADKAsyGC5wcm90ZWN0b3Jh'
-    'dGUudjEuR3B1QnVzeVIIYnVzeUdwdXM=');
+    'ZS52MS5Ob2RlQWxlcnRSBmFsZXJ0cxIaCghkcmFpbmluZxgLIAEoCFIIZHJhaW5pbmcSNQoJYn'
+    'VzeV9ncHVzGAwgAygLMhgucHJvdGVjdG9yYXRlLnYxLkdwdUJ1c3lSCGJ1c3lHcHVzSgQICBAJ'
+    'SgQICRAKSgQIChAL');
 
 @$core.Deprecated('Use gpuBusyDescriptor instead')
 const GpuBusy$json = {
@@ -1551,19 +1438,9 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '6': true
     },
     {
-      '1': 'DeskAction',
-      '2': '.protectorate.v1.DeskActionRequest',
-      '3': '.protectorate.v1.DeskActionResponse'
-    },
-    {
       '1': 'ApplyUpdate',
       '2': '.protectorate.v1.ApplyUpdateRequest',
       '3': '.protectorate.v1.ApplyUpdateResponse'
-    },
-    {
-      '1': 'GetDeskState',
-      '2': '.protectorate.v1.GetDeskStateRequest',
-      '3': '.protectorate.v1.DeskState'
     },
     {
       '1': 'Uninstall',
@@ -1579,7 +1456,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
     NodeAgentServiceBase$messageJson = {
   '.protectorate.v1.GetMetricsRequest': GetMetricsRequest$json,
   '.protectorate.v1.NodeMetrics': NodeMetrics$json,
-  '.google.protobuf.Timestamp': $1.Timestamp$json,
+  '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.CpuMetrics': CpuMetrics$json,
   '.protectorate.v1.MemoryMetrics': MemoryMetrics$json,
   '.protectorate.v1.FilesystemMetrics': FilesystemMetrics$json,
@@ -1589,42 +1466,42 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DiskBucket': DiskBucket$json,
   '.protectorate.v1.ContainerMetrics': ContainerMetrics$json,
   '.protectorate.v1.DirSize': DirSize$json,
-  '.google.protobuf.Duration': $4.Duration$json,
-  '.protectorate.v1.Sleeve': $2.Sleeve$json,
-  '.protectorate.v1.SleeveLimits': $2.SleeveLimits$json,
-  '.protectorate.v1.SleeveUsage': $2.SleeveUsage$json,
-  '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
-  '.protectorate.v1.ModelSettings': $5.ModelSettings$json,
-  '.protectorate.v1.ModelSelection': $5.ModelSelection$json,
-  '.protectorate.v1.Handoff': $5.Handoff$json,
-  '.protectorate.v1.ReadOnlyMount': $2.ReadOnlyMount$json,
-  '.protectorate.v1.SleeveResult': $5.SleeveResult$json,
+  '.google.protobuf.Duration': $3.Duration$json,
+  '.protectorate.v1.Sleeve': $1.Sleeve$json,
+  '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
+  '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
+  '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
+  '.protectorate.v1.ModelSettings': $4.ModelSettings$json,
+  '.protectorate.v1.ModelSelection': $4.ModelSelection$json,
+  '.protectorate.v1.Handoff': $4.Handoff$json,
+  '.protectorate.v1.ReadOnlyMount': $1.ReadOnlyMount$json,
+  '.protectorate.v1.SleeveResult': $4.SleeveResult$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
-  '.protectorate.v1.JobIsolation': $3.JobIsolation$json,
+  '.protectorate.v1.JobIsolation': $2.JobIsolation$json,
   '.protectorate.v1.NodeUpdateState': NodeUpdateState$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
-  '.protectorate.v1.PrepareJobRequest': $3.PrepareJobRequest$json,
-  '.protectorate.v1.PrepareJobResponse': $3.PrepareJobResponse$json,
-  '.protectorate.v1.UploadJobDataRequest': $3.UploadJobDataRequest$json,
-  '.protectorate.v1.UploadJobDataResponse': $3.UploadJobDataResponse$json,
-  '.protectorate.v1.RunJobRequest': $3.RunJobRequest$json,
-  '.protectorate.v1.RunJobRequest.EnvEntry': $3.RunJobRequest_EnvEntry$json,
-  '.protectorate.v1.JobLimits': $3.JobLimits$json,
-  '.protectorate.v1.JobEvent': $3.JobEvent$json,
-  '.protectorate.v1.JobStarted': $3.JobStarted$json,
-  '.protectorate.v1.JobOutput': $3.JobOutput$json,
-  '.protectorate.v1.JobArtifactChunk': $3.JobArtifactChunk$json,
-  '.protectorate.v1.JobFinished': $3.JobFinished$json,
-  '.protectorate.v1.AttachJobRequest': $3.AttachJobRequest$json,
+  '.protectorate.v1.PrepareJobRequest': $2.PrepareJobRequest$json,
+  '.protectorate.v1.PrepareJobResponse': $2.PrepareJobResponse$json,
+  '.protectorate.v1.UploadJobDataRequest': $2.UploadJobDataRequest$json,
+  '.protectorate.v1.UploadJobDataResponse': $2.UploadJobDataResponse$json,
+  '.protectorate.v1.RunJobRequest': $2.RunJobRequest$json,
+  '.protectorate.v1.RunJobRequest.EnvEntry': $2.RunJobRequest_EnvEntry$json,
+  '.protectorate.v1.JobLimits': $2.JobLimits$json,
+  '.protectorate.v1.JobEvent': $2.JobEvent$json,
+  '.protectorate.v1.JobStarted': $2.JobStarted$json,
+  '.protectorate.v1.JobOutput': $2.JobOutput$json,
+  '.protectorate.v1.JobArtifactChunk': $2.JobArtifactChunk$json,
+  '.protectorate.v1.JobFinished': $2.JobFinished$json,
+  '.protectorate.v1.AttachJobRequest': $2.AttachJobRequest$json,
   '.protectorate.v1.NodeAgentServiceListJobsRequest':
-      $3.NodeAgentServiceListJobsRequest$json,
+      $2.NodeAgentServiceListJobsRequest$json,
   '.protectorate.v1.NodeAgentServiceListJobsResponse':
-      $3.NodeAgentServiceListJobsResponse$json,
-  '.protectorate.v1.NodeJob': $3.NodeJob$json,
+      $2.NodeAgentServiceListJobsResponse$json,
+  '.protectorate.v1.NodeJob': $2.NodeJob$json,
   '.protectorate.v1.NodeAgentServiceCancelJobRequest':
-      $3.NodeAgentServiceCancelJobRequest$json,
+      $2.NodeAgentServiceCancelJobRequest$json,
   '.protectorate.v1.NodeAgentServiceCancelJobResponse':
-      $3.NodeAgentServiceCancelJobResponse$json,
+      $2.NodeAgentServiceCancelJobResponse$json,
   '.protectorate.v1.PutFileRequest': PutFileRequest$json,
   '.protectorate.v1.FileChunk': FileChunk$json,
   '.protectorate.v1.FileTrailer': FileTrailer$json,
@@ -1632,28 +1509,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetFileRequest': GetFileRequest$json,
   '.protectorate.v1.GetFileResponse': GetFileResponse$json,
   '.protectorate.v1.FileHeader': FileHeader$json,
-  '.protectorate.v1.DeskActionRequest': $0.DeskActionRequest$json,
-  '.protectorate.v1.ScreenshotRequest': $0.ScreenshotRequest$json,
-  '.protectorate.v1.DeskTarget': $0.DeskTarget$json,
-  '.protectorate.v1.ListWindowsRequest': $0.ListWindowsRequest$json,
-  '.protectorate.v1.ClickRequest': $0.ClickRequest$json,
-  '.protectorate.v1.MoveRequest': $0.MoveRequest$json,
-  '.protectorate.v1.TypeRequest': $0.TypeRequest$json,
-  '.protectorate.v1.KeyRequest': $0.KeyRequest$json,
-  '.protectorate.v1.RunRequest': $0.RunRequest$json,
-  '.protectorate.v1.ForegroundRequest': $0.ForegroundRequest$json,
-  '.protectorate.v1.DeskActionResponse': $0.DeskActionResponse$json,
-  '.protectorate.v1.ScreenshotResponse': $0.ScreenshotResponse$json,
-  '.protectorate.v1.ListWindowsResponse': $0.ListWindowsResponse$json,
-  '.protectorate.v1.DeskWindow': $0.DeskWindow$json,
-  '.protectorate.v1.InputResponse': $0.InputResponse$json,
-  '.protectorate.v1.RunResponse': $0.RunResponse$json,
-  '.protectorate.v1.ForegroundResponse': $0.ForegroundResponse$json,
   '.protectorate.v1.ApplyUpdateRequest': ApplyUpdateRequest$json,
   '.protectorate.v1.ApplyUpdateResponse': ApplyUpdateResponse$json,
-  '.protectorate.v1.GetDeskStateRequest': GetDeskStateRequest$json,
-  '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,
-  '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.UninstallRequest': UninstallRequest$json,
   '.protectorate.v1.UninstallResponse': UninstallResponse$json,
 };
@@ -1676,13 +1533,10 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     'UudjEuTm9kZUFnZW50U2VydmljZUNhbmNlbEpvYlJlc3BvbnNlEkwKB1B1dEZpbGUSHy5wcm90'
     'ZWN0b3JhdGUudjEuUHV0RmlsZVJlcXVlc3QaIC5wcm90ZWN0b3JhdGUudjEuUHV0RmlsZVJlc3'
     'BvbnNlEk4KB0dldEZpbGUSHy5wcm90ZWN0b3JhdGUudjEuR2V0RmlsZVJlcXVlc3QaIC5wcm90'
-    'ZWN0b3JhdGUudjEuR2V0RmlsZVJlc3BvbnNlMAESVQoKRGVza0FjdGlvbhIiLnByb3RlY3Rvcm'
-    'F0ZS52MS5EZXNrQWN0aW9uUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5EZXNrQWN0aW9uUmVz'
-    'cG9uc2USWAoLQXBwbHlVcGRhdGUSIy5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXF1ZX'
-    'N0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRlUmVzcG9uc2USUAoMR2V0RGVza1N0YXRl'
-    'EiQucHJvdGVjdG9yYXRlLnYxLkdldERlc2tTdGF0ZVJlcXVlc3QaGi5wcm90ZWN0b3JhdGUudj'
-    'EuRGVza1N0YXRlElIKCVVuaW5zdGFsbBIhLnByb3RlY3RvcmF0ZS52MS5Vbmluc3RhbGxSZXF1'
-    'ZXN0GiIucHJvdGVjdG9yYXRlLnYxLlVuaW5zdGFsbFJlc3BvbnNlGgSQtRgB');
+    'ZWN0b3JhdGUudjEuR2V0RmlsZVJlc3BvbnNlMAESWAoLQXBwbHlVcGRhdGUSIy5wcm90ZWN0b3'
+    'JhdGUudjEuQXBwbHlVcGRhdGVSZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRl'
+    'UmVzcG9uc2USUgoJVW5pbnN0YWxsEiEucHJvdGVjdG9yYXRlLnYxLlVuaW5zdGFsbFJlcXVlc3'
+    'QaIi5wcm90ZWN0b3JhdGUudjEuVW5pbnN0YWxsUmVzcG9uc2UaBJC1GAE=');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',
@@ -1750,17 +1604,6 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '6': true
     },
     {
-      '1': 'SetDeskPolicy',
-      '2': '.protectorate.v1.SetDeskPolicyRequest',
-      '3': '.protectorate.v1.DeskPolicyStatus',
-      '4': {}
-    },
-    {
-      '1': 'GetDeskPolicy',
-      '2': '.protectorate.v1.GetDeskPolicyRequest',
-      '3': '.protectorate.v1.DeskPolicyStatus'
-    },
-    {
       '1': 'SetNodeTier',
       '2': '.protectorate.v1.SetNodeTierRequest',
       '3': '.protectorate.v1.NodeInfo',
@@ -1777,7 +1620,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.NodeStatus': NodeStatus$json,
   '.protectorate.v1.NodeInfo': NodeInfo$json,
   '.protectorate.v1.NodeMetrics': NodeMetrics$json,
-  '.google.protobuf.Timestamp': $1.Timestamp$json,
+  '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.CpuMetrics': CpuMetrics$json,
   '.protectorate.v1.MemoryMetrics': MemoryMetrics$json,
   '.protectorate.v1.FilesystemMetrics': FilesystemMetrics$json,
@@ -1787,23 +1630,20 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DiskBucket': DiskBucket$json,
   '.protectorate.v1.ContainerMetrics': ContainerMetrics$json,
   '.protectorate.v1.DirSize': DirSize$json,
-  '.google.protobuf.Duration': $4.Duration$json,
-  '.protectorate.v1.Sleeve': $2.Sleeve$json,
-  '.protectorate.v1.SleeveLimits': $2.SleeveLimits$json,
-  '.protectorate.v1.SleeveUsage': $2.SleeveUsage$json,
-  '.protectorate.v1.ChatStatus': $5.ChatStatus$json,
-  '.protectorate.v1.ModelSettings': $5.ModelSettings$json,
-  '.protectorate.v1.ModelSelection': $5.ModelSelection$json,
-  '.protectorate.v1.Handoff': $5.Handoff$json,
-  '.protectorate.v1.ReadOnlyMount': $2.ReadOnlyMount$json,
-  '.protectorate.v1.SleeveResult': $5.SleeveResult$json,
+  '.google.protobuf.Duration': $3.Duration$json,
+  '.protectorate.v1.Sleeve': $1.Sleeve$json,
+  '.protectorate.v1.SleeveLimits': $1.SleeveLimits$json,
+  '.protectorate.v1.SleeveUsage': $1.SleeveUsage$json,
+  '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
+  '.protectorate.v1.ModelSettings': $4.ModelSettings$json,
+  '.protectorate.v1.ModelSelection': $4.ModelSelection$json,
+  '.protectorate.v1.Handoff': $4.Handoff$json,
+  '.protectorate.v1.ReadOnlyMount': $1.ReadOnlyMount$json,
+  '.protectorate.v1.SleeveResult': $4.SleeveResult$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
-  '.protectorate.v1.JobIsolation': $3.JobIsolation$json,
+  '.protectorate.v1.JobIsolation': $2.JobIsolation$json,
   '.protectorate.v1.NodeUpdateState': NodeUpdateState$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
-  '.protectorate.v1.DeskState': $0.DeskState$json,
-  '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,
-  '.protectorate.v1.DeskUse': $0.DeskUse$json,
   '.protectorate.v1.GpuBusy': GpuBusy$json,
   '.protectorate.v1.GetNodeRequest': GetNodeRequest$json,
   '.protectorate.v1.AddNodeRequest': AddNodeRequest$json,
@@ -1825,9 +1665,6 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ApplyUpdateResponse': ApplyUpdateResponse$json,
   '.protectorate.v1.UpdateNodeRequest': UpdateNodeRequest$json,
   '.protectorate.v1.UpdateNodeProgress': UpdateNodeProgress$json,
-  '.protectorate.v1.SetDeskPolicyRequest': SetDeskPolicyRequest$json,
-  '.protectorate.v1.DeskPolicyStatus': DeskPolicyStatus$json,
-  '.protectorate.v1.GetDeskPolicyRequest': GetDeskPolicyRequest$json,
   '.protectorate.v1.SetNodeTierRequest': SetNodeTierRequest$json,
 };
 
@@ -1849,9 +1686,5 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'RlEiMucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRlUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52'
     'MS5BcHBseVVwZGF0ZVJlc3BvbnNlIgSgtRgBEmEKClVwZGF0ZU5vZGUSIi5wcm90ZWN0b3JhdG'
     'UudjEuVXBkYXRlTm9kZVJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuVXBkYXRlTm9kZVByb2dy'
-    'ZXNzIgigtRgBqLUYATABEl8KDVNldERlc2tQb2xpY3kSJS5wcm90ZWN0b3JhdGUudjEuU2V0RG'
-    'Vza1BvbGljeVJlcXVlc3QaIS5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGljeVN0YXR1cyIEoLUY'
-    'ARJZCg1HZXREZXNrUG9saWN5EiUucHJvdGVjdG9yYXRlLnYxLkdldERlc2tQb2xpY3lSZXF1ZX'
-    'N0GiEucHJvdGVjdG9yYXRlLnYxLkRlc2tQb2xpY3lTdGF0dXMSUwoLU2V0Tm9kZVRpZXISIy5w'
-    'cm90ZWN0b3JhdGUudjEuU2V0Tm9kZVRpZXJSZXF1ZXN0GhkucHJvdGVjdG9yYXRlLnYxLk5vZG'
-    'VJbmZvIgSgtRgB');
+    'ZXNzIgigtRgBqLUYATABElMKC1NldE5vZGVUaWVyEiMucHJvdGVjdG9yYXRlLnYxLlNldE5vZG'
+    'VUaWVyUmVxdWVzdBoZLnByb3RlY3RvcmF0ZS52MS5Ob2RlSW5mbyIEoLUYAQ==');

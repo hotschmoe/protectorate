@@ -435,13 +435,11 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
    that node, valid for the length of a lease, instead of a long-lived private
    key inside the sleeve. Windows OpenSSH accepts user CAs
    (`TrustedUserCAKeys`). Revocation is the lease expiring.
-2. **Driving a GUI program.** SSH sessions on Windows run outside the
-   logged-in desktop (no visible windows, and we already saw processes started
-   over SSH behave inconsistently), so SSH alone cannot click or screenshot
-   ArchiCAD. Something must run inside the interactive session: the node agent
-   started at logon (`node install`).
+2. **Driving a GUI program.** Windows desktop control is shelved; see tag
+   `shelf/windows-desk`. Prefer the program's own API, `job run` or `ssh`, and
+   `node put/get` for files.
 
-`[decided]` Layered, most deterministic first (commands in `docs/desk.md`):
+`[decided]` Layered, most deterministic first:
 - **The program's own API** where it has one (ArchiCAD has a JSON interface
   on localhost and a Python package; ENERCALC's automation surface is
   unverified). Agents call it through `ssh` or `job run`. Repeatable and cheap.
@@ -449,45 +447,9 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
   (zstd only where it shrinks, size and sha256 checked, atomic, confined to the
   node's file root); a batch/export runs as a job or over `ssh`. Also
   deterministic.
-- **Screen and input** only as a fallback: the node agent in the desktop
-  session serves `protectorate desk <node> screenshot|windows|click|move|type|key|run`
-  for the harness's own computer-use (Windows only, syscalls only, no cgo).
-  Screenshots are files the harness reads; no MCP or harness changes needed.
-  It refuses with `failed_precondition` unless the agent runs in the logged-in
-  user's session (`node install`, a logon task).
-- The desktop is one shared resource with licensed seats, so it is **leased**
-  (P9) as `desk:<node>`: one sleeve drives a node's desktop at a time (the
-  mutating commands check the lease; screenshot and windows do not), and the
-  phone app can show the current screen.
 
 `[open]` Which ArchiCAD and ENERCALC workflows are first, and whether they can
 be done through APIs and files without the GUI.
-
-`[note]` Windows 10/11 has one live desktop session. A switched-away or
-disconnected session does not render, so it cannot be screenshotted or given
-input, and an RDP login takes over the console. An agent account cannot drive
-a desktop in the background while the user works on the same PC.
-
-`[decided]` (2026-10-20) For now: the user's own workstation desktop is
-leasable **while the user is away** (overnight). The node offers `desk:<node>`
-only inside an availability window and after a period without physical input,
-and ends the agent's lease the moment physical (non-injected) input arrives.
-The screen stays unlocked for that window; the user accepts this (the office
-is physically secure). The node locks the workstation when the window ends or
-the agent lease is released.
-
-`[done]` (2026-10-20) Built as a per-node desk policy (`protectorate desk
-policy <node> --window 19:00-07:00 --idle 15m --lock-after`, details in
-`docs/desk.md`, "Availability while away"). The node evaluates it: inside the
-window and no physical input for the idle period, where physical means a
-low-level keyboard/mouse hook event without the injected flag (the node's own
-`SendInput` never counts). The hub grants `desk:<node>` only while the node
-reports available, polls policy nodes every 3 seconds, and ends the lease and
-mails the holder when the user returns; the node also refuses every input
-command itself, so nothing is injected after the user is back. Not yet
-verified on the real desktop: the hooks and `LockWorkStation` (the live checks
-so far ran over SSH in session 0). With `--lock-after`, a lock leaves the
-desktop unavailable to the next agent until the user unlocks it.
 
 `[later]` Always-on agent desktops on machines with Intel Arc Pro cards, which
 support SR-IOV virtual GPUs: one or more Windows VMs (Hyper-V GPU partitioning,

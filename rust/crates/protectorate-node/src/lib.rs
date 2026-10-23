@@ -57,7 +57,6 @@ pub struct Agent {
     jobs: Option<Arc<JobStore>>,
     updater: Option<Arc<update::Updater>>,
     uninstaller: Option<Arc<uninstall::Uninstaller>>,
-    desk: Option<Arc<protectorate_desk_node::Controller>>,
 }
 impl Agent {
     pub fn new(collector: Arc<dyn MetricsCollector>, token: impl Into<String>) -> Self {
@@ -68,7 +67,6 @@ impl Agent {
             jobs: None,
             updater: None,
             uninstaller: None,
-            desk: None,
         }
     }
     /// Enables file RPCs. Relative remote paths resolve under `root`.
@@ -89,27 +87,6 @@ impl Agent {
     }
     pub fn with_jobs(mut self, jobs: Jobs) -> Self {
         self.jobs = Some(Arc::new(jobs));
-        self
-    }
-    /// Loads the node's persisted Windows desktop policy and native driver.
-    #[allow(unused_mut)] // Windows installs the controller; other platforms retain Unimplemented.
-    pub fn with_desk_home(mut self, home: impl AsRef<Path>) -> io::Result<Self> {
-        #[cfg(windows)]
-        {
-            let controller = Arc::new(protectorate_desk_node::Controller::open(
-                home.as_ref().to_path_buf(),
-            )?);
-            controller.start_background();
-            self.desk = Some(controller);
-        }
-        #[cfg(not(windows))]
-        let _ = home;
-        Ok(self)
-    }
-
-    /// Test/integration seam for a desktop whose input and availability can be controlled.
-    pub fn with_desktop(mut self, controller: Arc<protectorate_desk_node::Controller>) -> Self {
-        self.desk = Some(controller);
         self
     }
     pub fn with_update(
@@ -405,7 +382,6 @@ impl Agent {
                 Ok(Default::default())
             }
         })?;
-        let desk = agent.desk.clone();
         server.register_streaming("/protectorate.v1.NodeAgentService/WatchMetrics", move |request, sender| {
             let collector = Arc::clone(&agent.collector);
             async move {
@@ -429,69 +405,12 @@ impl Agent {
                 Ok(Default::default())
             }
         })?;
-        let desk_action = desk.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/DeskAction",
-            move |request| {
-                let desk = desk_action.clone();
-                async move {
-                    let desk = desk.ok_or_else(no_desk)?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let result = tokio::task::spawn_blocking(move || desk.action(&input))
-                        .await
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                        .map_err(desk_error)?;
-                    respond(&request, result)
-                }
-            },
-        )?;
-        server.register(
-            "/protectorate.v1.NodeAgentService/GetDeskState",
-            move |request| {
-                let desk = desk.clone();
-                async move {
-                    let desk = desk.ok_or_else(no_desk)?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let result = tokio::task::spawn_blocking(move || desk.get_state(&input))
-                        .await
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                        .map_err(desk_error)?;
-                    respond(&request, result)
-                }
-            },
-        )?;
         Ok(server.router())
     }
 }
 fn no_jobs() -> RpcError {
     RpcError::new(Code::Unimplemented, "this node does not run jobs")
 }
-fn no_desk() -> RpcError {
-    RpcError::new(
-        Code::Unimplemented,
-        "this node does not serve desktop commands",
-    )
-}
-fn desk_error(error: protectorate_desk_node::Error) -> RpcError {
-    use protectorate_desk_node::ErrorKind;
-    let code = match error.kind {
-        ErrorKind::Invalid => Code::InvalidArgument,
-        ErrorKind::Unavailable => Code::FailedPrecondition,
-        ErrorKind::Unsupported => Code::Unimplemented,
-        ErrorKind::Internal => Code::Internal,
-    };
-    let mut rpc = RpcError::new(code, error.message);
-    if let Some(reason) = error.reason {
-        let name = protectorate_desk_node::reason_name(reason);
-        if let Ok(value) = name.parse() {
-            rpc.headers.insert("Protectorate-Desk-Unavailable", value);
-        }
-    }
-    rpc
-}
-
 fn decode(request: &RpcRequest, value: Value) -> wire::Result<wire::DynamicMessage> {
     let bytes =
         serde_json::to_vec(&value).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;

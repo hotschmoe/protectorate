@@ -30,7 +30,6 @@ protectorate-tailnet-admin = { path = "../protectorate-tailnet-admin" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }
 protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }
-protectorate-desk-policy = { path = "../protectorate-desk-policy" }
 protectorate-tailnet-map = { path = "../protectorate-tailnet-map" }
 protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
 protectorate-tailnet-packets = { path = "../protectorate-tailnet-packets" }
@@ -52,7 +51,6 @@ tokio = { version = "1", features = ["rt", "sync", "time", "net", "process"] }
 protectorate-backup = { path = "../protectorate-backup" }
 protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-node = { path = "../protectorate-node" }
-protectorate-desk-node = { path = "../protectorate-desk-node" }
 protectorate-node-monitor = { path = "../protectorate-node-monitor" }
 protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }

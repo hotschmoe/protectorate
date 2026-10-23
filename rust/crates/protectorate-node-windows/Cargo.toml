@@ -16,7 +16,6 @@ protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
 protectorate-tailnet-stream = { path = "../protectorate-tailnet-stream" }
 protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
 protectorate-tailnet-discovery = { path = "../protectorate-tailnet-discovery" }
-protectorate-desk-node = { path = "../protectorate-desk-node" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
 protectorate-chatlog = { path = "../protectorate-chatlog" }

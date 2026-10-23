@@ -220,8 +220,6 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
         "nodes.json",
         "sleeves-rust.json",
         "leases.json",
-        "desk-policies-rust.json",
-        "desk-use-rust.json",
         "directory.json",
         "mailbox.jsonl",
         "notes.json",

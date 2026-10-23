@@ -20,12 +20,10 @@ SCENARIOS = {
     "session": "TERMINAL: real tmux lifecycle, WebSocket I/O, exit and respawn",
     "tailnet": "TAILNET: isolated headscale, two nodes, ACL, relay and restart",
     "quota": "QUOTA: hub polls local provider HTTP fixtures and exposes freshness/errors",
-    "desk": "DESK: isolated node desktop consent, lease, revocation and input fencing",
     "orchestrator": "MAIL: Envoy identity, wakeup, grants and mailbox delivery",
     "mcpbridge": "MCP: binary stdio handshake, tools, scopes and streamed errors through hub",
     "backlog": "BACKLOG: authenticated CRUD, concurrent writes and hub restart persistence",
     "xfer": "TRANSFER: binary hub/node chunks, compression, SHA-256 and malicious archive rejection",
-    "keylog": "DESK: real input activity monitoring gates desktop consent and revocation",
     "svcgen": "INSTALL: generated service definitions, offline systemd verification and isolated service lifecycle",
     "fsutil": "BACKUP: permission-preserving atomic persistence and interrupted writes",
     "web": "WEB: binary serves SPA, bootstrap, pairing, install scripts and downloads",
@@ -124,7 +122,7 @@ def scenario(path, name):
     if str(path).startswith("app/"):
         return "APP: Flutter client against real loopback hub; " + ("chat live/replay equivalence and reconnect" if "chat" in lower else re.sub(r"_test\.dart$", "", path.name).replace("_", " "))
     if "/hub/" in lower or "cmd/protectorate" in lower:
-        for key, value in [("lease", "LEASE: exclusivity, FIFO, expiry/renewal and restart"), ("job", "JOB: real agent git/artifact execution, cancel, idempotency and hub restart"), ("mail", SCENARIOS["mailbox"]), ("coord", SCENARIOS["mailbox"]), ("grant", SCENARIOS["auth"]), ("token", SCENARIOS["auth"]), ("auth", SCENARIOS["auth"]), ("chat", SCENARIOS["driver"]), ("sleeve", SCENARIOS["sleeve"]), ("envoy", SCENARIOS["orchestrator"]), ("resleeve", SCENARIOS["handoff"]), ("node", SCENARIOS["node"]), ("transfer", SCENARIOS["node"]), ("desk", SCENARIOS["desk"]), ("session", SCENARIOS["session"]), ("tailnet", SCENARIOS["tailnet"]), ("quota", SCENARIOS["quota"]), ("mcp", SCENARIOS["mcpbridge"]), ("install", SCENARIOS["web"]), ("web", SCENARIOS["web"]), ("backlog", "BACKLOG: authenticated CRUD, persistence and concurrent updates")]:
+        for key, value in [("lease", "LEASE: exclusivity, FIFO, expiry/renewal and restart"), ("job", "JOB: real agent git/artifact execution, cancel, idempotency and hub restart"), ("mail", SCENARIOS["mailbox"]), ("coord", SCENARIOS["mailbox"]), ("grant", SCENARIOS["auth"]), ("token", SCENARIOS["auth"]), ("auth", SCENARIOS["auth"]), ("chat", SCENARIOS["driver"]), ("sleeve", SCENARIOS["sleeve"]), ("envoy", SCENARIOS["orchestrator"]), ("resleeve", SCENARIOS["handoff"]), ("node", SCENARIOS["node"]), ("transfer", SCENARIOS["node"]), ("session", SCENARIOS["session"]), ("tailnet", SCENARIOS["tailnet"]), ("quota", SCENARIOS["quota"]), ("mcp", SCENARIOS["mcpbridge"]), ("install", SCENARIOS["web"]), ("web", SCENARIOS["web"]), ("backlog", "BACKLOG: authenticated CRUD, persistence and concurrent updates")]:
             if key in lower:
                 return value
         return "CLI: real binary API commands, JSON output, cancellation and error exit codes"

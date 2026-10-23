@@ -10,7 +10,6 @@ protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-xfer = { path = "../protectorate-xfer" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
-protectorate-desk-node = { path = "../protectorate-desk-node" }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
@@ -29,7 +28,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 getrandom = "0.2"
 
 [dev-dependencies]
-protectorate-desk-policy = { path = "../protectorate-desk-policy" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 tempfile = "3"
 protectorate-connect-client = { path = "../protectorate-connect-client" }

@@ -71,18 +71,10 @@ fn valid_node(n: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
 }
 fn valid_resource(r: &Resource) -> bool {
-    valid_node(&r.node) || r.gpu.is_none() && r.node.strip_prefix("desk:").is_some_and(valid_node)
+    valid_node(&r.node)
 }
 pub fn parse_resource(raw: &str) -> Result<Resource> {
     let raw = raw.trim().to_ascii_lowercase();
-    if let Some(node) = raw.strip_prefix("desk:") {
-        if valid_node(node) {
-            return Ok(Resource {
-                node: raw,
-                gpu: None,
-            });
-        }
-    }
     let (node, gpu) = match raw.split_once(':') {
         Some((node, suffix)) => {
             let n = suffix

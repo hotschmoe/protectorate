@@ -1,11 +1,10 @@
 //! argv parsing. Global options are accepted before or after the command, the
 //! way the Go CLI's persistent flags behave.
 use crate::{
-    desk, AuditQuery, BacklogFilter, ChatSettings, Command, HarnessName, JobFilter, JobLogs,
-    JobRun, JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit, NoteState,
-    ReadOnlyBind, SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve,
-    SleeveSpawn, WaitUntil, DEFAULT_ENVOY_TTL, DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT,
-    MAX_JOB_TIMEOUT, MAX_WAIT,
+    AuditQuery, BacklogFilter, ChatSettings, Command, HarnessName, JobFilter, JobLogs, JobRun,
+    JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit, NoteState, ReadOnlyBind,
+    SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve, SleeveSpawn, WaitUntil,
+    DEFAULT_ENVOY_TTL, DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
 };
 use protectorate_wire::{Result, RpcError};
 use serde_json::Value;
@@ -108,7 +107,6 @@ fn parse_tokens(args: &[String]) -> Result<Invocation> {
             "devices" => set(&mut command, devices(args, &mut index)?)?,
             "login" => set(&mut command, login(args, &mut index)?)?,
             "pair" => set(&mut command, pair(args, &mut index)?)?,
-            "desk" => set(&mut command, desk_command(args, &mut index)?)?,
             "who" => {
                 let target = match next(args, index + 1) {
                     Some(next) if !next.starts_with('-') => {
@@ -677,192 +675,6 @@ fn pair(args: &[String], index: &mut usize) -> Result<Command> {
         }
     }
     Ok(Command::Pair { url, app })
-}
-
-fn desk_command(args: &[String], index: &mut usize) -> Result<Command> {
-    let first = next(args, *index + 1).ok_or_else(|| bad_argument("desk needs a node"))?;
-    *index += 1;
-    if first == "policy" {
-        return desk_policy(args, index);
-    }
-    let node = first.to_owned();
-    let verb = next(args, *index + 1)
-        .ok_or_else(|| {
-            bad_argument(
-                "desk needs screenshot, windows, foreground, click, move, type, key or run",
-            )
-        })?
-        .to_owned();
-    *index += 1;
-    let mut lease = String::new();
-    let mut output = PathBuf::from("screenshot.png");
-    let mut max_width = 0;
-    let mut button = String::from("left");
-    let mut double = false;
-    let mut positional = Vec::new();
-    let mut raw = false;
-    while let Some(item) = next(args, *index + 1) {
-        let (flag, inline) = option(item);
-        if !raw
-            && matches!(
-                flag,
-                "--json" | "--hub" | "--token-file" | "--home" | "--timeout"
-            )
-        {
-            break;
-        }
-        *index += 1;
-        if !raw {
-            match flag {
-                "--" => {
-                    raw = true;
-                    continue;
-                }
-                "--lease" => {
-                    lease = value(args, index, flag, inline)?;
-                    continue;
-                }
-                "--output" | "-o" => {
-                    output = PathBuf::from(value(args, index, flag, inline)?);
-                    continue;
-                }
-                "--max-width" => {
-                    max_width = value(args, index, flag, inline)?
-                        .parse::<i32>()
-                        .map_err(|_| bad_argument("--max-width needs a nonnegative integer"))?;
-                    if max_width < 0 {
-                        return Err(bad_argument("--max-width needs a nonnegative integer"));
-                    }
-                    continue;
-                }
-                "--button" => {
-                    button = value(args, index, flag, inline)?;
-                    continue;
-                }
-                "--double" => {
-                    double = bool_flag(flag, inline)?;
-                    continue;
-                }
-                _ if item.starts_with('-') && verb != "run" => return Err(bad_argument(item)),
-                _ => {}
-            }
-        }
-        positional.push(item.to_owned());
-    }
-    let action = match verb.as_str() {
-        "screenshot" if positional.is_empty() => desk::Action::Screenshot {
-            output: output.clone(),
-            max_width,
-        },
-        "windows" if positional.is_empty() => desk::Action::Windows,
-        "foreground" if positional.is_empty() => desk::Action::Foreground,
-        "click" if positional.len() == 2 => desk::Action::Click {
-            x: desk_coordinate(&positional[0])?,
-            y: desk_coordinate(&positional[1])?,
-            button: button.clone(),
-            double,
-        },
-        "move" if positional.len() == 2 => desk::Action::Move {
-            x: desk_coordinate(&positional[0])?,
-            y: desk_coordinate(&positional[1])?,
-        },
-        "type" if !positional.is_empty() => desk::Action::Type {
-            text: positional.join(" "),
-        },
-        "key" if positional.len() == 1 => desk::Action::Key {
-            chord: positional.remove(0),
-        },
-        "run" if !positional.is_empty() => desk::Action::Run {
-            program: positional.remove(0),
-            args: positional,
-        },
-        _ => return Err(bad_argument(format!("invalid desk {verb} arguments"))),
-    };
-    if !matches!(action, desk::Action::Screenshot { .. })
-        && (output != std::path::Path::new("screenshot.png") || max_width != 0)
-    {
-        return Err(bad_argument("--output and --max-width apply to screenshot"));
-    }
-    if !matches!(action, desk::Action::Click { .. }) && (button != "left" || double) {
-        return Err(bad_argument("--button and --double apply to click"));
-    }
-    Ok(Command::DeskAction {
-        node,
-        lease,
-        action,
-    })
-}
-
-fn desk_coordinate(text: &str) -> Result<i32> {
-    text.parse::<i32>()
-        .map_err(|_| bad_argument(format!("coordinate {text:?} is not an integer")))
-}
-
-fn desk_policy(args: &[String], index: &mut usize) -> Result<Command> {
-    let node = next(args, *index + 1)
-        .filter(|node| !node.starts_with('-'))
-        .ok_or_else(|| bad_argument("desk policy needs a node"))?
-        .to_owned();
-    *index += 1;
-    let mut window = None;
-    let mut idle = None;
-    let mut timezone = None;
-    let mut lock_after = None;
-    let mut off = false;
-    while let Some(item) = next(args, *index + 1) {
-        let (flag, inline) = option(item);
-        match flag {
-            "--window" => {
-                *index += 1;
-                window = Some(value(args, index, flag, inline)?);
-            }
-            "--idle" => {
-                *index += 1;
-                idle = Some(go_duration(flag, &value(args, index, flag, inline)?)?);
-            }
-            "--tz" => {
-                *index += 1;
-                timezone = Some(value(args, index, flag, inline)?);
-            }
-            "--lock-after" => {
-                *index += 1;
-                lock_after = Some(bool_flag(flag, inline)?);
-            }
-            "--off" => {
-                *index += 1;
-                off = bool_flag(flag, inline)?;
-            }
-            "--json" | "--hub" | "--token-file" | "--home" | "--timeout" => break,
-            _ => {
-                return Err(bad_argument(format!(
-                    "unknown desk policy argument {item:?}"
-                )))
-            }
-        }
-    }
-    let setting = window.is_some() || idle.is_some() || timezone.is_some() || lock_after.is_some();
-    let action = if off {
-        if setting {
-            return Err(bad_argument("--off cannot be combined with policy flags"));
-        }
-        desk::PolicyAction::Clear
-    } else if setting {
-        let window = window
-            .filter(|window| !window.is_empty())
-            .ok_or_else(|| bad_argument("setting a policy needs --window and --idle"))?;
-        let idle = idle
-            .filter(|idle| !idle.is_zero())
-            .ok_or_else(|| bad_argument("setting a policy needs --window and --idle"))?;
-        desk::PolicyAction::Set {
-            window,
-            idle,
-            timezone: timezone.unwrap_or_default(),
-            lock_after: lock_after.unwrap_or(false),
-        }
-    } else {
-        desk::PolicyAction::Show
-    };
-    Ok(Command::DeskPolicy { node, action })
 }
 
 fn valid_label(text: &str, max: usize) -> bool {

@@ -48,8 +48,6 @@ fn roundtrip_excludes_transient_state_and_keeps_manifest_metadata() {
         "identity.json",
         "nodes.json",
         "sleeves-rust.json",
-        "desk-policies-rust.json",
-        "desk-use-rust.json",
         "leases.json",
         "notes.json",
         "directory.json",
@@ -93,8 +91,6 @@ fn roundtrip_excludes_transient_state_and_keeps_manifest_metadata() {
         "sleeves/alice/home/secret",
         "sleeves/alice/workspace/file",
         "sleeves.json",
-        "desk-policies.json",
-        "desk-use.json",
         "jobs/id/job.json",
         "jobs/id/artifacts/file",
         "jobs-rust/.id-artifacts-staging/file",
@@ -116,7 +112,7 @@ fn roundtrip_excludes_transient_state_and_keeps_manifest_metadata() {
     let path = create(&options(home.path(), out.path()), &cancel).unwrap();
     let manifest = verify(&path, &cancel).unwrap();
     assert_eq!(manifest.hub_version, "v1-test");
-    assert_eq!(manifest.files.len(), 29);
+    assert_eq!(manifest.files.len(), 27);
     assert!(manifest
         .files
         .iter()

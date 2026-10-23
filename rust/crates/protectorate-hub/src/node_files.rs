@@ -66,23 +66,6 @@ impl FileRelay {
         name: &str,
         timeout: Duration,
     ) -> Result<Client> {
-        self.client_for_node(Some(request), name, timeout)
-    }
-
-    pub(super) fn internal_client_with_timeout(
-        &self,
-        name: &str,
-        timeout: Duration,
-    ) -> Result<Client> {
-        self.client_for_node(None, name, timeout)
-    }
-
-    fn client_for_node(
-        &self,
-        request: Option<&RpcRequest>,
-        name: &str,
-        timeout: Duration,
-    ) -> Result<Client> {
         let name = name.trim().to_ascii_lowercase();
         if name.is_empty() {
             return Err(RpcError::invalid("node name is required"));
@@ -108,18 +91,16 @@ impl FileRelay {
                 ));
             }
             if info.tier == CARE
-                && request.is_some_and(|request| {
-                    !request.auth.owner
-                        && !protectorate_auth::admin_on(
-                            &request
-                                .auth
-                                .scopes
-                                .iter()
-                                .map(String::as_str)
-                                .collect::<Vec<_>>(),
-                            &name,
-                        )
-                })
+                && !request.auth.owner
+                && !protectorate_auth::admin_on(
+                    &request
+                        .auth
+                        .scopes
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                    &name,
+                )
             {
                 return Err(RpcError::new(
                     Code::PermissionDenied,
