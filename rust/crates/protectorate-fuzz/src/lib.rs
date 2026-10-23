@@ -6,6 +6,7 @@
 mod archives;
 mod auth;
 mod cli;
+mod egress;
 mod harness;
 mod metrics;
 mod quota;
@@ -17,6 +18,7 @@ mod wire;
 pub use archives::{release_manifest, release_web_archive, xfer_archive};
 pub use auth::{capability_tokens, device_proofs};
 pub use cli::{cli_args, mcp_stdio};
+pub use egress::egress_connect;
 pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
 pub use metrics::{docker_engine, gpu_tools};
 pub use quota::quota_responses;
@@ -39,6 +41,7 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("device_proofs", device_proofs),
     ("directory_state", directory_state),
     ("docker_engine", docker_engine),
+    ("egress_connect", egress_connect),
     ("gpu_tools", gpu_tools),
     ("grok_acp", grok_acp),
     ("identity_store", identity_store),
