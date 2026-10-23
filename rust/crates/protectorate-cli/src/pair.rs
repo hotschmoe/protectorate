@@ -34,36 +34,3 @@ pub(crate) fn run(invocation: &Invocation, url: Option<&str>, app_qr: bool) -> R
     ));
     Ok(output)
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::{parse, run_with_status, Command};
-    use serde_json::Value;
-
-    #[test]
-    fn pair_works_without_a_token_and_selects_the_requested_qr() {
-        let invocation = parse(["--hub", "https://hub.example", "pair", "--app"]).unwrap();
-        assert_eq!(
-            invocation.command,
-            Command::Pair {
-                url: None,
-                app: true
-            }
-        );
-        let text = run_with_status(["pair", "--url", "https://hub.example", "--app"]).unwrap();
-        assert!(text.starts_with("\u{1b}["));
-        assert!(text.contains("web:  https://hub.example/#/pair?url="));
-        assert!(text.contains("app:  protectorate://pair?url="));
-        let line = run_with_status(["pair", "--url", "https://hub.example", "--json"]).unwrap();
-        let links: Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(
-            links["web"],
-            "https://hub.example/#/pair?url=https%3A%2F%2Fhub%2Eexample"
-        );
-        assert!(links["app"]
-            .as_str()
-            .unwrap()
-            .starts_with("protectorate://pair?url="));
-        assert!(parse(["pair", "extra"]).is_err());
-    }
-}

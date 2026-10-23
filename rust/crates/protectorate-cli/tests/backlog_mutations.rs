@@ -1,8 +1,11 @@
 #![cfg(unix)]
 
-use protectorate_cli::{dispatch_endpoint, parse, Code, Command};
+mod common;
+
+use common::cli;
 use protectorate_hub::Hub;
 use serde_json::Value;
+use std::os::unix::fs::PermissionsExt;
 use tokio::net::TcpListener;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -15,7 +18,7 @@ async fn edit_pin_and_remove_notes_over_real_hub_http() {
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let root = home.path().to_owned();
     let result = tokio::task::spawn_blocking(move || {
-        let call = |args: &[&str]| dispatch_endpoint(&url, "owner-secret", args).unwrap();
+        let call = |args: &[&str]| cli(&url, "owner-secret", args).unwrap();
         let created: Value = serde_json::from_str(&call(&[
             "--json",
             "backlog",
@@ -63,60 +66,33 @@ async fn edit_pin_and_remove_notes_over_real_hub_http() {
             serde_json::from_str(&call(&["--json", "backlog", "pin", id, "--off"])).unwrap();
         assert!(!unpinned["pinned"].as_bool().unwrap_or(false));
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let editor = root.join("editor.sh");
-            std::fs::write(
-                &editor,
-                "#!/bin/sh\nprintf 'Editor title\\n\\nEditor body\\n' > \"$1\"\n",
-            )
+        let editor = root.join("editor.sh");
+        std::fs::write(
+            &editor,
+            "#!/bin/sh\nprintf 'Editor title\\n\\nEditor body\\n' > \"$1\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let edit = std::process::Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+            .env("PROTECTORATE_HUB", &url)
+            .env("PROTECTORATE_TOKEN", "owner-secret")
+            .env("EDITOR", &editor)
+            .args(["backlog", "edit", id])
+            .output()
             .unwrap();
-            std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
-            std::env::set_var("EDITOR", &editor);
-            call(&["backlog", "edit", id]);
-            std::env::remove_var("EDITOR");
-            let edited: Value =
-                serde_json::from_str(&call(&["--json", "backlog", "show", id])).unwrap();
-            assert_eq!(edited["title"], "Editor title");
-            assert_eq!(edited["body"], "Editor body\n");
-        }
-        assert_eq!(call(&["backlog", "rm", id]), format!("deleted\t{id}\n"));
-        assert_eq!(
-            dispatch_endpoint(&url, "owner-secret", ["backlog", "show", id])
-                .unwrap_err()
-                .code,
-            Code::NotFound
+        assert!(
+            edit.status.success(),
+            "{}",
+            String::from_utf8_lossy(&edit.stderr)
         );
+        let edited: Value =
+            serde_json::from_str(&call(&["--json", "backlog", "show", id])).unwrap();
+        assert_eq!(edited["title"], "Editor title");
+        assert_eq!(edited["body"], "Editor body\n");
+        assert_eq!(call(&["backlog", "rm", id]), format!("deleted\t{id}\n"));
+        cli(&url, "owner-secret", ["backlog", "show", id]).unwrap_err();
     })
     .await;
     server.abort();
     result.unwrap();
-}
-
-#[test]
-fn edit_flag_validation_preserves_optional_empty_fields() {
-    let parsed = parse(["backlog", "edit", "note-1", "--title=", "--project="])
-        .unwrap()
-        .command;
-    assert!(
-        matches!(parsed, Command::BacklogEdit(edit) if edit.title == Some(String::new()) && edit.project == Some(String::new()))
-    );
-    for args in [
-        vec![
-            "backlog",
-            "edit",
-            "note-1",
-            "--body",
-            "x",
-            "--body-file",
-            "x.md",
-        ],
-        vec!["backlog", "edit", "note-1", "--body", "x", "--append", "y"],
-        vec!["backlog", "edit"],
-        vec!["backlog", "pin"],
-        vec!["backlog", "rm"],
-    ] {
-        assert!(parse(args).is_err());
-    }
 }

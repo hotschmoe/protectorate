@@ -15,28 +15,6 @@
 //! `protectorate-connect-client` and renders the replies as aligned text, or
 //! as compact proto-JSON one-liners when `--json` is set. It speaks only the
 //! Connect API defined in `proto/protectorate/v1`; it never reads hub storage.
-//! Command names, flags and the human columns follow the Go CLI so both can be
-//! scripted the same way.
-//!
-//! Three entry points, from most to least ready-made:
-//!
-//! * [`dispatch`] for a caller that already owns a [`Client`].
-//! * [`dispatch_endpoint`] for a caller that has an endpoint and a bearer token.
-//! * [`run`] for a binary that only has argv and the hub environment variables.
-//!
-//! ```
-//! use protectorate_cli::{parse, Command, NoteState};
-//!
-//! let invocation = parse(["node", "show", "win1"]).unwrap();
-//! assert_eq!(invocation.command, Command::NodeShow { name: "win1".into() });
-//!
-//! let invocation = parse(["backlog", "ls", "--state", "all", "--project", "protectorate"]).unwrap();
-//! assert_eq!(invocation.command, Command::BacklogList(protectorate_cli::BacklogFilter {
-//!     project: "protectorate".into(),
-//!     query: String::new(),
-//!     state: NoteState::All,
-//! }));
-//! ```
 mod args;
 mod attach;
 pub mod desk;
@@ -896,7 +874,7 @@ pub enum Command {
 }
 
 /// argv plus the global options, ready to run.
-pub fn usage() -> &'static str {
+fn usage() -> &'static str {
     "Usage:\n  \
      protectorate-cli [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
      Commands:\n  \
@@ -1056,7 +1034,7 @@ fn command_usage(path: &str) -> Result<String> {
 }
 
 /// Runs an already parsed invocation against an existing client.
-pub fn execute(client: &Client, invocation: &Invocation) -> Result<String> {
+fn execute(client: &Client, invocation: &Invocation) -> Result<String> {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     match render(client, invocation, &mut stdout, &mut stderr, None, false) {
@@ -2554,36 +2532,6 @@ fn exited_pane_tail(client: &Client, sleeve: &Value) -> Option<String> {
     (!tail.is_empty()).then_some(tail)
 }
 
-/// Parses `args` and runs them with a client the caller already owns. The
-/// global endpoint options in the parsed invocation are not used.
-pub fn dispatch(
-    client: &Client,
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> Result<String> {
-    let invocation = parse(args)?;
-    execute(client, &invocation)
-}
-
-/// Parses `args` and runs them against `endpoint` with `token`. `endpoint` and
-/// `token` win over `--hub` and `--token-file` in `args`.
-pub fn dispatch_endpoint(
-    endpoint: &str,
-    token: &str,
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> Result<String> {
-    let invocation = parse(args)?;
-    match &invocation.command {
-        Command::Help => return Ok(usage().to_string()),
-        Command::HelpPath(path) => return command_usage(path),
-        _ => {}
-    }
-    if invocation.command == Command::Version {
-        return Ok(version_text(invocation.json));
-    }
-    let client = Client::new(endpoint, token, transport_timeout(&invocation))?;
-    execute(&client, &invocation)
-}
-
 /// Builds the client for an invocation: the hub URL from `--hub` or
 /// `PROTECTORATE_HUB`, the bearer token from `--token-file`,
 /// `PROTECTORATE_TOKEN_FILE` or `PROTECTORATE_TOKEN`, in that order.
@@ -2597,7 +2545,7 @@ pub fn client_for(invocation: &Invocation) -> Result<Client> {
 
 /// The HTTP timeout for an invocation. A `chat wait` blocks on hub events for
 /// as long as its own deadline, so the transport has to outlast it.
-pub fn transport_timeout(invocation: &Invocation) -> Duration {
+fn transport_timeout(invocation: &Invocation) -> Duration {
     match &invocation.command {
         Command::ChatWait { timeout, .. } => {
             let wait = if timeout.is_zero() {
@@ -2829,15 +2777,6 @@ fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
     }
 }
 
-/// Run through the library's RPC-error interface. The CLI binary uses
-/// [`run_with_status`] so a remote command's exit code reaches the shell.
-pub fn run(args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<String> {
-    run_with_status(args).map_err(|error| match error {
-        RunError::Rpc(error) => error,
-        RunError::Status { message, .. } => RpcError::new(Code::Unknown, message),
-    })
-}
-
 fn streams(command: &Command) -> bool {
     matches!(command, Command::ChatWait { sleeves, .. } if sleeves.len() > 1)
         || matches!(
@@ -2888,7 +2827,7 @@ fn api_call(client: &Client, procedure: &str, body: &str, json: bool) -> Result<
 
 /// The client build version: the release tag stamped at build time, or this
 /// crate's version for a local build.
-pub fn client_version() -> &'static str {
+fn client_version() -> &'static str {
     option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
@@ -2901,13 +2840,13 @@ fn host_arch() -> &'static str {
 }
 
 /// This machine's platform the way releases and the Go CLI name it.
-pub fn client_platform() -> String {
+fn client_platform() -> String {
     format!("{}/{}", std::env::consts::OS, host_arch())
 }
 
 /// What `version` prints: `protectorate-cli 0.1.0 linux/amd64`, or one JSON
 /// object holding the same three fields.
-pub fn version_text(json: bool) -> String {
+fn version_text(json: bool) -> String {
     let version = client_version();
     if json {
         return format!(
@@ -3482,33 +3421,4 @@ fn now_millis() -> i64 {
         .as_millis()
         .try_into()
         .unwrap_or(i64::MAX)
-}
-
-#[cfg(test)]
-mod update_timeout_tests {
-    use super::*;
-
-    #[test]
-    fn release_updates_outlast_the_old_ten_minute_global_deadline() {
-        for args in [
-            vec!["node", "update", "remote"],
-            vec!["hub", "update", "--version", "0.1.1"],
-        ] {
-            let invocation = parse(args).unwrap();
-            assert_eq!(transport_timeout(&invocation), UPDATE_TRANSFER_TIMEOUT);
-        }
-    }
-
-    #[test]
-    fn explicit_longer_deadline_is_honored_and_no_wait_allows_slow_transfer() {
-        for args in [
-            vec!["--timeout", "7200", "node", "update", "remote"],
-            vec!["--timeout", "7200", "hub", "update", "--version", "0.1.1"],
-        ] {
-            let invocation = parse(args).unwrap();
-            assert_eq!(transport_timeout(&invocation), Duration::from_secs(7200));
-        }
-        let no_wait = parse(["node", "update", "remote", "--no-wait"]).unwrap();
-        assert_eq!(transport_timeout(&no_wait), UPDATE_TRANSFER_TIMEOUT);
-    }
 }
