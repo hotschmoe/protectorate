@@ -95,3 +95,52 @@ pub async fn poll(monitor: &Arc<protectorate_node_monitor::Monitor>, name: &str)
         .await
         .unwrap();
 }
+
+/// Subscribes to the hub's event stream on a thread of its own and returns
+/// once the stream is live (its first heartbeat arrived).
+pub fn subscribe(addr: &str) -> std::sync::mpsc::Receiver<Value> {
+    let client = Client::new(
+        &format!("http://{addr}"),
+        "owner-secret",
+        Duration::from_secs(600),
+    )
+    .unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = client.stream(
+            "/protectorate.v1.EventService/Subscribe",
+            &serde_json::json!({}),
+            |event| {
+                sender
+                    .send(event)
+                    .map_err(|_| RpcError::new(protectorate_wire::Code::Canceled, "done"))
+            },
+        );
+    });
+    let first = receiver.recv_timeout(Duration::from_secs(60)).unwrap();
+    assert_eq!(first["kind"], "heartbeat", "{first}");
+    receiver
+}
+
+/// The next events about `subject`, up to and including one of `last`'s
+/// kind, skipping heartbeats and other subjects.
+pub fn events_until(
+    events: &std::sync::mpsc::Receiver<Value>,
+    subject: &str,
+    last: &str,
+) -> Vec<Value> {
+    let mut seen = Vec::new();
+    loop {
+        let event = events
+            .recv_timeout(Duration::from_secs(60))
+            .unwrap_or_else(|_| panic!("no {last} for {subject}; saw {seen:?}"));
+        if event["subject"] != subject {
+            continue;
+        }
+        let done = event["kind"] == last;
+        seen.push(event);
+        if done {
+            return seen;
+        }
+    }
+}
