@@ -1980,8 +1980,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// How long a node's last good poll stays usable. The hub polls every
 /// `node_interval`, so the window has to scale with it: a node polled every two
 /// minutes would otherwise be reported UNREACHABLE, alerted, and made the
-/// subject of node.unreachable between two successful polls. Go's NodeOptions
-/// does the same (StaleAfter defaults to 2 * Interval).
+/// subject of node.unreachable between two successful polls.
 fn node_timing(interval: Duration) -> protectorate_node_monitor::Timing {
     protectorate_node_monitor::Timing {
         stale_after: interval.saturating_mul(2),

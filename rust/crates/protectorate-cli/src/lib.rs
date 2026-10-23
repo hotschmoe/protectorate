@@ -327,7 +327,7 @@ pub struct JobLogs {
     pub follow: bool,
 }
 
-/// The default `msg wait` deadline, the Go CLI's 10 minutes.
+/// The default `msg wait` deadline.
 pub const DEFAULT_MSG_WAIT: Duration = Duration::from_secs(600);
 
 /// Which condition `chat wait` blocks on.
@@ -413,7 +413,7 @@ impl MessageKind {
     }
 }
 
-/// A harness name, in the Go CLI's spelling.
+/// A harness name as the CLI spells it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HarnessName {
     Claude,
@@ -2588,8 +2588,8 @@ fn sent_message_output(
     }
 }
 
-/// The tail of an exited sleeve's kept session, the way the Go CLI reads it
-/// through SessionService.CapturePane. A session that is gone, or a hub that
+/// The tail of an exited sleeve's kept session, read through
+/// SessionService.CapturePane. A session that is gone, or a hub that
 /// refuses the capture, just means there is no tail to show.
 fn exited_pane_tail(client: &Client, sleeve: &Value) -> Option<String> {
     if sleeve.get("state").and_then(Value::as_str) != Some("SLEEVE_STATE_EXITED") {
@@ -2919,7 +2919,7 @@ fn host_arch() -> &'static str {
     }
 }
 
-/// This machine's platform the way releases and the Go CLI name it.
+/// This machine's platform as releases name it (`linux/amd64`).
 fn client_platform() -> String {
     format!("{}/{}", std::env::consts::OS, host_arch())
 }
@@ -3147,7 +3147,7 @@ fn private_owner_token(path: &Path) -> Result<Option<String>> {
 }
 
 /// What `backlog add`, `done` and `reopen` print: the note the hub just
-/// created or changed, as one Go-style row or one proto-JSON line.
+/// created or changed, as one text row or one proto-JSON line.
 fn note_output(response: &Value, json: bool) -> Result<String> {
     let note = response
         .get("note")
@@ -3471,7 +3471,7 @@ pub(crate) fn absolute_disk_path(path: &str) -> Result<String> {
 }
 
 /// A local path becomes absolute and cleaned. A git URL, recognized by
-/// `://` or `@` the way the Go CLI recognizes one, is left unchanged.
+/// `://` or `@`, is left unchanged.
 fn absolute_workspace(workspace: &str) -> Result<String> {
     if workspace.contains("://") || workspace.contains('@') {
         return Ok(workspace.to_owned());

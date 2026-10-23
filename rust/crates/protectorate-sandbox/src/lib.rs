@@ -1248,8 +1248,7 @@ fn overlaps(a: &Path, b: &Path) -> bool {
 }
 
 /// Extra Git directories a linked worktree or submodule needs besides the
-/// workspace checkout. Matches Go `linkedGitDirs`: the `.git` file's gitdir
-/// and its commondir, resolved, with nested paths coalesced to the outer dir.
+/// workspace checkout: the `.git` file's gitdir and its commondir, resolved, with nested paths coalesced to the outer dir.
 fn linked_git_dirs(workspace: &Path) -> Vec<PathBuf> {
     let raw = match fs::read_to_string(workspace.join(".git")) {
         Ok(raw) => raw,

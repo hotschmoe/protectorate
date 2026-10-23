@@ -273,8 +273,8 @@ fn parse(args: impl Iterator<Item = String>) -> std::result::Result<Options, Str
     Ok(options)
 }
 
-// Cobra's StringSlice flags accept comma-separated values, including quoted
-// values with literal commas. Keep repeated flags additive.
+// Comma-separated values, CSV-quoted to hold a literal comma ("a,b").
+// Repeated flags are additive.
 fn slice_value(value: &str) -> std::result::Result<Vec<String>, String> {
     let mut result = Vec::new();
     let mut field = String::new();

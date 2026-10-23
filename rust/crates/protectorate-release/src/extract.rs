@@ -1,8 +1,7 @@
 //! Safe, bounded extraction of the release web archive.
 //!
-//! Mirrors the Go extractor: gzip inside a tar, only directories and regular
-//! files, no absolute or escaping paths, a hard cap on unpacked bytes and a
-//! required index.html.
+//! Gzip inside a tar, only directories and regular files, no absolute or
+//! escaping paths, a hard cap on unpacked bytes and a required index.html.
 use crate::{invalid, Error, Result};
 use flate2::read::GzDecoder;
 use std::fs::{self, File, OpenOptions};

@@ -101,8 +101,7 @@ impl Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Message kinds. Free-form like the Go Kind string, with the three known
-/// values as constants.
+/// Message kinds: free-form, with the three known values as constants.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Kind(Cow<'static, str>);

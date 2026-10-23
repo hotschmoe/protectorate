@@ -245,8 +245,8 @@ async fn watch_node_setup(
     hub.inventory.get(&name).map_err(node_error)?;
     let mut last = None;
     // A node that just joined is only seen when the hub next polls it. Kick
-    // the poll from the watch, as Go's WatchNodeSetup does, so the setup flow
-    // does not sit at JOINED for a whole poll interval.
+    // the poll from the watch so the setup flow does not sit at JOINED for a
+    // whole poll interval.
     let mut kicked = None::<Instant>;
     loop {
         let node = hub.inventory.get(&name).map_err(node_error)?;

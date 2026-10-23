@@ -1,5 +1,5 @@
-//! Human output. The columns, labels and dashes mirror the Go CLI so the two
-//! CLIs read the same, including timestamps rendered in local time.
+//! Human output: tab-aligned columns, `-` for empty values and timestamps in
+//! local time.
 use chrono::{Local, LocalResult, TimeZone};
 use protectorate_wire::{Code, Result, RpcError};
 use serde_json::Value;
@@ -359,7 +359,7 @@ pub(crate) fn token_revoked_text(response: &Value) -> String {
     )
 }
 
-/// `devices ls`: one row per trusted device, the way the Go CLI prints them.
+/// `devices ls`: one row per trusted device.
 pub(crate) fn device_list_text(response: &Value) -> String {
     let mut out = "ID\tNAME\tPLATFORM\tLAST USED\tAPPROVED\tAPPROVER\n".to_owned();
     for device in items(response, "devices") {
@@ -522,8 +522,7 @@ pub(crate) fn audit_verify_text(report: &Value) -> String {
     out
 }
 
-/// How many output lines `sleeve show` keeps from an exited session, like
-/// the Go CLI.
+/// How many output lines `sleeve show` keeps from an exited session.
 pub(crate) const SHOW_TAIL_LINES: usize = 20;
 
 pub(crate) fn status_text(status: &Value, runtime: Option<&Value>) -> String {
@@ -1271,7 +1270,7 @@ pub(crate) fn job_cancel_text(job: &Value) -> String {
 }
 
 /// The one-line summary `job run` prints after the log. Durations are rounded
-/// to a millisecond, the way the Go CLI prints `time.Duration`.
+/// to a millisecond (`1m2.5s`).
 pub(crate) fn job_summary_line(job: &Value) -> String {
     let state = text(job, "state");
     let mut line = format!("job {} {}", text(job, "id"), job_state_label(job));
@@ -1370,7 +1369,7 @@ pub(crate) fn chat_send_text(response: &Value) -> String {
     out
 }
 
-/// The Go CLI's `chat wait` rows: the sleeve and its state, then the summary
+/// `chat wait` rows: the sleeve and its state, then the summary
 /// when the wait ended on a report.
 pub(crate) fn chat_wait_text(response: &Value) -> String {
     let sleeve = text(response, "sleeve");
@@ -1421,8 +1420,7 @@ pub(crate) fn msg_ack_text(message: &Value) -> String {
 }
 
 /// One block per message: a header row with its id, thread, direction, kind
-/// and state, then the body indented. The hub's own guidance heads the list,
-/// the way the Go CLI prints it.
+/// and state, then the body indented. The hub's own guidance heads the list.
 pub(crate) fn mail_text(messages: &[Value]) -> String {
     if messages.is_empty() {
         return "no messages\n".to_owned();
@@ -1479,7 +1477,7 @@ fn mail_flags(message: &Value) -> String {
     flags
 }
 
-/// The Go CLI's `msg threads` rows, most recently active first.
+/// `msg threads` rows, most recently active first.
 pub(crate) fn thread_list_text(response: &Value) -> String {
     let threads = items(response, "threads");
     if threads.is_empty() {
@@ -1600,8 +1598,8 @@ pub(crate) fn sleeve_list_text(response: &Value) -> String {
     align(&out)
 }
 
-/// The STATE column: "running", "exited(3)" or "exited(signal 9)", the way
-/// the Go CLI labels a session.
+/// The STATE column of a session: "running", "exited(3)" or
+/// "exited(signal 9)".
 fn session_state_label(session: &Value) -> String {
     if text(session, "state") != "SESSION_STATE_EXITED" {
         return "running".to_owned();
@@ -1615,7 +1613,7 @@ fn session_state_label(session: &Value) -> String {
     }
 }
 
-/// A hub timestamp as this machine's local clock, the Go CLI's 15:04:05.
+/// A hub timestamp as this machine's local clock, HH:MM:SS.
 fn local_clock(raw: String) -> String {
     match timestamp_millis(&raw) {
         Some(millis) => match Local.timestamp_millis_opt(millis) {
@@ -1655,7 +1653,7 @@ pub(crate) fn session_list_text(response: &Value) -> String {
     align(&out)
 }
 
-/// The Go CLI's `chat settings` rows: the effective model and effort, the
+/// `chat settings` rows: the effective model and effort, the
 /// requested selection, and the native defaults the harness captured before
 /// any override.
 pub(crate) fn chat_settings_text(chat: &Value) -> String {
@@ -2050,7 +2048,7 @@ fn append_handoff(out: &mut String, handoff: &Value) {
 }
 
 /// The last `count` lines of a captured pane, with ANSI SGR escapes removed
-/// and tabs expanded, the way the Go CLI tails an exited sleeve's session.
+/// and tabs expanded.
 pub(crate) fn pane_tail(text: &str, count: usize) -> String {
     let text = strip_sgr(text).replace('\t', "    ");
     let lines: Vec<&str> = text
@@ -2060,8 +2058,7 @@ pub(crate) fn pane_tail(text: &str, count: usize) -> String {
     lines[lines.len().saturating_sub(count)..].join("\n")
 }
 
-/// Removes ESC [ params m sequences, the Go CLI's `\x1b\[[0-9;]*m` regex
-/// without pulling in a regex crate.
+/// Removes `ESC [ params m` sequences (`\x1b\[[0-9;]*m`).
 fn strip_sgr(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -2096,7 +2093,7 @@ fn harness_label(sleeve: &Value) -> String {
 }
 
 /// The STATE column: "killed", "running", "exited", "exited(3)" or
-/// "exited(137,oom)", the way the Go CLI labels a sleeve record.
+/// "exited(137,oom)".
 fn terminal_activity(status: &Value) -> String {
     text(status, "activity")
         .strip_prefix("TERMINAL_ACTIVITY_")
@@ -2198,7 +2195,7 @@ fn mode_label(sleeve: &Value) -> String {
 }
 
 /// How an exited sleeve ended: "exit 3", "killed by signal 9 (exit 137)" or
-/// "exit 137 (OOM killed)", like the Go CLI.
+/// "exit 137 (OOM killed)".
 fn exit_label(sleeve: &Value) -> String {
     let signal = number(sleeve, "exitSignal").unwrap_or_default() as i64;
     let mut label = match number(sleeve, "exitCode") {
@@ -2384,7 +2381,7 @@ pub(crate) fn bytes(value: u64) -> String {
     String::new()
 }
 
-/// Whole seconds the way Go's `time.Duration` prints them.
+/// Whole seconds as `1h2m3s`, `2m3s` or `3s`.
 fn go_duration(seconds: f64) -> String {
     let total = seconds.round();
     let negative = total < 0.0;
@@ -2404,7 +2401,7 @@ fn go_duration(seconds: f64) -> String {
     }
 }
 
-/// A duration rounded to whole minutes, the way the Go CLI labels node age.
+/// A duration rounded to whole minutes, for node age.
 fn fmt_minutes(seconds: f64) -> String {
     let minutes = (seconds / 60.0).round() as i64;
     if minutes <= 0 {
@@ -2630,8 +2627,8 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-/// Aligns tab-separated columns the way Go's tabwriter does: consecutive
-/// column lines share widths, and a line without a tab ends the block.
+/// Aligns tab-separated columns: consecutive column lines share widths, and a
+/// line without a tab ends the block.
 fn align(text: &str) -> String {
     let mut out = String::new();
     let mut block: Vec<Vec<String>> = Vec::new();
@@ -2655,8 +2652,7 @@ fn flush(block: &mut Vec<Vec<String>>, out: &mut String) {
     let columns = block.iter().map(|row| row.len()).max().unwrap_or(0);
     let mut widths = vec![0usize; columns];
     for row in block.iter() {
-        // The text after a line's last tab is not a column, the way Go's
-        // tabwriter measures one.
+        // The text after a line's last tab is not a column.
         for (index, cell) in row.iter().enumerate().take(row.len().saturating_sub(1)) {
             widths[index] = widths[index].max(cell.chars().count());
         }

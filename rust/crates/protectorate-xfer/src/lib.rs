@@ -1,5 +1,5 @@
-//! Bounded transfers of files and directory trees. The directory archive is a
-//! small Rust-native format, not Go tar: no byte compatibility is required.
+//! Bounded transfers of files and directory trees in a small archive format
+//! of their own.
 //! Sources and sinks each hold at most one 4 MiB raw chunk plus compressor
 //! output. Directories spool to disk, so tree size does not grow RAM use.
 

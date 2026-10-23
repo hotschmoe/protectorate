@@ -95,7 +95,8 @@ pub struct Filter {
 struct Document {
     notes: Vec<Note>,
 }
-// Go strings.ToLower maps each Unicode scalar independently (no final-sigma context).
+// Lowercases each scalar on its own (no final-sigma context), so a search
+// key never depends on its neighbours.
 fn simple_lower(s: &str) -> String {
     s.chars()
         .map(|c| c.to_lowercase().next().unwrap())

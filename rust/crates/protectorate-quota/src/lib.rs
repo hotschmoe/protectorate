@@ -1,7 +1,6 @@
 //! Subscription usage windows and reset credits read from provider accounts
-//! with read-only calls and locally stored credentials. A Rust port of
-//! `internal/quota`; the wire format is this crate's own serde types, not the
-//! Go structs or the protobuf messages byte for byte.
+//! with read-only calls and locally stored credentials. Snapshots are this
+//! crate's own serde types; the hub maps them onto the protobuf messages.
 //!
 //! Providers: `claude`, `codex`, `grok`, `antigravity` and `local`
 //! (an OpenAI-compatible endpoint, which has no quota but reports reachability
@@ -137,8 +136,7 @@ impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// A read's clock and cancellation bound, the port of Go's `context.Context`
-/// plus the injected `Now` function.
+/// A read's clock and deadline, passed in so reads are deterministic.
 #[derive(Clone, Copy, Debug)]
 pub struct Ctx {
     pub now: DateTime<Utc>,

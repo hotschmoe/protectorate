@@ -1,8 +1,8 @@
 //! Bounded HTTP GET for release metadata and assets.
 //!
 //! Redirects are followed by this module instead of ureq so that every hop is
-//! checked against the same rules the Go client uses: at most ten hops and
-//! HTTPS unless the release API itself is plain HTTP.
+//! checked: at most ten hops, and HTTPS unless the release API itself is
+//! plain HTTP.
 use crate::{invalid, Error, Result};
 use std::io::Read;
 use std::time::Duration;

@@ -45,8 +45,8 @@ impl std::fmt::Display for ScopeError {
 
 impl std::error::Error for ScopeError {}
 
-/// Implements Go's path.Match grammar for scope and node names.
-/// This keeps grant decisions independent of a glob dependency.
+/// Shell-style globs (`*`, `?`, `[a-z]`, `[^x]`, `\\` escapes; `*` and `?`
+/// never match `/`) for scope and node names, without a glob dependency.
 pub fn glob_matches(pattern: &str, name: &str) -> Result<bool, ScopeError> {
     let pat: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = name.chars().collect();
@@ -238,7 +238,7 @@ pub fn scopes_allow(scopes: &[&str], method: &Method<'_>) -> bool {
     })
 }
 
-/// Match the Go hub's public Grants helper: unknown and owner-only tools deny.
+/// Whether `scopes` grant `tool`; unknown and owner-only tools deny.
 pub fn grants(scopes: &[&str], tool: &str, methods: &[Method<'_>]) -> bool {
     methods
         .iter()

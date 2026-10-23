@@ -1,4 +1,5 @@
-//! Per-harness sleeve home preparation, ported from internal/sleeve/layout.go.
+//! Per-harness sleeve home preparation. Unused: the hub and sleeve-runner
+//! prepare sleeve homes.
 //! A [`Layout`] is a typed, inspectable plan for one harness's private home:
 //! directories, first-run seed files, auth links and environment values.
 //! [`Layout::apply`] is idempotent and refuses to follow symlinks inside the
