@@ -1703,17 +1703,10 @@ fn token_counts_text(counts: &Value) -> String {
     )
 }
 
-/// Sequence, cache expiry, activity and prompt-cache rows of a chat status.
+/// Sequence, activity and prompt-cache rows of a chat status.
 fn chat_tail_text(chat: &Value) -> String {
     let mut out = String::new();
     row(&mut out, "last sequence", fmt_int(number(chat, "lastSeq")));
-    if !text(chat, "cacheExpiresAt").is_empty() {
-        row(
-            &mut out,
-            "cache expires",
-            local_stamp(text(chat, "cacheExpiresAt")),
-        );
-    }
     if !text(chat, "lastActivityAt").is_empty() {
         row(
             &mut out,

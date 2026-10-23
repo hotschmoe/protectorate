@@ -235,7 +235,7 @@ covered by `chat_*`.
 
 `Sleeve.chat` (`ChatStatus`) is kept current: state, harness session id, model,
 `context_tokens` (the prompt size of the last model call), `context_window`,
-`cache_expires_at` (Claude only), `last_seq`, `provider` and `local_model`.
+`last_seq`, `provider` and `local_model`.
 Every state change is published on EventService as `chat.state` (subject =
 sleeve name).
 
