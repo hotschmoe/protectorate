@@ -1,15 +1,17 @@
 # MCP server
 
-`protectorate mcp` serves the hub API as MCP tools so an AI client can act as,
-or talk to, the orchestrator. It is a client of the hub: it reads the hub token
-the same way the CLI does and calls the normal Connect API (`--hub` or
-`PROTECTORATE_HUB`, default `http://127.0.0.1:7470`).
+`protectorate mcp` (the CLI forwards to `protectorate-mcpbridge`) serves the
+hub API as MCP tools so an AI client can act as, or talk to, the orchestrator.
+It is a client of the hub: it finds its credential the way the CLI does and
+calls the normal Connect API (`--hub` or `PROTECTORATE_HUB`, default
+`http://127.0.0.1:7470`).
 
 ## Tools come from the proto
 
-Nothing is hand-listed. At startup the bridge reads an embedded buf image
-(`internal/mcpbridge/image.binpb`, written by `make gen`) and turns every unary
-RPC into a tool:
+Nothing is hand-listed. The bridge reads the descriptor set with source
+comments embedded in protectorate-wire
+(`rust/crates/protectorate-wire/assets/protectorate-source.binpb`, written by
+`make gen`) and turns every unary RPC into a tool:
 
 - name: `<service>_<method>` in snake_case without the `Service` suffix, e.g.
   `quota_get_quota`, `backlog_create_note`
@@ -22,8 +24,8 @@ RPC into a tool:
 - errors: returned as tool errors whose text starts with the Connect code, e.g.
   `not_found: ...`
 
-A new RPC in `proto/` appears as a tool after `make gen`. A test fails if an RPC
-has no comment or if the image is out of date with the generated code.
+A new RPC in `proto/` appears as a tool after `make gen`; `make check-gen`
+fails if the descriptor set or the tool catalog is stale.
 Server-streaming RPCs (`EventService.Subscribe`) are not exposed; use
 `protectorate events` for those.
 
@@ -85,31 +87,33 @@ verified against a live client.
 Streamable HTTP, for bridges that cannot spawn a process:
 
 ```
-protectorate mcp --http 127.0.0.1:7471
+protectorate mcp --http 127.0.0.1:7471 --token-file ~/.protectorate/claude-bridge.token
 claude mcp add --transport http protectorate http://127.0.0.1:7471 \
-  --header "Authorization: Bearer $(cat $PROTECTORATE_HOME/token)"
+  --header "Authorization: Bearer $(cat ~/.protectorate/claude-bridge.token)"
 ```
 
-Every HTTP request must carry the bridge's own hub token as a bearer, or it
-gets 401. The endpoint acts with that token, so only a caller who already holds
+Every HTTP request must carry, as a bearer, the token the bridge read at
+startup, or it gets 401. The bridge keeps renewing its token file for its own
+hub calls, but the bearer it accepts stays the startup token. The endpoint acts with that token, so only a caller who already holds
 it can use it; this reuses the existing token machinery instead of adding a
 second secret. Requiring the bearer was chosen over only refusing non-loopback
 binds because a loopback bind still lets any local process or user, and any
 web page that can reach localhost, drive the bridge. Because the bearer is sent
-in cleartext over plain HTTP, `--http` accepts only loopback. An IP in a
-tailnet range alone does not prove the listener is on a WireGuard interface;
-any non-loopback address, including an empty host, is refused.
+in cleartext over plain HTTP, `--http` accepts only loopback: a private
+address does not prove the path to it is encrypted, so any non-loopback
+address, including an empty host, is refused.
 
 For a remote MCP client, serve HTTPS with a certificate the client trusts:
 
 ```
-protectorate mcp --https 0.0.0.0:7471 \
+protectorate mcp --https 192.168.22.5:7471 \
   --tls-cert /path/to/mcp-cert.pem --tls-key /path/to/mcp-key.pem \
   --token-file /path/to/scoped-bridge.token
 ```
 
 The HTTPS endpoint still requires `Authorization: Bearer <token>` on every
-request. Use `https://HOST:7471` in the MCP client and configure it to trust
+request. Bind a private address, never a wildcard or public one. Use
+`https://HOST:7471` in the MCP client and configure it to trust
 the certificate or its issuing CA. Keep the key file private (`chmod 600` on
 Unix). On Windows, the key must be owned by the current user, SYSTEM, or
 Administrators, and its ACL may grant access only to those principals. The
@@ -130,9 +134,10 @@ remain available at capacity and release slots when their calls finish.
 
 `protectorate mcp --list` prints the catalog the bridge would serve, with the
 same `--allow`/`--deny` filters, as JSON and exits without contacting the hub.
-`make gen` writes `tests/e2e/testdata/mcp_tools.json` from it, and the e2e
-suite checks the served `tools/list` against that file, so a schema change
-updates the golden like any other generated output.
+`make gen` writes
+`rust/crates/protectorate-mcpbridge/tests/testdata/mcp_tools.json` from it,
+and the bridge's e2e scenario checks the served `tools/list` against that
+file, so a schema change updates the golden like any other generated output.
 
 ```
 backlog_create_note     mutating
