@@ -7,6 +7,8 @@ import 'package:xterm2/xterm.dart';
 
 import '../hubs/hub_client.dart';
 import '../hubs/connection.dart';
+import '../hubs/http_client_io.dart'
+    if (dart.library.js_interop) '../hubs/http_client_web.dart';
 import '../hubs/hub_profile.dart';
 import '../terminal/compose_box.dart';
 import '../terminal/extra_keys.dart';
@@ -73,9 +75,10 @@ class _TerminalScreenState extends State<TerminalScreen>
 
   void _connect() {
     final uri = widget.hub.terminalUri(widget.session, readOnly: _readOnly);
-    final channel = WebSocketChannel.connect(
+    final channel = connectWebSocket(
       uri,
-      protocols: terminalSubprotocols(widget.hub.token),
+      terminalSubprotocols(widget.hub.token),
+      caPem: widget.hub.caPem,
     );
     _channel = channel;
     channel.ready

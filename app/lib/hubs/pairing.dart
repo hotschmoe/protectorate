@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import 'hub_profile.dart';
@@ -10,10 +12,13 @@ class PairingRequest {
     this.tab,
     this.session,
     this.node,
+    this.caPem = '',
   });
 
   final String baseUrl;
   final String name;
+  // caPem is the hub CA carried in the link as base64url DER.
+  final String caPem;
   final String? tab;
   final String? session;
   final String? node;
@@ -32,13 +37,33 @@ PairingRequest? _fromQuery(Map<String, String> q, String baseUrl) {
   if (q.containsKey('token')) return null;
   if (validateBaseUrl(base) != null) return null;
   final name = (q['name'] ?? '').trim();
+  final caPem = _caPem(q['ca']);
+  if (caPem == null) return null;
   return PairingRequest(
     baseUrl: base,
     name: name.isEmpty ? Uri.parse(base).host : name,
     tab: q['tab'],
     session: q['session'],
     node: q['node'],
+    caPem: caPem,
   );
+}
+
+// Null when `ca` is present but not base64url; empty when absent.
+String? _caPem(String? ca) {
+  if (ca == null || ca.isEmpty) return '';
+  final List<int> der;
+  try {
+    der = base64Url.decode(base64Url.normalize(ca));
+  } on FormatException {
+    return null;
+  }
+  final body = base64.encode(der);
+  final lines = [
+    for (var i = 0; i < body.length; i += 64)
+      body.substring(i, i + 64 > body.length ? body.length : i + 64),
+  ];
+  return '-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n';
 }
 
 /// Parses URL-only web and native connection links.

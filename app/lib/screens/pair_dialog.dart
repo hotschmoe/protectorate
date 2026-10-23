@@ -16,6 +16,7 @@ Future<HubProfile?> connectHub(
   required Future<void> Function(HubProfile) save,
   HubProfile? existing,
   String? baseUrl,
+  String caPem = '',
 }) => showDialog<HubProfile>(
   context: context,
   barrierDismissible: false,
@@ -24,6 +25,7 @@ Future<HubProfile?> connectHub(
     save: save,
     existing: existing,
     baseUrl: baseUrl,
+    caPem: caPem,
   ),
 );
 
@@ -47,12 +49,14 @@ class _ConnectDialog extends StatefulWidget {
     required this.save,
     this.existing,
     this.baseUrl,
+    this.caPem = '',
   });
 
   final HubClient Function(HubProfile) clientFactory;
   final Future<void> Function(HubProfile) save;
   final HubProfile? existing;
   final String? baseUrl;
+  final String caPem;
 
   @override
   State<_ConnectDialog> createState() => _ConnectDialogState();
@@ -84,6 +88,13 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   Future<void> _connect() async {
     if (!_form.currentState!.validate()) return;
     final baseUrl = _normalizeUrl(_url.text);
+    final link = Uri.tryParse(_url.text.trim());
+    final linked = link == null ? null : parsePairing(link);
+    final caPem = linked?.caPem.isNotEmpty == true
+        ? linked!.caPem
+        : widget.caPem.isNotEmpty
+        ? widget.caPem
+        : widget.existing?.caPem ?? '';
     final profile =
         _connecting ??
         HubProfile(
@@ -94,6 +105,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
               ? Uri.parse(baseUrl).host
               : _name.text.trim(),
           baseUrl: baseUrl,
+          caPem: caPem,
         );
     _connecting = profile;
     final abort = _abort = CancelableSignal();
@@ -116,6 +128,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         name: profile.name,
         baseUrl: profile.baseUrl,
         token: secret,
+        caPem: profile.caPem,
       );
       await widget.save(approved);
       if (mounted) Navigator.of(context).pop(approved);

@@ -217,6 +217,7 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
             save: widget.store.upsert,
             existing: existing,
             baseUrl: req.baseUrl,
+            caPem: req.caPem,
           );
     if (profile == null) return;
     if (!nav.mounted) return;

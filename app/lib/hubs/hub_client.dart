@@ -19,6 +19,8 @@ import '../gen/protectorate/v1/session.connect.client.dart';
 import '../gen/protectorate/v1/sleeve.connect.client.dart';
 import 'hub_profile.dart';
 import 'connection.dart';
+import 'http_client_io.dart'
+    if (dart.library.js_interop) 'http_client_web.dart';
 
 Interceptor bearerInterceptor(String token) {
   return <I extends Object, O extends Object>(AnyFn<I, O> next) =>
@@ -36,7 +38,11 @@ class HubClient {
         protocol.Transport(
           baseUrl: profile.baseUrl,
           codec: const JsonCodec(),
-          httpClient: hubHttpClient(profile.baseUrl, client: httpClient),
+          httpClient: hubHttpClient(
+            profile.baseUrl,
+            client:
+                httpClient ?? createPlatformHttpClient(caPem: profile.caPem),
+          ),
           interceptors: [bearerInterceptor(profile.token)],
         ),
       );

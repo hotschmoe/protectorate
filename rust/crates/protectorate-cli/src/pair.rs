@@ -13,7 +13,13 @@ pub(crate) fn run(invocation: &Invocation, url: Option<&str>, app_qr: bool) -> R
             &default_url
         }
     };
-    let links = new_pair_links(url)
+    let ca = std::env::var_os("PROTECTORATE_TLS_CA_CERT")
+        .map(|path| {
+            std::fs::read_to_string(&path)
+                .map_err(|error| RpcError::invalid(format!("PROTECTORATE_TLS_CA_CERT: {error}")))
+        })
+        .transpose()?;
+    let links = new_pair_links(url, ca.as_deref())
         .map_err(|error| RpcError::new(Code::InvalidArgument, error.to_string()))?;
     if invocation.json {
         return serde_json::to_string(&json!({"web": links.web, "app": links.app}))
