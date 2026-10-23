@@ -50,9 +50,6 @@ Advances already in the sleeve's own history do not notify it. Rewinds and
 branch deletion do not generate notices. The hub reads history in a read-only
 sandbox; it never runs source repository programs on the host.
 
-Existing sleeves gain no base automatically. Restart the upgraded hub and
-dispatch new sleeves with branch options; no persisted-state conversion is needed.
-
 Configure roots with repeatable `hub serve --workspace-root DIR`. Without the
 flag, the owner's `~/github` is the sole root when it exists; otherwise there
 are no roots. Explicit roots replace that default. Roots must exist and are
@@ -83,125 +80,30 @@ Paths refer to the hub. The default sandbox destination is the host path.
 Mounts must be directories, cannot expose credentials or hub state, and are
 checked after resolving symlinks. A read-only mount can cover a workspace's
 subdirectory. Reference discovery checks known workspaces' `references`
-directories and every `hub serve --sleeve-reference-dir`, without walking the home.
+directories and every `hub serve --reference-dir`, without walking the home.
 Other safe absolute directories can be mounted explicitly.
 
-The hub discovers Flutter from `PROTECTORATE_FLUTTER_SDK`, `flutter` on PATH,
-or `~/development/flutter`, in that order. Set the variable in the hub service's
-environment for another installation and restart the hub. Custom hub tool-dir
-lists replace automatic discovery; include the SDK and Pub tool directories.
-Install and prewarm the SDK and global code generators on the hub before
-starting workers. Sleeves expose Flutter, Dart, and `~/.pub-cache/bin` on PATH.
-The SDK is read-only. At startup the hub resolves bwrap from PATH, probes its
-version and help once, and pins that executable for launches. `protectorate
-status` prints the path, version and overlay capability. For JSON, use
-`protectorate api call HubService/GetSleeveRuntime '{}'` (MCP
-`hub_get_sleeve_runtime`).
-
-With overlay support, every workspace gets copy-on-write Flutter `bin/cache`
-and existing Pub hosted, hosted-hashes, git and global package caches. There
-is no per-sleeve seed copy. Host directories are lower layers; writes go only
-to the sleeve upper. `PUB_CACHE` links to these same overlays so global tools
-and project commands share private changes. Persistent upper/work pairs live
-at `<state>/sleeves/<name>/home/.cache/overlays/<cache>/{upper,work}`; cache
-is `flutter`, `pub-hosted`, `pub-hosted-hashes`, `pub-git`,
-`pub-global_packages` or `go-build/<snapshot-generation>`. Upper/work must
-share a filesystem. Home disk/cache accounting and pruning cover this tree;
-shared Go generations are inventoried separately by prune.
-
-Overlay options require bwrap 0.9 or later and a kernel that permits
-unprivileged overlay mounts. Debian 12's bwrap 0.8 keeps the copy fallback:
-only Dart workspaces (a `pubspec.yaml` at the root or one directory down) get
-SDK/Pub copies, unless that sleeve already has them. Copies use reflinks when
-supported; otherwise the first spawn copies about 2.5 GB. An advertised
-overlay option with a kernel/filesystem mount failure is a launch error.
-
-On Debian 12, build a newer bwrap locally with Meson, Ninja, a C compiler and
-pkg-config installed. From the upstream 0.13.1 source:
+Toolchains are mounted read-only from narrow tool roots the hub discovers
+(`~/.local/{bin,lib,opt,go}`, `~/go/bin`, `~/.cargo/bin`, `~/.rustup/toolchains`,
+the Pub tool directories and NVM's Node versions) plus `serve --terminal-tool-root DIR` and the per-harness
+`--<harness>-tool-root DIR`. Caches start empty and private in the sleeve home
+(`GOCACHE`, `GOMODCACHE`, `PUB_CACHE`, `CARGO_HOME`, `RUSTUP_HOME`,
+`XDG_CACHE_HOME`); nothing is copied from the owner at launch. To share
+downloads, publish a read-only generation once and pass its printed path to
+`serve`:
 
 ```sh
-git clone --branch v0.13.1 --depth 1 https://github.com/containers/bubblewrap.git
-cd bubblewrap
-meson setup build --prefix="$HOME/.local" -Dman=disabled -Dselinux=disabled \
-  -Dbash_completion=disabled -Dzsh_completion=disabled
-meson compile -C build
-meson install -C build
-export PATH="$HOME/.local/bin:$PATH"
-bwrap --version
+protectorate-rs hub publish-flutter-cache --home STATE --flutter-sdk-root SDK   # --flutter-sdk-root SDK --flutter-cache-lower PATH
+protectorate-rs hub publish-flutter-tools --home STATE --flutter-sdk-root SDK   # --flutter-tools-lower PATH
+protectorate-rs hub publish-pub-cache --home STATE --pub-cache-root ~/.pub-cache   # --pub-cache-lower PATH
+protectorate-rs hub publish-go-mod-cache --home STATE --go-mod-cache-root ~/go/pkg/mod   # --go-mod-cache-lower PATH
 ```
 
-Put this PATH in the hub service environment and restart the hub. The local
-installation leaves `/usr/bin/bwrap` available for the fallback.
-
-`PUB_CACHE=$HOME/.cache/pub` and `GOMODCACHE=$HOME/.cache/go-mod` are writable
-per sleeve. Owner Go caches are discovered with `go env GOCACHE GOMODCACHE`.
-Modules stay private and use the discovered host download cache through a
-read-only file proxy, then the public proxy. This avoids overlaying download
-locks and partial module downloads.
-
-With overlays, `GOCACHE=$HOME/.cache/go-build` layers private writes over a
-generation at `<state>/cache/go-build/snapshot-*/data`. Preparation runs in
-the background at every hub start and again after 24 hours. It never blocks
-startup: before a generation is ready sleeves get a private GOCACHE, logged
-at launch; a previous published generation can serve launches during refresh.
-The hub imports action indexes used in the last five days, newest first,
-up to `hub serve --sleeve-go-cache-max 20G` by default (`0` disables sharing).
-The limit includes unique referenced output lengths and copied index bytes.
-It hardlinks content-addressed `*-d` outputs and copies only the 175-byte
-`*-a` indexes. There is no output copy or full hash pass. Each referenced
-output's size is checked before and after linking; missing, malformed and
-size-mismatched entries are skipped. A different filesystem or hardlink
-failure disables sharing with a log; it never falls back to copying outputs.
-
-Publication atomically switches `current.json` after completing a generation.
-Running sleeves keep their mounted generation. Upper/work pairs include its
-name, so respawning against a new lower never reuses an upper built against
-a different lower. The hub keeps trusted references outside writable homes,
-checks pending launches and live scopes before deletion, and conservatively
-retains generations when a live sleeve's reference is missing or corrupt.
-Unreferenced old generations are collected after refresh; explicit cache
-prune can also remove an unreferenced current generation. Status RPC fields
-report preparation, errors, selected lower, age, logical bytes, entry count
-and the configured limit. Without overlays, Go keeps its private build cache.
-
-The kernel documents that changing an underlying filesystem during an overlay
-mount has [undefined behavior](https://docs.kernel.org/filesystems/overlayfs.html#changes-to-underlying-filesystems).
-The inspected Go 1.27.2
-[cache.go](https://go.dev/src/cmd/go/internal/cache/cache.go) rewrites action
-indexes in place (`putIndexEntry`), which is why indexes are copied. Its
-`copyFile` verifies an existing output's content hash and otherwise writes
-the bytes associated with that content-addressed name; ordinary successful
-rewrites have identical content. Trimming unlinks names (`trimSubdir`), so a
-snapshot's output hardlink survives. `GetFile` checks referenced output size,
-matching the import validation. The real-binary scenario verifies separate
-index inodes, shared output inodes, index rewrite isolation and survival of
-owner unlinking; the runtime lane verifies a warm build without compilation.
-
-The generation has its own directory namespace, but hardlinked output inodes
-can still receive owner mtime updates or identical-content rewrites. This
-accepts ordinary Go cache operations rather than claiming fully immutable
-lower inodes despite the kernel's general caveat. Corruption, interrupted
-output writes or manual in-place mutation are outside that assumption; Go's
-size checks turn missing/incomplete outputs into cache misses, and users
-should stop affected sleeves before manually altering cached data. The hub
-does not change owner mtimes. Go's hourly use-time refresh can copy older
-outputs into a sleeve's upper; those bytes count toward its cache usage and
-remain private. Sleeve writes cannot poison the owner cache, shared lower
-or another sleeve. Discovered owner cache trees and their parents cannot be selected
-as writable workspaces, preventing a workspace bind from bypassing isolation.
-Flutter/Pub lowers remain live host directories: prewarm them
-first and stop affected sleeves before owner SDK/package updates. The runtime
-scenario checks byte-for-byte preservation by a sleeve, not coherence during
-concurrent owner SDK/package changes.
-
-`make gen`, `make app-check`, and Go commands use these paths; no SDK download
-into `/tmp` is needed. Existing sleeves keep their mounts until respawn. Old
-private copies remain until explicitly dropped: reclaim an old home with
-`protectorate sleeve kill NAME --drop-caches` before respawning. No state
-conversion is needed. Use that cache drop before switching an existing home
-between overlay and copy modes. Private cache creation is confined to the
-sleeve home; a cache symlink pointing outside it makes respawn fail safely.
-Never manually modify published Go generations while sleeves use them.
+Each sleeve then gets a private overlay upper over the generation; writes
+never reach the owner's caches or another sleeve. Byte caps, exclusions and
+verified workloads are in [rust-sandbox.md](rust-sandbox.md#current-launcher-and-limits).
+`protectorate api call HubService/GetSleeveRuntime '{}'` (MCP
+`hub_get_sleeve_runtime`) reports the sandbox helper and overlay support.
 
 Codex's native package contains `codex-package.json` (`layoutVersion: 1`),
 with `entrypoint`, `pathDir` and `resourcesDir` relative to the package root.
@@ -226,42 +128,13 @@ harness subagents for parallel work in one workspace, and another sleeve for
 a separate branch, resource limits or isolation. See the official
 [subagent guidance](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
-Each sleeve seeds its own `$HOME/.gitconfig` with the hub owner's global git
-name and email. Missing fields fall back to the literal settings in
-`~/github/protectorate/.git/config`, with includes disabled. Configure the
-owner's identity before spawning if neither source supplies it:
-
-```sh
-git config --global user.name 'Owner Name'
-git config --global user.email 'owner@example.com'
-```
-
-Existing sleeve-local identity files are preserved. The hub never changes
-global or workspace git config. Attribute assisted commits with an explicit
-trailer, for example
-`Co-Authored-By: Codex (gpt-6.1-sol) <noreply@openai.com>`.
-Caller-provided `GIT_AUTHOR_*` and `GIT_COMMITTER_*` can override identity.
-
-CPU limits also set build concurrency: `--cpu 200` defaults to two Go workers,
-`GOFLAGS=-p=2`, and two Flutter test workers through `make app-check`. Fractional
-cores round down, with a minimum of one; unlimited CPU defaults to one worker.
-Override with repeatable `--env GOMAXPROCS=1`, `--env GOFLAGS=-p=1`, or
-`--env FLUTTER_TEST_CONCURRENCY=1`. For direct Flutter/Dart test invocations,
-pass `--concurrency="$FLUTTER_TEST_CONCURRENCY"`. These limits apply per command;
-running several heavy builds at once still shares the sleeve's memory cap.
-
 Idle removal applies only to chat sleeves and defaults off. After continuous
 IDLE with no pending or queued mail for `--exit-after-idle`, the hub closes the
 harness, kills its scope, revokes its identity and publishes the normal sleeve
 exit event. Working turns, approvals, compaction, hub takeovers and pending
 mail prevent removal. The home and workspace remain on disk. The timeout and
 mounts survive hub restarts and resleeves; the idle clock restarts after a hub
-restart. No persisted-state conversion is required for this release. Restart
-the updated hub and respawn existing sleeves to opt into mounts or idle removal.
-
-```sh
-systemctl --user restart protectorate-hub
-```
+restart.
 
 ## What the hub puts in front of a harness
 
@@ -357,15 +230,6 @@ these homes and are never candidates. Downloaded modules may be read-only;
 prune handles those permissions. Cache directories are recreated or seeded
 on the next spawn. Writable caches are private to each sleeve.
 
-Cache prune also inventories generations as `shared-go-cache`, reporting
-logical retained bytes separately from sleeve homes. Hardlinks share storage
-with the owner and other generations, so these are not incremental allocated
-disk bytes. Each generation respects the import cap; total retained bytes can
-exceed it while running sleeves hold older generations. Mounted generations
-are always kept, including after hub restart. Removing a snapshot unlinks
-only its own names, never the owner's links. Sleeve cache cleanup includes
-all generation-specific upper/work directories.
-
 Prune inventories non-running homes and the hub's workspace namespace, prints
 sizes and keep/remove reasons, and removes nothing without `--yes`. With no
 category, only caches are selected. These are owner-only, audited RPCs:
@@ -390,11 +254,8 @@ permissions, but cache dropping requires the owner token.
 
 Running sleeves, their workspaces and their reference mounts are always kept.
 `protectorate sleeve prune --caches --running` inventories them but keeps their
-data, even with `--yes`. Within a sleeve's writable cache, Go supports native
-age-based trimming rather than a configurable size bound: it scans at most
-daily and expires entries unused
-for five days ([Go cache implementation](https://go.dev/src/cmd/go/internal/cache/cache.go)).
-The hub reports the Go cache size instead of forcing cleanup during builds.
+data, even with `--yes`. The hub reports the Go build cache size instead of
+forcing cleanup during builds; Go trims its own cache by age.
 
 Workspace candidates are plain directories immediately under the hub's own
 `workspaces/` clone namespace. Edit-in-place checkouts elsewhere, symlinked
@@ -419,10 +280,7 @@ hooks and fsmonitor are disabled, and protocols are restricted to file,
 HTTP(S), SSH and native Git. SSH ignores user config, disallows prompts and
 requires a known host key. Unsupported metadata or fetch failure prints a
 keep reason. A reserved sleeve name prevents spawn/cleanup races; filesystem
-deletion is confined with Go's rooted filesystem operations.
-
-No state conversion is required. Restart the updated hub to enable sampling,
-the new CLI/RPCs, and discovery of pre-upgrade leftover homes.
+deletion goes through descriptor-anchored paths.
 
 ## Running runtime tests inside a sleeve
 
@@ -433,86 +291,26 @@ protectorate sleeve spawn runtime-dev --workspace /absolute/checkout \
   --harness codex --nested --cpu 200 --mem 5G
 ```
 
-`--nested` requires explicit CPU and memory limits. The option is persisted,
-reported by `sleeve show` and the API's `nested` field, and retained across hub
-restarts and resleeves. Existing sleeves need to be respawned with the flag;
-there is no state conversion. Ordinary sleeves retain their existing profile.
-The host needs cgroup v2 with delegated cpu, memory and pids controllers,
-unprivileged user namespaces, bwrap 0.8 or newer, and util-linux `unshare` and
-`flock` (plus GNU coreutils and findutils).
-Missing delegation or namespace support fails the launch; it never falls back
-to running a command outside the sandbox. The hub probes `unshare --user
---map-current-user --cgroup` at startup and refuses `--nested` with the reason
-when it fails; kernels without swap accounting simply skip the child's swap
-limit.
+`--nested` requires explicit CPU and memory limits and cgroup delegation on
+the host (cgroup v2 with delegated cpu, memory and pids controllers and
+unprivileged user namespaces); without them the spawn fails, never falling
+back to an unsandboxed run. The option is persisted, reported by `sleeve
+show` and the API's `nested` field, and kept across hub restarts and
+resleeves.
 
-Inside the new sleeve, build and run against its own checkout:
+The outer systemd scope uses `Delegate=yes`; its CPU, memory and task
+ceilings stay outside the sandbox. Only a delegated child cgroup is mounted
+writable, inside the sleeve's own cgroup namespace, so a child sandbox started
+inside can set its own limits but never raise or reach the outer ones.
+Killing the scope kills every descendant. Inside the sleeve, run the suite
+against its own checkout with temporary files on disk, since `/tmp` is a
+tmpfs charged to the memory limit:
 
 ```sh
-mkdir -p "$HOME/.cache/pt"
-TMPDIR="$HOME/.cache/pt" make test
-env -u PROTECTORATE_TOKEN_FILE -u PROTECTORATE_HUB -u PROTECTORATE_TOKEN \
-  TMPDIR="$HOME/.cache/pt" \
-  PROT_E2E=1 PROT_E2E_BINARY="$PWD/bin/protectorate" \
-  go test -count=1 -v ./tests/e2e -run '^TestBinaryNestedRuntime$'
+mkdir -p "$HOME/.cache/pt" && TMPDIR="$HOME/.cache/pt" make test
 ```
 
-Using the sleeve home for test temporary files keeps binary and cache fixtures
-on disk. The sandbox's `/tmp` is tmpfs and its contents count toward the memory
-limit. The binary harness puts only tmux sockets in separate private
-`/tmp/pt-tmux-*` directories, stops each server, then removes its socket
-directory. Long disk-backed test paths therefore cannot exceed Unix socket
-path limits.
-
-The runtime automatically discovers the private cgroup mount at
-`/run/protectorate/cgroup`. It creates child cgroups there and runs nested
-bwrap without the host systemd user manager or its bus. Each child gets the
-usual fresh filesystem, PID, IPC and UTS namespaces, its own home and hub
-state, and a private cgroup namespace. Nested-enabled children may delegate
-again; children without the flag receive no cgroup mount and root their cgroup
-namespace in a leaf below their hidden resource limits. This also confines a
-child that mounts a new cgroup filesystem, without relying on `nsdelegate`.
-Network access follows the parent's existing shared network profile.
-
-The outer systemd scope uses `Delegate=yes`. Its CPU, memory, swap and pid
-ceilings remain outside the sandbox. Only a `delegated/` child is mounted
-writable, and the cgroup namespace is rooted there. A `run/` leaf holds the
-parent workload so controllers can be enabled on the otherwise empty
-delegation root. Subprocesses enter their child cgroup after limits are
-installed and before nested bwrap executes their command. Raising a visible
-child limit cannot raise the hidden ancestor's limit. The outer scope also
-bounds delegation to 256 descendant cgroups and 16 levels. Killing a scope
-kills its entire descendant tree; child launch supervisors reap empty cgroups.
-
-The sleeve's test runner executes inside bwrap, with the kernel enforcing
-hierarchical limits and namespace confinement. The host test
-`TestBinaryNestedRuntime` copies the selected production binary and the e2e
-runner into a temporary workspace, starts a real `--nested` sleeve, and runs
-the runtime scenario there. It checks persisted opt-in, ownership, restart,
-chat, hidden parent state, actual memory OOM and CPU throttling, unchanged
-outer limits, and descendant cleanup. The same test can run inside an already
-nested-enabled sleeve and exercises another sandbox level.
-
-That scenario explicitly mounts the installed Go toolchain and its private
-executable peers, and seeds private Pub lower trees. It excludes unused Flutter
-caches to avoid stacking another overlay above the development sleeve's SDK.
-The selected real bwrap, production hub/CLI, namespace and cgroup checks stay
-unchanged, and the inner run fails on any skip. Its binary and cache fixtures
-use its private home as disk-backed temporary storage.
-
-Design references: [systemd cgroup delegation](https://systemd.io/CGROUP_DELEGATION/),
-[Linux 6.6 cgroup v2 delegation and namespaces](https://www.kernel.org/doc/html/v6.6/admin-guide/cgroup-v2.html),
-and [bwrap 0.8 namespace options](https://github.com/containers/bubblewrap/blob/v0.8.0/bubblewrap.c).
-The namespace probes in the original non-delegated development sleeve passed
-with bwrap 0.8.0; the writable cgroup path must be verified by the host e2e.
-
-The follow-up probes also passed with bwrap 0.13.1 selected from PATH inside
-that same sleeve: nested user, PID and cgroup namespaces, tmux, and two stacked
-`--tmp-overlay` layers. Child overlay writes stayed out of the parent layer,
-and parent writes stayed out of the original lower directory. No relaxed
-security flags were needed. These overlay capabilities do not supply cgroup
-delegation; the hidden ancestor limits and private subtree remain necessary.
-The binary e2e harness copies the selected bwrap into each private HOME and
-checks its version inside the nested sleeve, so a user-installed binary is
-not replaced silently by the system binary. See the
-[bwrap 0.13.1 implementation](https://github.com/containers/bubblewrap/blob/v0.13.1/bubblewrap.c).
+`protectorate-hub/tests/nested_sleeve_workload.rs` starts a real nested sleeve
+through the hub, builds a sibling module under a private overlay, and checks
+delegated child cgroup control, secret denial and cleanup of the scope and
+mount staging.

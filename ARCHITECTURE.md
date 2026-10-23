@@ -89,7 +89,7 @@ the docs write the CLI as `protectorate`.
 | sandbox | validated Linux sandbox plans, launcher and egress proxy |
 | server | `protectorate-rs` entry points |
 | session | tmux sessions |
-| sleeve-layout | per-harness sleeve home preparation |
+| sleeve-layout | per-harness sleeve home plan; no crate depends on it yet |
 | sleeve-registry | durable sleeve lifecycle records |
 | sleeve-runner | terminal sleeve runner and sandbox helper |
 | svcgen | systemd, Windows task and Termux service definitions |
