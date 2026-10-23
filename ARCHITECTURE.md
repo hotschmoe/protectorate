@@ -414,9 +414,9 @@ Design:
   the outer limits and other sleeves' state remain inaccessible. The flag
   requires finite CPU/memory limits and persists across restart and resleeve.
   See [runtime development](docs/sleeves.md#running-runtime-tests-inside-a-sleeve).
-- Known gap: bwrap shares the host network, so two sleeves' dev servers can
-  collide on ports. Docker covers per-sleeve networking if that becomes a hard
-  requirement.
+- Each sleeve has its own network namespace, so dev servers cannot collide on
+  ports; outbound traffic leaves only through the allowlisting egress proxy
+  (docs/rust-sandbox.md#egress).
 - Windows and Android nodes run no sleeves. They're build/test targets only.
 
 ## Leases and jobs (P3, P9)

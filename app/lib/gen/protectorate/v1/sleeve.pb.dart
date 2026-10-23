@@ -3136,6 +3136,7 @@ class PruneSleevesRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearCaches() => $_clearField(2);
 
+  /// homes also selects each sleeve's checkpoint store.
   @$pb.TagNumber(3)
   $core.bool get homes => $_getBF(2);
   @$pb.TagNumber(3)

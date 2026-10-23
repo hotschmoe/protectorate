@@ -1929,6 +1929,7 @@ fn prune_sleeves(hub: &Hub, options: &Value) -> Result<Vec<Value>> {
         .cloned()
         .collect::<Vec<_>>();
     let state = open_root_directory(hub.workspaces.state_root()).map_err(cache_error)?;
+    let helpers = open_child_directory(&state, OsStr::new("helpers")).map_err(cache_error)?;
     let mut entries = Vec::new();
     if let Some(sleeves) =
         open_child_directory(&state, OsStr::new("sleeves")).map_err(cache_error)?
@@ -2005,6 +2006,21 @@ fn prune_sleeves(hub: &Hub, options: &Value) -> Result<Vec<Value>> {
                     OsStr::new("home"),
                     &home_path,
                     "home",
+                    homes,
+                    yes,
+                    busy.as_deref(),
+                    true,
+                )?;
+            }
+            if let Some(helpers) = &helpers {
+                let store = format!("checkpoint-{name_str}");
+                prune_one(
+                    &mut entries,
+                    name_str,
+                    helpers,
+                    OsStr::new(&store),
+                    &hub.workspaces.state_root().join("helpers").join(&store),
+                    "checkpoints",
                     homes,
                     yes,
                     busy.as_deref(),
@@ -2296,6 +2312,8 @@ fn prune_one(
         "clone requires Git history and working-tree verification".to_owned()
     } else if kind == "home" {
         "whole home, including auth, sessions, history and config".to_owned()
+    } else if kind == "checkpoints" {
+        "workspace checkpoints, pruned with the home".to_owned()
     } else {
         "regenerable cache".to_owned()
     };

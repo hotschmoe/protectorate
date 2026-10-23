@@ -402,7 +402,12 @@ pub(crate) fn serve_relays(listeners: Vec<(TcpListener, PathBuf)>) {
         .into_iter()
         .map(|(listener, socket)| {
             thread::spawn(move || {
-                for stream in listener.incoming().flatten() {
+                for stream in listener.incoming() {
+                    // Out of descriptors or memory: back off rather than spin.
+                    let Ok(stream) = stream else {
+                        thread::sleep(Duration::from_millis(50));
+                        continue;
+                    };
                     let socket = socket.clone();
                     thread::spawn(move || {
                         if let Ok(upstream) = UnixStream::connect(&socket) {

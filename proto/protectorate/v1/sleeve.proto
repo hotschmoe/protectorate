@@ -447,6 +447,7 @@ message PruneSleevesRequest {
   bool yes = 1;
   // With no category selected, caches is the default.
   bool caches = 2;
+  // homes also selects each sleeve's checkpoint store.
   bool homes = 3;
   bool workspaces = 4;
   // Running sleeves are inventoried but always kept.

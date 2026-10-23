@@ -90,8 +90,10 @@ exact prefix, context files included. So the hub keeps that prefix still:
   started with until it ends.
 
 The hub adds its own binary's directory read-only to every sleeve and puts it
-last on `PATH`, so `protectorate` runs inside the sandbox. Sleeves share the
-host network, so `127.0.0.1` reaches the hub. The binary must be installed
+last on `PATH`, so `protectorate` runs inside the sandbox. A sleeve has its
+own network namespace; when the hub listens on loopback, the sandbox relays
+the same `127.0.0.1` port to it, otherwise the hub is reached through the
+egress proxy. The binary must be installed
 under the name `protectorate`.
 
 The orchestrator can read and edit the owner's notes with `protectorate backlog ...`, so you can talk to it about them (docs/backlog.md).
