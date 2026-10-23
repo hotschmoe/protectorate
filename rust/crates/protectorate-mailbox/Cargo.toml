@@ -1,0 +1,8 @@
+[package]
+name = "protectorate-mailbox"
+version = "0.1.0"
+edition.workspace = true
+description = "Append-only JSONL message store, a Rust port of internal/mailbox"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "time"] }

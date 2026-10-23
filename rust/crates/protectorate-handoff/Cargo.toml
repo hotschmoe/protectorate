@@ -1,0 +1,11 @@
+[package]
+name = "protectorate-handoff"
+version = "0.1.0"
+edition.workspace = true
+[dependencies]
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+cap-std = "3"
+getrandom = "0.2"
+[dev-dependencies]
+tempfile = "3"

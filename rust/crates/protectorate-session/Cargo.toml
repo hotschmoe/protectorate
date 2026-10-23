@@ -1,0 +1,9 @@
+[package]
+name = "protectorate-session"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+base64 = "0.22"
+serde_json = "1"
+
