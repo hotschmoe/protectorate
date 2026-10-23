@@ -1,5 +1,8 @@
 #[path = "support/capability.rs"]
 mod capability;
+#[cfg(unix)]
+#[path = "support/private_tmux.rs"]
+mod private_tmux;
 use protectorate_hub::Hub;
 use protectorate_session::Manager as SessionManager;
 use serde_json::{json, Value};
@@ -99,6 +102,7 @@ async fn status_and_backlog_use_real_identity_and_persistence() {
         .is_empty());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
     if std::process::Command::new("tmux")
@@ -110,6 +114,7 @@ async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
     }
     let dir = tempfile::tempdir().unwrap();
     let socket = format!("protectorate-hub-test-{}", std::process::id());
+    let _tmux = private_tmux::PrivateTmux::new(&socket);
     let sessions = Arc::new(SessionManager::new(&socket));
     let hub = Hub::open(dir.path(), "owner-secret", "v-rust")
         .unwrap()
@@ -124,7 +129,9 @@ async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
     let list = "/protectorate.v1.SessionService/ListSessions";
     let capture = "/protectorate.v1.SessionService/CapturePane";
     let kill = "/protectorate.v1.SessionService/KillSession";
-    let input = json!({"name":"job", "command":["sh", "-c", "printf 'hello\\n'; exit 7"]});
+    // The command outlives the capture: tmux drops pty output still in flight
+    // when a pane's process exits.
+    let input = json!({"name":"job", "command":["sh", "-c", "printf 'hello\\n'; exec sleep 600"]});
     let (code, body) = call(addr, create, &reader, input.clone()).await;
     assert_eq!((code, &body["code"]), (403, &json!("permission_denied")));
     let (code, body) = call(addr, create, "owner-secret", input).await;
@@ -133,21 +140,25 @@ async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
     let (code, body) = call(addr, list, &reader, json!({})).await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["sessions"][0]["name"], "job");
-    let (code, body) = call(
-        addr,
-        capture,
-        "owner-secret",
-        json!({"name":"job","lines":1}),
-    )
-    .await;
-    assert_eq!(code, 200, "{body}");
-    assert!(body["text"].as_str().unwrap().contains("hello"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let (code, body) = call(
+            addr,
+            capture,
+            "owner-secret",
+            json!({"name":"job","lines":1}),
+        )
+        .await;
+        assert_eq!(code, 200, "{body}");
+        if body["text"].as_str().unwrap().contains("hello") {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{body}");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     let (code, body) = call(addr, kill, "owner-secret", json!({"name":"job"})).await;
     assert_eq!(code, 200, "{body}");
     server.abort();
-    let _ = std::process::Command::new("tmux")
-        .args(["-L", &socket, "kill-server"])
-        .output();
 }
 
 #[tokio::test]

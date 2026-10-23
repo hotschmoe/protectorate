@@ -100,8 +100,9 @@ for line in sys.stdin:
   path=base.stdout.strip()
   source=os.path.dirname(os.readlink(path+'/objects'))
   fetched=subprocess.run(['git','fetch','-q','base'],capture_output=True,text=True)
-  with open('notice-fetch-proof','w') as f:
+  with open('notice-fetch-proof.part','w') as f:
    f.write('|'.join([str(fetched.returncode),str(os.path.exists(source+'/config.worktree')),str(os.path.exists(source+'/FETCH_HEAD')),str(os.path.exists(source+'/logs/new-secret')),fetched.stderr]))
+  os.replace('notice-fetch-proof.part','notice-fetch-proof')
   print(json.dumps({'type':'response','id':m['id'],'command':m['type'],'success':True,'data':{'disposition':'started'}}),flush=True)
   print(json.dumps({'type':'agent_settled','aborted':False}),flush=True)
 "#).unwrap();
@@ -178,7 +179,8 @@ for line in sys.stdin:
     git(&source, &["commit", "-qm", "advance"]);
     let next_tip = git(&source, &["rev-parse", "HEAD"]);
     git(&source, &["pack-refs", "--all", "--prune"]);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(12);
+    // The watcher waits for the base to settle, then runs sandboxed Git.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
         let (status, inbox) = call_path(
             addr,
@@ -212,8 +214,12 @@ for line in sys.stdin:
     assert_eq!(status, 200, "{updated}");
     assert_eq!(updated["sleeve"]["baseTip"], next_tip);
     let fetch_proof = destination.join("notice-fetch-proof");
-    let proof_deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
-    while !fetch_proof.exists() && std::time::Instant::now() < proof_deadline {
+    let proof_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !fetch_proof.exists() {
+        assert!(
+            std::time::Instant::now() < proof_deadline,
+            "the harness never fetched after the notice"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert_eq!(

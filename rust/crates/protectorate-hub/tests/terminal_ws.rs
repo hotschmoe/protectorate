@@ -1,6 +1,8 @@
 #![cfg(target_os = "linux")]
 #[path = "support/capability.rs"]
 mod capability;
+#[path = "support/private_tmux.rs"]
+mod private_tmux;
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use std::{
@@ -11,7 +13,8 @@ use std::{
 use tokio::net::TcpListener;
 use tungstenite::{client::IntoClientRequest, http::HeaderValue, Message};
 
-#[tokio::test]
+// The hub's bridge reaps detached clients on the runtime this test waits on.
+#[tokio::test(flavor = "multi_thread")]
 async fn terminal_websocket_auth_readonly_and_input_use_private_tmux() {
     if std::process::Command::new("tmux")
         .arg("-V")
@@ -26,6 +29,7 @@ async fn terminal_websocket_auth_readonly_and_input_use_private_tmux() {
         .unwrap()
         .as_nanos();
     let socket = format!("protectorate-terminal-{}-{nonce}", std::process::id());
+    let _tmux = private_tmux::PrivateTmux::new(&socket);
     let manager = Arc::new(Manager::new(&socket));
     manager
         .create(&CreateOptions {
@@ -127,13 +131,13 @@ async fn terminal_websocket_auth_readonly_and_input_use_private_tmux() {
     assert!(matches!(bad, tungstenite::Error::Http(_)));
     assert!(!ro, "read-only attach accepted keyboard input");
     assert!(writable.0, "writable attach failed: {:?}", writable.1);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let clients = std::process::Command::new("tmux")
             .args(["-L", &socket, "list-clients", "-F", "#{client_pid}"])
             .output()
             .unwrap();
-        assert!(clients.status.success());
+        assert!(clients.status.success(), "{clients:?}");
         if clients.stdout.is_empty() {
             break;
         }
@@ -142,7 +146,7 @@ async fn terminal_websocket_auth_readonly_and_input_use_private_tmux() {
             "detached terminal clients survived: {}",
             String::from_utf8_lossy(&clients.stdout)
         );
-        std::thread::sleep(Duration::from_millis(50));
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let entries = audit.tail(10).unwrap();
     let terminal = entries

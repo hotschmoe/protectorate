@@ -1,23 +1,16 @@
 #![cfg(target_os = "linux")]
+#[path = "support/private_tmux.rs"]
+mod private_tmux;
 
+use private_tmux::PrivateTmux;
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use serde_json::Value;
-use std::{process::Command, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
-
-struct PrivateTmux(String);
-
-impl Drop for PrivateTmux {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.0, "kill-server"])
-            .output();
-    }
-}
 
 async fn line(stream: &mut TcpStream) -> String {
     let mut bytes = Vec::new();
@@ -56,15 +49,16 @@ async fn next_kind(stream: &mut TcpStream, kind: &str) -> Value {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn external_tmux_lifecycle_reaches_event_stream() {
     let temp = tempfile::tempdir().unwrap();
-    let socket = PrivateTmux(format!(
+    let socket = format!(
         "p-rust-session-events-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .subsec_nanos()
-    ));
-    let manager = Arc::new(Manager::new(&socket.0));
+    );
+    let _tmux = PrivateTmux::new(&socket);
+    let manager = Arc::new(Manager::new(&socket));
     let hub = Hub::open(temp.path(), "owner-secret", "test")
         .unwrap()
         .with_sessions(Arc::clone(&manager))

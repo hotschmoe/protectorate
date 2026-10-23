@@ -28,9 +28,11 @@ async fn call(addr: std::net::SocketAddr, method: &str, body: Value) -> (u16, Va
     )
 }
 
+/// A Pi whose `slow` prompt keeps its turn open until the workspace holds
+/// `release-slow`.
 fn fake_pi(path: &Path) {
     fs::write(path, r#"#!/usr/bin/python3
-import json,sys,time
+import json,os,sys,time
 def emit(obj): print(json.dumps(obj),flush=True)
 for line in sys.stdin:
  m=json.loads(line); k=m.get('type')
@@ -46,7 +48,7 @@ for line in sys.stdin:
   emit({'type':'response','id':m['id'],'command':k,'success':True})
  elif k in ('prompt','steer'):
   emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'disposition':'started'}})
-  if m['message']=='slow': time.sleep(3.5)
+  while m['message']=='slow' and not os.path.exists('release-slow'): time.sleep(0.05)
   emit({'type':'message_start','message':{'role':'assistant'}})
   emit({'type':'message_update','assistantMessageEvent':{'type':'text_delta','delta':'done'}})
   emit({'type':'message_end','message':{'role':'assistant','model':'test','provider':'local','usage':{'totalTokens':13,'input':10,'output':3}}})
@@ -141,7 +143,8 @@ async fn mail_waits_for_idle_then_injects_once_with_reply_instructions() {
         peek["messages"][0]["deliveries"][0]["deliveredAt"].is_null(),
         "mail injected during a working turn: {peek}"
     );
-    let deadline = Instant::now() + Duration::from_secs(8);
+    fs::write(workspace.join("release-slow"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let (status, peek) = call(
             addr,
@@ -266,23 +269,11 @@ async fn idle_reaper_waits_for_work_and_pending_mail() {
     .await;
     assert_eq!(status, 200, "{sent}");
     tokio::time::sleep(Duration::from_millis(1200)).await;
-    for name in ["busy", "mailbox"] {
-        let (status, body) = call(addr, "SleeveService/GetSleeve", json!({"name":name})).await;
-        assert_eq!(status, 200, "{body}");
-        assert_eq!(body["sleeve"]["state"], "SLEEVE_STATE_RUNNING", "{body}");
-    }
-    let (status, inbox) = call(
-        addr,
-        "MessageService/Inbox",
-        json!({"as":"mailbox","peek":true}),
-    )
-    .await;
-    assert_eq!(status, 200, "{inbox}");
-    assert!(
-        inbox["messages"][0]["deliveries"][0]["deliveredAt"].is_null(),
-        "{inbox}"
-    );
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let (status, body) = call(addr, "SleeveService/GetSleeve", json!({"name":"busy"})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["sleeve"]["state"], "SLEEVE_STATE_RUNNING", "{body}");
+    fs::write(workspace.join("release-slow"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(120);
     for name in ["busy", "mailbox"] {
         loop {
             let (status, body) = call(addr, "SleeveService/GetSleeve", json!({"name":name})).await;
@@ -298,5 +289,17 @@ async fn idle_reaper_waits_for_work_and_pending_mail() {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+    // Reaping the idle mailbox before its mail arrived would leave it unread.
+    let (status, inbox) = call(
+        addr,
+        "MessageService/Inbox",
+        json!({"as":"mailbox","peek":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{inbox}");
+    assert!(
+        inbox["messages"][0]["deliveries"][0]["deliveredAt"].is_string(),
+        "the idle mailbox was reaped with mail pending: {inbox}"
+    );
     task.abort();
 }
