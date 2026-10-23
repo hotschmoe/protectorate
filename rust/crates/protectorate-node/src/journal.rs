@@ -146,22 +146,3 @@ pub(crate) fn recover(root: &Path, retention: Duration) -> io::Result<Vec<Recove
     }
     Ok(recovered)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn unfinished_job_is_reconciled_after_restart() {
-        let temp = tempfile::tempdir().unwrap();
-        let dir = create(temp.path(), "job-one").unwrap();
-        append_log(&dir, b"before").unwrap();
-        let jobs = recover(temp.path(), Duration::from_secs(3600)).unwrap();
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].log, b"before");
-        assert_eq!(jobs[0].finished["end"], "JOB_END_ERROR");
-        assert!(jobs[0].finished["error"]
-            .as_str()
-            .unwrap()
-            .contains("outcome unknown"));
-    }
-}

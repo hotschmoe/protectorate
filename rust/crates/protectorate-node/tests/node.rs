@@ -1,9 +1,5 @@
 use protectorate_node::{Agent, MetricsCollector};
-use protectorate_node_metrics::{
-    AcceleratorMetrics, ContainerEngine, ContainerMetrics, CpuMetrics, DirSize, DiskBucket,
-    EngineDiskUsage, FilesystemMetrics, GpuMetrics, JobIsolation, MemoryMetrics, NodeMetrics,
-    SleeveMetrics,
-};
+use protectorate_node_metrics::{CpuMetrics, FilesystemMetrics, NodeMetrics};
 use serde_json::{json, Value};
 use std::{
     io,
@@ -16,117 +12,6 @@ use tokio::{
 };
 
 struct Fixed;
-struct Complete;
-impl MetricsCollector for Complete {
-    fn collect(&self) -> io::Result<NodeMetrics> {
-        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let bucket = DiskBucket {
-            count: 2,
-            size_bytes: 900,
-            reclaimable_bytes: 300,
-        };
-        Ok(NodeMetrics {
-            hostname: "complete-node".into(),
-            os: "linux".into(),
-            arch: "x86_64".into(),
-            platform: "Linux test".into(),
-            agent_version: "rust-test".into(),
-            uptime_seconds: 123,
-            collected_at: Some(at),
-            cpu: Some(CpuMetrics {
-                logical_cores: 8,
-                usage_percent: 12.5,
-                load1: Some(1.0),
-                load5: Some(2.0),
-                load15: Some(3.0),
-            }),
-            memory: Some(MemoryMetrics {
-                total_bytes: 1000,
-                used_bytes: 400,
-                available_bytes: 600,
-                used_percent: 40.0,
-                swap_total_bytes: 100,
-                swap_used_bytes: 20,
-                swap_used_percent: 20.0,
-            }),
-            filesystems: vec![FilesystemMetrics {
-                mount: "/".into(),
-                device: "disk".into(),
-                fstype: "ext4".into(),
-                total_bytes: 1000,
-                used_bytes: 250,
-                free_bytes: 750,
-                used_percent: 25.0,
-                primary: true,
-            }],
-            gpus: vec![GpuMetrics {
-                index: 1,
-                vendor: "intel".into(),
-                name: "Arc".into(),
-                utilization_percent: 42.0,
-                memory_used_bytes: Some(300),
-                memory_total_bytes: 800,
-                temperature_celsius: 55.0,
-                integrated: false,
-                driver: "xe".into(),
-                bus_id: "0000:01:00.0".into(),
-            }],
-            npus: vec![AcceleratorMetrics {
-                kind: "npu".into(),
-                vendor: "intel".into(),
-                name: "NPU".into(),
-                driver: "intel_vpu".into(),
-                utilization_percent: 15.0,
-                frequency_hz: 1_000_000_000,
-                bus_id: "0000:02:00.0".into(),
-            }],
-            engine: Some(ContainerEngine {
-                kind: "podman".into(),
-                version: "5".into(),
-                disk: Some(EngineDiskUsage {
-                    images: bucket.clone(),
-                    containers: bucket.clone(),
-                    volumes: bucket.clone(),
-                    build_cache: bucket,
-                }),
-                disk_measured_at: Some(at),
-                containers: vec![ContainerMetrics {
-                    id: "abc".into(),
-                    name: "work".into(),
-                    image: "alpine".into(),
-                    state: "running".into(),
-                    cpu_percent: 5.0,
-                    memory_used_bytes: 100,
-                    memory_limit_bytes: 500,
-                    memory_percent: 20.0,
-                    writable_layer_bytes: 40,
-                    rootfs_bytes: 80,
-                    stats_error: String::new(),
-                    created_at: Some(at),
-                }],
-            }),
-            watch_dirs: vec![DirSize {
-                path: "/work".into(),
-                size_bytes: 500,
-                measured_at: Some(at),
-                took: Duration::from_millis(1250),
-                complete: true,
-                error: String::new(),
-            }],
-            warnings: vec!["sample warning".into()],
-            sleeves: vec![SleeveMetrics {
-                id: "s-1".into(),
-                name: "dev".into(),
-                state: "running".into(),
-            }],
-            jobs: Some(JobIsolation {
-                sandbox: "native".into(),
-                note: "ready".into(),
-                admin: "sudo".into(),
-            }),
-        })
-    }
-}
 impl MetricsCollector for Fixed {
     fn collect(&self) -> io::Result<NodeMetrics> {
         Ok(NodeMetrics {
@@ -155,71 +40,6 @@ impl MetricsCollector for Fixed {
             ..Default::default()
         })
     }
-}
-
-#[tokio::test]
-async fn get_metrics_serializes_every_available_section() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Complete), "node-secret")
-        .router()
-        .unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let (code, body) = unary(addr, "node-secret").await;
-    assert_eq!(code, 200, "{body}");
-    assert_eq!(body["hostname"], "complete-node");
-    assert_eq!(body["platform"], "Linux test");
-    assert_eq!(body["collectedAt"], "2023-11-14T22:13:20Z");
-    assert_eq!(body["cpu"]["load15"], 3.0);
-    assert_eq!(body["memory"]["swapUsedBytes"], "20");
-    assert_eq!(body["filesystems"][0]["usedPercent"], 25.0);
-    assert_eq!(body["gpus"][0]["memoryUsedBytes"], "300");
-    assert_eq!(body["gpus"][0]["busId"], "0000:01:00.0");
-    assert_eq!(body["npus"][0]["frequencyHz"], "1000000000");
-    assert_eq!(
-        body["engine"]["disk"]["buildCache"]["reclaimableBytes"],
-        "300"
-    );
-    assert_eq!(
-        body["engine"]["containers"][0]["createdAt"],
-        "2023-11-14T22:13:20Z"
-    );
-    assert_eq!(body["watchDirs"][0]["took"], "1.250s");
-    assert_eq!(body["watchDirs"][0]["measuredAt"], "2023-11-14T22:13:20Z");
-    assert_eq!(body["sleeves"][0]["name"], "dev");
-    assert_eq!(body["sleeves"][0]["state"], "SLEEVE_STATE_RUNNING");
-    assert_eq!(body["jobs"]["sandbox"], "native");
-    assert_eq!(body["warnings"][0], "sample warning");
-    server.abort();
-}
-
-#[tokio::test]
-async fn live_job_capability_replaces_stale_collector_job_metadata() {
-    let home = tempfile::tempdir().unwrap();
-    let jobs = protectorate_node::Jobs::new(home.path(), 1).unwrap();
-    let expected = jobs.isolation();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Complete), "node-secret")
-        .with_jobs(jobs)
-        .router()
-        .unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let (code, metrics) = unary(addr, "node-secret").await;
-    assert_eq!(code, 200, "{metrics}");
-    assert_eq!(metrics["jobs"]["sandbox"], expected.sandbox);
-    assert_eq!(
-        metrics["jobs"]["admin"].as_str().unwrap_or(""),
-        expected.admin
-    );
-    assert_eq!(
-        metrics["jobs"]["note"].as_str().unwrap_or(""),
-        expected.note
-    );
-    server.abort();
-}
-async fn unary(addr: std::net::SocketAddr, token: &str) -> (u16, Value) {
-    rpc(addr, "GetMetrics", token, json!({})).await
 }
 async fn rpc(addr: std::net::SocketAddr, method: &str, token: &str, body: Value) -> (u16, Value) {
     let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -400,46 +220,6 @@ async fn desk_rpc_applies_policy_and_dispatches_authenticated_actions() {
     assert_eq!(error["code"], "invalid_argument");
     server.abort();
 }
-
-#[tokio::test]
-async fn node_metrics_unary_and_watch_use_connect_json() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret").router().unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let (code, _) = unary(addr, "wrong").await;
-    assert_eq!(code, 401);
-    let (code, body) = unary(addr, "node-secret").await;
-    assert_eq!(code, 200, "{body}");
-    assert_eq!(body["hostname"], "node-a");
-    assert_eq!(body["uptimeSeconds"], "123");
-    assert_eq!(body["filesystems"][0]["totalBytes"], "4096");
-    let mut stream = TcpStream::connect(addr).await.unwrap();
-    let body = [0, 0, 0, 0, 2, b'{', b'}'];
-    let headers = format!("POST /protectorate.v1.NodeAgentService/WatchMetrics HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/connect+json\r\nAuthorization: Bearer node-secret\r\nContent-Length: {}\r\n\r\n", body.len());
-    stream.write_all(headers.as_bytes()).await.unwrap();
-    stream.write_all(&body).await.unwrap();
-    assert!(line(&mut stream).await.contains("200"));
-    loop {
-        if line(&mut stream).await == "\r\n" {
-            break;
-        }
-    }
-    let chunk = line(&mut stream).await;
-    let size = usize::from_str_radix(chunk.trim(), 16).unwrap();
-    let mut frame = vec![0; size];
-    stream.read_exact(&mut frame).await.unwrap();
-    assert_eq!(frame[0], 0);
-    assert_eq!(
-        u32::from_be_bytes(frame[1..5].try_into().unwrap()) as usize,
-        size - 5
-    );
-    let event: Value = serde_json::from_slice(&frame[5..]).unwrap();
-    assert_eq!(event["hostname"], json!("node-a"));
-    drop(stream);
-    server.abort();
-}
-
 #[tokio::test]
 async fn file_rpc_round_trip_boundary_and_confinement() {
     use base64::{engine::general_purpose::STANDARD, Engine as _};

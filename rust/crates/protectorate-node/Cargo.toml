@@ -32,4 +32,3 @@ getrandom = "0.2"
 protectorate-desk-policy = { path = "../protectorate-desk-policy" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 tempfile = "3"
-protectorate-connect-client = { path = "../protectorate-connect-client" }

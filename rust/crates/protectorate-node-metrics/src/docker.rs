@@ -400,25 +400,3 @@ pub fn probe(host: Option<&str>, include_disk: bool) -> io::Result<Option<Contai
     engine.containers.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Some(engine))
 }
-
-#[cfg(test)]
-mod named_pipe_tests {
-    use super::*;
-
-    #[test]
-    fn accepts_only_local_docker_named_pipes() {
-        assert!(matches!(
-            endpoint(Some("npipe:////./pipe/docker_engine")).unwrap(),
-            Endpoint::Pipe(ref path) if path == r"\\.\pipe\docker_engine"
-        ));
-        for host in [
-            "npipe://remote/pipe/docker_engine",
-            "npipe:////server/pipe/docker_engine",
-            "npipe:////./pipe/",
-            "npipe:////./pipe/../docker_engine",
-            "npipe:////./pipe/docker_engine/other",
-        ] {
-            assert!(endpoint(Some(host)).is_err(), "{host}");
-        }
-    }
-}

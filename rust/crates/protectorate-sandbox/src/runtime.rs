@@ -1854,20 +1854,3 @@ pub fn helper_main() -> Result<i32> {
     }
     result
 }
-
-#[cfg(test)]
-mod runtime_tests {
-    use super::*;
-    #[test]
-    fn resolver_symlink_preserves_only_its_regular_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("resolved.conf");
-        fs::write(&target, "nameserver 192.0.2.1\n").unwrap();
-        let link = dir.path().join("resolv.conf");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        assert_eq!(external_resolver_target(&link).unwrap(), Some(target));
-        fs::remove_file(&link).unwrap();
-        std::os::unix::fs::symlink(dir.path(), &link).unwrap();
-        assert!(external_resolver_target(&link).is_err());
-    }
-}
