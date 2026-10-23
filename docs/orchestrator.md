@@ -3,21 +3,19 @@
 Envoy is the orchestrator. It is not engine code, but an ordinary sleeve named `envoy`: a harness (Claude,
 Codex, Grok or pi, whichever has quota to spare) running in chat mode (see
 [chat.md](chat.md)) in the usual bwrap and systemd-scope sandbox. Its workspace is `$PROTECTORATE_HOME/orchestrator/` and
-its only tool is the `protectorate` CLI, authenticated with a scoped token. The
+its only tool is the `protectorate` CLI, authenticated with a capability. The
 harness is untouched: it only finds normal project context files and a CLI.
 
 ```
 protectorate orchestrator spawn [--harness auto|claude|codex|grok|pi] [--scopes a,b] [--add-scopes c]
 protectorate orchestrator status
-protectorate orchestrator scopes --add chat_send --remove events
 protectorate quota suggest [--for small|medium|large]
 ```
 
 `spawn` is a thin client of the owner-only `SleeveService.SpawnEnvoy` RPC: the
-hub does the work in process, so it needs the owner token but not the hub
-machine, and the app's ENVOY tab starts Envoy with the same call. The RPC is
-owner-only whatever the scopes and is not an MCP tool, so Envoy's own token can
-never call it. `--harness auto` takes the top of `quota suggest`
+hub does the work in process, so it needs the owner token, which the hub
+accepts only on its loopback listener. The RPC is owner-only whatever the
+scopes and is not an MCP tool, so Envoy's own capability can never call it. `--harness auto` takes the top of `quota suggest`
 (`QuotaService.Suggest`, also an MCP tool). Only FRESH quota counts as capacity;
 STALE and UNKNOWN providers are listed but never picked, and the local LLM
 through pi is always the fallback. `orchestrator status` shows the sleeve and
@@ -26,8 +24,9 @@ the token, including its expiry.
 ## What a spawn does
 
 1. Picks the harness, stops a running `envoy`, and revokes every earlier
-   `orchestrator-envoy` token.
-2. Mints a new token and writes it to `orchestrator/.protectorate-token` (0600).
+   `orchestrator-envoy` capability.
+2. Mints a new capability and writes it to `orchestrator/.protectorate-token`
+   (0600).
    The sleeve gets `PROTECTORATE_TOKEN_FILE` and `PROTECTORATE_HUB`, so the CLI
    inside needs no flags.
 3. Regenerates `AGENTS.md`, `CLAUDE.md` (a symlink to it) and `hosts.md`.
@@ -81,13 +80,12 @@ exact prefix, context files included. So the hub keeps that prefix still:
 - `hosts.md` changes whenever a node does, so it is never part of the loaded
   context: `AGENTS.md` only mentions it and Envoy reads it on demand. The hub
   refreshes the copy in the workspace every minute.
-- The token is renewed in place. The hub watches Envoy's token and, once less
-  than a quarter of its life is left (or it is past its end), mints a new one
-  with the same scopes and lifetime, replaces the token file atomically, and
-  revokes the old one five minutes later. The harness is not restarted: the CLI
-  reads `PROTECTORATE_TOKEN_FILE` on every call. A command that streams for
-  longer than the grace period (`chat watch`, `events`) keeps the token it
-  started with until it ends.
+- The capability lives an hour (`hub serve --capability-ttl`) and is renewed in
+  place: at half its life the hub writes a fresh token with the same caveats
+  into the token file. The harness is not restarted: the CLI reads
+  `PROTECTORATE_TOKEN_FILE` on every call and renews it itself when it is past
+  half its life. A stream (`chat watch`, `events`) authenticates once and
+  runs until it ends or the lineage is revoked.
 
 The hub adds its own binary's directory read-only to every sleeve and puts it
 last on `PATH`, so `protectorate` runs inside the sandbox. A sleeve has its
@@ -129,32 +127,17 @@ A denied call fails with `permission_denied` and is written to the audit log
 tells Envoy to ask the user before any destructive action, even one its token
 would allow. That is a convention for the model; the token is the enforcement.
 
-## Changing scopes in place
+## Changing scopes
 
-```
-protectorate orchestrator scopes --add sleeve_kill_sleeve
-protectorate orchestrator scopes --remove sleeve_kill_sleeve
-protectorate token scopes sleeve:worker --add sleeve_spawn_sleeve
-```
-
-Run these commands with owner authentication (see [auth.md](auth.md)); Envoy
-cannot change its own scopes. `TokenService.UpdateTokenScopes` changes the
-existing token's grants without rotating its secret or restarting Envoy. The
-next request uses the new scopes; existing streams retain their admission.
-Every change is audited with its before/after scopes. `orchestrator scopes`
-selects the newest active Envoy token, including during the renewal grace
-period. Older grace-period tokens keep their own grants until revoked.
-
-`--add-scopes` extends the defaults, or the explicit `--scopes` list; it does
-not extend the running token's custom grants. To preserve custom grants, supply
-their complete list with `--scopes` and add the new scope with `--add-scopes`.
-These flags still apply when creating or explicitly respawning Envoy.
-Scopes use tool names (see [auth.md](auth.md)). The owner-only spawn API is
-`SleeveService/SpawnEnvoy`, with `SpawnEnvoyRequest.scopes`, `add_scopes`,
-`harness` and `ttl`. Automatic renewal keeps the updated scopes, including an
-empty set. No hub restart is needed. In-place updates leave `AGENTS.md` alone
-to preserve its prompt prefix; its spawn-time scope table may be stale. The
-API is authoritative; `orchestrator status` shows the current grants.
+A capability's scopes are fixed when it is minted; to change Envoy's grants,
+respawn it with `--scopes` (replacing the defaults) or `--add-scopes`
+(extending them). Scopes use tool names (see [auth.md](auth.md)). The
+owner-only spawn API is `SleeveService/SpawnEnvoy`, with
+`SpawnEnvoyRequest.scopes`, `add_scopes` and `harness`. Envoy cannot widen its
+own grants: whatever it mints or narrows for its workers is cut down to what
+it holds. A sleeve Envoy spawns gets the sleeve scopes intersected with
+Envoy's, and `protectorate token attenuate` narrows a capability offline for a
+script Envoy runs.
 
 Envoy can assign work with `msg send <sleeve> ...`; the mailbox delivers it
 into chat according to [delivery rules](coordination.md#delivery). Direct
@@ -164,20 +147,23 @@ terminal sessions; host sessions need `terminal:host` or the owner token.
 Neither terminal grant is needed for mailbox assignments. Envoy can kill a
 sleeve it spawned without a global kill grant. The hub records `parent: envoy`
 on new workers and exposes it in `sleeve ls` and `sleeve show`. This ownership
-right survives Envoy token renewal, cannot kill Envoy itself, and grants no
+right survives Envoy capability renewal, cannot kill Envoy itself, and grants no
 rights over older workers whose records lack a parent. An explicit
 `sleeve_kill_sleeve` grant permits killing sleeves generally, not only children.
 
 ## External bridges are the same mechanism
 
-"AI as orchestrator" and "AI talking to the orchestrator" are one path: a scoped
-token plus the CLI or the MCP bridge. A Claude or Grok bot on another machine
-does the same thing Envoy does, without the sleeve:
+"AI as orchestrator" and "AI talking to the orchestrator" are one path: a
+capability plus the CLI or the MCP bridge. A Claude or Grok bot on another
+machine does the same thing Envoy does, without the sleeve:
 
 ```
-protectorate token create claude-bridge --scope read --scope 'backlog_*' --scope sleeve_spawn_sleeve
+protectorate token create claude-bridge --scope read --scope 'backlog_*' --scope sleeve_spawn_sleeve --ttl 24h
 protectorate mcp --token-file ~/.protectorate/claude-bridge.token --allow 'quota_*' --allow 'backlog_*'
 ```
+
+The bridge renews the token file in place while it runs; a bridge stopped for
+longer than the lifetime needs a fresh token.
 
 `quota_suggest` and `quota_get_quota` are available to either. See
 [mcp.md](mcp.md).
@@ -186,7 +172,7 @@ protectorate mcp --token-file ~/.protectorate/claude-bridge.token --allow 'quota
 
 The outside reviews warned that a sleeve able to spawn others tends to collect
 holes until it is the hub. Envoy keeps its sandbox and gets only a revocable,
-expiring, audited token. Its harness's shared auth directory is mounted
+short-lived, audited capability. Its harness's shared auth directory is mounted
 read-write so native login refresh works; the sandbox is not credential-free.
 The owner's real home and SSH key directory are not mounted as general access.
 Envoy can still spend quota by spawning sleeves, so the spawn scope is the thing

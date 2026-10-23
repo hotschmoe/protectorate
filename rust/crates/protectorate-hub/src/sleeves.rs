@@ -2,7 +2,7 @@
 //! usage/chat updates are deliberately separate from these read routes.
 pub(super) mod branch;
 mod prune_git;
-use super::{input, respond, string, token_json, Hub};
+use super::{access::token_json, input, respond, string, Hub};
 use chrono::Utc;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_sandbox::{
@@ -75,6 +75,9 @@ struct ResleeveReservation<'a> {
 pub(super) struct SpawnParent {
     pub label: String,
     pub token_id: String,
+    /// What the spawner holds, which bounds its child; None for the owner
+    /// and devices.
+    pub scopes: Option<Vec<String>>,
 }
 
 impl SpawnParent {
@@ -91,6 +94,7 @@ impl SpawnParent {
         Self {
             label,
             token_id: auth.token_id.clone(),
+            scopes: (!auth.owner && !auth.device).then(|| auth.scopes.clone()),
         }
     }
 
@@ -98,6 +102,7 @@ impl SpawnParent {
         Self {
             label: "owner".into(),
             token_id: String::new(),
+            scopes: None,
         }
     }
 }
@@ -199,7 +204,7 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
     };
     let mut launch_request = resleeve_launch_request(&old, to, &chosen_selection);
     launch_request["requester"] = value["requester"].clone();
-    if let Some(pin) = crate::chat::chat_pin(hub, &launch_request, to)? {
+    if let Some(pin) = crate::chat::chat_pin(hub, &launch_request, to, &SpawnParent::owner())? {
         let pin_key = pin_key(Mode::Chat, to);
         crate::approvals::check_pin(
             hub,
@@ -709,7 +714,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         branch::start_watcher(&runtime, &hub);
         crate::chat::start_idle_reaper(&runtime, &hub);
-        crate::envoy::start_watcher(&runtime, &hub);
+        crate::access::start_refresh(&runtime, &hub);
         let weak = Arc::downgrade(&hub);
         runtime.spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -917,6 +922,11 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         .is_ok_and(|row| row.mode == Mode::Chat)
                     {
                         crate::chat::kill_pi(&hub, &name)?;
+                        // A killed Envoy is never resumed for mail, so its
+                        // capability goes with it.
+                        if name == "envoy" {
+                            crate::access::revoke_held(&hub, crate::access::ENVOY)?;
+                        }
                     } else {
                         kill_shell(&hub, &name)?;
                     }
@@ -1077,11 +1087,6 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
             ));
         }
     }
-    let ttl = if value.get("ttl").is_some() {
-        super::parse_duration(value.get("ttl"))?
-    } else {
-        Duration::from_secs(720 * 3600)
-    };
     let mut scopes = value
         .get("scopes")
         .and_then(Value::as_array)
@@ -1146,30 +1151,15 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
     } else {
         false
     };
-    for token in hub.identity.list() {
-        if token.name == "orchestrator-envoy" && token.revoked_at.is_none() {
-            hub.identity
-                .revoke(&token.id, super::now_unix())
-                .map_err(super::token_error)?;
-        }
-    }
-    let issued = hub
-        .identity
-        .create(
-            "orchestrator-envoy",
-            &scopes.iter().map(String::as_str).collect::<Vec<_>>(),
-            ttl,
-            super::now_unix(),
-            &scope_methods,
-        )
-        .map_err(super::token_error)?;
     let token_path = workspace.join(".protectorate-token");
+    let token = crate::access::issue_held(
+        hub,
+        crate::access::ENVOY,
+        scopes.clone(),
+        "owner",
+        &token_path,
+    )?;
     let launch = || -> Result<Record> {
-        envoy_write_if_changed(
-            &token_path,
-            format!("{}\n", issued.secret.expose()).as_bytes(),
-            0o600,
-        )?;
         let agents = envoy_agents(&hub_url, &scopes, &methods);
         envoy_write_if_changed(&workspace.join("AGENTS.md"), agents.as_bytes(), 0o644)?;
         let hosts = fs::read_to_string(hub.workspaces.state_root().join("hosts.md"))
@@ -1193,14 +1183,13 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
     let sleeve = match launch() {
         Ok(row) => row,
         Err(error) => {
-            let _ = hub.identity.revoke(&issued.token.id, super::now_unix());
-            let _ = fs::remove_file(&token_path);
+            let _ = crate::access::revoke_held(hub, crate::access::ENVOY);
             return Err(error);
         }
     };
     hub.directory_kick.notify_one();
     Ok(
-        json!({"sleeve":sleeve_json(&sleeve),"token":token_json(&issued.token),"workspace":workspace,"reason":reason,"replaced":replaced}),
+        json!({"sleeve":sleeve_json(&sleeve),"token":token_json(&token),"workspace":workspace,"reason":reason,"replaced":replaced}),
     )
 }
 
@@ -1809,7 +1798,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
             "nested": nested,
             "env": caller_env,
             "egress": config.egress,
-            "scopes": SLEEVE_SCOPES,
+            "scopes": crate::access::sleeve_scopes(hub, parent),
         })),
     };
     crate::approvals::check_pin(
@@ -1821,7 +1810,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         old_base.as_ref().and_then(|row| row.pins.get(&pin_key)),
         &pin,
     )?;
-    issue_terminal_identity(hub, &name)?;
+    issue_terminal_identity(hub, &name, parent)?;
     if let Err(error) = protectorate_sleeve_runner::write_config(&config_path, &config) {
         let _ = revoke_terminal_identity(hub, &name);
         return Err(internal(error));
@@ -2814,59 +2803,11 @@ fn terminal_token_path(hub: &Hub, name: &str) -> Result<PathBuf> {
 }
 
 fn revoke_terminal_identity(hub: &Hub, name: &str) -> Result<()> {
-    let now = super::now_unix();
-    for token in hub.identity.list() {
-        if token.name == format!("sleeve:{name}") && token.is_active(now) {
-            hub.identity
-                .revoke(&token.id, now)
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-        }
-    }
-    match fs::remove_file(terminal_token_path(hub, name)?) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(internal(error)),
-    }
+    crate::access::revoke_held(hub, &format!("sleeve:{name}"))
 }
 
-fn issue_terminal_identity(hub: &Hub, name: &str) -> Result<()> {
-    revoke_terminal_identity(hub, name)?;
-    let catalog = protectorate_wire::Catalog::embedded()?;
-    let methods = catalog.methods().cloned().collect::<Vec<_>>();
-    let scope_methods = super::scope_methods(&methods);
-    let issued = hub
-        .identity
-        .create(
-            &format!("sleeve:{name}"),
-            &SLEEVE_SCOPES,
-            Duration::ZERO,
-            super::now_unix(),
-            &scope_methods,
-        )
-        .map_err(|e| RpcError::new(Code::Internal, format!("issue sleeve token: {e}")))?;
-    let path = terminal_token_path(hub, name)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = path.with_extension(format!("token-{}-{nonce}", std::process::id()));
-    let write = || -> std::io::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
-        file.write_all(issued.secret.expose().as_bytes())?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        fs::rename(&temporary, &path)
-    };
-    if let Err(error) = write() {
-        let _ = fs::remove_file(&temporary);
-        let _ = hub.identity.revoke(&issued.token.id, super::now_unix());
-        return Err(internal(error));
-    }
-    Ok(())
+fn issue_terminal_identity(hub: &Hub, name: &str, parent: &SpawnParent) -> Result<()> {
+    crate::access::issue_sleeve(hub, name, parent, &terminal_token_path(hub, name)?).map(|_| ())
 }
 
 fn number(value: &Value, key: &str) -> Result<u64> {

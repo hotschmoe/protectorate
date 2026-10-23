@@ -7,6 +7,8 @@ import "package:connectrpc/connect.dart" as connect;
 import "device.pb.dart" as protectoratev1device;
 
 /// DeviceService connects new clients through approval by a trusted device.
+/// A device registers a P-256 public key when it starts; once approved it
+/// signs every request with the private half, which never leaves it.
 abstract final class DeviceService {
   /// Fully-qualified name of the DeviceService service.
   static const name = 'protectorate.v1.DeviceService';
@@ -19,7 +21,7 @@ abstract final class DeviceService {
     protectoratev1device.StartDeviceAuthResponse.new,
   );
 
-  /// PollDeviceAuth delivers a fresh token only once after approval.
+  /// PollDeviceAuth reports the outcome, and the approved device once.
   static const pollDeviceAuth = connect.Spec(
     '/$name/PollDeviceAuth',
     connect.StreamType.unary,

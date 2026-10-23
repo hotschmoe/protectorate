@@ -17,18 +17,18 @@ import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
-import 'token.pb.dart' as $1;
-
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 class StartDeviceAuthRequest extends $pb.GeneratedMessage {
   factory StartDeviceAuthRequest({
     $core.String? name,
     $core.String? platform,
+    $core.List<$core.int>? publicKey,
   }) {
     final result = StartDeviceAuthRequest._();
     if (name != null) result.name = name;
     if (platform != null) result.platform = platform;
+    if (publicKey != null) result.publicKey = publicKey;
     return result;
   }
 
@@ -48,6 +48,8 @@ class StartDeviceAuthRequest extends $pb.GeneratedMessage {
       createEmptyInstance: StartDeviceAuthRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aOS(2, _omitFieldNames ? '' : 'platform')
+    ..a<$core.List<$core.int>>(
+        3, _omitFieldNames ? '' : 'publicKey', $pb.PbFieldType.OY)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -91,6 +93,16 @@ class StartDeviceAuthRequest extends $pb.GeneratedMessage {
   $core.bool hasPlatform() => $_has(1);
   @$pb.TagNumber(2)
   void clearPlatform() => $_clearField(2);
+
+  /// public_key is the device's uncompressed P-256 public key (65 bytes).
+  @$pb.TagNumber(3)
+  $core.List<$core.int> get publicKey => $_getN(2);
+  @$pb.TagNumber(3)
+  set publicKey($core.List<$core.int> value) => $_setBytes(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPublicKey() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPublicKey() => $_clearField(3);
 }
 
 class StartDeviceAuthResponse extends $pb.GeneratedMessage {
@@ -256,14 +268,12 @@ class PollDeviceAuthResponse extends $pb.GeneratedMessage {
   factory PollDeviceAuthResponse({
     $core.String? status,
     $core.int? interval,
-    $core.String? secret,
-    $1.TokenInfo? token,
+    DeviceInfo? device,
   }) {
     final result = PollDeviceAuthResponse._();
     if (status != null) result.status = status;
     if (interval != null) result.interval = interval;
-    if (secret != null) result.secret = secret;
-    if (token != null) result.token = token;
+    if (device != null) result.device = device;
     return result;
   }
 
@@ -283,9 +293,8 @@ class PollDeviceAuthResponse extends $pb.GeneratedMessage {
       createEmptyInstance: PollDeviceAuthResponse.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'status')
     ..aI(2, _omitFieldNames ? '' : 'interval')
-    ..aOS(3, _omitFieldNames ? '' : 'secret')
-    ..aOM<$1.TokenInfo>(4, _omitFieldNames ? '' : 'token',
-        subBuilder: $1.TokenInfo.$_createMessage)
+    ..aOM<DeviceInfo>(3, _omitFieldNames ? '' : 'device',
+        subBuilder: DeviceInfo.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -331,25 +340,142 @@ class PollDeviceAuthResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearInterval() => $_clearField(2);
 
+  /// device is set once, on the poll that reports approved.
   @$pb.TagNumber(3)
-  $core.String get secret => $_getSZ(2);
+  DeviceInfo get device => $_getN(2);
   @$pb.TagNumber(3)
-  set secret($core.String value) => $_setString(2, value);
+  set device(DeviceInfo value) => $_setField(3, value);
   @$pb.TagNumber(3)
-  $core.bool hasSecret() => $_has(2);
+  $core.bool hasDevice() => $_has(2);
   @$pb.TagNumber(3)
-  void clearSecret() => $_clearField(3);
+  void clearDevice() => $_clearField(3);
+  @$pb.TagNumber(3)
+  DeviceInfo ensureDevice() => $_ensure(2);
+}
+
+/// DeviceInfo describes an approved device. Its id is derived from its public
+/// key and names it in audit lines.
+class DeviceInfo extends $pb.GeneratedMessage {
+  factory DeviceInfo({
+    $core.String? id,
+    $core.String? name,
+    $core.String? platform,
+    $0.Timestamp? approvedAt,
+    $core.String? approvedBy,
+    $0.Timestamp? lastUsedAt,
+  }) {
+    final result = DeviceInfo._();
+    if (id != null) result.id = id;
+    if (name != null) result.name = name;
+    if (platform != null) result.platform = platform;
+    if (approvedAt != null) result.approvedAt = approvedAt;
+    if (approvedBy != null) result.approvedBy = approvedBy;
+    if (lastUsedAt != null) result.lastUsedAt = lastUsedAt;
+    return result;
+  }
+
+  DeviceInfo._();
+
+  factory DeviceInfo.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeviceInfo()..mergeFromBuffer(data, registry);
+  factory DeviceInfo.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DeviceInfo()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DeviceInfo',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DeviceInfo.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'id')
+    ..aOS(2, _omitFieldNames ? '' : 'name')
+    ..aOS(3, _omitFieldNames ? '' : 'platform')
+    ..aOM<$0.Timestamp>(4, _omitFieldNames ? '' : 'approvedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOS(5, _omitFieldNames ? '' : 'approvedBy')
+    ..aOM<$0.Timestamp>(6, _omitFieldNames ? '' : 'lastUsedAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeviceInfo clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DeviceInfo copyWith(void Function(DeviceInfo) updates) =>
+      super.copyWith((message) => updates(message as DeviceInfo)) as DeviceInfo;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use DeviceInfo() / DeviceInfo.new instead')
+  static DeviceInfo create() => DeviceInfo._();
+  static $pb.GeneratedMessage $_createMessage() => DeviceInfo._();
+  @$core.override
+  DeviceInfo createEmptyInstance() => DeviceInfo._();
+  @$core.pragma('dart2js:noInline')
+  static DeviceInfo getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DeviceInfo>(DeviceInfo.$_createMessage);
+  static DeviceInfo? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get id => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set id($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get name => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set name($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasName() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearName() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get platform => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set platform($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPlatform() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPlatform() => $_clearField(3);
 
   @$pb.TagNumber(4)
-  $1.TokenInfo get token => $_getN(3);
+  $0.Timestamp get approvedAt => $_getN(3);
   @$pb.TagNumber(4)
-  set token($1.TokenInfo value) => $_setField(4, value);
+  set approvedAt($0.Timestamp value) => $_setField(4, value);
   @$pb.TagNumber(4)
-  $core.bool hasToken() => $_has(3);
+  $core.bool hasApprovedAt() => $_has(3);
   @$pb.TagNumber(4)
-  void clearToken() => $_clearField(4);
+  void clearApprovedAt() => $_clearField(4);
   @$pb.TagNumber(4)
-  $1.TokenInfo ensureToken() => $_ensure(3);
+  $0.Timestamp ensureApprovedAt() => $_ensure(3);
+
+  @$pb.TagNumber(5)
+  $core.String get approvedBy => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set approvedBy($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasApprovedBy() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearApprovedBy() => $_clearField(5);
+
+  /// last_used_at is persisted at most about once a minute.
+  @$pb.TagNumber(6)
+  $0.Timestamp get lastUsedAt => $_getN(5);
+  @$pb.TagNumber(6)
+  set lastUsedAt($0.Timestamp value) => $_setField(6, value);
+  @$pb.TagNumber(6)
+  $core.bool hasLastUsedAt() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearLastUsedAt() => $_clearField(6);
+  @$pb.TagNumber(6)
+  $0.Timestamp ensureLastUsedAt() => $_ensure(5);
 }
 
 class DeviceAuthInfo extends $pb.GeneratedMessage {
@@ -815,7 +941,7 @@ class ListDevicesRequest extends $pb.GeneratedMessage {
 
 class ListDevicesResponse extends $pb.GeneratedMessage {
   factory ListDevicesResponse({
-    $core.Iterable<$1.TokenInfo>? devices,
+    $core.Iterable<DeviceInfo>? devices,
   }) {
     final result = ListDevicesResponse._();
     if (devices != null) result.devices.addAll(devices);
@@ -836,8 +962,8 @@ class ListDevicesResponse extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ListDevicesResponse.$_createMessage)
-    ..pPM<$1.TokenInfo>(1, _omitFieldNames ? '' : 'devices',
-        subBuilder: $1.TokenInfo.$_createMessage)
+    ..pPM<DeviceInfo>(1, _omitFieldNames ? '' : 'devices',
+        subBuilder: DeviceInfo.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -864,7 +990,7 @@ class ListDevicesResponse extends $pb.GeneratedMessage {
   static ListDevicesResponse? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $pb.PbList<$1.TokenInfo> get devices => $_getList(0);
+  $pb.PbList<DeviceInfo> get devices => $_getList(0);
 }
 
 class RevokeDeviceRequest extends $pb.GeneratedMessage {
@@ -928,10 +1054,10 @@ class RevokeDeviceRequest extends $pb.GeneratedMessage {
 
 class RevokeDeviceResponse extends $pb.GeneratedMessage {
   factory RevokeDeviceResponse({
-    $1.TokenInfo? token,
+    DeviceInfo? device,
   }) {
     final result = RevokeDeviceResponse._();
-    if (token != null) result.token = token;
+    if (device != null) result.device = device;
     return result;
   }
 
@@ -949,8 +1075,8 @@ class RevokeDeviceResponse extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: RevokeDeviceResponse.$_createMessage)
-    ..aOM<$1.TokenInfo>(1, _omitFieldNames ? '' : 'token',
-        subBuilder: $1.TokenInfo.$_createMessage)
+    ..aOM<DeviceInfo>(1, _omitFieldNames ? '' : 'device',
+        subBuilder: DeviceInfo.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -977,15 +1103,15 @@ class RevokeDeviceResponse extends $pb.GeneratedMessage {
   static RevokeDeviceResponse? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $1.TokenInfo get token => $_getN(0);
+  DeviceInfo get device => $_getN(0);
   @$pb.TagNumber(1)
-  set token($1.TokenInfo value) => $_setField(1, value);
+  set device(DeviceInfo value) => $_setField(1, value);
   @$pb.TagNumber(1)
-  $core.bool hasToken() => $_has(0);
+  $core.bool hasDevice() => $_has(0);
   @$pb.TagNumber(1)
-  void clearToken() => $_clearField(1);
+  void clearDevice() => $_clearField(1);
   @$pb.TagNumber(1)
-  $1.TokenInfo ensureToken() => $_ensure(0);
+  DeviceInfo ensureDevice() => $_ensure(0);
 }
 
 class RenameDeviceRequest extends $pb.GeneratedMessage {
@@ -1061,10 +1187,10 @@ class RenameDeviceRequest extends $pb.GeneratedMessage {
 
 class RenameDeviceResponse extends $pb.GeneratedMessage {
   factory RenameDeviceResponse({
-    $1.TokenInfo? token,
+    DeviceInfo? device,
   }) {
     final result = RenameDeviceResponse._();
-    if (token != null) result.token = token;
+    if (device != null) result.device = device;
     return result;
   }
 
@@ -1082,8 +1208,8 @@ class RenameDeviceResponse extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: RenameDeviceResponse.$_createMessage)
-    ..aOM<$1.TokenInfo>(1, _omitFieldNames ? '' : 'token',
-        subBuilder: $1.TokenInfo.$_createMessage)
+    ..aOM<DeviceInfo>(1, _omitFieldNames ? '' : 'device',
+        subBuilder: DeviceInfo.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1110,18 +1236,20 @@ class RenameDeviceResponse extends $pb.GeneratedMessage {
   static RenameDeviceResponse? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $1.TokenInfo get token => $_getN(0);
+  DeviceInfo get device => $_getN(0);
   @$pb.TagNumber(1)
-  set token($1.TokenInfo value) => $_setField(1, value);
+  set device(DeviceInfo value) => $_setField(1, value);
   @$pb.TagNumber(1)
-  $core.bool hasToken() => $_has(0);
+  $core.bool hasDevice() => $_has(0);
   @$pb.TagNumber(1)
-  void clearToken() => $_clearField(1);
+  void clearDevice() => $_clearField(1);
   @$pb.TagNumber(1)
-  $1.TokenInfo ensureToken() => $_ensure(0);
+  DeviceInfo ensureDevice() => $_ensure(0);
 }
 
 /// DeviceService connects new clients through approval by a trusted device.
+/// A device registers a P-256 public key when it starts; once approved it
+/// signs every request with the private half, which never leaves it.
 class DeviceServiceApi {
   final $pb.RpcClient _client;
 
@@ -1133,7 +1261,7 @@ class DeviceServiceApi {
       _client.invoke<StartDeviceAuthResponse>(ctx, 'DeviceService',
           'StartDeviceAuth', request, StartDeviceAuthResponse());
 
-  /// PollDeviceAuth delivers a fresh token only once after approval.
+  /// PollDeviceAuth reports the outcome, and the approved device once.
   $async.Future<PollDeviceAuthResponse> pollDeviceAuth(
           $pb.ClientContext? ctx, PollDeviceAuthRequest request) =>
       _client.invoke<PollDeviceAuthResponse>(ctx, 'DeviceService',

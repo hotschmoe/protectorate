@@ -1,4 +1,4 @@
-//! Owner-only, bounded process diagnostics on the hub listener.
+//! Owner-only, bounded process diagnostics on the hub's loopback listener.
 use crate::Hub;
 use axum::{
     body::Body,
@@ -11,7 +11,7 @@ use std::{fs, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
 
 fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
-    let Some(secret) = super::bearer(headers) else {
+    let Some(secret) = crate::access::bearer(headers) else {
         return false;
     };
     !hub.owner_token.is_empty() && bool::from(hub.owner_token.as_bytes().ct_eq(secret.as_bytes()))

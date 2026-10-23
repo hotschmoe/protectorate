@@ -63,7 +63,7 @@ fn forwards_bridge_exit_status() {
 }
 
 #[test]
-fn saved_device_token_precedes_private_local_owner_token() {
+fn saved_device_key_precedes_private_local_owner_token() {
     let temp = tempfile::tempdir().unwrap();
     let cli = temp.path().join("protectorate-cli");
     let bridge = temp.path().join("protectorate-mcpbridge");
@@ -72,7 +72,11 @@ fn saved_device_token_precedes_private_local_owner_token() {
     fs::create_dir_all(&credentials).unwrap();
     fs::set_permissions(&credentials, fs::Permissions::from_mode(0o700)).unwrap();
     fs::copy(env!("CARGO_BIN_EXE_protectorate-cli"), &cli).unwrap();
-    fs::write(&bridge, "#!/bin/sh\nprintf '%s' \"$PROTECTORATE_TOKEN\"\n").unwrap();
+    fs::write(
+        &bridge,
+        "#!/bin/sh\nprintf '%s|%s' \"$PROTECTORATE_DEVICE_CREDENTIAL\" \"$PROTECTORATE_TOKEN\"\n",
+    )
+    .unwrap();
     fs::set_permissions(&bridge, fs::Permissions::from_mode(0o755)).unwrap();
 
     let owner = state.join("token");
@@ -85,11 +89,10 @@ fn saved_device_token_precedes_private_local_owner_token() {
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     let credential = credentials.join(format!("{name}.json"));
-    fs::write(
-        &credential,
-        format!(r#"{{"hub":"{hub}","secret":"device-secret"}}"#),
-    )
-    .unwrap();
+    let (_, pkcs8) = protectorate_auth::proof::DeviceKey::generate().unwrap();
+    use base64::Engine;
+    let key = base64::engine::general_purpose::STANDARD.encode(pkcs8);
+    fs::write(&credential, format!(r#"{{"hub":"{hub}","key":"{key}"}}"#)).unwrap();
     fs::set_permissions(&credential, fs::Permissions::from_mode(0o600)).unwrap();
 
     let run = || {
@@ -108,7 +111,10 @@ fn saved_device_token_precedes_private_local_owner_token() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"device-secret");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("{}|", credential.display())
+    );
 
     fs::remove_file(&credential).unwrap();
     let output = run();
@@ -117,7 +123,7 @@ fn saved_device_token_precedes_private_local_owner_token() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"owner-secret");
+    assert_eq!(output.stdout, b"|owner-secret");
 
     fs::set_permissions(&owner, fs::Permissions::from_mode(0o644)).unwrap();
     let output = run();

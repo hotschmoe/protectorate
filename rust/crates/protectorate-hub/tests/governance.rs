@@ -1,6 +1,8 @@
 //! Run correlation, approval gates, harness pinning and token budgets
 //! against a real hub over HTTP, with sandboxed fake harnesses.
 #![cfg(target_os = "linux")]
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_inventory::{Node, SHARED};
 use protectorate_lease::{parse_resource, Chooser, Error};
@@ -230,6 +232,7 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
         )
         .unwrap();
     let hub = hub.with_lease_chooser(any_lease()).unwrap();
+    let identity = std::sync::Arc::clone(&hub.identity);
     let (addr, server) = serve(hub.router().unwrap()).await;
 
     let (status, spawned) = call(
@@ -242,23 +245,14 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
     assert_eq!(status, 200, "{spawned}");
     let run = spawned["sleeve"]["runId"].as_str().unwrap().to_owned();
     assert_eq!(run.len(), 16, "{spawned}");
-    let token = sleeve_token(&setup.state, "runner");
-    let (_, tokens) = call(addr, "TokenService/ListTokens", OWNER, json!({})).await;
-    let token_id = tokens["tokens"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["name"] == "sleeve:runner" && t.get("revokedAt").is_none())
-        .unwrap()["id"]
-        .clone();
-    let (status, scoped) = call(
-        addr,
-        "TokenService/UpdateTokenScopes",
-        OWNER,
-        json!({"id":token_id,"add":["job_submit_job"]}),
+    assert!(!sleeve_token(&setup.state, "runner").is_empty());
+    // Capability scopes are fixed, so the owner mints the runner a wider one.
+    let token = capability::mint_in(
+        &identity,
+        "sleeve:runner",
+        &sleeve_scopes_with(&["job_submit_job"]),
     )
-    .await;
-    assert_eq!(status, 200, "{scoped}");
+    .1;
 
     let (status, mail) = call(
         addr,
@@ -371,33 +365,22 @@ async fn call_approved(
     )
 }
 
+/// The scopes the hub gives a sleeve, plus `extra`.
+fn sleeve_scopes_with(extra: &[&'static str]) -> Vec<&'static str> {
+    let mut scopes = vec![
+        "read",
+        "backlog_*",
+        "directory_*",
+        "lease_*",
+        "message_*",
+        "chat_report",
+    ];
+    scopes.extend_from_slice(extra);
+    scopes
+}
+
 fn envoy_token(hub: &Hub, scopes: &[&str]) -> String {
-    let catalog = protectorate_wire::Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|method| protectorate_auth::Method {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    hub.identity
-        .create(
-            "orchestrator-envoy",
-            scopes,
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap()
-        .secret
-        .expose()
-        .to_owned()
+    capability::mint(hub, "orchestrator-envoy", scopes).1
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -559,6 +542,7 @@ async fn used(addr: std::net::SocketAddr, name: &str) -> (u64, u64) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn budgets_warn_at_90_percent_and_stop_the_turn_at_100_including_children() {
     let (setup, hub) = setup();
+    let identity = std::sync::Arc::clone(&hub.identity);
     let (addr, server) = serve(hub.router().unwrap()).await;
     let (status, spawned) = call(
         addr,
@@ -569,22 +553,13 @@ async fn budgets_warn_at_90_percent_and_stop_the_turn_at_100_including_children(
     .await;
     assert_eq!(status, 200, "{spawned}");
     let run = spawned["sleeve"]["runId"].as_str().unwrap().to_owned();
-    let (_, tokens) = call(addr, "TokenService/ListTokens", OWNER, json!({})).await;
-    let token_id = tokens["tokens"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["name"] == "sleeve:parent" && t.get("revokedAt").is_none())
-        .unwrap()["id"]
-        .clone();
-    call(
-        addr,
-        "TokenService/UpdateTokenScopes",
-        OWNER,
-        json!({"id":token_id,"add":["sleeve_spawn_sleeve"]}),
+    assert!(!sleeve_token(&setup.state, "parent").is_empty());
+    let parent = capability::mint_in(
+        &identity,
+        "sleeve:parent",
+        &sleeve_scopes_with(&["sleeve_spawn_sleeve"]),
     )
-    .await;
-    let parent = sleeve_token(&setup.state, "parent");
+    .1;
     let kid_work = setup.work.with_file_name("kid-work");
     fs::create_dir_all(&kid_work).unwrap();
     let (status, kid) = call(

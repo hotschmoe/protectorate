@@ -102,7 +102,7 @@ class GrantServiceAdminRequest extends $pb.GeneratedMessage {
   $0.Duration ensureTtl() => $_ensure(1);
 
   /// task says what the grant is for, e.g. "update the kids' machine". It is
-  /// stored with the token and written to every audit line the grant causes.
+  /// carried in the grant and written to every audit line the grant causes.
   @$pb.TagNumber(3)
   $core.String get task => $_getSZ(2);
   @$pb.TagNumber(3)
@@ -180,7 +180,7 @@ class GrantServiceAdminResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   TokenInfo ensureToken() => $_ensure(0);
 
-  /// secret is the bearer token. It is shown only in this response.
+  /// secret is the capability. It is shown only in this response.
   @$pb.TagNumber(2)
   $core.String get secret => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -191,7 +191,7 @@ class GrantServiceAdminResponse extends $pb.GeneratedMessage {
   void clearSecret() => $_clearField(2);
 }
 
-/// TokenInfo describes an issued token. It never carries the secret.
+/// TokenInfo describes one capability lineage. It never carries a secret.
 class TokenInfo extends $pb.GeneratedMessage {
   factory TokenInfo({
     $core.String? id,
@@ -199,13 +199,9 @@ class TokenInfo extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? scopes,
     $1.Timestamp? createdAt,
     $1.Timestamp? expiresAt,
-    $1.Timestamp? lastUsedAt,
     $1.Timestamp? revokedAt,
     $core.String? task,
     $core.String? mintedBy,
-    $core.String? platform,
-    $1.Timestamp? approvedAt,
-    $core.String? approvedBy,
   }) {
     final result = TokenInfo._();
     if (id != null) result.id = id;
@@ -213,13 +209,9 @@ class TokenInfo extends $pb.GeneratedMessage {
     if (scopes != null) result.scopes.addAll(scopes);
     if (createdAt != null) result.createdAt = createdAt;
     if (expiresAt != null) result.expiresAt = expiresAt;
-    if (lastUsedAt != null) result.lastUsedAt = lastUsedAt;
     if (revokedAt != null) result.revokedAt = revokedAt;
     if (task != null) result.task = task;
     if (mintedBy != null) result.mintedBy = mintedBy;
-    if (platform != null) result.platform = platform;
-    if (approvedAt != null) result.approvedAt = approvedAt;
-    if (approvedBy != null) result.approvedBy = approvedBy;
     return result;
   }
 
@@ -244,16 +236,10 @@ class TokenInfo extends $pb.GeneratedMessage {
         subBuilder: $1.Timestamp.$_createMessage)
     ..aOM<$1.Timestamp>(5, _omitFieldNames ? '' : 'expiresAt',
         subBuilder: $1.Timestamp.$_createMessage)
-    ..aOM<$1.Timestamp>(6, _omitFieldNames ? '' : 'lastUsedAt',
+    ..aOM<$1.Timestamp>(6, _omitFieldNames ? '' : 'revokedAt',
         subBuilder: $1.Timestamp.$_createMessage)
-    ..aOM<$1.Timestamp>(7, _omitFieldNames ? '' : 'revokedAt',
-        subBuilder: $1.Timestamp.$_createMessage)
-    ..aOS(8, _omitFieldNames ? '' : 'task')
-    ..aOS(9, _omitFieldNames ? '' : 'mintedBy')
-    ..aOS(10, _omitFieldNames ? '' : 'platform')
-    ..aOM<$1.Timestamp>(11, _omitFieldNames ? '' : 'approvedAt',
-        subBuilder: $1.Timestamp.$_createMessage)
-    ..aOS(12, _omitFieldNames ? '' : 'approvedBy')
+    ..aOS(7, _omitFieldNames ? '' : 'task')
+    ..aOS(8, _omitFieldNames ? '' : 'mintedBy')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -276,7 +262,7 @@ class TokenInfo extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<TokenInfo>(TokenInfo.$_createMessage);
   static TokenInfo? _defaultInstance;
 
-  /// id is the stable identifier used to revoke the token and in audit lines.
+  /// id is the lineage identifier used to revoke it and in audit lines.
   @$pb.TagNumber(1)
   $core.String get id => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -286,7 +272,8 @@ class TokenInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearId() => $_clearField(1);
 
-  /// name is the label given at creation.
+  /// name is the principal: sleeve:<name>, orchestrator-envoy, grant:<node>
+  /// or the name given at creation.
   @$pb.TagNumber(2)
   $core.String get name => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -313,7 +300,7 @@ class TokenInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $1.Timestamp ensureCreatedAt() => $_ensure(3);
 
-  /// expires_at is unset for a token that never expires.
+  /// expires_at is the latest expiry of any token in the lineage.
   @$pb.TagNumber(5)
   $1.Timestamp get expiresAt => $_getN(4);
   @$pb.TagNumber(5)
@@ -325,79 +312,37 @@ class TokenInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   $1.Timestamp ensureExpiresAt() => $_ensure(4);
 
-  /// last_used_at is unset until the token authenticates once. It is
-  /// persisted at most about once a minute.
+  /// revoked_at is unset while the lineage is not revoked.
   @$pb.TagNumber(6)
-  $1.Timestamp get lastUsedAt => $_getN(5);
+  $1.Timestamp get revokedAt => $_getN(5);
   @$pb.TagNumber(6)
-  set lastUsedAt($1.Timestamp value) => $_setField(6, value);
+  set revokedAt($1.Timestamp value) => $_setField(6, value);
   @$pb.TagNumber(6)
-  $core.bool hasLastUsedAt() => $_has(5);
+  $core.bool hasRevokedAt() => $_has(5);
   @$pb.TagNumber(6)
-  void clearLastUsedAt() => $_clearField(6);
+  void clearRevokedAt() => $_clearField(6);
   @$pb.TagNumber(6)
-  $1.Timestamp ensureLastUsedAt() => $_ensure(5);
-
-  /// revoked_at is unset while the token is not revoked.
-  @$pb.TagNumber(7)
-  $1.Timestamp get revokedAt => $_getN(6);
-  @$pb.TagNumber(7)
-  set revokedAt($1.Timestamp value) => $_setField(7, value);
-  @$pb.TagNumber(7)
-  $core.bool hasRevokedAt() => $_has(6);
-  @$pb.TagNumber(7)
-  void clearRevokedAt() => $_clearField(7);
-  @$pb.TagNumber(7)
-  $1.Timestamp ensureRevokedAt() => $_ensure(6);
+  $1.Timestamp ensureRevokedAt() => $_ensure(5);
 
   /// task is set on an admin grant: what it was minted for.
-  @$pb.TagNumber(8)
-  $core.String get task => $_getSZ(7);
-  @$pb.TagNumber(8)
-  set task($core.String value) => $_setString(7, value);
-  @$pb.TagNumber(8)
-  $core.bool hasTask() => $_has(7);
-  @$pb.TagNumber(8)
-  void clearTask() => $_clearField(8);
+  @$pb.TagNumber(7)
+  $core.String get task => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set task($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasTask() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearTask() => $_clearField(7);
 
-  /// minted_by names who minted an admin grant: "owner" or a token name.
-  @$pb.TagNumber(9)
-  $core.String get mintedBy => $_getSZ(8);
-  @$pb.TagNumber(9)
-  set mintedBy($core.String value) => $_setString(8, value);
-  @$pb.TagNumber(9)
-  $core.bool hasMintedBy() => $_has(8);
-  @$pb.TagNumber(9)
-  void clearMintedBy() => $_clearField(9);
-
-  @$pb.TagNumber(10)
-  $core.String get platform => $_getSZ(9);
-  @$pb.TagNumber(10)
-  set platform($core.String value) => $_setString(9, value);
-  @$pb.TagNumber(10)
-  $core.bool hasPlatform() => $_has(9);
-  @$pb.TagNumber(10)
-  void clearPlatform() => $_clearField(10);
-
-  @$pb.TagNumber(11)
-  $1.Timestamp get approvedAt => $_getN(10);
-  @$pb.TagNumber(11)
-  set approvedAt($1.Timestamp value) => $_setField(11, value);
-  @$pb.TagNumber(11)
-  $core.bool hasApprovedAt() => $_has(10);
-  @$pb.TagNumber(11)
-  void clearApprovedAt() => $_clearField(11);
-  @$pb.TagNumber(11)
-  $1.Timestamp ensureApprovedAt() => $_ensure(10);
-
-  @$pb.TagNumber(12)
-  $core.String get approvedBy => $_getSZ(11);
-  @$pb.TagNumber(12)
-  set approvedBy($core.String value) => $_setString(11, value);
-  @$pb.TagNumber(12)
-  $core.bool hasApprovedBy() => $_has(11);
-  @$pb.TagNumber(12)
-  void clearApprovedBy() => $_clearField(12);
+  /// minted_by names who minted it: "owner" or a principal.
+  @$pb.TagNumber(8)
+  $core.String get mintedBy => $_getSZ(7);
+  @$pb.TagNumber(8)
+  set mintedBy($core.String value) => $_setString(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasMintedBy() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearMintedBy() => $_clearField(8);
 }
 
 class CreateTokenRequest extends $pb.GeneratedMessage {
@@ -455,7 +400,7 @@ class CreateTokenRequest extends $pb.GeneratedMessage {
           CreateTokenRequest.$_createMessage);
   static CreateTokenRequest? _defaultInstance;
 
-  /// name labels the token, for example "pixel phone" or "mcp bridge".
+  /// name labels the capability, for example "backup script".
   @$pb.TagNumber(1)
   $core.String get name => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -469,7 +414,8 @@ class CreateTokenRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $pb.PbList<$core.String> get scopes => $_getList(1);
 
-  /// ttl is the lifetime from now; zero means the token never expires.
+  /// ttl is the lifetime of each token; unset means 1h, at most 24h. Renew
+  /// before it ends to keep the capability.
   @$pb.TagNumber(3)
   $0.Duration get ttl => $_getN(2);
   @$pb.TagNumber(3)
@@ -546,7 +492,7 @@ class CreateTokenResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   TokenInfo ensureToken() => $_ensure(0);
 
-  /// secret is the bearer token. It is shown only in this response.
+  /// secret is the capability. It is shown only in this response.
   @$pb.TagNumber(2)
   $core.String get secret => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -700,7 +646,7 @@ class RevokeTokenRequest extends $pb.GeneratedMessage {
           RevokeTokenRequest.$_createMessage);
   static RevokeTokenRequest? _defaultInstance;
 
-  /// id of the token to revoke.
+  /// id of the lineage to revoke.
   @$pb.TagNumber(1)
   $core.String get id => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -773,132 +719,99 @@ class RevokeTokenResponse extends $pb.GeneratedMessage {
   TokenInfo ensureToken() => $_ensure(0);
 }
 
-class UpdateTokenScopesRequest extends $pb.GeneratedMessage {
-  factory UpdateTokenScopesRequest({
-    $core.String? id,
-    $core.Iterable<$core.String>? add,
-    $core.Iterable<$core.String>? remove,
-  }) {
-    final result = UpdateTokenScopesRequest._();
-    if (id != null) result.id = id;
-    if (add != null) result.add.addAll(add);
-    if (remove != null) result.remove.addAll(remove);
-    return result;
-  }
+class RenewTokenRequest extends $pb.GeneratedMessage {
+  factory RenewTokenRequest() => RenewTokenRequest._();
 
-  UpdateTokenScopesRequest._();
+  RenewTokenRequest._();
 
-  factory UpdateTokenScopesRequest.fromBuffer($core.List<$core.int> data,
+  factory RenewTokenRequest.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      UpdateTokenScopesRequest()..mergeFromBuffer(data, registry);
-  factory UpdateTokenScopesRequest.fromJson($core.String json,
+      RenewTokenRequest()..mergeFromBuffer(data, registry);
+  factory RenewTokenRequest.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      UpdateTokenScopesRequest()..mergeFromJson(json, registry);
+      RenewTokenRequest()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'UpdateTokenScopesRequest',
+      _omitMessageNames ? '' : 'RenewTokenRequest',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
-      createEmptyInstance: UpdateTokenScopesRequest.$_createMessage)
-    ..aOS(1, _omitFieldNames ? '' : 'id')
-    ..pPS(2, _omitFieldNames ? '' : 'add')
-    ..pPS(3, _omitFieldNames ? '' : 'remove')
+      createEmptyInstance: RenewTokenRequest.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  UpdateTokenScopesRequest clone() => deepCopy();
+  RenewTokenRequest clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  UpdateTokenScopesRequest copyWith(
-          void Function(UpdateTokenScopesRequest) updates) =>
-      super.copyWith((message) => updates(message as UpdateTokenScopesRequest))
-          as UpdateTokenScopesRequest;
+  RenewTokenRequest copyWith(void Function(RenewTokenRequest) updates) =>
+      super.copyWith((message) => updates(message as RenewTokenRequest))
+          as RenewTokenRequest;
 
   @$core.override
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
-  @$core.Deprecated(
-      'Use UpdateTokenScopesRequest() / UpdateTokenScopesRequest.new instead')
-  static UpdateTokenScopesRequest create() => UpdateTokenScopesRequest._();
-  static $pb.GeneratedMessage $_createMessage() => UpdateTokenScopesRequest._();
+  @$core.Deprecated('Use RenewTokenRequest() / RenewTokenRequest.new instead')
+  static RenewTokenRequest create() => RenewTokenRequest._();
+  static $pb.GeneratedMessage $_createMessage() => RenewTokenRequest._();
   @$core.override
-  UpdateTokenScopesRequest createEmptyInstance() =>
-      UpdateTokenScopesRequest._();
+  RenewTokenRequest createEmptyInstance() => RenewTokenRequest._();
   @$core.pragma('dart2js:noInline')
-  static UpdateTokenScopesRequest getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<UpdateTokenScopesRequest>(
-          UpdateTokenScopesRequest.$_createMessage);
-  static UpdateTokenScopesRequest? _defaultInstance;
-
-  /// id is an exact token ID or an unambiguous active token name.
-  @$pb.TagNumber(1)
-  $core.String get id => $_getSZ(0);
-  @$pb.TagNumber(1)
-  set id($core.String value) => $_setString(0, value);
-  @$pb.TagNumber(1)
-  $core.bool hasId() => $_has(0);
-  @$pb.TagNumber(1)
-  void clearId() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  $pb.PbList<$core.String> get add => $_getList(1);
-
-  @$pb.TagNumber(3)
-  $pb.PbList<$core.String> get remove => $_getList(2);
+  static RenewTokenRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<RenewTokenRequest>(
+          RenewTokenRequest.$_createMessage);
+  static RenewTokenRequest? _defaultInstance;
 }
 
-class UpdateTokenScopesResponse extends $pb.GeneratedMessage {
-  factory UpdateTokenScopesResponse({
+class RenewTokenResponse extends $pb.GeneratedMessage {
+  factory RenewTokenResponse({
     TokenInfo? token,
+    $core.String? secret,
   }) {
-    final result = UpdateTokenScopesResponse._();
+    final result = RenewTokenResponse._();
     if (token != null) result.token = token;
+    if (secret != null) result.secret = secret;
     return result;
   }
 
-  UpdateTokenScopesResponse._();
+  RenewTokenResponse._();
 
-  factory UpdateTokenScopesResponse.fromBuffer($core.List<$core.int> data,
+  factory RenewTokenResponse.fromBuffer($core.List<$core.int> data,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      UpdateTokenScopesResponse()..mergeFromBuffer(data, registry);
-  factory UpdateTokenScopesResponse.fromJson($core.String json,
+      RenewTokenResponse()..mergeFromBuffer(data, registry);
+  factory RenewTokenResponse.fromJson($core.String json,
           [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
-      UpdateTokenScopesResponse()..mergeFromJson(json, registry);
+      RenewTokenResponse()..mergeFromJson(json, registry);
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
-      _omitMessageNames ? '' : 'UpdateTokenScopesResponse',
+      _omitMessageNames ? '' : 'RenewTokenResponse',
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
-      createEmptyInstance: UpdateTokenScopesResponse.$_createMessage)
+      createEmptyInstance: RenewTokenResponse.$_createMessage)
     ..aOM<TokenInfo>(1, _omitFieldNames ? '' : 'token',
         subBuilder: TokenInfo.$_createMessage)
+    ..aOS(2, _omitFieldNames ? '' : 'secret')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  UpdateTokenScopesResponse clone() => deepCopy();
+  RenewTokenResponse clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  UpdateTokenScopesResponse copyWith(
-          void Function(UpdateTokenScopesResponse) updates) =>
-      super.copyWith((message) => updates(message as UpdateTokenScopesResponse))
-          as UpdateTokenScopesResponse;
+  RenewTokenResponse copyWith(void Function(RenewTokenResponse) updates) =>
+      super.copyWith((message) => updates(message as RenewTokenResponse))
+          as RenewTokenResponse;
 
   @$core.override
   $pb.BuilderInfo get info_ => _i;
 
   @$core.pragma('dart2js:noInline')
-  @$core.Deprecated(
-      'Use UpdateTokenScopesResponse() / UpdateTokenScopesResponse.new instead')
-  static UpdateTokenScopesResponse create() => UpdateTokenScopesResponse._();
-  static $pb.GeneratedMessage $_createMessage() =>
-      UpdateTokenScopesResponse._();
+  @$core.Deprecated('Use RenewTokenResponse() / RenewTokenResponse.new instead')
+  static RenewTokenResponse create() => RenewTokenResponse._();
+  static $pb.GeneratedMessage $_createMessage() => RenewTokenResponse._();
   @$core.override
-  UpdateTokenScopesResponse createEmptyInstance() =>
-      UpdateTokenScopesResponse._();
+  RenewTokenResponse createEmptyInstance() => RenewTokenResponse._();
   @$core.pragma('dart2js:noInline')
-  static UpdateTokenScopesResponse getDefault() => _defaultInstance ??=
-      $pb.GeneratedMessage.$_defaultFor<UpdateTokenScopesResponse>(
-          UpdateTokenScopesResponse.$_createMessage);
-  static UpdateTokenScopesResponse? _defaultInstance;
+  static RenewTokenResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RenewTokenResponse>(
+          RenewTokenResponse.$_createMessage);
+  static RenewTokenResponse? _defaultInstance;
 
   @$pb.TagNumber(1)
   TokenInfo get token => $_getN(0);
@@ -910,48 +823,63 @@ class UpdateTokenScopesResponse extends $pb.GeneratedMessage {
   void clearToken() => $_clearField(1);
   @$pb.TagNumber(1)
   TokenInfo ensureToken() => $_ensure(0);
+
+  /// secret is the fresh capability.
+  @$pb.TagNumber(2)
+  $core.String get secret => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set secret($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasSecret() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearSecret() => $_clearField(2);
 }
 
-/// TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
-/// one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
+/// TokenService manages capabilities: short-lived macaroons only the hub can
+/// mint and verify. A capability names its principal, scopes and expiry in
+/// caveats; its holder may append caveats to narrow it, never to widen it.
+/// The hub keeps one record per lineage so it can list and revoke it.
 class TokenServiceApi {
   final $pb.RpcClient _client;
 
   TokenServiceApi(this._client);
 
-  /// CreateToken issues a scoped token. The secret is returned once and only
-  /// its SHA-256 hash is stored, so it cannot be recovered later.
+  /// CreateToken mints a capability for a script or tool. The secret is
+  /// returned once and is not stored.
   $async.Future<CreateTokenResponse> createToken(
           $pb.ClientContext? ctx, CreateTokenRequest request) =>
       _client.invoke<CreateTokenResponse>(
           ctx, 'TokenService', 'CreateToken', request, CreateTokenResponse());
 
-  /// UpdateTokenScopes changes grants without rotating the secret.
-  $async.Future<UpdateTokenScopesResponse> updateTokenScopes(
-          $pb.ClientContext? ctx, UpdateTokenScopesRequest request) =>
-      _client.invoke<UpdateTokenScopesResponse>(ctx, 'TokenService',
-          'UpdateTokenScopes', request, UpdateTokenScopesResponse());
-
-  /// ListTokens returns every issued token, including revoked and expired
-  /// ones, without secrets.
+  /// ListTokens returns every capability lineage, including revoked and
+  /// expired ones, without secrets.
   $async.Future<ListTokensResponse> listTokens(
           $pb.ClientContext? ctx, ListTokensRequest request) =>
       _client.invoke<ListTokensResponse>(
           ctx, 'TokenService', 'ListTokens', request, ListTokensResponse());
 
-  /// RevokeToken permanently disables a token. Revoking an already revoked
-  /// token succeeds and keeps the original revocation time.
+  /// RevokeToken permanently disables a lineage: every token minted, renewed
+  /// or narrowed from it. Revoking an already revoked lineage succeeds and
+  /// keeps the original revocation time.
   $async.Future<RevokeTokenResponse> revokeToken(
           $pb.ClientContext? ctx, RevokeTokenRequest request) =>
       _client.invoke<RevokeTokenResponse>(
           ctx, 'TokenService', 'RevokeToken', request, RevokeTokenResponse());
+
+  /// RenewToken returns a fresh token for the capability that authenticates
+  /// the call: the same caveats, including any its holder appended, with a
+  /// new expiry. Only a capability that has not expired may call it.
+  $async.Future<RenewTokenResponse> renewToken(
+          $pb.ClientContext? ctx, RenewTokenRequest request) =>
+      _client.invoke<RenewTokenResponse>(
+          ctx, 'TokenService', 'RenewToken', request, RenewTokenResponse());
 }
 
-/// GrantService mints task-scoped admin grants: short-lived tokens whose
-/// scopes are job_* and node_admin:<node>. The owner may grant any node (or a
-/// glob over node names); the orchestrator's token may grant one shared node
-/// by name, and only when the hub runs with --orchestrator-admin-grants. Every
-/// call made with a grant is audited with its task.
+/// GrantService mints task-scoped admin grants: capabilities whose scopes are
+/// job_* and node_admin:<node>. The owner may grant any node (or a glob over
+/// node names); the orchestrator may grant one shared node by name, and only
+/// when the hub runs with --orchestrator-admin-grants. Every call made with a
+/// grant is audited with its task.
 class GrantServiceApi {
   final $pb.RpcClient _client;
 

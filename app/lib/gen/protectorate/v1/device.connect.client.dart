@@ -8,6 +8,8 @@ import "device.pb.dart" as protectoratev1device;
 import "device.connect.spec.dart" as specs;
 
 /// DeviceService connects new clients through approval by a trusted device.
+/// A device registers a P-256 public key when it starts; once approved it
+/// signs every request with the private half, which never leaves it.
 extension type DeviceServiceClient (connect.Transport _transport) {
   /// StartDeviceAuth is unauthenticated and rate limited on the LAN.
   Future<protectoratev1device.StartDeviceAuthResponse> startDeviceAuth(
@@ -27,7 +29,7 @@ extension type DeviceServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// PollDeviceAuth delivers a fresh token only once after approval.
+  /// PollDeviceAuth reports the outcome, and the approved device once.
   Future<protectoratev1device.PollDeviceAuthResponse> pollDeviceAuth(
     protectoratev1device.PollDeviceAuthRequest input, {
     connect.Headers? headers,

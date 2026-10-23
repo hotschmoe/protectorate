@@ -274,16 +274,16 @@ fn approval_json(request: &Request) -> Value {
     })
 }
 
-/// Envoy, a sleeve, or a token Envoy minted. The owner, approved devices and
-/// tokens the owner issued are never gated.
+/// Envoy, a sleeve, or a capability lineage Envoy minted. The owner,
+/// approved devices and capabilities the owner minted are never gated.
 pub(crate) fn is_agent(hub: &Hub, actor: &str, token_id: &str) -> bool {
     super::actor_sleeve(actor).is_some()
         || (!token_id.is_empty()
             && hub
                 .identity
-                .list()
+                .capabilities()
                 .iter()
-                .any(|t| t.id == token_id && t.minted_by == "orchestrator-envoy"))
+                .any(|c| c.id == token_id && c.minted_by == crate::access::ENVOY))
 }
 
 /// The wire gate: destructive calls and admin jobs by agents need an

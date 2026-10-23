@@ -9,14 +9,16 @@ class HubProfile {
     required this.id,
     required this.name,
     required this.baseUrl,
-    this.token = '',
+    this.deviceId = '',
     this.caPem = '',
   });
 
   final String id;
   final String name;
   final String baseUrl;
-  final String token;
+  // deviceId is set once the hub approved this profile's device key; the key
+  // itself stays in the platform key store under the profile id.
+  final String deviceId;
   // caPem is the hub's private CA from its pairing link; empty trusts the
   // platform roots.
   final String caPem;
@@ -41,7 +43,7 @@ class HubProfile {
     'id': id,
     'name': name,
     'baseUrl': baseUrl,
-    'token': token,
+    'deviceId': deviceId,
     'caPem': caPem,
   };
 
@@ -49,7 +51,7 @@ class HubProfile {
     id: json['id'] as String,
     name: json['name'] as String,
     baseUrl: json['baseUrl'] as String,
-    token: (json['token'] as String?) ?? '',
+    deviceId: (json['deviceId'] as String?) ?? '',
     caPem: (json['caPem'] as String?) ?? '',
   );
 
@@ -59,11 +61,11 @@ class HubProfile {
       other.id == id &&
       other.name == name &&
       other.baseUrl == baseUrl &&
-      other.token == token &&
+      other.deviceId == deviceId &&
       other.caPem == caPem;
 
   @override
-  int get hashCode => Object.hash(id, name, baseUrl, token, caPem);
+  int get hashCode => Object.hash(id, name, baseUrl, deviceId, caPem);
 }
 
 String? validateBaseUrl(String value) {

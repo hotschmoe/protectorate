@@ -91,17 +91,21 @@ fn joined_node_trusts_only_the_hub_and_removal_revokes_it() {
     let ca = hub.ca();
     let ca_pem = fs::read(&ca).unwrap();
 
+    // With the hub CA the TLS handshake succeeds and the hub itself answers,
+    // refusing the owner token off its loopback listener.
     let status = "/protectorate.v1.HubService/GetStatus";
-    Client::new_with_ca(&hub.tls, OWNER, Duration::from_secs(5), Some(&ca))
+    let error = Client::new_with_ca(&hub.tls, OWNER, Duration::from_secs(5), Some(&ca))
         .unwrap()
         .call(status, &json!({}))
-        .expect("HTTPS with the hub CA");
+        .unwrap_err();
+    assert!(error.message.contains("loopback listener"), "{error:?}");
+    let error = Client::new_with_trust(&hub.tls, OWNER, Duration::from_secs(5), None)
+        .unwrap()
+        .call(status, &json!({}))
+        .unwrap_err();
     assert!(
-        Client::new_with_trust(&hub.tls, OWNER, Duration::from_secs(5), None)
-            .unwrap()
-            .call(status, &json!({}))
-            .is_err(),
-        "public roots must not verify the hub certificate"
+        !error.message.contains("loopback listener"),
+        "public roots must not verify the hub certificate: {error:?}"
     );
 
     let node_home = root.path().join("node");

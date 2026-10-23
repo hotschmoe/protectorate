@@ -111,9 +111,8 @@ The nodes view updates reachable remote nodes that differ from the hub,
 showing each node's progress and continuing after an individual failure.
 `NodeService.UpdateNode` and `node update --all` send the platform binary from
 the hub's current release and retain the node's staged update, health
-confirmation and rollback. Full device tokens gain the owner update
-capability through the device-authorization integration; arbitrary scope
-globs do not grant it. Installation and local fake-release-server testing
+confirmation and rollback. Approved devices gain the owner update capability
+through `device_allowed`; no capability scope grants it. Installation and local fake-release-server testing
 are documented in [docs/install.md](docs/install.md) and
 [docs/testing.md](docs/testing.md).
 
@@ -594,9 +593,9 @@ current shell because NodeStatus has no historical alert onset timestamp.
 
 - The orchestrator ("Envoy") is **a sleeve**, not engine code. Its harness is
   whichever subscription has quota left, and its tool is the `protectorate`
-  CLI with a scoped hub token.
-- External bridges (MCP for Claude, Grok bot, Dots, Muse) use the same scoped
-  token mechanism (scopes, TokenService and the audit log: `docs/auth.md`).
+  CLI with a hub-minted capability.
+- External bridges (MCP for Claude, Grok bot, Dots, Muse) use the same
+  capability mechanism (scopes, TokenService and the audit log: `docs/auth.md`).
   "AI as orchestrator" and "AI talking to the orchestrator"
   are the same path.
 
@@ -604,9 +603,9 @@ current shell because NodeStatus has no historical alert onset timestamp.
 
 The coordinator is hub code, not a sleeve, and decides nothing with a model.
 
-- **Identity:** each sleeve has a scoped token (`sleeve:<name>`) in its home;
-  the hub maps it to the sleeve, so message senders and lease holders are
-  authenticated, not claimed.
+- **Identity:** each sleeve holds a capability (`sleeve:<name>`) in its home,
+  which the hub keeps fresh; the hub maps it to the sleeve, so message senders
+  and lease holders are authenticated, not claimed.
 - **Directory:** per sleeve workspace, the git remote, branch/HEAD and package
   names from go.mod, package.json, Cargo.toml and pyproject.toml; projects and
   their dependency edges are derived, refreshed on spawn and every minute.
@@ -663,7 +662,7 @@ Plain files on the hub, so it stays debuggable and crash-resilient:
 ~/.protectorate/
   nodes.json          # inventory (P2)
   leases.json         # live leases and the lease queue (P9)
-  tokens.json         # scoped/device token hashes and pending device approvals
+  identity.json       # capability key, device public keys, capability lineages, pending approvals
   sleeves.json        # sleeve records and chat summaries
   directory.json      # projects, packages, last seen refs
   mailbox.jsonl       # messages and their delivery state

@@ -382,14 +382,35 @@ pub struct AuthContext {
     /// Direct transport peer for public device pairing audit entries.
     pub requesting_ip: Option<std::net::IpAddr>,
 }
+/// The transport peer, inserted as a request extension by the listener and
+/// never taken from a header. `tls` is false only on the hub's loopback
+/// listener.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Peer {
+    pub addr: SocketAddr,
+    pub tls: bool,
+}
+/// An admission failure, with whatever identity was established before it.
+#[derive(Clone, Debug)]
+pub struct Denied {
+    pub error: RpcError,
+    pub auth: AuthContext,
+}
+impl From<RpcError> for Box<Denied> {
+    fn from(error: RpcError) -> Self {
+        Box::new(Denied {
+            error,
+            auth: AuthContext::default(),
+        })
+    }
+}
 #[derive(Clone, Debug)]
 pub struct RpcRequest {
     pub method: Method,
     pub headers: HeaderMap,
     pub message: DynamicMessage,
     pub auth: AuthContext,
-    /// The transport peer, inserted by the listener, never by a request header.
-    pub peer_addr: Option<SocketAddr>,
+    pub peer: Option<Peer>,
 }
 #[derive(Clone, Debug)]
 pub struct RpcResponse {
@@ -411,8 +432,11 @@ type StreamingHandler = Arc<dyn Fn(RpcRequest, StreamSender) -> StreamingFuture 
 /// The hook decides public, owner, device, scope and node-local policies.
 /// It runs before JSON decoding and handlers, and must not block on network IO.
 pub type Authorizer = Arc<dyn Fn(&Method, &HeaderMap) -> Result<AuthContext> + Send + Sync>;
-pub type PeerAuthorizer =
-    Arc<dyn Fn(&Method, &HeaderMap, Option<SocketAddr>) -> Result<AuthContext> + Send + Sync>;
+pub type PeerAuthorizer = Arc<
+    dyn Fn(&Method, &HeaderMap, Option<Peer>) -> std::result::Result<AuthContext, Box<Denied>>
+        + Send
+        + Sync,
+>;
 enum Admission {
     Headers(Authorizer),
     Peer(PeerAuthorizer),
@@ -428,27 +452,21 @@ pub type Gate = Arc<dyn Fn(&RpcRequest) -> Result<()> + Send + Sync>;
 /// Called when a known procedure fails validation before its handler starts.
 /// No request body or credential headers are exposed to this hook.
 pub type RejectionObserver = Arc<dyn Fn(&Method, Option<&AuthContext>, &RpcError) + Send + Sync>;
-/// Called once for an admission denial. The optional request is decoded only
-/// when its body fits the small audit bound and arrives promptly. This trusted
-/// hook receives headers so the service can identify the rejected credential;
-/// it must never write bearer tokens or message bodies to an audit log.
-pub type AdmissionDenialObserver = Arc<
-    dyn Fn(&Method, &HeaderMap, Option<SocketAddr>, Option<&DynamicMessage>, &RpcError)
-        + Send
-        + Sync,
->;
+/// Called once for an admission denial with the identity the authorizer
+/// established. The optional request is decoded only when its body fits the
+/// small audit bound and arrives promptly.
+pub type AdmissionDenialObserver =
+    Arc<dyn Fn(&Method, &AuthContext, Option<&DynamicMessage>, &RpcError) + Send + Sync>;
 struct AdmissionDenialGuard {
     observer: AdmissionDenialObserver,
     method: Method,
-    headers: HeaderMap,
-    peer: Option<SocketAddr>,
-    error: RpcError,
+    denied: Box<Denied>,
     finished: bool,
 }
 impl AdmissionDenialGuard {
     fn finish(&mut self, message: Option<&DynamicMessage>) {
         self.finished = true;
-        (self.observer)(&self.method, &self.headers, self.peer, message, &self.error);
+        (self.observer)(&self.method, &self.denied.auth, message, &self.denied.error);
     }
 }
 impl Drop for AdmissionDenialGuard {
@@ -851,21 +869,22 @@ async fn dispatch_inner(
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE),
         ));
     }
-    let peer_addr = request.extensions().get::<SocketAddr>().copied();
+    let peer = request.extensions().get::<Peer>().copied();
     let admission = match &server.authorize {
-        Admission::Headers(authorize) => authorize(&method, request.headers()),
-        Admission::Peer(authorize) => authorize(&method, request.headers(), peer_addr),
+        Admission::Headers(authorize) => {
+            authorize(&method, request.headers()).map_err(Box::<Denied>::from)
+        }
+        Admission::Peer(authorize) => authorize(&method, request.headers(), peer),
     };
     let auth = match admission {
         Ok(auth) => auth,
-        Err(error) => {
+        Err(denied) => {
+            let error = denied.error.clone();
             if let Some(observer) = &server.admission_denial_observer {
                 let mut guard = AdmissionDenialGuard {
                     observer: Arc::clone(observer),
                     method: method.clone(),
-                    headers: request.headers().clone(),
-                    peer: peer_addr,
-                    error: error.clone(),
+                    denied,
                     finished: false,
                 };
                 const AUDIT_BODY_LIMIT: usize = 16 << 10;
@@ -954,7 +973,7 @@ async fn dispatch_inner(
             headers,
             message,
             auth,
-            peer_addr,
+            peer,
         };
         if let Some(gate) = &server.gate {
             gate(&req)?;
@@ -983,7 +1002,7 @@ async fn dispatch_inner(
         headers,
         message,
         auth,
-        peer_addr,
+        peer,
     };
     if let Some(gate) = &server.gate {
         gate(&request)?;

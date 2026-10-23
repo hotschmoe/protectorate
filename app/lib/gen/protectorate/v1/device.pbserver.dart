@@ -15,47 +15,47 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'device.pb.dart' as $2;
+import 'device.pb.dart' as $1;
 import 'device.pbjson.dart';
 
 export 'device.pb.dart';
 
 abstract class DeviceServiceBase extends $pb.GeneratedService {
-  $async.Future<$2.StartDeviceAuthResponse> startDeviceAuth(
-      $pb.ServerContext ctx, $2.StartDeviceAuthRequest request);
-  $async.Future<$2.PollDeviceAuthResponse> pollDeviceAuth(
-      $pb.ServerContext ctx, $2.PollDeviceAuthRequest request);
-  $async.Future<$2.ListDeviceAuthResponse> listDeviceAuth(
-      $pb.ServerContext ctx, $2.ListDeviceAuthRequest request);
-  $async.Future<$2.ApproveDeviceAuthResponse> approveDeviceAuth(
-      $pb.ServerContext ctx, $2.ApproveDeviceAuthRequest request);
-  $async.Future<$2.DenyDeviceAuthResponse> denyDeviceAuth(
-      $pb.ServerContext ctx, $2.DenyDeviceAuthRequest request);
-  $async.Future<$2.ListDevicesResponse> listDevices(
-      $pb.ServerContext ctx, $2.ListDevicesRequest request);
-  $async.Future<$2.RevokeDeviceResponse> revokeDevice(
-      $pb.ServerContext ctx, $2.RevokeDeviceRequest request);
-  $async.Future<$2.RenameDeviceResponse> renameDevice(
-      $pb.ServerContext ctx, $2.RenameDeviceRequest request);
+  $async.Future<$1.StartDeviceAuthResponse> startDeviceAuth(
+      $pb.ServerContext ctx, $1.StartDeviceAuthRequest request);
+  $async.Future<$1.PollDeviceAuthResponse> pollDeviceAuth(
+      $pb.ServerContext ctx, $1.PollDeviceAuthRequest request);
+  $async.Future<$1.ListDeviceAuthResponse> listDeviceAuth(
+      $pb.ServerContext ctx, $1.ListDeviceAuthRequest request);
+  $async.Future<$1.ApproveDeviceAuthResponse> approveDeviceAuth(
+      $pb.ServerContext ctx, $1.ApproveDeviceAuthRequest request);
+  $async.Future<$1.DenyDeviceAuthResponse> denyDeviceAuth(
+      $pb.ServerContext ctx, $1.DenyDeviceAuthRequest request);
+  $async.Future<$1.ListDevicesResponse> listDevices(
+      $pb.ServerContext ctx, $1.ListDevicesRequest request);
+  $async.Future<$1.RevokeDeviceResponse> revokeDevice(
+      $pb.ServerContext ctx, $1.RevokeDeviceRequest request);
+  $async.Future<$1.RenameDeviceResponse> renameDevice(
+      $pb.ServerContext ctx, $1.RenameDeviceRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'StartDeviceAuth':
-        return $2.StartDeviceAuthRequest();
+        return $1.StartDeviceAuthRequest();
       case 'PollDeviceAuth':
-        return $2.PollDeviceAuthRequest();
+        return $1.PollDeviceAuthRequest();
       case 'ListDeviceAuth':
-        return $2.ListDeviceAuthRequest();
+        return $1.ListDeviceAuthRequest();
       case 'ApproveDeviceAuth':
-        return $2.ApproveDeviceAuthRequest();
+        return $1.ApproveDeviceAuthRequest();
       case 'DenyDeviceAuth':
-        return $2.DenyDeviceAuthRequest();
+        return $1.DenyDeviceAuthRequest();
       case 'ListDevices':
-        return $2.ListDevicesRequest();
+        return $1.ListDevicesRequest();
       case 'RevokeDevice':
-        return $2.RevokeDeviceRequest();
+        return $1.RevokeDeviceRequest();
       case 'RenameDevice':
-        return $2.RenameDeviceRequest();
+        return $1.RenameDeviceRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -65,21 +65,21 @@ abstract class DeviceServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'StartDeviceAuth':
-        return startDeviceAuth(ctx, request as $2.StartDeviceAuthRequest);
+        return startDeviceAuth(ctx, request as $1.StartDeviceAuthRequest);
       case 'PollDeviceAuth':
-        return pollDeviceAuth(ctx, request as $2.PollDeviceAuthRequest);
+        return pollDeviceAuth(ctx, request as $1.PollDeviceAuthRequest);
       case 'ListDeviceAuth':
-        return listDeviceAuth(ctx, request as $2.ListDeviceAuthRequest);
+        return listDeviceAuth(ctx, request as $1.ListDeviceAuthRequest);
       case 'ApproveDeviceAuth':
-        return approveDeviceAuth(ctx, request as $2.ApproveDeviceAuthRequest);
+        return approveDeviceAuth(ctx, request as $1.ApproveDeviceAuthRequest);
       case 'DenyDeviceAuth':
-        return denyDeviceAuth(ctx, request as $2.DenyDeviceAuthRequest);
+        return denyDeviceAuth(ctx, request as $1.DenyDeviceAuthRequest);
       case 'ListDevices':
-        return listDevices(ctx, request as $2.ListDevicesRequest);
+        return listDevices(ctx, request as $1.ListDevicesRequest);
       case 'RevokeDevice':
-        return revokeDevice(ctx, request as $2.RevokeDeviceRequest);
+        return revokeDevice(ctx, request as $1.RevokeDeviceRequest);
       case 'RenameDevice':
-        return renameDevice(ctx, request as $2.RenameDeviceRequest);
+        return renameDevice(ctx, request as $1.RenameDeviceRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

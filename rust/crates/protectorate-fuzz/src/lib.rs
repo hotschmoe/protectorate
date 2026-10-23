@@ -4,6 +4,7 @@
 #![cfg(target_os = "linux")]
 
 mod archives;
+mod auth;
 mod cli;
 mod harness;
 mod quota;
@@ -13,13 +14,12 @@ mod terminal;
 mod wire;
 
 pub use archives::{release_manifest, release_web_archive, xfer_archive};
+pub use auth::{capability_tokens, device_proofs};
 pub use cli::{cli_args, mcp_stdio};
 pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
 pub use quota::quota_responses;
 pub use sandbox::sandbox_plan;
-pub use stores::{
-    audit_log, backlog_notes, chatlog, directory_state, identity_tokens, mailbox_log,
-};
+pub use stores::{audit_log, backlog_notes, chatlog, directory_state, identity_store, mailbox_log};
 pub use terminal::terminal_pane;
 pub use wire::wire_json;
 
@@ -29,13 +29,15 @@ pub type Target = fn(&[u8]);
 pub const TARGETS: &[(&str, Target)] = &[
     ("audit_log", audit_log),
     ("backlog_notes", backlog_notes),
+    ("capability_tokens", capability_tokens),
     ("chatlog", chatlog),
     ("claude_stream", claude_stream),
     ("cli_args", cli_args),
     ("codex_rpc", codex_rpc),
+    ("device_proofs", device_proofs),
     ("directory_state", directory_state),
     ("grok_acp", grok_acp),
-    ("identity_tokens", identity_tokens),
+    ("identity_store", identity_store),
     ("mailbox_log", mailbox_log),
     ("mcp_stdio", mcp_stdio),
     ("pi_rpc", pi_rpc),

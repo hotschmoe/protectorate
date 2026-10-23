@@ -4,7 +4,7 @@ use crate::{
     AuditQuery, BacklogFilter, ChatSettings, Command, HarnessName, JobFilter, JobLogs, JobRun,
     JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit, NoteState, ReadOnlyBind,
     SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve, SleeveSpawn, WaitUntil,
-    DEFAULT_ENVOY_TTL, DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
+    DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
 };
 use protectorate_wire::{Result, RpcError};
 use serde_json::Value;
@@ -295,41 +295,7 @@ fn orchestrator(args: &[String], index: &mut usize) -> Result<Command> {
             *index += 1;
             sleeve_envoy(args, index)
         }
-        Some("scopes") => {
-            *index += 1;
-            let mut add = Vec::new();
-            let mut remove = Vec::new();
-            while let Some(item) = next(args, *index + 1) {
-                let (flag, inline) = option(item);
-                match flag {
-                    "--add" | "--remove" => {
-                        *index += 1;
-                        let values = split_scopes(&value(args, index, flag, inline)?);
-                        if values.is_empty() {
-                            return Err(bad_argument(format!("{flag} needs scopes")));
-                        }
-                        if flag == "--add" {
-                            add.extend(values);
-                        } else {
-                            remove.extend(values);
-                        }
-                    }
-                    "--json" | "--hub" | "--token-file" | "--home" | "--timeout" => break,
-                    _ => {
-                        return Err(bad_argument(format!(
-                            "unknown orchestrator scopes argument {item:?}"
-                        )))
-                    }
-                }
-            }
-            if add.is_empty() && remove.is_empty() {
-                return Err(bad_argument(
-                    "orchestrator scopes requires --add or --remove",
-                ));
-            }
-            Ok(Command::OrchestratorScopes { add, remove })
-        }
-        _ => Err(bad_argument("orchestrator needs spawn, status or scopes")),
+        _ => Err(bad_argument("orchestrator needs spawn or status")),
     }
 }
 
@@ -710,14 +676,14 @@ fn valid_label(text: &str, max: usize) -> bool {
 
 fn token(args: &[String], index: &mut usize) -> Result<Command> {
     let action = next(args, *index + 1)
-        .ok_or_else(|| bad_argument("token needs create, ls, revoke or scopes"))?;
+        .ok_or_else(|| bad_argument("token needs create, ls, revoke, renew or attenuate"))?;
     *index += 1;
     match action {
         "ls" | "list" => Ok(Command::TokenList),
         "create" => {
             let mut name = None;
             let mut scopes = Vec::new();
-            let mut ttl = Duration::from_secs(720 * 3600);
+            let mut ttl = Duration::from_secs(3600);
             while let Some(item) = next(args, *index + 1) {
                 let (flag, inline) = option(item);
                 match flag {
@@ -741,46 +707,39 @@ fn token(args: &[String], index: &mut usize) -> Result<Command> {
             if scopes.is_empty() || scopes.iter().any(String::is_empty) {
                 return Err(bad_argument("token create requires at least one --scope"));
             }
+            if ttl.is_zero() || ttl > Duration::from_secs(24 * 3600) {
+                return Err(bad_argument("--ttl must be between 1s and 24h"));
+            }
             Ok(Command::TokenCreate { name, scopes, ttl })
         }
         "revoke" => Ok(Command::TokenRevoke {
             id: argument(args, index, "token revoke <id>")?,
         }),
-        "scopes" => {
-            let mut id = None;
-            let mut add = Vec::new();
-            let mut remove = Vec::new();
+        "renew" => Ok(Command::TokenRenew),
+        "attenuate" => {
+            let mut scopes = Vec::new();
+            let mut ttl = None;
             while let Some(item) = next(args, *index + 1) {
                 let (flag, inline) = option(item);
                 match flag {
-                    "--add" | "--remove" => {
+                    "--scope" => {
                         *index += 1;
-                        let values = split_scopes(&value(args, index, flag, inline)?);
-                        if values.is_empty() {
-                            return Err(bad_argument(format!("{flag} needs scopes")));
-                        }
-                        if flag == "--add" {
-                            add.extend(values);
-                        } else {
-                            remove.extend(values);
-                        }
+                        scopes.push(value(args, index, flag, inline)?);
                     }
-                    _ if item.starts_with('-') => break,
-                    _ if id.is_none() => {
-                        id = Some(item.to_owned());
+                    "--ttl" => {
                         *index += 1;
+                        ttl = Some(go_duration(flag, &value(args, index, flag, inline)?)?);
                     }
-                    _ => return Err(bad_argument("token scopes accepts one id or name")),
+                    _ => break,
                 }
             }
-            let id = id.ok_or_else(|| bad_argument("token scopes <id|name>"))?;
-            if add.is_empty() && remove.is_empty() {
-                return Err(bad_argument("token scopes requires --add or --remove"));
+            if scopes.is_empty() && ttl.is_none() {
+                return Err(bad_argument("token attenuate needs --scope or --ttl"));
             }
-            Ok(Command::TokenScopes { id, add, remove })
+            Ok(Command::TokenAttenuate { scopes, ttl })
         }
         other => Err(bad_argument(format!(
-            "unknown token subcommand {other:?}; use create, ls, revoke or scopes"
+            "unknown token subcommand {other:?}; use create, ls, revoke, renew or attenuate"
         ))),
     }
 }
@@ -2209,7 +2168,6 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
     let mut harness = "auto".to_owned();
     let mut scopes = Vec::new();
     let mut add_scopes = Vec::new();
-    let mut ttl = DEFAULT_ENVOY_TTL;
     let mut selection = ModelChoice::default();
     let mut token_budget = 0;
     while let Some(token) = next(args, *index + 1) {
@@ -2229,10 +2187,6 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
             "--add-scopes" => {
                 *index += 1;
                 add_scopes.extend(split_scopes(&value(args, index, "--add-scopes", inline)?));
-            }
-            "--ttl" => {
-                *index += 1;
-                ttl = go_duration("--ttl", &value(args, index, "--ttl", inline)?)?;
             }
             "--model" => {
                 *index += 1;
@@ -2258,7 +2212,6 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
         harness,
         scopes,
         add_scopes,
-        ttl,
         selection,
         token_budget,
     }))

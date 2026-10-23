@@ -143,16 +143,19 @@ impl<'a> axum::extract::connect_info::Connected<IncomingStream<'a, TlsListener>>
 }
 
 async fn insert_peer(mut request: Request, next: Next) -> Response {
-    let peer = request
+    let tls = request
         .extensions()
         .get::<ConnectInfo<Peer>>()
-        .map(|info| info.0 .0)
-        .or_else(|| {
-            request
-                .extensions()
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|info| info.0)
-        });
+        .map(|info| info.0 .0);
+    let plain = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    let peer = match (tls, plain) {
+        (Some(addr), _) => Some(protectorate_wire::Peer { addr, tls: true }),
+        (None, Some(addr)) => Some(protectorate_wire::Peer { addr, tls: false }),
+        _ => None,
+    };
     if let Some(peer) = peer {
         request.extensions_mut().insert(peer);
     }

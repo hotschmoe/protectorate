@@ -19,15 +19,22 @@ class DeviceAuthException implements Exception {
   };
 }
 
-Future<String> authorizeDevice(
+/// Registers `publicKey` with the hub and waits for a trusted device to
+/// approve it. Returns the approved device.
+Future<DeviceInfo> authorizeDevice(
   DeviceServiceClient client, {
   required String name,
   required String platform,
+  required List<int> publicKey,
   required AbortSignal signal,
   required void Function(StartDeviceAuthResponse) onStarted,
 }) async {
   final request = await client.startDeviceAuth(
-    StartDeviceAuthRequest(name: name, platform: platform),
+    StartDeviceAuthRequest(
+      name: name,
+      platform: platform,
+      publicKey: publicKey,
+    ),
     signal: TimeoutSignal(const Duration(seconds: 8), parent: signal),
   );
   onStarted(request);
@@ -65,10 +72,10 @@ Future<String> authorizeDevice(
             ? response.interval
             : interval + 5;
       case 'approved':
-        if (response.secret.isEmpty) {
+        if (!response.hasDevice() || response.device.id.isEmpty) {
           throw const DeviceAuthException('invalid');
         }
-        return response.secret;
+        return response.device;
       default:
         throw DeviceAuthException(response.status);
     }

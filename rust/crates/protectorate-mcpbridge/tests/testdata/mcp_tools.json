@@ -423,7 +423,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "PollDeviceAuth delivers a fresh token only once after approval.",
+    "description": "PollDeviceAuth reports the outcome, and the approved device once.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -492,6 +492,11 @@
         },
         "platform": {
           "type": "string"
+        },
+        "publicKey": {
+          "contentEncoding": "base64",
+          "description": "public_key is the device's uncompressed P-256 public key (65 bytes).",
+          "type": "string"
         }
       },
       "type": "object"
@@ -551,7 +556,7 @@
           "type": "string"
         },
         "task": {
-          "description": "task says what the grant is for, e.g. \"update the kids' machine\". It is stored with the token and written to every audit line the grant causes.",
+          "description": "task says what the grant is for, e.g. \"update the kids' machine\". It is carried in the grant and written to every audit line the grant causes.",
           "type": "string"
         },
         "ttl": {
@@ -1784,5 +1789,20 @@
       "type": "object"
     },
     "name": "sleeve_spawn_sleeve"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RenewToken returns a fresh token for the capability that authenticates the call: the same caveats, including any its holder appended, with a new expiry. Only a capability that has not expired may call it.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "token_renew_token"
   }
 ]

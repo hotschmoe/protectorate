@@ -2,46 +2,16 @@
 
 //! `report` from a sleeve: each report carries a growing sequence, and a late
 //! or repeated one is dropped by the hub instead of replacing a newer result.
-use protectorate_auth::Method as ScopeMethod;
+mod common;
+
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_sleeve_registry::{Harness, Mode, Record};
-use protectorate_wire::Catalog;
 use serde_json::Value;
-use std::{
-    collections::BTreeMap,
-    fs,
-    process::Command,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::BTreeMap, fs, process::Command};
 use tokio::net::TcpListener;
 
 fn sleeve_token(hub: &Hub, name: &str) -> String {
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|method| ScopeMethod {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    hub.identity
-        .create(
-            &format!("sleeve:{name}"),
-            &["chat_report"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap()
-        .secret
-        .expose()
-        .to_string()
+    common::mint(hub, &format!("sleeve:{name}"), &["chat_report"])
 }
 
 #[tokio::test(flavor = "multi_thread")]

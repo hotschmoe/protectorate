@@ -112,7 +112,6 @@ pub(super) fn record_completion(
             "/protectorate.v1.JobService/SubmitJob"
                 | "/protectorate.v1.DeviceService/ApproveDeviceAuth"
                 | "/protectorate.v1.DeviceService/DenyDeviceAuth"
-                | "/protectorate.v1.TokenService/UpdateTokenScopes"
                 | "/protectorate.v1.ReleaseService/UpdateHub"
                 | "/protectorate.v1.SleeveService/SpawnEnvoy"
                 | "/protectorate.v1.ApprovalService/DecideApproval"

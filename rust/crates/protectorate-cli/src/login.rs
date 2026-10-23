@@ -1,11 +1,13 @@
-//! Device login: pair this machine with a hub through `StartDeviceAuth` and
-//! `PollDeviceAuth`, and keep the credential the hub issues in a private file
-//! per hub under the state home. Ordinary commands read that file back when no
+//! Device login: create a P-256 key, pair this machine with a hub through
+//! `StartDeviceAuth` and `PollDeviceAuth`, and keep the key in a private file
+//! per hub under the state home. Ordinary commands sign with that key when no
 //! `--token-file` and no token environment variable is set.
 use crate::{
     format::{local_minute, timestamp_millis},
     hub_url, Invocation,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
+use protectorate_auth::proof::DeviceKey;
 use protectorate_connect_client::Client;
 use protectorate_wire::{Code, Result, RpcError};
 use serde_json::{json, Value};
@@ -14,6 +16,7 @@ use std::{
     env, fs,
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -35,7 +38,7 @@ const SLOW_DOWN_STEP: u64 = 5;
 const POLL_TIMEOUT_FLOOR: Duration = Duration::from_secs(30);
 
 /// Runs `login` with no harness: start a pairing request, wait for a trusted
-/// device or the hub to approve it, and save the issued credential. Progress is
+/// device or the hub to approve it, and save the device key. Progress is
 /// written to `stdout` as it happens, so the code is visible before the wait.
 pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<String> {
     let hub = hub_url(invocation);
@@ -43,9 +46,12 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
     let path = credential_path(&home, &hub)?;
     let (name, platform) = device_identity(invocation);
     let client = Client::new_public(&hub, invocation.timeout.max(POLL_TIMEOUT_FLOOR))?;
+    let (key, pkcs8) =
+        DeviceKey::generate().map_err(|error| RpcError::new(Code::Internal, error))?;
+    let pkcs8 = zeroize::Zeroizing::new(pkcs8);
     let started = match client.call(
         START_DEVICE_AUTH,
-        &json!({"name": name, "platform": platform}),
+        &json!({"name": name, "platform": platform, "publicKey": STANDARD.encode(key.public_key())}),
     ) {
         Ok(started) => started,
         Err(error) => {
@@ -116,8 +122,8 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
                 continue;
             }
             // Keep the visible code usable through a transient lost poll.
-            // If the lost reply contained the one-shot secret, the next poll
-            // reports `consumed` and asks the user to restart.
+            // If the lost reply reported approval, the next poll reports
+            // `consumed` and asks the user to restart.
             Err(error) if error.code == Code::Unavailable && deadline.is_some() => continue,
             Err(error) => {
                 return Err(RpcError::new(
@@ -132,19 +138,18 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
         match status.as_str() {
             "pending" | "slow_down" => continue,
             "approved" => {
-                let secret = field(&reply, "secret")
-                    .filter(|secret| !secret.is_empty())
-                    .ok_or_else(|| {
-                        RpcError::new(
-                            Code::DataLoss,
-                            "hub approved this device without returning its credential; run login again",
-                        )
-                    })?;
-                save_credential(&path, &hub, &reply, &secret)?;
+                let device = reply.get("device").cloned().unwrap_or(Value::Null);
+                if device.get("id").and_then(Value::as_str) != Some(key.id().as_str()) {
+                    return Err(RpcError::new(
+                        Code::DataLoss,
+                        "hub approved a device with another key; run login again",
+                    ));
+                }
+                save_credential(&path, &hub, &device, &pkcs8)?;
                 if invocation.json {
                     return json_line(&json!({
                         "status": "approved",
-                        "token": reply.get("token"),
+                        "device": device,
                         "credentialFile": path.display().to_string(),
                     }));
                 }
@@ -163,7 +168,7 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
             "consumed" => {
                 return Err(RpcError::new(
                     Code::AlreadyExists,
-                    "device credential was already delivered; run login again",
+                    "this pairing request was already completed; run login again",
                 ))
             }
             other => {
@@ -306,9 +311,9 @@ fn credential_path(home: &Path, hub: &str) -> Result<PathBuf> {
     Ok(home.join(CREDENTIALS_DIR).join(format!("{name}.json")))
 }
 
-/// Save the issued credential: a private directory, a private file, written
-/// through a temporary file and one rename.
-fn save_credential(path: &Path, hub: &str, reply: &Value, secret: &str) -> Result<()> {
+/// Save the device key: a private directory, a private file, written through
+/// a temporary file and one rename.
+fn save_credential(path: &Path, hub: &str, device: &Value, pkcs8: &[u8]) -> Result<()> {
     let dir = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -351,17 +356,18 @@ fn save_credential(path: &Path, hub: &str, reply: &Value, secret: &str) -> Resul
             )
         })?;
     }
-    let token = reply.get("token").cloned().unwrap_or(Value::Null);
     let record = json!({
         "hub": normalized_hub(hub)?,
-        "deviceId": token.get("id").cloned().unwrap_or(Value::Null),
-        "name": token.get("name").cloned().unwrap_or(Value::Null),
-        "platform": token.get("platform").cloned().unwrap_or(Value::Null),
+        "deviceId": device.get("id").cloned().unwrap_or(Value::Null),
+        "name": device.get("name").cloned().unwrap_or(Value::Null),
+        "platform": device.get("platform").cloned().unwrap_or(Value::Null),
         "savedAt": json!(now_millis()),
-        "secret": secret,
+        "key": STANDARD.encode(pkcs8),
     });
-    let body = serde_json::to_vec_pretty(&record)
-        .map_err(|error| RpcError::new(Code::Internal, format!("encode credential: {error}")))?;
+    let body =
+        zeroize::Zeroizing::new(serde_json::to_vec_pretty(&record).map_err(|error| {
+            RpcError::new(Code::Internal, format!("encode credential: {error}"))
+        })?);
     #[cfg(windows)]
     let write = windows::write_private_file(path, &[body.as_slice(), b"\n"].concat());
     #[cfg(not(windows))]
@@ -378,8 +384,13 @@ fn save_credential(path: &Path, hub: &str, reply: &Value, secret: &str) -> Resul
     })
 }
 
-/// The credential saved for this invocation's hub, if this machine has one.
-pub(crate) fn saved_token(invocation: &Invocation) -> Result<Option<String>> {
+/// Where the device credential for this invocation's hub lives.
+pub(crate) fn credential_file(invocation: &Invocation) -> Result<PathBuf> {
+    credential_path(&state_home(invocation)?, &hub_url(invocation))
+}
+
+/// The device key saved for this invocation's hub, if this machine has one.
+pub(crate) fn saved_device(invocation: &Invocation) -> Result<Option<Arc<DeviceKey>>> {
     let home = match state_home(invocation) {
         Ok(home) => home,
         Err(_) => return Ok(None),
@@ -476,21 +487,19 @@ pub(crate) fn saved_token(invocation: &Invocation) -> Result<Option<String>> {
             ),
         ));
     }
-    match record
-        .get("secret")
-        .and_then(Value::as_str)
-        .filter(|secret| !secret.is_empty())
-    {
-        Some(secret) => Ok(Some(secret.to_owned())),
-        None => Err(RpcError::new(
-            Code::InvalidArgument,
-            format!(
-                "device credential {} has no secret; run login --hub {} again",
-                path.display(),
-                hub
-            ),
-        )),
-    }
+    protectorate_connect_client::device_key(&record)
+        .map(Some)
+        .map_err(|error| {
+            RpcError::new(
+                Code::InvalidArgument,
+                format!(
+                    "device credential {}: {}; run login --hub {} again",
+                    path.display(),
+                    error.message,
+                    hub
+                ),
+            )
+        })
 }
 
 fn field(value: &Value, key: &str) -> Option<String> {

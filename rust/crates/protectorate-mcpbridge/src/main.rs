@@ -3,8 +3,8 @@
 //! `--http` or `--https`. `--list` prints the catalog the bridge would serve and exits
 //! without contacting the hub.
 use protectorate_mcpbridge::{
-    bind, bind_tls, serve, serve_tls, tls_config, Bridge, Config, Filter, HttpConfig, Hub,
-    DEFAULT_HUB, DEFAULT_TIMEOUT,
+    bind, bind_tls, serve, serve_tls, tls_config, Bridge, Config, Credential, Filter, HttpConfig,
+    Hub, DEFAULT_HUB, DEFAULT_TIMEOUT,
 };
 use protectorate_mcpbridge::{Code, Result as HubResult, RpcError};
 use std::io::{self, Write};
@@ -21,8 +21,10 @@ Serves every unary hub RPC as an MCP tool over stdio, loopback streamable HTTP,
 or HTTPS on a requested address. Network requests require the bridge token as
 a bearer. Without --allow only read-only tools are served; --allow replaces
 that default with globs over tool names and --deny always removes matches. The
-hub URL comes from --hub or PROTECTORATE_HUB, the bearer token from
---token-file, PROTECTORATE_TOKEN_FILE or PROTECTORATE_TOKEN.
+hub URL comes from --hub or PROTECTORATE_HUB. The bridge authenticates with the
+capability in --token-file or PROTECTORATE_TOKEN_FILE, read for each call and
+renewed in place, a token in PROTECTORATE_TOKEN, or the device key file in
+PROTECTORATE_DEVICE_CREDENTIAL; the network endpoints need a token.
 "#;
 
 struct Options {
@@ -81,13 +83,20 @@ fn run(args: impl Iterator<Item = String>) -> HubResult<()> {
             .hub
             .or_else(|| env("PROTECTORATE_HUB"))
             .unwrap_or_else(|| DEFAULT_HUB.to_owned());
-        let token = token(options.token_file)?;
+        let credential = credential(options.token_file)?;
+        let token = match &credential {
+            Credential::TokenFile(path) => std::fs::read_to_string(path)
+                .map(|raw| raw.trim().to_owned())
+                .map_err(|error| internal(format!("read token file: {error}")))?,
+            Credential::Bearer(token) => token.to_string(),
+            _ => String::new(),
+        };
         let bridge = Arc::new(Bridge::new(Config {
             version: version.to_owned(),
             filter: options.filter,
             hub: Some(Hub {
                 url: hub_url,
-                token: token.clone(),
+                credential,
                 timeout: options.timeout,
             }),
         })?);
@@ -178,26 +187,29 @@ fn env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn token(file: Option<PathBuf>) -> HubResult<String> {
+fn credential(file: Option<PathBuf>) -> HubResult<Credential> {
     let file = file.or_else(|| env("PROTECTORATE_TOKEN_FILE").map(PathBuf::from));
     if let Some(file) = file {
         let raw = std::fs::read_to_string(&file)
             .map_err(|error| internal(format!("read token file: {error}")))?;
-        let token = raw.trim().to_owned();
-        if token.is_empty() {
+        if raw.trim().is_empty() {
             return Err(RpcError::invalid(format!(
                 "token file {} is empty",
                 file.display()
             )));
         }
-        return Ok(token);
+        return Ok(Credential::TokenFile(file));
     }
-    env("PROTECTORATE_TOKEN").ok_or_else(|| {
-        RpcError::new(
+    if let Some(token) = env("PROTECTORATE_TOKEN") {
+        return Ok(Credential::Bearer(token.into()));
+    }
+    match env("PROTECTORATE_DEVICE_CREDENTIAL") {
+        Some(path) => protectorate_connect_client::read_device_credential(path.as_ref()),
+        None => Err(RpcError::new(
             Code::Unauthenticated,
-            "no bearer token: set --token-file, PROTECTORATE_TOKEN_FILE or PROTECTORATE_TOKEN",
-        )
-    })
+            "no credential: set --token-file, PROTECTORATE_TOKEN_FILE, PROTECTORATE_TOKEN or PROTECTORATE_DEVICE_CREDENTIAL",
+        )),
+    }
 }
 
 fn parse(args: impl Iterator<Item = String>) -> std::result::Result<Options, String> {

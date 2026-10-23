@@ -6,36 +6,43 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "protectorate/v1/options.proto";
 
-// TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
-// one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
+// TokenService manages capabilities: short-lived macaroons only the hub can
+// mint and verify. A capability names its principal, scopes and expiry in
+// caveats; its holder may append caveats to narrow it, never to widen it.
+// The hub keeps one record per lineage so it can list and revoke it.
 service TokenService {
-  option (protectorate.v1.owner_only) = true;
+  // CreateToken mints a capability for a script or tool. The secret is
+  // returned once and is not stored.
+  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse) {
+    option (protectorate.v1.owner_only_rpc) = true;
+  }
 
-  // CreateToken issues a scoped token. The secret is returned once and only
-  // its SHA-256 hash is stored, so it cannot be recovered later.
-  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
-
-  // UpdateTokenScopes changes grants without rotating the secret.
-  rpc UpdateTokenScopes(UpdateTokenScopesRequest) returns (UpdateTokenScopesResponse);
-
-  // ListTokens returns every issued token, including revoked and expired
-  // ones, without secrets.
+  // ListTokens returns every capability lineage, including revoked and
+  // expired ones, without secrets.
   rpc ListTokens(ListTokensRequest) returns (ListTokensResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
+    option (protectorate.v1.owner_only_rpc) = true;
   }
 
-  // RevokeToken permanently disables a token. Revoking an already revoked
-  // token succeeds and keeps the original revocation time.
+  // RevokeToken permanently disables a lineage: every token minted, renewed
+  // or narrowed from it. Revoking an already revoked lineage succeeds and
+  // keeps the original revocation time.
   rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse) {
     option (protectorate.v1.destructive) = true;
+    option (protectorate.v1.owner_only_rpc) = true;
   }
+
+  // RenewToken returns a fresh token for the capability that authenticates
+  // the call: the same caveats, including any its holder appended, with a
+  // new expiry. Only a capability that has not expired may call it.
+  rpc RenewToken(RenewTokenRequest) returns (RenewTokenResponse);
 }
 
-// GrantService mints task-scoped admin grants: short-lived tokens whose
-// scopes are job_* and node_admin:<node>. The owner may grant any node (or a
-// glob over node names); the orchestrator's token may grant one shared node
-// by name, and only when the hub runs with --orchestrator-admin-grants. Every
-// call made with a grant is audited with its task.
+// GrantService mints task-scoped admin grants: capabilities whose scopes are
+// job_* and node_admin:<node>. The owner may grant any node (or a glob over
+// node names); the orchestrator may grant one shared node by name, and only
+// when the hub runs with --orchestrator-admin-grants. Every call made with a
+// grant is audited with its task.
 service GrantService {
   // Admin mints a grant. The secret is returned once.
   rpc Admin(GrantServiceAdminRequest) returns (GrantServiceAdminResponse);
@@ -47,55 +54,51 @@ message GrantServiceAdminRequest {
   // ttl is the grant's lifetime; unset means 4h, at most 24h.
   google.protobuf.Duration ttl = 2;
   // task says what the grant is for, e.g. "update the kids' machine". It is
-  // stored with the token and written to every audit line the grant causes.
+  // carried in the grant and written to every audit line the grant causes.
   string task = 3;
 }
 
 message GrantServiceAdminResponse {
   TokenInfo token = 1;
-  // secret is the bearer token. It is shown only in this response.
+  // secret is the capability. It is shown only in this response.
   string secret = 2;
 }
 
-// TokenInfo describes an issued token. It never carries the secret.
+// TokenInfo describes one capability lineage. It never carries a secret.
 message TokenInfo {
-  // id is the stable identifier used to revoke the token and in audit lines.
+  // id is the lineage identifier used to revoke it and in audit lines.
   string id = 1;
-  // name is the label given at creation.
+  // name is the principal: sleeve:<name>, orchestrator-envoy, grant:<node>
+  // or the name given at creation.
   string name = 2;
   // scopes are the grants: tool-name globs such as "session_*", the special
   // scopes read, events, terminal and terminal:readonly, and on an admin
   // grant node_admin:<node>.
   repeated string scopes = 3;
   google.protobuf.Timestamp created_at = 4;
-  // expires_at is unset for a token that never expires.
+  // expires_at is the latest expiry of any token in the lineage.
   google.protobuf.Timestamp expires_at = 5;
-  // last_used_at is unset until the token authenticates once. It is
-  // persisted at most about once a minute.
-  google.protobuf.Timestamp last_used_at = 6;
-  // revoked_at is unset while the token is not revoked.
-  google.protobuf.Timestamp revoked_at = 7;
+  // revoked_at is unset while the lineage is not revoked.
+  google.protobuf.Timestamp revoked_at = 6;
   // task is set on an admin grant: what it was minted for.
-  string task = 8;
-  // minted_by names who minted an admin grant: "owner" or a token name.
-  string minted_by = 9;
-  string platform = 10;
-  google.protobuf.Timestamp approved_at = 11;
-  string approved_by = 12;
+  string task = 7;
+  // minted_by names who minted it: "owner" or a principal.
+  string minted_by = 8;
 }
 
 message CreateTokenRequest {
-  // name labels the token, for example "pixel phone" or "mcp bridge".
+  // name labels the capability, for example "backup script".
   string name = 1;
   // scopes grant access; at least one is required and nothing is implied.
   repeated string scopes = 2;
-  // ttl is the lifetime from now; zero means the token never expires.
+  // ttl is the lifetime of each token; unset means 1h, at most 24h. Renew
+  // before it ends to keep the capability.
   google.protobuf.Duration ttl = 3;
 }
 
 message CreateTokenResponse {
   TokenInfo token = 1;
-  // secret is the bearer token. It is shown only in this response.
+  // secret is the capability. It is shown only in this response.
   string secret = 2;
 }
 
@@ -106,7 +109,7 @@ message ListTokensResponse {
 }
 
 message RevokeTokenRequest {
-  // id of the token to revoke.
+  // id of the lineage to revoke.
   string id = 1;
 }
 
@@ -114,13 +117,10 @@ message RevokeTokenResponse {
   TokenInfo token = 1;
 }
 
-message UpdateTokenScopesRequest {
-  // id is an exact token ID or an unambiguous active token name.
-  string id = 1;
-  repeated string add = 2;
-  repeated string remove = 3;
-}
+message RenewTokenRequest {}
 
-message UpdateTokenScopesResponse {
+message RenewTokenResponse {
   TokenInfo token = 1;
+  // secret is the fresh capability.
+  string secret = 2;
 }

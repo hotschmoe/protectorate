@@ -239,16 +239,11 @@ fn token_scopes(token: &Value) -> String {
 
 pub(crate) fn token_created_text(response: &Value) -> String {
     let token = &response["token"];
-    let expires = if token["expiresAt"].is_null() {
-        "never".into()
-    } else {
-        local_stamp(text(token, "expiresAt"))
-    };
-    format!("id\t{}\nname\t{}\nscopes\t{}\nexpires\t{}\nsecret\t{}\n\nThis is the only time the secret is shown.\n", text(token,"id"), text(token,"name"), token_scopes(token), expires, text(response,"secret"))
+    format!("id\t{}\nname\t{}\nscopes\t{}\nexpires\t{}\nsecret\t{}\n\nThis is the only time the secret is shown. Renew it before it expires: protectorate --token-file FILE token renew.\n", text(token,"id"), text(token,"name"), token_scopes(token), local_stamp(text(token, "expiresAt")), text(response,"secret"))
 }
 
 pub(crate) fn token_list_text(response: &Value) -> String {
-    let mut out = "ID\tNAME\tSTATE\tEXPIRES\tLAST USED\tSCOPES\tTASK\n".to_owned();
+    let mut out = "ID\tNAME\tSTATE\tEXPIRES\tSCOPES\tTASK\n".to_owned();
     for token in items(response, "tokens") {
         let expires = text(&token, "expiresAt");
         let state = if !token["revokedAt"].is_null() {
@@ -258,28 +253,18 @@ pub(crate) fn token_list_text(response: &Value) -> String {
         } else {
             "active"
         };
-        let expires = if expires.is_empty() {
-            "never".into()
-        } else {
-            local_stamp(expires)
-        };
-        let last_used = if token["lastUsedAt"].is_null() {
-            "-".into()
-        } else {
-            local_stamp(text(&token, "lastUsedAt"))
-        };
+        let expires = local_stamp(expires);
         let task = if text(&token, "task").is_empty() {
             "-".into()
         } else {
             format!("{} (by {})", text(&token, "task"), text(&token, "mintedBy"))
         };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\n",
             text(&token, "id"),
             text(&token, "name"),
             state,
             expires,
-            last_used,
             token_scopes(&token),
             task
         ));
@@ -358,6 +343,14 @@ pub(crate) fn orchestrator_status_text(status: &Value, now: i64) -> String {
     out
 }
 
+pub(crate) fn token_renewed_text(response: &Value) -> String {
+    format!(
+        "{}\nexpires\t{}\n",
+        text(response, "secret"),
+        local_stamp(text(response, "token.expiresAt"))
+    )
+}
+
 pub(crate) fn token_revoked_text(response: &Value) -> String {
     format!(
         "revoked {} ({})\n",
@@ -366,28 +359,10 @@ pub(crate) fn token_revoked_text(response: &Value) -> String {
     )
 }
 
-pub(crate) fn token_scopes_text(response: &Value) -> String {
-    let token = &response["token"];
-    format!(
-        "token\t{} ({})\nscopes\t{}\n",
-        text(token, "id"),
-        text(token, "name"),
-        token_scopes(token)
-    )
-}
-
 /// `devices ls`: one row per trusted device, the way the Go CLI prints them.
 pub(crate) fn device_list_text(response: &Value) -> String {
-    let mut out = "ID\tNAME\tPLATFORM\tSTATE\tLAST USED\tAPPROVED\tAPPROVER\n".to_owned();
+    let mut out = "ID\tNAME\tPLATFORM\tLAST USED\tAPPROVED\tAPPROVER\n".to_owned();
     for device in items(response, "devices") {
-        let expires = text(&device, "expiresAt");
-        let state = if !device["revokedAt"].is_null() {
-            "revoked"
-        } else if timestamp_millis(&expires).is_some_and(|time| time <= now_millis()) {
-            "expired"
-        } else {
-            "active"
-        };
         let last_used = if device["lastUsedAt"].is_null() {
             "never".into()
         } else {
@@ -399,11 +374,10 @@ pub(crate) fn device_list_text(response: &Value) -> String {
             local_stamp(text(&device, "approvedAt"))
         };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\n",
             text(&device, "id"),
             text(&device, "name"),
             or_dash(text(&device, "platform")),
-            state,
             last_used,
             approved,
             or_dash(text(&device, "approvedBy"))

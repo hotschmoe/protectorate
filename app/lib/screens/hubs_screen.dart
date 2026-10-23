@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../hubs/device_keys.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../version.dart';
@@ -169,8 +170,8 @@ class HubsScreen extends StatelessWidget {
                   style: t.small(),
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (hub.token.isEmpty)
-                  Text('NO TOKEN', style: t.legend(t.p.warn)),
+                if (hub.deviceId.isEmpty)
+                  Text('NOT PAIRED', style: t.legend(t.p.warn)),
               ],
             ),
           ),
@@ -182,7 +183,10 @@ class HubsScreen extends StatelessWidget {
           IconButton(
             tooltip: 'Remove',
             icon: const Icon(Icons.delete_outline),
-            onPressed: () => store.remove(hub.id),
+            onPressed: () async {
+              await store.remove(hub.id);
+              await DeviceKeys.forget(hub.id);
+            },
           ),
         ],
       ),

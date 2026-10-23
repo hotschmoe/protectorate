@@ -45,17 +45,20 @@ protectorate mcp --allow '*' --deny 'session_kill_*'
 ```
 
 These filters only limit what the client is offered. What a bridge can actually
-do is set by the token it runs with, which the hub enforces. Give every bridge
-a scoped token (see [auth.md](auth.md)):
+do is set by the credential it runs with, which the hub enforces. Give every
+bridge its own capability (see [auth.md](auth.md)):
 
 ```
-protectorate token create claude-bridge --scope read --scope 'backlog_*' --ttl 720h
+protectorate token create claude-bridge --scope read --scope 'backlog_*' --ttl 24h
 protectorate mcp --token-file ~/.protectorate/claude-bridge.token --allow 'backlog_*'
 ```
 
-The token comes from `--token-file`, then env `PROTECTORATE_TOKEN`, then the
-owner token file. Scopes use the same tool names as this bridge. TokenService
-is owner-only and is never exposed as a tool.
+The bridge reads the token file for every call and renews it in place past
+half its life. Without a token file it uses `PROTECTORATE_TOKEN`, then the
+device key `protectorate login` saved for the hub, then (on the hub host) the
+owner token file. The HTTP endpoints need a token: their bearer is the token
+the bridge started with. Scopes use the same tool names as this bridge. Only
+`token_renew_token` of TokenService is a tool.
 
 ## Registering
 

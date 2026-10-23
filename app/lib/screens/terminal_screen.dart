@@ -7,6 +7,8 @@ import 'package:xterm2/xterm.dart';
 
 import '../hubs/hub_client.dart';
 import '../hubs/connection.dart';
+import '../hubs/device_key.dart';
+import '../hubs/device_keys.dart';
 import '../hubs/http_client_io.dart'
     if (dart.library.js_interop) '../hubs/http_client_web.dart';
 import '../hubs/hub_profile.dart';
@@ -69,15 +71,26 @@ class _TerminalScreenState extends State<TerminalScreen>
     _focused = focused;
   }
 
-  // A device token without terminal:host may only view sessions outside a
-  // sleeve sandbox; the hub refuses the read-write handshake.
+  // Devices may type into host sessions, but the hub still refuses a
+  // read-write handshake to any caller without terminal:host.
   bool get _hostSession => !widget.session.startsWith('sleeve-');
 
-  void _connect() {
+  Future<void> _connect() async {
     final uri = widget.hub.terminalUri(widget.session, readOnly: _readOnly);
+    final String proof;
+    try {
+      final key = widget.hub.deviceId.isEmpty
+          ? null
+          : await DeviceKeys.load(widget.hub.id);
+      proof = key == null ? '' : await deviceProof(key, 'GET', uri.path);
+    } on Object catch (e) {
+      if (mounted) setState(() => _status = 'device key unavailable: $e');
+      return;
+    }
+    if (!mounted) return;
     final channel = connectWebSocket(
       uri,
-      terminalSubprotocols(widget.hub.token),
+      terminalSubprotocols(proof),
       caPem: widget.hub.caPem,
     );
     _channel = channel;

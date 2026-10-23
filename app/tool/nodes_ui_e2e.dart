@@ -61,7 +61,6 @@ void main() {
       id: 'rust-widget-e2e',
       name: 'Rust fixture',
       baseUrl: baseUrl,
-      token: token,
     );
     await tester.pumpWidget(
       MaterialApp(

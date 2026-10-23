@@ -5,7 +5,10 @@ edition.workspace = true
 description = "Bounded Connect JSON client for Protectorate RPCs"
 
 [dependencies]
+protectorate-auth = { path = "../protectorate-auth" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-wire = { path = "../protectorate-wire" }
+base64 = "0.22"
 serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

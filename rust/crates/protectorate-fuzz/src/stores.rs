@@ -153,39 +153,61 @@ pub fn backlog_notes(data: &[u8]) {
     }
 }
 
-/// A token file loads, a token issued into it is found by its secret after a
-/// reopen, and no other input secret matches.
-pub fn identity_tokens(data: &[u8]) {
+/// An identity file loads; a capability minted into it verifies after a
+/// reopen and after renewal, no other input verifies as it, and a probe
+/// proof or device code never panics the store.
+pub fn identity_store(data: &[u8]) {
     let [file, probe] = fields(data, 2)[..] else {
         unreachable!()
     };
     let dir = scratch();
-    let path = dir.path().join("tokens.json");
+    let path = dir.path().join("identity.json");
     fs::write(&path, file).unwrap();
     let Ok(store) = protectorate_identity::Store::open(&path) else {
         return;
     };
     let now = 1_800_000_000;
     let probe = text(probe);
-    let _ = store.lookup(&probe, now);
+    let _ = store.verify(&probe, now);
+    if let Some(proof) = protectorate_auth::proof::Proof::parse(&probe) {
+        let _ = store.verify_proof(&proof, "POST", "/fuzz", proof.time);
+    }
     let _ = store.poll_device(&probe, now);
     let _ = store.pending_devices(now);
-    let before = store.list().len();
-    let Ok(issued) = store.create("fuzz", &["read"], Duration::from_secs(3600), now, &[]) else {
+    let before = store.capabilities().len();
+    let Ok((record, secret)) = store.mint(
+        protectorate_identity::Mint {
+            principal: "fuzz",
+            scopes: vec!["read".into()],
+            task: "",
+            minted_by: "owner",
+            ttl: Duration::from_secs(3600),
+            file: None,
+        },
+        now,
+    ) else {
         return;
     };
-    let reopened = protectorate_identity::Store::open(&path).expect("reopen a written token file");
-    assert_eq!(reopened.list().len(), before + 1);
-    let found = reopened
-        .lookup(issued.secret.expose(), now + 1)
-        .expect("issued secret after reopen");
-    assert_eq!(found.id, issued.token.id);
-    if probe != issued.secret.expose() {
+    let reopened =
+        protectorate_identity::Store::open(&path).expect("reopen a written identity file");
+    assert_eq!(reopened.capabilities().len(), before + 1);
+    let (found, _) = reopened
+        .verify(secret.expose(), now + 1)
+        .expect("minted capability after reopen");
+    assert_eq!(found.id, record.id);
+    let (_, renewed) = reopened
+        .renew(secret.expose(), now + 2)
+        .expect("renew a live capability");
+    assert_eq!(
+        reopened.verify(renewed.expose(), now + 3).unwrap().0.id,
+        record.id
+    );
+    if probe != secret.expose() && probe != renewed.expose() {
         assert!(
             reopened
-                .lookup(&probe, now + 1)
-                .map_or(true, |t| t.id != issued.token.id),
-            "another secret matched the new token"
+                .verify(&probe, now + 1)
+                .map_or(true, |(r, _)| r.id != record.id),
+            "another input verified as the new capability"
         );
     }
 }

@@ -187,7 +187,6 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
     let mut paths = BTreeSet::new();
     for name in [
         "token",
-        "tokens.json",
         "identity.json",
         "nodes.json",
         "sleeves.json",

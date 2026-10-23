@@ -37,6 +37,9 @@ async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
     let hub = Hub::open(home.path(), "owner-secret", "test")
         .unwrap()
         .with_approval_ttl(Duration::from_secs(5));
+    // Agent identities are hub-minted capabilities, never owner-created.
+    let envoy = common::mint(&hub, "orchestrator-envoy", &["backlog_*", "read"]);
+    let sleeve = common::mint(&hub, "sleeve:worker", &["backlog_*", "read"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server =
@@ -44,21 +47,6 @@ async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
     let result = tokio::task::spawn_blocking(move || {
         let owner = |args: &[&str]| cli(&url, "owner-secret", args).unwrap();
         let json = |text: String| serde_json::from_str::<Value>(&text).unwrap();
-        let token = |name: &str| {
-            let issued = json(owner(&[
-                "--json",
-                "token",
-                "create",
-                name,
-                "--scope",
-                "backlog_*",
-                "--scope",
-                "read",
-            ]));
-            issued["secret"].as_str().unwrap().to_owned()
-        };
-        let envoy = token("orchestrator-envoy");
-        let sleeve = token("sleeve:worker");
         let note = |title: &str| {
             json(owner(&["--json", "backlog", "add", title]))["id"]
                 .as_str()

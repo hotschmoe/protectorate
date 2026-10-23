@@ -3257,7 +3257,6 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     Harness? harness,
     $core.Iterable<$core.String>? scopes,
     $core.Iterable<$core.String>? addScopes,
-    $2.Duration? ttl,
     $1.ModelSelection? selection,
     $fixnum.Int64? tokenBudget,
   }) {
@@ -3265,7 +3264,6 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     if (harness != null) result.harness = harness;
     if (scopes != null) result.scopes.addAll(scopes);
     if (addScopes != null) result.addScopes.addAll(addScopes);
-    if (ttl != null) result.ttl = ttl;
     if (selection != null) result.selection = selection;
     if (tokenBudget != null) result.tokenBudget = tokenBudget;
     return result;
@@ -3289,8 +3287,6 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
         enumValues: Harness.values)
     ..pPS(2, _omitFieldNames ? '' : 'scopes')
     ..pPS(3, _omitFieldNames ? '' : 'addScopes')
-    ..aOM<$2.Duration>(4, _omitFieldNames ? '' : 'ttl',
-        subBuilder: $2.Duration.$_createMessage)
     ..aOM<$1.ModelSelection>(5, _omitFieldNames ? '' : 'selection',
         subBuilder: $1.ModelSelection.$_createMessage)
     ..a<$fixnum.Int64>(
@@ -3340,37 +3336,24 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $pb.PbList<$core.String> get addScopes => $_getList(2);
 
-  /// ttl is the token lifetime. Unset means 720h; zero never expires. The hub
-  /// renews the token before it expires without restarting the harness.
-  @$pb.TagNumber(4)
-  $2.Duration get ttl => $_getN(3);
-  @$pb.TagNumber(4)
-  set ttl($2.Duration value) => $_setField(4, value);
-  @$pb.TagNumber(4)
-  $core.bool hasTtl() => $_has(3);
-  @$pb.TagNumber(4)
-  void clearTtl() => $_clearField(4);
-  @$pb.TagNumber(4)
-  $2.Duration ensureTtl() => $_ensure(3);
-
   @$pb.TagNumber(5)
-  $1.ModelSelection get selection => $_getN(4);
+  $1.ModelSelection get selection => $_getN(3);
   @$pb.TagNumber(5)
   set selection($1.ModelSelection value) => $_setField(5, value);
   @$pb.TagNumber(5)
-  $core.bool hasSelection() => $_has(4);
+  $core.bool hasSelection() => $_has(3);
   @$pb.TagNumber(5)
   void clearSelection() => $_clearField(5);
   @$pb.TagNumber(5)
-  $1.ModelSelection ensureSelection() => $_ensure(4);
+  $1.ModelSelection ensureSelection() => $_ensure(3);
 
   /// token_budget caps Envoy's run like SpawnSleeveRequest.token_budget.
   @$pb.TagNumber(6)
-  $fixnum.Int64 get tokenBudget => $_getI64(5);
+  $fixnum.Int64 get tokenBudget => $_getI64(4);
   @$pb.TagNumber(6)
-  set tokenBudget($fixnum.Int64 value) => $_setInt64(5, value);
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(4, value);
   @$pb.TagNumber(6)
-  $core.bool hasTokenBudget() => $_has(5);
+  $core.bool hasTokenBudget() => $_has(4);
   @$pb.TagNumber(6)
   void clearTokenBudget() => $_clearField(6);
 }
@@ -3898,10 +3881,11 @@ class SleeveServiceApi {
           'ResleeveSleeve', request, ResleeveSleeveResponse());
 
   /// SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
-  /// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
-  /// token. It picks the harness (the top of QuotaService.Suggest unless one
-  /// is given), stops a running Envoy, revokes every earlier orchestrator
-  /// token, mints a new one, writes the token file and the generated context
+  /// named "envoy" in $PROTECTORATE_HOME/orchestrator with its own
+  /// capability. It picks the harness (the top of QuotaService.Suggest unless
+  /// one is given), stops a running Envoy, revokes every earlier orchestrator
+  /// capability, mints a new one, writes the token file (which the hub keeps
+  /// fresh while Envoy runs) and the generated context
   /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
   /// is byte-identical across respawns unless the CLI, the tool catalog, the
   /// hub URL, or the scopes change, so a resumed session keeps its

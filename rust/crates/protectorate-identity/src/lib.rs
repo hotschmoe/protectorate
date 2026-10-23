@@ -1,52 +1,60 @@
-//! Persistent token issuance and device approval. Public metadata never includes
-//! credential hashes; secrets are returned once, redact Debug, and zero on drop.
-//! Timestamps are Unix seconds. One hub process owns each store file.
-use protectorate_auth::{self as auth, Method};
+//! The devices and capabilities a hub has issued. A device record holds the
+//! public key that verifies each of its requests; a capability record names
+//! one lineage of tokens the hub minted, so it can list, renew, refresh and
+//! revoke it. The hub's capability key lives in the same file. Timestamps are
+//! Unix seconds. One hub process owns each store file.
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
+use protectorate_auth::{
+    capability::{self, Claims},
+    proof::{self, Proof},
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs, io,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex, Weak,
+        Arc, Mutex, Weak,
     },
     time::Duration,
 };
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
-pub const SECRET_PREFIX: &str = "ptk_";
-pub const MAX_GRANT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+pub const MAX_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub const DEVICE_LIFETIME: i64 = 600;
 pub const DEVICE_INTERVAL: u32 = 5;
 pub const MAX_PENDING_DEVICES: usize = 100;
+const NONCE_CAPACITY: usize = 100_000;
+/// How long a dead lineage stays listed before it is forgotten.
+const RECORD_RETENTION: i64 = 24 * 60 * 60;
+
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
     Json(serde_json::Error),
     Invalid(String),
-    Scopes(auth::ScopeError),
     UnknownToken,
     Expired,
     Revoked,
+    Proof(&'static str),
     DeviceCapacity,
     DeviceRequest,
-    Ambiguous(String),
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => e.fmt(f),
             Self::Json(e) => e.fmt(f),
-            Self::Scopes(e) => e.fmt(f),
             Self::Invalid(s) => write!(f, "{s}"),
-            Self::UnknownToken => write!(f, "unknown token"),
-            Self::Expired => write!(f, "token expired"),
-            Self::Revoked => write!(f, "token revoked"),
+            Self::UnknownToken => write!(f, "unknown credential"),
+            Self::Expired => write!(f, "capability expired"),
+            Self::Revoked => write!(f, "capability revoked"),
+            Self::Proof(why) => write!(f, "device proof {why}"),
             Self::DeviceCapacity => write!(f, "device authorization capacity reached"),
             Self::DeviceRequest => write!(f, "no pending device request matches that code"),
-            Self::Ambiguous(s) => write!(f, "token name {s:?} is ambiguous; use an ID"),
         }
     }
 }
@@ -61,13 +69,9 @@ impl From<serde_json::Error> for Error {
         Self::Json(e)
     }
 }
-impl From<auth::ScopeError> for Error {
-    fn from(e: auth::ScopeError) -> Self {
-        Self::Scopes(e)
-    }
-}
 pub type Result<T> = std::result::Result<T, Error>;
-/// Does not implement Serialize or Clone; reveal only when delivering to its owner.
+
+/// Does not implement Serialize or Clone; reveal only when delivering to its holder.
 pub struct Secret(Zeroizing<String>);
 impl Secret {
     pub fn expose(&self) -> &str {
@@ -79,41 +83,51 @@ impl std::fmt::Debug for Secret {
         f.write_str("Secret([REDACTED])")
     }
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Token {
+pub struct Device {
+    /// Derived from the public key; also the audit `token_id`.
     pub id: String,
     pub name: String,
-    pub scopes: Vec<String>,
-    pub created: i64,
-    pub expires: Option<i64>,
+    pub platform: String,
+    /// Uncompressed P-256 point, base64url.
+    pub public_key: String,
+    pub approved_at: i64,
+    pub approved_by: String,
     pub last_used: Option<i64>,
-    pub revoked_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Capability {
+    pub id: String,
+    pub principal: String,
+    pub scopes: Vec<String>,
     pub task: String,
     pub minted_by: String,
-    pub device: bool,
-    pub platform: String,
-    pub approved_at: Option<i64>,
-    pub approved_by: String,
+    pub created: i64,
+    pub ttl: i64,
+    /// The latest expiry of any token in the lineage.
+    pub expires: i64,
+    pub revoked_at: Option<i64>,
+    /// The holder's token file the hub keeps fresh, for sleeves and Envoy.
+    pub file: Option<PathBuf>,
 }
-impl Token {
+impl Capability {
     pub fn is_active(&self, now: i64) -> bool {
-        self.revoked_at.is_none() && self.expires.is_none_or(|e| now < e)
-    }
-    fn check(&self, now: i64) -> Result<()> {
-        if self.revoked_at.is_some() {
-            Err(Error::Revoked)
-        } else if self.expires.is_some_and(|e| now >= e) {
-            Err(Error::Expired)
-        } else {
-            Ok(())
-        }
+        self.revoked_at.is_none() && now < self.expires
     }
 }
-#[derive(Debug)]
-pub struct Issued {
-    pub token: Token,
-    pub secret: Secret,
+
+/// What a minted token is for. `minted_by` names the caller.
+pub struct Mint<'a> {
+    pub principal: &'a str,
+    pub scopes: Vec<String>,
+    pub task: &'a str,
+    pub minted_by: &'a str,
+    pub ttl: Duration,
+    pub file: Option<PathBuf>,
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceStatus {
@@ -127,6 +141,7 @@ pub struct DeviceAuth {
     pub user_code: String,
     pub name: String,
     pub platform: String,
+    pub public_key: String,
     pub ip: String,
     pub expires: i64,
     pub status: DeviceStatus,
@@ -153,29 +168,30 @@ pub enum PollStatus {
 pub struct DevicePoll {
     pub status: PollStatus,
     pub interval: u32,
-    pub issued: Option<Issued>,
+    pub device: Option<Device>,
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct StoredToken {
-    token: Token,
-    hash: [u8; 32],
-}
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct StoredDevice {
+struct StoredRequest {
     request: DeviceAuth,
     code_hash: [u8; 32],
 }
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Disk {
     #[serde(default)]
-    tokens: Vec<StoredToken>,
+    key: String,
     #[serde(default)]
-    devices: Vec<StoredDevice>,
+    devices: Vec<Device>,
+    #[serde(default)]
+    capabilities: Vec<Capability>,
+    #[serde(default)]
+    requests: Vec<StoredRequest>,
 }
 struct Inner {
     disk: Disk,
+    key: Zeroizing<Vec<u8>>,
     last_flush: Option<i64>,
     watches: BTreeMap<String, Vec<Weak<Signal>>>,
+    nonces: HashMap<String, i64>,
 }
 pub struct Store {
     path: Option<PathBuf>,
@@ -187,83 +203,72 @@ fn invalid<T>(s: &str) -> Result<T> {
 fn hash(secret: &str) -> [u8; 32] {
     Sha256::digest(secret.as_bytes()).into()
 }
-fn random_hex(n: usize) -> Result<Secret> {
+fn random_bytes(n: usize) -> Result<Zeroizing<Vec<u8>>> {
     let mut b = Zeroizing::new(vec![0u8; n]);
     getrandom::getrandom(&mut b).map_err(|e| io::Error::other(e.to_string()))?;
-    let text = b.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(Secret(Zeroizing::new(text)))
+    Ok(b)
 }
-fn expires(now: i64, ttl: Duration) -> Result<Option<i64>> {
-    if ttl.is_zero() {
-        return Ok(None);
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+fn ttl_seconds(ttl: Duration) -> Result<i64> {
+    if ttl.is_zero() || ttl > MAX_TTL {
+        return invalid("capability lifetime must be positive and at most 24 hours");
     }
-    let secs = ttl
-        .as_secs()
-        .checked_add(u64::from(ttl.subsec_nanos() > 0))
-        .and_then(|s| i64::try_from(s).ok())
-        .ok_or_else(|| Error::Invalid("ttl is too large".into()))?;
-    Ok(Some(now.checked_add(secs).ok_or_else(|| {
-        Error::Invalid("expiry overflows timestamp".into())
-    })?))
+    Ok(ttl.as_secs().max(1) as i64)
 }
-fn token_template(name: &str, scopes: Vec<String>, now: i64) -> Token {
-    Token {
-        id: String::new(),
-        name: name.into(),
-        scopes,
-        created: now,
-        expires: None,
-        last_used: None,
-        revoked_at: None,
-        task: String::new(),
-        minted_by: String::new(),
-        device: false,
-        platform: String::new(),
-        approved_at: None,
-        approved_by: String::new(),
-    }
+fn key_from_hex(text: &str) -> Option<Zeroizing<Vec<u8>>> {
+    (text.len() == 64).then_some(())?;
+    let bytes = (0..32)
+        .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    Some(Zeroizing::new(bytes))
 }
-fn issue(disk: &mut Disk, mut token: Token, ttl: Duration, now: i64) -> Result<Issued> {
-    loop {
-        token.id = random_hex(8)?.expose().into();
-        if !disk.tokens.iter().any(|t| t.token.id == token.id) {
-            break;
+fn signal(inner: &mut Inner, id: &str) {
+    if let Some(watches) = inner.watches.remove(id) {
+        for signal in watches.into_iter().filter_map(|s| s.upgrade()) {
+            signal.cancel()
         }
     }
-    let raw = random_hex(32)?;
-    let secret = Secret(Zeroizing::new(format!("{SECRET_PREFIX}{}", raw.expose())));
-    token.created = now;
-    token.expires = expires(now, ttl)?;
-    token.last_used = None;
-    token.revoked_at = None;
-    disk.tokens.push(StoredToken {
-        hash: hash(secret.expose()),
-        token: token.clone(),
-    });
-    Ok(Issued { token, secret })
 }
+
 impl Store {
     pub fn memory() -> Self {
-        Self {
-            path: None,
+        Self::with_disk(None, Disk::default()).expect("a fresh capability key")
+    }
+    fn with_disk(path: Option<PathBuf>, mut disk: Disk) -> Result<Self> {
+        let key = match key_from_hex(&disk.key) {
+            Some(key) => key,
+            None => {
+                let key = random_bytes(32)?;
+                disk.key = hex(&key);
+                key
+            }
+        };
+        Ok(Self {
+            path,
             inner: Mutex::new(Inner {
-                disk: Disk::default(),
+                disk,
+                key,
                 last_flush: None,
                 watches: BTreeMap::new(),
+                nonces: HashMap::new(),
             }),
-        }
+        })
     }
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let disk = match fs::read(&path) {
+        let disk: Disk = match fs::read(&path) {
             Ok(b) => serde_json::from_slice(&b)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => Disk::default(),
             Err(e) => return Err(e.into()),
         };
-        let mut s = Self::memory();
-        s.path = Some(path);
-        s.inner.get_mut().unwrap().disk = disk;
-        Ok(s)
+        let generated = key_from_hex(&disk.key).is_none();
+        let store = Self::with_disk(Some(path), disk)?;
+        if generated {
+            store.flush()?;
+        }
+        Ok(store)
     }
     fn persist(&self, disk: &Disk) -> Result<()> {
         let Some(path) = &self.path else {
@@ -284,185 +289,177 @@ impl Store {
         protectorate_fsutil::write_file(path, &serde_json::to_vec_pretty(disk)?, 0o600)?;
         Ok(())
     }
-    fn change<T>(&self, change: impl FnOnce(&mut Disk) -> Result<T>) -> Result<T> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    fn change<T>(&self, change: impl FnOnce(&mut Disk, &[u8]) -> Result<T>) -> Result<T> {
+        let mut inner = self.lock();
         let mut next = inner.disk.clone();
-        let out = change(&mut next)?;
+        let out = change(&mut next, &inner.key)?;
         if next != inner.disk {
             self.persist(&next)?;
         }
         inner.disk = next;
         Ok(out)
-    }
-    pub fn create(
-        &self,
-        name: &str,
-        scopes: &[&str],
-        ttl: Duration,
-        now: i64,
-        methods: &[Method<'_>],
-    ) -> Result<Issued> {
-        if name.is_empty() {
-            return invalid("name is required");
-        }
-        let scopes = auth::validate_scopes(scopes, methods)?;
-        self.change(|d| issue(d, token_template(name, scopes, now), ttl, now))
-    }
-    pub fn create_grant(
-        &self,
-        node: &str,
-        task: &str,
-        minted_by: &str,
-        ttl: Duration,
-        now: i64,
-        methods: &[Method<'_>],
-    ) -> Result<Issued> {
-        if task.trim().is_empty() || task.len() > 500 {
-            return invalid("a grant needs a task of 1-500 bytes");
-        }
-        if minted_by.is_empty() {
-            return invalid("a grant needs its minter");
-        }
-        if ttl.is_zero() || ttl > MAX_GRANT_TTL {
-            return invalid("grant ttl must be positive and at most 24 hours");
-        }
-        let scopes = auth::grant_scopes(node, methods)?;
-        let mut token = token_template(&format!("grant:{node}"), scopes, now);
-        token.task = task.trim().into();
-        token.minted_by = minted_by.into();
-        self.change(|d| issue(d, token, ttl, now))
-    }
-    pub fn renew(&self, id: &str, ttl: Duration, now: i64) -> Result<Issued> {
-        self.change(|d| {
-            let token = d
-                .tokens
-                .iter()
-                .find(|t| t.token.id == id)
-                .ok_or(Error::UnknownToken)?
-                .token
-                .clone();
-            token.check(now)?;
-            if !token.task.is_empty() && (ttl.is_zero() || ttl > MAX_GRANT_TTL) {
-                return invalid("grant ttl must be positive and at most 24 hours");
-            }
-            issue(d, token, ttl, now)
-        })
-    }
-    pub fn list(&self) -> Vec<Token> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .disk
-            .tokens
-            .iter()
-            .map(|t| t.token.clone())
-            .collect()
-    }
-    pub fn lookup(&self, secret: &str, now: i64) -> Result<Token> {
-        let got = hash(secret);
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut found = None;
-        for (i, t) in inner.disk.tokens.iter().enumerate() {
-            if bool::from(got.ct_eq(&t.hash)) {
-                found = Some(i)
-            }
-        }
-        let index = found.ok_or(Error::UnknownToken)?;
-        inner.disk.tokens[index].token.check(now)?;
-        inner.disk.tokens[index].token.last_used = Some(now);
-        if inner.last_flush.is_none_or(|t| now.saturating_sub(t) >= 60)
-            && self.persist(&inner.disk).is_ok()
-        {
-            inner.last_flush = Some(now)
-        }
-        Ok(inner.disk.tokens[index].token.clone())
-    }
-    pub fn revoke(&self, id: &str, now: i64) -> Result<Token> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut next = inner.disk.clone();
-        let token = &mut next
-            .tokens
-            .iter_mut()
-            .find(|t| t.token.id == id)
-            .ok_or(Error::UnknownToken)?
-            .token;
-        if token.revoked_at.is_none() {
-            token.revoked_at = Some(now)
-        }
-        let out = token.clone();
-        if next != inner.disk {
-            self.persist(&next)?;
-        }
-        inner.disk = next;
-        if let Some(watches) = inner.watches.remove(id) {
-            for signal in watches.into_iter().filter_map(|s| s.upgrade()) {
-                signal.cancel()
-            }
-        }
-        Ok(out)
-    }
-    pub fn update_scopes(
-        &self,
-        id_or_name: &str,
-        add: &[&str],
-        remove: &[&str],
-        now: i64,
-        methods: &[Method<'_>],
-    ) -> Result<(Token, Vec<String>)> {
-        let additions = if add.is_empty() {
-            vec![]
-        } else {
-            auth::validate_scopes(add, methods)?
-        };
-        self.change(|d| {
-            let exact = d.tokens.iter().position(|t| t.token.id == id_or_name);
-            let index = if let Some(i) = exact {
-                i
-            } else {
-                let hits: Vec<_> = d
-                    .tokens
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, t)| t.token.name == id_or_name && t.token.is_active(now))
-                    .map(|(i, _)| i)
-                    .collect();
-                match hits.len() {
-                    0 => return Err(Error::UnknownToken),
-                    1 => hits[0],
-                    _ => return Err(Error::Ambiguous(id_or_name.into())),
-                }
-            };
-            let t = &mut d.tokens[index].token;
-            t.check(now)?;
-            if t.device {
-                return invalid("devices have Full access; revoke the device to remove access");
-            }
-            let before = t.scopes.clone();
-            t.scopes.extend(additions);
-            t.scopes.retain(|s| !remove.contains(&s.as_str()));
-            t.scopes.sort();
-            t.scopes.dedup();
-            Ok((t.clone(), before))
-        })
     }
     pub fn flush(&self) -> Result<()> {
-        self.persist(&self.inner.lock().unwrap_or_else(|e| e.into_inner()).disk)
+        self.persist(&self.lock().disk)
     }
+
+    /// Mints the first token of a new lineage.
+    pub fn mint(&self, mint: Mint<'_>, now: i64) -> Result<(Capability, Secret)> {
+        let ttl = ttl_seconds(mint.ttl)?;
+        if mint.task.len() > 500 || mint.minted_by.is_empty() {
+            return invalid("a capability needs its minter and a task of at most 500 bytes");
+        }
+        let id = hex(&random_bytes(16)?);
+        let record = Capability {
+            id: id.clone(),
+            principal: mint.principal.into(),
+            scopes: mint.scopes,
+            task: mint.task.trim().into(),
+            minted_by: mint.minted_by.into(),
+            created: now,
+            ttl,
+            expires: now.saturating_add(ttl),
+            revoked_at: None,
+            file: mint.file,
+        };
+        self.change(|d, key| {
+            let token = capability::mint(
+                key,
+                &record.id,
+                &record.principal,
+                &record.scopes,
+                &record.task,
+                now,
+                record.expires,
+            )
+            .map_err(|e| Error::Invalid(format!("{e}: check the name, scopes and task")))?;
+            d.capabilities.push(record.clone());
+            Ok((record, Secret(Zeroizing::new(token))))
+        })
+    }
+
+    fn check(&self, inner: &Inner, token: &str, now: i64) -> Result<(Capability, Claims)> {
+        let claims = capability::verify(&inner.key, token).map_err(|_| Error::UnknownToken)?;
+        let record = inner
+            .disk
+            .capabilities
+            .iter()
+            .find(|c| c.id == claims.id)
+            .ok_or(Error::UnknownToken)?;
+        if record.revoked_at.is_some() {
+            return Err(Error::Revoked);
+        }
+        if now >= claims.expires {
+            return Err(Error::Expired);
+        }
+        Ok((record.clone(), claims))
+    }
+
+    pub fn verify(&self, token: &str, now: i64) -> Result<(Capability, Claims)> {
+        self.check(&self.lock(), token, now)
+    }
+
+    /// A fresh token for the presented one, holder caveats kept: a narrowed
+    /// token stays narrowed and never outlives an expiry its holder set.
+    pub fn renew(&self, token: &str, now: i64) -> Result<(Capability, Secret)> {
+        let (record, claims) = self.verify(token, now)?;
+        self.change(|d, key| {
+            let expires = now.saturating_add(record.ttl);
+            let token = capability::reissue(key, &claims, now, expires)
+                .map_err(|e| Error::Invalid(e.to_string()))?;
+            let stored = d
+                .capabilities
+                .iter_mut()
+                .find(|c| c.id == record.id)
+                .ok_or(Error::UnknownToken)?;
+            stored.expires = stored.expires.max(expires);
+            Ok((stored.clone(), Secret(Zeroizing::new(token))))
+        })
+    }
+
+    /// A fresh token from the record alone, for the holder file the hub keeps.
+    pub fn refresh(&self, id: &str, now: i64) -> Result<Secret> {
+        self.change(|d, key| {
+            let stored = d
+                .capabilities
+                .iter_mut()
+                .find(|c| c.id == id)
+                .ok_or(Error::UnknownToken)?;
+            if stored.revoked_at.is_some() {
+                return Err(Error::Revoked);
+            }
+            let expires = now.saturating_add(stored.ttl);
+            let token = capability::mint(
+                key,
+                &stored.id,
+                &stored.principal,
+                &stored.scopes,
+                &stored.task,
+                now,
+                expires,
+            )
+            .map_err(|e| Error::Invalid(e.to_string()))?;
+            stored.expires = stored.expires.max(expires);
+            Ok(Secret(Zeroizing::new(token)))
+        })
+    }
+
+    pub fn capabilities(&self) -> Vec<Capability> {
+        self.lock().disk.capabilities.clone()
+    }
+
+    pub fn revoke(&self, id: &str, now: i64) -> Result<Capability> {
+        let mut inner = self.lock();
+        let mut next = inner.disk.clone();
+        let record = next
+            .capabilities
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or(Error::UnknownToken)?;
+        if record.revoked_at.is_none() {
+            record.revoked_at = Some(now)
+        }
+        let out = record.clone();
+        if next != inner.disk {
+            self.persist(&next)?;
+        }
+        inner.disk = next;
+        signal(&mut inner, id);
+        Ok(out)
+    }
+
+    /// Revokes every active lineage of one principal, such as a killed sleeve.
+    pub fn revoke_principal(&self, principal: &str, now: i64) -> Result<()> {
+        for record in self.capabilities() {
+            if record.principal == principal && record.revoked_at.is_none() {
+                self.revoke(&record.id, now)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn start_device(
         &self,
         name: &str,
         platform: &str,
+        public_key: &[u8],
         ip: &str,
         now: i64,
     ) -> Result<DeviceStarted> {
         if !valid_device_name(name) || !valid_device_label(platform, 40) {
             return invalid("invalid device name or platform");
         }
-        let secret = random_hex(32)?;
-        self.change(|d| {
-            d.devices.retain(|r| now < r.request.expires);
-            if d.devices.len() >= 1000
-                || d.devices
+        if !proof::valid_public_key(public_key) {
+            return invalid("the device key must be an uncompressed P-256 public key");
+        }
+        let secret = Secret(Zeroizing::new(hex(&random_bytes(32)?)));
+        self.change(|d, _| {
+            d.requests.retain(|r| now < r.request.expires);
+            if d.requests.len() >= 1000
+                || d.requests
                     .iter()
                     .filter(|r| {
                         matches!(
@@ -477,7 +474,7 @@ impl Store {
             }
             let code = loop {
                 let code = user_code()?;
-                if !d.devices.iter().any(|r| r.request.user_code == code) {
+                if !d.requests.iter().any(|r| r.request.user_code == code) {
                     break code;
                 }
             };
@@ -485,6 +482,7 @@ impl Store {
                 user_code: code,
                 name: name.into(),
                 platform: platform.into(),
+                public_key: B64.encode(public_key),
                 ip: ip.into(),
                 expires: now
                     .checked_add(DEVICE_LIFETIME)
@@ -495,7 +493,7 @@ impl Store {
                 approved_at: None,
                 approved_by: String::new(),
             };
-            d.devices.push(StoredDevice {
+            d.requests.push(StoredRequest {
                 request: request.clone(),
                 code_hash: hash(secret.expose()),
             });
@@ -506,11 +504,9 @@ impl Store {
         })
     }
     pub fn pending_devices(&self, now: i64) -> Vec<DeviceAuth> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        self.lock()
             .disk
-            .devices
+            .requests
             .iter()
             .filter(|r| r.request.status == DeviceStatus::Pending && now < r.request.expires)
             .map(|r| r.request.clone())
@@ -527,15 +523,15 @@ impl Store {
             return invalid("approval actor is required");
         }
         let got = hash(&normalize_code(code));
-        self.change(|d| {
+        self.change(|d, _| {
             let mut found = None;
-            for (i, r) in d.devices.iter().enumerate() {
+            for (i, r) in d.requests.iter().enumerate() {
                 if bool::from(got.ct_eq(&hash(&normalize_code(&r.request.user_code)))) {
                     found = Some(i)
                 }
             }
             let i = found.ok_or(Error::DeviceRequest)?;
-            let r = &mut d.devices[i].request;
+            let r = &mut d.requests[i].request;
             if r.status != DeviceStatus::Pending || now >= r.expires {
                 return Err(Error::DeviceRequest);
             }
@@ -549,30 +545,29 @@ impl Store {
             Ok(r.clone())
         })
     }
+    /// Polls a request. The device code only learns the outcome: what the
+    /// approved device can do still needs its private key.
     pub fn poll_device(&self, code: &str, now: i64) -> Result<DevicePoll> {
         let got = hash(code);
-        self.change(|d| {
+        self.change(|d, _| {
             let mut found = None;
-            for (i, r) in d.devices.iter().enumerate() {
+            for (i, r) in d.requests.iter().enumerate() {
                 if bool::from(got.ct_eq(&r.code_hash)) {
                     found = Some(i)
                 }
             }
-            let expired = || DevicePoll {
-                status: PollStatus::Expired,
-                interval: DEVICE_INTERVAL,
-                issued: None,
-            };
-            let Some(i) = found else { return Ok(expired()) };
-            let r = &mut d.devices[i].request;
-            if now >= r.expires {
-                return Ok(expired());
-            }
             let poll = |status, interval| DevicePoll {
                 status,
                 interval,
-                issued: None,
+                device: None,
             };
+            let Some(i) = found else {
+                return Ok(poll(PollStatus::Expired, DEVICE_INTERVAL));
+            };
+            let r = &mut d.requests[i].request;
+            if now >= r.expires {
+                return Ok(poll(PollStatus::Expired, DEVICE_INTERVAL));
+            }
             if r.status == DeviceStatus::Consumed {
                 return Ok(poll(PollStatus::Consumed, r.interval));
             }
@@ -588,56 +583,127 @@ impl Store {
             if r.status != DeviceStatus::Approved {
                 return Ok(poll(PollStatus::Pending, r.interval));
             }
-            let interval = r.interval;
-            let mut token = token_template(&r.name, vec![auth::SCOPE_FULL.into()], now);
-            token.device = true;
-            token.platform = r.platform.clone();
-            token.approved_at = r.approved_at;
-            token.approved_by = r.approved_by.clone();
             r.status = DeviceStatus::Consumed;
-            let issued = issue(d, token, Duration::ZERO, now)?;
+            let key = B64
+                .decode(&r.public_key)
+                .map_err(|_| Error::Invalid("stored device key".into()))?;
+            let device = Device {
+                id: proof::device_id(&key),
+                name: r.name.clone(),
+                platform: r.platform.clone(),
+                public_key: r.public_key.clone(),
+                approved_at: r.approved_at.unwrap_or(now),
+                approved_by: r.approved_by.clone(),
+                last_used: None,
+            };
+            let interval = r.interval;
+            d.devices.retain(|known| known.id != device.id);
+            d.devices.push(device.clone());
             Ok(DevicePoll {
                 status: PollStatus::Approved,
                 interval,
-                issued: Some(issued),
+                device: Some(device),
             })
         })
     }
-    pub fn rename_device(&self, id: &str, name: &str) -> Result<Token> {
+    pub fn devices(&self) -> Vec<Device> {
+        self.lock().disk.devices.clone()
+    }
+    /// Admits one signed request: a known device, a clock within
+    /// `MAX_SKEW`, a valid signature and a nonce not seen before.
+    pub fn verify_proof(
+        &self,
+        proof: &Proof,
+        method: &str,
+        path: &str,
+        now: i64,
+    ) -> Result<Device> {
+        if now.abs_diff(proof.time) > proof::MAX_SKEW as u64 {
+            return Err(Error::Proof("is outside the allowed clock skew"));
+        }
+        let mut inner = self.lock();
+        let index = inner
+            .disk
+            .devices
+            .iter()
+            .position(|d| d.id == proof.device)
+            .ok_or(Error::UnknownToken)?;
+        let key = B64
+            .decode(&inner.disk.devices[index].public_key)
+            .map_err(|_| Error::UnknownToken)?;
+        if !proof.verify(&key, method, path) {
+            return Err(Error::Proof("signature is invalid"));
+        }
+        let seen = format!("{}.{}", proof.device, proof.nonce);
+        if inner.nonces.len() >= NONCE_CAPACITY {
+            inner.nonces.retain(|_, until| *until >= now);
+            if inner.nonces.len() >= NONCE_CAPACITY {
+                return Err(Error::Proof("cache is full; retry shortly"));
+            }
+        }
+        if inner.nonces.contains_key(&seen) {
+            return Err(Error::Proof("was replayed"));
+        }
+        inner.nonces.insert(seen, proof.time + proof::MAX_SKEW);
+        inner.disk.devices[index].last_used = Some(now);
+        if inner.last_flush.is_none_or(|t| now.saturating_sub(t) >= 60)
+            && self.persist(&inner.disk).is_ok()
+        {
+            inner.last_flush = Some(now)
+        }
+        Ok(inner.disk.devices[index].clone())
+    }
+    /// Forgets a device: its next request fails and its streams close.
+    pub fn remove_device(&self, id: &str) -> Result<Device> {
+        let mut inner = self.lock();
+        let mut next = inner.disk.clone();
+        let index = next
+            .devices
+            .iter()
+            .position(|d| d.id == id)
+            .ok_or(Error::UnknownToken)?;
+        let device = next.devices.remove(index);
+        self.persist(&next)?;
+        inner.disk = next;
+        signal(&mut inner, id);
+        Ok(device)
+    }
+    pub fn rename_device(&self, id: &str, name: &str) -> Result<Device> {
         if !valid_device_name(name) {
             return invalid("invalid device name");
         }
-        self.change(|d| {
-            let t = &mut d
-                .tokens
+        self.change(|d, _| {
+            let device = d
+                .devices
                 .iter_mut()
-                .find(|t| t.token.id == id && t.token.device)
-                .ok_or(Error::UnknownToken)?
-                .token;
-            t.name = name.into();
-            Ok(t.clone())
+                .find(|d| d.id == id)
+                .ok_or(Error::UnknownToken)?;
+            device.name = name.into();
+            Ok(device.clone())
         })
     }
-    pub fn sweep_devices(&self, now: i64) -> Result<()> {
-        self.change(|d| {
-            d.devices.retain(|r| now < r.request.expires);
+    /// Drops expired device requests and long-dead capability lineages.
+    pub fn sweep(&self, now: i64) -> Result<()> {
+        self.lock().nonces.retain(|_, until| *until >= now);
+        self.change(|d, _| {
+            d.requests.retain(|r| now < r.request.expires);
+            d.capabilities
+                .retain(|c| now < c.expires.saturating_add(RECORD_RETENTION));
             Ok(())
         })
     }
     /// Registration and revocation share a lock, preventing admission races.
-    pub fn watch_token(&self, id: &str, now: i64) -> RevocationWatch {
-        let signal = Arc::new(Signal {
-            cancelled: AtomicBool::new(false),
-            mutex: Mutex::new(()),
-            changed: Condvar::new(),
-        });
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if inner
-            .disk
-            .tokens
-            .iter()
-            .any(|t| t.token.id == id && t.token.is_active(now))
-        {
+    /// The ID is a device's or a capability lineage's.
+    pub fn watch(&self, id: &str, now: i64) -> RevocationWatch {
+        let signal = Arc::new(Signal(AtomicBool::new(false)));
+        let mut inner = self.lock();
+        let live = inner.disk.devices.iter().any(|d| d.id == id)
+            || inner
+                .disk
+                .capabilities
+                .iter()
+                .any(|c| c.id == id && c.revoked_at.is_none() && now < c.expires);
+        if live {
             let watches = inner.watches.entry(id.into()).or_default();
             watches.retain(|s| s.strong_count() > 0);
             watches.push(Arc::downgrade(&signal));
@@ -663,8 +729,7 @@ fn user_code() -> Result<String> {
     const ABC: &[u8] = b"23456789BCDFGHJKLMNPQRSTVWXYZ";
     let mut code = String::new();
     while code.len() < 8 {
-        let mut b = [0u8; 1];
-        getrandom::getrandom(&mut b).map_err(|e| io::Error::other(e.to_string()))?;
+        let b = random_bytes(1)?;
         let limit = 256 - 256 % ABC.len();
         if (b[0] as usize) < limit {
             code.push(ABC[b[0] as usize % ABC.len()] as char)
@@ -673,31 +738,16 @@ fn user_code() -> Result<String> {
     code.insert(4, '-');
     Ok(code)
 }
-struct Signal {
-    cancelled: AtomicBool,
-    mutex: Mutex<()>,
-    changed: Condvar,
-}
+struct Signal(AtomicBool);
 impl Signal {
     fn cancel(&self) {
-        let _guard = self.mutex.lock().unwrap_or_else(|e| e.into_inner());
-        self.cancelled.store(true, Ordering::Release);
-        self.changed.notify_all()
+        self.0.store(true, Ordering::Release)
     }
 }
-/// Dropping the watch releases its registration; no token secret is retained.
+/// Dropping the watch releases its registration; no credential is retained.
 pub struct RevocationWatch(Arc<Signal>);
 impl RevocationWatch {
     pub fn is_cancelled(&self) -> bool {
-        self.0.cancelled.load(Ordering::Acquire)
-    }
-    pub fn wait(&self, timeout: Duration) -> bool {
-        let guard = self.0.mutex.lock().unwrap_or_else(|e| e.into_inner());
-        let _result = self
-            .0
-            .changed
-            .wait_timeout_while(guard, timeout, |_| !self.is_cancelled())
-            .unwrap_or_else(|e| e.into_inner());
-        self.is_cancelled()
+        self.0 .0.load(Ordering::Acquire)
     }
 }

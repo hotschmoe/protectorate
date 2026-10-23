@@ -30,6 +30,7 @@ pub mod windows_private;
 pub use args::{parse, Invocation};
 pub use job::RunError;
 pub use protectorate_connect_client::Client;
+use protectorate_connect_client::Credential;
 pub use protectorate_wire::{Code, Result, RpcError};
 use serde_json::{json, Value};
 use std::{
@@ -45,6 +46,8 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const HUB_URL_ENV: &str = "PROTECTORATE_HUB";
 pub const TOKEN_ENV: &str = "PROTECTORATE_TOKEN";
 pub const TOKEN_FILE_ENV: &str = "PROTECTORATE_TOKEN_FILE";
+/// A saved device credential file the MCP bridge signs requests with.
+pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 /// The state home holding this machine's saved device credential.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
@@ -55,7 +58,7 @@ const SLEEVE_RUNTIME: &str = "/protectorate.v1.HubService/GetSleeveRuntime";
 const CREATE_TOKEN: &str = "/protectorate.v1.TokenService/CreateToken";
 const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
 const REVOKE_TOKEN: &str = "/protectorate.v1.TokenService/RevokeToken";
-const UPDATE_TOKEN_SCOPES: &str = "/protectorate.v1.TokenService/UpdateTokenScopes";
+const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
 const GRANT_ADMIN: &str = "/protectorate.v1.GrantService/Admin";
 const LIST_AUDIT: &str = "/protectorate.v1.AuditService/ListAuditEntries";
 const VERIFY_AUDIT: &str = "/protectorate.v1.AuditService/VerifyAudit";
@@ -539,17 +542,12 @@ pub struct SleeveSpawn {
     pub token_budget: u64,
 }
 
-/// The token lifetime `sleeve envoy` sends when `--ttl` is omitted: 720h.
-/// Zero, from `--ttl 0`, never expires.
-pub const DEFAULT_ENVOY_TTL: Duration = Duration::from_secs(720 * 3600);
-
 /// `sleeve envoy`, the owner-only SpawnEnvoy call. `harness` none is auto.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SleeveEnvoy {
     pub harness: Option<HarnessName>,
     pub scopes: Vec<String>,
     pub add_scopes: Vec<String>,
-    pub ttl: Duration,
     pub selection: ModelChoice,
     pub token_budget: u64,
 }
@@ -620,18 +618,15 @@ pub enum Command {
     TokenList,
     /// `orchestrator status`: Envoy's sleeve and most recently created token.
     OrchestratorStatus,
-    /// `orchestrator scopes`: update the newest active Envoy token.
-    OrchestratorScopes {
-        add: Vec<String>,
-        remove: Vec<String>,
-    },
     TokenRevoke {
         id: String,
     },
-    TokenScopes {
-        id: String,
-        add: Vec<String>,
-        remove: Vec<String>,
+    /// `token renew`: a fresh token for the capability this call presents.
+    TokenRenew,
+    /// `token attenuate`: narrow the presented capability offline.
+    TokenAttenuate {
+        scopes: Vec<String>,
+        ttl: Option<Duration>,
     },
     GrantAdmin {
         node: String,
@@ -920,14 +915,15 @@ fn usage() -> &'static str {
      service termux             print Termux runit run and Termux:Boot scripts (--binary, --home, --write, --install; serve flags after --)\n  \
      quota [--refresh]           subscription usage, resets and projected unused capacity\n  \
      quota suggest [--for small|medium|large] [--refresh]  rank chat harness capacity\n  \
-     token create <name>        issue a scoped token (--scope repeated, --ttl 720h; secret shown once)\n  \
-     token ls | token list      issued tokens and their status, without secrets\n  \
-     token revoke <id>          revoke a token immediately\n  \
-     token scopes <id|name>     change grants (--add SCOPE, --remove SCOPE)\n  \
+     token create <name>        mint a capability (--scope repeated, --ttl 1h, at most 24h; secret shown once)\n  \
+     token ls | token list      capability lineages and their status, without secrets\n  \
+     token revoke <id>          revoke a lineage immediately\n  \
+     token renew                print a fresh token for the presented capability\n  \
+     token attenuate            print the presented capability narrowed offline (--scope repeated, --ttl)\n  \
      approvals ls [--all]       agent calls waiting for the owner: id, actor, call, reason, expiry\n  \
      approvals approve <id>     run a gated agent call once\n  \
      approvals deny <id>        refuse a gated agent call\n  \
-     devices ls | devices list  trusted devices: name, platform, state, last use and approver\n  \
+     devices ls | devices list  trusted devices: name, platform, last use and approver\n  \
      devices pending            pairing requests awaiting approval\n  \
      devices approve <code>     approve a request after matching its code on the new device\n  \
      devices deny <code>        deny a pairing request\n  \
@@ -993,10 +989,9 @@ fn usage() -> &'static str {
      sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
      sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, --budget TOKENS, -- args)\n  \
-     sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --ttl, --model, --effort, --budget TOKENS)\n  \
+     sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --model, --effort, --budget TOKENS)\n  \
      orchestrator spawn         create or respawn Envoy (same options as sleeve envoy)\n  \
      orchestrator status        show Envoy sleeve and latest token\n  \
-     orchestrator scopes        change the newest active Envoy token (--add, --remove)\n  \
      sleeve resleeve <name>     move a chat sleeve (--to auto|claude|codex|grok|pi, --interrupt, --wait, --model, --effort, --native-defaults)\n  \
      sleeve prune               inventory unused sleeve disk; --yes removes (--caches, --homes, --workspaces, --ignored, --running)\n  \
      session ls | session list  tmux sessions, running and exited\n  \
@@ -1033,10 +1028,12 @@ fn usage() -> &'static str {
      hub commands, so they need the owner token. session names are 1-64 of
   \
      A-Z a-z 0-9 _ -, and sleeve-* belongs to SleeveService.\n\n\
-     Hub URL defaults to http://127.0.0.1:7470 or $PROTECTORATE_HUB. The bearer\n  \
-     token comes from --token-file, $PROTECTORATE_TOKEN_FILE or $PROTECTORATE_TOKEN,\n  \
-     and otherwise from the device credential login saved for that hub under\n  \
-     --home, $PROTECTORATE_HOME or $HOME/.protectorate.\n"
+     Hub URL defaults to http://127.0.0.1:7470 or $PROTECTORATE_HUB. The\n  \
+     credential is the capability in --token-file or $PROTECTORATE_TOKEN_FILE\n  \
+     (renewed in place past half its life), then $PROTECTORATE_TOKEN, then the\n  \
+     device key login saved for that hub under --home, $PROTECTORATE_HOME or\n  \
+     $HOME/.protectorate. The owner token works only on the hub's loopback\n  \
+     listener.\n"
 }
 
 fn command_usage(path: &str) -> Result<String> {
@@ -1630,9 +1627,6 @@ fn execute_commands(
             }
         }
         Command::OrchestratorStatus => orchestrator_status(client, json),
-        Command::OrchestratorScopes { add, remove } => {
-            orchestrator_scopes(client, add, remove, json)
-        }
         Command::TokenRevoke { id } => {
             let revoked = client.call(REVOKE_TOKEN, &json!({"id":id}))?;
             if json {
@@ -1641,17 +1635,17 @@ fn execute_commands(
                 Ok(format::token_revoked_text(&revoked))
             }
         }
-        Command::TokenScopes { id, add, remove } => {
-            let updated = client.call(
-                UPDATE_TOKEN_SCOPES,
-                &json!({"id":id,"add":add,"remove":remove}),
-            )?;
+        Command::TokenRenew => {
+            let renewed = client.call(RENEW_TOKEN, &json!({}))?;
             if json {
-                json_line(&updated)
+                json_line(&renewed)
             } else {
-                Ok(format::token_scopes_text(&updated))
+                Ok(format::token_renewed_text(&renewed))
             }
         }
+        Command::TokenAttenuate { .. } => Err(RpcError::invalid(
+            "token attenuate runs without a hub client",
+        )),
         Command::GrantAdmin {
             node,
             task,
@@ -2625,10 +2619,9 @@ fn exited_pane_tail(client: &Client, sleeve: &Value) -> Option<String> {
 /// `PROTECTORATE_HUB`, the bearer token from `--token-file`,
 /// `PROTECTORATE_TOKEN_FILE` or `PROTECTORATE_TOKEN`, in that order.
 pub fn client_for(invocation: &Invocation) -> Result<Client> {
-    Client::new(
-        &hub_url(invocation),
-        token(invocation)?,
-        transport_timeout(invocation),
+    Ok(
+        Client::new(&hub_url(invocation), "", transport_timeout(invocation))?
+            .with_credential(credential(invocation)?),
     )
 }
 
@@ -2827,6 +2820,9 @@ pub fn run_with_status(
     if let Command::Pair { url, app } = &invocation.command {
         return pair::run(&invocation, url.as_deref(), *app).map_err(RunError::from);
     }
+    if let Command::TokenAttenuate { scopes, ttl } = &invocation.command {
+        return attenuate(&invocation, scopes, *ttl).map_err(RunError::from);
+    }
     let client = client_for(&invocation)?;
     if streams(&invocation.command) {
         let cancel = cancel_client(&invocation)?;
@@ -2891,11 +2887,10 @@ fn cancel_client(invocation: &Invocation) -> Result<Option<Client>> {
     ) {
         return Ok(None);
     }
-    Ok(Some(Client::new(
-        &hub_url(invocation),
-        token(invocation)?,
-        Duration::from_secs(20),
-    )?))
+    Ok(Some(
+        Client::new(&hub_url(invocation), "", Duration::from_secs(20))?
+            .with_credential(credential(invocation)?),
+    ))
 }
 
 /// What `api call` prints: the hub's reply as one compact proto-JSON line
@@ -2957,7 +2952,10 @@ pub(crate) fn hub_url(invocation: &Invocation) -> String {
         .unwrap_or_else(|| DEFAULT_HUB.to_owned())
 }
 
-fn token(invocation: &Invocation) -> Result<String> {
+/// The credential for an invocation: the capability file from --token-file
+/// or the environment, a token in the environment, then the device key saved
+/// by `login` for this hub.
+fn credential(invocation: &Invocation) -> Result<Credential> {
     let file = invocation.token_file.clone().or_else(|| {
         env::var(TOKEN_FILE_ENV)
             .ok()
@@ -2967,42 +2965,75 @@ fn token(invocation: &Invocation) -> Result<String> {
     if let Some(file) = file {
         let raw = fs::read_to_string(&file)
             .map_err(|error| RpcError::new(Code::Internal, format!("read token file: {error}")))?;
-        let token = raw.trim();
-        if token.is_empty() {
+        if raw.trim().is_empty() {
             return Err(RpcError::new(
                 Code::InvalidArgument,
                 format!("token file {} is empty", file.display()),
             ));
         }
-        return Ok(token.to_owned());
+        return Ok(Credential::TokenFile(file));
     }
-    env::var(TOKEN_ENV)
+    if let Some(token) = env::var(TOKEN_ENV)
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
-        .map(Ok)
-        .unwrap_or_else(|| match login::saved_token(invocation) {
-            Ok(Some(secret)) => Ok(secret),
-            Ok(None) => Err(RpcError::new(
-                Code::Unauthenticated,
-                format!(
-                    "no bearer token: set --token-file, {TOKEN_FILE_ENV} or {TOKEN_ENV}, or run login --hub {}",
-                    hub_url(invocation)
-                ),
-            )),
-            Err(error) => Err(error),
-        })
+    {
+        return Ok(Credential::Bearer(token.into()));
+    }
+    match login::saved_device(invocation)? {
+        Some(key) => Ok(Credential::Device(key)),
+        None => Err(RpcError::new(
+            Code::Unauthenticated,
+            format!(
+                "no credential: set --token-file, {TOKEN_FILE_ENV} or {TOKEN_ENV}, or run login --hub {}",
+                hub_url(invocation)
+            ),
+        )),
+    }
 }
 
-/// Resolve the MCP bridge's bearer the same way as other CLI commands, then
-/// fall back to the private token created by the Rust hub installer. The
-/// bridge gets the resolved token through its child environment; it never
+/// The capability or token an offline command such as `token attenuate`
+/// works on, from the same places as `credential`.
+fn presented_token(invocation: &Invocation) -> Result<zeroize::Zeroizing<String>> {
+    match credential(invocation) {
+        Ok(Credential::TokenFile(file)) => fs::read_to_string(&file)
+            .map(|raw| raw.trim().to_owned().into())
+            .map_err(|error| RpcError::new(Code::Internal, format!("read token file: {error}"))),
+        Ok(Credential::Bearer(token)) => Ok(token),
+        Ok(_) => Err(RpcError::invalid(
+            "a device key is not a capability; pass --token-file",
+        )),
+        Err(error) => Err(error),
+    }
+}
+
+/// `token attenuate`: append caveats to the presented capability. Only the
+/// hub can verify the result; it never grants more than the original.
+fn attenuate(invocation: &Invocation, scopes: &[String], ttl: Option<Duration>) -> Result<String> {
+    use protectorate_auth::capability::{self, Caveat};
+    let mut token = presented_token(invocation)?.to_string();
+    let bad = |error: capability::Error| RpcError::invalid(error.to_string());
+    if !scopes.is_empty() {
+        token = capability::attenuate(&token, &Caveat::Scopes(scopes.to_vec())).map_err(bad)?;
+    }
+    if let Some(ttl) = ttl {
+        let at = chrono::Utc::now()
+            .timestamp()
+            .saturating_add(ttl.as_secs() as i64);
+        token = capability::attenuate(&token, &Caveat::Expires(at)).map_err(bad)?;
+    }
+    Ok(format!("{token}\n"))
+}
+
+/// How the MCP bridge child authenticates, as the environment variable and
+/// value the CLI sets for it: the same credential as other commands, then the
+/// private owner token created by the Rust hub installer. The bridge never
 /// writes credentials to the MCP protocol stream.
-pub fn mcp_token(
+pub fn mcp_credential(
     hub: Option<&str>,
     token_file: Option<&Path>,
     home: Option<&Path>,
-) -> Result<String> {
+) -> Result<(&'static str, String)> {
     let invocation = Invocation {
         command: Command::Help,
         json: false,
@@ -3011,11 +3042,18 @@ pub fn mcp_token(
         home: home.map(Path::to_path_buf),
         timeout: DEFAULT_TIMEOUT,
     };
-    match token(&invocation) {
-        Ok(token) => Ok(token),
+    match credential(&invocation) {
+        Ok(Credential::TokenFile(file)) => Ok((TOKEN_FILE_ENV, file.display().to_string())),
+        Ok(Credential::Bearer(token)) => Ok((TOKEN_ENV, token.to_string())),
+        Ok(_) => Ok((
+            DEVICE_CREDENTIAL_ENV,
+            login::credential_file(&invocation)?.display().to_string(),
+        )),
         Err(error) if error.code == Code::Unauthenticated => {
             let home = login::state_home(&invocation)?;
-            private_owner_token(&home.join("token"))?.ok_or(error)
+            private_owner_token(&home.join("token"))?
+                .map(|token| (TOKEN_ENV, token))
+                .ok_or(error)
         }
         Err(error) => Err(error),
     }
@@ -3179,45 +3217,6 @@ fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
     }
 }
 
-fn orchestrator_scopes(
-    client: &Client,
-    add: &[String],
-    remove: &[String],
-    json: bool,
-) -> Result<String> {
-    let listing = client.call(LIST_TOKENS, &json!({}))?;
-    let now = now_millis();
-    let token = listing["tokens"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|token| {
-            token["name"] == "orchestrator-envoy"
-                && token.get("revokedAt").is_none_or(Value::is_null)
-                && token["expiresAt"].as_str().is_none_or(|expires| {
-                    format::timestamp_millis(expires).is_some_and(|ts| ts > now)
-                })
-        })
-        .max_by_key(|token| {
-            format::timestamp_millis(token["createdAt"].as_str().unwrap_or_default())
-                .unwrap_or_default()
-        })
-        .ok_or_else(|| RpcError::new(Code::NotFound, "no active Envoy token"))?;
-    let id = token["id"]
-        .as_str()
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "Envoy token has no id"))?;
-    let updated = client.call(
-        UPDATE_TOKEN_SCOPES,
-        &json!({"id":id,"add":add,"remove":remove}),
-    )?;
-    if json {
-        json_line(&updated)
-    } else {
-        Ok(format::token_scopes_text(&updated))
-    }
-}
-
 fn spawn_envoy(client: &Client, envoy: &SleeveEnvoy, json: bool) -> Result<String> {
     let response = client.call(SPAWN_ENVOY, &envoy_body(envoy))?;
     if json {
@@ -3367,7 +3366,7 @@ fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
 }
 
 fn envoy_body(envoy: &SleeveEnvoy) -> Value {
-    let mut request = json!({ "ttl": format_duration(envoy.ttl) });
+    let mut request = json!({});
     if let Some(harness) = envoy.harness {
         request["harness"] = json!(harness.as_proto());
     }

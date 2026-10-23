@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::cli;
+use common::{cli, cli_device, device_home};
 use protectorate_hub::Hub;
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,21 +19,24 @@ async fn devices_commands_use_real_hub_connect_routes() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (phone_home, phone_key) = device_home(&url);
+    let (_, laptop_key) = device_home(&url);
+    let (_, watch_key) = device_home(&url);
     let phone = identity
-        .start_device("phone-a", "android/arm64", "127.0.0.1", now)
+        .start_device("phone-a", "android/arm64", &phone_key, "127.0.0.1", now)
         .unwrap();
     let laptop = identity
-        .start_device("laptop-b", "linux/amd64", "127.0.0.1", now)
+        .start_device("laptop-b", "linux/amd64", &laptop_key, "127.0.0.1", now)
         .unwrap();
     let watch = identity
-        .start_device("watch-c", "watchos/arm", "127.0.0.1", now)
+        .start_device("watch-c", "watchos/arm", &watch_key, "127.0.0.1", now)
         .unwrap();
     let phone_code = phone.request.user_code.clone();
     let laptop_code = laptop.request.user_code.clone();
     let watch_code = watch.request.user_code.clone();
     let phone_pairing = phone.device_code.expose().to_owned();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let result = tokio::task::spawn_blocking(move || {
@@ -82,24 +85,19 @@ async fn devices_commands_use_real_hub_connect_routes() {
         cli(&url, "owner-secret", ["devices", "approve", &laptop_code]).unwrap_err();
         cli(&url, "owner-secret", ["devices", "deny", "XXXX-XXXX"]).unwrap_err();
 
-        // The approved pairing poll issues the device credential; the CLI
-        // device commands then run as that device, not only as the owner.
+        // The approved pairing poll registers the phone's key; the CLI device
+        // commands then run as that device, signing with its key.
         let polled = identity.poll_device(&phone_pairing, now + 1).unwrap();
-        let issued = polled.issued.expect("approved pairing issues a credential");
-        let secret = issued.secret.expose().to_owned();
-        assert!(!secret.is_empty());
+        polled
+            .device
+            .expect("approved pairing registers the device");
+        let phone_home = phone_home.path();
 
-        let listed = cli(&url, &secret, ["devices", "ls"]).unwrap();
+        let listed = cli_device(&url, phone_home, ["devices", "ls"]).unwrap();
         let rows: Vec<&str> = listed.lines().collect();
-        assert_eq!(
-            rows[0],
-            "ID\tNAME\tPLATFORM\tSTATE\tLAST USED\tAPPROVED\tAPPROVER"
-        );
+        assert_eq!(rows[0], "ID\tNAME\tPLATFORM\tLAST USED\tAPPROVED\tAPPROVER");
         assert_eq!(rows.len(), 2, "{listed}");
-        assert!(
-            rows[1].contains("\tphone-a\tandroid/arm64\tactive\t"),
-            "{listed}"
-        );
+        assert!(rows[1].contains("\tphone-a\tandroid/arm64\t"), "{listed}");
         assert!(rows[1].ends_with("\towner"), "{listed}");
 
         let raw: Value = serde_json::from_str(&owner(&["--json", "devices", "ls"])).unwrap();
@@ -110,9 +108,9 @@ async fn devices_commands_use_real_hub_connect_routes() {
         let id = devices[0]["id"].as_str().unwrap().to_owned();
 
         assert_eq!(
-            cli(
+            cli_device(
                 &url,
-                &secret,
+                phone_home,
                 ["devices", "rename", id.as_str(), "desk desktop"]
             )
             .unwrap(),
@@ -120,7 +118,7 @@ async fn devices_commands_use_real_hub_connect_routes() {
         );
         let listed = owner(&["devices", "ls"]);
         assert!(
-            listed.contains(&format!("{id}\tdesk desktop\tandroid/arm64\tactive")),
+            listed.contains(&format!("{id}\tdesk desktop\tandroid/arm64\t")),
             "{listed}"
         );
         cli(
@@ -135,15 +133,12 @@ async fn devices_commands_use_real_hub_connect_routes() {
             format!("revoked {id}\n")
         );
         let listed = owner(&["devices", "ls"]);
-        assert!(
-            listed.contains(&format!("{id}\tdesk desktop\tandroid/arm64\trevoked")),
-            "{listed}"
-        );
-        cli(&url, &secret, ["devices", "ls"]).unwrap_err();
+        assert!(!listed.contains(&id), "{listed}");
+        let error = cli_device(&url, phone_home, ["devices", "ls"]).unwrap_err();
+        assert!(error.contains("unknown credential"), "{error}");
         cli(&url, "owner-secret", ["devices", "revoke", "no-such-id"]).unwrap_err();
 
-        // A scoped token that is not a device credential never reaches
-        // DeviceService.
+        // A capability, whatever its scopes, never reaches DeviceService.
         let issued: Value = serde_json::from_str(&owner(&[
             "--json", "token", "create", "--scope", "read", "reader",
         ]))

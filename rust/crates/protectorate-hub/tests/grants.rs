@@ -1,9 +1,8 @@
-use protectorate_auth::Method as ScopeMethod;
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::Hub;
 use protectorate_inventory::Node;
-use protectorate_wire::Catalog;
 use serde_json::{json, Value};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -166,31 +165,7 @@ async fn orchestrator_can_grant_only_named_shared_nodes_when_enabled() {
             false,
         )
         .unwrap();
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|method| ScopeMethod {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let issued = hub
-        .identity
-        .create(
-            "orchestrator-envoy",
-            &["grant_admin"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap();
-    let secret = issued.secret.expose().to_string();
+    let (_, secret) = capability::mint(&hub, "orchestrator-envoy", &["grant_admin", "job_*"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server =
