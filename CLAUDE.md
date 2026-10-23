@@ -27,26 +27,23 @@ Forbidden unless I give the exact command and explicit approval in the same mess
 - Minimal comments, only where they add what the code cannot say.
 - No bulk-modifying scripts (codemods, giant sed/regex refactors). Make mechanical changes in small explicit edits.
 - Full migrations only: no compat shims, `_legacy`/`_old` names, v2 clones or "remove later" code. Change behavior and migrate every caller in the same commit.
-- Errors wrap with context (`fmt.Errorf("...: %w", err)`); pass `context.Context` for cancellation; tests are table-driven.
+- Errors carry context at each layer; cancellation propagates; tests are real-binary e2e or fuzz targets only, never unit tests.
 
 ## Layout and commands
 
 ```
 proto/protectorate/v1/   API schema (the only API definition)
-gen/                     generated Go, committed
+rust/crates/             Rust workspace: hub, node, CLI, MCP bridge, sandbox, drivers
 app/                     Flutter client (app/lib/gen is generated Dart, committed)
-cmd/protectorate/        cobra CLI (thin)
-internal/hub/            Connect service implementations
 ```
 
 ```
-make gen     # buf lint + generate (needs buf, protoc-gen-go, protoc-gen-connect-go via go install; protoc-gen-dart and protoc-gen-connect-dart via dart pub global activate protoc_plugin / connectrpc, on PATH from ~/.pub-cache/bin)
-make build   # bin/protectorate
+make gen        # buf lint + Dart generation + the embedded descriptor set (needs buf; protoc-gen-dart and protoc-gen-connect-dart via dart pub global activate protoc_plugin / connectrpc, on PATH from ~/.pub-cache/bin)
+make build      # release binaries for the host into target/release
+make test       # real-binary e2e and fuzz seeds
+make check      # cargo fmt --check, clippy -D warnings, test, app-check, check-version
+make check-gen  # fails if generated Dart or the descriptor set are stale or uncommitted
 make app-check  # flutter analyze in app/
-make test    # tagged build + vet + fuzz seeds + real-binary e2e
-make check-gen  # fails if generated Go/Dart/descriptor image are stale or uncommitted
-make cross   # linux/windows amd64+arm64 and android/arm64 into bin/
-gofmt -l .   # must print nothing
 ```
 
-Never hand-edit or reformat `gen/` or `app/lib/gen/` (no `dart format` there); change the .proto and run `make gen`. Go lives in `~/.local/go/bin`.
+Never hand-edit or reformat `app/lib/gen/` (no `dart format` there) or `rust/crates/protectorate-wire/assets/`; change the .proto and run `make gen`.

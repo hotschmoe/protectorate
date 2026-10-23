@@ -6,8 +6,6 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "protectorate/v1/options.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // TokenService issues, updates and revokes scoped API tokens. Only the owner token (the
 // one in $PROTECTORATE_HOME/token) may call it; no scope grants access.
 service TokenService {

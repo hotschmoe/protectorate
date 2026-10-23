@@ -9,8 +9,6 @@ import "protectorate/v1/job.proto";
 import "protectorate/v1/options.proto";
 import "protectorate/v1/sleeve.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
 // is for live views. The job RPCs are called by the hub only and are unary
 // except RunJob, so they work over plain HTTP/1.1.

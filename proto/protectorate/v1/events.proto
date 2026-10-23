@@ -5,8 +5,6 @@ package protectorate.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // EventService streams hub events. It is server-streaming only, so the MCP
 // bridge does not expose it as a tool.
 service EventService {

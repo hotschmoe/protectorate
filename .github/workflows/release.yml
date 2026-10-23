@@ -156,7 +156,7 @@ jobs:
       - name: Rust workspace gate
         env:
           PROTECTORATE_REQUIRE_FLUTTER_TEST: "1"
-        run: make rust-check
+        run: make check
       - name: Rust Linux installer checks
         run: bash scripts/test-rust-installers.sh
       - name: Build Rust Linux amd64 bundle

@@ -5,8 +5,6 @@ package protectorate.v1;
 import "protectorate/v1/node.proto";
 import "protectorate/v1/options.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 service ReleaseService {
   rpc CheckRelease(CheckReleaseRequest) returns (ReleaseInfo) {
     option idempotency_level = NO_SIDE_EFFECTS;

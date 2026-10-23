@@ -59,7 +59,7 @@ fn comma_separated_filters_select_and_exclude_tools() {
 }
 
 #[test]
-fn list_matches_the_generated_go_mcp_catalog() {
+fn list_matches_the_committed_mcp_catalog() {
     let output = Command::new(env!("CARGO_BIN_EXE_protectorate-mcpbridge"))
         .args(["--allow", "*", "--list"])
         .output()
@@ -72,7 +72,7 @@ fn list_matches_the_generated_go_mcp_catalog() {
     let tools: Value = serde_json::from_slice(&output.stdout).unwrap();
     let golden: Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../tests/e2e/testdata/mcp_tools.json"
+        "/tests/testdata/mcp_tools.json"
     )))
     .unwrap();
     assert_eq!(tools, golden);

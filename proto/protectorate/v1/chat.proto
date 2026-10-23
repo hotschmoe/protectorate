@@ -5,8 +5,6 @@ package protectorate.v1;
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // ChatService drives a sleeve in chat mode: the harness runs its own official
 // headless protocol inside the sleeve and the hub normalizes what it emits
 // into ChatEvents. The hub keeps each sleeve's events in an append-only log,
@@ -95,7 +93,9 @@ message SetSelectionRequest {
   string sleeve = 1;
   ModelSelection selection = 2;
 }
-message SetSelectionResponse { ChatStatus chat = 1; }
+message SetSelectionResponse {
+  ChatStatus chat = 1;
+}
 
 enum SleeveMode {
   // UNSPECIFIED on spawn means CHAT for agent harnesses and TERMINAL for

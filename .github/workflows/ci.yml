@@ -25,9 +25,7 @@ jobs:
           flutter-version: 3.44.1
           cache: true
       - name: Prepare Flutter client for Rust hub integration tests
-        run: |
-          cd app && flutter pub get
-          cd .. && make app-check
+        run: cd app && flutter pub get
       - name: Prepare verified Headscale for node invitation trial
         run: |
           cargo build --locked -p protectorate-server --bin protectorate-rs
@@ -36,7 +34,7 @@ jobs:
       - name: Rust workspace
         env:
           PROTECTORATE_REQUIRE_FLUTTER_TEST: "1"
-        run: make rust-check
+        run: make check
       - name: Rust Linux installer checks
         run: bash scripts/test-rust-installers.sh
 

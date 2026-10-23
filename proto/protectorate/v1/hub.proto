@@ -4,8 +4,6 @@ package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // HubService reports on the hub process itself.
 service HubService {
   // GetStatus returns the hub version, host platform and uptime.

@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package protectorate.v1;
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // DirectoryService answers which projects the sleeves work on and how they
 // depend on each other. The hub builds it deterministically from each sleeve
 // workspace's git remote and package manifests (go.mod, package.json,

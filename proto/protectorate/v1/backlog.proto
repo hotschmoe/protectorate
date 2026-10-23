@@ -5,8 +5,6 @@ package protectorate.v1;
 import "google/protobuf/timestamp.proto";
 import "protectorate/v1/options.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // BacklogService keeps the owner's notes on the hub (docs/backlog.md). The
 // owner writes them in the app or CLI; the orchestrator reads and edits them
 // through the same API. Mutations publish note.* events on EventService.

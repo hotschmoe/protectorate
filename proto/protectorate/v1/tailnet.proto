@@ -4,8 +4,6 @@ package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // TailnetService exposes the hub's own view of the tailnet for debugging.
 service TailnetService {
   // GetStatus returns the hub's tailnet identity and every peer it knows.

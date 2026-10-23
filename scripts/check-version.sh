@@ -20,16 +20,12 @@ for target in app-build-web apk app-build-linux app-build-windows; do
 	done || bad "make $target: flutter build lacks --build-name, --build-number or PROTECTORATE_VERSION"
 done
 
-for target in build cross; do
-	${MAKE:-make} -n "$target" 2>&1 | grep 'go build' | while IFS= read -r l; do
-		case $l in *-X\ main.version=*) ;; *) exit 1 ;; esac
-	done || bad "make $target: go build lacks -X main.version"
-done
+${MAKE:-make} -n build 2>&1 | grep -q "PROTECTORATE_BUILD_VERSION=" || bad "make build: cargo build lacks PROTECTORATE_BUILD_VERSION"
 
 for f in $workflows scripts/*.sh; do
 	[ "$f" = scripts/check-version.sh ] && continue
-	if grep -nE 'flutter build|go build' "$f" >&2; then
-		bad "$f: build through make (build, cross, apk, app-build-web, app-build-linux, app-build-windows) so the version is applied"
+	if grep -nE 'flutter build' "$f" >&2; then
+		bad "$f: build through make (apk, app-build-web, app-build-linux, app-build-windows) so the version is applied"
 	fi
 done
 

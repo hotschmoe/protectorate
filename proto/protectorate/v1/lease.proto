@@ -5,8 +5,6 @@ package protectorate.v1;
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // LeaseService reserves nodes and GPUs for a holder. A lease that is not
 // renewed expires on its own, so a dead agent cannot hold hardware forever.
 // Leases are kept across hub restarts and announced on EventService as

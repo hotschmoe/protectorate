@@ -1,11 +1,5 @@
 version: v2
 plugins:
-  - local: protoc-gen-go
-    out: gen
-    opt: paths=source_relative
-  - local: protoc-gen-connect-go
-    out: gen
-    opt: paths=source_relative
   # Needs `dart pub global activate protoc_plugin` and `dart pub global activate connectrpc`.
   # Do not pass the grpc option to protoc-gen-dart.
   - local: protoc-gen-dart

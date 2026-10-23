@@ -2,10 +2,8 @@ syntax = "proto3";
 
 package protectorate.v1;
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
-
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
+import "google/protobuf/timestamp.proto";
 
 // MessageService is the hub's mailbox between sleeves, the orchestrator and
 // the owner. The sender of a message is the authenticated caller (a sleeve's

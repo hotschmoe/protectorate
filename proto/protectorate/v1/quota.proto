@@ -6,8 +6,6 @@ import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "protectorate/v1/sleeve.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // QuotaService reports subscription usage. Updates are also announced on
 // EventService as events with kind "quota.updated" (subject = provider,
 // payload = the ProviderQuota in proto-JSON form).

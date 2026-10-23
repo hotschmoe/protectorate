@@ -368,7 +368,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -404,7 +404,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -437,7 +437,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -467,7 +467,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -497,7 +497,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -542,7 +542,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -576,7 +576,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -606,7 +606,7 @@
           "additionalProperties": false,
           "properties": {
             "leaseId": {
-              "description": "lease_id names a live lease on \"desk:\u003cname\u003e\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
+              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
               "type": "string"
             },
             "name": {
@@ -956,7 +956,7 @@
           "type": "boolean"
         },
         "artifactGlobs": {
-          "description": "artifact_globs select files, relative to the working directory, that are sent back to $PROTECTORATE_HOME/jobs/\u003cid\u003e/artifacts/. A glob that matches a directory takes the files below it.",
+          "description": "artifact_globs select files, relative to the working directory, that are sent back to $PROTECTORATE_HOME/jobs/<id>/artifacts/. A glob that matches a directory takes the files below it.",
           "items": {
             "type": "string"
           },
@@ -1091,7 +1091,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased, except their desktop (\"desk:\u003cnode\u003e\") under the owner token or a node_admin grant. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased, except their desktop (\"desk:<node>\") under the owner token or a node_admin grant. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1104,7 +1104,7 @@
           "type": "integer"
         },
         "resource": {
-          "description": "resource is a node name or \"\u003cnode\u003e:gpu\u003cindex\u003e\".",
+          "description": "resource is a node name or \"<node>:gpu<index>\".",
           "type": "string"
         },
         "selector": {
@@ -1321,7 +1321,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "Send addresses a message to a sleeve name, \"project:\u003cid-or-name\u003e\", \"orchestrator\" or \"owner\". Retrying with the same request_id returns the original message instead of sending twice.",
+    "description": "Send addresses a message to a sleeve name, \"project:<id-or-name>\", \"orchestrator\" or \"owner\". Retrying with the same request_id returns the original message instead of sending twice.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1350,7 +1350,7 @@
           "type": "string"
         },
         "to": {
-          "description": "to is a sleeve name, \"project:\u003cid-or-name\u003e\", \"orchestrator\" or \"owner\".",
+          "description": "to is a sleeve name, \"project:<id-or-name>\", \"orchestrator\" or \"owner\".",
           "type": "string"
         }
       },
@@ -1756,7 +1756,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "ResleeveSleeve moves a chat sleeve to another harness on the same workspace, under the same name, without asking the outgoing harness anything. The hub takes the chat over (no other sender can start a turn), waits for it to be IDLE (interrupting a turn that runs past wait), composes facts in code (git status, diff --stat, recent commits, backlog and mail, the last user messages and the final assistant message from the outgoing harness's own transcript), has a separate model write a Goal/State/Unfinished/Next/Gotchas summary (the subscription with the most spare quota other than the outgoing harness, else pi with the local LLM), overwrites \u003cworkspace\u003e/.protectorate/HANDOFF.md (kept out of git through .git/info/exclude, archived under the hub's state directory), replaces the harness and sends it one plain user message naming the handoff. The summary runs while the outgoing turn winds down. The old native session stays on disk for a later resume. If the new harness cannot start, the old one is respawned on its own session. Announced as \"sleeve.resleeved\"; a summary by the fallback model, or none, also emits \"resleeve.warning\".",
+    "description": "ResleeveSleeve moves a chat sleeve to another harness on the same workspace, under the same name, without asking the outgoing harness anything. The hub takes the chat over (no other sender can start a turn), waits for it to be IDLE (interrupting a turn that runs past wait), composes facts in code (git status, diff --stat, recent commits, backlog and mail, the last user messages and the final assistant message from the outgoing harness's own transcript), has a separate model write a Goal/State/Unfinished/Next/Gotchas summary (the subscription with the most spare quota other than the outgoing harness, else pi with the local LLM), overwrites <workspace>/.protectorate/HANDOFF.md (kept out of git through .git/info/exclude, archived under the hub's state directory), replaces the harness and sends it one plain user message naming the handoff. The summary runs while the outgoing turn winds down. The old native session stays on disk for a later resume. If the new harness cannot start, the old one is respawned on its own session. Announced as \"sleeve.resleeved\"; a summary by the fallback model, or none, also emits \"resleeve.warning\".",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

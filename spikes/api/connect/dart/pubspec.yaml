@@ -1,7 +1,0 @@
-name: connect_spike
-publish_to: none
-environment:
-  sdk: ^3.7.0
-dependencies:
-  connectrpc: ^2.0.0
-  protobuf: ^6.0.0

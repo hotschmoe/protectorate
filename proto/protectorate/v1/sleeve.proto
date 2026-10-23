@@ -8,8 +8,6 @@ import "protectorate/v1/chat.proto";
 import "protectorate/v1/options.proto";
 import "protectorate/v1/token.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // SleeveService manages sleeves on the hub machine: one workspace plus one
 // harness, run inside a Linux namespace sandbox in a systemd scope with CPU and
 // memory limits. In chat mode (the default for agent harnesses) the harness

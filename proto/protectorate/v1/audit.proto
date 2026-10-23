@@ -5,8 +5,6 @@ package protectorate.v1;
 import "google/protobuf/timestamp.proto";
 import "protectorate/v1/options.proto";
 
-option go_package = "github.com/hotschmoe/protectorate/gen/protectorate/v1;protectoratev1";
-
 // AuditService reads the hub's audit log (docs/auth.md): every mutating call
 // and terminal attach, with who made it and how it ended. Only the owner
 // token may call it.
