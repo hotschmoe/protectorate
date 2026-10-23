@@ -49,7 +49,7 @@ fn private_ca_pem_from(
 }
 
 fn private_ca_config(pem: &[u8]) -> Result<Arc<rustls::ClientConfig>> {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     if pem.is_empty() || pem.len() > 1024 * 1024 {
         return Err(RpcError::invalid("TLS CA bundle must be under 1 MiB"));
     }
@@ -93,7 +93,7 @@ fn connect_websocket(
     request: tungstenite::http::Request<()>,
     pem: Option<&[u8]>,
 ) -> std::result::Result<Socket, ConnectError> {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     if let Some(pem) = pem {
         let config = match private_ca_config(pem) {
             Ok(config) => config,
@@ -666,7 +666,7 @@ mod tests {
 
     #[tokio::test]
     async fn private_ca_wss_accepts_only_the_pinned_trust_bundle() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let generated = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let wrong = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = generated.cert.pem();

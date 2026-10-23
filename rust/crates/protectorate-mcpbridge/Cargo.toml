@@ -11,7 +11,7 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 serde_json = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
 rustls-pemfile = "2"
 futures-core = "0.3"
 getrandom = "0.2"

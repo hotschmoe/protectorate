@@ -54,7 +54,7 @@ pub(crate) fn tls_config(cert: &Path, key: &Path) -> io::Result<Arc<rustls::Serv
 }
 
 fn ensure_provider() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 fn private_file(path: &Path, key: bool) -> io::Result<File> {

@@ -29,7 +29,7 @@ const MAX_PEM_BYTES: u64 = 1024 * 1024;
 mod windows;
 
 pub fn tls_config(cert: &Path, key: &Path) -> Result<Arc<rustls::ServerConfig>> {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let cert = private_file(cert, false).map_err(|error| tls_file_error("certificate", error))?;
     let key = private_file(key, true).map_err(|error| tls_file_error("key", error))?;
     let certs = rustls_pemfile::certs(&mut BufReader::new(cert))
