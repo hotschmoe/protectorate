@@ -179,7 +179,7 @@ async fn job_run_and_logs_stream_through_real_hub_and_node() {
         .unwrap();
         assert_eq!(
             canceled.status.code(),
-            Some(1),
+            Some(130),
             "{}",
             String::from_utf8_lossy(&canceled.stderr)
         );
