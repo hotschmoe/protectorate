@@ -149,7 +149,7 @@ fn installed_cli_reports_missing_hub_companion() {
     let empty_path = tempfile::tempdir().unwrap();
     let output = Command::new(&cli)
         .env("PATH", empty_path.path())
-        .args(["hub", "tailnet", "install"])
+        .args(["hub", "backup"])
         .output_retry()
         .unwrap();
     assert!(!output.status.success());

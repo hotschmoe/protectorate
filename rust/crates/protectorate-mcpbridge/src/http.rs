@@ -121,9 +121,8 @@ pub async fn serve(
         .map_err(|error| RpcError::new(Code::Internal, format!("serve MCP HTTP: {error}")))
 }
 
-/// Plain HTTP carries the bearer in the clear. An IP within a tailnet's
-/// address range does not prove that the interface is actually WireGuard.
-/// Keep this listener on loopback until the transport can verify that fact.
+/// Plain HTTP carries the bearer in the clear, so it stays on loopback; a
+/// private address does not prove the path to it is encrypted.
 pub fn validate_listen(listen: &str) -> Result<()> {
     let refused = |reason: &str| {
         RpcError::invalid(format!(

@@ -10,12 +10,16 @@ class HubProfile {
     required this.name,
     required this.baseUrl,
     this.token = '',
+    this.caPem = '',
   });
 
   final String id;
   final String name;
   final String baseUrl;
   final String token;
+  // caPem is the hub's private CA from its pairing link; empty trusts the
+  // platform roots.
+  final String caPem;
 
   Uri get baseUri => Uri.parse(baseUrl);
 
@@ -38,6 +42,7 @@ class HubProfile {
     'name': name,
     'baseUrl': baseUrl,
     'token': token,
+    'caPem': caPem,
   };
 
   factory HubProfile.fromJson(Map<String, Object?> json) => HubProfile(
@@ -45,6 +50,7 @@ class HubProfile {
     name: json['name'] as String,
     baseUrl: json['baseUrl'] as String,
     token: (json['token'] as String?) ?? '',
+    caPem: (json['caPem'] as String?) ?? '',
   );
 
   @override
@@ -53,10 +59,11 @@ class HubProfile {
       other.id == id &&
       other.name == name &&
       other.baseUrl == baseUrl &&
-      other.token == token;
+      other.token == token &&
+      other.caPem == caPem;
 
   @override
-  int get hashCode => Object.hash(id, name, baseUrl, token);
+  int get hashCode => Object.hash(id, name, baseUrl, token, caPem);
 }
 
 String? validateBaseUrl(String value) {

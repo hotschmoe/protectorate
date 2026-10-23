@@ -105,7 +105,7 @@ pub fn systemd(spec: &Spec) -> Result<String, Error> {
         "ExecStart={words}\nRestart=on-failure\nRestartSec=5\n"
     ));
     if spec.role == ROLE_HUB {
-        out.push_str("# A SIGKILLed hub must not orphan the headscale child it supervises.\nKillMode=control-group\n# hub drain plus headscale SIGTERM grace (10s) before SIGKILL.\nTimeoutStopSec=45\n");
+        out.push_str("KillMode=control-group\n# Time for the hub to drain before SIGKILL.\nTimeoutStopSec=45\n");
     } else {
         out.push_str("KillMode=control-group\nTimeoutStopSec=20\n");
     }

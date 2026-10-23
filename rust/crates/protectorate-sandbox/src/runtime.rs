@@ -969,7 +969,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         environment.insert("NODE_USE_ENV_PROXY".into(), "1".into());
     }
     let unit = format!(
-        "protectorate-rust-{}-{}.scope",
+        "protectorate-{}-{}.scope",
         std::process::id(),
         root.path().file_name().unwrap().to_string_lossy()
     );
@@ -1851,7 +1851,7 @@ pub fn helper_main() -> Result<i32> {
                     .file_name()
                     .and_then(OsStr::to_str)
                     .is_some_and(|name| {
-                        name.starts_with("protectorate-rust-") && name.ends_with(".scope")
+                        name.starts_with("protectorate-") && name.ends_with(".scope")
                     })
             {
                 return invalid("direct scope is outside delegated parent");

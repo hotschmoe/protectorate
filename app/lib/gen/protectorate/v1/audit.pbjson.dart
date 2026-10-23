@@ -74,7 +74,6 @@ const AuditEntry$json = {
     },
     {'1': 'actor', '3': 2, '4': 1, '5': 9, '10': 'actor'},
     {'1': 'token_id', '3': 3, '4': 1, '5': 9, '10': 'tokenId'},
-    {'1': 'tailnet', '3': 4, '4': 1, '5': 9, '10': 'tailnet'},
     {'1': 'procedure', '3': 5, '4': 1, '5': 9, '10': 'procedure'},
     {'1': 'subject', '3': 6, '4': 1, '5': 9, '10': 'subject'},
     {'1': 'outcome', '3': 7, '4': 1, '5': 9, '10': 'outcome'},
@@ -82,16 +81,18 @@ const AuditEntry$json = {
     {'1': 'task', '3': 9, '4': 1, '5': 9, '10': 'task'},
     {'1': 'detail', '3': 10, '4': 1, '5': 9, '10': 'detail'},
   ],
+  '9': [
+    {'1': 4, '2': 5},
+  ],
 };
 
 /// Descriptor for `AuditEntry`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List auditEntryDescriptor = $convert.base64Decode(
     'CgpBdWRpdEVudHJ5Ei4KBHRpbWUYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wUg'
-    'R0aW1lEhQKBWFjdG9yGAIgASgJUgVhY3RvchIZCgh0b2tlbl9pZBgDIAEoCVIHdG9rZW5JZBIY'
-    'Cgd0YWlsbmV0GAQgASgJUgd0YWlsbmV0EhwKCXByb2NlZHVyZRgFIAEoCVIJcHJvY2VkdXJlEh'
-    'gKB3N1YmplY3QYBiABKAlSB3N1YmplY3QSGAoHb3V0Y29tZRgHIAEoCVIHb3V0Y29tZRISCgRj'
-    'b2RlGAggASgJUgRjb2RlEhIKBHRhc2sYCSABKAlSBHRhc2sSFgoGZGV0YWlsGAogASgJUgZkZX'
-    'RhaWw=');
+    'R0aW1lEhQKBWFjdG9yGAIgASgJUgVhY3RvchIZCgh0b2tlbl9pZBgDIAEoCVIHdG9rZW5JZBIc'
+    'Cglwcm9jZWR1cmUYBSABKAlSCXByb2NlZHVyZRIYCgdzdWJqZWN0GAYgASgJUgdzdWJqZWN0Eh'
+    'gKB291dGNvbWUYByABKAlSB291dGNvbWUSEgoEY29kZRgIIAEoCVIEY29kZRISCgR0YXNrGAkg'
+    'ASgJUgR0YXNrEhYKBmRldGFpbBgKIAEoCVIGZGV0YWlsSgQIBBAF');
 
 const $core.Map<$core.String, $core.dynamic> AuditServiceBase$json = {
   '1': 'AuditService',

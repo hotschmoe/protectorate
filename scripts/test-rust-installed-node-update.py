@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Exercise node binary update and rollback in a disposable systemd user unit.
 
-The fixture leaves its files for inspection and never addresses the installed
-protectorate-node.service unit.
+A disposable hub with a TLS listener invites the node, the node joins it, and
+every node call goes through the hub over mutual TLS. The fixture leaves its
+files for inspection and never addresses the installed protectorate-node.service
+unit.
 """
 
 import hashlib
@@ -25,7 +27,7 @@ DEBUG = (TARGET if TARGET.is_absolute() else ROOT / TARGET) / "debug"
 FIRST = "0.1.0"
 SECOND = "0.1.1"
 FAILED = "0.1.2"
-METHOD = "http://127.0.0.1:{port}/protectorate.v1.NodeAgentService/{method}"
+OWNER = "node-update-fixture-owner-token"
 
 
 def run(*args, **kwargs):
@@ -62,11 +64,11 @@ def build_server(version, destination):
     assert json.loads(reported.stdout)["version"] == version, reported.stdout
 
 
-def call(port, token, method, body, timeout=5):
+def hub_call(hub, method, body, timeout=10):
     request = urllib.request.Request(
-        METHOD.format(port=port, method=method),
+        f"{hub}/protectorate.v1.{method}",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + OWNER},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -75,22 +77,65 @@ def call(port, token, method, body, timeout=5):
         return error.code, json.load(error)
 
 
-def metrics(port, token):
+def start_hub(fixture, hub_exe, *extra):
+    """Starts a hub beside its sleeve companions; returns (process, plain URL)."""
+    for filename in ("protectorate-sleeve-runner", "protectorate-sleeve-sandbox-helper"):
+        companion = DEBUG / filename
+        assert companion.is_file(), f"build {filename} first"
+        shutil.copy2(companion, hub_exe.parent / filename)
+    token = fixture / "owner-token"
+    token.write_text(OWNER + "\n")
+    token.chmod(0o600)
+    plain, tls = free_port(), free_port()
+    hub = f"http://127.0.0.1:{plain}"
+    log = (fixture / "hub.log").open("w")
+    process = subprocess.Popen(
+        (str(hub_exe), "serve", "--home", str(fixture / "hub-state"),
+         "--owner-token-file", str(token), "--listen", f"127.0.0.1:{plain}",
+         "--tls-listen", f"127.0.0.1:{tls}", "--node-interval", "1s", *extra),
+        stdout=log, stderr=subprocess.STDOUT,
+    )
+
+    def ready():
+        assert process.poll() is None, (fixture / "hub.log").read_text()
+        try:
+            return hub_call(hub, "HubService/GetStatus", {})[0] == 200
+        except (ConnectionError, urllib.error.URLError):
+            return False
+
+    wait_until("hub", ready)
+    return process, hub
+
+
+def join(hub, fixture, node_exe, home, name, port):
+    """Invites `name` and joins `home` to the fixture hub on 127.0.0.1:`port`."""
+    status, invite = hub_call(hub, "NodeService/InviteNode", {"name": name, "tier": "care"})
+    assert status == 200, invite
+    run(node_exe, "node", "join", "--hub", invite["hubUrl"], "--code", invite["code"],
+        "--ca-cert", str(fixture / "hub-state/ca/ca.pem"),
+        "--name", name, "--listen", f"127.0.0.1:{port}", "--home", str(home))
+
+
+def metrics(hub, name):
+    """The node's agent version from a fresh hub poll, else None."""
     try:
-        status, body = call(port, token, "GetMetrics", {})
-        return body.get("agentVersion") if status == 200 else None
+        status, body = hub_call(hub, "NodeService/GetNode", {"name": name})
     except (ConnectionError, TimeoutError, urllib.error.URLError):
         return None
+    if status != 200 or body.get("freshness") != "NODE_FRESHNESS_FRESH":
+        return None
+    return body.get("metrics", {}).get("agentVersion")
 
 
-def apply(port, token, staged, filename, version):
+def apply(hub, name, staged, filename, version):
     body = {
+        "name": name,
         "path": filename,
         "size": str(staged.stat().st_size),
         "sha256": hashlib.sha256(staged.read_bytes()).hexdigest(),
         "expectedVersion": version,
     }
-    status, reply = call(port, token, "ApplyUpdate", body, timeout=90)
+    status, reply = hub_call(hub, "NodeService/ApplyUpdate", body, timeout=90)
     assert status == 200, (status, reply)
     assert reply["version"] == version, reply
 
@@ -143,29 +188,28 @@ def main():
         "exit 42\n"
     )
     failed.chmod(0o755)
-    token = "node-update-fixture-token"
-    token_path = fixture / "agent-token"
-    token_path.write_text(token + "\n")
-    token_path.chmod(0o600)
+    hub_bin = fixture / "hub-bin"
+    hub_bin.mkdir()
+    shutil.copy2(second, hub_bin / "protectorate-rs")
+    hub_process, hub = start_hub(fixture, hub_bin / "protectorate-rs")
     port = free_port()
-    unit = f"protectorate-rust-node-update-trial-{os.getpid()}.service"
+    join(hub, fixture, exe, state, "trial-peer", port)
+    unit = f"protectorate-node-update-trial-{os.getpid()}.service"
     marker_path = pathlib.Path(str(exe) + ".update")
     try:
         run("systemd-run", "--user", "--collect", "--unit", unit,
             "--property=Type=exec", "--property=KillMode=control-group",
             "--property=Restart=no", str(exe), "node", "serve",
-            "--home", str(state), "--agent-token-file", str(token_path),
-            "--file-root", str(staged), "--allow-plain-jobs",
-            "--listen", f"127.0.0.1:{port}")
-        wait_until("initial node", lambda: metrics(port, token) == FIRST)
+            "--home", str(state), "--file-root", str(staged), "--allow-plain-jobs")
+        wait_until("initial node", lambda: metrics(hub, "trial-peer") == FIRST)
         guardian = run("systemctl", "--user", "show", unit, "--property=MainPID", "--value",
                        capture_output=True).stdout.strip()
         assert guardian not in ("", "0")
 
         staged_second = staged / "second"
         shutil.copy2(second, staged_second)
-        apply(port, token, staged_second, staged_second.name, SECOND)
-        wait_until("updated node", lambda: metrics(port, token) == SECOND)
+        apply(hub, "trial-peer", staged_second, staged_second.name, SECOND)
+        wait_until("updated node", lambda: metrics(hub, "trial-peer") == SECOND)
         wait_until("confirmed update", lambda: marker(marker_path, "confirmed"))
         assert hashlib.sha256(exe.read_bytes()).digest() == hashlib.sha256(second.read_bytes()).digest()
         assert run("systemctl", "--user", "show", unit, "--property=MainPID", "--value",
@@ -173,9 +217,9 @@ def main():
 
         staged_failed = staged / "failed"
         shutil.copy2(failed, staged_failed)
-        apply(port, token, staged_failed, staged_failed.name, FAILED)
+        apply(hub, "trial-peer", staged_failed, staged_failed.name, FAILED)
         wait_until("failed candidate rollback", lambda: marker(marker_path, "rolledback"))
-        wait_until("restored node", lambda: metrics(port, token) == SECOND)
+        wait_until("restored node", lambda: metrics(hub, "trial-peer") == SECOND)
         assert hashlib.sha256(exe.read_bytes()).digest() == hashlib.sha256(second.read_bytes()).digest()
         assert run("systemctl", "--user", "show", unit, "--property=MainPID", "--value",
                    capture_output=True).stdout.strip() == guardian
@@ -183,6 +227,8 @@ def main():
         print("installed Rust node update, confirmation, and failed-candidate rollback passed", flush=True)
     finally:
         subprocess.run(("systemctl", "--user", "stop", unit), check=False)
+        hub_process.terminate()
+        hub_process.wait(timeout=10)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,6 @@ pub const TOKEN_FILE_ENV: &str = "PROTECTORATE_TOKEN_FILE";
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
 const STATUS: &str = "/protectorate.v1.HubService/GetStatus";
-const TAILNET_STATUS: &str = "/protectorate.v1.TailnetService/GetStatus";
 const GET_QUOTA: &str = "/protectorate.v1.QuotaService/GetQuota";
 const SUGGEST_QUOTA: &str = "/protectorate.v1.QuotaService/Suggest";
 const SLEEVE_RUNTIME: &str = "/protectorate.v1.HubService/GetSleeveRuntime";
@@ -591,7 +590,6 @@ pub enum Command {
         channel: String,
         version: String,
     },
-    TailnetStatus,
     Quota {
         refresh: bool,
     },
@@ -674,6 +672,7 @@ pub enum Command {
         tier: String,
         tags: Vec<String>,
         notes: String,
+        update: bool,
     },
     NodeRemove {
         name: String,
@@ -877,9 +876,7 @@ fn usage() -> &'static str {
      protectorate-cli [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
      Commands:\n  \
      status                      hub version, host and uptime\n  \
-     hub serve                   run the local Rust hub (--home, --listen, --tls-cert, --tls-key, and serve flags)\n  \
-     hub tailnet install         install the pinned local Headscale binary (--home)\n  \
-     hub tailnet init            write local tailnet config (--server-url URL, --home, and network flags)\n  \
+     hub serve                   run the local Rust hub (--home, --listen, --tls-listen, --tls-name, and serve flags)\n  \
      hub backup                  snapshot local hub state (--home, --to DIR)\n  \
      hub restore FILE            restore into an empty state directory (--home DIR required)\n  \
      hub publish-flutter-cache   publish the Flutter SDK download cache (--home, --flutter-sdk-root, --max-bytes)\n  \
@@ -891,9 +888,6 @@ fn usage() -> &'static str {
      service windows-task       print Task Scheduler XML (--binary, --home, --trigger, --write)\n  \
      service install-windows    print Windows service registration commands (--binary, --home, --write)\n  \
      service termux             print Termux runit run and Termux:Boot scripts (--binary, --home, --write, --install; serve flags after --)\n  \
-     tailnet status              connected hub identity and peers\n  \
-     client invite --name NAME   create a single-use Tailscale client key locally (--expires, --home)\n  \
-     client register <key>       approve a Tailscale app registration locally (--home)\n  \
      quota [--refresh]           subscription usage, resets and projected unused capacity\n  \
      quota suggest [--for small|medium|large] [--refresh]  rank chat harness capacity\n  \
      token create <name>        issue a scoped token (--scope repeated, --ttl 720h; secret shown once)\n  \
@@ -907,7 +901,7 @@ fn usage() -> &'static str {
      devices revoke <id>        revoke a device and disconnect its streams immediately\n  \
      devices rename <id> <name> rename a trusted device\n  \
      login [--name NAME] [--platform OS/ARCH] [--home DIR]  pair this machine with --hub through device approval\n  \
-     pair [--url URL] [--app]  print a public pairing link and terminal QR\n  \
+     pair [--url URL] [--app]  print a public pairing link and terminal QR; it carries the CA in PROTECTORATE_TLS_CA_CERT\n  \
      grant admin               mint a task grant (--node NAME|GLOB, --task TEXT, --ttl 4h, --out FILE)\n  \
      audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --page-token)\n  \
      who [project|sleeve]       show projects, owning sleeves and dependency edges\n  \
@@ -915,16 +909,14 @@ fn usage() -> &'static str {
      node ls | node list        every node with its latest metrics summary\n  \
      node show <name>           one node with full metrics\n  \
      node metrics --local       collect this machine's metrics without a hub (--watch DIR repeated)\n  \
-     node add <name> --addr HOST  add a node (--ssh, --tier, --tag, --notes)\n  \
+     node add <name> --addr HOST  add a node, or with --update change a joined node's address (--ssh, --tier, --tag, --notes)\n  \
      node rm <name>             drain, revoke and remove (--jobs wait|cancel, --wait-timeout, --uninstall)\n  \
      node tier <name> shared|care  retag and change a node's tier\n  \
      node update <name> | --all  push the hub release (--force, --no-wait)\n  \
-     node serve                run this machine's Rust node agent (--agent-token-file FILE, --home DIR, --file-root DIR, --file-unconfined, --job-concurrency N, --sandbox-helper FILE, --allow-plain-jobs, --watch-dir DIR, --docker-host URL, --listen IP:PORT, --tls-cert FILE --tls-key FILE)\n  \
-     node doctor               inspect this machine's Rust node install (--home DIR, --hub URL, --ca-cert FILE, --json)\n  \
-     node join                 enroll this machine with Headscale (--control URL, --key-file FILE, --home DIR)\n  \
-     node renew <name>         extend an enrolled node's key using the local hub (--home DIR)\n  \
-     node revoke <name>        revoke an enrolled node using the local hub (--home DIR)\n  \
-     node invite <name>         issue a single-use enrollment key (--tier, --pool, --expires, --url)\n  \
+     node serve                run this machine's Rust node agent over mutual TLS (--home DIR, --listen IP:PORT, --file-root DIR, --file-unconfined, --job-concurrency N, --sandbox-helper FILE, --allow-plain-jobs, --watch-dir DIR, --docker-host URL)\n  \
+     node doctor               inspect this machine's Rust node install (--home DIR, --json)\n  \
+     node join                 join a hub with an invite code (--hub URL, --ca-cert FILE, --code CODE or PROTECTORATE_JOIN_CODE, --name, --listen IP:PORT, --home DIR)\n  \
+     node invite <name>         issue a single-use join code (--tier, --pool, --expires, --url)\n  \
      node put <node> <local> <remote>  copy file or directory to a node (-f, --no-compress)\n  \
      node get <node> <remote> <local>  copy file or directory from a node (-f, --no-compress)\n  \
      backlog ls | backlog list  notes, pinned first (--project, --query, --state open|done|all, --all)\n  \
@@ -1008,7 +1000,7 @@ fn usage() -> &'static str {
      Hub URL defaults to http://127.0.0.1:7470 or $PROTECTORATE_HUB. The bearer\n  \
      token comes from --token-file, $PROTECTORATE_TOKEN_FILE or $PROTECTORATE_TOKEN,\n  \
      and otherwise from the device credential login saved for that hub under\n  \
-     --home, $PROTECTORATE_HOME or $HOME/.protectorate-rust.\n"
+     --home, $PROTECTORATE_HOME or $HOME/.protectorate.\n"
 }
 
 fn command_usage(path: &str) -> Result<String> {
@@ -1541,14 +1533,6 @@ fn execute_commands(
                 Ok(format::status_text(&status, runtime.as_ref()))
             }
         }
-        Command::TailnetStatus => {
-            let status = client.call(TAILNET_STATUS, &json!({}))?;
-            if json {
-                json_line(&status)
-            } else {
-                Ok(format::tailnet_status_text(&status))
-            }
-        }
         Command::Quota { refresh } => {
             let quota = client.call(GET_QUOTA, &json!({"refresh": refresh}))?;
             if json {
@@ -1745,8 +1729,9 @@ fn execute_commands(
             tier,
             tags,
             notes,
+            update,
         } => {
-            let node = client.call(ADD_NODE, &json!({"node": {"name": name, "address": address, "sshAlias": ssh_alias, "tier": tier, "tags": tags, "notes": notes}}))?;
+            let node = client.call(ADD_NODE, &json!({"node": {"name": name, "address": address, "sshAlias": ssh_alias, "tier": tier, "tags": tags, "notes": notes}, "update": update}))?;
             if json {
                 json_line(&node)
             } else {

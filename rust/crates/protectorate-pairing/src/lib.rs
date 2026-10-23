@@ -13,6 +13,7 @@ pub struct PairLinks {
 #[derive(Debug)]
 pub enum Error {
     InvalidUrl,
+    InvalidCa,
     QrTooLong,
     Io(io::Error),
 }
@@ -23,6 +24,7 @@ impl std::fmt::Display for Error {
             Self::InvalidUrl => f.write_str(
                 "pair URL must be http:// or https:// without credentials, query or fragment",
             ),
+            Self::InvalidCa => f.write_str("pair CA must be one PEM certificate"),
             Self::QrTooLong => f.write_str("pair link is too long for a QR code"),
             Self::Io(error) => write!(f, "write pairing QR: {error}"),
         }
@@ -47,8 +49,10 @@ impl From<io::Error> for Error {
 /// Construct browser and native-app links from a public hub URL.
 ///
 /// The URL may include a path prefix. An empty query or fragment is rejected as
-/// well, since it would be ambiguous when adding the pairing route.
-pub fn new_pair_links(base_url: &str) -> Result<PairLinks, Error> {
+/// well, since it would be ambiguous when adding the pairing route. `ca_pem`
+/// is the hub CA the native app must trust; it travels as base64url DER in
+/// `ca`, so the link itself is the trust anchor.
+pub fn new_pair_links(base_url: &str, ca_pem: Option<&str>) -> Result<PairLinks, Error> {
     if base_url.is_empty()
         || base_url
             .chars()
@@ -69,7 +73,28 @@ pub fn new_pair_links(base_url: &str) -> Result<PairLinks, Error> {
         return Err(Error::InvalidUrl);
     }
     let base = base_url.trim_end_matches('/');
-    let query = format!("url={}", utf8_percent_encode(base, NON_ALPHANUMERIC));
+    let mut query = format!("url={}", utf8_percent_encode(base, NON_ALPHANUMERIC));
+    if let Some(pem) = ca_pem {
+        let pem = pem.trim();
+        let body = pem
+            .strip_prefix("-----BEGIN CERTIFICATE-----")
+            .and_then(|rest| rest.strip_suffix("-----END CERTIFICATE-----"))
+            .ok_or(Error::InvalidCa)?
+            .split_whitespace()
+            .collect::<String>();
+        if body.is_empty()
+            || !body
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+        {
+            return Err(Error::InvalidCa);
+        }
+        let der = body
+            .trim_end_matches('=')
+            .replace('+', "-")
+            .replace('/', "_");
+        query.push_str(&format!("&ca={der}"));
+    }
     Ok(PairLinks {
         web: format!("{base}/#/pair?{query}"),
         app: format!("protectorate://pair?{query}"),

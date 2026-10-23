@@ -138,13 +138,13 @@ fn default_home() -> Result<String, String> {
         .or_else(|| {
             if cfg!(windows) {
                 env::var_os("LOCALAPPDATA")
-                    .map(|local| PathBuf::from(local).join("Protectorate-Rust-Node"))
+                    .map(|local| PathBuf::from(local).join("Protectorate-Node"))
                     .or_else(|| {
                         env::var_os("USERPROFILE")
-                            .map(|home| PathBuf::from(home).join(".protectorate-rust"))
+                            .map(|home| PathBuf::from(home).join(".protectorate"))
                     })
             } else {
-                env::var_os("HOME").map(|home| PathBuf::from(home).join(".protectorate-rust"))
+                env::var_os("HOME").map(|home| PathBuf::from(home).join(".protectorate"))
             }
         })
         .ok_or("state home is unset; pass --home")?;

@@ -267,7 +267,7 @@ class _AuditScreenState extends State<AuditScreen> {
   }
 }
 
-const _flex = [3, 3, 3, 4, 2, 4];
+const _flex = [3, 3, 4, 2, 4];
 
 class _HeadRow extends StatelessWidget {
   const _HeadRow();
@@ -275,14 +275,7 @@ class _HeadRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
-    const heads = [
-      'TIME',
-      'ACTOR',
-      'TAILNET',
-      'PROCEDURE',
-      'SUBJECT',
-      'OUTCOME',
-    ];
+    const heads = ['TIME', 'ACTOR', 'PROCEDURE', 'SUBJECT', 'OUTCOME'];
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
       child: Row(
@@ -343,15 +336,14 @@ class AuditRow extends StatelessWidget {
           children: [
             cell(time, 0, style: t.small()),
             cell(e.actor, 1, style: t.data(t.p.emph)),
-            cell(e.tailnet, 2, style: t.small()),
-            cell(shortProcedure(e.procedure), 3),
+            cell(shortProcedure(e.procedure), 2),
             cell(
               e.task.isEmpty ? e.subject : '${e.subject} [task: ${e.task}]',
-              4,
+              3,
               style: t.data(t.p.emph),
             ),
             Expanded(
-              flex: _flex[5],
+              flex: _flex[4],
               child: Row(
                 children: [
                   outcome,
@@ -396,8 +388,6 @@ class AuditRow extends StatelessWidget {
             TextSpan(
               children: [
                 TextSpan(text: e.actor, style: t.small(t.p.emph)),
-                if (e.tailnet.isNotEmpty)
-                  TextSpan(text: ' @ ${e.tailnet}', style: t.small()),
                 if (e.subject.isNotEmpty) ...[
                   TextSpan(text: '  >  ', style: t.small(t.p.legend)),
                   TextSpan(text: e.subject, style: t.small(t.p.emph)),

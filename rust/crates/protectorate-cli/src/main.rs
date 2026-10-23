@@ -94,7 +94,7 @@ fn main() -> ExitCode {
             }
         };
     }
-    if let Some(forwarded) = node_tailnet_alias_argv(&args) {
+    if let Some(forwarded) = node_join_alias_argv(&args) {
         return match forwarded {
             Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
             Err(message) => {
@@ -106,15 +106,6 @@ fn main() -> ExitCode {
     if let Some(forwarded) = node_serve_alias_argv(&args) {
         return match forwarded {
             Ok(forwarded) => run_server_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = client_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
             Err(message) => {
                 eprintln!("error: {message}");
                 ExitCode::FAILURE
@@ -417,8 +408,7 @@ fn run_mcp_companion(forwarded: &McpForward) -> ExitCode {
 
 /// `protectorate node install ...` forwards to the companion's node install.
 /// Install flags after the subcommand are passed through verbatim; the
-/// global RPC options are ignored. The hub API URL can differ from the
-/// Headscale control URL, so enrollment requires an explicit --control.
+/// global RPC options are ignored; joining takes its own --hub HTTPS URL.
 fn install_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
     let at = args
         .windows(2)
@@ -485,49 +475,23 @@ fn node_serve_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>>
     node_local_alias_argv(args, "serve", NODE_SERVE_LOCAL_OPTIONS, None)
 }
 
-/// Node enrollment and local Headscale administration live in the companion.
-/// The Windows companion supports joining a node; a Rust hub is Unix-only.
-fn node_tailnet_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
+/// Joining a hub creates this machine's key and certificate, so the companion
+/// runs it locally.
+fn node_join_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
     let at = local_root_at(args, "node")?;
-    let action = args.get(at + 1)?.as_str();
-    if !matches!(action, "join" | "renew" | "revoke") {
+    if args.get(at + 1)? != "join" {
         return None;
     }
-    let leading = local_alias_leading(args, at, &format!("node {action}"), &[("--home", true)])?;
-    if cfg!(windows) && matches!(action, "renew" | "revoke") {
-        return Some(Err(format!(
-            "node {action} administers the local Rust hub and is unavailable in the Windows node companion"
-        )));
-    }
+    let leading = local_alias_leading(args, at, "node join", &[("--home", true)])?;
     Some(leading.map(|leading| {
-        let mut forwarded = vec!["node".to_owned(), action.to_owned()];
+        let mut forwarded = vec!["node".to_owned(), "join".to_owned()];
         forwarded.extend(leading);
         forwarded.extend_from_slice(&args[at + 2..]);
         forwarded
     }))
 }
 
-/// Client enrollment administers the local Headscale instance, so the public
-/// CLI forwards it to the installed Rust hub companion instead of the hub API.
-fn client_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    let at = local_root_at(args, "client")?;
-    if !matches!(
-        args.get(at + 1).map(String::as_str),
-        Some("invite" | "register")
-    ) {
-        return None;
-    }
-    let action = &args[at + 1];
-    let leading = local_alias_leading(args, at, &format!("client {action}"), &[("--home", true)])?;
-    Some(leading.map(|leading| {
-        let mut forwarded = vec!["client".to_owned(), action.clone()];
-        forwarded.extend(leading);
-        forwarded.extend_from_slice(&args[at + 2..]);
-        forwarded
-    }))
-}
-
-/// Hub startup, tailnet setup, backup/restore and cache publication are local
+/// Hub startup, backup/restore and cache publication are local
 /// operations owned by the Rust hub companion. `hub update` remains an
 /// authenticated hub RPC.
 fn hub_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
@@ -540,11 +504,6 @@ fn hub_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
         Some("publish-flutter-tools") => (2, &["hub", "publish-flutter-tools"]),
         Some("publish-pub-cache") => (2, &["hub", "publish-pub-cache"]),
         Some("publish-go-mod-cache") => (2, &["hub", "publish-go-mod-cache"]),
-        Some("tailnet") => match args.get(at + 2).map(String::as_str) {
-            Some("install") => (3, &["hub", "tailnet", "install"]),
-            Some("init") => (3, &["hub", "tailnet", "init"]),
-            _ => return None,
-        },
         _ => return None,
     };
     let label = args[at..at + consumed].join(" ");

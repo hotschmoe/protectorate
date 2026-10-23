@@ -7,6 +7,16 @@ client UI during this phase. The Android app is outside this migration phase.
 The Linux sleeve and shared-node sandbox replacement is scoped from actual
 workloads and recent host incidents in [rust-sandbox.md](rust-sandbox.md).
 
+## Network
+
+The hand-written tailnet (Headscale supervision, tsnet-style member, DERP,
+WireGuard, userspace TCP; about 15,000 lines and an external Headscale binary)
+is gone. The owner's routers provide site-to-site and road-warrior WireGuard;
+Protectorate binds private addresses only and authenticates every peer with
+certificates from the hub CA. Every hub and node is installed fresh: nodes and
+devices pair again under this model, and no Go or tailnet state is imported.
+See [install.md](install.md#network-model).
+
 ## Current Rust crates
 
 | Crate | Go package | Status |
@@ -28,25 +38,11 @@ workloads and recent host incidents in [rust-sandbox.md](rust-sandbox.md).
 | `protectorate-svcgen` | `internal/svcgen` | Systemd, Windows and Termux service definitions are available through public `protectorate service systemd`, `windows-task`, `install-windows` and `termux` commands; generated hub units invoke the Rust server, file output does not overwrite existing definitions, and Termux `--install` writes only into a validated Termux prefix and home. The Android app is outside this rewrite |
 | `protectorate-lease` | `internal/hub/leases.go` | Persistent leases, expiration and priority wait queue ported; all four LeaseService RPCs wired to the Rust hub and tested over HTTP. Queued grants send an idempotent mailbox notice to the waiting sleeve. Default selection requires a fresh node poll |
 | `protectorate-quota` | `internal/quota`, `internal/hub/suggest.go` | Provider reads, cache and harness ranking ported; GetQuota and Suggest wired to the hub with startup and periodic refresh. A real Rust hub now passes the closed-stdout Codex peer cleanup E2E: quota is published only after its process is reaped. Windows quota readers now launch suspended into a kill-on-close Job Object; a native officewin test confirms cleanup terminates a grandchild that inherited stdout. |
-| `protectorate-backup` | `internal/backup` | Verified Rust-native archive and restore flow includes identity, sleeves, job records/logs and published job artifact trees, desk policy/use state, archived handoffs and durable member enrollment keys; transient staging, homes, workspaces and harness credentials stay excluded. Backup refuses a snapshot when a retained job record references an artifact absent from the archive. Restore tests reopen the sleeve registry, desk policy, job record and artifact bytes through a real hub; a crate round-trip verifies archived job, handoff and member files. Rust CLI has `hub backup`/`hub restore`, and `serve --backup-dir` schedules snapshots. Tailnet supervisor coordinates its database backup lock; a disposable live supervisor pause and restart test passes. Broader installed-service recovery remains unverified |
-| `protectorate-tailnet` | `internal/tailnet/config.go` | Validated Headscale config, narrow tag ACLs and pinned private DERP map rendering; process supervisor, bounded restart, private logs and backup coordination are wired to hub startup. Hub startup now reconciles and registers durable `tag:hub` control membership over Noise, with a real Headscale restart/recovery test. Authenticated packet transport and virtual tailnet listeners are now wired; wider network conditions still need validation |
-| `protectorate-tailnet-install` | `internal/tailnet/install.go` | Pinned Headscale 0.29.5 Linux amd64/arm64 download with bounded size, SHA-256 verification and atomic executable install; `hub tailnet install` and `hub tailnet init` are wired |
-| `protectorate-tailnet-admin` | Headscale admin API | Health, policy user, invite/key, expiry, revoke and tier tag operations; wired to hub startup, RemoveNode, SetNodeTier, and InviteNode. Invites record pending inventory and expire old keys on reinvite. A background worker enforces configured key lifetime. An isolated installed x86_64 node remained fresh in hub GetNode polling for 96 seconds; a later isolated trial also passed a named job and verified 1.5 MB and 5.5 MB file round trips. Relay loss and longer running work still need real-network validation |
-| `protectorate-derp` | private DERP server | Rust TLS DERP and STUN relay with certificate pinning, fail-closed local admission and bounded clients. A disposable test relayed a packet between real Tailscale Go DERP clients; broader network and restart behavior remain to be validated |
-| `protectorate-tailnet-member` | embedded tsnet client | Durable machine and node identity, origin-bound Headscale control-key discovery, verified HTTP/HTTPS TS2021 Noise upgrade and encrypted HTTP/2 registration/streaming. Disposable Headscale 0.29.5 tests passed registration and HTTPS trust/hostname rejection. `node join` stores registration, disco identity and optional private HTTPS CA trust for reconnecting map polls. Its output distinguishes registration from a running tailnet listener and from hub-to-node service authorization |
-| `protectorate-tailnet-map` | tailnet netmap | Separate bounded map request, frame parser and state reducer for peer, DERP, profile and packet-filter updates. Authenticated local UDP endpoint reporting was verified with two disposable Headscale 0.29.5 members: each published an endpoint and received the other's exact endpoint in its netmap. Packet filters and hub/node virtual listeners are wired; wider network conditions remain |
-| `protectorate-tailnet-discovery` | tsnet disco identity | Durable owner-only X25519 disco key in the node state, with the public `discokey:` value persisted by `node join`. The runtime now binds a UDP socket before publishing its local endpoint through authenticated map polling. A two-member Headscale HTTP test passes with published endpoints; NAT discovery and changing public endpoints remain |
-| `protectorate-tailnet-poll` | tsnet map poll | Validates joined node and disco identities against durable private keys, streams the Headscale map over authenticated Noise using optional saved private HTTPS CA, applies bounded updates, reconnects with backoff and clears stale peer snapshots on disconnect. A bounded watch channel carries poll generations so the packet engine can detect missed disconnects. Disposable Headscale 0.29.5 registration, polling and two-member HTTP tests pass. Hub and node startup use this poller for virtual HTTP listeners |
-| `protectorate-tailnet-route` | tailnet peer/ACL policy | Compiles exact peer-address routes and inbound packet filters from a live netmap; checks authenticated node key, source/destination IP, key expiry, machine authorization and peer-API-only flag. The packet engine applies these checks and permits authenticated return traffic for exact locally opened TCP flows. Subnet routing and capability grants remain |
-| `protectorate-tailnet-wg` | tailnet WireGuard crypto | Durable node key feeds a WireGuard Noise IK handshake, ChaCha20-Poly1305 transport and replay window; two cross-implementation `wireguard-go` tests pass. The packet engine uses it over verified DERP and authenticated direct UDP. Cookie/rate-limit defense remains |
-| `protectorate-derp-client` | tailnet relay client | TLS-verified DERP v2 upgrade, optional CA and certificate/key pins, encrypted client/server identity and bounded send/receive. Relay and rejection tests against the Rust DERP server pass. The packet runtime uses the pinned client for two-member HTTP and authenticated ping/pong liveness; a silent relay now drops connected state and reconnects after a bounded timeout. Broader real-network recovery remains |
-| `protectorate-tailnet-tcp` | userspace TCP | Bounded IPv4/IPv6 TCP listener over plaintext tunnel packets, including checksums, handshake, data, FIN/RST, retransmission and idle cleanup. Integrated with the WireGuard packet runtime and HTTP listeners; unsupported TCP options and wider network conditions remain |
-| `protectorate-tailnet-packets` | tailnet packet engine | Authenticated WireGuard packets over a verified DERP region or a current peer's exact UDP endpoint, exact peer routes, inbound IP and ACL checks, and map-loss session revocation. Private relays require their leaf pin; pinless public relays are limited to `derp*.tailscale.com` with WebPKI hostname validation. A local TLS relay test covers the public path, private rejection and map-change revocation; a live public relay trial remains. A direct handshake retries at 250 ms and falls back through DERP after one second; established direct traffic falls back after five seconds without authenticated direct receive. Bounded encrypted keepalive probes can later promote a working DERP session to direct. Two disposable Headscale HTTP runs carried IP packets directly in both directions with zero DERP IP packets, measured by runtime counters. Packet tests cover endpoint moves, direct failure fallback and DERP-to-direct promotion. NAT traversal and local interface rebind remain |
-| `protectorate-tailnet-stream` | virtual TCP streams | Bounded Tokio stream adapter for authenticated plaintext IP ingress and TCP packet egress, with retransmission ticks and backpressure. Virtual and real two-member Headscale/DERP HTTP exchanges pass. Hub and node Axum listeners pass synthetic stream admission tests |
-| `protectorate-tailnet-runtime` | joined node packet runtime | Supervises authenticated Headscale map polls, verified DERP/WireGuard packet transport and virtual TCP; accepted streams carry authenticated peer ID and map generation. Hub and node serve HTTP on virtual tailnet ports 7470 and 7475. The node checks current `tag:hub` membership on every request, including an existing connection after revocation. A disposable Headscale 0.29.5 and private DERP test exchanged HTTP between two Rust members; named dials reject peer identity changes. Relay selection tests accept a Tailscale public hostname without a private pin and reject an arbitrary unpinned hostname. A local relay outage test now verifies disconnection, cleared authorization, same-port relay restart and a resumed HTTP exchange. Wider network and long-running transfer recovery remain |
+| `protectorate-backup` | `internal/backup` | Verified Rust-native archive and restore flow includes identity, sleeves, job records/logs and published job artifact trees, desk policy/use state, archived handoffs and durable member enrollment keys; transient staging, homes, workspaces and harness credentials stay excluded. Backup refuses a snapshot when a retained job record references an artifact absent from the archive. Restore tests reopen the sleeve registry, desk policy, job record and artifact bytes through a real hub; a crate round-trip verifies archived job, handoff and member files. Rust CLI has `hub backup`/`hub restore`, and `serve --backup-dir` schedules snapshots. Broader installed-service recovery remains unverified |
+| `protectorate-tls` | replaces the tailnet | Hub CA created on first hub start (key mode 0600, in backups); per-start hub certificate for `--tls-listen` addresses and `--tls-name` names; node certificates for a node-generated P-256 key at join, named `ID.NAME.node.protectorate.internal`; node listener requiring a hub-CA client certificate naming `hub.protectorate.internal`; in-place certificate renewal; the private-address listener rule. Real-binary tests cover join, mutual TLS, foreign-CA and node-certificate refusal, renewal, removal and refusal of public or unspecified listeners |
 | `protectorate-node-metrics` | `internal/node/collector.go` | Linux CPU, memory, host and filesystem collection, GPU/NPU sysfs inventory, NVIDIA, AMD ROCm and Intel sysfs/xpu-smi gauges, bounded watched directory sizes and Docker Engine metrics. The hub's local node response now includes visible running sleeve records from its registry, including usage sampled by the sleeve runtime. Native Windows CPU, memory/page-file, host/uptime and logical-drive collection is wired into node startup; configured Docker TCP or local named-pipe endpoints and bounded NVIDIA `nvidia-smi` gauges are supported. Crate tests, an isolated Windows target check, and a native officewin `node metrics --local` trial pass: CPU count, physical memory, uptime, and primary-disk values agreed with Windows counters; Docker and NVIDIA were unavailable on that host. ROCm/Intel gauges have fixture tests but no matching hardware on this host; xe DRM ioctl VRAM fallback and broader Windows GPU/NPU inventory pending |
-| `protectorate-inventory` | `internal/hub/inventory.go` | Persistent node records and tier changes; NodeService inventory, WatchNodeSetup and RemoveNode RPCs wired and tested over HTTP. Setup watch reports invited, enrolled, attention and ready states until readiness; a real hub and agent test proves invited-to-ready. Removal drains new jobs and leases, waits for or cancels active jobs, releases leases and removes the inventory record. When tailnet admin is configured, removal expires the invite and revokes the Headscale node before inventory deletion; tier changes retag Headscale before persistence. The hub atomically regenerates `hosts.md` from current inventory on startup and successful commits, with the local hub first and invited state visible; fixture and HTTP tests pass |
-| `protectorate-node-monitor` | `internal/hub/nodes.go` | Bounded concurrent authenticated polls, freshness cache and node status wired to NodeService and lease admission. Opt-in TLS agent listener and explicit hub private-CA trust for remote polls are tested; registered nodes use named, authenticated tailnet dials when configured. GPU history now marks immediate VRAM use and sustained load or heat with a reason in `busyGpus`; explicit GPU and whole-node leases refuse busy discrete GPUs, while desk leases retain their separate policy. Focused monitor and lease tests pass |
+| `protectorate-inventory` | `internal/hub/inventory.go` | Persistent node records, tier changes, single-use join codes (stored as SHA-256 with expiry) and the current certificate id, expiry and public key per node; NodeService inventory, InviteNode, JoinNode, WatchNodeSetup and RemoveNode wired and tested over HTTP and real binaries. Removal drains new jobs and leases, waits for or cancels active jobs, releases leases and removes the record, which revokes the node certificate. The hub regenerates `hosts.md` from current inventory on startup and successful commits |
+| `protectorate-node-monitor` | `internal/hub/nodes.go` | Bounded concurrent polls, freshness cache and node status wired to NodeService and lease admission. Its dialer reaches joined nodes over mutual TLS, checking the certificate name of the current join, and unjoined loopback agents (tests) over plain HTTP. GPU history marks immediate VRAM use and sustained load or heat in `busyGpus`; explicit GPU and whole-node leases refuse busy discrete GPUs |
 | `protectorate-node` | `internal/node/agent.go`, `files.go` | Authenticated metrics, file transfer and job RPCs over Connect JSON. Sandboxed jobs stream output, replay by offset, cancel descendants, prepare/upload bounded sources, stage Git workspaces and collect artifacts with aggregate disk limits. Windows jobs now use a Job Object for descendant cleanup and limits; an explicitly provisioned local runner account executes shared sandboxed jobs from a separate ACL-protected root. Plain jobs remain an explicit care-node option. Native officewin process-tree tests verify Job Object descendant termination and CPU/memory limits. A disposable direct node reported sandbox:none and rejected an unconfigured shared job. An interactive officewin trial provisioned the runner, ran a sandboxed job as the separate account in its workspace, confirmed denial of node-token access, and canceled a parent and child process; it exposed and fixed an overlong account name and a Windows verbatim-path working directory. Explicit admin jobs run only when the node reports a working elevation path. Finished jobs survive restart; unfinished jobs reconcile as outcome unknown. Verified Linux ApplyUpdate has a real different-version 0.1.0 to 0.1.1 trial in an isolated systemd user unit; a failing 0.1.2 candidate rolled back while the node guardian remained the service main process. A disposable Rust hub, CLI, and systemd node completed hub-mediated binary transfer, guardian confirmation, repeat skip, and both different-version and forced same-version rollback; the CLI streamed progress and returned an error for each rollback. Installer-enrolled Linux updates now stage a verified versioned bundle, keep the prior release immutable, and confirm the new current pointer through the node guardian; shell and native install layouts passed isolated systemd trials. Hosted release delivery remains unverified. Authenticated Linux Uninstall disables the user service after its reply, exits cleanly and leaves the unit, binary and state in place; local `node uninstall --dry-run` previews this. Linux DeskAction/GetDeskState return authenticated explicit unsupported errors; a native Windows desktop runtime passed an isolated interactive read-only officewin trial; input remains unverified |
 | `protectorate-sleeve-layout` | `internal/sleeve/layout.go` | Per-harness private home directories, seeds, auth links and environment for Claude, Codex, Grok and Pi; fd-relative no-follow writes resist concurrent symlink swaps and home paths are confined to the sleeve namespace. Chat and terminal launches receive private Go, Pub, Cargo and rustup caches |
 | `protectorate-sleeve-registry` | `internal/sleeve/sleeve.go`, `mode.go` | Durable sleeve lifecycle records with mode, harness, parent, nested limits, grants, chat/result and exit metadata; ListSleeves/GetSleeve wired and tested over HTTP. Background workspace, home and cache disk samples populate sleeve status. Shell terminal and Pi/Claude/Codex/Grok chat Spawn/Kill wired. Local branch and Git URL dispatch create fresh managed clones and remove them after failed launch; source Git config, reflogs and fetch metadata are hidden while `git fetch base` works. Base metadata survives respawn and resleeve. Owner SpawnEnvoy and guarded PruneSleeves have HTTP tests. Resleeve preserves the task workspace and history, rotates identity, writes a bounded fact and Pi summary handoff, and rolls back a failed target launch; source branch advance notices now queue one idle mailbox delivery with a recorded new base tip; hub-owned sanitized Git views support packed refs and SHA256 fetches while hiding source config, reflogs and fetch metadata. New-branch clones check out tracked files with a clean index. Owner `sleeve prune --workspaces` now deletes only stopped hub-managed clones after a bounded, isolated Git verification of clean tracked, untracked and ignored work and recoverability of every local object from an independent origin; eight real HTTP tests cover SHA1/SHA256, dirty and unpublished work, local origins and cross-sleeve references. Long-running branch behavior remains to validate |
@@ -54,15 +50,15 @@ workloads and recent host incidents in [rust-sandbox.md](rust-sandbox.md).
 | `protectorate-sandbox` | `internal/sleeve/plan.go`, `layout.go` | Typed plans plus direct Linux launcher; real host tests cover mounts, masks, secrets, SDK PATH, cancellation, parent death, a sibling-module build, private Flutter cache overlay copy-up, and a nested child sandbox under delegated cgroup controls. Wired to chat and terminal sleeves, read-only Git handoff helpers and node jobs. Chat sleeves now accept an explicit nested profile and preserve it through resleeve; a live fake-Pi-to-Codex HTTP test passes. A combined public-hub sleeve test now verifies dependent-module compilation, nested delegation, secret denial, overlay copy-up, bounded systemd scope and cleanup after Kill. The test exposed host staging left behind when tmux killed the runner; the launcher now removes that staging directory after the helper reports ready. Long-running harness workloads remain |
 | `protectorate-release` | `internal/release/source.go` | Bounded network check/fetch, checksum verification, staged publish, safe web extraction and Unix symlink or Windows file pointers implemented. Rust server, sleeve runner/helper, node helper and CLI are fetched as a matched checksummed bundle without requiring Go executable assets. Hub CheckRelease and both same-version and different-version UpdateHub paths have HTTP tests. The initial-launch hub guardian keeps the service main PID, trials a candidate on the same listener, confirms its GetStatus version, and restores the prior release on failure; a disposable real process test covers handoff and rollback. The hub serves the current staged Linux Rust bundle components and checksums at bounded public `/dl` routes after verifying SHA256SUMS. Rust-first Linux hub and node installers verify the full bundle, preserve private tokens, stage systemd user units and keep Rust state separate from Go state; temporary-directory installer tests pass. A PowerShell installer verifies the pinned Windows Rust asset manifest, enrolls a user node, registers an interactive logon task, and offers an explicit care-node plain-job option. A dedicated Windows node-only Rust binary supplies join, serve, doctor and runner provisioning without pulling in the Unix hub; Windows CI runs a native installer verification after building it. An isolated native Windows trial on officewin built the node, CLI and MCP bridge, enrolled a Rust node with disposable Headscale, verified the logon task and doctor, replaced the process on reinstall, and confirmed uninstall removed both task and process. Installer fixture and native MCP tool listing pass; an isolated officewin shared-runner job and cancellation trial passed, while hosted release installation remains unverified. Release workflows gate Rust Linux amd64/arm64 bundles, Windows amd64/arm64 server/CLI/MCP bridge, Android arm64 Termux node, Flutter desktop/web, exact asset names and checksums; local package validation passes, while hosted Actions and publication remain unverified; a real compiled 0.1.0 to 0.1.1 hub trial and failed-candidate rollback passed in isolation. Windows node update has a separate installed guardian executable and a native officewin trial confirmed hub-mediated same-version replacement and failing-candidate rollback; installed-task update and hosted-release delivery remain to validate. Android and app updates remain |
 | `protectorate-xfer` | `internal/xfer` | Bounded chunked file and directory transfer, optional zstd, SHA-256 verification, atomic Linux publish and Windows overwrite fallback; node RPCs and direct CLI push/pull wired; isolated native Windows Connect transfer test passed file and directory round trips, chunk crossing, overwrite refusal, and atomic download failure cases |
-| `protectorate-connect-client` | CLI and hub HTTP calls | Bounded descriptor validated Connect JSON unary and server streaming client; raw API call and basic owner CLI commands wired. A no-token client is restricted to public device Start/Poll, and unary calls can retain bounded desktop lease headers for CLI notices. HTTPS clients can trust a private CA certificate from `PROTECTORATE_TLS_CA_CERT` with normal server-name verification; terminal sleeves receive the public certificate through a bounded environment value. Direct HTTPS hub-to-node calls use explicit trust roots loaded at startup; invited nodes use the authenticated virtual tailnet adapter |
+| `protectorate-connect-client` | CLI and hub HTTP calls | Bounded descriptor validated Connect JSON unary and server streaming client; raw API call and basic owner CLI commands wired. A no-token client is restricted to public device Start/Poll, and unary calls can retain bounded desktop lease headers for CLI notices. HTTPS clients can trust a private CA certificate from `PROTECTORATE_TLS_CA_CERT` with normal server-name verification; terminal sleeves receive the public certificate through a bounded environment value. Hub-to-node calls use mutual TLS with the hub certificate, the hub CA as the only root and the node certificate name of its current join, dialing the inventory address |
 | `protectorate-mcpbridge` | `internal/mcpbridge` | Public `protectorate mcp` CLI forwards to a packaged stdio bridge for all 67 unary hub tools; its names and schemas match the Go catalog, including proto field descriptions. Read-only default filtering and comma-separated allow/deny patterns, hub-token auth, bounded JSON-RPC frames and concurrent tool calls are implemented. Modern stdio subscriptions acknowledge, permit other calls, and finish on cancellation. The public CLI resolves saved device and local Rust owner credentials. Streamable HTTP serves modern stateless requests and request-scoped subscription streams, with legacy sessions for older clients. The HTTP endpoint validates Origin and protocol headers when supplied, uses bearer auth, binds plain HTTP to loopback, and offers bounded HTTPS for remote clients with a private TLS key. Windows validates the key owner and DACL and rejects reparse paths; a native Windows TLS and bearer-auth trial passed. Real-binary MCP session, cancellation, catalog and HTTP tool scenarios pass. Cancellation now shuts down each call's isolated connection pool; a 320-call stalled-server churn test confirms sockets close and new calls proceed. DNS lookup and TCP connect already in progress remain bounded by the client timeout |
-| `protectorate-cli` | `cmd/protectorate` | Owner status, tailnet status, quota usage and task-size suggestions, node list/show/invite/put/get, backlog list/show/add/done/reopen/edit/rm/pin, lease list/acquire/renew/release, grant admin, audit list/tail, token create/list/revoke/scopes, devices list/pending/approve/deny/revoke/rename, job list/show/cancel/run/logs, chat send/wait/watch/respond/interrupt/compact/models/settings, report, who and events, message send/inbox/reply/ack/thread/threads/wait, and sleeve list/workspaces/browse/show/kill/spawn/envoy/resleeve/prune/attach, and session list/new/kill/respawn/capture/attach over the Rust Connect API and terminal WebSocket; text and JSON output. Real HTTP tests cover tailnet status, quota refresh and suggestions, token, lease, grant, audit, backlog and chat control flows, including settings read and selection request shapes; real PTY-to-CLI and private tmux tests cover attach and detach. Report, who and event streaming have real HTTP dispatch tests. Session commands pass a real hub/private tmux lifecycle test; terminal attach has live PTY and WebSocket tests for writable input, read-only suppression, detach and missing-session errors. WSS attach trusts `PROTECTORATE_TLS_CA_PEM` or `PROTECTORATE_TLS_CA_CERT` with the same bounds and precedence as Connect; a private-certificate handshake test passes. Invite issues a single-use key and a Rust registration command. Job run submits by idempotency key, streams and resumes output, reports the remote exit code, and cancels by request ID on Unix SIGINT/SIGTERM or Windows Ctrl-C/Break; a real hub and node Unix integration test passes, and the Windows console-handler build passes natively. A native officewin console trial attached over the Rust hub's terminal WebSocket to a private tmux session: shell output rendered, typed input reached the session, Ctrl-] detached, read-only mode suppressed input, and a missing session returned HTTP 404. A disposable native officewin console trial against a Rust hub and node verified first Ctrl-C cancellation, persisted JOB_STATE_CANCELED and descendant exit; two Ctrl-Break events 10 ms apart exited the CLI with code 130 after requesting cancellation, and the hub again persisted JOB_STATE_CANCELED with the descendant gone. Node file and directory transfers use bounded chunks through the hub, verified atomic downloads, `--force` and `--no-compress`. Owner-only `sleeve kill --drop-caches` removes regenerable private caches. Node add, remove, tier and update commands use the Rust hub APIs with setup/update progress streams. Owner device management passes a real hub HTTP lifecycle test. Public new-device login and saved credential reuse pass eight real-hub tests, including approval, denial, expiry, token precedence and private files; pairing web/app links and terminal QR have focused tests. Desktop actions and policy commands are wired to the hub with request, rendering and parser tests; isolated native Windows read-only execution passed, while desktop input and lock remain unverified. Broader command behavior across supported targets still needs validation |
+| `protectorate-cli` | `cmd/protectorate` | Owner status, quota usage and task-size suggestions, node list/show/invite/put/get, backlog list/show/add/done/reopen/edit/rm/pin, lease list/acquire/renew/release, grant admin, audit list/tail, token create/list/revoke/scopes, devices list/pending/approve/deny/revoke/rename, job list/show/cancel/run/logs, chat send/wait/watch/respond/interrupt/compact/models/settings, report, who and events, message send/inbox/reply/ack/thread/threads/wait, and sleeve list/workspaces/browse/show/kill/spawn/envoy/resleeve/prune/attach, and session list/new/kill/respawn/capture/attach over the Rust Connect API and terminal WebSocket; text and JSON output. Real HTTP tests cover quota refresh and suggestions, token, lease, grant, audit, backlog and chat control flows, including settings read and selection request shapes; real PTY-to-CLI and private tmux tests cover attach and detach. Report, who and event streaming have real HTTP dispatch tests. Session commands pass a real hub/private tmux lifecycle test; terminal attach has live PTY and WebSocket tests for writable input, read-only suppression, detach and missing-session errors. WSS attach trusts `PROTECTORATE_TLS_CA_PEM` or `PROTECTORATE_TLS_CA_CERT` with the same bounds and precedence as Connect; a private-certificate handshake test passes. Invite issues a single-use key and a Rust registration command. Job run submits by idempotency key, streams and resumes output, reports the remote exit code, and cancels by request ID on Unix SIGINT/SIGTERM or Windows Ctrl-C/Break; a real hub and node Unix integration test passes, and the Windows console-handler build passes natively. A native officewin console trial attached over the Rust hub's terminal WebSocket to a private tmux session: shell output rendered, typed input reached the session, Ctrl-] detached, read-only mode suppressed input, and a missing session returned HTTP 404. A disposable native officewin console trial against a Rust hub and node verified first Ctrl-C cancellation, persisted JOB_STATE_CANCELED and descendant exit; two Ctrl-Break events 10 ms apart exited the CLI with code 130 after requesting cancellation, and the hub again persisted JOB_STATE_CANCELED with the descendant gone. Node file and directory transfers use bounded chunks through the hub, verified atomic downloads, `--force` and `--no-compress`. Owner-only `sleeve kill --drop-caches` removes regenerable private caches. Node add, remove, tier and update commands use the Rust hub APIs with setup/update progress streams. Owner device management passes a real hub HTTP lifecycle test. Public new-device login and saved credential reuse pass eight real-hub tests, including approval, denial, expiry, token precedence and private files; pairing web/app links and terminal QR have focused tests. Desktop actions and policy commands are wired to the hub with request, rendering and parser tests; isolated native Windows read-only execution passed, while desktop input and lock remain unverified. Broader command behavior across supported targets still needs validation |
 | `protectorate-pairing` | `internal/hub/pair.go` | Validated browser and app pairing links and terminal QR rendering, used by public `pair` CLI output |
-| `protectorate-node-termux` | Termux node executable | An Android AArch64 binary now cross-checks and links against NDK r28. It provides `version`, `node join`, and `node serve` with authenticated tailnet access and explicit plain-job opt-in. Local install, doctor and uninstall plus guarded update/rollback are implemented; the pinned NDK release link and host lifecycle tests pass. A real Termux device trial remains. See [Termux build and runtime notes](rust-termux.md) |
+| `protectorate-node-termux` | Termux node executable | An Android AArch64 binary cross-checks and links against NDK r28. It provides `version`, `node join`, and `node serve` over mutual TLS with explicit plain-job opt-in. Local install, doctor and uninstall plus guarded update/rollback are implemented. A real Termux device trial remains. See [Termux build and runtime notes](rust-termux.md) |
 | `protectorate-node-client` | `internal/node/push.go`, CLI transfer | Verified file and directory push/pull using the Rust node RPCs; direct-node CLI commands and hub RPC forwarding wired. CLI `node put/get` now routes through the hub with full-chunk HTTP coverage |
 | `protectorate-wire` | `proto/protectorate/v1`, `internal/codec` | Strict protobuf JSON and Connect unary/server streaming JSON HTTP transport. The current proto declares no client-streaming or bidirectional RPC, so neither transport is needed for present user-facing parity. All declared hub service RPCs are registered in the Rust hub |
-| `protectorate-hub` | `internal/hub/hub.go`, `tokens.go`, `devices.go`, `directory.go`, `backlog.go`, `sessions.go`, `quota.go` | Authenticated hub basics plus shell, Pi, Claude, Codex and Grok sleeves; chat, audit query/write, task grants, lease-target and selector-placed JobService with file, directory and Git source shipping and verified artifact collection, hub file relay, mailbox delivery, release lookup/node update, and SleeveService workspace listing/browsing. `chat models --harness codex` queries Codex's native catalog in a temporary Rust sandbox without a registered sleeve; other harnesses report unsupported offline catalogs. HubService reports the Rust namespace launcher. Admin jobs require a named node or lease, node admin grant and fresh node capability; care jobs run plain. EventService streams heartbeat, note, device, quota, lease and message events. TailnetService/GetStatus reports the applied live map; NodeService desk policy RPCs persist owner changes, and DeskService forwards eight actions through exact-resource leases and node-side policy enforcement. Persisted remote jobs reattach by output offset after restart, retry temporary route failures with a refreshed endpoint, and stop retrying after the original timeout plus ten minutes. HTTP and real Headscale/DERP trials verify reattachment across route loss; a Linux systemd user-service trial verifies exact running-job replay after SIGKILL and manager restart. Local jobs resume after their sidecar endpoint is configured |
-| `protectorate-server` | `cmd/protectorate` | Hub and node listeners default to loopback HTTP with private tokens. Opt-in TLS serves HTTP/1.1 on LAN addresses with bounded handshakes and connections; non-loopback plaintext is rejected. Authenticated HTTPS and LAN device pairing pass real HTTP tests; shell, Pi, Claude, Codex and Grok sleeves, configurable workspace browse roots and references, mailbox acknowledgement timeout, opt-in orchestrator admin grants, release source options, sandboxed node jobs, hub-to-sidecar node URL, metrics watch/Docker flags, raw API call, direct-node transfer and backup/restore commands. Configured tailnet startup supervises Headscale and private DERP; `hub tailnet install/init`, local `client invite/register`, and local `node join/renew/revoke` are wired. `node join` registers and persists identity; `node serve` exposes its agent only to a current authenticated `tag:hub` peer over the virtual tailnet. Client registration applies configured expiry. A disposable Headscale/private DERP test passes NodeAgentService/GetMetrics calls through the hub loopback adapter and virtual TCP before and after relay restart; the node receives neither local proxy credential. A named-peer job also resumes across a live DERP outage. Hub and node guardians remain service main processes while supervising candidate binaries; a hub release candidate uses its verified sibling companions. Direct installation still needs companion runner/helper binaries beside the server. `node doctor` checks Linux service startup or the Windows Rust scheduled task, Rust tailnet enrollment, optional trusted hub reachability, and read-only Windows desktop state; the installed CLI forwards to this command. An isolated officewin native trial verified task startup, doctor enrollment, reinstall replacement and clean uninstall |
+| `protectorate-hub` | `internal/hub/hub.go`, `tokens.go`, `devices.go`, `directory.go`, `backlog.go`, `sessions.go`, `quota.go` | Authenticated hub basics plus shell, Pi, Claude, Codex and Grok sleeves; chat, audit query/write, task grants, lease-target and selector-placed JobService with file, directory and Git source shipping and verified artifact collection, hub file relay, mailbox delivery, release lookup/node update, and SleeveService workspace listing/browsing. `chat models --harness codex` queries Codex's native catalog in a temporary Rust sandbox without a registered sleeve; other harnesses report unsupported offline catalogs. HubService reports the Rust namespace launcher. Admin jobs require a named node or lease, node admin grant and fresh node capability; care jobs run plain. EventService streams heartbeat, note, device, quota, lease and message events. NodeService desk policy RPCs persist owner changes, and DeskService forwards eight actions through exact-resource leases and node-side policy enforcement. Persisted remote jobs reattach by output offset after restart, retry temporary route failures with a refreshed endpoint, and stop retrying after the original timeout plus ten minutes. a Linux systemd user-service trial verifies exact running-job replay after SIGKILL and manager restart. Local jobs resume after their sidecar endpoint is configured |
+| `protectorate-server` | `cmd/protectorate` | The hub serves plain HTTP on its loopback `--listen` and HTTPS with its CA on each `--tls-listen`; every listener must be an explicit private address. `node join` creates the node key, redeems the invite code over TLS pinned to the hub CA and stores the certificate; `node serve` serves only mutual TLS to the hub on the joined address and swaps in renewed certificates. Shell, Pi, Claude, Codex and Grok sleeves, workspace browse roots and references, mailbox acknowledgement timeout, opt-in orchestrator admin grants, release source options, sandboxed node jobs, metrics watch/Docker flags, raw API call and backup/restore commands. Hub and node guardians remain service main processes while supervising candidate binaries. `node doctor` checks Linux service startup or the Windows scheduled task, the join state and certificate, and hub reachability over the pinned CA |
 
 The real-binary branch dispatch scenario passes against both backends across
 seven branch variants. The Rust hub resumes previously running chat sleeves
@@ -71,12 +67,8 @@ base-branch notices continue after the restart. The sleeve's private Git view
 can accept writes inside its mount namespace without changing the source
 repository on the host, which the scenario checks before and after sleeve exit.
 
-NodeStatus now carries the hub's draining flag and disk and memory threshold
-alerts. For an invite claimed under a different tailnet name, a bounded
-invite-key check supplies the name-mismatch alert to ListNodes, GetNode and
-WatchNodeSetup and emits `node.name_mismatch` even without a status caller.
-Focused HTTP tests cover the app-visible fields, drain behavior, and the
-subscriber-only event path.
+NodeStatus carries the hub's draining flag and disk and memory threshold
+alerts. Focused HTTP tests cover the app-visible fields and drain behavior.
 WatchNodeSetup also kicks an individual monitor poll every three seconds after
 the node leaves INVITED, so a newly reachable node can move from JOINED to
 READY without waiting for the hub's full fleet poll interval. A real HTTP
@@ -118,9 +110,6 @@ request bodies while auditing file chunks; a real hub/node upload test checks
 the first, final and failed chunks, omission of successful middle chunks,
 and absence of the file path and contents from audit entries. A separate
 HTTP test verifies that AddNode keeps its nested node name as the subject.
-Audit entries from the authenticated virtual tailnet listener now include the
-admitted peer name from current map state. Ordinary loopback requests leave
-the tailnet field empty; the value does not come from a client header.
 `UpdateHub` records one entry with the resolved release channel and version,
 including the path that signals the guardian to restart.
 `SpawnEnvoy` records the resolved harness and whether an existing Envoy was
@@ -172,15 +161,6 @@ trials. Desktop admission now permits care-tier desks, rejects idle policies
 above 24 hours and drops leases when a node refuses an input action. Ordinary
 desk lease release, expiry and policy refusal now send bounded best-effort
 `leaseEnded` notifications to the node; real hub/node tests cover each path.
-
-TailnetService/GetStatus now combines the applied control map with per-peer
-telemetry from authenticated WireGuard packets. It reports the observed direct
-UDP endpoint or private DERP path, last completed handshake, and accepted IP
-bytes sent and received. A control-map `LastSeen` is shown for offline peers
-when the server supplies it; an absent value remains unset. Counters reset on
-runtime restart. Packet-path tests, the status RPC test, and a live Headscale
-HTTP exchange cover the fields. The runtime does not yet expose tsnet-style
-health details.
 
 Run `make rust-check` for formatting, Clippy and workspace tests. The original
 `tests/e2e` suite is a reference for user-visible behavior; Go storage formats
@@ -245,10 +225,6 @@ token by exact ID without respawning it. The command covers the period when
 the previous token remains valid after renewal; a real hub CLI test confirms
 that only the new token changes. Status includes an empty state before first
 spawn.
-The public `protectorate client invite/register` commands forward to the
-installed Rust hub companion for local Headscale administration. `--home`
-selects the local state directory; hub API credentials are not used. The CLI
-reports a missing companion when the installed bundle is incomplete.
 `chat wait` accepts several sleeve names, deduplicates them, waits concurrently,
 and prints each completed result as it arrives. An error from one sleeve no
 longer waits for unrelated sleeves to finish.
@@ -303,15 +279,7 @@ built successfully in an isolated Debian container using the host SDK and
 project; interactive desktop behavior remains untested. See
 [rust-sandbox.md](rust-sandbox.md) for the cache setup and limits.
 
-To run the current hub, build `protectorate-rs`, `protectorate-sleeve-runner` and `protectorate-sleeve-sandbox-helper` into the same directory, then pass `serve --home DIR --owner-token-file FILE`. The installed Pi, Claude, Codex and Grok executables are detected at `~/.local/bin/pi`, `~/.local/bin/claude`, `~/.local/bin/codex` (then the newest installed NVM Codex package, a PATH match or `/usr/bin/codex`) and `~/.local/bin/grok`, or set with `--pi-executable FILE`, `--claude-executable FILE`, `--codex-executable FILE` and `--grok-executable FILE`; corresponding `--*-tool-root DIR` flags grant additional read-only SDK roots. Pi auth belongs in the hub state at `auth/pi`. Claude uses a private `.claude` configuration in its sleeve home with a narrow symlink to the configured credential file. Grok's executable downloads get a narrow read-only SDK mount while its account state remains hidden. The hub gives each chat and terminal sleeve a scoped token file and its actual listener URL; terminal tokens revoke on Kill or a background exit reconciliation pass. If `protectorate-cli` is installed beside the server, terminal sleeves see it as `protectorate` on PATH via a single read-only file bind, including when built inside their writable checkout. `--workspace-root DIR` adds browseable roots; an existing `~/github` is added by default. `--reference-dir DIR` lists explicit read-only references. `--msg-ack-timeout DURATION` configures mailbox reminders and escalation (default `30m`). The node agent also needs `protectorate-node-sandbox-helper` beside the server and runs with `node serve --agent-token-file FILE [--home DIR] [--file-root DIR] [--file-unconfined] [--watch-dir DIR] [--docker-host URL]`. Start a node sidecar with the same agent token and pass the hub `--agent-token-file FILE --local-node-url http://127.0.0.1:PORT` to route local jobs and files. Token files must be private. Both bind to loopback HTTP by default. Pass
-`--listen IP:PORT --tls-cert CERT.pem --tls-key KEY.pem` to serve HTTPS on a LAN
-address; both flags are required together and the private key file must have
-owner-only permissions. For a wildcard hub listener, the certificate must have
-an IP subject alternative name for `127.0.0.1` (or `::1` for IPv6), which the
-guardian and terminal CLI use for verified local HTTPS. For a specific IP, it
-must cover that IP. Set `PROTECTORATE_TLS_CA_CERT=/path/to/CERT.pem` for a host
-CLI that uses a private CA; terminal sleeves receive the public certificate
-automatically without a wider filesystem mount. Name verification stays on.
+To run the current hub, build `protectorate-rs`, `protectorate-sleeve-runner` and `protectorate-sleeve-sandbox-helper` into the same directory, then pass `serve --home DIR --owner-token-file FILE`. The installed Pi, Claude, Codex and Grok executables are detected at `~/.local/bin/pi`, `~/.local/bin/claude`, `~/.local/bin/codex` (then the newest installed NVM Codex package, a PATH match or `/usr/bin/codex`) and `~/.local/bin/grok`, or set with `--pi-executable FILE`, `--claude-executable FILE`, `--codex-executable FILE` and `--grok-executable FILE`; corresponding `--*-tool-root DIR` flags grant additional read-only SDK roots. Pi auth belongs in the hub state at `auth/pi`. Claude uses a private `.claude` configuration in its sleeve home with a narrow symlink to the configured credential file. Grok's executable downloads get a narrow read-only SDK mount while its account state remains hidden. The hub gives each chat and terminal sleeve a scoped token file and its actual listener URL; terminal tokens revoke on Kill or a background exit reconciliation pass. If `protectorate-cli` is installed beside the server, terminal sleeves see it as `protectorate` on PATH via a single read-only file bind, including when built inside their writable checkout. `--workspace-root DIR` adds browseable roots; an existing `~/github` is added by default. `--reference-dir DIR` lists explicit read-only references. `--msg-ack-timeout DURATION` configures mailbox reminders and escalation (default `30m`). The node agent also needs `protectorate-node-sandbox-helper` beside the server; it joins a hub with `node join --hub URL --ca-cert FILE --code CODE` and then runs `node serve [--home DIR] [--file-root DIR] [--file-unconfined] [--watch-dir DIR] [--docker-host URL]`. The hub's own machine runs no node agent; join it as a node to run jobs there. The hub listens on loopback HTTP (`--listen`, default `127.0.0.1:7470`) and on each `--tls-listen` private address over HTTPS with its CA; sleeves and the guardian use the loopback listener. Set `PROTECTORATE_TLS_CA_CERT=/path/to/ca.pem` for a CLI on another machine. Name verification stays on.
 Run `protectorate-cli login claude|codex|grok|pi --home HUB_STATE` on the hub
 machine to place a vendor credential in the corresponding shared auth
 directory. `login --status --home HUB_STATE` checks credential presence without
@@ -323,18 +291,6 @@ release's web directory when available.
 `protectorate-cli hub update [--channel stable|dev] [--version TAG]` streams
 verified release progress and polls authenticated status after guardian
 handoff, reporting confirmation or rollback.
-For remote nodes with certificates issued by a private CA, pass
-`--node-ca-cert FILE` to `hub serve`. The hub validates and loads a bounded PEM
-bundle at startup for polling, job calls, file relay and updates. A real HTTPS
-node test covers wrong-CA rejection, metrics and hub-relayed file transfer.
-An isolated cross-machine trial used a Rust hub on this host and a Rust node on
-`agent-world` (Debian 13 x86_64) with a private CA and verified TLS. The hub
-reported fresh remote metrics, relayed a 1,500,000-byte file in both directions
-with matching SHA-256 hashes, and completed a remote sandboxed job. The trial
-used separate state and ports; its processes and files were removed afterward,
-and the machine's existing services remained active.
-Joined tailnet node requests are admitted by authenticated peer ID and the
-current `tag:hub` map; the node's loopback listener still uses its bearer token.
 Set `--allow-plain-jobs` on a care node to permit its explicit plain jobs.
 
 Chat and terminal sleeves discover existing narrow user tool directories for Go, Cargo,
@@ -397,51 +353,19 @@ file must be private. On Windows, the key owner and DACL are checked and
 reparse paths are rejected; a native Windows TLS and bearer-auth trial passed.
 `--http` remains loopback-only.
 
-For a development node, `protectorate-rs node direct-put LOCAL REMOTE
---agent-token-file FILE` and `node direct-get REMOTE LOCAL --agent-token-file
-FILE` use its loopback listener directly. `--node-url` selects another
-authenticated endpoint. These `direct-*` commands bypass the hub; the normal
-Rust CLI `node put/get` commands route through NodeService. The hub polls local metrics and
-registered remote nodes every 30 seconds. Remote bare addresses map to HTTPS
-port 7475. Their certificates must chain to system trust or to the PEM bundle
-provided with `--node-ca-cert`. Invited nodes use a private, authenticated
-loopback adapter to the hub's named tailnet dialer. The adapter removes its
-local credential before forwarding the request. The node checks the current
-authenticated hub peer and tag on every request.
+File transfers go through the hub (`node put/get`); a node accepts no client
+but the hub. The hub polls local metrics and joined nodes every 30 seconds.
+Addresses without a port use 7475.
 
-`protectorate-rs node install --control URL` now handles a local Rust node
+`protectorate-rs node install --hub URL --ca-cert FILE` handles a local Rust node
 installation. On Linux it stages the server and sandbox helper together,
-enrolls once, creates a private agent token, and enables a systemd user unit;
+joins once, and enables a systemd user unit;
 `--dry-run` and fixture rollback tests pass. The Windows node-only binary
 installs an interactive logon task with private state and restores a previous
 managed task and binary if an update fails. The public Rust CLI forwards
 `node install`, `node uninstall`, and the Windows-only `node install-runner` to
 its sibling backend. The Windows uninstaller checks that the scheduled task is
 ours before stopping and unregistering it, and retains node state and binaries.
-An isolated Linux x86_64 trial on agent-world installed and reinstalled a real
-systemd user service against a disposable Rust hub and Headscale. The node
-kept its enrollment across reinstall, the final service stop took eight seconds,
-and seven hub GetNode samples over 96 seconds all reported fresh metrics and
-the remote hostname. A quiet map stream previously timed out after 20 seconds,
-briefly clearing the map; the poll read window is now 60 seconds and node/hub
-shutdown is bounded so service stops do not wait for that blocking read.
-A second disposable agent-world trial ran the Rust hub on AArch64 and a Rust
-node on x86_64 through authenticated Headscale and direct UDP. A named x86_64
-job exited successfully; 1.5 MB and 5.5 MB random files completed upload and
-download with matching hashes. The larger transfer crossed the 4 MiB chunk
-boundary. The trial exposed UDP receive-buffer drops and slow TCP recovery;
-the Rust transport now requests a larger receive buffer, retains packets under
-queue pressure, buffers bounded out-of-order TCP data and retransmits after
-duplicate ACKs. The hub's 8 MiB stream response limit accommodates a 4 MiB
-chunk after JSON encoding. All trial services and state were removed, leaving
-the existing Go node service active.
-An isolated officewin native trial built and tested the Rust node, CLI and MCP
-bridge. The node registered through disposable Headscale and remained online
-for four observations over 30 seconds. Doctor reported a running Rust logon
-task and saved enrollment. Reinstall replaced the node process without creating
-a second task; uninstall removed both task and process. The disposable Windows
-installation and control services were then cleaned. This trial did not create
-a hub inventory record or exercise node job execution or desktop input.
 An isolated native officewin Connect node transfer test now passes file and
 directory upload/download, SHA-256 agreement, 4 MiB chunk crossing, refusal to
 overwrite without `--force`, and replacement of existing files and nonempty
@@ -530,63 +454,12 @@ an empty directory. The hub can schedule backups with `serve --backup-dir DIR
 
 ## Remaining backend work
 
-The joined tailnet path now carries the authenticated WireGuard peer ID into
-accepted TCP streams, checks current `tag:hub` membership per request, and
-rejects stale connections after revocation or peer reassignment. The hub's
-node client uses a named peer dial through a local authenticated adapter.
-Registration still only enrolls a node: it must run `node serve`, appear in a
-connected map, and pass a fresh metrics poll before the hub can schedule work.
-An isolated x86_64 node passed direct-path named jobs and multi-chunk file
-round trips. A disposable Headscale/private-DERP trial now transfers a file
-through the named hub-to-node path, stops DERP between acknowledged chunks,
-rejects the next chunk without publishing a partial destination, resumes the
-same transfer after relay restart, and verifies exact bytes and SHA-256 on both
-the published file and hub-mediated download. An isolated node test cuts an
-HTTP request body halfway through a chunk, confirms no destination was
-published, then completes the same transfer through the hub. Another disposable
-Headscale/private-DERP test holds a live virtual TCP upload after the receiver
-stages 32 KiB of its 64 KiB body in the Rust transfer sink, stops the relay,
-confirms map revocation and no published destination, then restores the relay
-and publishes only an exact body retry with the expected SHA-256. The local
-peers may use direct UDP for upload packets. A separate
-hub/node fault test discards replies after the node accepts both first and
-later chunks: exact retries preserve the transfer, changed retries fail, and
-the direct transfer client retries transient chunk failures for up to 30
-seconds. A dropped final trailer reply also retries without publishing twice:
-the node keeps at most 64 completed replies for five minutes, and an altered
-retry is rejected. The node now persists a bounded final-request intent before
-publishing regular files and readable directories on Unix and Windows. After
-restart, it replays the reply only when the destination still has
-the staged object identity and matching content hash; tests cover completed
-publication and an intent left before publication on Linux and native Windows.
-Unreadable directory trees keep in-memory receipts. Windows regular-file
-overwrites now use one `MoveFileExW` replacement call. Windows directory
-overwrites still need two renames because the destination directory cannot
-exist for `MoveFileExW`; a crash between them can leave the outcome ambiguous.
-A live NodeAgent request-body cut and exact
-retry passed across a control/relay outage; upload packets used direct UDP, so
-DERP packet transfer remains unproven. A disposable real-binary local trial now
-SIGKILLs the hub after the first bytes of a care-node job are persisted,
-restarts it with the same state home, and verifies final success, the exact
-persisted output, a single WatchJob replay and request-id idempotency. The node
-stays alive throughout. A separate hub HTTP test cuts an active node route
-after the first log bytes, restores it, and verifies exact output plus
-request-ID idempotency. A local Headscale/DERP trial now runs a hub-to-node job
-through the named-peer proxy, drops and restarts DERP while the job is active,
-then verifies a fresh AttachJob request, exact persisted output and request-ID
-idempotency. The same trial confirms that the proxy can fetch node metrics
-again after relay recovery. A Linux systemd user-manager trial starts the hub
-as a uniquely named service with the generated unit's restart properties,
-SIGKILLs its main process during a running node job, and verifies the manager
-restarts it, the node stays alive, and the exact job output and request ID
-survive without duplicate WatchJob logs.
-
 1. Maintain parity for new service methods and keep Flutter's generated Dart
    client compatible. Add client streaming only if a user-facing RPC needs it.
 2. Extend audit coverage to the remaining mutations and denial paths.
 3. Validate mailbox coordination under long-running workloads and complete remaining
    sleeve, workspace, chat and MCP behavior.
-4. Broaden live backup and installed-service recovery trials. A real-binary artifact job now survives a live hub backup and restored-hub restart with its bytes, mode, state and log intact; a focused supervisor test verifies that Headscale pauses for a database snapshot. Validate admin jobs on each supported platform, broader CLI job commands,
+4. Broaden live backup and installed-service recovery trials. A real-binary artifact job now survives a live hub backup and restored-hub restart with its bytes, mode, state and log intact. Validate admin jobs on each supported platform, broader CLI job commands,
    live desktop input and locking on a Windows workstation, and installed update and release
    handling on supported Linux and Windows targets.
    An installed Rust bundle trial also backs up a live hub, restores into fresh
@@ -597,8 +470,8 @@ survive without duplicate WatchJob logs.
    reads the retained note again. The debug bundle spent substantial CPU time
    validating release assets on each service start; broader installed-machine
    recovery remains to validate.
-5. Validate tailnet control, DERP and direct-path recovery under relay loss,
-   peer endpoint changes and wider NAT conditions on real devices.
+5. Validate mutual-TLS joins, address changes and certificate renewal on
+   real Windows and Termux nodes across the routers' site-to-site WireGuard.
 6. Replace the Go CLI and hub/node binaries, then run the existing real-binary
    end-to-end scenarios against Rust across supported targets.
 
@@ -656,7 +529,7 @@ checks the cached binaries against fresh hub checksums before reuse, so repeat
 installs of one release do not download another full copy. A failed partial
 download can still leave an unused cache directory.
 Four unused direct dependency declarations were removed from the hub, Claude
-driver, Pi driver and tailnet-admin manifests. The external packages remain
+driver and Pi driver manifests. The external packages remain
 transitive dependencies elsewhere in the workspace.
 After these changes, `make rust-check` and `make app-check` passed locally. A
 parallel workspace run exposed a fake Grok peer test that sent a new prompt
@@ -726,24 +599,24 @@ unexpectedly exited Envoy with its saved chat settings and a one-minute retry
 interval; explicit kills and other exited sleeves remain stopped. The HTTP
 test reproduced the pending-mail failure before the fix and passes afterward.
 Flutter's Nodes tab also passes a real Rust hub widget trial for a care node's
-card, unreachable status and detail navigation. Tailnet invitation setup now
-has its own widget trial against an isolated configured Rust hub in
-`app/tool/node_invite_ui_e2e.dart`: Add Node issued a real Headscale key with
-the Linux, Windows and Termux install commands, the copy button carried the
-command shown on screen, `WatchNodeSetup` lit the INVITED stage with the hub's
-own message, the hub refused its own name inside the dialog, the invited node
-listed as PENDING without an unreachable alert, and reissue from node detail
-rotated the key while Headscale showed the replaced key expired. A phone-width
-run keeps the dialog and its QR inside a 411-pixel viewport. A second isolated
-trial took the one-use key from the displayed Linux command, enrolled a real
-Rust node, and started its agent. The widget observed INVITED, JOINED, then IN
+card, unreachable status and detail navigation. Node invitation has its own
+widget trial against a real Rust hub with a TLS listener in
+`app/tool/node_invite_ui_e2e.dart`: Add Node issued a real join code with
+the Linux, Windows and Termux install commands (each pinning the hub CA), the
+copy button carried the command shown on screen, `WatchNodeSetup` lit the
+INVITED stage with the hub's own message, the hub refused its own name inside
+the dialog, the invited node listed as PENDING without an unreachable alert,
+and reissue from node detail replaced the code. A phone-width run keeps the
+dialog and its QR inside a 411-pixel viewport. A second trial took the code
+from the displayed Linux command, joined a real Rust node over TLS pinned to
+the hub CA, and started its agent. The widget observed INVITED, JOINED, then IN
 SERVICE with every setup lamp lit; the node card showed LIVE with CPU metrics,
 and `GetNode` reported fresh metrics and `invited=false`. All three widget
 tests and focused Flutter analysis passed. The trial used `node join` and
 `node serve` directly, so the displayed installer and a full device install
 remain separate checks. The scenario is now a Linux-only real-hub test in
-`protectorate-server/tests/flutter_client.rs`; CI and the release gate prepare
-the pinned Headscale binary before running the required Rust workspace check.
+`protectorate-server/tests/flutter_client.rs`, run by the required Rust
+workspace check.
 The combined Flutter client test passed both real-hub cases locally.
 For Windows setup, the Rust watch now waits at FIRST METRICS until the
 desktop probe answers. A noninteractive agent reports ATTENTION with logon-task
@@ -805,39 +678,3 @@ metrics. The isolated task is disabled, its processes and listeners are stopped,
 and the production Go task remained running. Trial records are retained under
 `C:\Users\hotschmoe\protectorate-win-task-update-20261023t` and
 `/home/hotschmoe/protectorate-win-task-update-20261023t`.
-
-A cross-machine Rust hub and x86_64 agent-world node trial passed a named job
-and a 5.5 MB upload/download with matching SHA-256. With direct UDP blocked,
-a DERP interruption during another 5.5 MB upload exposed three recovery gaps:
-an unanswered WireGuard initiation never retried, stale ciphertext could
-restart the packet worker, and one backpressured or unread virtual TCP stream
-could hold the shared driver. The packet engine now refreshes unanswered
-initiations and drops stale ciphertext before a new session; the stream driver
-uses bounded per-connection write and bridge queues. Focused regressions cover
-those paths. In the final isolated trial, a 24-second DERP outage made the
-in-flight upload fail with a connection reset and published no partial file;
-after relay restoration a fresh named job succeeded in 1.82 seconds while
-direct UDP remained blocked. Interrupted uploads must be retried. The trial
-left the production Go node active and removed its temporary firewall rules.
-After that trial, a focused stream regression exposed loss of queued final
-bytes when a terminal TCP close aborted its bridge writer. The close path now
-lets queued bytes and EOF drain with a bounded timeout; the regression failed
-before the change and passes afterward.
-Grok review then found stale peer-frame and direct-path promotion cases, a
-global accepted-stream queue stall, and simultaneous handshake loss. Focused
-tests cover their fixes. A later cross-machine outage exposed a restarted
-node's lost WireGuard session while the hub retained its old session; the
-node now starts a rate-limited recovery handshake on stale ciphertext from
-a mapped peer over DERP. A separate relay-only 262 KiB download occasionally
-truncated when its virtual TCP bridge queue filled. The driver now pauses
-ACKs for that flow until its reader drains, while other flows continue.
-The latest AArch64 hub and x86_64 agent-world trial passed two 262 KiB
-relay-only upload/download round trips with matching SHA-256. During a 5.5 MB
-upload, a 24-second DERP interruption caused a bounded connection reset and
-published no partial destination; after restoration, a fresh job succeeded
-through DERP in 0.67 seconds with direct UDP still blocked. The interrupted
-upload still needs a user retry. The isolated services and firewall rules
-were stopped; the production Go node stayed active.
-The final combined `make rust-check` passed with
-`PROTECTORATE_REQUIRE_FLUTTER_TEST=1`, including the real Rust hub Flutter
-client lane; `make app-check` also passed.

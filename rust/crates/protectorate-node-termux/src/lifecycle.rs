@@ -1,8 +1,6 @@
 //! Termux service registration and local diagnostics. Files are left in place on uninstall.
 use std::{
-    env, fs,
-    io::{self, Read, Write},
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    env, fs, io,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -18,7 +16,6 @@ pub struct Paths {
 }
 
 impl Paths {
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub fn current(home: PathBuf) -> io::Result<Self> {
         let prefix = env::var_os("PREFIX")
             .map(PathBuf::from)
@@ -54,12 +51,6 @@ impl Paths {
     pub fn boot(&self) -> PathBuf {
         self.user_home.join(".termux/boot").join(SERVICE)
     }
-    pub fn token(&self) -> PathBuf {
-        self.home.join("agent-token")
-    }
-    pub fn joined(&self) -> PathBuf {
-        self.home.join("tsnet/join.json")
-    }
 }
 
 pub fn validate_managed(path: &Path) -> io::Result<()> {
@@ -86,45 +77,6 @@ pub fn validate_managed(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-pub fn validate_token(path: &Path) -> io::Result<bool> {
-    match fs::symlink_metadata(path) {
-        Ok(meta)
-            if meta.file_type().is_file()
-                && (1..=4096).contains(&meta.len())
-                && meta.permissions().mode() & 0o077 == 0 =>
-        {
-            Ok(true)
-        }
-        Ok(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "agent token must be a private nonempty regular file",
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-pub fn ensure_token(path: &Path) -> io::Result<()> {
-    if validate_token(path)? {
-        return Ok(());
-    }
-    let mut secret = [0u8; 32];
-    fs::File::open("/dev/urandom")?.read_exact(&mut secret)?;
-    let mut value = String::with_capacity(65);
-    for byte in secret {
-        use std::fmt::Write as _;
-        write!(value, "{byte:02x}").unwrap();
-    }
-    value.push('\n');
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(value.as_bytes())?;
-    file.sync_all()
 }
 
 pub fn service_files(paths: &Paths, args: Vec<String>) -> io::Result<(String, String)> {
@@ -163,7 +115,6 @@ pub fn write_service_files(paths: &Paths, run: &str, boot: &str) -> io::Result<(
     protectorate_fsutil::write_file(&paths.boot(), boot.as_bytes(), 0o755)
 }
 
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub fn command(binary: &Path, args: &[&str]) -> io::Result<()> {
     let output = Command::new(binary).args(args).output()?;
     if output.status.success() {
@@ -191,20 +142,5 @@ pub fn doctor(paths: &Paths, version: &str) -> Vec<(&'static str, &'static str, 
         };
         checks.push((name, result.0, result.1));
     }
-    let token = match validate_token(&paths.token()) {
-        Ok(true) => ("ok", "agent token is private".into()),
-        Ok(false) => ("FAIL", "agent token is missing".into()),
-        Err(error) => ("FAIL", error.to_string()),
-    };
-    checks.push(("token", token.0, token.1));
-    checks.push((
-        "enrollment",
-        if paths.joined().is_file() {
-            "ok"
-        } else {
-            "FAIL"
-        },
-        paths.joined().display().to_string(),
-    ));
     checks
 }

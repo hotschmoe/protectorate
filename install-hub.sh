@@ -13,44 +13,6 @@ regular_file() {
   [[ -f "$1" && ! -L "$1" ]] || die "expected a regular file: $1"
 }
 
-file_sha256() {
-  local digest
-  digest=$(sha256sum -- "$1") || die "cannot hash $1"
-  printf '%s' "${digest%% *}"
-}
-
-check_loaded_unit() {
-  local service=$1 unit=$2 fragment dropins
-  fragment=$(systemctl --user show "$service" -p FragmentPath --value) || die "cannot inspect loaded service unit"
-  [[ "$fragment" == "$unit" ]] || die "loaded service unit differs from $unit"
-  dropins=$(systemctl --user show "$service" -p DropInPaths --value) || die "cannot inspect service drop-ins"
-  [[ -z "$dropins" ]] || die "service drop-ins must be removed or reviewed before cutover"
-}
-
-rollback_go_unit() {
-  local expected_go=$1 expected_rust=$2
-  local unit_dir="$HOME/.config/systemd/user" unit="$HOME/.config/systemd/user/protectorate-hub.service"
-  local backup="$unit_dir/protectorate-hub.go-$expected_go.service.backup"
-  local rust_copy="$unit_dir/protectorate-hub.rust-before-rollback-$expected_rust.service.backup"
-  regular_file "$unit"; regular_file "$backup"
-  [[ "$(file_sha256 "$unit")" == "$expected_rust" ]] || die "current Rust unit fingerprint changed"
-  [[ "$(file_sha256 "$backup")" == "$expected_go" ]] || die "saved Go unit fingerprint changed"
-  [[ ! -e "$rust_copy" && ! -L "$rust_copy" ]] || die "Rust rollback copy already exists: $rust_copy"
-  systemctl --user show-environment >/dev/null 2>&1 || die "a working systemd user manager is required"
-  check_loaded_unit protectorate-hub.service "$unit"
-  ! systemctl --user is-active --quiet protectorate-hub.service || die "stop the Rust hub service before rollback"
-  cp -p -- "$unit" "$rust_copy"
-  cp -p -- "$backup" "$unit"
-  if ! systemctl --user daemon-reload || ! systemctl --user start protectorate-hub.service; then
-    cp -p -- "$rust_copy" "$unit" || die "Go restore failed and Rust unit could not be restored"
-    systemctl --user daemon-reload || die "Go restore failed and Rust unit reload failed"
-    systemctl --user start protectorate-hub.service || die "Go restore failed and Rust restart failed"
-    die "Go service start failed; restored the Rust unit and service"
-  fi
-  note "Restored the saved Go hub unit from $backup"
-  note "Retained the previous Rust unit at $rust_copy"
-}
-
 fetch() {
   local name=$1 destination=$2
   if [[ -n "$bundle_dir" ]]; then
@@ -110,60 +72,40 @@ PY
 
 main() {
   local role=hub channel=stable version='' repo=hotschmoe/protectorate base_url='' bundle_dir=''
-  local release_root='' state_home='' listen='' token_file='' tls_cert='' tls_key='' control='' node_name=''
-  local ca_cert='' join_key_file='' public_url='' dead_retention=''
-  local -a trusted_proxies=() local_llm_urls=() local_model_hosts=()
-  local dry=0 no_start=0 allow_plain_jobs=0 stage_for_cutover=0 adopt_go_unit=0 rollback_go=0
-  local expect_go_unit_sha='' expect_rust_unit_sha=''
+  local release_root='' state_home='' listen='' token_file='' hub='' node_name=''
+  local ca_cert='' code_file='' public_url='' dead_retention=''
+  local -a tls_listens=() tls_names=() trusted_proxies=() local_llm_urls=() local_model_hosts=()
+  local dry=0 no_start=0 allow_plain_jobs=0
   while (($#)); do
     case "$1" in
-      --role|--channel|--version|--release-repo|--base-url|--bundle-dir|--release-dir|--home|--listen|--token-file|--tls-cert|--tls-key|--control|--name|--ca-cert|--key-file|--public-url|--trusted-proxy|--local-llm-url|--local-model-host|--dead-retention|--expect-go-unit-sha256|--expect-rust-unit-sha256)
+      --role|--channel|--version|--release-repo|--base-url|--bundle-dir|--release-dir|--home|--listen|--tls-listen|--tls-name|--token-file|--hub|--name|--ca-cert|--code-file|--public-url|--trusted-proxy|--local-llm-url|--local-model-host|--dead-retention)
         (($# >= 2)) && [[ -n "$2" ]] || die "missing value for $1"
         case "$1" in
           --role) role=$2 ;; --channel) channel=$2 ;; --version) version=$2 ;;
           --release-repo) repo=$2 ;; --base-url) base_url=$2 ;; --bundle-dir) bundle_dir=$2 ;;
           --release-dir) release_root=$2 ;; --home) state_home=$2 ;; --listen) listen=$2 ;;
-          --token-file) token_file=$2 ;; --tls-cert) tls_cert=$2 ;; --tls-key) tls_key=$2 ;;
-          --control) control=$2 ;; --name) node_name=$2 ;; --ca-cert) ca_cert=$2 ;;
-          --key-file) join_key_file=$2 ;;
+          --tls-listen) tls_listens+=("$2") ;; --tls-name) tls_names+=("$2") ;;
+          --token-file) token_file=$2 ;; --hub) hub=$2 ;; --name) node_name=$2 ;;
+          --ca-cert) ca_cert=$2 ;; --code-file) code_file=$2 ;;
           --public-url) public_url=$2 ;; --trusted-proxy) trusted_proxies+=("$2") ;;
           --local-llm-url) local_llm_urls+=("$2") ;; --local-model-host) local_model_hosts+=("$2") ;;
           --dead-retention) dead_retention=$2 ;;
-          --expect-go-unit-sha256) expect_go_unit_sha=$2 ;;
-          --expect-rust-unit-sha256) expect_rust_unit_sha=$2 ;;
         esac
         shift 2 ;;
       --dry-run) dry=1; shift ;; --no-start) no_start=1; shift ;;
       --allow-plain-jobs) allow_plain_jobs=1; shift ;;
-      --stage-for-cutover) stage_for_cutover=1; shift ;;
-      --adopt-go-unit) adopt_go_unit=1; shift ;;
-      --rollback-go-unit) rollback_go=1; shift ;;
       --help|-h)
-        note "Usage: bash $(basename -- "$0") [--role hub|node] [--bundle-dir DIR | --version TAG] [--channel stable|dev] [--release-repo OWNER/REPO] [--base-url HTTPS_URL] [--release-dir DIR] [--home DIR] [--token-file FILE] [--listen IP:PORT] [--tls-cert FILE --tls-key FILE] [--public-url URL] [--trusted-proxy IP] [--local-llm-url URL] [--local-model-host HOST] [--dead-retention 24h|0] [--control URL --name NAME --key-file FILE --ca-cert FILE] [--allow-plain-jobs] [--no-start] [--dry-run] [--stage-for-cutover | --adopt-go-unit --expect-go-unit-sha256 HASH | --rollback-go-unit --expect-go-unit-sha256 HASH --expect-rust-unit-sha256 HASH]"
+        note "Usage: bash $(basename -- "$0") [--role hub|node] [--bundle-dir DIR | --version TAG] [--channel stable|dev] [--release-repo OWNER/REPO] [--base-url HTTPS_URL] [--release-dir DIR] [--home DIR] [--listen IP:PORT] [hub: --token-file FILE --tls-listen IP:PORT --tls-name HOST --public-url URL --trusted-proxy IP --local-llm-url URL --local-model-host HOST --dead-retention 24h|0] [node: --hub URL --name NAME --code-file FILE --ca-cert FILE --allow-plain-jobs] [--no-start] [--dry-run]"
         note "--dry-run verifies assets and writes nothing. --no-start stages the unit without starting it."
+        note "Hub: --listen is its loopback HTTP listener (default 127.0.0.1:7470); each --tls-listen is a private address served over HTTPS with the hub CA."
+        note "Node: --listen is the private address the node reports when it joins (default: the interface that reaches the hub, port 7475)."
         return 0 ;;
       *) die "unknown option: $1" ;;
     esac
   done
   [[ "$role" == hub || "$role" == node ]] || die "--role must be hub or node"
-  (( stage_for_cutover + adopt_go_unit + rollback_go <= 1 )) || die "cutover modes are exclusive"
-  (( ! stage_for_cutover || no_start )) || die "--stage-for-cutover requires --no-start"
-  (( ! adopt_go_unit || ! no_start )) || die "--adopt-go-unit starts the Rust service; omit --no-start"
-  (( ! rollback_go || ! no_start && ! dry )) || die "--rollback-go-unit cannot be combined with install modes"
-  [[ "$role" == hub || ( $stage_for_cutover == 0 && $adopt_go_unit == 0 && $rollback_go == 0 ) ]] || die "cutover modes require --role hub"
-  [[ -z "$expect_go_unit_sha" || "$expect_go_unit_sha" =~ ^[a-f0-9]{64}$ ]] || die "invalid Go unit SHA-256"
-  [[ -z "$expect_rust_unit_sha" || "$expect_rust_unit_sha" =~ ^[a-f0-9]{64}$ ]] || die "invalid Rust unit SHA-256"
-  (( ! adopt_go_unit && ! rollback_go )) || [[ -n "$expect_go_unit_sha" ]] || die "cutover requires --expect-go-unit-sha256"
-  (( ! rollback_go )) || [[ -n "$expect_rust_unit_sha" ]] || die "rollback requires --expect-rust-unit-sha256"
-  [[ -z "$expect_go_unit_sha" || $adopt_go_unit == 1 || $rollback_go == 1 ]] || die "Go unit fingerprint requires a cutover mode"
-  [[ -z "$expect_rust_unit_sha" || $rollback_go == 1 ]] || die "Rust unit fingerprint requires --rollback-go-unit"
-  (( ! adopt_go_unit )) || [[ -n "$listen" && -n "$state_home" ]] || die "adoption requires explicit --listen and --home"
-  if (( rollback_go )); then
-    rollback_go_unit "$expect_go_unit_sha" "$expect_rust_unit_sha"
-    return 0
-  fi
   [[ "$role" == node || "$allow_plain_jobs" == 0 ]] || die "--allow-plain-jobs requires --role node"
-  [[ "$role" == hub || ( -z "$public_url$dead_retention" && ${#trusted_proxies[@]} == 0 && ${#local_llm_urls[@]} == 0 && ${#local_model_hosts[@]} == 0 ) ]] || die "hub options require --role hub"
+  [[ "$role" == hub || ( -z "$public_url$dead_retention$token_file" && ${#trusted_proxies[@]} == 0 && ${#local_llm_urls[@]} == 0 && ${#local_model_hosts[@]} == 0 && ${#tls_listens[@]} == 0 && ${#tls_names[@]} == 0 ) ]] || die "hub options require --role hub"
   [[ -z "$dead_retention" || "$dead_retention" =~ ^(0|[0-9]+[smhd])$ ]] || die "--dead-retention requires a duration such as 24h or 0"
   [[ -z "$public_url" || "$public_url" == https://* || "$public_url" == http://* ]] || die "--public-url must be an HTTP or HTTPS URL"
   local local_llm_url
@@ -171,7 +113,7 @@ main() {
     [[ "$local_llm_url" == https://* || "$local_llm_url" == http://* ]] || die "--local-llm-url must be an HTTP or HTTPS URL"
   done
   local hub_option
-  for hub_option in "$public_url" "${trusted_proxies[@]}" "${local_llm_urls[@]}" "${local_model_hosts[@]}"; do
+  for hub_option in "$public_url" "$listen" "${tls_listens[@]}" "${tls_names[@]}" "${trusted_proxies[@]}" "${local_llm_urls[@]}" "${local_model_hosts[@]}"; do
     [[ "$hub_option" != *$'\n'* && "$hub_option" != *$'\r'* ]] || die "hub options must not contain newlines"
   done
   [[ "$channel" == stable || "$channel" == dev ]] || die "--channel must be stable or dev"
@@ -184,38 +126,37 @@ main() {
   local arch
   case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) die "unsupported architecture" ;; esac
   for tool in sha256sum mktemp install systemctl; do command -v "$tool" >/dev/null || die "$tool is required"; done
-  command -v openssl >/dev/null || die "openssl is required to create a token"
+  [[ "$role" == node ]] || command -v openssl >/dev/null || die "openssl is required to create a token"
   command -v python3 >/dev/null || die "python3 is required to inspect the web archive"
   [[ -n "$bundle_dir" ]] || command -v curl >/dev/null || die "curl is required"
   local path
-  for path in "$bundle_dir" "$release_root" "$state_home" "$token_file" "$tls_cert" "$tls_key" "$ca_cert" "$join_key_file"; do
+  for path in "$bundle_dir" "$release_root" "$state_home" "$token_file" "$ca_cert" "$code_file"; do
     [[ -z "$path" ]] || require_path path "$path"
   done
-  [[ -z "$tls_cert" && -z "$tls_key" || -n "$tls_cert" && -n "$tls_key" ]] || die "TLS certificate and key must be given together"
-  [[ -z "$tls_cert" ]] || { regular_file "$tls_cert"; regular_file "$tls_key"; }
   [[ -z "$ca_cert" ]] || regular_file "$ca_cert"
-  [[ -z "$join_key_file" ]] || regular_file "$join_key_file"
+  [[ -z "$code_file" ]] || regular_file "$code_file"
   if [[ "$role" == node ]]; then
-    [[ -z "$control" && -z "$node_name" && -z "$join_key_file" || -n "$control" && -n "$node_name" && -n "$join_key_file" ]] || die "node join needs --control, --name and --key-file together"
-    [[ -z "$control" || "$control" == https://* || "$control" == http://* ]] || die "node control must be an HTTP or HTTPS URL"
-  elif [[ -n "$control$node_name$join_key_file$ca_cert" ]]; then
-    die "node join options require --role node"
+    [[ -z "$hub$node_name$code_file$ca_cert" || -n "$hub" && -n "$node_name" && -n "$code_file" && -n "$ca_cert" ]] || die "joining needs --hub, --name, --code-file and --ca-cert together"
+    [[ -z "$hub" || "$hub" == https://* ]] || die "--hub must be the hub's HTTPS URL"
+  else
+    [[ -z "$hub$node_name$code_file$ca_cert" ]] || die "node join options require --role node"
+    listen=${listen:-127.0.0.1:7470}
+    [[ "$listen" == 127.0.0.1:* || "$listen" == '[::1]:'* ]] || die "the hub --listen is plain HTTP and must be loopback; use --tls-listen for private addresses"
   fi
-  listen=${listen:-$([[ "$role" == hub ]] && printf '127.0.0.1:7470' || printf '127.0.0.1:7475')}
-  if [[ -z "$tls_cert" && "$listen" != 127.0.0.1:* && "$listen" != '[::1]:'* ]]; then
-    die "non-loopback listener requires --tls-cert and --tls-key"
+  state_home=${state_home:-$HOME/.protectorate}
+  release_root=${release_root:-${XDG_DATA_HOME:-$HOME/.local/share}/protectorate/releases}
+  require_path home "$state_home"; require_path release-dir "$release_root"
+  if [[ "$role" == hub ]]; then
+    token_file=${token_file:-$state_home/token}
+    require_path token-file "$token_file"
   fi
-  state_home=${state_home:-$HOME/.protectorate-rust}
-  release_root=${release_root:-${XDG_DATA_HOME:-$HOME/.local/share}/protectorate-rust/releases}
-  token_file=${token_file:-$state_home/$([[ "$role" == hub ]] && printf 'token' || printf 'agent-token')}
-  require_path home "$state_home"; require_path release-dir "$release_root"; require_path token-file "$token_file"
   if [[ -z "$base_url" && -z "$bundle_dir" ]]; then
     if [[ -n "$version" ]]; then base_url="https://github.com/$repo/releases/download/$version"
     elif [[ "$channel" == dev ]]; then base_url="https://github.com/$repo/releases/download/dev"
     else base_url="https://github.com/$repo/releases/latest/download"; fi
   fi
   local stage
-  stage=$(mktemp -d "${TMPDIR:-/tmp}/protectorate-rust-install.XXXXXXXX")
+  stage=$(mktemp -d "${TMPDIR:-/tmp}/protectorate-install.XXXXXXXX")
   trap 'rm -rf -- "${INSTALL_STAGE:-}"' EXIT
   INSTALL_STAGE=$stage
   fetch SHA256SUMS "$stage/SHA256SUMS"
@@ -268,17 +209,9 @@ pathlib.Path(path).write_text(json.dumps(info, separators=(',', ':')) + '\n')
 PY
   note "Verified Rust $build_version bundle for linux-$arch"
   local unit_dir="$HOME/.config/systemd/user" service="protectorate-$role.service"
-  if (( stage_for_cutover )); then service=protectorate-rust-hub.service; fi
-  local unit="$unit_dir/$service" go_unit_backup=''
-  if (( adopt_go_unit )); then
-    regular_file "$unit"
-    systemctl --user show-environment >/dev/null 2>&1 || die "a working systemd user manager is required"
-    check_loaded_unit "$service" "$unit"
-    [[ "$(file_sha256 "$unit")" == "$expect_go_unit_sha" ]] || die "existing Go unit fingerprint changed"
-    grep -Eq '^ExecStart=.*protectorate.*hub serve' "$unit" || die "existing unit is not a recognizable Go hub service"
-    ! systemctl --user is-active --quiet "$service" || die "stop the Go hub service before adoption"
-    go_unit_backup="$unit_dir/protectorate-hub.go-$expect_go_unit_sha.service.backup"
-    [[ ! -e "$go_unit_backup" && ! -L "$go_unit_backup" ]] || die "Go unit backup already exists: $go_unit_backup"
+  local unit="$unit_dir/$service"
+  if [[ "$role" == node && -z "$hub" && ! -f "$state_home/node.json" ]]; then
+    die "a node must join a hub: pass --hub, --name, --code-file and --ca-cert from the node invite"
   fi
   if ((dry)); then note "Dry run: no release, token, unit, or service was changed"; return 0; fi
   systemctl --user show-environment >/dev/null 2>&1 || die "a working systemd user manager is required"
@@ -312,9 +245,7 @@ PY
   fi
   if [[ -e "$unit" ]]; then
     [[ ! -L "$unit" ]] || die "service unit is a symlink: $unit"
-    if (( ! adopt_go_unit )); then
-      grep -Fxq '# Managed by Protectorate Rust installer' "$unit" || die "existing unmanaged service unit: $unit"
-    fi
+    grep -Fxq '# Managed by Protectorate Rust installer' "$unit" || die "existing unmanaged service unit: $unit"
   fi
   local pointer old_current='' old_previous=''
   for pointer in current previous; do
@@ -329,7 +260,7 @@ PY
     fi
   done
   umask 077
-  mkdir -p -- "$release_root" "$state_home" "$unit_dir" "$(dirname -- "$token_file")"
+  mkdir -p -- "$release_root" "$state_home" "$unit_dir"
   if [[ ! -e "$install_dir" ]]; then
     local prepared="$release_root/.install-$build_version-$$"
     mkdir -m 700 -- "$prepared"
@@ -362,27 +293,23 @@ PY
     rmdir -- "$web_stage"
     note "Added verified web archive to node-first release $build_version"
   fi
-  if [[ ! -e "$token_file" && ! -L "$token_file" ]]; then
+  if [[ "$role" == hub && ! -e "$token_file" && ! -L "$token_file" ]]; then
+    mkdir -p -- "$(dirname -- "$token_file")"
     local token_tmp="$token_file.install-$$"
     openssl rand -hex 32 > "$token_tmp"
     chmod 600 "$token_tmp"
     [[ ! -e "$token_file" ]] || die "token appeared while installing"
     mv -- "$token_tmp" "$token_file"
-  else
+  elif [[ "$role" == hub ]]; then
     regular_file "$token_file"
     [[ -s "$token_file" ]] || die "token is empty"
   fi
-  if [[ "$role" == node && -n "$control" && ! -f "$state_home/tsnet/join.json" ]]; then
-    local join=("$install_dir/protectorate-rs" node join --control "$control" --name "$node_name" --key-file "$join_key_file" --home "$state_home")
-    [[ -z "$ca_cert" ]] || join+=(--ca-cert "$ca_cert")
+  if [[ "$role" == node && -n "$hub" && ! -f "$state_home/node.json" ]]; then
+    local join=("$install_dir/protectorate-rs" node join --hub "$hub" --name "$node_name" --code-file "$code_file" --ca-cert "$ca_cert" --home "$state_home")
+    [[ -z "$listen" ]] || join+=(--listen "$listen")
     "${join[@]}"
   fi
-  if [[ "$role" == hub && $no_start == 0 ]]; then
-    "$install_dir/protectorate-rs" hub tailnet install --home "$state_home"
-  fi
-  local unit_tmp="$unit.install-$$" unit_backup="$unit.rollback-$$" exec_path="$active/protectorate-rs" token_arg
-  if (( adopt_go_unit )); then unit_backup=$go_unit_backup; fi
-  token_arg=$([[ "$role" == hub ]] && printf '%s' '--owner-token-file' || printf '%s' '--agent-token-file')
+  local unit_tmp="$unit.install-$$" unit_backup="$unit.rollback-$$" exec_path="$active/protectorate-rs"
   {
     note '# Managed by Protectorate Rust installer'
     note '[Unit]'
@@ -394,10 +321,12 @@ PY
     printf 'ExecStart='; systemd_quote "$exec_path"; printf ' '
     if [[ "$role" == hub ]]; then printf 'serve'; else printf 'node serve'; fi
     printf ' --home '; systemd_quote "$state_home"
-    printf ' %s ' "$token_arg"; systemd_quote "$token_file"
-    printf ' --listen '; systemd_quote "$listen"
     if [[ "$role" == node && "$allow_plain_jobs" == 1 ]]; then printf ' --allow-plain-jobs'; fi
     if [[ "$role" == hub ]]; then
+      printf ' --owner-token-file '; systemd_quote "$token_file"
+      printf ' --listen '; systemd_quote "$listen"
+      for hub_option in "${tls_listens[@]}"; do printf ' --tls-listen '; systemd_quote "$hub_option"; done
+      for hub_option in "${tls_names[@]}"; do printf ' --tls-name '; systemd_quote "$hub_option"; done
       printf ' --release-repo '; systemd_quote "$repo"
       printf ' --update-channel '; systemd_quote "$channel"
       printf ' --release-dir '; systemd_quote "$release_root"
@@ -407,26 +336,13 @@ PY
       for hub_option in "${local_llm_urls[@]}"; do printf ' --local-llm-url '; systemd_quote "$hub_option"; done
       for hub_option in "${local_model_hosts[@]}"; do printf ' --local-model-host '; systemd_quote "$hub_option"; done
     fi
-    if [[ -n "$tls_cert" ]]; then
-      printf ' --tls-cert '; systemd_quote "$tls_cert"
-      printf ' --tls-key '; systemd_quote "$tls_key"
-    fi
     printf '\nRestart=on-failure\nRestartSec=5\nKillMode=control-group\nTimeoutStopSec=45\n[Install]\nWantedBy=default.target\n'
   } > "$unit_tmp"
   chmod 600 "$unit_tmp"
-  if (( adopt_go_unit )); then
-    check_loaded_unit "$service" "$unit"
-    [[ "$(file_sha256 "$unit")" == "$expect_go_unit_sha" ]] || die "existing Go unit fingerprint changed during staging"
-    ! systemctl --user is-active --quiet "$service" || die "Go hub became active during staging"
-  fi
   if [[ -e "$unit" ]]; then cp -p -- "$unit" "$unit_backup"; fi
-  if (( adopt_go_unit )); then
-    [[ "$(file_sha256 "$unit_backup")" == "$expect_go_unit_sha" ]] || die "saved Go unit fingerprint changed"
-  fi
   local was_active=0 was_enabled=0
   if systemctl --user is-active --quiet "$service"; then was_active=1; fi
   if systemctl --user is-enabled --quiet "$service"; then was_enabled=1; fi
-  (( ! adopt_go_unit || ! was_active )) || die "Go hub became active during adoption"
   if [[ -L "$active" ]]; then
     local old
     old=$(readlink -- "$active")
@@ -480,18 +396,12 @@ PY
     if (( reload_failed )); then die "daemon reload failed; restored the prior release and service"; fi
     die "start failed; restored the prior release and service"
   fi
-  if (( ! adopt_go_unit )) && [[ -e "$unit_backup" ]]; then rm -f -- "$unit_backup"; fi
+  if [[ -e "$unit_backup" ]]; then rm -f -- "$unit_backup"; fi
   note "Installed Rust $role $build_version at $active"
-  if (( adopt_go_unit )); then
-    note "Saved the exact Go unit at $go_unit_backup"
-    note "Rollback after stopping Rust: bash $(basename -- "$0") --rollback-go-unit --expect-go-unit-sha256 $expect_go_unit_sha --expect-rust-unit-sha256 $(file_sha256 "$unit")"
-  fi
   if [[ "$role" == hub ]]; then
     note "Owner token: $token_file"
-    note "Next: $exec_path hub tailnet install --home $state_home"
-    note "Then: $exec_path hub tailnet init --server-url https://HUB:7480 --home $state_home"
-  else
-    note "Agent token: $token_file"
+    note "Hub CA: $state_home/ca/ca.pem (created on first start; its SHA-256 is in every node invite)"
+    (( ${#tls_listens[@]} )) || note "No --tls-listen given: nodes and other machines cannot reach this hub until one is added"
   fi
   (( no_start == 0 )) || note "Service staged; start with systemctl --user enable --now $service"
 }

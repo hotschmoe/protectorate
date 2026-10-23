@@ -1,38 +1,25 @@
 //! Read-only diagnostics for a Rust node installation.
+use crate::node_join::Joined;
 use std::{
     error::Error,
-    fs, io,
+    io,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 pub(crate) struct Command {
     home: PathBuf,
-    hub: Option<String>,
-    ca_cert: Option<PathBuf>,
     json: bool,
 }
 
 pub(crate) fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
     let mut home = None;
-    let mut hub = std::env::var("PROTECTORATE_HUB")
-        .ok()
-        .filter(|v| !v.is_empty());
-    let mut ca_cert = None;
     let mut json = false;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--home" => home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?)),
-            "--hub" => hub = Some(args.next().ok_or("--hub requires URL")?),
-            "--ca-cert" => {
-                ca_cert = Some(PathBuf::from(args.next().ok_or("--ca-cert requires FILE")?))
-            }
             flag if flag.starts_with("--home=") => {
                 home = Some(PathBuf::from(&flag[7..]));
-            }
-            flag if flag.starts_with("--hub=") => hub = Some(flag[6..].to_owned()),
-            flag if flag.starts_with("--ca-cert=") => {
-                ca_cert = Some(PathBuf::from(&flag[10..]));
             }
             "--json" => json = true,
             _ => return Err(format!("unknown node doctor argument {flag:?}")),
@@ -40,8 +27,6 @@ pub(crate) fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, S
     }
     Ok(Command {
         home: home.map_or_else(crate::default_home, Ok)?,
-        hub,
-        ca_cert,
         json,
     })
 }
@@ -96,7 +81,7 @@ fn startup(enabled: &str, active: &str, linger: &str) -> Check {
             "startup",
             Level::Fail,
             format!(
-                "protectorate-node.service is not enabled ({enabled}); run `protectorate-rs node install --control URL`"
+                "protectorate-node.service is not enabled ({enabled}); run `protectorate-rs node install --hub URL`"
             ),
         )
     } else if active == "failed" {
@@ -154,7 +139,7 @@ async fn startup_check() -> Check {
     }
     #[cfg(windows)]
     {
-        let script = "$ErrorActionPreference='Stop'; $t=Get-ScheduledTask -TaskName 'Protectorate-Rust-Node' -ErrorAction Stop; @{state=[string]$t.State; action=[string]$t.Actions[0].Execute; arguments=[string]$t.Actions[0].Arguments} | ConvertTo-Json -Compress";
+        let script = "$ErrorActionPreference='Stop'; $t=Get-ScheduledTask -TaskName 'Protectorate-Node' -ErrorAction Stop; @{state=[string]$t.State; action=[string]$t.Actions[0].Execute; arguments=[string]$t.Actions[0].Arguments} | ConvertTo-Json -Compress";
         let output = tokio::time::timeout(
             Duration::from_secs(5),
             tokio::process::Command::new("powershell.exe")
@@ -178,7 +163,7 @@ async fn startup_check() -> Check {
                 "startup",
                 Level::Fail,
                 format!(
-                    "cannot inspect Protectorate-Rust-Node task (exit {}); run `protectorate-rs node install --control URL`",
+                    "cannot inspect Protectorate-Node task (exit {}); run `protectorate-rs node install --hub URL`",
                     output.status
                 ),
             ),
@@ -215,7 +200,7 @@ fn windows_startup(task: &serde_json::Value) -> Check {
         return Check::new(
             "startup",
             Level::Fail,
-            "Protectorate-Rust-Node task does not launch the Rust node",
+            "Protectorate-Node task does not launch the Rust node",
         );
     }
     match state.to_ascii_lowercase().as_str() {
@@ -238,113 +223,73 @@ fn windows_startup(task: &serde_json::Value) -> Check {
     }
 }
 
-fn enrollment(home: &Path) -> Check {
-    let dir = home.join("tsnet");
-    let join = dir.join("join.json");
-    let valid_file = |path: &Path, limit: u64| -> io::Result<bool> {
-        let metadata = fs::symlink_metadata(path)?;
-        Ok(metadata.file_type().is_file() && metadata.len() > 0 && metadata.len() <= limit)
+fn enrollment(home: &Path) -> (Check, Option<Joined>) {
+    let joined = match Joined::load(home) {
+        Ok(joined) => joined,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return (
+                Check::new(
+                    "enrollment",
+                    Level::Warn,
+                    "not joined to a hub; run `protectorate-rs node join` with an invite code",
+                ),
+                None,
+            )
+        }
+        Err(error) => {
+            return (
+                Check::new(
+                    "enrollment",
+                    Level::Fail,
+                    format!("join state is invalid: {error}"),
+                ),
+                None,
+            )
+        }
     };
-    if fs::symlink_metadata(&join).is_err_and(|error| error.kind() == io::ErrorKind::NotFound) {
-        return Check::new(
+    let check = match Joined::certificate(home) {
+        Ok(_) => Check::new(
             "enrollment",
-            Level::Warn,
-            "not enrolled in the Rust tailnet; run `protectorate-rs node join`",
-        );
-    }
-    if !valid_file(&join, 64 * 1024).unwrap_or(false) {
-        return Check::new(
-            "enrollment",
-            Level::Fail,
-            "tailnet registration file is invalid",
-        );
-    }
-    if !valid_file(&dir.join("machine.key"), 4096).unwrap_or(false)
-        || !valid_file(&dir.join("node.key"), 4096).unwrap_or(false)
-    {
-        return Check::new(
-            "enrollment",
-            Level::Fail,
-            "tailnet registration exists but a private identity key is missing or invalid",
-        );
-    }
-    let Ok(bytes) = fs::read(&join) else {
-        return Check::new(
-            "enrollment",
-            Level::Fail,
-            "cannot read tailnet registration",
-        );
-    };
-    let Ok(state) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return Check::new(
-            "enrollment",
-            Level::Fail,
-            "tailnet registration JSON is invalid",
-        );
-    };
-    if ["controlUrl", "name", "nodeKey", "discoKey"]
-        .iter()
-        .any(|field| {
-            state
-                .get(field)
-                .and_then(serde_json::Value::as_str)
-                .is_none_or(str::is_empty)
-        })
-    {
-        return Check::new(
-            "enrollment",
-            Level::Fail,
-            "tailnet registration is missing identity fields",
-        );
-    }
-    Check::new(
-        "enrollment",
-        Level::Ok,
-        format!(
-            "registered in {}; running connection not checked",
-            dir.display()
+            Level::Ok,
+            format!(
+                "joined {} as {}; serves {}",
+                joined.hub, joined.name, joined.address
+            ),
         ),
-    )
+        Err(error) => Check::new(
+            "enrollment",
+            Level::Fail,
+            format!("node certificate is unusable: {error}"),
+        ),
+    };
+    (check, Some(joined))
 }
 
-async fn hub_check(url: Option<String>, ca_cert: Option<PathBuf>) -> Check {
-    let Some(url) = url else {
-        return Check::new(
-            "hub",
-            Level::Info,
-            "not checked; pass --hub URL to test reachability",
-        );
+async fn hub_check(home: &Path, joined: Option<Joined>) -> Check {
+    let Some(joined) = joined else {
+        return Check::new("hub", Level::Info, "not checked: the node has not joined");
     };
+    let ca = home.join("tls/ca.pem");
     let detail = tokio::task::spawn_blocking(move || {
-        let mut config = ureq::Agent::config_builder()
+        let pem = protectorate_tls::read_pem(&ca).map_err(|error| format!("hub CA: {error}"))?;
+        let certs = ureq::tls::parse_pem(&pem)
+            .filter_map(|item| match item {
+                Ok(ureq::tls::PemItem::Certificate(cert)) => Some(cert),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .max_redirects(0)
-            .max_redirects_will_error(false)
-            .timeout_global(Some(Duration::from_secs(5)));
-        if let Some(path) = ca_cert {
-            let bytes =
-                fs::read(&path).map_err(|error| format!("read {}: {error}", path.display()))?;
-            if bytes.is_empty() || bytes.len() > 1024 * 1024 {
-                return Err("hub CA bundle must be between 1 byte and 1 MiB".to_owned());
-            }
-            let mut certs = Vec::new();
-            for item in ureq::tls::parse_pem(&bytes) {
-                match item.map_err(|error| format!("invalid hub CA PEM: {error}"))? {
-                    ureq::tls::PemItem::Certificate(cert) => certs.push(cert),
-                    _ => return Err("hub CA bundle must contain certificates only".to_owned()),
-                }
-            }
-            if certs.is_empty() {
-                return Err("hub CA bundle has no certificates".to_owned());
-            }
-            config = config.tls_config(
+            .timeout_global(Some(Duration::from_secs(5)))
+            .tls_config(
                 ureq::tls::TlsConfig::builder()
                     .root_certs(ureq::tls::RootCerts::new_with_certs(&certs))
                     .build(),
-            );
-        }
-        let config = config.build();
-        let agent: ureq::Agent = config.into();
+            )
+            .build()
+            .into();
+        let url = format!("{}/ca.pem", joined.hub);
         agent
             .get(&url)
             .call()
@@ -371,8 +316,9 @@ pub(crate) async fn run(options: Command) -> Result<(), Box<dyn Error>> {
         ),
     )];
     checks.push(startup_check().await);
-    checks.push(enrollment(&options.home));
-    checks.push(hub_check(options.hub, options.ca_cert).await);
+    let (check, joined) = enrollment(&options.home);
+    checks.push(check);
+    checks.push(hub_check(&options.home, joined).await);
     let failed = checks.iter().filter(|c| c.level == Level::Fail).count();
     if options.json {
         let rows: Vec<_> = checks

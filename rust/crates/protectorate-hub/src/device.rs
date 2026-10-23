@@ -13,6 +13,7 @@ use std::{
 
 const START: &str = "/protectorate.v1.DeviceService/StartDeviceAuth";
 const POLL: &str = "/protectorate.v1.DeviceService/PollDeviceAuth";
+const JOIN: &str = "/protectorate.v1.NodeService/JoinNode";
 const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(super) fn start_expiry_sweep(hub: &Arc<Hub>) {
@@ -44,8 +45,10 @@ fn sweep_expired(hub: &Hub, now: i64) {
     }
 }
 
+/// Procedures callable without a token: device pairing, and a new node
+/// redeeming its single-use join code.
 pub(super) fn public_procedure(procedure: &str) -> bool {
-    procedure == START || procedure == POLL
+    procedure == START || procedure == POLL || procedure == JOIN
 }
 
 #[derive(Clone)]
@@ -66,22 +69,16 @@ pub(super) struct Rates(Mutex<HashMap<String, Window>>);
 impl Rates {
     pub(super) fn admit(&self, procedure: &str, ip: IpAddr) -> Result<()> {
         let ip = normalize_ip(ip);
-        let is_lan = match ip {
-            IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
-            IpAddr::V6(v6) => {
-                v6.is_unique_local() || v6.is_loopback() || v6.is_unicast_link_local()
-            }
-        };
-        if !is_lan {
+        if !protectorate_tls::private_ip(ip) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
-                "device authorization is available on the LAN only",
+                "pairing and joining are available on the private network only",
             ));
         }
-        let (kind, local_limit, global_limit) = if procedure == START {
-            ("start", 10, 60)
-        } else {
-            ("poll", 120, 1200)
+        let (kind, local_limit, global_limit) = match procedure {
+            START => ("start", 10, 60),
+            JOIN => ("join", 10, 60),
+            _ => ("poll", 120, 1200),
         };
         let mut windows = self.0.lock().unwrap_or_else(|e| e.into_inner());
         windows.retain(|_, window| window.since.elapsed() < Duration::from_secs(60));
@@ -94,7 +91,7 @@ impl Rates {
         {
             return Err(RpcError::new(
                 Code::ResourceExhausted,
-                "device authorization rate limit; retry after one minute",
+                "pairing and join rate limit; retry after one minute",
             ));
         }
         // Every accepted request is bounded by the global window, so at most
@@ -243,7 +240,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 hub.audit.write(AuditEntry {
                     actor: request.auth.actor.clone(),
                     token_id: request.auth.token_id.clone(),
-                    tailnet: request.auth.tailnet.clone(),
                     task: request.auth.task.clone(),
                     procedure: procedure.into(),
                     subject: decided.name,

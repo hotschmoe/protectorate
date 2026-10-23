@@ -53,8 +53,6 @@ pub struct Entry {
     #[serde(default)]
     pub token_id: String,
     #[serde(default)]
-    pub tailnet: String,
-    #[serde(default)]
     pub procedure: String,
     #[serde(default)]
     pub subject: String,
@@ -73,7 +71,6 @@ impl Default for Entry {
             time: std::time::SystemTime::now().into(),
             actor: String::new(),
             token_id: String::new(),
-            tailnet: String::new(),
             procedure: String::new(),
             subject: String::new(),
             outcome: String::new(),

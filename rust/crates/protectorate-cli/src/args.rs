@@ -93,13 +93,6 @@ fn parse_tokens(args: &[String]) -> Result<Invocation> {
             "hub" => set(&mut command, hub(args, &mut index)?)?,
             "version" => set(&mut command, Command::Version)?,
             "api" => set(&mut command, api(args, &mut index)?)?,
-            "tailnet" => {
-                if next(args, index + 1) != Some("status") {
-                    return Err(bad_argument("tailnet requires status"));
-                }
-                index += 1;
-                set(&mut command, Command::TailnetStatus)?;
-            }
             "quota" => set(&mut command, quota(args, &mut index)?)?,
             "token" => set(&mut command, token(args, &mut index)?)?,
             "grant" => set(&mut command, grant(args, &mut index)?)?,
@@ -798,12 +791,18 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
             let mut name = None;
             let mut address = String::new();
             let mut ssh_alias = String::new();
-            let mut tier = "shared".to_owned();
+            let mut tier = String::new();
             let mut tags = Vec::new();
             let mut notes = String::new();
+            let mut update = false;
             while let Some(token) = next(args, *index + 1) {
                 let (flag, inline) = option(token);
                 let slot = match flag {
+                    "--update" if inline.is_none() => {
+                        update = true;
+                        *index += 1;
+                        continue;
+                    }
                     "--addr" => &mut address,
                     "--ssh" => &mut ssh_alias,
                     "--tier" => &mut tier,
@@ -822,8 +821,9 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
             }
             let name = name.ok_or_else(|| bad_argument("node add <name> --addr HOST"))?;
             if address.is_empty() { return Err(bad_argument("node add requires --addr HOST")); }
-            if !matches!(tier.as_str(), "shared" | "care") { return Err(bad_argument("--tier must be shared or care")); }
-            Ok(Command::NodeAdd { name, address, ssh_alias, tier, tags, notes })
+            if tier.is_empty() && !update { tier = "shared".to_owned(); }
+            if !tier.is_empty() && !matches!(tier.as_str(), "shared" | "care") { return Err(bad_argument("--tier must be shared or care")); }
+            Ok(Command::NodeAdd { name, address, ssh_alias, tier, tags, notes, update })
         }
         "rm" => {
             let mut name = None;

@@ -239,7 +239,7 @@ async fn chat_environment_is_private_and_survives_resleeve() {
         format!("{marker}|3")
     );
     assert!(!spawned.to_string().contains(marker));
-    let registry = root.path().join("state/sleeves-rust.json");
+    let registry = root.path().join("state/sleeves.json");
     assert_eq!(
         fs::metadata(&registry).unwrap().permissions().mode() & 0o777,
         0o600

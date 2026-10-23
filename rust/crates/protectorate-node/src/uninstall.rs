@@ -141,7 +141,7 @@ impl Plan {
         ];
         let release_root = self
             .user_home
-            .join(".local/share/protectorate-rust/node-install");
+            .join(".local/share/protectorate/node-install");
         if self.executable.starts_with(&release_root) {
             left.push(format!("{} (Rust node releases)", release_root.display()));
         }

@@ -20,7 +20,6 @@ mod quota;
 mod release;
 mod session_monitor;
 mod sleeves;
-mod tailnet_status;
 mod workspaces;
 use axum::{
     http::{header, HeaderMap},
@@ -64,9 +63,6 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 pub type NoteEventSink = Arc<dyn Fn(&str, &Note) + Send + Sync>;
-pub type TailnetStatusSource =
-    Arc<dyn Fn() -> Option<protectorate_tailnet_runtime::StatusSnapshot> + Send + Sync>;
-pub type TailnetStatusSlot = Arc<std::sync::RwLock<Option<TailnetStatusSource>>>;
 
 struct EventBus {
     sequence: AtomicU64,
@@ -112,17 +108,14 @@ pub struct Hub {
     pub jobs: Arc<jobs::Jobs>,
     node_admission: Arc<std::sync::RwLock<()>>,
     node_draining: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
-    invite_mismatches: std::sync::Mutex<nodes::InviteMismatches>,
+    renewing: std::sync::Mutex<std::collections::BTreeSet<String>>,
     pub node_files: Arc<node_files::FileRelay>,
     node_binary_dir: Option<std::path::PathBuf>,
     node_update_lock: Arc<tokio::sync::Mutex<()>>,
     node_update_timeout: std::time::Duration,
     node_update_poll: std::time::Duration,
     pub node_monitor: Arc<NodeMonitor>,
-    tailnet_admin: Option<Arc<protectorate_tailnet_admin::Admin>>,
-    tailnet_pools: Vec<String>,
-    tailnet_hub_name: Option<String>,
-    tailnet_status: TailnetStatusSlot,
+    ca: Option<Arc<protectorate_tls::Ca>>,
     pub mail: Arc<MailStore>,
     msg_ack_timeout: std::time::Duration,
     pub sleeves: Arc<SleeveRegistry>,
@@ -156,27 +149,6 @@ pub struct Hub {
 }
 
 impl Hub {
-    pub fn with_tailnet_admin(mut self, admin: Arc<protectorate_tailnet_admin::Admin>) -> Self {
-        self.tailnet_admin = Some(admin);
-        self
-    }
-
-    pub fn with_tailnet_pools(mut self, pools: Vec<String>) -> Self {
-        self.tailnet_pools = pools;
-        self
-    }
-
-    pub fn with_tailnet_hub_name(mut self, name: String) -> Self {
-        self.tailnet_hub_name = Some(name);
-        self
-    }
-
-    /// Install a live map source after the hub router has been constructed.
-    /// An absent source means tailnet is disabled on this listener.
-    pub fn tailnet_status_slot(&self) -> TailnetStatusSlot {
-        Arc::clone(&self.tailnet_status)
-    }
-
     pub fn open(
         home: impl Into<std::path::PathBuf>,
         owner_token: impl Into<String>,
@@ -230,13 +202,9 @@ impl Hub {
         let node_admission = Arc::new(std::sync::RwLock::new(()));
         let node_draining = Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
         let jobs = Arc::new(
-            jobs::Jobs::open(
-                home.join("jobs-rust"),
-                Arc::clone(&inventory),
-                hostname.clone(),
-            )
-            .map_err(identity::Error::Io)?
-            .with_admission(Arc::clone(&node_admission), Arc::clone(&node_draining)),
+            jobs::Jobs::open(home.join("jobs"), Arc::clone(&inventory), hostname.clone())
+                .map_err(identity::Error::Io)?
+                .with_admission(Arc::clone(&node_admission), Arc::clone(&node_draining)),
         );
         let node_files = Arc::new(node_files::FileRelay::new(
             Arc::clone(&inventory),
@@ -247,7 +215,7 @@ impl Hub {
                 .map_err(|error| identity::Error::Invalid(error.to_string()))?,
         );
         let sleeves = Arc::new(
-            SleeveRegistry::open(home.join("sleeves-rust.json"))
+            SleeveRegistry::open(home.join("sleeves.json"))
                 .map_err(|error| identity::Error::Invalid(error.to_string()))?,
         );
         let chat_recovery = sleeves
@@ -330,17 +298,14 @@ impl Hub {
             jobs,
             node_admission,
             node_draining,
-            invite_mismatches: std::sync::Mutex::new(nodes::InviteMismatches::default()),
+            renewing: std::sync::Mutex::new(std::collections::BTreeSet::new()),
             node_files,
             node_binary_dir: None,
             node_update_lock: Arc::new(tokio::sync::Mutex::new(())),
             node_update_timeout: std::time::Duration::from_secs(5 * 60),
             node_update_poll: std::time::Duration::from_secs(2),
             node_monitor,
-            tailnet_admin: None,
-            tailnet_pools: Vec::new(),
-            tailnet_hub_name: None,
-            tailnet_status: Arc::new(std::sync::RwLock::new(None)),
+            ca: None,
             mail,
             msg_ack_timeout: std::time::Duration::from_secs(30 * 60),
             sleeves,
@@ -464,31 +429,18 @@ impl Hub {
         self.directory = directory;
         self
     }
-    /// Configure the bearer token used to poll node agents. Hub owner and
-    /// node agent tokens are separate credentials.
-    pub fn with_node_token(self, token: String) -> Result<Self, &'static str> {
-        self.node_monitor.set_token(token.clone())?;
-        self.node_files.set_token(token.clone())?;
-        self.jobs.set_token(token)?;
-        Ok(self)
+    /// The CA that issues node certificates when nodes join and renew.
+    pub fn with_ca(mut self, ca: Arc<protectorate_tls::Ca>) -> Self {
+        self.ca = Some(ca);
+        self
     }
 
-    /// Trusts a validated private CA bundle for all remote node connections.
-    pub fn with_node_trust(self, trust: protectorate_connect_client::TrustRoots) -> Self {
-        self.node_monitor.set_trust(trust.clone());
-        self.node_files.set_trust(trust.clone());
-        self.jobs.set_trust(trust);
-        self
-    }
-    pub fn with_node_route(self, route: protectorate_node_monitor::NodeRoute) -> Self {
-        self.node_monitor.set_route(route.clone());
-        self.node_files.set_route(route.clone());
-        self.jobs.set_route(route);
-        self
-    }
-    pub fn with_local_node_endpoint(self, endpoint: String) -> Self {
-        self.node_files.set_local_endpoint(endpoint.clone());
-        self.jobs.set_local_endpoint(endpoint);
+    /// Reach nodes over mutual TLS with the hub's certificate. Call after
+    /// `with_node_monitor`.
+    pub fn with_node_tls(self, tls: protectorate_connect_client::NodeTls) -> Self {
+        self.node_monitor.dialer.set(tls.clone());
+        self.node_files.dialer.set(tls.clone());
+        self.jobs.set_node_tls(tls);
         self
     }
     pub fn with_node_monitor(
@@ -594,10 +546,7 @@ impl Hub {
         let denied_owner = Arc::clone(&owner);
         let denied_identity_store = Arc::clone(&identity);
         let authorize = Arc::new(
-            move |method: &Method,
-                  headers: &HeaderMap,
-                  peer: Option<std::net::SocketAddr>,
-                  tailnet: Option<&str>| {
+            move |method: &Method, headers: &HeaderMap, peer: Option<std::net::SocketAddr>| {
                 let pairing_ip = if device::public_procedure(&method.procedure) {
                     peer.map(|address| device::source_ip(address.ip(), headers, &trusted_proxies))
                         .or_else(|| {
@@ -607,7 +556,7 @@ impl Hub {
                 } else {
                     None
                 };
-                let result = if device::public_procedure(&method.procedure) {
+                if device::public_procedure(&method.procedure) {
                     if !public_device_auth {
                         Err(RpcError::new(
                             Code::PermissionDenied,
@@ -633,11 +582,7 @@ impl Hub {
                     }
                 } else {
                     authorize(&owner, &identity, method, headers)
-                };
-                result.map(|mut auth| {
-                    auth.tailnet = tailnet.unwrap_or_default().to_owned();
-                    auth
-                })
+                }
             },
         );
         let completion_audit = Arc::clone(&self.audit);
@@ -657,8 +602,8 @@ impl Hub {
             .with_max_request_bytes(8 << 20)
             .with_max_stream_message_bytes(8 << 20)
             .with_admission_denial_observer(Arc::new(
-                move |method, headers, peer, tailnet, message, error| {
-                    let mut actor = if device::public_procedure(&method.procedure) {
+                move |method, headers, peer, message, error| {
+                    let actor = if device::public_procedure(&method.procedure) {
                         AuthContext {
                             actor: "unauthenticated".into(),
                             requesting_ip: peer
@@ -679,7 +624,6 @@ impl Hub {
                     } else {
                         denied_identity(&denied_owner, &denied_identity_store, headers)
                     };
-                    actor.tailnet = tailnet.unwrap_or_default().to_owned();
                     audit::record_denied(&denied_audit, method, &actor, message, error);
                 },
             ))
@@ -695,9 +639,9 @@ impl Hub {
                 nodes::publish_poll_event(&hub, event);
             }
         }));
-        nodes::start_invite_refresh(&hub);
         hub.session_monitor.start(Arc::clone(&hub));
         device::start_expiry_sweep(&hub);
+        hub.jobs.resume();
         let downloads = Arc::clone(&hub);
         audit::register(&mut server, Arc::clone(&hub))?;
         device::register(&mut server, Arc::clone(&hub))?;
@@ -708,7 +652,6 @@ impl Hub {
         lease::register(&mut server, Arc::clone(&hub))?;
         mail::register(&mut server, Arc::clone(&hub))?;
         nodes::register(&mut server, Arc::clone(&hub))?;
-        tailnet_status::register(&mut server, Arc::clone(&hub))?;
         node_files::register(&mut server, Arc::clone(&hub))?;
         node_update::register(&mut server, Arc::clone(&hub))?;
         jobs::register(&mut server, Arc::clone(&hub))?;
@@ -905,7 +848,6 @@ impl Hub {
                     hub.audit.write(protectorate_audit::Entry {
                         actor: request.auth.actor.clone(),
                         token_id: request.auth.token_id.clone(),
-                        tailnet: request.auth.tailnet.clone(),
                         task: request.auth.task.clone(),
                         procedure: request.method.procedure.clone(),
                         subject: token.id.clone(),
@@ -1152,6 +1094,7 @@ impl Hub {
             },
         )?;
         let terminal_hub = Arc::clone(&hub);
+        let installer_ca = Arc::clone(&hub);
         let installer_sh = Arc::clone(&hub);
         let installer_termux = Arc::clone(&hub);
         let installer_ps1 = Arc::clone(&hub);
@@ -1199,22 +1142,20 @@ impl Hub {
                 ),
             )
             .route(
+                "/ca.pem",
+                axum::routing::get(move || distribution::ca(Arc::clone(&installer_ca))),
+            )
+            .route(
                 "/install.sh",
-                axum::routing::get(move |headers| {
-                    distribution::linux(Arc::clone(&installer_sh), headers)
-                }),
+                axum::routing::get(move || distribution::linux(Arc::clone(&installer_sh))),
             )
             .route(
                 "/install-termux.sh",
-                axum::routing::get(move |headers| {
-                    distribution::termux(Arc::clone(&installer_termux), headers)
-                }),
+                axum::routing::get(move || distribution::termux(Arc::clone(&installer_termux))),
             )
             .route(
                 "/install.ps1",
-                axum::routing::get(move |headers| {
-                    distribution::windows(Arc::clone(&installer_ps1), headers)
-                }),
+                axum::routing::get(move || distribution::windows(Arc::clone(&installer_ps1))),
             )
             .route(
                 "/debug/metrics",
@@ -1254,15 +1195,8 @@ impl Hub {
             )
             .route(
                 "/ws/terminal/{name}",
-                axum::routing::get(move |path, headers, uri, identity, upgrade| {
-                    terminal::attach(
-                        Arc::clone(&terminal_hub),
-                        path,
-                        headers,
-                        uri,
-                        identity,
-                        upgrade,
-                    )
+                axum::routing::get(move |path, headers, uri, upgrade| {
+                    terminal::attach(Arc::clone(&terminal_hub), path, headers, uri, upgrade)
                 }),
             ))
     }
@@ -1600,6 +1534,13 @@ fn session_error(error: session::Error) -> RpcError {
         session::Error::Tmux(_) | session::Error::Io(_) => Code::Internal,
     };
     RpcError::new(code, error.to_string())
+}
+
+fn no_local_agent() -> RpcError {
+    RpcError::new(
+        Code::FailedPrecondition,
+        "the hub's own machine runs no node agent; invite and join it as a node to run work there",
+    )
 }
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {

@@ -466,12 +466,7 @@ pub(crate) fn audit_entries_text(response: &Value, chronological: bool) -> Strin
     } else {
         Box::new(entries.iter())
     } {
-        let mut who = text(entry, "actor");
-        let tailnet = text(entry, "tailnet");
-        if !tailnet.is_empty() {
-            who.push('@');
-            who.push_str(&tailnet);
-        }
+        let who = text(entry, "actor");
         output.push_str(&format!(
             "{}  {}  {}  {}  {}",
             local_stamp(text(entry, "time")),
@@ -544,50 +539,6 @@ fn quota_freshness(quota: &Value) -> String {
         ),
         _ => "UNKNOWN".into(),
     }
-}
-
-pub(crate) fn tailnet_status_text(response: &Value) -> String {
-    let mut out = String::new();
-    if let Some(identity) = response.get("self") {
-        out.push_str(&format!("hub\t{}\n", text(identity, "name")));
-        out.push_str(&format!("ips\t{}\n", strings(identity, "ips").join(", ")));
-        out.push_str(&format!(
-            "tags\t{}\n",
-            or_dash(strings(identity, "tags").join(", "))
-        ));
-    }
-    out.push_str(&format!("state\t{}\n\n", text(response, "backendState")));
-    out.push_str("PEER\tIPS\tTAGS\tONLINE\tPATH\tHANDSHAKE\tLAST SEEN\tRX\tTX\n");
-    for peer in items(response, "peers") {
-        let path = if !text(&peer, "directAddr").is_empty() {
-            format!("direct {}", text(&peer, "directAddr"))
-        } else if !text(&peer, "relay").is_empty() {
-            format!("DERP {}", text(&peer, "relay"))
-        } else {
-            "-".into()
-        };
-        out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t-\t-\t-\t-\n",
-            text(&peer, "name"),
-            strings(&peer, "ips").join(", "),
-            or_dash(strings(&peer, "tags").join(",")),
-            if boolean(&peer, "online") {
-                "yes"
-            } else {
-                "no"
-            },
-            path,
-        ));
-    }
-    align(&out)
-}
-
-fn strings(value: &Value, key: &str) -> Vec<String> {
-    items(value, key)
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect()
 }
 
 pub(crate) fn quota_text(response: &Value) -> String {
@@ -807,11 +758,10 @@ pub(crate) fn node_invite_text(response: &Value) -> String {
             .get("node")
             .map(|node| text(node, "name"))
             .unwrap_or_default();
-        let key = text(response, "key");
-        let control = text(response, "controlUrl");
         return format!(
-            "{name} is invited. On the node, install with the Rust binary:\n  PROTECTORATE_ENROLL_KEY={} protectorate-rs node install --control {} --name {}\nFor a private HTTPS CA, add --ca-cert FILE. Keep the key private.\n",
-            sh_word(&key), sh_word(&control), sh_word(&name),
+            "{name} is invited. Fetch {}/ca.pem, check its SHA-256 is {}, then on the node:\n  PROTECTORATE_JOIN_CODE={} protectorate-rs node install --hub {} --ca-cert ca.pem --name {}\nKeep the code private.\n",
+            text(response, "hubUrl"), text(response, "caSha256"),
+            sh_word(&text(response, "code")), sh_word(&text(response, "hubUrl")), sh_word(&name),
         );
     }
     for command in commands {
@@ -825,13 +775,15 @@ pub(crate) fn node_invite_text(response: &Value) -> String {
             text(&command, "command")
         ));
     }
-    out.push_str(
-        "Manual, with the Rust server and node sandbox helper already on the machine:\n  ",
-    );
     out.push_str(&format!(
-        "PROTECTORATE_ENROLL_KEY={} protectorate-rs node install --control {} --name {}\n",
-        sh_word(&text(response, "key")),
-        sh_word(&text(response, "controlUrl")),
+        "Manual, with the Rust server and node sandbox helper already on the machine and\n{}/ca.pem saved as ca.pem after checking its SHA-256 is {}:\n  ",
+        text(response, "hubUrl"),
+        text(response, "caSha256"),
+    ));
+    out.push_str(&format!(
+        "PROTECTORATE_JOIN_CODE={} protectorate-rs node install --hub {} --ca-cert ca.pem --name {}\n",
+        sh_word(&text(response, "code")),
+        sh_word(&text(response, "hubUrl")),
         response
             .get("node")
             .map(|node| sh_word(&text(node, "name")))

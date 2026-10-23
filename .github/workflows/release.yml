@@ -148,11 +148,6 @@ jobs:
           echo "Rust release $version" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Prepare Flutter client
         run: cd app && flutter pub get
-      - name: Prepare verified Headscale for node invitation trial
-        run: |
-          cargo build --locked -p protectorate-server --bin protectorate-rs
-          target/debug/protectorate-rs hub tailnet install --home "$RUNNER_TEMP/protectorate-flutter-tailnet"
-          echo "PROT_HEADSCALE_BINARY=$RUNNER_TEMP/protectorate-flutter-tailnet/bin/headscale-0.29.5" >> "$GITHUB_ENV"
       - name: Rust workspace gate
         env:
           PROTECTORATE_REQUIRE_FLUTTER_TEST: "1"

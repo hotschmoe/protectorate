@@ -142,21 +142,15 @@ class AlertKind extends $pb.ProtobufEnum {
   static const AlertKind ALERT_KIND_UNREACHABLE =
       AlertKind._(3, _omitEnumNames ? '' : 'ALERT_KIND_UNREACHABLE');
 
-  /// ALERT_KIND_NAME_MISMATCH: an invited node joined the tailnet under a
-  /// different name than it was invited as, so the hub cannot reach it.
-  static const AlertKind ALERT_KIND_NAME_MISMATCH =
-      AlertKind._(4, _omitEnumNames ? '' : 'ALERT_KIND_NAME_MISMATCH');
-
   static const $core.List<AlertKind> values = <AlertKind>[
     ALERT_KIND_UNSPECIFIED,
     ALERT_KIND_DISK_PERCENT,
     ALERT_KIND_MEM_PRESSURE,
     ALERT_KIND_UNREACHABLE,
-    ALERT_KIND_NAME_MISMATCH,
   ];
 
   static final $core.List<AlertKind?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 4);
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
   static AlertKind? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
@@ -202,7 +196,8 @@ class RemovePhase extends $pb.ProtobufEnum {
   static const RemovePhase REMOVE_PHASE_UNINSTALLING =
       RemovePhase._(2, _omitEnumNames ? '' : 'REMOVE_PHASE_UNINSTALLING');
 
-  /// REMOVE_PHASE_REVOKING: the invite key and tailnet enrollment are revoked.
+  /// REMOVE_PHASE_REVOKING: the node's certificate and enrollment code are
+  /// revoked.
   static const RemovePhase REMOVE_PHASE_REVOKING =
       RemovePhase._(3, _omitEnumNames ? '' : 'REMOVE_PHASE_REVOKING');
 
@@ -230,7 +225,7 @@ class InstallPlatform extends $pb.ProtobufEnum {
   static const InstallPlatform INSTALL_PLATFORM_UNSPECIFIED = InstallPlatform._(
       0, _omitEnumNames ? '' : 'INSTALL_PLATFORM_UNSPECIFIED');
 
-  /// INSTALL_PLATFORM_WINDOWS: Windows PowerShell 5.1 or pwsh, x64 or ARM64.
+  /// INSTALL_PLATFORM_WINDOWS: Windows PowerShell 5.1, x64 or ARM64.
   static const InstallPlatform INSTALL_PLATFORM_WINDOWS =
       InstallPlatform._(1, _omitEnumNames ? '' : 'INSTALL_PLATFORM_WINDOWS');
 
@@ -261,13 +256,13 @@ class NodeSetupStage extends $pb.ProtobufEnum {
   static const NodeSetupStage NODE_SETUP_STAGE_UNSPECIFIED =
       NodeSetupStage._(0, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_UNSPECIFIED');
 
-  /// NODE_SETUP_STAGE_INVITED: the key is issued; the machine has not
-  /// enrolled in the tailnet yet.
+  /// NODE_SETUP_STAGE_INVITED: the code is issued; the machine has not
+  /// joined yet.
   static const NodeSetupStage NODE_SETUP_STAGE_INVITED =
       NodeSetupStage._(1, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_INVITED');
 
-  /// NODE_SETUP_STAGE_JOINED: the machine enrolled; the hub has not reached
-  /// its agent yet.
+  /// NODE_SETUP_STAGE_JOINED: the machine redeemed its code and holds a
+  /// certificate; the hub has not reached its agent yet.
   static const NodeSetupStage NODE_SETUP_STAGE_JOINED =
       NodeSetupStage._(2, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_JOINED');
 

@@ -1,5 +1,4 @@
-//! Experimental Rust hub and node entry points.
-mod client;
+//! Rust hub and node entry points.
 #[cfg(target_os = "linux")]
 mod driver;
 #[cfg(unix)]
@@ -40,8 +39,6 @@ mod flutter_cache {
 mod node_doctor;
 mod node_install;
 mod node_join;
-mod node_tailnet;
-mod tailnet_runtime;
 mod transport;
 mod web;
 use std::{
@@ -65,20 +62,15 @@ enum Command {
     Node(Options),
     NodeUninstall(NodeUninstallCommand),
     NodeDoctor(node_doctor::Command),
-    NodeTailnet(node_tailnet::Command),
     NodeJoin(node_join::Command),
     NodeInstall(node_install::Command),
     HubBackup(BackupCommand),
-    HubTailnetInstall(PathBuf),
-    HubTailnetInit(PathBuf, protectorate_tailnet::Config),
-    Client(client::Command),
     HubRestore(RestoreCommand),
     HubPublishFlutterCache(PublishFlutterCacheCommand),
     HubPublishFlutterTools(PublishFlutterCacheCommand),
     HubPublishPubCache(PublishPubCacheCommand),
     HubPublishGoModCache(PublishPubCacheCommand),
     ApiCall(ApiCall),
-    DirectTransfer(DirectTransfer),
 }
 
 fn build_version() -> &'static str {
@@ -127,21 +119,6 @@ fn default_codex_executable(user_home: &Path) -> PathBuf {
     PathBuf::from("/usr/bin/codex")
 }
 
-#[derive(Clone, Copy)]
-enum TailnetApi {
-    Hub,
-    Node,
-}
-
-/// Tailnet ACLs use fixed service ports even when the host listener uses a
-/// custom or ephemeral port.
-fn tailnet_api_port(service: TailnetApi, _host_listener: SocketAddr) -> u16 {
-    match service {
-        TailnetApi::Hub => protectorate_tailnet::HUB_API_PORT,
-        TailnetApi::Node => protectorate_tailnet::NODE_PORT,
-    }
-}
-
 fn host_arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -151,9 +128,7 @@ fn host_arch() -> &'static str {
 }
 struct Options {
     home: Option<PathBuf>,
-    token_file: PathBuf,
-    agent_token_file: Option<PathBuf>,
-    local_node_url: Option<String>,
+    token_file: Option<PathBuf>,
     pi_executable: Option<PathBuf>,
     pi_tool_roots: Vec<PathBuf>,
     claude_executable: Option<PathBuf>,
@@ -189,10 +164,9 @@ struct Options {
     release_dir: Option<PathBuf>,
     web_dir: Option<PathBuf>,
     node_binary_dir: Option<PathBuf>,
-    listen: SocketAddr,
-    tls_cert: Option<PathBuf>,
-    tls_key: Option<PathBuf>,
-    node_ca_cert: Option<PathBuf>,
+    listen: Option<SocketAddr>,
+    tls_listen: Vec<SocketAddr>,
+    tls_names: Vec<String>,
     file_root: Option<PathBuf>,
     file_unconfined: bool,
     job_concurrency: usize,
@@ -228,23 +202,13 @@ struct ApiCall {
     input: serde_json::Value,
     compact: bool,
 }
-struct DirectTransfer {
-    pull: bool,
-    node_url: String,
-    token_file: PathBuf,
-    local: PathBuf,
-    remote: String,
-    force: bool,
-    compress: bool,
-    compact: bool,
-}
 struct NodeUninstallCommand {
     home: PathBuf,
     dry_run: bool,
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  protectorate-rs version --json\n  protectorate-rs serve --home DIR --owner-token-file FILE [--web DIR] [--agent-token-file FILE] [--node-ca-cert FILE] [--local-node-url URL] [--workspace-root DIR] [--reference-dir DIR] [--sleeve-effort high] [--msg-ack-timeout 30m] [--dead-retention 24h|0] [--node-interval 30s] [--quota-interval 5m] [--local-llm-url URL] [--local-model-host HOST] [--egress-allow HOST[:PORT]] [--trusted-proxy IP] [--public-url URL] [--watch DIR] [--tmux-socket NAME] [--orchestrator-admin-grants] [--release-repo OWNER/REPO] [--update-channel stable|dev] [--release-api-url URL] [--release-dir DIR] [--node-binary-dir DIR] [--pi-executable FILE] [--pi-tool-root DIR] [--claude-executable FILE] [--claude-tool-root DIR] [--codex-executable FILE] [--codex-tool-root DIR] [--grok-executable FILE] [--grok-tool-root DIR] [--terminal-tool-root DIR] [--flutter-sdk-root DIR --flutter-cache-lower DIR] [--flutter-tools-lower DIR] [--pub-cache-lower DIR] [--go-mod-cache-lower DIR] [--backup-dir DIR] [--backup-every 6h] [--listen 127.0.0.1:7470] [--tls-cert FILE --tls-key FILE]\n  protectorate-rs hub tailnet install [--home DIR]\n  protectorate-rs hub tailnet init --server-url URL [--home DIR] [--no-embedded-derp --public-derp] [--pool NAME]\n  protectorate-rs client invite --name NAME [--expires 1h] [--home DIR]\n  protectorate-rs client register REGISTRATION_KEY [--home DIR]\n  protectorate-rs hub backup [--home DIR] [--to DIR]\n  protectorate-rs hub restore FILE --home DIR\n  protectorate-rs hub publish-flutter-cache --home DIR --flutter-sdk-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-flutter-tools --home DIR --flutter-sdk-root DIR [--max-bytes 4194304]\n  protectorate-rs hub publish-pub-cache --home DIR --pub-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-go-mod-cache --home DIR --go-mod-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs node join --control URL [--name NAME] [--key KEY | --key-file FILE] [--ca-cert FILE] [--home DIR]\n  protectorate-rs node install --control URL [--name NAME] [--key KEY | --key-file FILE | PROTECTORATE_ENROLL_KEY] [--ca-cert FILE] [--home DIR] [--listen IP:PORT] [--tls-cert FILE --tls-key FILE] [--allow-plain-jobs] [--dry-run] [--no-start] [-- serve-flags]\n  protectorate-rs node renew NAME [--home DIR]\n  protectorate-rs node revoke NAME [--home DIR]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node doctor [--home DIR] [--hub URL] [--ca-cert FILE] [--json]\n  protectorate-rs node serve --agent-token-file FILE [--home DIR] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--sandbox-helper FILE] [--allow-plain-jobs] [--egress-allow HOST[:PORT]] [--watch-dir DIR] [--docker-host URL] [--listen 127.0.0.1:7475] [--tls-cert FILE --tls-key FILE]\n  protectorate-rs node direct-put LOCAL REMOTE --agent-token-file FILE [--node-url URL] [--force] [--no-compress] [--json]\n  protectorate-rs node direct-get REMOTE LOCAL --agent-token-file FILE [--node-url URL] [--force] [--no-compress] [--json]\n  protectorate-rs api call Service/Method [JSON] [--hub URL] [--token-file FILE] [--json]\n\nNon-loopback listeners require TLS certificate and private key files; loopback HTTP remains the default. Hub TLS certificates must cover the listen IP, or 127.0.0.1/::1 for wildcard listeners, for internal clients and update health checks.\n"
+    "Usage:\n  protectorate-rs version --json\n  protectorate-rs serve --home DIR --owner-token-file FILE [--listen 127.0.0.1:7470] [--tls-listen IP:PORT]... [--tls-name HOST]... [--public-url URL] [--web DIR] [--workspace-root DIR] [--reference-dir DIR] [--sleeve-effort high] [--msg-ack-timeout 30m] [--dead-retention 24h|0] [--node-interval 30s] [--quota-interval 5m] [--local-llm-url URL] [--local-model-host HOST] [--egress-allow HOST[:PORT]] [--trusted-proxy IP] [--watch DIR] [--tmux-socket NAME] [--orchestrator-admin-grants] [--release-repo OWNER/REPO] [--update-channel stable|dev] [--release-api-url URL] [--release-dir DIR] [--node-binary-dir DIR] [--pi-executable FILE] [--pi-tool-root DIR] [--claude-executable FILE] [--claude-tool-root DIR] [--codex-executable FILE] [--codex-tool-root DIR] [--grok-executable FILE] [--grok-tool-root DIR] [--terminal-tool-root DIR] [--flutter-sdk-root DIR --flutter-cache-lower DIR] [--flutter-tools-lower DIR] [--pub-cache-lower DIR] [--go-mod-cache-lower DIR] [--backup-dir DIR] [--backup-every 6h]\n  protectorate-rs hub backup [--home DIR] [--to DIR]\n  protectorate-rs hub restore FILE --home DIR\n  protectorate-rs hub publish-flutter-cache --home DIR --flutter-sdk-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-flutter-tools --home DIR --flutter-sdk-root DIR [--max-bytes 4194304]\n  protectorate-rs hub publish-pub-cache --home DIR --pub-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-go-mod-cache --home DIR --go-mod-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs node join --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR]\n  protectorate-rs node install --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR] [--allow-plain-jobs] [--dry-run] [--no-start] [-- serve-flags]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node doctor [--home DIR] [--json]\n  protectorate-rs node serve [--home DIR] [--listen IP:PORT] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--sandbox-helper FILE] [--allow-plain-jobs] [--egress-allow HOST[:PORT]] [--watch-dir DIR] [--docker-host URL]\n  protectorate-rs api call Service/Method [JSON] [--hub URL] [--token-file FILE] [--json]\n\nListeners bind explicit private addresses only: loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10. The hub serves plain HTTP on its loopback --listen and HTTPS with its own CA (HOME/ca/ca.pem) on each --tls-listen; --tls-name adds a DNS name to its certificate. A node joins with an invite code (PROTECTORATE_JOIN_CODE) and serves only mutual TLS, to the hub, on the address it joined with.\n"
 }
 
 fn default_home() -> Result<PathBuf, String> {
@@ -252,7 +216,7 @@ fn default_home() -> Result<PathBuf, String> {
         return Ok(PathBuf::from(home));
     }
     env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".protectorate-rust"))
+        .map(|home| PathBuf::from(home).join(".protectorate"))
         .ok_or_else(|| "HOME is unset; pass --home".into())
 }
 
@@ -286,77 +250,6 @@ fn parse_dead_retention(value: &str) -> Result<Duration, String> {
 
 fn parse_hub_command(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
     match args.next().as_deref() {
-        Some("tailnet") => {
-            let action = args.next().ok_or("hub tailnet requires install or init")?;
-            let mut home = None;
-            let mut config = protectorate_tailnet::Config::default();
-            while let Some(flag) = args.next() {
-                match flag.as_str() {
-                    "--home" => {
-                        home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?))
-                    }
-                    "--server-url" if action == "init" => {
-                        config.server_url = args.next().ok_or("--server-url requires URL")?
-                    }
-                    "--listen" if action == "init" => {
-                        config.listen = args.next().ok_or("--listen requires IP:PORT")?
-                    }
-                    "--grpc-listen" if action == "init" => {
-                        config.grpc_listen = args.next().ok_or("--grpc-listen requires IP:PORT")?
-                    }
-                    "--metrics-listen" if action == "init" => {
-                        config.metrics_listen =
-                            args.next().ok_or("--metrics-listen requires IP:PORT")?
-                    }
-                    "--base-domain" if action == "init" => {
-                        config.base_domain = args.next().ok_or("--base-domain requires NAME")?
-                    }
-                    "--hub-name" if action == "init" => {
-                        config.hub_name = args.next().ok_or("--hub-name requires NAME")?
-                    }
-                    "--no-embedded-derp" if action == "init" => config.embedded_derp = false,
-                    "--derp-listen" if action == "init" => {
-                        config.derp_listen = args.next().ok_or("--derp-listen requires IP:PORT")?
-                    }
-                    "--stun-listen" if action == "init" => {
-                        config.stun_listen = args.next().ok_or("--stun-listen requires IP:PORT")?
-                    }
-                    "--derp-ipv4" if action == "init" => {
-                        config.derp_ipv4 = Some(args.next().ok_or("--derp-ipv4 requires IPv4")?)
-                    }
-                    "--public-derp" if action == "init" => config.public_derp = true,
-                    "--tls-cert" if action == "init" => {
-                        config.tls_cert = Some(PathBuf::from(
-                            args.next().ok_or("--tls-cert requires FILE")?,
-                        ))
-                    }
-                    "--tls-key" if action == "init" => {
-                        config.tls_key =
-                            Some(PathBuf::from(args.next().ok_or("--tls-key requires FILE")?))
-                    }
-                    "--key-expiry-days" if action == "init" => {
-                        config.key_expiry_days = args
-                            .next()
-                            .ok_or("--key-expiry-days requires N")?
-                            .parse()
-                            .map_err(|_| "--key-expiry-days requires N")?
-                    }
-                    "--pool" if action == "init" => config
-                        .pools
-                        .push(args.next().ok_or("--pool requires NAME")?),
-                    _ => return Err(format!("unknown tailnet {action} argument {flag:?}")),
-                }
-            }
-            let home = home.map_or_else(default_home, Ok)?;
-            match action.as_str() {
-                "install" => Ok(Command::HubTailnetInstall(home)),
-                "init" => {
-                    config.validate().map_err(|error| error.to_string())?;
-                    Ok(Command::HubTailnetInit(home, config))
-                }
-                _ => Err("hub tailnet requires install or init".into()),
-            }
-        }
         Some("backup") => {
             let mut home = None;
             let mut to = None;
@@ -485,15 +378,10 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
         Some("hub") => return parse_hub_command(args).map(Some),
         #[cfg(target_os = "linux")]
         Some("driver") => return driver::parse(args).map(|command| Some(Command::Driver(command))),
-        Some("client") => return client::parse(args).map(|command| Some(Command::Client(command))),
         Some("api") => return parse_api(args).map(|a| Some(Command::ApiCall(a))),
         Some("node") => {
             match args.next().as_deref() {
                 Some("serve") => {}
-                Some(action @ ("renew" | "revoke")) => {
-                    return node_tailnet::parse(action, args)
-                        .map(|command| Some(Command::NodeTailnet(command)));
-                }
                 Some("join") => {
                     return node_join::parse(args).map(|command| Some(Command::NodeJoin(command)));
                 }
@@ -523,14 +411,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
                         dry_run,
                     })));
                 }
-                Some("direct-put") => {
-                    return parse_direct_transfer(args, false)
-                        .map(|a| Some(Command::DirectTransfer(a)));
-                }
-                Some("direct-get") => {
-                    return parse_direct_transfer(args, true)
-                        .map(|a| Some(Command::DirectTransfer(a)));
-                }
                 _ => return Err(usage().into()),
             }
             true
@@ -539,8 +419,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     };
     let mut home = None;
     let mut token_file = None;
-    let mut agent_token_file = None;
-    let mut local_node_url = None;
     let mut pi_executable = None;
     let mut pi_tool_roots = Vec::new();
     let mut claude_executable = None;
@@ -587,16 +465,9 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     let mut backup_dir = None;
     let mut backup_every = Duration::from_secs(6 * 3600);
     let mut backup_every_set = false;
-    let mut listen = if node {
-        "127.0.0.1:7475"
-    } else {
-        "127.0.0.1:7470"
-    }
-    .parse::<SocketAddr>()
-    .unwrap();
-    let mut tls_cert = None;
-    let mut tls_key = None;
-    let mut node_ca_cert = None;
+    let mut listen = None;
+    let mut tls_listen = Vec::new();
+    let mut tls_names = Vec::new();
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--home" => home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?)),
@@ -604,19 +475,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
                 token_file = Some(PathBuf::from(
                     args.next().ok_or("--owner-token-file requires FILE")?,
                 ))
-            }
-            "--agent-token-file" if node => {
-                token_file = Some(PathBuf::from(
-                    args.next().ok_or("--agent-token-file requires FILE")?,
-                ))
-            }
-            "--agent-token-file" => {
-                agent_token_file = Some(PathBuf::from(
-                    args.next().ok_or("--agent-token-file requires FILE")?,
-                ))
-            }
-            "--local-node-url" if !node => {
-                local_node_url = Some(args.next().ok_or("--local-node-url requires URL")?);
             }
             "--workspace-root" if !node => {
                 workspace_roots.push(PathBuf::from(
@@ -796,24 +654,30 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
                 ));
             }
             "--listen" => {
-                listen = args
-                    .next()
-                    .ok_or("--listen requires ADDRESS")?
+                listen = Some(
+                    args.next()
+                        .ok_or("--listen requires IP:PORT")?
+                        .parse()
+                        .map_err(|_| "--listen requires IP:PORT")?,
+                )
+            }
+            "--tls-listen" if !node => tls_listen.push(
+                args.next()
+                    .ok_or("--tls-listen requires IP:PORT")?
                     .parse()
-                    .map_err(|_| "--listen requires IP:PORT")?
-            }
-            "--tls-cert" => {
-                tls_cert = Some(PathBuf::from(
-                    args.next().ok_or("--tls-cert requires FILE")?,
-                ))
-            }
-            "--tls-key" => {
-                tls_key = Some(PathBuf::from(args.next().ok_or("--tls-key requires FILE")?))
-            }
-            "--node-ca-cert" if !node => {
-                node_ca_cert = Some(PathBuf::from(
-                    args.next().ok_or("--node-ca-cert requires FILE")?,
-                ))
+                    .map_err(|_| "--tls-listen requires IP:PORT")?,
+            ),
+            "--tls-name" if !node => {
+                let name = args.next().ok_or("--tls-name requires HOST")?;
+                if name.is_empty()
+                    || name.len() > 253
+                    || !name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+                {
+                    return Err("--tls-name requires a DNS name".into());
+                }
+                tls_names.push(name);
             }
             "--file-root" if node => {
                 file_root = Some(PathBuf::from(
@@ -859,11 +723,11 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
             _ => return Err(format!("unknown argument {flag:?}\n{}", usage())),
         }
     }
-    if tls_cert.is_some() != tls_key.is_some() {
-        return Err("--tls-cert and --tls-key must be supplied together".into());
+    for address in listen.iter().chain(&tls_listen) {
+        protectorate_tls::check_listen(*address).map_err(|error| error.to_string())?;
     }
-    if !listen.ip().is_loopback() && tls_cert.is_none() {
-        return Err("non-loopback --listen requires --tls-cert and --tls-key".into());
+    if !node && listen.is_some_and(|address| !address.ip().is_loopback()) {
+        return Err("--listen is the hub's plain HTTP listener and must be loopback; use --tls-listen for other private addresses".into());
     }
     if !node && home.is_none() {
         return Err("--home is required".into());
@@ -878,16 +742,12 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     if backup_every_set && backup_dir.is_none() {
         return Err("--backup-every requires --backup-dir".into());
     }
-    let token_file = token_file.ok_or(if node {
-        "--agent-token-file is required"
-    } else {
-        "--owner-token-file is required"
-    })?;
+    if !node && token_file.is_none() {
+        return Err("--owner-token-file is required".into());
+    }
     let options = Options {
         home,
         token_file,
-        agent_token_file,
-        local_node_url,
         pi_executable,
         pi_tool_roots,
         claude_executable,
@@ -924,9 +784,8 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
         web_dir,
         node_binary_dir,
         listen,
-        tls_cert,
-        tls_key,
-        node_ca_cert,
+        tls_listen,
+        tls_names,
         file_root,
         file_unconfined,
         job_concurrency,
@@ -942,55 +801,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     } else {
         Command::Hub(options)
     }))
-}
-
-fn parse_direct_transfer(
-    mut args: impl Iterator<Item = String>,
-    pull: bool,
-) -> Result<DirectTransfer, String> {
-    let first = args
-        .next()
-        .ok_or("file transfer requires REMOTE and LOCAL paths")?;
-    let second = args
-        .next()
-        .ok_or("file transfer requires REMOTE and LOCAL paths")?;
-    let (remote, local) = if pull {
-        (first, PathBuf::from(second))
-    } else {
-        (second, PathBuf::from(first))
-    };
-    if remote.is_empty() || local.as_os_str().is_empty() {
-        return Err("file paths cannot be empty".into());
-    }
-    let mut node_url = "http://127.0.0.1:7475".to_owned();
-    let mut token_file = None;
-    let mut force = false;
-    let mut compress = true;
-    let mut compact = false;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--node-url" => node_url = args.next().ok_or("--node-url requires URL")?,
-            "--agent-token-file" => {
-                token_file = Some(PathBuf::from(
-                    args.next().ok_or("--agent-token-file requires FILE")?,
-                ))
-            }
-            "--force" | "-f" => force = true,
-            "--no-compress" => compress = false,
-            "--json" => compact = true,
-            _ => return Err(format!("unknown transfer argument {arg:?}")),
-        }
-    }
-    Ok(DirectTransfer {
-        pull,
-        node_url,
-        token_file: token_file.ok_or("--agent-token-file is required")?,
-        local,
-        remote,
-        force,
-        compress,
-        compact,
-    })
 }
 
 fn parse_api(args: impl Iterator<Item = String>) -> Result<ApiCall, String> {
@@ -1071,48 +881,6 @@ fn api_call(options: ApiCall) -> Result<(), Box<dyn Error>> {
         println!("{}", serde_json::to_string(&output)?);
     } else {
         println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-    Ok(())
-}
-
-fn direct_transfer(options: DirectTransfer) -> Result<(), Box<dyn Error>> {
-    let token = read_token(&options.token_file)?;
-    let client = protectorate_connect_client::Client::new(
-        &options.node_url,
-        token,
-        Duration::from_secs(600),
-    )?;
-    let result = if options.pull {
-        protectorate_node_client::pull(
-            &client,
-            "",
-            &options.remote,
-            &options.local,
-            options.force,
-            options.compress,
-        )?
-    } else {
-        protectorate_node_client::push(
-            &client,
-            "",
-            &options.local,
-            &options.remote,
-            options.force,
-            options.compress,
-        )?
-    };
-    if options.compact {
-        println!(
-            "{}",
-            serde_json::json!({"path": result.path, "size": result.size.to_string(), "sha256": result.sha256, "skipped": result.skipped})
-        );
-    } else {
-        println!(
-            "{}\t{} bytes\t{} skipped",
-            result.path.display(),
-            result.size,
-            result.skipped
-        );
     }
     Ok(())
 }
@@ -1200,210 +968,6 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-/// Adapts the existing blocking Connect clients to the authenticated virtual
-/// TCP dialer. A listener is created only for a name present in the current
-/// map; every accepted connection resolves that name again before dialing.
-struct NodeProxy {
-    runtime: Arc<protectorate_tailnet_runtime::Runtime>,
-    handle: tokio::runtime::Handle,
-    endpoints: std::sync::Mutex<std::collections::HashMap<String, String>>,
-    secret: String,
-}
-
-async fn proxy_request(
-    inbound: &mut tokio::net::TcpStream,
-    secret: &str,
-) -> std::io::Result<(Vec<u8>, u64)> {
-    use tokio::io::AsyncReadExt;
-    let mut buffered = Vec::with_capacity(4096);
-    let end = loop {
-        if let Some(end) = buffered.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
-            break end + 4;
-        }
-        if buffered.len() >= 16 * 1024 {
-            return Err(std::io::Error::other(
-                "node proxy request headers too large",
-            ));
-        }
-        let mut chunk = [0_u8; 4096];
-        let count = inbound.read(&mut chunk).await?;
-        if count == 0 {
-            return Err(std::io::Error::other(
-                "node proxy request ended before headers",
-            ));
-        }
-        buffered.extend_from_slice(&chunk[..count]);
-    };
-    let header = std::str::from_utf8(&buffered[..end])
-        .map_err(|_| std::io::Error::other("invalid node proxy request headers"))?;
-    let mut lines = header.split("\r\n");
-    let first = lines.next().unwrap_or_default();
-    if !first.starts_with("POST /protectorate.v1.NodeAgentService/")
-        || !first.ends_with(" HTTP/1.1")
-    {
-        return Err(std::io::Error::other(
-            "node proxy accepts only node RPC requests",
-        ));
-    }
-    let mut forwarded = Vec::with_capacity(buffered.len());
-    forwarded.extend_from_slice(first.as_bytes());
-    forwarded.extend_from_slice(b"\r\n");
-    let mut authorized = false;
-    let mut content_length = None;
-    for line in lines {
-        if line.is_empty() {
-            break;
-        }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(std::io::Error::other("invalid node proxy header"));
-        };
-        if name.eq_ignore_ascii_case("authorization") {
-            if authorized || value.trim() != format!("Bearer {secret}") {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "node proxy authorization failed",
-                ));
-            }
-            authorized = true;
-        } else if name.eq_ignore_ascii_case("content-length") {
-            if content_length.is_some() {
-                return Err(std::io::Error::other("duplicate node proxy content length"));
-            }
-            content_length = value.trim().parse::<u64>().ok();
-            if content_length.is_none() {
-                return Err(std::io::Error::other("invalid node proxy content length"));
-            }
-            forwarded.extend_from_slice(line.as_bytes());
-            forwarded.extend_from_slice(b"\r\n");
-        } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            return Err(std::io::Error::other(
-                "chunked node proxy requests are unsupported",
-            ));
-        } else if name.eq_ignore_ascii_case("connection")
-            || name.eq_ignore_ascii_case("proxy-connection")
-        {
-            // One request per proxy connection; a second request cannot carry
-            // the local-only Authorization header into the tailnet.
-        } else {
-            forwarded.extend_from_slice(line.as_bytes());
-            forwarded.extend_from_slice(b"\r\n");
-        }
-    }
-    if !authorized {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "node proxy authorization missing",
-        ));
-    }
-    let length =
-        content_length.ok_or_else(|| std::io::Error::other("node proxy content length missing"))?;
-    let initial_body = &buffered[end..];
-    if initial_body.len() as u64 > length {
-        return Err(std::io::Error::other(
-            "pipelined node proxy requests are refused",
-        ));
-    }
-    forwarded.extend_from_slice(b"Connection: close\r\n\r\n");
-    forwarded.extend_from_slice(initial_body);
-    Ok((forwarded, length - initial_body.len() as u64))
-}
-
-impl NodeProxy {
-    fn endpoint(&self, name: &str, address: &str) -> Result<String, String> {
-        // Explicit direct addresses retain the existing HTTPS or loopback
-        // path and its bearer token. Invited nodes use their DNS label here.
-        if address != name {
-            return direct_node_url(address);
-        }
-        self.runtime
-            .peer_addr(name, 7475)
-            .map_err(|e| e.to_string())?;
-        let mut endpoints = self.endpoints.lock().unwrap();
-        if let Some(url) = endpoints.get(name) {
-            return Ok(url.clone());
-        }
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("bind node proxy: {e}"))?;
-        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let url = format!(
-            "tailnet+http://{}",
-            listener.local_addr().map_err(|e| e.to_string())?
-        );
-        let runtime = Arc::clone(&self.runtime);
-        let name = name.to_owned();
-        let secret = self.secret.clone();
-        let _guard = self.handle.enter();
-        let listener = tokio::net::TcpListener::from_std(listener).map_err(|e| e.to_string())?;
-        endpoints.insert(name.clone(), url.clone());
-        self.handle.spawn(async move {
-            while let Ok((mut inbound, _)) = listener.accept().await {
-                let runtime = Arc::clone(&runtime);
-                let name = name.clone();
-                let secret = secret.clone();
-                tokio::spawn(async move {
-                    let Ok((request, remaining)) = proxy_request(&mut inbound, &secret).await
-                    else {
-                        return;
-                    };
-                    let Ok(Ok(mut outbound)) = tokio::time::timeout(
-                        Duration::from_secs(15),
-                        runtime.dial_peer(&name, 7475),
-                    )
-                    .await
-                    else {
-                        return;
-                    };
-                    use tokio::io::AsyncWriteExt;
-                    if outbound.write_all(&request).await.is_err() {
-                        return;
-                    }
-                    use tokio::io::AsyncReadExt;
-                    let Ok(sent) =
-                        tokio::io::copy(&mut (&mut inbound).take(remaining), &mut outbound).await
-                    else {
-                        return;
-                    };
-                    if sent != remaining {
-                        return;
-                    }
-                    let _ = tokio::io::copy(&mut outbound, &mut inbound).await;
-                });
-            }
-        });
-        Ok(url)
-    }
-}
-
-fn direct_node_url(address: &str) -> Result<String, String> {
-    let (scheme, authority) = if let Some(authority) = address.strip_prefix("https://") {
-        ("https", authority)
-    } else if let Some(authority) = address.strip_prefix("http://") {
-        ("http", authority)
-    } else if address.starts_with("127.0.0.1") || address.starts_with("[::1]") {
-        ("http", address)
-    } else {
-        ("https", address)
-    };
-    if authority.is_empty() || authority.contains(['/', '?', '#', '@', ' ', '\\']) {
-        return Err("invalid direct node address".into());
-    }
-    let has_port = if authority.starts_with('[') {
-        authority.contains("]:")
-    } else {
-        authority.contains(':')
-    };
-    let authority = if has_port {
-        authority.to_owned()
-    } else {
-        format!("{authority}:7475")
-    };
-    if scheme == "http" && !authority.starts_with("127.0.0.1:") && !authority.starts_with("[::1]:")
-    {
-        return Err("direct node HTTP requires loopback".into());
-    }
-    Ok(format!("{scheme}://{authority}"))
-}
-
 async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     #[cfg(unix)]
     {
@@ -1450,35 +1014,36 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         created_at: None,
     });
     let backup_every = options.backup_every;
-    let token = read_token(&options.token_file)?;
-    let node_trust = options
-        .node_ca_cert
-        .as_ref()
-        .map(|path| {
-            let pem = transport::load_ca(path)?;
-            protectorate_connect_client::TrustRoots::from_pem(&pem)
-                .map_err(|error| std::io::Error::other(error.to_string()))
-        })
-        .transpose()?;
-    let tls = match (&options.tls_cert, &options.tls_key) {
-        (Some(cert), Some(key)) => Some(transport::tls_config(cert, key)?),
-        _ => None,
-    };
-    let tls_ca_pem = options
-        .tls_cert
-        .as_ref()
-        .map(fs::read_to_string)
-        .transpose()?;
-    if tls_ca_pem.as_ref().is_some_and(|pem| pem.len() > 16 * 1024) {
-        return Err("hub TLS certificate chain exceeds terminal environment limit (16 KiB)".into());
+    let token = read_token(
+        options
+            .token_file
+            .as_ref()
+            .expect("hub token checked by parser"),
+    )?;
+    let ca = protectorate_tls::Ca::open_or_create(&home.join("ca"))?;
+    let listener = tokio::net::TcpListener::bind(hub_listen(options.listen)).await?;
+    let mut tls_listeners = Vec::new();
+    for address in &options.tls_listen {
+        tls_listeners.push(tokio::net::TcpListener::bind(address).await?);
     }
-    let listener = tokio::net::TcpListener::bind(options.listen).await?;
-    let hub_url = format!(
-        "{}://{}",
-        if tls.is_some() { "https" } else { "http" },
-        transport::reachable_addr(listener.local_addr()?)
-    );
-    let tailnet = tailnet_runtime::Runtime::start_if_configured(&home).await?;
+    let mut names = Vec::new();
+    for listener in &tls_listeners {
+        names.push(listener.local_addr()?.ip().to_string());
+    }
+    names.extend(options.tls_names.iter().cloned());
+    let identity = ca.hub_identity(&names)?;
+    let tls = protectorate_tls::hub_server_config(&identity)?;
+    let node_tls = protectorate_connect_client::NodeTls::from_pem(
+        ca.pem().as_bytes(),
+        identity.cert_pem.as_bytes(),
+        identity.key_pem.as_bytes(),
+    )?;
+    let hub_url = format!("http://{}", listener.local_addr()?);
+    let public_url = match (&options.public_url, tls_listeners.first()) {
+        (Some(url), _) => Some(url.clone()),
+        (None, Some(listener)) => Some(format!("https://{}", listener.local_addr()?)),
+        (None, None) => None,
+    };
     if options.flutter_sdk_root.is_some() != options.flutter_cache_lower.is_some() {
         return Err("--flutter-sdk-root and --flutter-cache-lower must be given together".into());
     }
@@ -1510,26 +1075,13 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     hub = hub.with_sleeve_effort(options.sleeve_effort.clone());
     hub = hub.with_dead_retention(options.dead_retention);
     hub = hub.with_trusted_proxies(options.trusted_proxies.clone());
-    if let Some(url) = &options.public_url {
-        hub = hub.with_public_url(url.clone())?;
+    if let Some(url) = public_url {
+        hub = hub.with_public_url(url)?;
     }
-    if tailnet.is_some() {
-        hub.jobs.defer_resume();
-    }
-    if let Some(runtime) = &tailnet {
-        hub = hub
-            .with_tailnet_admin(runtime.admin())
-            .with_tailnet_pools(runtime.pools().to_vec())
-            .with_tailnet_hub_name(runtime.hub_name().to_owned());
-    }
-    if let Some(trust) = node_trust.clone() {
-        hub = hub.with_node_trust(trust);
-    }
-    hub = if tls.is_some() {
-        hub.with_tls_device_auth()
-    } else {
-        hub.with_loopback_device_auth()
-    };
+    hub = hub
+        .with_ca(Arc::new(ca))
+        .with_node_tls(node_tls)
+        .with_tls_device_auth();
     hub = hub
         .with_sessions(Arc::new(protectorate_session::Manager::new(
             &options.tmux_socket,
@@ -1541,7 +1093,6 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
             runner,
             helper: helper.clone(),
             hub_url: hub_url.clone(),
-            tls_ca_pem,
             cli_executable: cli,
             tasks_max: 4096,
             tool_roots: terminal_tool_roots,
@@ -1751,27 +1302,10 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
             },
         ));
     }
-    if let Some(endpoint) = options.local_node_url {
-        protectorate_connect_client::Client::new_with_trust(
-            &endpoint,
-            "validation-only",
-            Duration::from_secs(1),
-            node_trust.as_ref(),
-        )?;
-        hub = hub.with_local_node_endpoint(endpoint);
-    }
-    if let Some(path) = options.agent_token_file {
-        hub = hub
-            .with_node_token(read_token(&path)?)
-            .map_err(std::io::Error::other)?;
-    }
     for (name, error) in hub.recover_chat_sleeves() {
         eprintln!("chat sleeve {name} could not resume: {error}");
     }
     let node_monitor = Arc::clone(&hub.node_monitor);
-    let routed_monitor = Arc::clone(&hub.node_monitor);
-    let routed_jobs = Arc::clone(&hub.jobs);
-    let routed_files = Arc::clone(&hub.node_files);
     let quota = Arc::clone(&hub.quota);
     let transport = Arc::clone(&hub.quota_transport);
     let stop = Arc::new(AtomicBool::new(false));
@@ -1779,7 +1313,9 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     let node_stop = Arc::clone(&stop);
     let node_interval = options.node_interval;
     eprintln!("protectorate-rs serving on {}", listener.local_addr()?);
-    let tailnet_status = hub.tailnet_status_slot();
+    for listener in &tls_listeners {
+        eprintln!("protectorate-rs serving TLS on {}", listener.local_addr()?);
+    }
     let chat_runtime = hub.chat_runtime.clone();
     let router = web.attach(hub.router()?);
     let worker = tokio::task::spawn_blocking(move || quota.run(transport.as_ref(), &worker_stop));
@@ -1796,24 +1332,6 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
                 remaining -= step;
             }
         }
-    });
-    let expiry_worker = tailnet.as_ref().map(|runtime| {
-        let admin = runtime.admin();
-        let days = runtime.key_expiry_days();
-        let stop = Arc::clone(&stop);
-        tokio::task::spawn_blocking(move || {
-            while !stop.load(Ordering::Relaxed) {
-                if let Err(error) = admin.enforce_expiry(days) {
-                    eprintln!("tailnet key expiry: {error}");
-                }
-                for _ in 0..600 {
-                    if stop.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-            }
-        })
     });
     let backup_cancel = protectorate_backup::Cancellation::default();
     let backup_worker = backup_options.map(|backup_options| {
@@ -1836,84 +1354,44 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     });
     let stopping = Arc::clone(&hub_restart);
     let router = transport::peer_router(router);
-    let tailnet_http = tailnet
-        .as_ref()
-        .map(|_| {
-            transport::TailnetHttp::start(
-                &home.join("tailnet/tsnet-hub"),
-                tailnet_api_port(TailnetApi::Hub, listener.local_addr()?),
-                router.clone(),
-            )
-        })
-        .transpose()?;
-    if let Some(http) = &tailnet_http {
-        let status_runtime = http.runtime();
-        *tailnet_status
-            .write()
-            .unwrap_or_else(|poison| poison.into_inner()) =
-            Some(Arc::new(move || status_runtime.status_snapshot()));
-        let proxy = Arc::new(NodeProxy {
-            runtime: http.runtime(),
-            handle: tokio::runtime::Handle::current(),
-            endpoints: std::sync::Mutex::new(std::collections::HashMap::new()),
-            secret: protectorate_connect_client::virtual_proxy_secret()?,
-        });
-        let route = Arc::new(move |name: &str, address: &str| proxy.endpoint(name, address));
-        routed_monitor.set_route(route.clone());
-        routed_jobs.set_route(route.clone());
-        routed_files.set_route(route);
-        let jobs = Arc::clone(&routed_jobs);
-        let runtime = http.runtime();
-        tokio::spawn(async move {
-            let mut state = runtime.subscribe_state();
-            loop {
-                if matches!(
-                    *state.borrow(),
-                    protectorate_tailnet_runtime::State::Connected { .. }
-                ) {
-                    jobs.resume_deferred();
-                    break;
-                }
-                if state.changed().await.is_err() {
-                    break;
-                }
-            }
+    let (stop_listeners, listening) = tokio::sync::watch::channel(false);
+    let until_stopped = |mut listening: tokio::sync::watch::Receiver<bool>| async move {
+        let _ = listening.wait_for(|stopped| *stopped).await;
+    };
+    let mut servers = tokio::task::JoinSet::new();
+    for listener in tls_listeners {
+        let listener = transport::TlsListener::new(listener, Arc::clone(&tls))?;
+        let service = router
+            .clone()
+            .into_make_service_with_connect_info::<transport::Peer>();
+        let stopped = until_stopped(listening.clone());
+        servers.spawn(async move {
+            axum::serve(listener, service)
+                .with_graceful_shutdown(stopped)
+                .await
         });
     }
-    let result = if let Some(tls) = tls {
-        let listener = transport::TlsListener::new(listener, tls)?;
-        axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<transport::Peer>(),
-        )
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = shutdown_signal() => {},
-                _ = async {
-                    while !stopping.load(Ordering::SeqCst) {
-                        hub_restart_notify.notified().await;
-                    }
-                } => {},
+    let service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let stopped = until_stopped(listening);
+    servers.spawn(async move {
+        axum::serve(listener, service)
+            .with_graceful_shutdown(stopped)
+            .await
+    });
+    let mut result = Ok(());
+    tokio::select! {
+        _ = shutdown_signal() => {},
+        _ = async {
+            while !stopping.load(Ordering::SeqCst) {
+                hub_restart_notify.notified().await;
             }
-        })
-        .await
-    } else {
-        axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = shutdown_signal() => {},
-                _ = async {
-                    while !stopping.load(Ordering::SeqCst) {
-                        hub_restart_notify.notified().await;
-                    }
-                } => {},
-            }
-        })
-        .await
-    };
+        } => {},
+        Some(ended) = servers.join_next() => result = ended?,
+    }
+    let _ = stop_listeners.send(true);
+    while let Some(ended) = servers.join_next().await {
+        result = result.and(ended?);
+    }
     stop.store(true, Ordering::Relaxed);
     backup_cancel.cancel();
     if let Some(runtime) = chat_runtime {
@@ -1921,20 +1399,8 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     }
     worker.await?;
     node_worker.await?;
-    if let Some(expiry_worker) = expiry_worker {
-        expiry_worker.await?;
-    }
     if let Some(backup_worker) = backup_worker {
         backup_worker.await??;
-    }
-    if let Some(http) = tailnet_http {
-        match tokio::time::timeout(Duration::from_secs(8), http.stop()).await {
-            Ok(result) => result?,
-            Err(_) => eprintln!("hub tailnet shutdown exceeded 8 seconds; exiting"),
-        }
-    }
-    if let Some(runtime) = tailnet {
-        runtime.stop().await?;
     }
     result?;
     Ok(hub_restart.load(Ordering::SeqCst))
@@ -1974,21 +1440,12 @@ enum NodeServeExit {
 }
 
 async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
-    let token = read_token(&options.token_file)?;
-    let tls = match (&options.tls_cert, &options.tls_key) {
-        (Some(cert), Some(key)) => Some(transport::tls_config(cert, key)?),
-        _ => None,
-    };
     let home = match options.home {
         Some(home) => home,
-        None => match env::var_os("PROTECTORATE_HOME") {
-            Some(home) => PathBuf::from(home),
-            None => PathBuf::from(env::var_os("HOME").ok_or("HOME is unset; pass --home")?)
-                .join(".protectorate-rust"),
-        },
+        None => default_home()?,
     };
-    fs::create_dir_all(&home)?;
     let home = fs::canonicalize(home)?;
+    let (address, tls, renew) = node_join::serve_tls(&home, options.listen)?;
     let metrics_options = protectorate_node_metrics::Options {
         version: build_version().to_owned(),
         home: home.clone(),
@@ -2076,7 +1533,8 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
         restart_flag.store(true, Ordering::SeqCst);
         restart_wake.notify_one();
     });
-    let agent = protectorate_node::Agent::new(collector, token)
+    let agent = protectorate_node::Agent::new(collector)
+        .with_certificate_renewal(renew)
         .with_files_durable(file_root, options.file_unconfined, &home)?
         .with_jobs(jobs)
         .with_update(std::env::current_exe()?, build_version(), restart)?;
@@ -2105,77 +1563,31 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
     if agent.start_update_trial()? {
         return Ok(NodeServeExit::Restart);
     }
-    let listener = tokio::net::TcpListener::bind(options.listen).await?;
+    let listener = tokio::net::TcpListener::bind(address).await?;
     eprintln!("protectorate-rs node serving on {}", listener.local_addr()?);
     let shutdown_requested = Arc::clone(&restart_requested);
     let uninstall_shutdown = Arc::clone(&uninstall_requested);
-    let trusted_router = if home.join("tsnet/join.json").try_exists()? {
-        Some(transport::peer_router(
-            agent.clone().router_trusted_tailnet()?,
-        ))
-    } else {
-        None
-    };
-    let router = transport::peer_router(agent.router()?);
-    let tailnet_http = if home.join("tsnet/join.json").try_exists()? {
-        Some(transport::TailnetHttp::start_node(
-            &home.join("tsnet"),
-            tailnet_api_port(TailnetApi::Node, listener.local_addr()?),
-            trusted_router.expect("joined node has trusted router"),
-        )?)
-    } else {
-        None
-    };
-    if let Some(tls) = tls {
-        let listener = transport::TlsListener::new(listener, tls)?;
-        axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<transport::Peer>(),
-        )
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = shutdown_signal() => {},
-                _ = async {
-                    while !shutdown_requested.load(Ordering::SeqCst) {
-                        restart_notify.notified().await;
-                    }
-                } => {},
-                _ = async {
-                    while !uninstall_shutdown.load(Ordering::SeqCst) {
-                        uninstall_notify.notified().await;
-                    }
-                } => {},
-            }
-        })
-        .await?;
-    } else {
-        axum::serve(
-            listener,
-            router.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = shutdown_signal() => {},
-                _ = async {
-                    while !shutdown_requested.load(Ordering::SeqCst) {
-                        restart_notify.notified().await;
-                    }
-                } => {},
-                    _ = async {
-                        while !uninstall_shutdown.load(Ordering::SeqCst) {
-                            uninstall_notify.notified().await;
-                        }
-                    } => {},
-            }
-        })
-        .await?;
-    }
-    if let Some(http) = tailnet_http {
-        match tokio::time::timeout(Duration::from_secs(8), http.stop()).await {
-            Ok(result) => result?,
-            Err(_) => eprintln!("node tailnet shutdown exceeded 8 seconds; exiting"),
+    axum::serve(
+        transport::TlsListener::new(listener, tls)?,
+        transport::peer_router(agent.router()?)
+            .into_make_service_with_connect_info::<transport::Peer>(),
+    )
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            _ = shutdown_signal() => {},
+            _ = async {
+                while !shutdown_requested.load(Ordering::SeqCst) {
+                    restart_notify.notified().await;
+                }
+            } => {},
+            _ = async {
+                while !uninstall_shutdown.load(Ordering::SeqCst) {
+                    uninstall_notify.notified().await;
+                }
+            } => {},
         }
-    }
+    })
+    .await?;
     Ok(if uninstall_requested.load(Ordering::SeqCst) {
         NodeServeExit::Uninstalled
     } else if restart_requested.load(Ordering::SeqCst) {
@@ -2269,15 +1681,15 @@ fn spawn_hub_child(
         .spawn()
 }
 
+fn hub_listen(listen: Option<SocketAddr>) -> SocketAddr {
+    listen.unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 7470)))
+}
+
 async fn hub_health(options: &Options, expected: &str) -> bool {
-    let token = match read_token(&options.token_file) {
-        Ok(token) => token,
-        Err(_) => return false,
+    let Some(Ok(token)) = options.token_file.as_ref().map(read_token) else {
+        return false;
     };
-    if let Some(cert) = &options.tls_cert {
-        return transport::hub_health(options.listen, cert, &token, expected).await;
-    }
-    let endpoint = format!("http://{}", transport::reachable_addr(options.listen));
+    let endpoint = format!("http://{}", hub_listen(options.listen));
     let expected = expected.to_owned();
     tokio::task::spawn_blocking(move || {
         let client =
@@ -2502,7 +1914,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if serve_hub(options).await? {
                     std::process::exit(75);
                 }
-                // A stopped blocking map poll may still be inside its read
+                // A blocking node call may still be inside its socket
                 // timeout. The hub child has finished service cleanup; exit
                 // so runtime teardown cannot outlast the service stop window.
                 std::process::exit(0);
@@ -2522,34 +1934,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 NodeServeExit::Uninstalled if std::env::var_os(GUARD_CHILD).is_some() => {
                     std::process::exit(76);
                 }
-                // The map poll uses a blocking control stream. After the
-                // HTTP and tailnet stop window, leaving Tokio's runtime by
-                // return would wait for that blocking read until its socket
-                // timeout. The process is already stopping, so close its
-                // sockets promptly instead of delaying the user service.
-                NodeServeExit::Uninstalled | NodeServeExit::Stopped => std::process::exit(0),
+                NodeServeExit::Uninstalled | NodeServeExit::Stopped => {}
             }
         }
         Some(Command::NodeUninstall(options)) => {
             node_uninstall_with(options, std::path::Path::new("/usr/bin/systemctl"))?;
         }
-        Some(Command::NodeTailnet(command)) => node_tailnet::run(command).await?,
         Some(Command::NodeJoin(command)) => node_join::run(command).await?,
         Some(Command::NodeInstall(command)) => node_install::run(command).await?,
         Some(Command::NodeDoctor(command)) => node_doctor::run(command).await?,
         Some(Command::HubBackup(options)) => hub_backup(options)?,
-        Some(Command::HubTailnetInstall(home)) => {
-            let path = protectorate_tailnet_install::install(&home)?;
-            println!("installed {} (SHA-256 verified)", path.display());
-        }
-        Some(Command::HubTailnetInit(home, config)) => {
-            config.save(&home)?;
-            println!(
-                "saved tailnet configuration in {}",
-                home.join("tailnet").display()
-            );
-        }
-        Some(Command::Client(command)) => client::run(command).await?,
         Some(Command::HubRestore(options)) => hub_restore(options)?,
         Some(Command::HubPublishFlutterCache(options)) => {
             let lower = flutter_cache::publish(&options.home, &options.sdk, options.max_bytes)?;
@@ -2571,7 +1965,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             println!("{}", lower.display());
         }
         Some(Command::ApiCall(options)) => api_call(options)?,
-        Some(Command::DirectTransfer(options)) => direct_transfer(options)?,
     }
     Ok(())
 }

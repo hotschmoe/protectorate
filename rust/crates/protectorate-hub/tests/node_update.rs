@@ -63,7 +63,7 @@ async fn update_node_skips_and_never_confirms_without_guardian_restart() {
     let exe = temp.path().join("node-exe");
     write_binary(&exe, "v1");
     let restart: UpdateRestart = Arc::new(|| {});
-    let agent = Agent::new(Arc::new(Metrics), "node-secret")
+    let agent = Agent::new(Arc::new(Metrics))
         .with_files(&node_root, false)
         .unwrap()
         .with_update(&exe, "v1", restart)
@@ -92,8 +92,6 @@ async fn update_node_skips_and_never_confirms_without_guardian_restart() {
         )
         .unwrap();
     let hub = hub
-        .with_node_token("node-secret".into())
-        .unwrap()
         .with_node_binary_dir(&bins)
         .with_node_update_timing(Duration::from_secs(5), Duration::from_millis(20));
     let (hub_url, hub_task) = serve(hub.router().unwrap()).await;

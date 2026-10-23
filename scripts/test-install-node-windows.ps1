@@ -7,11 +7,11 @@ $version = "v9.8.7"
 $server = "protectorate-rs-windows-amd64.exe"
 $cli = "protectorate-cli-windows-amd64.exe"
 $bridge = "protectorate-mcpbridge-windows-amd64.exe"
-$state = Join-Path $env:LOCALAPPDATA "Protectorate-Rust-Node"
-$install = Join-Path $env:LOCALAPPDATA "Programs\Protectorate-Rust-Node"
+$state = Join-Path $env:LOCALAPPDATA "Protectorate-Node"
+$install = Join-Path $env:LOCALAPPDATA "Programs\Protectorate-Node"
 $stateBefore = Test-Path -LiteralPath $state
 $installBefore = Test-Path -LiteralPath $install
-$taskBefore = [bool](Get-ScheduledTask -TaskName "Protectorate-Rust-Node" -ErrorAction SilentlyContinue)
+$taskBefore = [bool](Get-ScheduledTask -TaskName "Protectorate-Node" -ErrorAction SilentlyContinue)
 
 function Pin-Manifest {
     return (Get-FileHash -LiteralPath (Join-Path $bundle "SHA256SUMS") -Algorithm SHA256).Hash
@@ -89,7 +89,7 @@ try {
 
     if ((Test-Path -LiteralPath $state) -ne $stateBefore) { throw "VerifyOnly touched node state" }
     if ((Test-Path -LiteralPath $install) -ne $installBefore) { throw "VerifyOnly touched install directory" }
-    if ([bool](Get-ScheduledTask -TaskName "Protectorate-Rust-Node" -ErrorAction SilentlyContinue) -ne $taskBefore) { throw "VerifyOnly changed the scheduled task" }
+    if ([bool](Get-ScheduledTask -TaskName "Protectorate-Node" -ErrorAction SilentlyContinue) -ne $taskBefore) { throw "VerifyOnly changed the scheduled task" }
     Write-Output "Windows node installer manifest tests passed"
 } finally {
     if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }

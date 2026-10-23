@@ -1141,6 +1141,42 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "JoinNode redeems an InviteNode code from the new machine. The node sends the public half of a key it generated and a signature over the code made with that key; the hub CA returns a certificate for the key that names the node. No token is needed: the single-use code is the credential.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "description": "address is the private host:port the node agent listens on.",
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "proof": {
+          "contentEncoding": "base64",
+          "description": "proof is an ECDSA P-256 SHA-256 (ASN.1) signature over \"protectorate-join:\" + name + \":\" + code made with that key.",
+          "type": "string"
+        },
+        "publicKey": {
+          "contentEncoding": "base64",
+          "description": "public_key is the uncompressed P-256 point the node generated.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "node_join_node"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -1721,19 +1757,5 @@
       "type": "object"
     },
     "name": "sleeve_spawn_sleeve"
-  },
-  {
-    "annotations": {
-      "idempotentHint": true,
-      "openWorldHint": false,
-      "readOnlyHint": true
-    },
-    "description": "GetStatus returns the hub's tailnet identity and every peer it knows. FAILED_PRECONDITION when the tailnet is not enabled on this hub.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {},
-      "type": "object"
-    },
-    "name": "tailnet_get_status"
   }
 ]

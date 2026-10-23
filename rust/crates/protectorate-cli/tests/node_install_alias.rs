@@ -28,14 +28,14 @@ fn installed_cli_node_install_forwards_install_argv_to_sibling() {
             "/tmp/unused",
             "node",
             "install",
-            "--control",
+            "--hub",
             "https://hub",
             "--name",
             "gpu1",
             "--home",
             "/tmp/node",
-            "--key-file",
-            "/tmp/enroll.key",
+            "--code-file",
+            "/tmp/join.code",
             "--dry-run",
         ])
         .output()
@@ -47,13 +47,13 @@ fn installed_cli_node_install_forwards_install_argv_to_sibling() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "node\ninstall\n--control\nhttps://hub\n--name\ngpu1\n--home\n/tmp/node\n--key-file\n/tmp/enroll.key\n--dry-run\n"
+        "node\ninstall\n--hub\nhttps://hub\n--name\ngpu1\n--home\n/tmp/node\n--code-file\n/tmp/join.code\n--dry-run\n"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn installed_cli_node_install_requires_own_control_url() {
+fn installed_cli_node_install_ignores_the_global_hub_flag() {
     let root = tempfile::tempdir().unwrap();
     let cli = installed_cli(root.path());
     echo_companion(root.path());
@@ -80,14 +80,7 @@ fn installed_cli_node_install_reports_missing_companion() {
     let empty_path = tempfile::tempdir().unwrap();
     let output = Command::new(&cli)
         .env("PATH", empty_path.path())
-        .args([
-            "node",
-            "install",
-            "--control",
-            "https://hub",
-            "--name",
-            "gpu1",
-        ])
+        .args(["node", "install", "--hub", "https://hub", "--name", "gpu1"])
         .output()
         .unwrap();
     assert!(!output.status.success());

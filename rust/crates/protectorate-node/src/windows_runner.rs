@@ -45,7 +45,7 @@ use windows_sys::Win32::{
 use zeroize::Zeroizing;
 
 const RUNNER_USER: &str = "protectorate-runner";
-const CONFIG_FILE: &str = "runner-rust.json";
+const CONFIG_FILE: &str = "runner.json";
 const ENTROPY: &[u8] = b"protectorate-rust-runner-v1";
 
 #[link(name = "advapi32")]
@@ -493,7 +493,7 @@ pub fn install_windows_runner(home: &Path, job_root: &Path) -> io::Result<()> {
     let password = Zeroizing::new(runner_password(&random));
     ensure_account(RUNNER_USER, &password)
         .map_err(|error| io::Error::new(error.kind(), format!("create runner account: {error}")))?;
-    let temp = home.join("runner-rust.json.new");
+    let temp = home.join("runner.json.new");
     let result = (|| {
         let token = logon(RUNNER_USER, &password).map_err(|error| {
             io::Error::new(error.kind(), format!("log on runner account: {error}"))

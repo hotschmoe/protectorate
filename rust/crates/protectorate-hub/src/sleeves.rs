@@ -642,7 +642,6 @@ pub struct TerminalLauncher {
     pub runner: PathBuf,
     pub helper: PathBuf,
     pub hub_url: String,
-    pub tls_ca_pem: Option<String>,
     pub cli_executable: Option<PathBuf>,
     pub tool_roots: Vec<PathBuf>,
     pub flutter_sdk_root: Option<PathBuf>,
@@ -922,7 +921,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 hub.audit.write(AuditEntry {
                     actor: request.auth.actor.clone(),
                     token_id: request.auth.token_id.clone(),
-                    tailnet: request.auth.tailnet.clone(),
                     task: request.auth.task.clone(),
                     procedure: request.method.procedure.clone(),
                     subject: "envoy".into(),
@@ -1578,9 +1576,6 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     let caller_env = request_env(value)?;
     let mut env = caller_env.clone();
     env.insert("PROTECTORATE_HUB".into(), launcher.hub_url.clone());
-    if let Some(pem) = &launcher.tls_ca_pem {
-        env.insert("PROTECTORATE_TLS_CA_PEM".into(), pem.clone());
-    }
     env.insert(
         "PROTECTORATE_TOKEN_FILE".into(),
         launcher

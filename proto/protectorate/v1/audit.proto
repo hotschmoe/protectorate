@@ -48,8 +48,7 @@ message AuditEntry {
   // actor is "owner", "token:<name>" or "unauthenticated".
   string actor = 2;
   string token_id = 3;
-  // tailnet is the WhoIs identity of a tailnet caller.
-  string tailnet = 4;
+  reserved 4;
   // procedure is the Connect procedure, or the terminal path.
   string procedure = 5;
   // subject is the request's name or id, nothing else from the body.

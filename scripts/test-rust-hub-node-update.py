@@ -25,6 +25,9 @@ build_server = installed.build_server
 free_port = installed.free_port
 metrics = installed.metrics
 wait_until = installed.wait_until
+start_hub = installed.start_hub
+join = installed.join
+OWNER = installed.OWNER
 FIRST = "0.1.0"
 SECOND = "0.1.1"
 
@@ -90,57 +93,25 @@ def main():
         binary = ROOT / "target/debug" / filename
         assert binary.is_file(), f"build {filename} first"
         shutil.copy2(binary, fixture / "node-bin" / filename)
-    for filename in ("protectorate-sleeve-runner", "protectorate-sleeve-sandbox-helper"):
-        binary = ROOT / "target/debug" / filename
-        assert binary.is_file(), f"build {filename} first"
-        shutil.copy2(binary, fixture / "hub-bin" / filename)
     cli_exe = ROOT / "target/debug/protectorate-cli"
     assert cli_exe.is_file(), "build protectorate-cli first"
 
     owner_token = fixture / "owner-token"
-    agent_token = fixture / "agent-token"
-    owner_token.write_text("hub-node-update-owner-token\n")
-    agent_token.write_text("hub-node-update-agent-token\n")
-    owner_token.chmod(0o600)
-    agent_token.chmod(0o600)
-    node_port, hub_port = free_port(), free_port()
-    hub_url = f"http://127.0.0.1:{hub_port}"
-    unit = f"protectorate-rust-hub-node-update-{os.getpid()}.service"
+    node_port = free_port()
+    unit = f"protectorate-hub-node-update-{os.getpid()}.service"
     hub_process = None
     try:
+        hub_process, hub_url = start_hub(fixture, hub_exe, "--node-binary-dir", str(fixture / "releases"))
+        join(hub_url, fixture, node_exe, fixture / "node-state", "trial-peer", node_port)
         subprocess.run(
             ("systemd-run", "--user", "--collect", "--unit", unit,
              "--property=Type=exec", "--property=KillMode=control-group",
              "--property=Restart=no", str(node_exe), "node", "serve",
-             "--home", str(fixture / "node-state"), "--agent-token-file", str(agent_token),
-             "--file-root", str(fixture / "node-files"), "--allow-plain-jobs",
-             "--listen", f"127.0.0.1:{node_port}"),
+             "--home", str(fixture / "node-state"),
+             "--file-root", str(fixture / "node-files"), "--allow-plain-jobs"),
             check=True, capture_output=True, text=True,
         )
-        wait_until("first node", lambda: metrics(node_port, agent_token.read_text().strip()) == FIRST)
-        with (fixture / "hub.log").open("w") as log:
-            hub_process = subprocess.Popen(
-                (str(hub_exe), "serve", "--home", str(fixture / "hub-state"),
-                 "--owner-token-file", str(owner_token), "--agent-token-file", str(agent_token),
-                 "--node-binary-dir", str(fixture / "releases"),
-                 "--listen", f"127.0.0.1:{hub_port}"),
-                stdout=log, stderr=subprocess.STDOUT,
-            )
-        def hub_ready():
-            if hub_process.poll() is not None:
-                raise AssertionError(f"hub exited: {(fixture / 'hub.log').read_text()}")
-            try:
-                return cli(cli_exe, hub_url, owner_token, "status").returncode == 0
-            except (AssertionError, subprocess.TimeoutExpired):
-                return False
-        wait_until("hub", hub_ready)
-        added = cli(cli_exe, hub_url, owner_token, "node", "add", "trial-peer",
-                    "--addr", f"127.0.0.1:{node_port}", "--json")
-        assert "trial-peer" in added.stdout, added.stdout
-        def node_fresh():
-            shown = cli(cli_exe, hub_url, owner_token, "node", "show", "trial-peer", "--json")
-            return json.loads(shown.stdout).get("freshness") == "NODE_FRESHNESS_FRESH"
-        wait_until("hub node poll", node_fresh)
+        wait_until("hub node poll", lambda: metrics(hub_url, "trial-peer") == FIRST)
 
         write_failed_candidate(candidate, arch)
         failed = cli(cli_exe, hub_url, owner_token, "node", "update", "trial-peer",
@@ -151,7 +122,7 @@ def main():
         assert failed_phases[-1]["phase"] == "UPDATE_PHASE_ROLLED_BACK", (failed_phases, failed.stderr)
         wait_until("rollback marker", lambda: marker(pathlib.Path(str(node_exe) + ".update"), "rolledback"))
         assert hashlib.sha256(node_exe.read_bytes()).digest() == hashlib.sha256(first.read_bytes()).digest()
-        assert metrics(node_port, agent_token.read_text().strip()) == FIRST
+        wait_until("node after rollback", lambda: metrics(hub_url, "trial-peer") == FIRST)
 
         shutil.copy2(second, candidate)
         update = cli(cli_exe, hub_url, owner_token, "node", "update", "trial-peer", "--json")
@@ -161,7 +132,7 @@ def main():
         assert phases[-1]["phase"] == "UPDATE_PHASE_CONFIRMED", phases
         wait_until("node confirmation", lambda: marker(pathlib.Path(str(node_exe) + ".update"), "confirmed"))
         assert hashlib.sha256(node_exe.read_bytes()).digest() == hashlib.sha256(second.read_bytes()).digest()
-        assert metrics(node_port, agent_token.read_text().strip()) == SECOND
+        wait_until("updated node", lambda: metrics(hub_url, "trial-peer") == SECOND)
         skipped = phase_lines(cli(cli_exe, hub_url, owner_token, "node", "update", "trial-peer", "--json"))
         assert skipped[-1]["phase"] == "UPDATE_PHASE_SKIPPED", skipped
 

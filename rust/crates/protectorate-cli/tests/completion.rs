@@ -112,7 +112,7 @@ fn completion_tracks_nested_commands_and_skips_flag_values() {
     );
     let serve_all = String::from_utf8(cli(&["__complete", "node", "serve", "--"]).stdout).unwrap();
     assert!(
-        serve_all.contains("--agent-token-file\tNode bearer token file\n"),
+        serve_all.contains("--listen\tListen address\n"),
         "{serve_all}"
     );
     assert!(

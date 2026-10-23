@@ -330,7 +330,7 @@ fn termux_write_checks_both_destinations_before_creating_either_script() {
             "--binary",
             "/data/data/com.termux/files/usr/bin/protectorate-rs",
             "--home",
-            "/data/data/com.termux/files/home/.protectorate-rust",
+            "/data/data/com.termux/files/home/.protectorate",
             "--write",
             out.to_str().unwrap(),
         ])
@@ -354,7 +354,7 @@ fn termux_print_mode_labels_both_target_paths() {
             "--binary",
             "/data/data/com.termux/files/usr/bin/protectorate-rs",
             "--home",
-            "/data/data/com.termux/files/home/.protectorate-rust",
+            "/data/data/com.termux/files/home/.protectorate",
         ])
         .output_retry()
         .unwrap();
@@ -431,7 +431,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
             "--binary",
             binary,
             "--home",
-            "/data/data/com.termux/files/home/.protectorate-rust",
+            "/data/data/com.termux/files/home/.protectorate",
             "--install",
         ])
         .output_retry()
@@ -461,7 +461,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
             "--binary",
             binary,
             "--home",
-            "/data/data/com.termux/files/home/.protectorate-rust",
+            "/data/data/com.termux/files/home/.protectorate",
             "--install",
         ])
         .output_retry()

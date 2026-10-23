@@ -38,7 +38,7 @@ async fn job_run_and_logs_stream_through_real_hub_and_node() {
     let jobs = Jobs::new(root.path().join("node-jobs"), 2)
         .unwrap()
         .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(jobs);
+    let node = Agent::new(Arc::new(Metrics)).with_jobs(jobs);
     let (node_url, node_task) = serve(node.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -52,7 +52,6 @@ async fn job_run_and_logs_stream_through_real_hub_and_node() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (url, hub_task) = serve(hub.router().unwrap()).await;
 
     let url2 = url.clone();

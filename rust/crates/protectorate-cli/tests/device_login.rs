@@ -143,7 +143,7 @@ fn wait_for_code(hub: &str, name: &str) -> String {
 }
 
 fn credential_dir(home: &Path) -> PathBuf {
-    home.join(".protectorate-rust").join("credentials")
+    home.join(".protectorate").join("credentials")
 }
 
 fn only_credential(home: &Path) -> PathBuf {
@@ -419,7 +419,7 @@ fn a_credential_for_another_hub_or_without_a_secret_is_refused() {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let home = tempfile::tempdir().unwrap();
-    let dir = home.path().join(".protectorate-rust").join("credentials");
+    let dir = home.path().join(".protectorate").join("credentials");
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{key}.json"));
     let write = |body: &str| {

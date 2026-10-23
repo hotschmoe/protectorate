@@ -7,9 +7,7 @@ use axum::{
     },
     http::{header, HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
-    Extension,
 };
-use protectorate_wire::TailnetIdentity;
 use std::{
     io,
     os::{
@@ -31,10 +29,8 @@ pub(super) async fn attach(
     Path(name): Path<String>,
     headers: HeaderMap,
     uri: Uri,
-    identity: Option<Extension<TailnetIdentity>>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let tailnet = identity.map_or_else(String::new, |identity| identity.0 .0);
     let query = uri.query().unwrap_or("");
     let read_only = query_value(query, "readonly") == Some("1");
     let cols = query_value(query, "cols")
@@ -75,7 +71,6 @@ pub(super) async fn attach(
             &hub.audit,
             "unauthenticated",
             "",
-            &tailnet,
             if protectorate_session::valid_name(&name).is_ok() {
                 &name
             } else {
@@ -95,7 +90,6 @@ pub(super) async fn attach(
             &hub.audit,
             &actor,
             &token_id,
-            &tailnet,
             "",
             read_only,
             ("error", "invalid_argument"),
@@ -107,7 +101,6 @@ pub(super) async fn attach(
             &hub.audit,
             &actor,
             &token_id,
-            &tailnet,
             &name,
             read_only,
             ("denied", "permission_denied"),
@@ -125,7 +118,6 @@ pub(super) async fn attach(
                 &hub.audit,
                 &actor,
                 &token_id,
-                &tailnet,
                 &name,
                 read_only,
                 ("error", "not_found"),
@@ -137,7 +129,6 @@ pub(super) async fn attach(
                 &hub.audit,
                 &actor,
                 &token_id,
-                &tailnet,
                 &name,
                 read_only,
                 ("error", "invalid_argument"),
@@ -149,7 +140,6 @@ pub(super) async fn attach(
                 &hub.audit,
                 &actor,
                 &token_id,
-                &tailnet,
                 &name,
                 read_only,
                 ("error", "internal"),
@@ -161,8 +151,8 @@ pub(super) async fn attach(
         .protocols([PROTOCOL])
         .on_upgrade(move |socket| async move {
             let _ = bridge(
-                hub, socket, name, secret, owner, actor, token_id, tailnet, command, session,
-                read_only, cols, rows,
+                hub, socket, name, secret, owner, actor, token_id, command, session, read_only,
+                cols, rows,
             )
             .await;
         })
@@ -273,7 +263,6 @@ async fn bridge(
     owner: bool,
     actor: String,
     token_id: String,
-    tailnet: String,
     command: Command,
     session: protectorate_session::Session,
     mut read_only: bool,
@@ -299,7 +288,6 @@ async fn bridge(
                 &hub.audit,
                 &actor,
                 &token_id,
-                &tailnet,
                 &name,
                 requested_read_only,
                 ("error", "internal"),
@@ -311,7 +299,6 @@ async fn bridge(
         &hub.audit,
         &actor,
         &token_id,
-        &tailnet,
         &name,
         requested_read_only,
         ("ok", ""),

@@ -4,7 +4,6 @@ use protectorate_inventory::{Node, CARE};
 use protectorate_lease::{parse_resource, Chooser, Error as LeaseError};
 use protectorate_node::{Agent, Jobs, MetricsCollector};
 use protectorate_node_metrics::NodeMetrics;
-use protectorate_tailnet_admin::Admin;
 use protectorate_wire::Code;
 use serde_json::{json, Value};
 use std::{io, sync::Arc, time::Duration};
@@ -38,7 +37,7 @@ async fn wait_drain_blocks_new_jobs_and_leases_then_releases_old_lease() {
     let jobs = Jobs::new(root.path().join("node-jobs"), 2)
         .unwrap()
         .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(jobs);
+    let node = Agent::new(Arc::new(Metrics)).with_jobs(jobs);
     let (node_url, node_task) = serve(node.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -60,11 +59,7 @@ async fn wait_drain_blocks_new_jobs_and_leases_then_releases_old_lease() {
         }
         Ok(resource)
     });
-    let hub = hub
-        .with_lease_chooser(chooser)
-        .unwrap()
-        .with_node_token("node-secret".into())
-        .unwrap();
+    let hub = hub.with_lease_chooser(chooser).unwrap();
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     let url2 = url.clone();
     let job = tokio::task::spawn_blocking(move || {
@@ -131,7 +126,7 @@ async fn wait_drain_blocks_new_jobs_and_leases_then_releases_old_lease() {
             && e["message"]
                 .as_str()
                 .unwrap()
-                .contains("no tailnet enrollment was revoked")));
+                .contains("the node certificate is no longer trusted")));
     assert!(!phases.2.to_string().contains(&lease_id));
     assert!(!phases.2.to_string().contains(&ticket_id));
     assert_eq!(phases.3.code, Code::NotFound);
@@ -145,7 +140,7 @@ async fn cancel_mode_stops_running_job_before_forgetting_node() {
     let jobs = Jobs::new(root.path().join("node-jobs"), 2)
         .unwrap()
         .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(jobs);
+    let node = Agent::new(Arc::new(Metrics)).with_jobs(jobs);
     let (node_url, node_task) = serve(node.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -159,7 +154,6 @@ async fn cancel_mode_stops_running_job_before_forgetting_node() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     let url2 = url.clone();
     let job=tokio::task::spawn_blocking(move || client(&url2).call(SUBMIT,&json!({"target":{"node":"peer"},"command":["/bin/sh","-c","sleep 10"],"timeout":"15s"}))).await.unwrap().unwrap();
@@ -208,7 +202,7 @@ async fn fresh_node_receives_authenticated_uninstall_before_removal() {
     .unwrap();
     let stopped = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stopped);
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_uninstall(
+    let node = Agent::new(Arc::new(Metrics)).with_uninstall(
         plan,
         "/bin/true",
         Arc::new(move || {
@@ -227,7 +221,6 @@ async fn fresh_node_receives_authenticated_uninstall_before_removal() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let monitor = Arc::clone(&hub.node_monitor);
     tokio::task::spawn_blocking(move || monitor.poll_node("peer"))
         .await
@@ -268,97 +261,4 @@ async fn fresh_node_receives_authenticated_uninstall_before_removal() {
     .unwrap();
     hub_task.abort();
     node_task.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn removal_expires_invite_and_revokes_enrollment_before_forgetting_node() {
-    use axum::routing::{delete, get, post};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    let calls = Arc::new(AtomicUsize::new(0));
-    let expire_calls = Arc::clone(&calls);
-    let revoke_calls = Arc::clone(&calls);
-    let delete_calls = Arc::clone(&calls);
-    let api = axum::Router::new()
-        .route(
-            "/api/v1/preauthkey/expire",
-            post(move |headers: axum::http::HeaderMap| {
-                let calls = Arc::clone(&expire_calls);
-                async move {
-                    assert_eq!(headers["authorization"], "Bearer api-secret");
-                    assert_eq!(calls.fetch_add(1, Ordering::SeqCst), 0);
-                    ([("content-type", "application/json")], "{}")
-                }
-            }),
-        )
-        .route(
-            "/api/v1/node",
-            get(|| async {
-                (
-                    [("content-type", "application/json")],
-                    json!({"nodes":[{"id":"7","name":"peer"}]}).to_string(),
-                )
-            }),
-        )
-        .route(
-            "/api/v1/node/7/expire",
-            post(move || {
-                let calls = Arc::clone(&revoke_calls);
-                async move {
-                    assert_eq!(calls.fetch_add(1, Ordering::SeqCst), 1);
-                    ([("content-type", "application/json")], "{}")
-                }
-            }),
-        )
-        .route(
-            "/api/v1/node/7",
-            delete(move || {
-                let calls = Arc::clone(&delete_calls);
-                async move {
-                    assert_eq!(calls.fetch_add(1, Ordering::SeqCst), 2);
-                    ([("content-type", "application/json")], "{}")
-                }
-            }),
-        );
-    let (admin_url, admin_task) = serve(api).await;
-    let admin = Arc::new(Admin::new(&admin_url, "api-secret", Duration::from_secs(3)).unwrap());
-    let root = tempfile::tempdir().unwrap();
-    let hub = Hub::open(root.path(), "owner-secret", "test").unwrap();
-    hub.inventory
-        .add(
-            Node {
-                name: "peer".into(),
-                address: "peer".into(),
-                invited: true,
-                invite_key_id: 11,
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
-    let (url, hub_task) = serve(hub.with_tailnet_admin(admin).router().unwrap()).await;
-    let phases = tokio::task::spawn_blocking(move || {
-        let mut phases = Vec::new();
-        client(&url)
-            .stream(REMOVE, &json!({"name":"peer"}), |event| {
-                phases.push(event);
-                Ok(())
-            })
-            .unwrap();
-        phases
-    })
-    .await
-    .unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
-    assert!(phases
-        .iter()
-        .any(|phase| phase["phase"] == "REMOVE_PHASE_REVOKING"
-            && phase["message"]
-                .as_str()
-                .unwrap()
-                .contains("revoked the tailnet enrollment")));
-    assert!(phases
-        .iter()
-        .any(|phase| phase["phase"] == "REMOVE_PHASE_REMOVED"));
-    hub_task.abort();
-    admin_task.abort();
 }

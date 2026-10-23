@@ -80,7 +80,6 @@ async fn nested_hub_sleeve_builds_sibling_with_private_overlay_and_cleans_up() {
         runner: env!("CARGO_BIN_EXE_protectorate-hub-sleeve-runner").into(),
         helper: env!("CARGO_BIN_EXE_protectorate-hub-sandbox-helper").into(),
         hub_url: format!("http://{addr}"),
-        tls_ca_pem: None,
         cli_executable: None,
         tool_roots: vec![sdk.clone()],
         flutter_sdk_root: Some(sdk.clone()),
@@ -141,7 +140,7 @@ async fn nested_hub_sleeve_builds_sibling_with_private_overlay_and_cleans_up() {
             "--plain",
             "--no-legend",
             "--full",
-            &format!("protectorate-rust-{pane_pid}-*.scope"),
+            &format!("protectorate-{pane_pid}-*.scope"),
         ])
         .output()
         .unwrap();

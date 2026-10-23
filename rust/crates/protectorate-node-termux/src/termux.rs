@@ -1,6 +1,5 @@
 #[path = "../../protectorate-server/src/node_join.rs"]
 mod node_join;
-#[allow(dead_code)] // The shared transport includes hub-side helpers.
 #[path = "../../protectorate-server/src/transport.rs"]
 mod transport;
 
@@ -22,10 +21,7 @@ const GUARD_CHILD: &str = "PROTECTORATE_NODE_GUARD_CHILD";
 
 struct Serve {
     home: PathBuf,
-    token_file: PathBuf,
-    listen: SocketAddr,
-    tls_cert: Option<PathBuf>,
-    tls_key: Option<PathBuf>,
+    listen: Option<SocketAddr>,
     file_root: Option<PathBuf>,
     file_unconfined: bool,
     job_concurrency: usize,
@@ -45,14 +41,12 @@ enum Command {
 
 struct Install {
     paths: lifecycle::Paths,
-    control: String,
+    hub: String,
     name: Option<String>,
-    key: Option<String>,
-    key_file: Option<PathBuf>,
-    ca_cert: Option<PathBuf>,
-    listen: SocketAddr,
-    tls_cert: Option<PathBuf>,
-    tls_key: Option<PathBuf>,
+    code: Option<String>,
+    code_file: Option<PathBuf>,
+    ca_cert: PathBuf,
+    listen: Option<SocketAddr>,
     allow_plain_jobs: bool,
     dry_run: bool,
     no_start: bool,
@@ -60,8 +54,6 @@ struct Install {
 }
 struct Doctor {
     paths: lifecycle::Paths,
-    hub: Option<String>,
-    ca_cert: Option<PathBuf>,
     json: bool,
 }
 struct Uninstall {
@@ -92,24 +84,29 @@ fn default_home() -> Result<PathBuf, String> {
         return Ok(PathBuf::from(home));
     }
     env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".protectorate-rust"))
+        .map(|home| PathBuf::from(home).join(".protectorate"))
         .ok_or_else(|| "HOME is unset; pass --home".into())
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  protectorate-rs version --json\n  protectorate-rs node join --control URL [--name NAME] [--key KEY | --key-file FILE] [--ca-cert FILE] [--home DIR]\n  protectorate-rs node install --control URL [--name NAME] [--key KEY | --key-file FILE] [--ca-cert FILE] [--home DIR] [--allow-plain-jobs] [--dry-run] [--no-start] [-- serve-flags]\n  protectorate-rs node doctor [--home DIR] [--hub URL] [--ca-cert FILE] [--json]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node serve --agent-token-file FILE [--home DIR] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--allow-plain-jobs] [--watch-dir DIR] [--docker-host URL] [--listen 127.0.0.1:7475] [--tls-cert FILE --tls-key FILE]\n"
+    "Usage:\n  protectorate-rs version --json\n  protectorate-rs node join --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR]\n  protectorate-rs node install --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR] [--allow-plain-jobs] [--dry-run] [--no-start] [-- serve-flags]\n  protectorate-rs node doctor [--home DIR] [--json]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node serve [--home DIR] [--listen IP:PORT] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--allow-plain-jobs] [--watch-dir DIR] [--docker-host URL]\n"
+}
+
+fn parse_listen(value: Option<String>) -> Result<SocketAddr, String> {
+    value
+        .ok_or("--listen requires IP:PORT")?
+        .parse()
+        .map_err(|_| "--listen requires IP:PORT".into())
 }
 
 fn parse_install(mut args: impl Iterator<Item = String>) -> Result<Install, String> {
     let mut home = None;
-    let mut control = None;
+    let mut hub = None;
     let mut name = None;
-    let mut key = None;
-    let mut key_file = None;
+    let mut code = None;
+    let mut code_file = None;
     let mut ca_cert = None;
-    let mut listen = "127.0.0.1:7475".parse::<SocketAddr>().unwrap();
-    let mut tls_cert = None;
-    let mut tls_key = None;
+    let mut listen = None;
     let mut allow_plain_jobs = false;
     let mut dry_run = false;
     let mut no_start = false;
@@ -123,34 +120,18 @@ fn parse_install(mut args: impl Iterator<Item = String>) -> Result<Install, Stri
             "--home" if home.is_none() => {
                 home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?))
             }
-            "--control" if control.is_none() => {
-                control = Some(args.next().ok_or("--control requires URL")?)
-            }
+            "--hub" if hub.is_none() => hub = Some(args.next().ok_or("--hub requires URL")?),
             "--name" if name.is_none() => name = Some(args.next().ok_or("--name requires NAME")?),
-            "--key" if key.is_none() => key = Some(args.next().ok_or("--key requires KEY")?),
-            "--key-file" if key_file.is_none() => {
-                key_file = Some(PathBuf::from(
-                    args.next().ok_or("--key-file requires FILE")?,
+            "--code" if code.is_none() => code = Some(args.next().ok_or("--code requires CODE")?),
+            "--code-file" if code_file.is_none() => {
+                code_file = Some(PathBuf::from(
+                    args.next().ok_or("--code-file requires FILE")?,
                 ))
             }
             "--ca-cert" if ca_cert.is_none() => {
                 ca_cert = Some(PathBuf::from(args.next().ok_or("--ca-cert requires FILE")?))
             }
-            "--listen" => {
-                listen = args
-                    .next()
-                    .ok_or("--listen requires IP:PORT")?
-                    .parse()
-                    .map_err(|_| "--listen requires IP:PORT")?
-            }
-            "--tls-cert" if tls_cert.is_none() => {
-                tls_cert = Some(PathBuf::from(
-                    args.next().ok_or("--tls-cert requires FILE")?,
-                ))
-            }
-            "--tls-key" if tls_key.is_none() => {
-                tls_key = Some(PathBuf::from(args.next().ok_or("--tls-key requires FILE")?))
-            }
+            "--listen" => listen = Some(parse_listen(args.next())?),
             "--allow-plain-jobs" => allow_plain_jobs = true,
             "--dry-run" => dry_run = true,
             "--no-start" => no_start = true,
@@ -161,34 +142,18 @@ fn parse_install(mut args: impl Iterator<Item = String>) -> Result<Install, Stri
             }
         }
     }
-    let control = control.ok_or("node install requires --control URL")?;
-    if !control.starts_with("http://") && !control.starts_with("https://") {
-        return Err("--control requires HTTP or HTTPS URL".into());
+    let hub = hub.ok_or("node install requires --hub URL")?;
+    if !hub.starts_with("https://") {
+        return Err("--hub requires the hub's HTTPS URL".into());
     }
-    if ca_cert.is_some() && !control.starts_with("https://") {
-        return Err("--ca-cert requires HTTPS control URL".into());
-    }
-    if key.is_some() && key_file.is_some() {
-        return Err("--key and --key-file are exclusive".into());
-    }
-    if tls_cert.is_some() != tls_key.is_some() {
-        return Err("--tls-cert and --tls-key must be supplied together".into());
-    }
-    if !listen.ip().is_loopback() && tls_cert.is_none() {
-        return Err("non-loopback --listen requires --tls-cert and --tls-key".into());
+    if code.is_some() && code_file.is_some() {
+        return Err("--code and --code-file are exclusive".into());
     }
     for arg in &serve_args {
         if arg.contains(['\n', '\r'])
-            || [
-                "--home",
-                "--agent-token-file",
-                "--listen",
-                "--tls-cert",
-                "--tls-key",
-                "--sandbox-helper",
-            ]
-            .iter()
-            .any(|reserved| arg == reserved || arg.starts_with(&format!("{reserved}=")))
+            || ["--home", "--listen", "--sandbox-helper"]
+                .iter()
+                .any(|reserved| arg == reserved || arg.starts_with(&format!("{reserved}=")))
         {
             return Err("node serve argument conflicts with installer-managed options".into());
         }
@@ -197,14 +162,12 @@ fn parse_install(mut args: impl Iterator<Item = String>) -> Result<Install, Stri
         .map_err(|error| error.to_string())?;
     Ok(Install {
         paths,
-        control,
+        hub: hub.trim_end_matches('/').to_owned(),
         name,
-        key,
-        key_file,
-        ca_cert,
+        code,
+        code_file,
+        ca_cert: ca_cert.ok_or("node install requires --ca-cert FILE (the hub CA)")?,
         listen,
-        tls_cert,
-        tls_key,
         allow_plain_jobs,
         dry_run,
         no_start,
@@ -214,19 +177,11 @@ fn parse_install(mut args: impl Iterator<Item = String>) -> Result<Install, Stri
 
 fn parse_doctor(mut args: impl Iterator<Item = String>) -> Result<Doctor, String> {
     let mut home = None;
-    let mut hub = env::var("PROTECTORATE_HUB")
-        .ok()
-        .filter(|value| !value.is_empty());
-    let mut ca_cert = None;
     let mut json = false;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--home" if home.is_none() => {
                 home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?))
-            }
-            "--hub" => hub = Some(args.next().ok_or("--hub requires URL")?),
-            "--ca-cert" if ca_cert.is_none() => {
-                ca_cert = Some(PathBuf::from(args.next().ok_or("--ca-cert requires FILE")?))
             }
             "--json" => json = true,
             _ => return Err(format!("unknown node doctor argument {flag:?}")),
@@ -234,12 +189,7 @@ fn parse_doctor(mut args: impl Iterator<Item = String>) -> Result<Doctor, String
     }
     let paths = lifecycle::Paths::current(home.map_or_else(default_home, Ok)?)
         .map_err(|error| error.to_string())?;
-    Ok(Doctor {
-        paths,
-        hub,
-        ca_cert,
-        json,
-    })
+    Ok(Doctor { paths, json })
 }
 
 fn parse_uninstall(mut args: impl Iterator<Item = String>) -> Result<Uninstall, String> {
@@ -261,10 +211,7 @@ fn parse_uninstall(mut args: impl Iterator<Item = String>) -> Result<Uninstall, 
 
 fn parse_serve(mut args: impl Iterator<Item = String>) -> Result<Serve, String> {
     let mut home = None;
-    let mut token_file = None;
-    let mut listen = "127.0.0.1:7475".parse::<SocketAddr>().unwrap();
-    let mut tls_cert = None;
-    let mut tls_key = None;
+    let mut listen = None;
     let mut file_root = None;
     let mut file_unconfined = false;
     let mut job_concurrency = 2;
@@ -276,26 +223,7 @@ fn parse_serve(mut args: impl Iterator<Item = String>) -> Result<Serve, String> 
             "--home" if home.is_none() => {
                 home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?))
             }
-            "--agent-token-file" if token_file.is_none() => {
-                token_file = Some(PathBuf::from(
-                    args.next().ok_or("--agent-token-file requires FILE")?,
-                ))
-            }
-            "--listen" => {
-                listen = args
-                    .next()
-                    .ok_or("--listen requires IP:PORT")?
-                    .parse()
-                    .map_err(|_| "--listen requires IP:PORT")?
-            }
-            "--tls-cert" if tls_cert.is_none() => {
-                tls_cert = Some(PathBuf::from(
-                    args.next().ok_or("--tls-cert requires FILE")?,
-                ))
-            }
-            "--tls-key" if tls_key.is_none() => {
-                tls_key = Some(PathBuf::from(args.next().ok_or("--tls-key requires FILE")?))
-            }
+            "--listen" => listen = Some(parse_listen(args.next())?),
             "--file-root" if file_root.is_none() => {
                 file_root = Some(PathBuf::from(
                     args.next().ok_or("--file-root requires DIR")?,
@@ -327,18 +255,9 @@ fn parse_serve(mut args: impl Iterator<Item = String>) -> Result<Serve, String> 
             _ => return Err(format!("unknown or duplicate node serve argument {flag:?}")),
         }
     }
-    if tls_cert.is_some() != tls_key.is_some() {
-        return Err("--tls-cert and --tls-key must be supplied together".into());
-    }
-    if !listen.ip().is_loopback() && tls_cert.is_none() {
-        return Err("non-loopback --listen requires --tls-cert and --tls-key".into());
-    }
     Ok(Serve {
         home: home.map_or_else(default_home, Ok)?,
-        token_file: token_file.ok_or("--agent-token-file is required")?,
         listen,
-        tls_cert,
-        tls_key,
         file_root,
         file_unconfined,
         job_concurrency,
@@ -366,31 +285,6 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Command>, Stri
     }
 }
 
-fn read_token(path: &Path) -> io::Result<String> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > 4096 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "agent token must be a bounded regular file",
-        ));
-    }
-    if metadata.permissions().mode() & 0o077 != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "agent token must be private (mode 0600)",
-        ));
-    }
-    let token = fs::read_to_string(path)?;
-    let token = token.trim_end_matches(['\r', '\n']);
-    if token.is_empty() || token.contains(['\r', '\n']) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "agent token is empty or contains a newline",
-        ));
-    }
-    Ok(token.to_owned())
-}
-
 async fn shutdown_signal() {
     if let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
     {
@@ -404,64 +298,33 @@ async fn shutdown_signal() {
 }
 
 fn serve_args(command: &Install) -> Vec<String> {
-    let mut args = vec![
-        "--home".into(),
-        command.paths.home.display().to_string(),
-        "--agent-token-file".into(),
-        command.paths.token().display().to_string(),
-        "--listen".into(),
-        command.listen.to_string(),
-    ];
+    let mut args = vec!["--home".into(), command.paths.home.display().to_string()];
     if command.allow_plain_jobs {
         args.push("--allow-plain-jobs".into());
-    }
-    if let (Some(cert), Some(key)) = (&command.tls_cert, &command.tls_key) {
-        args.extend([
-            "--tls-cert".into(),
-            cert.display().to_string(),
-            "--tls-key".into(),
-            key.display().to_string(),
-        ]);
     }
     args.extend(command.serve_args.iter().cloned());
     args
 }
 
+/// A node already joined to this hub under this name is not joined again.
 fn existing_join(command: &Install) -> io::Result<bool> {
-    let path = command.paths.joined();
-    let metadata = match fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
+    let joined = match node_join::Joined::load(&command.paths.home) {
+        Ok(joined) => joined,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error),
     };
-    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > 64 * 1024 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid existing enrollment file",
-        ));
-    }
-    for key in ["machine.key", "node.key"] {
-        let metadata = fs::symlink_metadata(command.paths.home.join("tsnet").join(key))?;
-        if !metadata.file_type().is_file() || metadata.len() == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid existing enrollment {key}"),
-            ));
-        }
-    }
-    let state: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-    if state["controlUrl"].as_str() != Some(&command.control)
+    if joined.hub != command.hub
         || command
             .name
             .as_deref()
-            .is_some_and(|name| state["name"].as_str() != Some(name))
-        || state["name"].as_str().is_none_or(str::is_empty)
-        || state["nodeKey"].as_str().is_none()
-        || state["discoKey"].as_str().is_none()
+            .is_some_and(|name| name != joined.name)
     {
         return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "existing enrollment does not match requested node",
+            io::ErrorKind::InvalidInput,
+            format!(
+                "already joined {} as {}; uninstall first to join another hub or name",
+                joined.hub, joined.name
+            ),
         ));
     }
     Ok(true)
@@ -504,7 +367,7 @@ async fn install_node(command: Install) -> Result<(), Box<dyn Error>> {
         if joined {
             "keep existing"
         } else {
-            "register with control"
+            "join the hub"
         }
     );
     if command.dry_run {
@@ -512,33 +375,34 @@ async fn install_node(command: Install) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     if !joined
-        && command.key.is_none()
-        && command.key_file.is_none()
-        && env::var_os("PROTECTORATE_ENROLL_KEY").is_none()
+        && command.code.is_none()
+        && command.code_file.is_none()
+        && env::var_os("PROTECTORATE_JOIN_CODE").is_none()
     {
-        return Err("enrollment requires --key, --key-file or PROTECTORATE_ENROLL_KEY".into());
+        return Err("joining requires --code, --code-file or PROTECTORATE_JOIN_CODE".into());
     }
     fs::create_dir_all(&command.paths.home)?;
     fs::set_permissions(&command.paths.home, fs::Permissions::from_mode(0o700))?;
-    lifecycle::ensure_token(&command.paths.token())?;
     if !joined {
         let mut join = vec![
             "--home".into(),
             command.paths.home.display().to_string(),
-            "--control".into(),
-            command.control.clone(),
+            "--hub".into(),
+            command.hub.clone(),
+            "--ca-cert".into(),
+            command.ca_cert.display().to_string(),
         ];
         if let Some(name) = &command.name {
             join.extend(["--name".into(), name.clone()]);
         }
-        if let Some(key) = &command.key {
-            join.extend(["--key".into(), key.clone()]);
+        if let Some(code) = &command.code {
+            join.extend(["--code".into(), code.clone()]);
         }
-        if let Some(path) = &command.key_file {
-            join.extend(["--key-file".into(), path.display().to_string()]);
+        if let Some(path) = &command.code_file {
+            join.extend(["--code-file".into(), path.display().to_string()]);
         }
-        if let Some(path) = &command.ca_cert {
-            join.extend(["--ca-cert".into(), path.display().to_string()]);
+        if let Some(listen) = command.listen {
+            join.extend(["--listen".into(), listen.to_string()]);
         }
         node_join::run(node_join::parse(join.into_iter()).map_err(io::Error::other)?).await?;
     }
@@ -568,60 +432,15 @@ async fn install_node(command: Install) -> Result<(), Box<dyn Error>> {
 
 async fn doctor_node(command: Doctor) -> Result<(), Box<dyn Error>> {
     let mut checks = lifecycle::doctor(&command.paths, build_version());
-    if let Some(hub) = command.hub {
-        let ca = command.ca_cert;
-        let result = tokio::task::spawn_blocking(move || {
-            let mut config = ureq::Agent::config_builder()
-                .http_status_as_error(false)
-                .max_redirects(0)
-                .max_redirects_will_error(false)
-                .timeout_global(Some(Duration::from_secs(5)));
-            if let Some(path) = ca {
-                let bytes = fs::read(&path)?;
-                if bytes.is_empty() || bytes.len() > 1024 * 1024 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "invalid hub CA bundle",
-                    ));
-                }
-                let mut certs = Vec::new();
-                for item in ureq::tls::parse_pem(&bytes) {
-                    match item.map_err(io::Error::other)? {
-                        ureq::tls::PemItem::Certificate(cert) => certs.push(cert),
-                        _ => {
-                            return Err(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                "hub CA bundle must contain certificates only",
-                            ))
-                        }
-                    }
-                }
-                if certs.is_empty() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "hub CA bundle has no certificates",
-                    ));
-                }
-                config = config.tls_config(
-                    ureq::tls::TlsConfig::builder()
-                        .root_certs(ureq::tls::RootCerts::new_with_certs(&certs))
-                        .build(),
-                );
-            }
-            let agent: ureq::Agent = config.build().into();
-            agent
-                .get(&hub)
-                .call()
-                .map(|response| format!("{hub} answered HTTP {}", response.status().as_u16()))
-                .map_err(io::Error::other)
-        })
-        .await?;
-        match result {
-            Ok(detail) => checks.push(("hub", "ok", detail)),
-            Err(error) => checks.push(("hub", "FAIL", error.to_string())),
-        }
-    } else {
-        checks.push(("hub", "info", "not checked; pass --hub URL".into()));
+    match node_join::Joined::load(&command.paths.home)
+        .and_then(|joined| node_join::Joined::certificate(&command.paths.home).map(|_| joined))
+    {
+        Ok(joined) => checks.push((
+            "enrollment",
+            "ok",
+            format!("joined {} as {}; serves {}", joined.hub, joined.name, joined.address),
+        )),
+        Err(error) => checks.push(("enrollment", "FAIL", error.to_string())),
     }
     let failed = checks
         .iter()
@@ -663,13 +482,8 @@ fn uninstall_node(command: Uninstall) -> Result<(), Box<dyn Error>> {
 }
 
 async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
-    let token = read_token(&options.token_file)?;
-    let tls = match (&options.tls_cert, &options.tls_key) {
-        (Some(cert), Some(key)) => Some(transport::tls_config(cert, key)?),
-        _ => None,
-    };
-    fs::create_dir_all(&options.home)?;
     let home = fs::canonicalize(&options.home)?;
+    let (address, tls, renew) = node_join::serve_tls(&home, options.listen)?;
     let collector: Arc<dyn protectorate_node::MetricsCollector> = Arc::new(
         protectorate_node_metrics::Collector::linux(protectorate_node_metrics::Options {
             version: build_version().to_owned(),
@@ -694,7 +508,8 @@ async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
         restart_flag.store(true, Ordering::SeqCst);
         restart_wake.notify_one();
     });
-    let agent = protectorate_node::Agent::new(collector, token)
+    let agent = protectorate_node::Agent::new(collector)
+        .with_certificate_renewal(renew)
         .with_files_durable(file_root, options.file_unconfined, &home)?
         .with_jobs(jobs)
         .with_update(env::current_exe()?, build_version(), restart)?;
@@ -719,56 +534,23 @@ async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
     if agent.start_update_trial()? {
         return Ok(ServeExit::Restart);
     }
-    let listener = tokio::net::TcpListener::bind(options.listen).await?;
+    let listener = tokio::net::TcpListener::bind(address).await?;
     eprintln!("protectorate-rs node serving on {}", listener.local_addr()?);
-    let trusted_router = if home.join("tsnet/join.json").try_exists()? {
-        Some(transport::peer_router(
-            agent.clone().router_trusted_tailnet()?,
-        ))
-    } else {
-        None
-    };
-    let router = transport::peer_router(agent.router()?);
-    let tailnet_http = if let Some(trusted_router) = trusted_router {
-        Some(transport::TailnetHttp::start_node(
-            &home.join("tsnet"),
-            protectorate_tailnet::NODE_PORT,
-            trusted_router,
-        )?)
-    } else {
-        None
-    };
     let shutdown_requested = Arc::clone(&restart_requested);
-    let shutdown_wake = Arc::clone(&restart_notify);
     let uninstall_shutdown = Arc::clone(&uninstall_requested);
-    let uninstall_wake = Arc::clone(&uninstall_notify);
-    if let Some(tls) = tls {
-        let listener = transport::TlsListener::new(listener, tls)?;
-        axum::serve(listener, router.into_make_service_with_connect_info::<transport::Peer>())
-            .with_graceful_shutdown(async move {
-                tokio::select! {
-                    _ = shutdown_signal() => {},
-                    _ = async { while !shutdown_requested.load(Ordering::SeqCst) { shutdown_wake.notified().await; } } => {},
-                    _ = async { while !uninstall_shutdown.load(Ordering::SeqCst) { uninstall_wake.notified().await; } } => {},
-                }
-            })
-            .await?;
-    } else {
-        let shutdown_requested = Arc::clone(&restart_requested);
-        let uninstall_shutdown = Arc::clone(&uninstall_requested);
-        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
-            .with_graceful_shutdown(async move {
-                tokio::select! {
-                    _ = shutdown_signal() => {},
-                    _ = async { while !shutdown_requested.load(Ordering::SeqCst) { restart_notify.notified().await; } } => {},
-                    _ = async { while !uninstall_shutdown.load(Ordering::SeqCst) { uninstall_notify.notified().await; } } => {},
-                }
-            })
-            .await?;
-    }
-    if let Some(http) = tailnet_http {
-        http.stop().await?;
-    }
+    axum::serve(
+        transport::TlsListener::new(listener, tls)?,
+        transport::peer_router(agent.router()?)
+            .into_make_service_with_connect_info::<transport::Peer>(),
+    )
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            _ = shutdown_signal() => {},
+            _ = async { while !shutdown_requested.load(Ordering::SeqCst) { restart_notify.notified().await; } } => {},
+            _ = async { while !uninstall_shutdown.load(Ordering::SeqCst) { uninstall_notify.notified().await; } } => {},
+        }
+    })
+    .await?;
     Ok(if uninstall_requested.load(Ordering::SeqCst) {
         ServeExit::Uninstalled
     } else if restart_requested.load(Ordering::SeqCst) {

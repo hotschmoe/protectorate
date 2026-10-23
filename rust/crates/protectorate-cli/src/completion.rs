@@ -10,7 +10,6 @@ const ROOT: &[Candidate] = &[
     ("audit", "Inspect the audit log"),
     ("backlog", "Manage notes"),
     ("chat", "Talk to a sleeve"),
-    ("client", "Enroll a Tailscale client"),
     ("completion", "Generate shell completion"),
     ("devices", "Manage trusted devices"),
     ("events", "Stream hub events"),
@@ -30,7 +29,6 @@ const ROOT: &[Candidate] = &[
     ("session", "Manage sessions"),
     ("sleeve", "Manage sleeves"),
     ("status", "Show hub status"),
-    ("tailnet", "Show the tailnet"),
     ("token", "Manage tokens"),
     ("version", "Show client version"),
     ("who", "Show project ownership"),
@@ -167,10 +165,6 @@ fn children(path: &str) -> &'static [Candidate] {
             ("models", "List models"),
             ("settings", "Show or change selection"),
         ],
-        "client" => &[
-            ("invite", "Issue a client key"),
-            ("register", "Register a client"),
-        ],
         "completion" => &[
             ("bash", "Bash script"),
             ("fish", "Fish script"),
@@ -188,7 +182,6 @@ fn children(path: &str) -> &'static [Candidate] {
         "grant" => &[("admin", "Mint an admin grant")],
         "hub" => &[
             ("serve", "Run the hub"),
-            ("tailnet", "Manage local tailnet"),
             ("backup", "Create a backup"),
             ("restore", "Restore a backup"),
             ("publish-flutter-cache", "Publish Flutter SDK cache"),
@@ -196,10 +189,6 @@ fn children(path: &str) -> &'static [Candidate] {
             ("publish-pub-cache", "Publish Pub package cache"),
             ("publish-go-mod-cache", "Publish Go module cache"),
             ("update", "Update the hub"),
-        ],
-        "hub tailnet" => &[
-            ("install", "Install Headscale"),
-            ("init", "Initialize tailnet"),
         ],
         "job" => &[
             ("ls", "List jobs"),
@@ -232,12 +221,10 @@ fn children(path: &str) -> &'static [Candidate] {
             ("rm", "Remove a node"),
             ("tier", "Set tier"),
             ("update", "Update node"),
-            ("invite", "Issue enrollment key"),
+            ("invite", "Issue a join code"),
             ("put", "Upload a file"),
             ("get", "Download a file"),
-            ("join", "Join tailnet"),
-            ("renew", "Renew enrollment"),
-            ("revoke", "Revoke enrollment"),
+            ("join", "Join a hub"),
             ("install", "Install node"),
             ("uninstall", "Uninstall node"),
             ("doctor", "Inspect local node"),
@@ -276,7 +263,6 @@ fn children(path: &str) -> &'static [Candidate] {
             ("resleeve", "Move a sleeve"),
             ("prune", "Prune unused disk"),
         ],
-        "tailnet" => &[("status", "Show tailnet status")],
         "token" => &[
             ("create", "Create token"),
             ("ls", "List tokens"),
@@ -334,28 +320,17 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--write", "Output path"),
             ("--install", "Install into Termux"),
         ],
-        "client invite" => &[
-            ("--name", "Client name"),
-            ("--expires", "Key lifetime"),
-            ("--home", "State directory"),
-        ],
-        "client register" => &[("--home", "State directory")],
         "node join" | "node install" => &[
-            ("--control", "Control URL"),
+            ("--hub", "Hub HTTPS URL"),
             ("--name", "Node name"),
-            ("--key", "Enrollment key"),
-            ("--key-file", "Enrollment key file"),
-            ("--ca-cert", "CA certificate"),
+            ("--code", "Join code"),
+            ("--code-file", "Join code file"),
+            ("--ca-cert", "Hub CA certificate"),
+            ("--listen", "Listen address"),
             ("--home", "State directory"),
         ],
-        "node doctor" => &[
-            ("--home", "State directory"),
-            ("--hub", "Hub URL"),
-            ("--ca-cert", "CA certificate"),
-        ],
-        "node renew" | "node revoke" | "node uninstall" => &[("--home", "State directory")],
+        "node doctor" | "node uninstall" => &[("--home", "State directory")],
         "node serve" => &[
-            ("--agent-token-file", "Node bearer token file"),
             ("--home", "State directory"),
             ("--file-root", "File transfer root"),
             ("--file-unconfined", "Unrestricted file transfers"),
@@ -365,8 +340,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--watch-dir", "Watched directory"),
             ("--docker-host", "Docker host URL"),
             ("--listen", "Listen address"),
-            ("--tls-cert", "TLS certificate"),
-            ("--tls-key", "TLS private key"),
         ],
         "job run" => &[
             ("--on", "Node, lease or selector"),
@@ -391,11 +364,12 @@ fn local_flags(path: &str) -> &'static [Candidate] {
         "node invite" => &[
             ("--tier", "Node tier"),
             ("--pool", "Network pool"),
-            ("--expires", "Key lifetime"),
+            ("--expires", "Code lifetime"),
             ("--url", "Install URL"),
         ],
         "node add" => &[
             ("--addr", "Node address"),
+            ("--update", "Change an existing node"),
             ("--ssh", "SSH alias"),
             ("--tier", "Node tier"),
             ("--tag", "Node tag"),
@@ -556,12 +530,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--go-mod-cache-root", "Go module cache root"),
             ("--max-bytes", "Maximum archive bytes"),
         ],
-        "hub tailnet init" => &[
-            ("--server-url", "Public URL"),
-            ("--no-embedded-derp", "Disable private relay"),
-            ("--public-derp", "Use public relay"),
-            ("--pool", "Network pool"),
-        ],
         "token create" => &[("--scope", "Scope"), ("--ttl", "Lifetime")],
         "token scopes" | "orchestrator scopes" => {
             &[("--add", "Add scope"), ("--remove", "Remove scope")]
@@ -627,10 +595,9 @@ fn takes_value(flag: &str) -> bool {
             | "--peek"
             | "--ack"
             | "--refresh"
-            | "--no-embedded-derp"
-            | "--public-derp"
             | "--file-unconfined"
             | "--allow-plain-jobs"
+            | "--update"
             | "--double"
     )
 }
