@@ -181,11 +181,11 @@ impl Drop for Proxy {
 
 fn respond(stream: &mut UnixStream, status: &str, reason: &str) {
     let body = format!("protectorate egress: {reason}\n");
-    let _ = write!(
-        stream,
+    let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
+    let _ = stream.write_all(response.as_bytes());
 }
 
 fn serve_connect(mut stream: UnixStream, policy: &EgressPolicy, log: &Log, active: &AtomicUsize) {
