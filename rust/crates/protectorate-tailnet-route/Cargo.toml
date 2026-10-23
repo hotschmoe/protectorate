@@ -1,0 +1,9 @@
+[package]
+name = "protectorate-tailnet-route"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+protectorate-tailnet-map = { path = "../protectorate-tailnet-map" }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }

@@ -1,0 +1,11 @@
+[package]
+name = "protectorate-tailnet-discovery"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+curve25519-dalek = { version = "4", default-features = false }
+getrandom = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

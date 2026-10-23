@@ -1,0 +1,16 @@
+[package]
+name = "protectorate-derp"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+crypto_box = { version = "0.9", features = ["std"] }
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde_json = "1"
+sha2 = "0.10"
+ureq = { version = "3", default-features = false }
+crc32fast = "1"
+
+[dev-dependencies]
+tempfile = "3"

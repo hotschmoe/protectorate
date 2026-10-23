@@ -1,0 +1,13 @@
+[package]
+name = "protectorate-tailnet-map"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+protectorate-tailnet = { path = "../protectorate-tailnet" }
+protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
+tempfile = "3"
