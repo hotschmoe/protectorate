@@ -43,7 +43,7 @@ but no successful behavioral scenario unless an optional lane is named.
 | NodeService | ListNodes, GetNode, AddNode: cluster setup, CLI/MCP, Service; RemoveNode: Remove; PutFile, GetFile: Transfer, Credentials; ApplyUpdate, UpdateNode: Cluster; SetNodeTier: Cluster, Credentials | InviteNode, WatchNodeSetup (tailnet enrollment) |
 | JobService | SubmitJob, GetJob: Cluster, Cancel, Artifact; ListJobs: Artifact; CancelJob: Cancel; WatchJob: CLI/MCP and Artifact through CLI execution/replay | CLI signal cancellation while submission is in flight; lost-node recovery deadline; multiple execution slots; same-repo serialization under contention |
 | LeaseService | AcquireLease, RenewLease, ReleaseLease, ListLeases: Cluster, Remove, State | Claim-window expiry and GPU contention need deterministic hardware/time lanes |
-| TokenService | CreateToken, UpdateTokenScopes, RevokeToken: Cluster, Stream, Credentials | ListTokens positive listing; last-used flush timing |
+| TokenService | CreateToken, ListTokens, RevokeToken, RenewToken: server `auth.rs` (renewal across expiry, attenuation, revocation), `sleeve_guards.rs` (sleeve renewal through the relay, kill revocation), CLI `token_control.rs` | Envoy-held capability refresh across a hub restart |
 | GrantService | Admin: Cluster, Credentials | External node-admin elevation on Windows |
 | AuditService | None; Cluster reads persisted audit entries and checks scope-change/redaction effects | ListAuditEntries pagination/filtering |
 | EventService | Subscribe: Stream; host `TestChatEndToEnd`, `TestMailEscalation` | Slow event consumers/backpressure |
@@ -136,7 +136,7 @@ by their owning directory; this is not a claim to cover their internal format.
 
 | State | Scenario/evidence | Remaining gap |
 |---|---|---|
-| token, tokens.json | Cluster restore/revoke/expiry/scope changes; Stream revocation across restart | Last-used flush and malformed token store |
+| token, identity.json | server `auth.rs` (owner token loopback only, device proofs, replay and skew), fuzz `identity_store`, `capability_tokens`, `device_proofs` | Device last-used flush timing |
 | audit/audit-YYYY-MM.jsonl | Cluster redaction/scope-change audit | Rotation, pagination and malformed/truncated replay |
 | nodes.json, nodes.json.pre-tiers, hosts.md | State migration, exact original backup, refusal to overwrite, tags/tier preservation; Remove persistence | Malformed/duplicate inventory and failed atomic writes |
 | leases.json | Cluster queue priority/FIFO/claim across restart; State expiry; Remove held/queued cleanup | Lost claim window, GPU conflicts |

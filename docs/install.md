@@ -6,7 +6,7 @@ Protectorate never builds a network and never listens on the internet. The route
 
 - Every listener binds an explicit private address: loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10. `0.0.0.0`, `::` and public addresses are refused, with no override.
 - The hub creates its own CA on first start (`HOME/ca/ca.pem`, key `HOME/ca/ca-key.pem`, mode 0600; the key never leaves the hub and is part of hub backups). Each start issues the hub a fresh certificate for its `--tls-listen` addresses and `--tls-name` names.
-- Clients (the app, the CLI, the MCP bridge) reach the hub over HTTPS and trust only that CA; they authenticate with their owner, device or scoped token as before. The hub also serves plain HTTP on its loopback `--listen` for local tools and sleeves.
+- Clients (the app, the CLI, the MCP bridge) reach the hub over HTTPS and trust only that CA; devices sign every request with the key they registered when they paired, and scripts and sleeves hold short-lived capabilities (see [auth.md](auth.md)). The hub also serves plain HTTP on its loopback `--listen` for local tools and sleeves; the owner token works only there.
 - A node joins with a single-use code from `node invite`. It creates its own P-256 key, signs the code with it and sends the public key; the hub CA returns a certificate naming the node. The node trusts only the hub CA.
 - The hub dials nodes (never the reverse) over mutual TLS on port 7475. A node accepts only a client certificate from the hub CA that names the hub, so another node or any other CA is refused. The hub accepts only the node certificate issued at the node's current join, at the address the node reported; `node rm` forgets it, which revokes it. Certificates last a year and the hub renews them in place a month before expiry.
 
@@ -35,7 +35,7 @@ bash install-hub.sh --tls-listen 192.168.22.5:7470 --tls-name stronghold.lan
 
 To use the hub from another machine, give the CLI the CA: `PROTECTORATE_TLS_CA_CERT=/path/ca.pem protectorate --hub https://stronghold.lan:7470 status`. Browsers need the CA installed in the system or browser trust store. For the Android app, run `PROTECTORATE_TLS_CA_CERT=~/.protectorate/ca/ca.pem protectorate pair --url https://stronghold.lan:7470 --app` on the hub: the pairing link carries the CA, and the app trusts only it for that hub.
 
-The Rust hub exposes owner-token diagnostics at `/debug/metrics` and `/debug/pprof/`. `/debug/nodes/NAME/metrics` returns the hub's cached node monitor status. `/ca.pem` is public: it is the certificate every invite pins by SHA-256.
+The Rust hub exposes owner-token diagnostics at `/debug/metrics` and `/debug/pprof/` on its loopback listener. `/debug/nodes/NAME/metrics` returns the hub's cached node monitor status. `/ca.pem` is public: it is the certificate every invite pins by SHA-256.
 
 ## Nodes
 

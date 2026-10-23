@@ -78,8 +78,9 @@ or reimplementing it.
 
 ## Hub auth
 
-- RPC: `Authorization: Bearer <token>` (web needs the hub to answer CORS preflight allowing that header).
-- Terminal WebSocket `ws(s)://<hub>/ws/terminal/<name>`: offered `Sec-WebSocket-Protocol` entries are `protectorate.v1` and `token.<value>` (browsers cannot set headers). The server selects `protectorate.terminal.v1`.
+- Each hub profile has a P-256 device key: a non-extractable WebCrypto key in IndexedDB on the web, the Android Keystore on Android (`MainActivity.kt`, channel `protectorate/device_key`), and a key kept with the app preferences on desktop builds (`lib/hubs/software_key.dart`).
+- RPC: `Authorization: Proof <device>.<seconds>.<nonce>.<signature>`, signed fresh for every call (see `docs/auth.md`).
+- Terminal WebSocket `ws(s)://<hub>/ws/terminal/<name>`: offered `Sec-WebSocket-Protocol` entries are `protectorate.v1` and `proof.<proof>` (browsers cannot set headers). The server selects `protectorate.v1`.
 - Frames: binary; `0x30` + bytes for data, `0x31` + JSON `{"cols":N,"rows":M}` for resize.
 
 ## Pairing
@@ -91,7 +92,7 @@ or reimplementing it.
 
 Either link opens the connect dialog with the hub URL filled in. You can also enter the URL under ADD HUB. Bare addresses default to HTTPS; specify `http://` for a hub without TLS and include `:7470` when using its default LAN port. Name this device, press CONNECT, then compare the large code with the request on a trusted device before approving. For the first device, run `protectorate devices approve <code>` on the hub. Denied or expired requests have a TRY AGAIN button. No link can bypass approval or carry a token; old token links are rejected.
 
-Approval issues a long-lived Full device token, including device approval and revocation but excluding owner-only operations. The Devices screen shows platform, approver and last use, and supports rename and revoke. Revocation closes live streams immediately. Existing paired device profiles continue to work. Optional tokenless `tab`, `session` and `node` parameters still select a screen when the hub is already connected.
+Connecting creates the profile's device key and registers its public half; approval gives that key Full access, including device approval and revocation but excluding owner-only operations. No secret is delivered or stored. The Devices screen shows platform, approver and last use, and supports rename and revoke. Revocation closes live streams immediately. Optional `tab`, `session` and `node` parameters still select a screen when the hub is already connected.
 
 Native handling uses the `app_links` package. Android registers an intent filter for `protectorate://pair` in `AndroidManifest.xml`. Untested: Android (no device or SDK here), Windows/Linux/macOS scheme registration (the OS must launch the app with the URL; no installer registers the scheme yet), iOS (not scaffolded).
 
