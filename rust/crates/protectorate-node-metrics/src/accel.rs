@@ -540,7 +540,8 @@ pub fn parse_nvidia_csv(raw: &str) -> Vec<GpuMetrics> {
         };
         let mb = |s: &str| s.parse::<u64>().ok().map(|n| n.saturating_mul(1 << 20));
         let bus_id = if let Some((domain, rest)) = fields[6].split_once(':') {
-            format!("{}:{rest}", &domain[domain.len().saturating_sub(4)..])
+            let start = domain.char_indices().rev().nth(3).map_or(0, |(at, _)| at);
+            format!("{}:{rest}", &domain[start..])
         } else {
             fields[6].to_owned()
         };
@@ -548,10 +549,10 @@ pub fn parse_nvidia_csv(raw: &str) -> Vec<GpuMetrics> {
             index,
             vendor: "nvidia".into(),
             name: fields[1].into(),
-            utilization_percent: fields[2].parse().unwrap_or(-1.0),
+            utilization_percent: numeric(fields[2]).map(percent).unwrap_or(-1.0),
             memory_used_bytes: mb(fields[3]),
             memory_total_bytes: mb(fields[4]).unwrap_or(0),
-            temperature_celsius: fields[5].parse().unwrap_or(-1.0),
+            temperature_celsius: numeric(fields[5]).unwrap_or(-1.0),
             bus_id,
             driver: fields[7].into(),
             ..GpuMetrics::default()
