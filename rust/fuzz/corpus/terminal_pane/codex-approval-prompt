@@ -1,0 +1,41 @@
+codex
+
+  >_ OpenAI Codex (v0.164.0)
+     ~/github/protectorate
+
+  Tip: Press ^t to open the full transcript.
+
+
+› Use your shell tool to run: curl -s https://example.com -o /dev/null
+
+
+• I’ll run the command and report its result.
+
+• Ran curl -s https://example.com -o /dev/null
+  └ (no output)
+ 
+• Running curl -s https://example.com -o /dev/null
+ 
+ 
+  Would you like to run the following command?
+ 
+  Environment: local
+ 
+  Reason: May I run the requested curl command with network access outside the sandbox?
+ 
+  $ curl -s https://example.com -o /dev/null
+ 
+ 
+› 1. Yes, proceed (y)                                                                                                   
+  2. Yes, and don't ask again for commands that start with `curl -s https://example.com -o /dev/null` (p)
+  3. No, and tell Codex what to do differently (esc)
+ 
+  Press enter to confirm or esc to cancel                                                                               
+
+
+
+
+
+
+
+

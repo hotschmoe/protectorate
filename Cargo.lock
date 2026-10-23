@@ -1026,6 +1026,7 @@ dependencies = [
  "protectorate-quota",
  "protectorate-release",
  "protectorate-sandbox",
+ "protectorate-session",
  "protectorate-wire",
  "protectorate-xfer",
  "serde_json",

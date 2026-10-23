@@ -1,4 +1,8 @@
 //! Tmux-backed sessions for long-running harnesses.
+mod activity;
+
+pub use activity::{classify, explain, Activity, Explanation};
+
 use base64::Engine;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -290,6 +294,22 @@ impl Manager {
             other => other?,
         };
         Ok(strip_dead_banner(&out))
+    }
+
+    /// The visible screen as plain text, without scrollback.
+    pub fn screen(&self, name: &str) -> Result<String, Error> {
+        valid_name(name)?;
+        let args = [
+            "capture-pane".into(),
+            "-p".into(),
+            "-J".into(),
+            "-t".into(),
+            target(name),
+        ];
+        match self.run(&args) {
+            Err(Error::NoServer) => Err(Error::NotFound),
+            other => other,
+        }
     }
 
     pub fn attach_command(&self, name: &str, read_only: bool) -> Result<(Command, Session), Error> {
