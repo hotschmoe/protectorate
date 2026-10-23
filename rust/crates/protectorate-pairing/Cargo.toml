@@ -1,0 +1,9 @@
+[package]
+name = "protectorate-pairing"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+qrcodegen = "1.8"
+http = "1"
+percent-encoding = "2"

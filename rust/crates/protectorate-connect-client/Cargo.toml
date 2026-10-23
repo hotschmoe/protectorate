@@ -1,0 +1,17 @@
+[package]
+name = "protectorate-connect-client"
+version = "0.1.0"
+edition.workspace = true
+description = "Bounded Connect JSON client for Protectorate RPCs"
+
+[dependencies]
+protectorate-wire = { path = "../protectorate-wire" }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+rustls = "0.23"
+zeroize = "1"
+getrandom = "0.2"
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }

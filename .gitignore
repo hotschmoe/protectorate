@@ -1,6 +1,9 @@
 references/
 /protectorate
 /bin/
+/target/
+/dist/
+__pycache__/
 *.test
 .claude/worktrees/
 

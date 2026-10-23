@@ -1,0 +1,14 @@
+[package]
+name = "protectorate-wire"
+version = "0.1.0"
+edition.workspace = true
+[dependencies]
+prost-reflect = { version = "0.16", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+futures-core = "0.3"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
