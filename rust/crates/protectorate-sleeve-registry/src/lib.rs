@@ -177,6 +177,10 @@ pub struct Record {
     pub parent: String,
     #[serde(default)]
     pub parent_token_id: String,
+    /// The spawner's scopes, which bound this sleeve's token on every
+    /// launch; None when the owner or a device spawned it.
+    #[serde(default)]
+    pub parent_scopes: Option<Vec<String>>,
     #[serde(default)]
     pub read_only: Vec<ReadOnlyMount>,
     #[serde(default)]
@@ -266,6 +270,7 @@ impl Record {
             token_budget: 0,
             tokens_used: 0,
             parent_run_id: String::new(),
+            parent_scopes: None,
             pins: BTreeMap::new(),
         };
         row.validate()?;

@@ -105,6 +105,16 @@ impl SpawnParent {
             scopes: None,
         }
     }
+
+    /// The original spawner of an existing sleeve, so a resleeve or recovery
+    /// never mints wider scopes than its first launch.
+    pub(super) fn of_record(record: &Record) -> Self {
+        Self {
+            label: record.parent.clone(),
+            token_id: record.parent_token_id.clone(),
+            scopes: record.parent_scopes.clone(),
+        }
+    }
 }
 
 /// Whether the caller is the identity that spawned this sleeve.
@@ -204,7 +214,9 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
     };
     let mut launch_request = resleeve_launch_request(&old, to, &chosen_selection);
     launch_request["requester"] = value["requester"].clone();
-    if let Some(pin) = crate::chat::chat_pin(hub, &launch_request, to, &SpawnParent::owner())? {
+    if let Some(pin) =
+        crate::chat::chat_pin(hub, &launch_request, to, &SpawnParent::of_record(&old))?
+    {
         let pin_key = pin_key(Mode::Chat, to);
         crate::approvals::check_pin(
             hub,
@@ -1882,6 +1894,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     row.pins.insert(pin_key, pin);
     row.parent = parent.label.clone();
     row.parent_token_id = parent.token_id.clone();
+    row.parent_scopes = parent.scopes.clone();
     row.read_only = read_only
         .iter()
         .map(|r| ReadOnlyMount {
@@ -2925,6 +2938,7 @@ pub(super) fn sleeve_json(sleeve: &Record) -> Value {
     let mut value = serde_json::to_value(sleeve).expect("valid sleeve record serializes");
     let object = value.as_object_mut().expect("record is object");
     object.remove("parentTokenId");
+    object.remove("parentScopes");
     object.remove("helper");
     object.remove("managedClone");
     object.remove("env");

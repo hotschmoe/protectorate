@@ -977,14 +977,12 @@ pub(super) fn spawn_envoy(hub: &Hub, value: &Value, harness: Harness) -> Result<
 }
 
 pub(super) fn spawn_resleeve(hub: &Hub, value: &Value, harness: Harness) -> Result<Record> {
-    spawn_chat(
-        hub,
-        value,
-        harness,
-        string(value, "name") == "envoy",
-        true,
-        &crate::sleeves::SpawnParent::owner(),
-    )
+    let name = string(value, "name");
+    let parent = match hub.sleeves.get(&name) {
+        Ok(record) => crate::sleeves::SpawnParent::of_record(&record),
+        Err(_) => crate::sleeves::SpawnParent::owner(),
+    };
+    spawn_chat(hub, value, harness, name == "envoy", true, &parent)
 }
 
 pub(super) fn recover_chat_sleeves(hub: &Hub) -> Vec<(String, String)> {
@@ -1673,6 +1671,7 @@ fn spawn_chat(
         if let Some(old) = previous.as_ref() {
             row.parent = old.parent.clone();
             row.parent_token_id = old.parent_token_id.clone();
+            row.parent_scopes = old.parent_scopes.clone();
             row.result = old.result.clone();
             row.handoff = old.handoff.clone();
             row.exit_after_idle = old.exit_after_idle.clone();
@@ -1705,6 +1704,7 @@ fn spawn_chat(
     if !resleeve {
         row.parent = parent.label.clone();
         row.parent_token_id = parent.token_id.clone();
+        row.parent_scopes = parent.scopes.clone();
     }
     row.limits.cpu_percent = cpu_percent;
     row.limits.memory_bytes = memory_bytes;
