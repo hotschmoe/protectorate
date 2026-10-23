@@ -1094,6 +1094,7 @@ class MailMessage extends $pb.GeneratedMessage {
     $core.Iterable<MailDelivery>? deliveries,
     $0.Timestamp? escalatedAt,
     $core.String? noteId,
+    $core.String? runId,
   }) {
     final result = MailMessage._();
     if (id != null) result.id = id;
@@ -1108,6 +1109,7 @@ class MailMessage extends $pb.GeneratedMessage {
     if (deliveries != null) result.deliveries.addAll(deliveries);
     if (escalatedAt != null) result.escalatedAt = escalatedAt;
     if (noteId != null) result.noteId = noteId;
+    if (runId != null) result.runId = runId;
     return result;
   }
 
@@ -1141,6 +1143,7 @@ class MailMessage extends $pb.GeneratedMessage {
     ..aOM<$0.Timestamp>(11, _omitFieldNames ? '' : 'escalatedAt',
         subBuilder: $0.Timestamp.$_createMessage)
     ..aOS(12, _omitFieldNames ? '' : 'noteId')
+    ..aOS(13, _omitFieldNames ? '' : 'runId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1273,6 +1276,16 @@ class MailMessage extends $pb.GeneratedMessage {
   $core.bool hasNoteId() => $_has(11);
   @$pb.TagNumber(12)
   void clearNoteId() => $_clearField(12);
+
+  /// run_id is the sending sleeve's run.
+  @$pb.TagNumber(13)
+  $core.String get runId => $_getSZ(12);
+  @$pb.TagNumber(13)
+  set runId($core.String value) => $_setString(12, value);
+  @$pb.TagNumber(13)
+  $core.bool hasRunId() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearRunId() => $_clearField(13);
 }
 
 /// MailDelivery is one recipient's state for a message.

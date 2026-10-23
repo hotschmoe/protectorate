@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Fuzz targets over the parsers that read untrusted input; rust/fuzz runs them under libFuzzer"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+protectorate-audit = { path = "../protectorate-audit" }
 protectorate-auth = { path = "../protectorate-auth" }
 protectorate-backlog = { path = "../protectorate-backlog" }
 protectorate-chatlog = { path = "../protectorate-chatlog" }

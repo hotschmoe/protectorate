@@ -23,11 +23,15 @@ export 'audit.pb.dart';
 abstract class AuditServiceBase extends $pb.GeneratedService {
   $async.Future<$1.ListAuditEntriesResponse> listAuditEntries(
       $pb.ServerContext ctx, $1.ListAuditEntriesRequest request);
+  $async.Future<$1.VerifyAuditResponse> verifyAudit(
+      $pb.ServerContext ctx, $1.VerifyAuditRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'ListAuditEntries':
         return $1.ListAuditEntriesRequest();
+      case 'VerifyAudit':
+        return $1.VerifyAuditRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -38,6 +42,8 @@ abstract class AuditServiceBase extends $pb.GeneratedService {
     switch (methodName) {
       case 'ListAuditEntries':
         return listAuditEntries(ctx, request as $1.ListAuditEntriesRequest);
+      case 'VerifyAudit':
+        return verifyAudit(ctx, request as $1.VerifyAuditRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

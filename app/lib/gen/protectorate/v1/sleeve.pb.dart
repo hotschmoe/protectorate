@@ -34,12 +34,14 @@ class Checkpoint extends $pb.GeneratedMessage {
     $core.String? commit,
     $0.Timestamp? createdAt,
     $core.String? reason,
+    $core.String? runId,
   }) {
     final result = Checkpoint._();
     if (id != null) result.id = id;
     if (commit != null) result.commit = commit;
     if (createdAt != null) result.createdAt = createdAt;
     if (reason != null) result.reason = reason;
+    if (runId != null) result.runId = runId;
     return result;
   }
 
@@ -63,6 +65,7 @@ class Checkpoint extends $pb.GeneratedMessage {
     ..aOM<$0.Timestamp>(3, _omitFieldNames ? '' : 'createdAt',
         subBuilder: $0.Timestamp.$_createMessage)
     ..aOS(4, _omitFieldNames ? '' : 'reason')
+    ..aOS(5, _omitFieldNames ? '' : 'runId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -124,6 +127,16 @@ class Checkpoint extends $pb.GeneratedMessage {
   $core.bool hasReason() => $_has(3);
   @$pb.TagNumber(4)
   void clearReason() => $_clearField(4);
+
+  /// run_id is the sleeve's run when the checkpoint was taken.
+  @$pb.TagNumber(5)
+  $core.String get runId => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set runId($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasRunId() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearRunId() => $_clearField(5);
 }
 
 class CreateCheckpointRequest extends $pb.GeneratedMessage {
@@ -1016,6 +1029,11 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.bool? killed,
     $core.bool? nested,
     TerminalStatus? terminal,
+    $core.String? runId,
+    $core.String? harnessSha256,
+    $core.String? profileSha256,
+    $fixnum.Int64? tokenBudget,
+    $fixnum.Int64? tokensUsed,
   }) {
     final result$ = Sleeve._();
     if (name != null) result$.name = name;
@@ -1046,6 +1064,11 @@ class Sleeve extends $pb.GeneratedMessage {
     if (killed != null) result$.killed = killed;
     if (nested != null) result$.nested = nested;
     if (terminal != null) result$.terminal = terminal;
+    if (runId != null) result$.runId = runId;
+    if (harnessSha256 != null) result$.harnessSha256 = harnessSha256;
+    if (profileSha256 != null) result$.profileSha256 = profileSha256;
+    if (tokenBudget != null) result$.tokenBudget = tokenBudget;
+    if (tokensUsed != null) result$.tokensUsed = tokensUsed;
     return result$;
   }
 
@@ -1104,6 +1127,15 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOB(30, _omitFieldNames ? '' : 'nested')
     ..aOM<TerminalStatus>(31, _omitFieldNames ? '' : 'terminal',
         subBuilder: TerminalStatus.$_createMessage)
+    ..aOS(32, _omitFieldNames ? '' : 'runId')
+    ..aOS(33, _omitFieldNames ? '' : 'harnessSha256')
+    ..aOS(34, _omitFieldNames ? '' : 'profileSha256')
+    ..a<$fixnum.Int64>(
+        35, _omitFieldNames ? '' : 'tokenBudget', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        36, _omitFieldNames ? '' : 'tokensUsed', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1405,6 +1437,62 @@ class Sleeve extends $pb.GeneratedMessage {
   void clearTerminal() => $_clearField(31);
   @$pb.TagNumber(31)
   TerminalStatus ensureTerminal() => $_ensure(27);
+
+  /// run_id is minted at spawn and kept across resleeves and hub restarts. It
+  /// marks the sleeve's audit entries, jobs, mail, leases, checkpoints and
+  /// egress decisions; filter with ListAuditEntries.run_id.
+  @$pb.TagNumber(32)
+  $core.String get runId => $_getSZ(28);
+  @$pb.TagNumber(32)
+  set runId($core.String value) => $_setString(28, value);
+  @$pb.TagNumber(32)
+  $core.bool hasRunId() => $_has(28);
+  @$pb.TagNumber(32)
+  void clearRunId() => $_clearField(32);
+
+  /// harness_sha256 and profile_sha256 pin this harness's last approved
+  /// launch: the executable's bytes, and the sandbox inputs (mounts, tool
+  /// roots, limits, environment, egress allowlist) and token scopes. A later
+  /// launch that differs is recorded when the owner asked for it and needs
+  /// owner approval (ApprovalService) when Envoy, a sleeve or the hub itself
+  /// did.
+  @$pb.TagNumber(33)
+  $core.String get harnessSha256 => $_getSZ(29);
+  @$pb.TagNumber(33)
+  set harnessSha256($core.String value) => $_setString(29, value);
+  @$pb.TagNumber(33)
+  $core.bool hasHarnessSha256() => $_has(29);
+  @$pb.TagNumber(33)
+  void clearHarnessSha256() => $_clearField(33);
+
+  @$pb.TagNumber(34)
+  $core.String get profileSha256 => $_getSZ(30);
+  @$pb.TagNumber(34)
+  set profileSha256($core.String value) => $_setString(30, value);
+  @$pb.TagNumber(34)
+  $core.bool hasProfileSha256() => $_has(30);
+  @$pb.TagNumber(34)
+  void clearProfileSha256() => $_clearField(34);
+
+  /// token_budget is the run's cap in weighted tokens (zero: none) and
+  /// tokens_used what the run and the sleeves it spawned have used.
+  @$pb.TagNumber(35)
+  $fixnum.Int64 get tokenBudget => $_getI64(31);
+  @$pb.TagNumber(35)
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(31, value);
+  @$pb.TagNumber(35)
+  $core.bool hasTokenBudget() => $_has(31);
+  @$pb.TagNumber(35)
+  void clearTokenBudget() => $_clearField(35);
+
+  @$pb.TagNumber(36)
+  $fixnum.Int64 get tokensUsed => $_getI64(32);
+  @$pb.TagNumber(36)
+  set tokensUsed($fixnum.Int64 value) => $_setInt64(32, value);
+  @$pb.TagNumber(36)
+  $core.bool hasTokensUsed() => $_has(32);
+  @$pb.TagNumber(36)
+  void clearTokensUsed() => $_clearField(36);
 }
 
 class TerminalStatus extends $pb.GeneratedMessage {
@@ -1863,6 +1951,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $core.String? newBranch,
     $core.String? brief,
     $core.bool? nested,
+    $fixnum.Int64? tokenBudget,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -1880,6 +1969,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (newBranch != null) result.newBranch = newBranch;
     if (brief != null) result.brief = brief;
     if (nested != null) result.nested = nested;
+    if (tokenBudget != null) result.tokenBudget = tokenBudget;
     return result;
   }
 
@@ -1922,6 +2012,9 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     ..aOS(13, _omitFieldNames ? '' : 'newBranch')
     ..aOS(14, _omitFieldNames ? '' : 'brief')
     ..aOB(17, _omitFieldNames ? '' : 'nested')
+    ..a<$fixnum.Int64>(
+        18, _omitFieldNames ? '' : 'tokenBudget', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2083,6 +2176,22 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   $core.bool hasNested() => $_has(14);
   @$pb.TagNumber(17)
   void clearNested() => $_clearField(17);
+
+  /// token_budget caps the run's weighted tokens, counted from the harness's
+  /// usage reports: input + output + 0.1 x cache reads + 1.25 x cache writes.
+  /// At 90% the hub posts a chat notice; at 100% it interrupts the turn and
+  /// refuses new ones. Zero means no cap. A sleeve spawned by Envoy or another
+  /// sleeve with a budget gets at most that parent's remaining budget (all of
+  /// it when zero), and its usage counts against the parent too. Chat mode
+  /// only.
+  @$pb.TagNumber(18)
+  $fixnum.Int64 get tokenBudget => $_getI64(15);
+  @$pb.TagNumber(18)
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(15, value);
+  @$pb.TagNumber(18)
+  $core.bool hasTokenBudget() => $_has(15);
+  @$pb.TagNumber(18)
+  void clearTokenBudget() => $_clearField(18);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -3149,12 +3258,14 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? scopes,
     $core.Iterable<$core.String>? addScopes,
     $1.ModelSelection? selection,
+    $fixnum.Int64? tokenBudget,
   }) {
     final result = SpawnEnvoyRequest._();
     if (harness != null) result.harness = harness;
     if (scopes != null) result.scopes.addAll(scopes);
     if (addScopes != null) result.addScopes.addAll(addScopes);
     if (selection != null) result.selection = selection;
+    if (tokenBudget != null) result.tokenBudget = tokenBudget;
     return result;
   }
 
@@ -3178,6 +3289,9 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     ..pPS(3, _omitFieldNames ? '' : 'addScopes')
     ..aOM<$1.ModelSelection>(5, _omitFieldNames ? '' : 'selection',
         subBuilder: $1.ModelSelection.$_createMessage)
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'tokenBudget', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3232,6 +3346,16 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
   void clearSelection() => $_clearField(5);
   @$pb.TagNumber(5)
   $1.ModelSelection ensureSelection() => $_ensure(3);
+
+  /// token_budget caps Envoy's run like SpawnSleeveRequest.token_budget.
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get tokenBudget => $_getI64(4);
+  @$pb.TagNumber(6)
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(4, value);
+  @$pb.TagNumber(6)
+  $core.bool hasTokenBudget() => $_has(4);
+  @$pb.TagNumber(6)
+  void clearTokenBudget() => $_clearField(6);
 }
 
 class SpawnEnvoyResponse extends $pb.GeneratedMessage {

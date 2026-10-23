@@ -889,6 +889,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1018,6 +1019,7 @@ name = "protectorate-fuzz"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "protectorate-audit",
  "protectorate-auth",
  "protectorate-backlog",
  "protectorate-chatlog",

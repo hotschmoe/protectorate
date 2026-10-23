@@ -90,6 +90,10 @@ fn devices_sign_every_request_and_revocation_closes_their_streams() {
     let (key, id) = pair(&hub, "laptop");
     let device = tls_client(&hub, "").with_credential(Credential::Device(Arc::clone(&key)));
     assert!(device.call(STATUS, &json!({})).is_ok());
+    // Owner approvals take signed device requests as well as the owner.
+    let approvals = "/protectorate.v1.ApprovalService/ListApprovals";
+    assert!(device.call(approvals, &json!({})).is_ok());
+    assert!(hub.client.call(approvals, &json!({})).is_ok());
 
     let proof = format!("Proof {}", key.prove("POST", STATUS, now()).unwrap());
     assert_eq!(post(&hub.plain, STATUS, &proof).0, 200);

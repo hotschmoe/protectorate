@@ -14,6 +14,13 @@ protectorate-fuzz = { path = "../crates/protectorate-fuzz" }
 [workspace]
 
 [[bin]]
+name = "audit_log"
+path = "fuzz_targets/audit_log.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "backlog_notes"
 path = "fuzz_targets/backlog_notes.rs"
 test = false

@@ -61,7 +61,10 @@ const REVOKE_TOKEN: &str = "/protectorate.v1.TokenService/RevokeToken";
 const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
 const GRANT_ADMIN: &str = "/protectorate.v1.GrantService/Admin";
 const LIST_AUDIT: &str = "/protectorate.v1.AuditService/ListAuditEntries";
+const VERIFY_AUDIT: &str = "/protectorate.v1.AuditService/VerifyAudit";
 const LIST_DEVICES: &str = "/protectorate.v1.DeviceService/ListDevices";
+const LIST_APPROVALS: &str = "/protectorate.v1.ApprovalService/ListApprovals";
+const DECIDE_APPROVAL: &str = "/protectorate.v1.ApprovalService/DecideApproval";
 const LIST_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ListDeviceAuth";
 const APPROVE_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ApproveDeviceAuth";
 const DENY_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/DenyDeviceAuth";
@@ -195,6 +198,7 @@ pub struct AuditQuery {
     pub procedure: String,
     pub subject: String,
     pub outcome: String,
+    pub run_id: String,
     pub chronological: bool,
 }
 
@@ -534,6 +538,8 @@ pub struct SleeveSpawn {
     /// Path of the brief file, read by this CLI. Empty means no brief.
     pub brief_file: String,
     pub nested: bool,
+    /// Weighted tokens the run may use; zero means no cap.
+    pub token_budget: u64,
 }
 
 /// `sleeve envoy`, the owner-only SpawnEnvoy call. `harness` none is auto.
@@ -543,6 +549,7 @@ pub struct SleeveEnvoy {
     pub scopes: Vec<String>,
     pub add_scopes: Vec<String>,
     pub selection: ModelChoice,
+    pub token_budget: u64,
 }
 
 /// `sleeve resleeve`. `to` none is auto. A zero `wait` leaves the hub's
@@ -628,6 +635,14 @@ pub enum Command {
         out: Option<PathBuf>,
     },
     AuditList(AuditQuery),
+    AuditVerify,
+    ApprovalList {
+        all: bool,
+    },
+    ApprovalDecide {
+        id: String,
+        approve: bool,
+    },
     DeviceList,
     DevicePendingList,
     DeviceApprove {
@@ -905,6 +920,9 @@ fn usage() -> &'static str {
      token revoke <id>          revoke a lineage immediately\n  \
      token renew                print a fresh token for the presented capability\n  \
      token attenuate            print the presented capability narrowed offline (--scope repeated, --ttl)\n  \
+     approvals ls [--all]       agent calls waiting for the owner: id, actor, call, reason, expiry\n  \
+     approvals approve <id>     run a gated agent call once\n  \
+     approvals deny <id>        refuse a gated agent call\n  \
      devices ls | devices list  trusted devices: name, platform, last use and approver\n  \
      devices pending            pairing requests awaiting approval\n  \
      devices approve <code>     approve a request after matching its code on the new device\n  \
@@ -914,7 +932,8 @@ fn usage() -> &'static str {
      login [--name NAME] [--platform OS/ARCH] [--home DIR]  pair this machine with --hub through device approval\n  \
      pair [--url URL] [--app]  print a public pairing link and terminal QR; it carries the CA in PROTECTORATE_TLS_CA_CERT\n  \
      grant admin               mint a task grant (--node NAME|GLOB, --task TEXT, --ttl 4h, --out FILE)\n  \
-     audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --page-token)\n  \
+     audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --run, --page-token)\n  \
+     audit verify               check the audit hash chain against the hub's recorded head\n  \
      who [project|sleeve]       show projects, owning sleeves and dependency edges\n  \
      events                     stream hub events until interrupted\n  \
      node ls | node list        every node with its latest metrics summary\n  \
@@ -969,8 +988,8 @@ fn usage() -> &'static str {
      sleeve kill <name>         stop a sleeve and its processes (--drop-caches)\n  \
      sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
-     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, -- args)\n  \
-     sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --model, --effort)\n  \
+     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, --budget TOKENS, -- args)\n  \
+     sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --model, --effort, --budget TOKENS)\n  \
      orchestrator spawn         create or respawn Envoy (same options as sleeve envoy)\n  \
      orchestrator status        show Envoy sleeve and latest token\n  \
      sleeve resleeve <name>     move a chat sleeve (--to auto|claude|codex|grok|pi, --interrupt, --wait, --model, --effort, --native-defaults)\n  \
@@ -1674,7 +1693,7 @@ fn execute_commands(
             }
         }
         Command::AuditList(query) => {
-            let page = client.call(LIST_AUDIT, &json!({"limit":query.limit,"pageToken":query.page_token,"actor":query.actor,"procedure":query.procedure,"subject":query.subject,"outcome":query.outcome}))?;
+            let page = client.call(LIST_AUDIT, &json!({"limit":query.limit,"pageToken":query.page_token,"actor":query.actor,"procedure":query.procedure,"subject":query.subject,"outcome":query.outcome,"runId":query.run_id}))?;
             if json {
                 if query.chronological {
                     Ok(format::items(&page, "entries")
@@ -1688,6 +1707,42 @@ fn execute_commands(
                 }
             } else {
                 Ok(format::audit_entries_text(&page, query.chronological))
+            }
+        }
+        Command::AuditVerify => {
+            let report = client.call_with_timeout(VERIFY_AUDIT, &json!({}), MAX_WAIT)?;
+            if report["ok"] != true {
+                return Err(RpcError::new(
+                    Code::DataLoss,
+                    format!(
+                        "audit chain broken: {}",
+                        report["error"].as_str().unwrap_or_default()
+                    ),
+                ));
+            }
+            if json {
+                json_line(&report)
+            } else {
+                Ok(format::audit_verify_text(&report))
+            }
+        }
+        Command::ApprovalList { all } => {
+            let approvals = client.call(LIST_APPROVALS, &json!({"all": all}))?;
+            if json {
+                json_line(&approvals)
+            } else {
+                Ok(format::approvals_text(&approvals))
+            }
+        }
+        Command::ApprovalDecide { id, approve } => {
+            let response = client.call(DECIDE_APPROVAL, &json!({"id": id, "approve": approve}))?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format!(
+                    "{} {id}\n",
+                    if *approve { "approved" } else { "denied" }
+                ))
             }
         }
         Command::DeviceList => {
@@ -3304,6 +3359,9 @@ fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
     if spawn.nested {
         request["nested"] = json!(true);
     }
+    if spawn.token_budget > 0 {
+        request["tokenBudget"] = json!(spawn.token_budget.to_string());
+    }
     request
 }
 
@@ -3320,6 +3378,9 @@ fn envoy_body(envoy: &SleeveEnvoy) -> Value {
     }
     if let Some(selection) = selection_body(&envoy.selection) {
         request["selection"] = selection;
+    }
+    if envoy.token_budget > 0 {
+        request["tokenBudget"] = json!(envoy.token_budget.to_string());
     }
     request
 }

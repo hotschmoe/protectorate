@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package protectorate.v1;
+
+import "google/protobuf/timestamp.proto";
+import "protectorate/v1/options.proto";
+
+// ApprovalService lists and decides the requests the hub opens instead of
+// running a high-impact call made by Envoy, a sleeve or a grant Envoy
+// minted: an RPC marked destructive, minting an admin grant, an admin job,
+// and launching a sleeve whose harness executable or profile changed since
+// its last launch. Agents never reach care nodes; placement refuses them.
+// Calls by the owner and approved devices are never gated. The caller gets
+// an aborted error carrying the request id; repeating the same call with the
+// protectorate-approval header set to that id runs it once approved, and
+// fails once denied or expired. The protectorate CLI and MCP bridge repeat
+// it themselves. Requests expire after ten minutes and live only in hub
+// memory. Changes are announced as "approval.requested" and
+// "approval.decided" (subject = request id). Only the owner and approved
+// devices may call this service.
+service ApprovalService {
+  option (protectorate.v1.owner_only) = true;
+
+  // ListApprovals returns pending requests, oldest first, or with all every
+  // request the hub still remembers.
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (protectorate.v1.device_allowed) = true;
+  }
+
+  // DecideApproval approves or denies a pending request. Each decision is
+  // audited.
+  rpc DecideApproval(DecideApprovalRequest) returns (DecideApprovalResponse) {
+    option (protectorate.v1.device_allowed) = true;
+  }
+}
+
+enum ApprovalState {
+  APPROVAL_STATE_UNSPECIFIED = 0;
+  APPROVAL_STATE_PENDING = 1;
+  // APPROVED is waiting for the caller to repeat the call; USED once it ran.
+  APPROVAL_STATE_APPROVED = 2;
+  APPROVAL_STATE_DENIED = 3;
+  APPROVAL_STATE_EXPIRED = 4;
+  APPROVAL_STATE_USED = 5;
+}
+
+message Approval {
+  string id = 1;
+  // actor is the principal that made the call, as in the audit log.
+  string actor = 2;
+  string procedure = 3;
+  string subject = 4;
+  // reason says why the call is gated, such as "destructive".
+  string reason = 5;
+  // detail adds what the owner needs to decide, such as changed hashes.
+  string detail = 6;
+  string run_id = 7;
+  ApprovalState state = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp expires_at = 10;
+  string decided_by = 11;
+}
+
+message ListApprovalsRequest {
+  bool all = 1;
+}
+
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+
+message DecideApprovalRequest {
+  string id = 1;
+  bool approve = 2;
+}
+
+message DecideApprovalResponse {
+  Approval approval = 1;
+}

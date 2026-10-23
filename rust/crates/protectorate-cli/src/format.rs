@@ -386,6 +386,36 @@ pub(crate) fn device_list_text(response: &Value) -> String {
     out
 }
 
+/// `approvals ls`: one row per gated agent call.
+pub(crate) fn approvals_text(response: &Value) -> String {
+    let mut out = "ID\tSTATE\tACTOR\tCALL\tREASON\tEXPIRES\n".to_owned();
+    for approval in items(response, "approvals") {
+        let mut call = text(&approval, "procedure")
+            .trim_start_matches("/protectorate.v1.")
+            .to_owned();
+        let subject = text(&approval, "subject");
+        if !subject.is_empty() {
+            call.push(' ');
+            call.push_str(&subject);
+        }
+        let mut reason = text(&approval, "reason");
+        let detail = text(&approval, "detail");
+        if !detail.is_empty() {
+            reason = format!("{reason}: {detail}");
+        }
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{call}\t{reason}\t{}\n",
+            text(&approval, "id"),
+            text(&approval, "state")
+                .trim_start_matches("APPROVAL_STATE_")
+                .to_ascii_lowercase(),
+            text(&approval, "actor"),
+            local_stamp(text(&approval, "expiresAt"))
+        ));
+    }
+    out
+}
+
 /// `devices pending`: one row per pairing request still awaiting a decision.
 pub(crate) fn device_pending_text(response: &Value) -> String {
     let mut out = "CODE\tNAME\tPLATFORM\tREQUESTING IP\tEXPIRES\n".to_owned();
@@ -461,6 +491,10 @@ pub(crate) fn audit_entries_text(response: &Value, chronological: bool) -> Strin
         if !task.is_empty() {
             output.push_str(&format!("  [task: {task}]"));
         }
+        let run = text(entry, "runId");
+        if !run.is_empty() {
+            output.push_str(&format!("  [run: {run}]"));
+        }
         output.push('\n');
     }
     if !chronological {
@@ -470,6 +504,22 @@ pub(crate) fn audit_entries_text(response: &Value, chronological: bool) -> Strin
         }
     }
     output
+}
+
+pub(crate) fn audit_verify_text(report: &Value) -> String {
+    let mut out = format!(
+        "audit chain ok: {} entries, head {} {}\n",
+        text(report, "entries"),
+        text(&report["head"], "seq"),
+        text(&report["head"], "hash")
+    );
+    let beyond = text(report, "beyondHead");
+    if !beyond.is_empty() && beyond != "0" {
+        out.push_str(&format!(
+            "{beyond} entries after the recorded head; the next write records them\n"
+        ));
+    }
+    out
 }
 
 /// How many output lines `sleeve show` keeps from an exited session, like
@@ -1728,6 +1778,20 @@ pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
         row(&mut out, "base tip", text(sleeve, "baseTip"));
     }
     row(&mut out, "parent", text(sleeve, "parent"));
+    optional_row(&mut out, "run", text(sleeve, "runId"));
+    optional_row(&mut out, "harness sha256", text(sleeve, "harnessSha256"));
+    optional_row(&mut out, "profile sha256", text(sleeve, "profileSha256"));
+    if number(sleeve, "tokenBudget").unwrap_or_default() > 0.0 {
+        row(
+            &mut out,
+            "token budget",
+            format!(
+                "{} of {} weighted tokens used",
+                fmt_int(number(sleeve, "tokensUsed")),
+                fmt_int(number(sleeve, "tokenBudget"))
+            ),
+        );
+    }
     row(&mut out, "mode", mode_label(sleeve));
     if let Some(result) = at(sleeve, "result").filter(|value| !value.is_null()) {
         out.push_str(&format!(

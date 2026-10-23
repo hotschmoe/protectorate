@@ -21,6 +21,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             if task.trim().is_empty() || task.len() > 500 {
                 return Err(RpcError::invalid("a grant needs a task of 1-500 bytes"));
             }
+            let ttl = access::ttl(&body, DEFAULT_TTL)?;
             let methods = scope_methods(&hub.methods);
             let mut scopes = protectorate_auth::grant_scopes(&node, &methods)
                 .map_err(|error| RpcError::invalid(error.to_string()))?;
@@ -73,6 +74,12 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     ));
                 }
                 scopes = jobs.into_iter().chain(admin).collect();
+                if ttl.is_zero() || ttl > protectorate_identity::MAX_TTL {
+                    return Err(RpcError::invalid(
+                        "a grant lifetime must be positive and at most 24 hours",
+                    ));
+                }
+                crate::approvals::require(&hub, &request, "admin grant")?;
                 access::ENVOY
             } else {
                 return Err(RpcError::new(
@@ -88,7 +95,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         scopes,
                         task: &task,
                         minted_by,
-                        ttl: access::ttl(&body, DEFAULT_TTL)?,
+                        ttl,
                         file: None,
                     },
                     now_unix(),

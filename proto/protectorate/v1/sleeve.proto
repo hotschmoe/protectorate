@@ -148,6 +148,8 @@ message Checkpoint {
   google.protobuf.Timestamp created_at = 3;
   // reason is "turn", "resleeve", "manual" or "before restore of N".
   string reason = 4;
+  // run_id is the sleeve's run when the checkpoint was taken.
+  string run_id = 5;
 }
 
 message CreateCheckpointRequest {
@@ -292,6 +294,22 @@ message Sleeve {
   // terminal is the screen-derived activity of a running terminal sleeve
   // whose harness has screen rules; unset otherwise.
   TerminalStatus terminal = 31;
+  // run_id is minted at spawn and kept across resleeves and hub restarts. It
+  // marks the sleeve's audit entries, jobs, mail, leases, checkpoints and
+  // egress decisions; filter with ListAuditEntries.run_id.
+  string run_id = 32;
+  // harness_sha256 and profile_sha256 pin this harness's last approved
+  // launch: the executable's bytes, and the sandbox inputs (mounts, tool
+  // roots, limits, environment, egress allowlist) and token scopes. A later
+  // launch that differs is recorded when the owner asked for it and needs
+  // owner approval (ApprovalService) when Envoy, a sleeve or the hub itself
+  // did.
+  string harness_sha256 = 33;
+  string profile_sha256 = 34;
+  // token_budget is the run's cap in weighted tokens (zero: none) and
+  // tokens_used what the run and the sleeves it spawned have used.
+  uint64 token_budget = 35;
+  uint64 tokens_used = 36;
 }
 
 enum TerminalActivity {
@@ -369,6 +387,14 @@ message SpawnSleeveRequest {
   string brief = 14;
   // Delegates a private cgroup subtree; requires CPU and memory limits.
   bool nested = 17;
+  // token_budget caps the run's weighted tokens, counted from the harness's
+  // usage reports: input + output + 0.1 x cache reads + 1.25 x cache writes.
+  // At 90% the hub posts a chat notice; at 100% it interrupts the turn and
+  // refuses new ones. Zero means no cap. A sleeve spawned by Envoy or another
+  // sleeve with a budget gets at most that parent's remaining budget (all of
+  // it when zero), and its usage counts against the parent too. Chat mode
+  // only.
+  uint64 token_budget = 18;
 }
 
 message SpawnSleeveResponse {
@@ -473,6 +499,8 @@ message SpawnEnvoyRequest {
   // add_scopes extends the scopes, defaults or replaced.
   repeated string add_scopes = 3;
   ModelSelection selection = 5;
+  // token_budget caps Envoy's run like SpawnSleeveRequest.token_budget.
+  uint64 token_budget = 6;
 }
 
 message SpawnEnvoyResponse {

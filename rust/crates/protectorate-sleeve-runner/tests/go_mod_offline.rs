@@ -65,6 +65,7 @@ fn installed_go_builds_offline_with_private_module_overlay() {
         nested: false,
         ready_file: sleeve.join("ready"),
         egress: None,
+        run_id: String::new(),
     };
     assert_eq!(protectorate_sleeve_runner::run(&config).unwrap(), 0);
     assert_eq!(

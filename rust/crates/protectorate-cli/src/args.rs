@@ -98,6 +98,7 @@ fn parse_tokens(args: &[String]) -> Result<Invocation> {
             "grant" => set(&mut command, grant(args, &mut index)?)?,
             "audit" => set(&mut command, audit(args, &mut index)?)?,
             "devices" => set(&mut command, devices(args, &mut index)?)?,
+            "approvals" => set(&mut command, approvals(args, &mut index)?)?,
             "login" => set(&mut command, login(args, &mut index)?)?,
             "pair" => set(&mut command, pair(args, &mut index)?)?,
             "who" => {
@@ -470,11 +471,15 @@ fn grant(args: &[String], index: &mut usize) -> Result<Command> {
 }
 
 fn audit(args: &[String], index: &mut usize) -> Result<Command> {
-    let action = next(args, *index + 1).ok_or_else(|| bad_argument("audit needs ls or tail"))?;
-    if !matches!(action, "ls" | "tail") {
-        return Err(bad_argument("audit needs ls or tail"));
+    let action =
+        next(args, *index + 1).ok_or_else(|| bad_argument("audit needs ls, tail or verify"))?;
+    if !matches!(action, "ls" | "tail" | "verify") {
+        return Err(bad_argument("audit needs ls, tail or verify"));
     }
     *index += 1;
+    if action == "verify" {
+        return Ok(Command::AuditVerify);
+    }
     let mut query = AuditQuery {
         limit: 50,
         page_token: String::new(),
@@ -482,6 +487,7 @@ fn audit(args: &[String], index: &mut usize) -> Result<Command> {
         procedure: String::new(),
         subject: String::new(),
         outcome: String::new(),
+        run_id: String::new(),
         chronological: action == "tail",
     };
     while let Some(item) = next(args, *index + 1) {
@@ -513,6 +519,10 @@ fn audit(args: &[String], index: &mut usize) -> Result<Command> {
                 *index += 1;
                 query.outcome = value(args, index, flag, inline)?;
             }
+            "--run" => {
+                *index += 1;
+                query.run_id = value(args, index, flag, inline)?;
+            }
             _ => break,
         }
     }
@@ -523,6 +533,30 @@ fn audit(args: &[String], index: &mut usize) -> Result<Command> {
         return Err(bad_argument("--outcome must be ok, denied or error"));
     }
     Ok(Command::AuditList(query))
+}
+
+/// Owner approval of gated agent calls: `approvals ls [--all]`,
+/// `approve <id>` and `deny <id>`.
+fn approvals(args: &[String], index: &mut usize) -> Result<Command> {
+    let usage = "approvals needs ls [--all], approve <id> or deny <id>";
+    let action = next(args, *index + 1).ok_or_else(|| bad_argument(usage))?;
+    *index += 1;
+    match action {
+        "ls" | "list" => {
+            let all = next(args, *index + 1) == Some("--all");
+            if all {
+                *index += 1;
+            }
+            Ok(Command::ApprovalList { all })
+        }
+        "approve" | "deny" => Ok(Command::ApprovalDecide {
+            id: argument(args, index, usage)?,
+            approve: action == "approve",
+        }),
+        other => Err(bad_argument(format!(
+            "unknown approvals subcommand {other:?}; {usage}"
+        ))),
+    }
 }
 
 /// Trusted-device management: `devices ls`, `pending`, `approve <code>`,
@@ -1988,6 +2022,7 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
     let mut mode = SleeveModeName::Default;
     let mut supervised = false;
     let mut nested = false;
+    let mut token_budget = 0;
     let mut selection = ModelChoice::default();
     let mut read_only = Vec::new();
     let mut exit_after_idle = Duration::ZERO;
@@ -2078,6 +2113,10 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
                     *index += 1;
                     nested = bool_flag("--nested", inline)?;
                 }
+                "--budget" => {
+                    *index += 1;
+                    token_budget = budget_flag(&value(args, index, "--budget", inline)?)?;
+                }
                 _ => break,
             }
         } else if name.is_some() {
@@ -2116,7 +2155,13 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
         new_branch,
         brief_file,
         nested,
+        token_budget,
     }))
+}
+
+fn budget_flag(text: &str) -> Result<u64> {
+    text.parse()
+        .map_err(|_| bad_argument("--budget is a count of weighted tokens"))
 }
 
 fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
@@ -2124,6 +2169,7 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
     let mut scopes = Vec::new();
     let mut add_scopes = Vec::new();
     let mut selection = ModelChoice::default();
+    let mut token_budget = 0;
     while let Some(token) = next(args, *index + 1) {
         if !token.starts_with('-') {
             return Err(bad_argument("sleeve envoy takes no arguments"));
@@ -2150,6 +2196,10 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
                 *index += 1;
                 selection.effort = value(args, index, "--effort", inline)?;
             }
+            "--budget" => {
+                *index += 1;
+                token_budget = budget_flag(&value(args, index, "--budget", inline)?)?;
+            }
             _ => break,
         }
     }
@@ -2163,6 +2213,7 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
         scopes,
         add_scopes,
         selection,
+        token_budget,
     }))
 }
 

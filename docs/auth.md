@@ -166,6 +166,36 @@ sleeve or orchestrator identities.
 
 Trusted devices share the owner's mailbox; their audit actor is the device.
 
+## Approval gates
+
+Agents are the holders of hub-minted capabilities whose principal is Envoy
+(`orchestrator-envoy`) or a sleeve (`sleeve:<name>`), and of any lineage Envoy
+minted, such as its admin grants. When an agent makes a high-impact call the hub opens
+an approval request instead of running it: any RPC marked `destructive` in
+the proto (`DeleteNote`, `KillSleeve` even of its own children,
+`RestoreCheckpoint` and the rest), minting an admin grant (after the grant's
+own checks pass), an admin job, and launching a sleeve whose harness
+executable or profile changed (see harness pinning in `docs/sleeves.md`).
+Agents cannot reach care nodes at all: placement refuses them without an
+owner-minted grant. Calls by the owner, approved devices and capabilities the
+owner minted are never gated.
+
+The call fails with `aborted` and a detail naming the request id. Repeating
+the same call with header `protectorate-approval: <id>` runs it once after the
+owner approves, and fails with `permission_denied` after a denial or expiry;
+the CLI and MCP bridge repeat it every two seconds and print the id once. An
+approval binds to the caller and the exact request bytes and admits one
+execution. A call identical to a denied one is denied again for ten minutes.
+Requests expire after ten minutes and live only in hub memory.
+
+The owner decides from an approved device (the app's ACTION APPROVAL banner,
+fed by `approval.requested` and `approval.decided` events) or with
+`protectorate approvals ls | approve <id> | deny <id>`
+(`ApprovalService`, owner and devices only). The audit log records each
+request (`approval.request`), decision (`DecideApproval`, with the decider and
+what was decided) and expiry (`approval.expired`), and the call's own entry
+when it runs.
+
 ## Audit log
 
 `$PROTECTORATE_HOME/audit/audit-YYYY-MM.jsonl`, JSON lines opened `O_APPEND`
@@ -174,14 +204,30 @@ unauthenticated attempts), every terminal attach, and every call made with an
 admin grant. Fields: `time`, `actor` (`owner`, `token:<principal or device
 name>` or `unauthenticated`), `token_id` (the device ID, which is its key ID,
 or the capability lineage ID), `procedure`, `subject`, `outcome`, `code`,
-`task` and `detail`. Secrets, proofs, env values and request bodies are never
-written. `protectorate audit tail` reads it on the hub machine;
-`AuditService.ListAuditEntries` (owner only) serves the app's AUDIT view.
+`task`, `detail`, `run_id` (the run of the sleeve that made the call or that
+it concerns), `seq`, `prev` and `hash`; every field is part of the hashed
+line. Secrets, proofs, env values and request bodies are never written.
+`protectorate audit tail` reads it on the hub machine;
+`AuditService.ListAuditEntries` (owner only) serves the app's AUDIT view,
+filtered by actor, procedure, subject, outcome and run id.
 
-Limits: append-only is a convention of the hub process, so anything running as
-the same OS user can edit the file (sleeves cannot reach `$PROTECTORATE_HOME`);
-an entry is written after its call returns; unauthenticated attempts are
-logged too, so a caller who can reach the port can grow the log.
+The log is a hash chain. `seq` numbers entries from 1 across every monthly
+file, `prev` is the previous entry's hash, and `hash` is SHA-256 over the
+line's exact bytes with an empty `hash` value. After each append the writer
+records the newest `seq` and `hash` in `audit/head.json`; writers in every
+process (the hub and terminal sleeve runners) serialize on `audit/.lock` and
+continue from the last line on disk. `protectorate audit verify`
+(`AuditService.VerifyAudit`) walks the chain from entry 1 and fails, naming
+the file and line, when an entry was edited, removed or reordered, when the
+log ends before the recorded head, or when the head is missing. `GetStatus`
+and `ListAuditEntries` report the head, so a client can remember it.
+
+Limits: the chain makes tampering evident, not impossible; anything running as
+the same OS user can rewrite the whole log and its head, which only a head
+remembered elsewhere or a root-owned append-only location catches (sleeves
+cannot reach `$PROTECTORATE_HOME`). An entry is written after its call
+returns; unauthenticated attempts are logged too, so a caller who can reach
+the port can grow the log.
 
 ## CLI
 
@@ -194,6 +240,9 @@ protectorate --token-file FILE token attenuate --scope backlog_create_note --ttl
 protectorate login --hub https://hub.example --name officepc
 protectorate devices ls | pending | approve CODE | deny CODE | rename ID NAME | revoke ID
 protectorate audit tail -n 50
+protectorate audit ls --run RUN_ID
+protectorate audit verify
+protectorate approvals ls | approve ID | deny ID
 ```
 
 Every command authenticates with the capability in `--token-file` or

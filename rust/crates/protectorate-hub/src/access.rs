@@ -19,15 +19,6 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 
-/// What a sleeve may do through the hub: coordinate, never administer.
-pub(crate) const SLEEVE_SCOPES: &[&str] = &[
-    "read",
-    "backlog_*",
-    "directory_*",
-    "lease_*",
-    "message_*",
-    "chat_report",
-];
 pub(crate) const ENVOY: &str = "orchestrator-envoy";
 const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60);
 const RENEW: &str = "token_renew_token";
@@ -268,18 +259,33 @@ pub(crate) fn issue_held(
     Ok(record)
 }
 
-/// A sleeve's capability: the sleeve scopes, limited to what its spawner holds.
+/// A sleeve's scopes: the sleeve scopes, limited to what its spawner holds.
+pub(crate) fn sleeve_scopes(hub: &Hub, parent: &crate::sleeves::SpawnParent) -> Vec<String> {
+    let wanted = crate::sleeves::SLEEVE_SCOPES.map(str::to_owned).to_vec();
+    match &parent.scopes {
+        Some(held) => auth::intersect(&wanted, held, &scope_methods(&hub.methods)),
+        None => wanted,
+    }
+}
+
+/// The scopes of Envoy's live capability, empty when it holds none.
+pub(crate) fn envoy_scopes(hub: &Hub) -> Vec<String> {
+    let now = now_unix();
+    hub.identity
+        .capabilities()
+        .into_iter()
+        .find(|c| c.principal == ENVOY && c.is_active(now))
+        .map(|c| c.scopes)
+        .unwrap_or_default()
+}
+
 pub(crate) fn issue_sleeve(
     hub: &Hub,
     name: &str,
     parent: &crate::sleeves::SpawnParent,
     path: &Path,
 ) -> Result<Capability> {
-    let wanted: Vec<String> = SLEEVE_SCOPES.iter().map(|s| (*s).to_owned()).collect();
-    let scopes = match &parent.scopes {
-        Some(held) => auth::intersect(&wanted, held, &scope_methods(&hub.methods)),
-        None => wanted,
-    };
+    let scopes = sleeve_scopes(hub, parent);
     issue_held(hub, &format!("sleeve:{name}"), scopes, &parent.label, path)
 }
 

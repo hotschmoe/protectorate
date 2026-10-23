@@ -19,7 +19,7 @@ pub use cli::{cli_args, mcp_stdio};
 pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
 pub use quota::quota_responses;
 pub use sandbox::sandbox_plan;
-pub use stores::{backlog_notes, chatlog, directory_state, identity_store, mailbox_log};
+pub use stores::{audit_log, backlog_notes, chatlog, directory_state, identity_store, mailbox_log};
 pub use terminal::terminal_pane;
 pub use wire::wire_json;
 
@@ -27,6 +27,7 @@ pub type Target = fn(&[u8]);
 
 /// Every target by its corpus directory name under rust/fuzz/corpus.
 pub const TARGETS: &[(&str, Target)] = &[
+    ("audit_log", audit_log),
     ("backlog_notes", backlog_notes),
     ("capability_tokens", capability_tokens),
     ("chatlog", chatlog),

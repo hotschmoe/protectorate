@@ -99,6 +99,9 @@ pub struct Lease {
     pub id: String,
     pub resource: Resource,
     pub holder: String,
+    /// The holding sleeve's run, empty for other holders.
+    #[serde(default)]
+    pub run_id: String,
     pub ttl: Duration,
     pub acquired_at: i64,
     pub expires_at: i64,
@@ -110,6 +113,8 @@ pub struct Ticket {
     pub id: String,
     pub resource: String,
     pub holder: String,
+    #[serde(default)]
+    pub run_id: String,
     pub notify: String,
     pub priority: i32,
     pub sequence: u64,
@@ -134,6 +139,7 @@ impl Entry {
 #[derive(Clone, Debug)]
 pub struct Wait {
     pub holder: String,
+    pub run_id: String,
     pub notify: String,
     pub resource: String,
     pub request: String,
@@ -249,7 +255,7 @@ fn blocked(d: &Disk, resource: &Resource) -> Option<Lease> {
 fn acquire_into(
     d: &mut Disk,
     chooser: &Chooser,
-    holder: &str,
+    (holder, run_id): (&str, &str),
     ttl: Duration,
     want: Option<Duration>,
     request: &str,
@@ -268,6 +274,7 @@ fn acquire_into(
         id: random_id("lease-", d)?,
         resource,
         holder: holder.into(),
+        run_id: run_id.into(),
         ttl,
         acquired_at: now,
         expires_at: expiry(now, ttl)?,
@@ -429,7 +436,7 @@ impl LeaseTable {
             match acquire_into(
                 d,
                 &self.chooser,
-                &ticket.holder,
+                (&ticket.holder, &ticket.run_id),
                 ttl,
                 Some(ticket.ttl),
                 &ticket.request,
@@ -471,11 +478,18 @@ impl LeaseTable {
             self.grant_into(d, events, now)
         })
     }
-    pub fn acquire(&self, holder: &str, ttl: Duration, request: &str, now: i64) -> Result<Lease> {
+    pub fn acquire(
+        &self,
+        holder: &str,
+        run_id: &str,
+        ttl: Duration,
+        request: &str,
+        now: i64,
+    ) -> Result<Lease> {
         holder_ttl(holder, ttl)?;
         self.sweep(now)?;
         self.transaction(|d, events| {
-            let l = acquire_into(d, &self.chooser, holder, ttl, None, request, now)?;
+            let l = acquire_into(d, &self.chooser, (holder, run_id), ttl, None, request, now)?;
             events.push(Event::lease(EventKind::Acquired, l.clone()));
             Ok(l)
         })
@@ -484,7 +498,15 @@ impl LeaseTable {
         holder_ttl(&w.holder, w.ttl)?;
         self.sweep(now)?;
         self.transaction(|d, events| {
-            match acquire_into(d, &self.chooser, &w.holder, w.ttl, None, &w.request, now) {
+            match acquire_into(
+                d,
+                &self.chooser,
+                (&w.holder, &w.run_id),
+                w.ttl,
+                None,
+                &w.request,
+                now,
+            ) {
                 Ok(l) => {
                     events.push(Event::lease(EventKind::Acquired, l.clone()));
                     return Ok(Entry::Active(l));
@@ -500,6 +522,7 @@ impl LeaseTable {
                 id: random_id("ticket-", d)?,
                 resource: w.resource,
                 holder: w.holder,
+                run_id: w.run_id,
                 notify: w.notify,
                 priority: w.priority,
                 sequence: d.next_sequence,
