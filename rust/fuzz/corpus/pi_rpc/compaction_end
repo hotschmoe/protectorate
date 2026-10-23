@@ -1,0 +1,2 @@
+{"type":"compaction_end","result":{"tokensBefore":150,"estimatedTokensAfter":30}}
+{"type":"compaction_end","result":null}

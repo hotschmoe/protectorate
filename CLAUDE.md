@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code in this repository. Read PROBLEMS.md and ARCHITECTURE.md first. Branch and release rules: DEV.md. `archive/` and `references/` are read-only reference material.
+Guidance for Claude Code in this repository. Read PROBLEMS.md and ARCHITECTURE.md first. Branch and release rules: DEV.md. `references/` (gitignored clones) is read-only reference material.
 
 ## RULE 1 - ABSOLUTE (DO NOT EVER VIOLATE THIS)
 

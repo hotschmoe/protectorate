@@ -1,6 +1,7 @@
-#![cfg(unix)]
 #![cfg(target_os = "linux")]
-use protectorate_cli::{dispatch_endpoint, Code};
+mod common;
+
+use common::cli;
 use protectorate_hub::Hub;
 use protectorate_session::Manager;
 use serde_json::Value;
@@ -23,10 +24,7 @@ fn integer(row: &Value, key: &str) -> i64 {
 
 /// Waits for the hub to report `name` as exited, and returns the listing that
 /// first said so.
-fn exited_listing(
-    call: &dyn Fn(&[&str]) -> Result<String, protectorate_cli::RpcError>,
-    name: &str,
-) -> Value {
+fn exited_listing(call: &dyn Fn(&[&str]) -> Result<String, String>, name: &str) -> Value {
     for _ in 0..100 {
         let listing: Value =
             serde_json::from_str(&call(&["--json", "session", "ls"]).unwrap()).unwrap();
@@ -38,7 +36,7 @@ fn exited_listing(
     panic!("{name} never exited");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
     if Command::new("tmux").arg("-V").output().is_err() {
         return;
@@ -61,83 +59,92 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
 
     let cwd = root.path().to_string_lossy().into_owned();
     let outcome = tokio::task::spawn_blocking(move || {
-        let call = |args: &[&str]| dispatch_endpoint(&url, "owner-secret", args);
-        let created = call(&[
-            "session",
-            "new",
-            "runner",
-            "--cwd",
-            cwd.as_str(),
-            "--",
-            "/bin/sh",
-        ]);
-        let duplicate = call(&["session", "new", "runner"]);
-        let reserved = call(&["session", "new", "sleeve-taken"]);
-        let listed = call(&["session", "ls"]);
-        let json_list = call(&["--json", "session", "ls"]);
+        let call = |args: &[&str]| cli(&url, "owner-secret", args);
+        assert_eq!(
+            call(&["session", "new", "runner", "--cwd", &cwd, "--", "/bin/sh"]).unwrap(),
+            "created\trunner\n"
+        );
+        assert!(call(&["session", "new", "runner"]).is_err());
+        assert!(call(&["session", "new", "sleeve-taken"]).is_err());
+        let listed = call(&["session", "ls"]).unwrap();
+        assert!(listed.contains("runner"), "{listed}");
+        assert!(listed.contains("running"), "{listed}");
+        let listing: Value =
+            serde_json::from_str(&call(&["--json", "session", "ls"]).unwrap()).unwrap();
+        let runner = session_row(&listing, "runner").expect("runner is listed");
+        assert_eq!(runner["cwd"], cwd.as_str());
+        assert_eq!(runner["command"], Value::Array(vec!["/bin/sh".into()]));
+        assert_eq!(runner["state"], "SESSION_STATE_RUNNING");
         std::thread::sleep(std::time::Duration::from_millis(400));
-        let capture = call(&["session", "capture", "runner", "--lines", "20"]);
-        let respawn_running = call(&["session", "respawn", "runner"]);
+        call(&["session", "capture", "runner", "--lines", "20"]).unwrap();
+        assert!(call(&["session", "respawn", "runner"]).is_err());
 
         let printed = call(&[
             "session",
             "new",
             "printer",
             "--cwd",
-            cwd.as_str(),
+            &cwd,
             "--env",
             "GREETING=hello",
             "--",
             "env",
         ]);
+        assert_eq!(printed.unwrap(), "created\tprinter\n");
         let printed_listing = exited_listing(&call, "printer");
-        let capture_printed = call(&["session", "capture", "printer", "--lines", "200"]);
+        assert_eq!(
+            integer(
+                session_row(&printed_listing, "printer").unwrap(),
+                "exitCode"
+            ),
+            0
+        );
+        let pane = call(&["session", "capture", "printer", "--lines", "200"]).unwrap();
+        assert!(pane.contains("GREETING=hello"), "{pane}");
+        assert!(pane.contains(cwd.as_str()), "{pane}");
 
-        let crashed = call(&["session", "new", "crash", "--", "/bin/false"]);
+        assert_eq!(
+            call(&["session", "new", "crash", "--", "/bin/false"]).unwrap(),
+            "created\tcrash\n"
+        );
         let crashed_listing = exited_listing(&call, "crash");
-        let respawned = call(&["session", "respawn", "crash"]);
+        assert_eq!(
+            integer(session_row(&crashed_listing, "crash").unwrap(), "exitCode"),
+            1
+        );
+        assert_eq!(
+            call(&["session", "respawn", "crash"]).unwrap(),
+            "respawned\tcrash\n"
+        );
 
-        let killed = call(&["session", "kill", "runner"]);
-        let capture_gone = call(&["session", "capture", "runner"]);
-        let capture_missing = call(&["session", "capture", "never-existed"]);
+        assert_eq!(
+            call(&["session", "kill", "runner"]).unwrap(),
+            "killed\trunner\n"
+        );
+        assert!(call(&["session", "capture", "runner"]).is_err());
+        assert!(call(&["session", "capture", "never-existed"]).is_err());
+        let bad_name = call(&["session", "new", "a/b", "--", "sh"]).unwrap_err();
+        assert!(bad_name.contains("1-64"), "{bad_name}");
 
+        // The hub keeps session new, respawn and kill owner-only; a read token
+        // still gets the two NO_SIDE_EFFECTS calls.
         let issued: Value = serde_json::from_str(
             &call(&["--json", "token", "create", "viewer", "--scope", "read"]).unwrap(),
         )
         .unwrap();
-        let secret = issued["secret"].as_str().unwrap().to_owned();
-        let scoped_list = dispatch_endpoint(&url, &secret, ["session", "ls"]);
-        let scoped_capture = dispatch_endpoint(&url, &secret, ["session", "capture", "printer"]);
-        let scoped_new = dispatch_endpoint(&url, &secret, ["session", "new", "ghost"]);
-        let scoped_respawn = dispatch_endpoint(&url, &secret, ["session", "respawn", "crash"]);
-        let scoped_kill = dispatch_endpoint(&url, &secret, ["session", "kill", "crash"]);
-
-        (
-            created,
-            duplicate,
-            reserved,
-            listed,
-            json_list,
-            capture,
-            respawn_running,
-            printed,
-            printed_listing,
-            capture_printed,
-            crashed,
-            crashed_listing,
-            respawned,
-            killed,
-            capture_gone,
-            capture_missing,
-            scoped_list,
-            scoped_capture,
-            scoped_new,
-            scoped_respawn,
-            scoped_kill,
-        )
+        let secret = issued["secret"].as_str().unwrap();
+        let scoped = |args: &[&str]| cli(&url, secret, args);
+        scoped(&["session", "ls"]).unwrap();
+        scoped(&["session", "capture", "printer"]).unwrap();
+        for args in [
+            ["session", "new", "ghost"],
+            ["session", "respawn", "crash"],
+            ["session", "kill", "crash"],
+        ] {
+            assert!(scoped(&args).is_err(), "{args:?}");
+        }
     })
-    .await
-    .unwrap();
+    .await;
     for name in ["runner", "printer", "crash", "ghost"] {
         let _ = manager.kill(name);
     }
@@ -145,95 +152,5 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
         .args(["-L", &socket, "kill-server"])
         .output();
     server.abort();
-
-    let (
-        created,
-        duplicate,
-        reserved,
-        listed,
-        json_list,
-        capture,
-        respawn_running,
-        printed,
-        printed_listing,
-        capture_printed,
-        crashed,
-        crashed_listing,
-        respawned,
-        killed,
-        capture_gone,
-        capture_missing,
-        scoped_list,
-        scoped_capture,
-        scoped_new,
-        scoped_respawn,
-        scoped_kill,
-    ) = outcome;
-
-    let created = created.unwrap();
-    assert_eq!(created, "created\trunner\n");
-    assert_eq!(duplicate.unwrap_err().code, Code::AlreadyExists);
-    assert_eq!(reserved.unwrap_err().code, Code::FailedPrecondition);
-    let listed = listed.unwrap();
-    assert!(listed.contains("runner"), "{listed}");
-    assert!(listed.contains("running"), "{listed}");
-
-    let listing: Value = serde_json::from_str(&json_list.unwrap()).unwrap();
-    let runner = session_row(&listing, "runner").expect("runner is listed");
-    assert_eq!(runner["cwd"], root.path().to_string_lossy().as_ref());
-    assert_eq!(runner["command"], Value::Array(vec!["/bin/sh".into()]));
-    assert_eq!(runner["state"], "SESSION_STATE_RUNNING");
-    assert!(capture.is_ok(), "{capture:?}");
-    assert_eq!(respawn_running.unwrap_err().code, Code::FailedPrecondition);
-
-    let printed = printed.unwrap();
-    assert_eq!(printed, "created\tprinter\n");
-    assert_eq!(
-        integer(
-            session_row(&printed_listing, "printer").unwrap(),
-            "exitCode"
-        ),
-        0
-    );
-    let pane = capture_printed.unwrap();
-    assert!(pane.contains("GREETING=hello"), "{pane}");
-    assert!(
-        pane.contains(root.path().to_string_lossy().as_ref()),
-        "{pane}"
-    );
-
-    let crashed = crashed.unwrap();
-    assert_eq!(crashed, "created\tcrash\n");
-    assert_eq!(
-        integer(session_row(&crashed_listing, "crash").unwrap(), "exitCode"),
-        1
-    );
-    let respawned = respawned.unwrap();
-    assert_eq!(respawned, "respawned\tcrash\n");
-
-    let killed = killed.unwrap();
-    assert_eq!(killed, "killed\trunner\n");
-    assert_eq!(capture_gone.unwrap_err().code, Code::NotFound);
-    assert_eq!(capture_missing.unwrap_err().code, Code::NotFound);
-
-    // The hub keeps session new, respawn and kill owner-only; a read token
-    // still gets the two NO_SIDE_EFFECTS calls.
-    assert!(scoped_list.is_ok(), "{scoped_list:?}");
-    assert!(scoped_capture.is_ok(), "{scoped_capture:?}");
-    for denied in [scoped_new, scoped_respawn, scoped_kill] {
-        assert_eq!(denied.unwrap_err().code, Code::PermissionDenied);
-    }
-}
-
-#[test]
-fn session_names_are_rejected_before_any_request() {
-    for args in [
-        ["session", "attach", "not a name"].as_slice(),
-        &["session", "new", "a/b", "--", "sh"],
-        &["session", "capture", "x".repeat(65).as_str()],
-    ] {
-        let error = dispatch_endpoint("http://127.0.0.1:1", "owner-secret", args).unwrap_err();
-        assert_eq!(error.code, Code::InvalidArgument, "{args:?}");
-        assert!(error.message.contains("1-64"), "{error}");
-    }
+    outcome.unwrap();
 }

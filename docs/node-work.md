@@ -12,7 +12,7 @@ Windows job sandboxes and busy-GPU placement below; see "Live proof" and
   **jobs through the hub**, which picks the node, checks the token, audits and
   streams output. SSH is an escape hatch for interactive needs, through
   short-lived hub-signed certificates (P11), never long-lived keys in sleeves.
-- Shell and files first, GUI last ([desk.md](desk.md)).
+- Shell and files first. Windows desktop control is shelved; see tag `shelf/windows-desk`.
 - Anything that can be decided by code is: placement, offload, grants,
   toolchain detection.
 
@@ -48,13 +48,11 @@ keep working until `node tier` retags them.
 - Selectors (jobs and leases) never pick a `care` node; the refusal lists it
   as `tier care`.
 - Leases never cover a `care` node or one of its GPUs, whoever asks
-  (failed_precondition). Its desktop (`desk:<node>`) is not compute and can
-  be leased like any desk command below.
+  (failed_precondition).
 - A job naming a `care` node (`--on kidsbox`, or a lease on one taken before
-  it became `care`), a file transfer to or from one, and desk commands on it
-  need the owner token or a token with `node_admin:<glob>` matching the node
+  it became `care`) and a file transfer to or from one need the owner token or a token with `node_admin:<glob>` matching the node
   (permission_denied otherwise, with the command that mints a grant). Owner
-  only RPCs (`node update`, `desk policy`) are unaffected.
+  only RPCs (`node update`) are unaffected.
 - The `allow_care` fields and `--allow-care` flags are gone: the grant is the
   explicit opt-in. `node_admin:<glob>` is a `path.Match` glob over node names
   and admits no RPC by itself; `*` does not include it.

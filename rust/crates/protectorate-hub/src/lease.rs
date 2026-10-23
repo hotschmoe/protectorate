@@ -1,6 +1,6 @@
 //! Lease RPCs backed by the persistent lease table. Node admission is supplied
 //! by a chooser once the node monitor is connected to this hub.
-use super::{desk_policy, input, node_files, parse_duration, respond, string, EventBus, Hub};
+use super::{input, parse_duration, respond, string, EventBus, Hub};
 use chrono::{DateTime, SecondsFormat, Utc};
 use protectorate_inventory::{Inventory, SHARED};
 use protectorate_lease::{self as leases, Chooser, Entry, Event, EventKind, LeaseTable, Wait};
@@ -11,8 +11,7 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeSet,
     path::Path,
-    sync::{mpsc, Arc, Mutex, RwLock},
-    thread,
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -28,16 +27,12 @@ pub(super) fn default_chooser(
             ));
         }
         let resource = leases::parse_resource(request)?;
-        let desk = resource.node.starts_with("desk:");
-        let name = resource
-            .node
-            .strip_prefix("desk:")
-            .unwrap_or(&resource.node);
+        let name = resource.node.as_str();
         let address = if name != local_name {
             let node = inventory.get(name).map_err(|_| {
                 leases::Error::Unavailable(format!("node {name} is not in the inventory"))
             })?;
-            if node.invited || (!desk && node.tier != SHARED) {
+            if node.invited || node.tier != SHARED {
                 return Err(leases::Error::Unavailable(format!(
                     "node {name} is not available for leases"
                 )));
@@ -51,11 +46,9 @@ pub(super) fn default_chooser(
                 "node {name} has no fresh successful metrics poll"
             )));
         }
-        if !desk {
-            monitor
-                .gpu_free(name, &address, resource.gpu)
-                .map_err(leases::Error::Unavailable)?;
-        }
+        monitor
+            .gpu_free(name, &address, resource.gpu)
+            .map_err(leases::Error::Unavailable)?;
         if let Some(held) = blocked(&resource) {
             return Err(leases::Error::Busy(format!(
                 "{} held by {}",
@@ -66,70 +59,18 @@ pub(super) fn default_chooser(
     })
 }
 
-pub(super) struct DeskNotifications {
-    policies: Arc<desk_policy::Store>,
-    files: Arc<node_files::FileRelay>,
-}
-
-impl DeskNotifications {
-    pub(super) fn new(
-        policies: Arc<desk_policy::Store>,
-        files: Arc<node_files::FileRelay>,
-    ) -> Self {
-        Self { policies, files }
-    }
-}
-
 pub(super) fn open_table(
     path: &Path,
     events: Arc<EventBus>,
     mail: Arc<MailStore>,
-    desk: DeskNotifications,
     chooser: Chooser,
     admission: Arc<RwLock<()>>,
     draining: Arc<Mutex<BTreeSet<String>>>,
 ) -> leases::Result<LeaseTable> {
     let grant_events = Arc::clone(&events);
-    let DeskNotifications { policies, files } = desk;
-    let chooser_policies = Arc::clone(&policies);
-    let (desk_end_tx, desk_end_rx) = mpsc::sync_channel::<String>(64);
-    let worker_policies = Arc::clone(&policies);
-    thread::Builder::new()
-        .name("protectorate-desk-lease".into())
-        .spawn(move || {
-            for name in desk_end_rx {
-                let Some(policy) = worker_policies
-                    .get(&name)
-                    .filter(|policy| policy.lock_after())
-                else {
-                    continue;
-                };
-                let result = files
-                    .internal_client_with_timeout(&name, Duration::from_secs(10))
-                    .and_then(|client| {
-                        client.call(
-                            "/protectorate.v1.NodeAgentService/GetDeskState",
-                            &json!({"policy": policy.value(), "leaseEnded": true}),
-                        )
-                    });
-                if let Err(error) = result {
-                    eprintln!("desk:{name} lease end notification failed: {error}");
-                }
-            }
-        })?;
     let guarded: Chooser = Arc::new(move |request, blocked| {
         let resource = chooser(request, blocked)?;
-        if let Some(name) = resource.node.strip_prefix("desk:") {
-            if chooser_policies.get(name).is_some() && !chooser_policies.fresh_available(name) {
-                return Err(leases::Error::Unavailable(format!(
-                    "desk:{name} has no fresh available desktop state"
-                )));
-            }
-        }
-        let name = resource
-            .node
-            .strip_prefix("desk:")
-            .unwrap_or(&resource.node);
+        let name = &resource.node;
         if draining.lock().unwrap().contains(name) {
             return Err(leases::Error::Unavailable(format!(
                 "node {name} is being removed"
@@ -142,18 +83,6 @@ pub(super) fn open_table(
         .with_admission(admission)
         .with_on_event(move |event| {
             publish_event(&events, event);
-            if !matches!(event.kind, EventKind::Released | EventKind::Expired) {
-                return;
-            }
-            let Some(name) = event.lease.as_ref().and_then(|lease| lease.resource.node.strip_prefix("desk:")) else {
-                return;
-            };
-            if !policies.get(name).is_some_and(|policy| policy.lock_after()) {
-                return;
-            }
-            if let Err(error) = desk_end_tx.try_send(name.to_owned()) {
-                eprintln!("desk:{name} lease end notification queue unavailable: {error}");
-            }
         })
         .with_on_grant(move |ticket, lease| {
             if ticket.notify.is_empty() {
@@ -337,9 +266,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             async move {
                 let body = input(&request)?;
                 let (resource, key) = request_key(&body)?;
-                if let Some(name) = resource.strip_prefix("desk:") {
-                    desk_policy::gate_live(&hub, &request, name).await?;
-                }
                 let holder = holder(&request.auth.actor, string(&body, "holder"));
                 let ttl = parse_duration(body.get("ttl"))?;
                 let wait = body.get("wait").and_then(Value::as_bool).unwrap_or(false);
@@ -422,67 +348,4 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         }
     })?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn queued_grant_sends_a_single_claim_notice_to_the_waiting_sleeve() {
-        let dir = tempfile::tempdir().unwrap();
-        let mail = Arc::new(MailStore::open(dir.path().join("mail.jsonl")).unwrap());
-        let chooser: Chooser = Arc::new(|request, blocked| {
-            let resource = leases::parse_resource(request)?;
-            if blocked(&resource).is_some() {
-                return Err(leases::Error::Busy("held".into()));
-            }
-            Ok(resource)
-        });
-        let table = open_table(
-            &dir.path().join("leases.json"),
-            Arc::new(EventBus::new()),
-            Arc::clone(&mail),
-            DeskNotifications::new(
-                Arc::new(desk_policy::Store::open(dir.path().join("desk-policies.json")).unwrap()),
-                Arc::new(node_files::FileRelay::new(
-                    Arc::new(Inventory::open(dir.path().join("nodes.json"), "hub").unwrap()),
-                    "hub".into(),
-                )),
-            ),
-            chooser,
-            Arc::new(RwLock::new(())),
-            Arc::new(Mutex::new(BTreeSet::new())),
-        )
-        .unwrap();
-        let now = now_millis();
-        let held = table
-            .acquire("first", Duration::from_secs(20), "peer", now)
-            .unwrap();
-        let queued = table
-            .acquire_wait(
-                Wait {
-                    holder: "waiting".into(),
-                    notify: "worker".into(),
-                    resource: "peer".into(),
-                    request: "peer".into(),
-                    ttl: Duration::from_secs(60),
-                    priority: 0,
-                },
-                now,
-            )
-            .unwrap();
-        assert!(matches!(queued, Entry::Queued { .. }));
-        table.release(&held.id, now).unwrap();
-        let pending = mail.pending();
-        let notices = &pending["worker"];
-        assert_eq!(notices.len(), 1);
-        assert_eq!(notices[0].from, "hub");
-        assert_eq!(notices[0].kind, Kind::NOTICE);
-        assert!(notices[0].body.contains("protectorate lease renew"));
-        assert!(notices[0].body.contains("protectorate lease release"));
-        assert!(notices[0].request_id.starts_with("lease-grant-"));
-        table.sweep(now).unwrap();
-        assert_eq!(mail.pending()["worker"].len(), 1);
-    }
 }

@@ -313,7 +313,6 @@ fn setup_progress(hub: &Hub, node: &Node, status: Value) -> Value {
         )
     } else {
         let metrics = &status["metrics"];
-        let mut pending = None;
         if status["freshness"] != "NODE_FRESHNESS_FRESH" {
             problems.push(format!(
                 "the hub cannot reach the agent now: {}",
@@ -330,34 +329,17 @@ fn setup_progress(hub: &Hub, node: &Node, status: Value) -> Value {
                 hub.version
             ));
         }
-        if string(metrics, "os").eq_ignore_ascii_case("windows") {
-            let desk = &status["desk"];
-            if desk.is_null() {
-                pending = Some("waiting for the desktop check");
-            } else if desk["reason"] == "DESK_REASON_NOT_INTERACTIVE" {
-                problems.push(format!(
-                    "the agent is not in an interactive desktop session, so desk commands cannot run: start it with the logon task `node install` registers, not as a service or over SSH ({})",
-                    string(desk, "detail")
-                ));
-            } else if desk["reason"] == "DESK_REASON_UNKNOWN" {
-                notes.push(format!("desktop state unknown: {}", string(desk, "detail")));
-            }
-        }
         if let Some(warnings) = metrics["warnings"].as_array() {
             notes.extend(warnings.iter().filter_map(Value::as_str).map(str::to_owned));
         }
         (
             if !problems.is_empty() {
                 "NODE_SETUP_STAGE_ATTENTION"
-            } else if pending.is_some() {
-                "NODE_SETUP_STAGE_METRICS"
             } else {
                 "NODE_SETUP_STAGE_READY"
             },
             if !problems.is_empty() {
                 "the node answers but needs attention".to_owned()
-            } else if let Some(pending) = pending {
-                pending.to_owned()
             } else {
                 format!(
                     "{}/{}, agent {version}",
@@ -772,10 +754,7 @@ async fn remove_node(
             Entry::Active(lease) => (lease.id, lease.resource.to_string()),
             Entry::Queued { ticket, .. } => (ticket.id, ticket.resource),
         };
-        if resource == name
-            || resource == format!("desk:{name}")
-            || resource.starts_with(&format!("{name}:"))
-        {
+        if resource == name || resource.starts_with(&format!("{name}:")) {
             hub.leases.release(&id, now).map_err(lease_error)?;
             released += 1;
         }
@@ -954,9 +933,6 @@ fn status(hub: &Arc<Hub>, node: Value) -> Value {
             .collect::<Vec<_>>();
         status["metrics"]["sleeves"] = json!(sleeves);
     }
-    if node["local"] != true && node["invited"] != true {
-        desk_status(hub, &node, &mut status);
-    }
     status["node"] = node;
     status
 }
@@ -1046,36 +1022,6 @@ fn resource_alerts(metrics: &Value) -> Vec<Value> {
     out
 }
 
-fn desk_status(hub: &Arc<Hub>, node: &Value, status: &mut Value) {
-    let name = node["name"]
-        .as_str()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let address = node["address"].as_str().unwrap_or_default();
-    let os = status["metrics"]["os"]
-        .as_str()
-        .or_else(|| node["os"].as_str())
-        .unwrap_or_default()
-        .to_owned();
-    if let Some(state) = hub.desk_policies.cached(&name, address) {
-        status["desk"] = state;
-    }
-    let resource = protectorate_lease::Resource {
-        node: format!("desk:{name}"),
-        gpu: None,
-    };
-    if let Ok(Some(lease)) = hub
-        .leases
-        .blocked(&resource, chrono::Utc::now().timestamp_millis())
-    {
-        status["deskHolder"] = json!(lease.holder);
-    }
-    let inputs = hub.desk_use.get(&name);
-    if !inputs.is_empty() {
-        status["deskInputs"] = json!(inputs);
-    }
-    super::desk_policy::Store::refresh_if_due(hub, &name, address, &os, false);
-}
 fn node_error(error: Error) -> RpcError {
     let code = match error {
         Error::Invalid(_) => Code::InvalidArgument,

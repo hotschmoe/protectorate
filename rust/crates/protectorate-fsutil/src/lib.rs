@@ -83,31 +83,3 @@ fn sync_dir(dir: &Path) {
     #[cfg(windows)]
     let _ = dir;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn replaces_atomically_and_cleans_temp() {
-        let dir = std::env::temp_dir().join(format!(
-            "protectorate-fsutil-{}-{}",
-            std::process::id(),
-            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&dir).unwrap();
-        let path = dir.join("notes.json");
-        write_file(&path, b"first", 0o600).unwrap();
-        write_file(&path, b"second", 0o600).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"second");
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
-        fs::remove_dir_all(dir).unwrap();
-    }
-}

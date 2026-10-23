@@ -365,9 +365,6 @@ impl Catalog {
     pub fn methods(&self) -> impl Iterator<Item = &Method> {
         self.methods.values()
     }
-    pub fn hub_methods(&self) -> impl Iterator<Item = &Method> {
-        self.methods.values().filter(|m| !m.node_local)
-    }
     pub fn message(&self, name: &str) -> Result<MessageDescriptor> {
         self.pool
             .get_message_by_name(name)
@@ -529,7 +526,6 @@ pub struct UnaryServer {
     catalog: Catalog,
     handlers: BTreeMap<String, Handler>,
     streaming_handlers: BTreeMap<String, StreamingHandler>,
-    stream_capacity: usize,
     max_stream_message_bytes: usize,
     authorize: Admission,
     completion_observer: Option<CompletionObserver>,
@@ -550,7 +546,6 @@ impl UnaryServer {
             catalog,
             handlers: BTreeMap::new(),
             streaming_handlers: BTreeMap::new(),
-            stream_capacity: DEFAULT_STREAM_CAPACITY,
             max_stream_message_bytes: DEFAULT_MAX_STREAM_MESSAGE_BYTES,
             authorize,
             completion_observer: None,
@@ -682,10 +677,6 @@ impl UnaryServer {
             }),
         );
         Ok(())
-    }
-    pub fn with_stream_capacity(mut self, capacity: usize) -> Self {
-        self.stream_capacity = capacity.max(1);
-        self
     }
     pub fn with_max_stream_message_bytes(mut self, limit: usize) -> Self {
         self.max_stream_message_bytes = limit;
@@ -957,7 +948,7 @@ async fn dispatch_inner(
         };
         return Ok(streaming::stream_response(
             output,
-            server.stream_capacity,
+            DEFAULT_STREAM_CAPACITY,
             server.max_stream_message_bytes,
             deadline,
             move |sender| handler(req, sender),

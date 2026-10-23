@@ -126,13 +126,6 @@ fn agent(config: ureq::config::Config, dial: Option<SocketAddr>) -> ureq::Agent 
     }
 }
 
-/// Response metadata used by desktop input commands to show an automatic lease.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct UnaryMetadata {
-    pub desk_lease_id: Option<String>,
-    pub desk_lease_expires: Option<String>,
-}
-
 impl Client {
     /// Creates a client with the same endpoint, credentials and TLS policy,
     /// but its own connection pool. Shutting this client down interrupts only
@@ -306,8 +299,7 @@ impl Client {
     }
 
     pub fn call(&self, procedure: &str, input: &Value) -> Result<Value> {
-        self.call_with_metadata(procedure, input)
-            .map(|(message, _)| message)
+        self.unary(procedure, input, None)
     }
 
     /// Call one unary RPC with a shorter per-request deadline while retaining
@@ -318,25 +310,10 @@ impl Client {
         input: &Value,
         timeout: Duration,
     ) -> Result<Value> {
-        self.call_with_metadata_timeout(procedure, input, Some(timeout))
-            .map(|(message, _)| message)
+        self.unary(procedure, input, Some(timeout))
     }
 
-    /// Call a unary RPC and retain the bounded desktop lease response headers.
-    pub fn call_with_metadata(
-        &self,
-        procedure: &str,
-        input: &Value,
-    ) -> Result<(Value, UnaryMetadata)> {
-        self.call_with_metadata_timeout(procedure, input, None)
-    }
-
-    fn call_with_metadata_timeout(
-        &self,
-        procedure: &str,
-        input: &Value,
-        timeout: Option<Duration>,
-    ) -> Result<(Value, UnaryMetadata)> {
+    fn unary(&self, procedure: &str, input: &Value, timeout: Option<Duration>) -> Result<Value> {
         if self.public && !PUBLIC.contains(&procedure) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
@@ -356,19 +333,6 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let desk_unavailable = response
-            .headers()
-            .get("Protectorate-Desk-Unavailable")
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| !value.is_empty() && value.len() <= 128)
-            .map(str::to_owned);
-        let metadata = UnaryMetadata {
-            desk_lease_id: bounded_header(response.headers(), "protectorate-desk-lease"),
-            desk_lease_expires: bounded_header(
-                response.headers(),
-                "protectorate-desk-lease-expires",
-            ),
-        };
         let bytes = read_bounded(
             response.into_body().into_reader(),
             if status == 200 {
@@ -378,7 +342,7 @@ impl Client {
             },
         )?;
         if status != 200 {
-            return Err(remote_error(status, &bytes, desk_unavailable));
+            return Err(remote_error(status, &bytes));
         }
         if !content_type.starts_with("application/json") {
             return Err(RpcError::new(
@@ -390,7 +354,7 @@ impl Client {
             .map_err(|e| RpcError::new(Code::DataLoss, e.message))?;
         let message = serde_json::to_value(message)
             .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-        Ok((message, metadata))
+        Ok(message)
     }
 
     /// Calls a server-streaming RPC. The callback runs synchronously for each
@@ -444,15 +408,9 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let desk_unavailable = response
-            .headers()
-            .get("Protectorate-Desk-Unavailable")
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| !value.is_empty() && value.len() <= 128)
-            .map(str::to_owned);
         if status != 200 {
             let bytes = read_bounded(response.into_body().into_reader(), MAX_ERROR_BYTES)?;
-            return Err(remote_error(status, &bytes, desk_unavailable));
+            return Err(remote_error(status, &bytes));
         }
         if !content_type.starts_with("application/connect+json") {
             return Err(RpcError::new(
@@ -591,14 +549,6 @@ fn valid_endpoint(base: &str) -> bool {
     }
 }
 
-fn bounded_header(headers: &ureq::http::HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty() && value.len() <= 256)
-        .map(str::to_owned)
-}
-
 fn read_bounded(reader: impl Read, limit: u64) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader
@@ -614,11 +564,7 @@ fn read_bounded(reader: impl Read, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn remote_error(status: u16, bytes: &[u8], desk_unavailable: Option<String>) -> RpcError {
-    let mut error = serde_json::from_slice::<RpcError>(bytes)
-        .unwrap_or_else(|_| RpcError::new(Code::Unavailable, format!("remote HTTP {status}")));
-    if let Some(value) = desk_unavailable.and_then(|value| value.parse().ok()) {
-        error.headers.insert("Protectorate-Desk-Unavailable", value);
-    }
-    error
+fn remote_error(status: u16, bytes: &[u8]) -> RpcError {
+    serde_json::from_slice::<RpcError>(bytes)
+        .unwrap_or_else(|_| RpcError::new(Code::Unavailable, format!("remote HTTP {status}")))
 }

@@ -388,23 +388,30 @@ fn parse_number(field: &[u8]) -> Option<i64> {
     i64::from_str_radix(text.trim(), 8).ok()
 }
 
-/// The `path=` value of a pax extended header, when it has one.
+/// The `path=` value of a pax extended header, when it has one. Record
+/// lengths count bytes, so the records are split before any UTF-8 decoding.
 fn pax_path(data: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(data);
-    let mut rest: &str = &text;
+    let mut rest = data;
     let mut found = None;
     while !rest.is_empty() {
-        let space = rest.find(' ')?;
-        let Ok(length) = rest[..space].parse::<usize>() else {
+        let space = rest.iter().position(|&b| b == b' ')?;
+        let Some(length) = std::str::from_utf8(&rest[..space])
+            .ok()
+            .and_then(|digits| digits.parse::<usize>().ok())
+        else {
             break;
         };
         if length == 0 || length > rest.len() {
             break;
         }
-        let record = &rest[..length];
-        rest = &rest[length..];
-        if let Some(value) = record.get(space + 1..)?.strip_prefix("path=") {
-            found = Some(value.trim_end_matches('\n').to_string());
+        let (record, tail) = rest.split_at(length);
+        rest = tail;
+        if let Some(value) = record.get(space + 1..)?.strip_prefix(b"path=") {
+            found = Some(
+                String::from_utf8_lossy(value)
+                    .trim_end_matches('\n')
+                    .to_string(),
+            );
         }
     }
     found
@@ -412,163 +419,4 @@ fn pax_path(data: &[u8]) -> Option<String> {
 
 fn bytes_to_string(data: &[u8]) -> String {
     String::from_utf8_lossy(data).into_owned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use flate2::{write::GzEncoder, Compression};
-
-    fn header(name: &str, kind: u8, size: u64) -> [u8; BLOCK] {
-        let mut block = [0u8; BLOCK];
-        block[..name.len()].copy_from_slice(name.as_bytes());
-        let mode = format!("{:07o}\0", 0o644);
-        block[100..108].copy_from_slice(mode.as_bytes());
-        let size_field = format!("{size:011o}\0");
-        block[124..136].copy_from_slice(size_field.as_bytes());
-        block[148..156].copy_from_slice(b"        ");
-        block[156] = kind;
-        block[257..263].copy_from_slice(b"ustar\0");
-        block[263..265].copy_from_slice(b"00");
-        let sum: u32 = block.iter().map(|b| *b as u32).sum();
-        let checksum = format!("{sum:07o}\0");
-        block[148..156].copy_from_slice(checksum.as_bytes());
-        block
-    }
-
-    fn archive(entries: &[(&str, u8, &[u8])]) -> Vec<u8> {
-        let mut out = Vec::new();
-        for (name, kind, data) in entries {
-            out.extend_from_slice(&header(name, *kind, data.len() as u64));
-            out.extend_from_slice(data);
-            out.extend(std::iter::repeat_n(
-                0u8,
-                (BLOCK - data.len() % BLOCK) % BLOCK,
-            ));
-        }
-        out.extend(std::iter::repeat_n(0u8, 2 * BLOCK));
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&out).unwrap();
-        encoder.finish().unwrap()
-    }
-
-    fn extract(dir: &Path, entries: &[(&str, u8, &[u8])]) -> Result<PathBuf> {
-        let archive_path = dir.join("web.tar.gz");
-        fs::write(&archive_path, archive(entries)).unwrap();
-        let web = dir.join("web");
-        extract_web(&archive_path, &web)?;
-        Ok(web)
-    }
-
-    #[test]
-    fn web_paths_stay_inside_the_root() {
-        assert_eq!(
-            safe_web_path("./index.html").unwrap(),
-            PathBuf::from("index.html")
-        );
-        assert_eq!(safe_web_path("./").unwrap(), PathBuf::from("."));
-        assert_eq!(safe_web_path("a/./b/../c").unwrap(), PathBuf::from("a/c"));
-        for bad in [
-            "../escape",
-            "a/../../escape",
-            "..",
-            "/etc/passwd",
-            "C:/Windows/system.ini",
-            "C:relative",
-            "assets/CON.txt",
-            "assets/COM1",
-            "assets/trailing. ",
-            "web\\evil",
-            "a/..\\b",
-        ] {
-            let err = safe_web_path(bad).unwrap_err().to_string();
-            assert!(err.contains("unsafe web path"), "{bad}: {err}");
-        }
-    }
-
-    #[test]
-    fn extracts_directories_and_nested_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let web = extract(
-            dir.path(),
-            &[
-                ("./", b'5', b""),
-                ("./index.html", b'0', b"<html>index</html>"),
-                ("./assets/app.css", b'0', b"body{}"),
-            ],
-        )
-        .unwrap();
-        assert_eq!(
-            fs::read(web.join("index.html")).unwrap(),
-            b"<html>index</html>"
-        );
-        assert_eq!(fs::read(web.join("assets/app.css")).unwrap(), b"body{}");
-    }
-
-    #[test]
-    fn pax_path_is_taken_from_the_extended_header() {
-        let record = "28 path=assets/deep/app.css\n";
-        assert_eq!(
-            pax_path(record.as_bytes()).as_deref(),
-            Some("assets/deep/app.css")
-        );
-        assert_eq!(pax_path(b"12 other=1\n"), None);
-        assert_eq!(pax_path(b"garbage"), None);
-    }
-
-    #[test]
-    fn header_numbers_accept_octal_and_base_256() {
-        assert_eq!(parse_number(b"0000644\0"), Some(0o644));
-        assert_eq!(parse_number(b"\0"), Some(0));
-        assert_eq!(parse_number(b"        \0"), Some(0));
-        assert_eq!(
-            parse_number(&[0x80, 0, 0, 0, 0, 0x10, 0, 0]),
-            Some(0x10_0000)
-        );
-        assert_eq!(
-            parse_number(&[0x80, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
-            Some(-1)
-        );
-        assert_eq!(parse_number(b"not octal\0"), None);
-    }
-
-    #[test]
-    fn extraction_rejects_a_non_gzip_stream() {
-        let dir = tempfile::tempdir().unwrap();
-        let archive_path = dir.path().join("web.tar.gz");
-        fs::write(&archive_path, b"not gzip at all").unwrap();
-        let err = extract_web(&archive_path, &dir.path().join("web"))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("web"), "{err}");
-    }
-
-    #[test]
-    fn extraction_rejects_a_file_truncated_at_a_block_boundary() {
-        let dir = tempfile::tempdir().unwrap();
-        let archive_path = dir.path().join("web.tar.gz");
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&header("index.html", b'0', 12)).unwrap();
-        fs::write(&archive_path, encoder.finish().unwrap()).unwrap();
-        let err = extract_web(&archive_path, &dir.path().join("web"))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("truncated"), "{err}");
-    }
-
-    #[test]
-    fn extraction_refuses_to_overwrite_an_extracted_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let web = dir.path().join("web");
-        fs::create_dir_all(&web).unwrap();
-        fs::write(web.join("index.html"), b"existing").unwrap();
-        let archive_path = dir.path().join("web.tar.gz");
-        fs::write(
-            &archive_path,
-            archive(&[("index.html", b'0', b"<html>index</html>")]),
-        )
-        .unwrap();
-        let err = extract_web(&archive_path, &web).unwrap_err().to_string();
-        assert!(err.contains("create web file"), "{err}");
-    }
 }

@@ -112,64 +112,6 @@ fn list(out: &mut String, title: &str, items: &[String]) {
     }
 }
 impl Facts {
-    /// The caller supplies its sandboxed git runner; worktree status/diff must not
-    /// run with the hub's authority against an agent-controlled repository.
-    pub fn read_git(&mut self, mut run: impl FnMut(&Path, &[&str]) -> Result<String>) {
-        let status = run(
-            &self.workspace,
-            &[
-                "status",
-                "--short",
-                "--branch",
-                "--ignore-submodules=all",
-                "--untracked-files=normal",
-            ],
-        );
-        match status {
-            Ok(s) => self.status = s.trim_end_matches('\n').into(),
-            Err(e) => {
-                self.git_err = e.to_string();
-                return;
-            }
-        }
-        self.branch = run(&self.workspace, &["symbolic-ref", "--short", "-q", "HEAD"])
-            .unwrap_or_default()
-            .trim()
-            .into();
-        self.head = run(&self.workspace, &["rev-parse", "--short", "HEAD"])
-            .unwrap_or_default()
-            .trim()
-            .into();
-        if self.head.is_empty() {
-            return;
-        }
-        for (args, dest) in [
-            (
-                &["diff", "--stat", "--ignore-submodules=all", "HEAD"][..],
-                &mut self.diff_stat,
-            ),
-            (
-                &[
-                    "log",
-                    "--no-show-signature",
-                    "--format=%h %ad %s",
-                    "--date=short",
-                    "-n",
-                    "10",
-                ][..],
-                &mut self.log,
-            ),
-        ] {
-            match run(&self.workspace, args) {
-                Ok(s) => *dest = s.trim_end_matches('\n').into(),
-                Err(e) => {
-                    if self.git_err.is_empty() {
-                        self.git_err = e.to_string()
-                    }
-                }
-            }
-        }
-    }
     pub fn markdown(&self, budget: usize) -> String {
         let mut out=String::from("## Facts\n\nComposed by the hub from the workspace and outgoing harness transcript; no model was asked.\n\n");
         out.push_str(&format!("- Sleeve: {}, was {}", self.sleeve, self.harness));

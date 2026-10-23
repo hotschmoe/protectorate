@@ -28,14 +28,662 @@ export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'sleeve.pbenum.dart';
 
+class Checkpoint extends $pb.GeneratedMessage {
+  factory Checkpoint({
+    $fixnum.Int64? id,
+    $core.String? commit,
+    $0.Timestamp? createdAt,
+    $core.String? reason,
+  }) {
+    final result = Checkpoint._();
+    if (id != null) result.id = id;
+    if (commit != null) result.commit = commit;
+    if (createdAt != null) result.createdAt = createdAt;
+    if (reason != null) result.reason = reason;
+    return result;
+  }
+
+  Checkpoint._();
+
+  factory Checkpoint.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Checkpoint()..mergeFromBuffer(data, registry);
+  factory Checkpoint.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      Checkpoint()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'Checkpoint',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: Checkpoint.$_createMessage)
+    ..a<$fixnum.Int64>(1, _omitFieldNames ? '' : 'id', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(2, _omitFieldNames ? '' : 'commit')
+    ..aOM<$0.Timestamp>(3, _omitFieldNames ? '' : 'createdAt',
+        subBuilder: $0.Timestamp.$_createMessage)
+    ..aOS(4, _omitFieldNames ? '' : 'reason')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Checkpoint clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  Checkpoint copyWith(void Function(Checkpoint) updates) =>
+      super.copyWith((message) => updates(message as Checkpoint)) as Checkpoint;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use Checkpoint() / Checkpoint.new instead')
+  static Checkpoint create() => Checkpoint._();
+  static $pb.GeneratedMessage $_createMessage() => Checkpoint._();
+  @$core.override
+  Checkpoint createEmptyInstance() => Checkpoint._();
+  @$core.pragma('dart2js:noInline')
+  static Checkpoint getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<Checkpoint>(Checkpoint.$_createMessage);
+  static Checkpoint? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get id => $_getI64(0);
+  @$pb.TagNumber(1)
+  set id($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearId() => $_clearField(1);
+
+  /// commit is the checkpoint's commit in the private store.
+  @$pb.TagNumber(2)
+  $core.String get commit => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set commit($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCommit() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCommit() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $0.Timestamp get createdAt => $_getN(2);
+  @$pb.TagNumber(3)
+  set createdAt($0.Timestamp value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasCreatedAt() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearCreatedAt() => $_clearField(3);
+  @$pb.TagNumber(3)
+  $0.Timestamp ensureCreatedAt() => $_ensure(2);
+
+  /// reason is "turn", "resleeve", "manual" or "before restore of N".
+  @$pb.TagNumber(4)
+  $core.String get reason => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set reason($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasReason() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearReason() => $_clearField(4);
+}
+
+class CreateCheckpointRequest extends $pb.GeneratedMessage {
+  factory CreateCheckpointRequest({
+    $core.String? name,
+  }) {
+    final result = CreateCheckpointRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  CreateCheckpointRequest._();
+
+  factory CreateCheckpointRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      CreateCheckpointRequest()..mergeFromBuffer(data, registry);
+  factory CreateCheckpointRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      CreateCheckpointRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'CreateCheckpointRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: CreateCheckpointRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  CreateCheckpointRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  CreateCheckpointRequest copyWith(
+          void Function(CreateCheckpointRequest) updates) =>
+      super.copyWith((message) => updates(message as CreateCheckpointRequest))
+          as CreateCheckpointRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use CreateCheckpointRequest() / CreateCheckpointRequest.new instead')
+  static CreateCheckpointRequest create() => CreateCheckpointRequest._();
+  static $pb.GeneratedMessage $_createMessage() => CreateCheckpointRequest._();
+  @$core.override
+  CreateCheckpointRequest createEmptyInstance() => CreateCheckpointRequest._();
+  @$core.pragma('dart2js:noInline')
+  static CreateCheckpointRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<CreateCheckpointRequest>(
+          CreateCheckpointRequest.$_createMessage);
+  static CreateCheckpointRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class CreateCheckpointResponse extends $pb.GeneratedMessage {
+  factory CreateCheckpointResponse({
+    Checkpoint? checkpoint,
+    $core.bool? unchanged,
+  }) {
+    final result = CreateCheckpointResponse._();
+    if (checkpoint != null) result.checkpoint = checkpoint;
+    if (unchanged != null) result.unchanged = unchanged;
+    return result;
+  }
+
+  CreateCheckpointResponse._();
+
+  factory CreateCheckpointResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      CreateCheckpointResponse()..mergeFromBuffer(data, registry);
+  factory CreateCheckpointResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      CreateCheckpointResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'CreateCheckpointResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: CreateCheckpointResponse.$_createMessage)
+    ..aOM<Checkpoint>(1, _omitFieldNames ? '' : 'checkpoint',
+        subBuilder: Checkpoint.$_createMessage)
+    ..aOB(2, _omitFieldNames ? '' : 'unchanged')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  CreateCheckpointResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  CreateCheckpointResponse copyWith(
+          void Function(CreateCheckpointResponse) updates) =>
+      super.copyWith((message) => updates(message as CreateCheckpointResponse))
+          as CreateCheckpointResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use CreateCheckpointResponse() / CreateCheckpointResponse.new instead')
+  static CreateCheckpointResponse create() => CreateCheckpointResponse._();
+  static $pb.GeneratedMessage $_createMessage() => CreateCheckpointResponse._();
+  @$core.override
+  CreateCheckpointResponse createEmptyInstance() =>
+      CreateCheckpointResponse._();
+  @$core.pragma('dart2js:noInline')
+  static CreateCheckpointResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<CreateCheckpointResponse>(
+          CreateCheckpointResponse.$_createMessage);
+  static CreateCheckpointResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  Checkpoint get checkpoint => $_getN(0);
+  @$pb.TagNumber(1)
+  set checkpoint(Checkpoint value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCheckpoint() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCheckpoint() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Checkpoint ensureCheckpoint() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  $core.bool get unchanged => $_getBF(1);
+  @$pb.TagNumber(2)
+  set unchanged($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasUnchanged() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearUnchanged() => $_clearField(2);
+}
+
+class ListCheckpointsRequest extends $pb.GeneratedMessage {
+  factory ListCheckpointsRequest({
+    $core.String? name,
+  }) {
+    final result = ListCheckpointsRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  ListCheckpointsRequest._();
+
+  factory ListCheckpointsRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListCheckpointsRequest()..mergeFromBuffer(data, registry);
+  factory ListCheckpointsRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListCheckpointsRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListCheckpointsRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListCheckpointsRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListCheckpointsRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListCheckpointsRequest copyWith(
+          void Function(ListCheckpointsRequest) updates) =>
+      super.copyWith((message) => updates(message as ListCheckpointsRequest))
+          as ListCheckpointsRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ListCheckpointsRequest() / ListCheckpointsRequest.new instead')
+  static ListCheckpointsRequest create() => ListCheckpointsRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ListCheckpointsRequest._();
+  @$core.override
+  ListCheckpointsRequest createEmptyInstance() => ListCheckpointsRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ListCheckpointsRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListCheckpointsRequest>(
+          ListCheckpointsRequest.$_createMessage);
+  static ListCheckpointsRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class ListCheckpointsResponse extends $pb.GeneratedMessage {
+  factory ListCheckpointsResponse({
+    $core.Iterable<Checkpoint>? checkpoints,
+  }) {
+    final result = ListCheckpointsResponse._();
+    if (checkpoints != null) result.checkpoints.addAll(checkpoints);
+    return result;
+  }
+
+  ListCheckpointsResponse._();
+
+  factory ListCheckpointsResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListCheckpointsResponse()..mergeFromBuffer(data, registry);
+  factory ListCheckpointsResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ListCheckpointsResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ListCheckpointsResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ListCheckpointsResponse.$_createMessage)
+    ..pPM<Checkpoint>(1, _omitFieldNames ? '' : 'checkpoints',
+        subBuilder: Checkpoint.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListCheckpointsResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ListCheckpointsResponse copyWith(
+          void Function(ListCheckpointsResponse) updates) =>
+      super.copyWith((message) => updates(message as ListCheckpointsResponse))
+          as ListCheckpointsResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ListCheckpointsResponse() / ListCheckpointsResponse.new instead')
+  static ListCheckpointsResponse create() => ListCheckpointsResponse._();
+  static $pb.GeneratedMessage $_createMessage() => ListCheckpointsResponse._();
+  @$core.override
+  ListCheckpointsResponse createEmptyInstance() => ListCheckpointsResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ListCheckpointsResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ListCheckpointsResponse>(
+          ListCheckpointsResponse.$_createMessage);
+  static ListCheckpointsResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $pb.PbList<Checkpoint> get checkpoints => $_getList(0);
+}
+
+class DiffCheckpointRequest extends $pb.GeneratedMessage {
+  factory DiffCheckpointRequest({
+    $core.String? name,
+    $fixnum.Int64? fromId,
+    $fixnum.Int64? toId,
+  }) {
+    final result = DiffCheckpointRequest._();
+    if (name != null) result.name = name;
+    if (fromId != null) result.fromId = fromId;
+    if (toId != null) result.toId = toId;
+    return result;
+  }
+
+  DiffCheckpointRequest._();
+
+  factory DiffCheckpointRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DiffCheckpointRequest()..mergeFromBuffer(data, registry);
+  factory DiffCheckpointRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DiffCheckpointRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DiffCheckpointRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DiffCheckpointRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..a<$fixnum.Int64>(2, _omitFieldNames ? '' : 'fromId', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(3, _omitFieldNames ? '' : 'toId', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DiffCheckpointRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DiffCheckpointRequest copyWith(
+          void Function(DiffCheckpointRequest) updates) =>
+      super.copyWith((message) => updates(message as DiffCheckpointRequest))
+          as DiffCheckpointRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use DiffCheckpointRequest() / DiffCheckpointRequest.new instead')
+  static DiffCheckpointRequest create() => DiffCheckpointRequest._();
+  static $pb.GeneratedMessage $_createMessage() => DiffCheckpointRequest._();
+  @$core.override
+  DiffCheckpointRequest createEmptyInstance() => DiffCheckpointRequest._();
+  @$core.pragma('dart2js:noInline')
+  static DiffCheckpointRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DiffCheckpointRequest>(
+          DiffCheckpointRequest.$_createMessage);
+  static DiffCheckpointRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get fromId => $_getI64(1);
+  @$pb.TagNumber(2)
+  set fromId($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasFromId() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearFromId() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get toId => $_getI64(2);
+  @$pb.TagNumber(3)
+  set toId($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasToId() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearToId() => $_clearField(3);
+}
+
+class DiffCheckpointResponse extends $pb.GeneratedMessage {
+  factory DiffCheckpointResponse({
+    $core.String? diff,
+    $core.bool? truncated,
+  }) {
+    final result = DiffCheckpointResponse._();
+    if (diff != null) result.diff = diff;
+    if (truncated != null) result.truncated = truncated;
+    return result;
+  }
+
+  DiffCheckpointResponse._();
+
+  factory DiffCheckpointResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DiffCheckpointResponse()..mergeFromBuffer(data, registry);
+  factory DiffCheckpointResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      DiffCheckpointResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'DiffCheckpointResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: DiffCheckpointResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'diff')
+    ..aOB(2, _omitFieldNames ? '' : 'truncated')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DiffCheckpointResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  DiffCheckpointResponse copyWith(
+          void Function(DiffCheckpointResponse) updates) =>
+      super.copyWith((message) => updates(message as DiffCheckpointResponse))
+          as DiffCheckpointResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use DiffCheckpointResponse() / DiffCheckpointResponse.new instead')
+  static DiffCheckpointResponse create() => DiffCheckpointResponse._();
+  static $pb.GeneratedMessage $_createMessage() => DiffCheckpointResponse._();
+  @$core.override
+  DiffCheckpointResponse createEmptyInstance() => DiffCheckpointResponse._();
+  @$core.pragma('dart2js:noInline')
+  static DiffCheckpointResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<DiffCheckpointResponse>(
+          DiffCheckpointResponse.$_createMessage);
+  static DiffCheckpointResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get diff => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set diff($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasDiff() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearDiff() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.bool get truncated => $_getBF(1);
+  @$pb.TagNumber(2)
+  set truncated($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasTruncated() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearTruncated() => $_clearField(2);
+}
+
+class RestoreCheckpointRequest extends $pb.GeneratedMessage {
+  factory RestoreCheckpointRequest({
+    $core.String? name,
+    $fixnum.Int64? id,
+  }) {
+    final result = RestoreCheckpointRequest._();
+    if (name != null) result.name = name;
+    if (id != null) result.id = id;
+    return result;
+  }
+
+  RestoreCheckpointRequest._();
+
+  factory RestoreCheckpointRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RestoreCheckpointRequest()..mergeFromBuffer(data, registry);
+  factory RestoreCheckpointRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RestoreCheckpointRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RestoreCheckpointRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: RestoreCheckpointRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..a<$fixnum.Int64>(2, _omitFieldNames ? '' : 'id', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RestoreCheckpointRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RestoreCheckpointRequest copyWith(
+          void Function(RestoreCheckpointRequest) updates) =>
+      super.copyWith((message) => updates(message as RestoreCheckpointRequest))
+          as RestoreCheckpointRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use RestoreCheckpointRequest() / RestoreCheckpointRequest.new instead')
+  static RestoreCheckpointRequest create() => RestoreCheckpointRequest._();
+  static $pb.GeneratedMessage $_createMessage() => RestoreCheckpointRequest._();
+  @$core.override
+  RestoreCheckpointRequest createEmptyInstance() =>
+      RestoreCheckpointRequest._();
+  @$core.pragma('dart2js:noInline')
+  static RestoreCheckpointRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RestoreCheckpointRequest>(
+          RestoreCheckpointRequest.$_createMessage);
+  static RestoreCheckpointRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get id => $_getI64(1);
+  @$pb.TagNumber(2)
+  set id($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasId() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearId() => $_clearField(2);
+}
+
+class RestoreCheckpointResponse extends $pb.GeneratedMessage {
+  factory RestoreCheckpointResponse({
+    Checkpoint? before,
+  }) {
+    final result = RestoreCheckpointResponse._();
+    if (before != null) result.before = before;
+    return result;
+  }
+
+  RestoreCheckpointResponse._();
+
+  factory RestoreCheckpointResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RestoreCheckpointResponse()..mergeFromBuffer(data, registry);
+  factory RestoreCheckpointResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RestoreCheckpointResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RestoreCheckpointResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: RestoreCheckpointResponse.$_createMessage)
+    ..aOM<Checkpoint>(1, _omitFieldNames ? '' : 'before',
+        subBuilder: Checkpoint.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RestoreCheckpointResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RestoreCheckpointResponse copyWith(
+          void Function(RestoreCheckpointResponse) updates) =>
+      super.copyWith((message) => updates(message as RestoreCheckpointResponse))
+          as RestoreCheckpointResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use RestoreCheckpointResponse() / RestoreCheckpointResponse.new instead')
+  static RestoreCheckpointResponse create() => RestoreCheckpointResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      RestoreCheckpointResponse._();
+  @$core.override
+  RestoreCheckpointResponse createEmptyInstance() =>
+      RestoreCheckpointResponse._();
+  @$core.pragma('dart2js:noInline')
+  static RestoreCheckpointResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RestoreCheckpointResponse>(
+          RestoreCheckpointResponse.$_createMessage);
+  static RestoreCheckpointResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  Checkpoint get before => $_getN(0);
+  @$pb.TagNumber(1)
+  set before(Checkpoint value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasBefore() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearBefore() => $_clearField(1);
+  @$pb.TagNumber(1)
+  Checkpoint ensureBefore() => $_ensure(0);
+}
+
 class SleeveLimits extends $pb.GeneratedMessage {
   factory SleeveLimits({
     $core.int? cpuPercent,
     $fixnum.Int64? memoryBytes,
+    $fixnum.Int64? diskBytes,
   }) {
     final result = SleeveLimits._();
     if (cpuPercent != null) result.cpuPercent = cpuPercent;
     if (memoryBytes != null) result.memoryBytes = memoryBytes;
+    if (diskBytes != null) result.diskBytes = diskBytes;
     return result;
   }
 
@@ -56,6 +704,9 @@ class SleeveLimits extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'cpuPercent', fieldType: $pb.PbFieldType.OU3)
     ..a<$fixnum.Int64>(
         2, _omitFieldNames ? '' : 'memoryBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        3, _omitFieldNames ? '' : 'diskBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
@@ -101,6 +752,20 @@ class SleeveLimits extends $pb.GeneratedMessage {
   $core.bool hasMemoryBytes() => $_has(1);
   @$pb.TagNumber(2)
   void clearMemoryBytes() => $_clearField(2);
+
+  /// disk_bytes bounds the sleeve's workspace, home, cache overlays and
+  /// checkpoint store, as the hub samples them every 10 seconds while it runs.
+  /// At 90% the hub emits "sleeve.disk_warning"; at 100% it stops the harness,
+  /// emits "sleeve.disk_limit", notes it in the chat and audits it. Writes
+  /// between samples are not blocked. 0 means unlimited.
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get diskBytes => $_getI64(2);
+  @$pb.TagNumber(3)
+  set diskBytes($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDiskBytes() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDiskBytes() => $_clearField(3);
 }
 
 /// SleeveUsage is read from the sleeve's cgroup.
@@ -2471,6 +3136,7 @@ class PruneSleevesRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearCaches() => $_clearField(2);
 
+  /// homes also selects each sleeve's checkpoint store.
   @$pb.TagNumber(3)
   $core.bool get homes => $_getBF(2);
   @$pb.TagNumber(3)
@@ -2702,8 +3368,9 @@ class SleeveDiskEntry extends $pb.GeneratedMessage {
 /// runs its official headless protocol and is driven through ChatService. In
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
-/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
-/// and "sleeve.oom" (subject = sleeve name).
+/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
+/// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
+/// "sleeve.restored" (subject = sleeve name).
 class SleeveServiceApi {
   final $pb.RpcClient _client;
 
@@ -2804,6 +3471,41 @@ class SleeveServiceApi {
           $pb.ClientContext? ctx, PruneSleevesRequest request) =>
       _client.invoke<PruneSleevesResponse>(ctx, 'SleeveService', 'PruneSleeves',
           request, PruneSleevesResponse());
+
+  /// CreateCheckpoint snapshots the sleeve's git workspace: tracked files and
+  /// untracked files that are not ignored. The hub also checkpoints a chat
+  /// sleeve when a turn settles and before a resleeve. Checkpoints live in a
+  /// private store under the hub's state, never in the workspace repository,
+  /// so no push can carry them; the newest 20 are kept. If nothing changed
+  /// since the latest checkpoint, that checkpoint is returned with unchanged.
+  $async.Future<CreateCheckpointResponse> createCheckpoint(
+          $pb.ClientContext? ctx, CreateCheckpointRequest request) =>
+      _client.invoke<CreateCheckpointResponse>(ctx, 'SleeveService',
+          'CreateCheckpoint', request, CreateCheckpointResponse());
+
+  /// ListCheckpoints returns the sleeve's checkpoints, oldest first.
+  $async.Future<ListCheckpointsResponse> listCheckpoints(
+          $pb.ClientContext? ctx, ListCheckpointsRequest request) =>
+      _client.invoke<ListCheckpointsResponse>(ctx, 'SleeveService',
+          'ListCheckpoints', request, ListCheckpointsResponse());
+
+  /// DiffCheckpoint returns a unified diff from checkpoint from_id to
+  /// checkpoint to_id, or to the current workspace when to_id is 0. Output
+  /// beyond 1 MiB is cut off and marked truncated.
+  $async.Future<DiffCheckpointResponse> diffCheckpoint(
+          $pb.ClientContext? ctx, DiffCheckpointRequest request) =>
+      _client.invoke<DiffCheckpointResponse>(ctx, 'SleeveService',
+          'DiffCheckpoint', request, DiffCheckpointResponse());
+
+  /// RestoreCheckpoint makes the workspace's non-ignored files match a
+  /// checkpoint, removing files the checkpoint lacks. Ignored files, the
+  /// workspace's .git directory and its index are untouched. It first
+  /// checkpoints the current state, returned as before, so a restore can be
+  /// undone. A chat sleeve must be idle.
+  $async.Future<RestoreCheckpointResponse> restoreCheckpoint(
+          $pb.ClientContext? ctx, RestoreCheckpointRequest request) =>
+      _client.invoke<RestoreCheckpointResponse>(ctx, 'SleeveService',
+          'RestoreCheckpoint', request, RestoreCheckpointResponse());
 }
 
 const $core.bool _omitFieldNames =

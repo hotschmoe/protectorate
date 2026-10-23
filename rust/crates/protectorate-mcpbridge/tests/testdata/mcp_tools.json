@@ -353,284 +353,6 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "Click moves the pointer and clicks. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "button": {
-          "description": "button is \"left\" (default), \"right\" or \"middle\".",
-          "type": "string"
-        },
-        "double": {
-          "type": "boolean"
-        },
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "x": {
-          "type": "integer"
-        },
-        "y": {
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_click"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "Foreground reports the window that receives keystrokes now, with its process and integrity level. Read-only. Windows drops input injected into a window of a higher integrity level than the agent's without any error, so Click, Move, Type and Key refuse with FAILED_PRECONDITION when the foreground window (or, for the mouse, the window under the pointer) is higher; this shows what is in the way.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_foreground"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "Key presses a chord such as \"ctrl+s\", \"alt+f4\" or \"enter\". Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "chord": {
-          "type": "string"
-        },
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_key"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "ListWindows lists visible top-level windows, topmost first.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_list_windows"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "Move puts the pointer at a position. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "x": {
-          "type": "integer"
-        },
-        "y": {
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_move"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "Run starts a program in the interactive session and returns at once. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "args": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "program": {
-          "type": "string"
-        },
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_run"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "Screenshot captures the whole virtual screen as a PNG.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "maxWidth": {
-          "description": "max_width scales the image down, keeping its aspect ratio, to at most this many pixels wide, for viewing over a slow link; 0 keeps full size. Input coordinates stay screen pixels: scale by width / the PNG's width.",
-          "type": "integer"
-        },
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_screenshot"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "Type enters text as key presses into the focused window. Last resort: prefer the shell (job run, ssh), node put/get, or the program's API. Needs a desk lease.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "target": {
-          "additionalProperties": false,
-          "properties": {
-            "leaseId": {
-              "description": "lease_id names a live lease on \"desk:<name>\". Optional for mutating commands: when empty the hub leases the desktop for the caller.",
-              "type": "string"
-            },
-            "name": {
-              "description": "name is the node name.",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "desk_type"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
     "description": "",
     "inputSchema": {
       "additionalProperties": false,
@@ -1091,7 +813,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased, except their desktop (\"desk:<node>\") under the owner token or a node_admin grant. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
+    "description": "AcquireLease reserves one resource exclusively: a node name (\"win1\"), one GPU (\"gpu-box:gpu1\") or whatever a selector picks. A selector chooses the least-loaded fresh matching node of tier \"shared\" that is not already leased; nodes of tier \"care\" are never leased. When the resource is held, the call fails with failed_precondition, unless the request sets wait: then the caller is queued first in first out (highest priority first) and gets a ticket, a Lease in state QUEUED. When the hub grants a ticket it holds the lease for the waiter for a short claim window and sends it a notice message; RenewLease with no ttl claims the lease for the requested ttl, otherwise it passes to the next waiter. ReleaseLease on a ticket leaves the queue.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1401,25 +1123,6 @@
   },
   {
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "GetDeskPolicy returns a node's policy, its current evaluation and who holds the desktop lease.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "node_get_desk_policy"
-  },
-  {
-    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -1718,6 +1421,49 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "CreateCheckpoint snapshots the sleeve's git workspace: tracked files and untracked files that are not ignored. The hub also checkpoints a chat sleeve when a turn settles and before a resleeve. Checkpoints live in a private store under the hub's state, never in the workspace repository, so no push can carry them; the newest 20 are kept. If nothing changed since the latest checkpoint, that checkpoint is returned with unchanged.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_create_checkpoint"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "DiffCheckpoint returns a unified diff from checkpoint from_id to checkpoint to_id, or to the current workspace when to_id is 0. Output beyond 1 MiB is cut off and marked truncated.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fromId": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "toId": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_diff_checkpoint"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -1756,6 +1502,24 @@
       "type": "object"
     },
     "name": "sleeve_kill_sleeve"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListCheckpoints returns the sleeve's checkpoints, oldest first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_list_checkpoints"
   },
   {
     "annotations": {
@@ -1844,6 +1608,28 @@
   },
   {
     "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RestoreCheckpoint makes the workspace's non-ignored files match a checkpoint, removing files the checkpoint lacks. Ignored files, the workspace's .git directory and its index are untouched. It first checkpoints the current state, returned as before, so a restore can be undone. A chat sleeve must be idle.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_restore_checkpoint"
+  },
+  {
+    "annotations": {
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false,
@@ -1896,6 +1682,10 @@
           "properties": {
             "cpuPercent": {
               "description": "cpu_percent caps CPU time; 100 is one core, 200 two cores. 0 means unlimited.",
+              "type": "integer"
+            },
+            "diskBytes": {
+              "description": "disk_bytes bounds the sleeve's workspace, home, cache overlays and checkpoint store, as the hub samples them every 10 seconds while it runs. At 90% the hub emits \"sleeve.disk_warning\"; at 100% it stops the harness, emits \"sleeve.disk_limit\", notes it in the chat and audits it. Writes between samples are not blocked. 0 means unlimited.",
               "type": "integer"
             },
             "memoryBytes": {

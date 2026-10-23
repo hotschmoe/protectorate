@@ -51,7 +51,6 @@ const _platformHint = {
 const setupStages = [
   (NodeSetupStage.NODE_SETUP_STAGE_INVITED, 'INVITED'),
   (NodeSetupStage.NODE_SETUP_STAGE_JOINED, 'JOINED'),
-  (NodeSetupStage.NODE_SETUP_STAGE_METRICS, 'FIRST METRICS'),
   (NodeSetupStage.NODE_SETUP_STAGE_READY, 'READY'),
 ];
 

@@ -6,7 +6,6 @@
 import "package:connectrpc/connect.dart" as connect;
 import "node.pb.dart" as protectoratev1node;
 import "job.pb.dart" as protectoratev1job;
-import "desk.pb.dart" as protectoratev1desk;
 
 /// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
 /// is for live views. The job RPCs are called by the hub only and are unary
@@ -108,15 +107,6 @@ abstract final class NodeAgentService {
     protectoratev1node.GetFileResponse.new,
   );
 
-  /// DeskAction runs one desktop command in the node agent's interactive
-  /// session. See DeskService.
-  static const deskAction = connect.Spec(
-    '/$name/DeskAction',
-    connect.StreamType.unary,
-    protectoratev1desk.DeskActionRequest.new,
-    protectoratev1desk.DeskActionResponse.new,
-  );
-
   /// ApplyUpdate swaps the agent's binary for a file already transferred into
   /// its file root and restarts the agent. See NodeService.ApplyUpdate.
   static const applyUpdate = connect.Spec(
@@ -124,16 +114,6 @@ abstract final class NodeAgentService {
     connect.StreamType.unary,
     protectoratev1node.ApplyUpdateRequest.new,
     protectoratev1node.ApplyUpdateResponse.new,
-  );
-
-  /// GetDeskState adopts the desk policy the hub sends (none clears it) and
-  /// evaluates it now. The node enforces the policy itself on every input
-  /// command, so the hub's view can be a few seconds old without harm.
-  static const getDeskState = connect.Spec(
-    '/$name/GetDeskState',
-    connect.StreamType.unary,
-    protectoratev1node.GetDeskStateRequest.new,
-    protectoratev1desk.DeskState.new,
   );
 
   /// Uninstall unregisters the agent's startup (the logon task, systemd user
@@ -296,25 +276,6 @@ abstract final class NodeService {
     connect.StreamType.server,
     protectoratev1node.UpdateNodeRequest.new,
     protectoratev1node.UpdateNodeProgress.new,
-  );
-
-  /// SetDeskPolicy sets or clears (policy unset) when agents may drive a
-  /// node's desktop. Only the owner token may call it. The hub keeps the
-  /// policy and sends it to the node, which enforces it.
-  static const setDeskPolicy = connect.Spec(
-    '/$name/SetDeskPolicy',
-    connect.StreamType.unary,
-    protectoratev1node.SetDeskPolicyRequest.new,
-    protectoratev1node.DeskPolicyStatus.new,
-  );
-
-  /// GetDeskPolicy returns a node's policy, its current evaluation and who
-  /// holds the desktop lease.
-  static const getDeskPolicy = connect.Spec(
-    '/$name/GetDeskPolicy',
-    connect.StreamType.unary,
-    protectoratev1node.GetDeskPolicyRequest.new,
-    protectoratev1node.DeskPolicyStatus.new,
   );
 
   /// SetNodeTier changes a node's tier in the inventory and announces

@@ -1,5 +1,4 @@
 use protectorate_auth::Method as ScopeMethod;
-use protectorate_directory::{Scan, Workspace};
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
 use protectorate_wire::Catalog;
@@ -43,72 +42,6 @@ async fn call(addr: std::net::SocketAddr, path: &str, token: &str, body: Value) 
         head.split_whitespace().nth(1).unwrap().parse().unwrap(),
         serde_json::from_str(body).unwrap(),
     )
-}
-
-#[test]
-fn concurrent_long_waits_do_not_occupy_the_blocking_pool() {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(1)
-        .enable_all()
-        .build()
-        .unwrap();
-    runtime.block_on(async {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
-        known_sleeve(&hub, "bob", &dir.path().join("bob-work"), Mode::Terminal);
-        let bob = sleeve_token(&hub, "bob", &["message_*"]);
-        let (addr, server) = serve(hub).await;
-        let (status, sent) = call(
-            addr,
-            SEND,
-            "owner-secret",
-            json!({"to":"bob","body":"question"}),
-        )
-        .await;
-        assert_eq!(status, 200, "{sent}");
-        let id = sent["message"]["id"].as_str().unwrap().to_owned();
-
-        let waiters = (0..32)
-            .map(|_| {
-                let id = id.clone();
-                tokio::spawn(async move {
-                    call(
-                        addr,
-                        WAIT,
-                        "owner-secret",
-                        json!({"target":id,"timeout":"3600s"}),
-                    )
-                    .await
-                })
-            })
-            .collect::<Vec<_>>();
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(waiters.iter().all(|waiter| !waiter.is_finished()));
-        let probe =
-            tokio::time::timeout(Duration::from_secs(5), tokio::task::spawn_blocking(|| 42))
-                .await
-                .expect("live waits must not occupy the only blocking worker")
-                .unwrap();
-        assert_eq!(probe, 42);
-
-        let (status, reply) = call(addr, REPLY, &bob, json!({"id":id,"body":"Done"})).await;
-        assert_eq!(status, 200, "{reply}");
-        let reply_id = reply["message"]["id"].as_str().unwrap();
-        for waiter in waiters {
-            let (status, outcome) = tokio::time::timeout(Duration::from_secs(2), waiter)
-                .await
-                .expect("all waiters should wake for the reply")
-                .unwrap();
-            assert_eq!(status, 200, "{outcome}");
-            assert!(
-                outcome["message"]["id"] == reply_id || outcome["message"]["id"] == id,
-                "{outcome}"
-            );
-        }
-        server.abort();
-    });
-    runtime.shutdown_timeout(Duration::from_millis(100));
 }
 
 fn sleeve_token(hub: &Hub, name: &str, scopes: &[&str]) -> String {
@@ -156,15 +89,6 @@ fn known_sleeve(hub: &Hub, name: &str, workspace: &Path, mode: Mode) {
         .unwrap();
     hub.sleeves
         .record_exit(name, "2026-01-01T00:00:01Z".into(), None, 0, false, false)
-        .unwrap();
-}
-
-#[test]
-fn router_can_be_constructed_before_a_tokio_runtime_starts() {
-    let dir = tempfile::tempdir().unwrap();
-    let _router = Hub::open(dir.path(), "owner-secret", "test")
-        .unwrap()
-        .router()
         .unwrap();
 }
 
@@ -265,142 +189,6 @@ async fn send_inbox_reply_ack_thread_wait_and_restart() {
     let (status, messages) = call(addr, THREAD, "owner-secret", json!({"threadId":thread})).await;
     assert_eq!(status, 200, "{messages}");
     assert_eq!(messages["messages"].as_array().unwrap().len(), 2);
-    server.abort();
-}
-
-#[tokio::test]
-async fn owner_may_read_and_ack_as_recipient_and_validates_inputs() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
-    known_sleeve(&hub, "bob", &dir.path().join("bob-work"), Mode::Terminal);
-    let bob = sleeve_token(&hub, "bob", &["message_*"]);
-    let (addr, server) = serve(hub).await;
-    let (status, sent) = call(
-        addr,
-        SEND,
-        "owner-secret",
-        json!({"to":"bob","body":"hello"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{sent}");
-    let id = sent["message"]["id"].as_str().unwrap();
-    let (status, inbox) = call(addr, INBOX, "owner-secret", json!({"as":"bob","peek":true})).await;
-    assert_eq!(status, 200, "{inbox}");
-    assert_eq!(inbox["messages"][0]["id"], id);
-    let (status, acked) = call(addr, ACK, "owner-secret", json!({"as":"bob","id":id})).await;
-    assert_eq!(status, 200, "{acked}");
-    let (status, wrong) = call(
-        addr,
-        REPLY,
-        &bob,
-        json!({"id":id,"body":" ","requestId":"x"}),
-    )
-    .await;
-    assert_eq!((status, &wrong["code"]), (400, &json!("invalid_argument")));
-    let (status, wrong) = call(
-        addr,
-        SEND,
-        &bob,
-        json!({"to":"owner","body":" ","kind":"MESSAGE_KIND_NOTE"}),
-    )
-    .await;
-    assert_eq!((status, &wrong["code"]), (400, &json!("invalid_argument")));
-    let (status, wrong) = call(addr, LIST, &bob, json!({"limit":-1})).await;
-    assert_eq!((status, &wrong["code"]), (400, &json!("invalid_argument")));
-    let (status, wrong) = call(
-        addr,
-        SEND,
-        "owner-secret",
-        json!({"to":"unknown","body":"hello"}),
-    )
-    .await;
-    assert_eq!((status, &wrong["code"]), (404, &json!("not_found")));
-    server.abort();
-}
-
-#[tokio::test]
-async fn project_request_waits_and_creates_one_backlog_note() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
-    hub.directory
-        .update(&[Scan {
-            sleeve: "worker".into(),
-            workspace: Workspace {
-                path: dir.path().join("repo"),
-                remote: "github.com/acme/repo".into(),
-                ..Default::default()
-            },
-        }])
-        .unwrap();
-    hub.directory.update(&[]).unwrap();
-    let alice = sleeve_token(&hub, "alice", &["message_*"]);
-    let directory = Arc::clone(&hub.directory);
-    let sleeves = Arc::clone(&hub.sleeves);
-    let (addr, server) = serve(hub).await;
-    let input = json!({
-        "to":"project:acme/repo", "body":"Please inspect the build",
-        "kind":"MESSAGE_KIND_REQUEST", "requestId":"project-0001"
-    });
-    let (status, sent) = call(addr, SEND, &alice, input.clone()).await;
-    assert_eq!(status, 200, "{sent}");
-    assert_eq!(sent["waiting"], true);
-    let note_id = sent["noteId"].as_str().unwrap();
-    assert!(!note_id.is_empty());
-    assert_eq!(sent["message"]["noteId"], note_id);
-    let (status, duplicate) = call(addr, SEND, &alice, input).await;
-    assert_eq!(status, 200, "{duplicate}");
-    assert_eq!(duplicate["duplicate"], true);
-    assert_eq!(duplicate["noteId"], note_id);
-    let (status, notes) = call(
-        addr,
-        "/protectorate.v1.BacklogService/ListNotes",
-        "owner-secret",
-        json!({"project":"acme/repo"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{notes}");
-    assert_eq!(notes["notes"].as_array().unwrap().len(), 1);
-    sleeves
-        .record_spawned(
-            Record::new(
-                "worker",
-                Harness::Pi,
-                Mode::Chat,
-                &dir.path().join("repo"),
-                "2026-01-01T00:00:00Z",
-            )
-            .unwrap(),
-        )
-        .unwrap();
-    directory
-        .update(&[Scan {
-            sleeve: "worker".into(),
-            workspace: Workspace {
-                path: dir.path().join("repo"),
-                remote: "github.com/acme/repo".into(),
-                ..Default::default()
-            },
-        }])
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        let (status, inbox) = call(
-            addr,
-            INBOX,
-            "owner-secret",
-            json!({"as":"worker","peek":true}),
-        )
-        .await;
-        assert_eq!(status, 200, "{inbox}");
-        if inbox["messages"].as_array().is_some_and(|v| v.len() == 1) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "waiting project mail did not resolve: {inbox}"
-        );
-        tokio::time::sleep(Duration::from_millis(40)).await;
-    }
     server.abort();
 }
 

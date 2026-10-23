@@ -926,25 +926,6 @@ impl Store {
             .collect()
     }
 
-    /// Returns the ack-required messages still open that name sent or that are
-    /// addressed to name and unacked by it, oldest first.
-    pub fn involving(&self, name: &str) -> Vec<Message> {
-        let s = self.lock();
-        s.order
-            .iter()
-            .filter_map(|id| s.msgs.get(id))
-            .filter(|m| m.ack_required)
-            .filter(|m| {
-                let named = m.from == name && m.open();
-                match m.deliveries.get(name) {
-                    Some(d) => named || d.acked.is_none(),
-                    None => named,
-                }
-            })
-            .cloned()
-            .collect()
-    }
-
     /// Returns the unacked request messages addressed to project that were
     /// sent from from_project, oldest first.
     pub fn open_requests(&self, project: &str, from_project: &str) -> Vec<Message> {

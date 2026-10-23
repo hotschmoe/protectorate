@@ -4,11 +4,14 @@
 //! errors. A sandboxed workload never falls back to running on the host.
 
 #[cfg(target_os = "linux")]
+pub mod egress;
+#[cfg(target_os = "linux")]
 pub mod runtime;
 #[cfg(windows)]
 #[path = "runtime_windows.rs"]
 pub mod runtime;
 
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
     fmt, fs, io,
@@ -22,6 +25,9 @@ pub enum Workload {
     NestedRuntimeTestSleeve,
     SharedNodeJob,
     ReadOnlyHelper(Helper),
+    /// Snapshots and restores a sleeve workspace into a private store kept in
+    /// its home, so the workspace is writable and nothing else is.
+    CheckpointHelper,
     /// An administrator intentionally requested an unsandboxed job. A plan
     /// carrying this variant never contains sandbox grants or credentials.
     PlainNodeJob,
@@ -52,6 +58,37 @@ impl Provider {
             Self::Codex => "codex",
             Self::Grok => "grok",
             Self::Pi => "pi",
+        }
+    }
+
+    /// The hosts each harness needs for inference and token refresh, taken
+    /// from the installed CLIs. Pi covers its subscription sign-ins plus
+    /// Gemini and OpenRouter; other Pi providers need operator entries.
+    pub fn api_hosts(self) -> &'static [&'static str] {
+        const CLAUDE: &[&str] = &["api.anthropic.com", "claude.ai", "platform.claude.com"];
+        const CODEX: &[&str] = &["api.openai.com", "chatgpt.com", "auth.openai.com"];
+        const GROK: &[&str] = &[
+            "api.x.ai",
+            "auth.x.ai",
+            "accounts.x.ai",
+            "cli-chat-proxy.grok.com",
+        ];
+        const PI: &[&str] = &[
+            "api.anthropic.com",
+            "platform.claude.com",
+            "api.openai.com",
+            "chatgpt.com",
+            "auth.openai.com",
+            "api.x.ai",
+            "auth.x.ai",
+            "generativelanguage.googleapis.com",
+            "openrouter.ai",
+        ];
+        match self {
+            Self::Claude => CLAUDE,
+            Self::Codex => CODEX,
+            Self::Grok => GROK,
+            Self::Pi => PI,
         }
     }
 }
@@ -96,9 +133,229 @@ pub struct Limits {
     pub tasks_max: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Outbound authority requested for a sandbox. The provider API hosts of the
+/// request's credential are added by the policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Egress {
+    /// `host:port` of the hub. Unlike other destinations it may resolve to a
+    /// private or loopback address.
+    pub hub: Option<String>,
+    /// Operator-approved `host`, `host:port` or `*.domain[:port]` patterns;
+    /// the port defaults to 443. Only public addresses are reachable.
+    pub allow: Vec<String>,
+    /// Hosts reachable on any port at private addresses, such as local model
+    /// servers. These are the only IP literals a workload may name.
+    pub private_hosts: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Network {
-    Shared,
+    /// Only for intentionally unsandboxed host processes.
+    Host,
+    /// A private network namespace with nothing but loopback.
+    Loopback,
+    /// A private network namespace whose only way out is the host CONNECT
+    /// proxy enforcing this policy.
+    Proxied(EgressPolicy),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Rule {
+    /// Lowercase host, or `*.` followed by a domain for its subdomains.
+    host: String,
+    /// `None` admits any port.
+    port: Option<u16>,
+    private: bool,
+    source: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EgressPolicy {
+    hub: Option<(String, u16)>,
+    rules: Vec<Rule>,
+}
+
+/// Why a CONNECT target is admitted before its name is resolved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Admission {
+    /// Private and loopback addresses are acceptable for this destination.
+    pub private: bool,
+    pub rule: &'static str,
+}
+
+impl EgressPolicy {
+    pub fn hub(&self) -> Option<(&str, u16)> {
+        self.hub.as_ref().map(|(host, port)| (host.as_str(), *port))
+    }
+
+    pub fn admit(&self, host: &str, port: u16) -> std::result::Result<Admission, String> {
+        let host = normalize_host(host);
+        if self.hub.as_ref() == Some(&(host.clone(), port)) {
+            return Ok(Admission {
+                private: true,
+                rule: "hub",
+            });
+        }
+        let literal = host.parse::<std::net::IpAddr>().is_ok();
+        if !literal && !valid_hostname(&host) {
+            return Err(format!("invalid host name {host:?}"));
+        }
+        self.rules
+            .iter()
+            .find(|rule| {
+                rule.port.is_none_or(|p| p == port)
+                    && match rule.host.strip_prefix("*.") {
+                        Some(domain) => !literal && host.ends_with(&format!(".{domain}")),
+                        None => rule.host == host,
+                    }
+            })
+            .map(|rule| Admission {
+                private: rule.private,
+                rule: rule.source,
+            })
+            .ok_or_else(|| {
+                if literal {
+                    "IP literals are refused".to_owned()
+                } else {
+                    "host is not allowlisted".to_owned()
+                }
+            })
+    }
+}
+
+/// Whether an address is globally routable. Private, loopback, link-local
+/// (including cloud metadata), shared, documentation, multicast and reserved
+/// ranges are not.
+pub fn public_address(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_unspecified()
+                || v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast()
+                || a == 0
+                || a >= 240
+                || (a == 100 && (64..128).contains(&b))
+                || (a == 192 && b == 0 && v4.octets()[2] == 0)
+                || (a == 198 && (b == 18 || b == 19)))
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return public_address(IpAddr::V4(v4));
+            }
+            let s = v6.segments();
+            if s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0; 4] {
+                let [a, b] = s[6].to_be_bytes();
+                let [c, d] = s[7].to_be_bytes();
+                return public_address(IpAddr::V4([a, b, c, d].into()));
+            }
+            !(v6.is_unspecified()
+                || v6.is_loopback()
+                || v6.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || (s[0] == 0x2001 && (s[1] == 0xdb8 || s[1] == 0))
+                || s[0] == 0x2002
+                || (s[0] == 0x100 && s[1..4] == [0; 3]))
+        }
+    }
+}
+
+fn normalize_host(host: &str) -> String {
+    let host = host.trim_end_matches('.');
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+        .to_ascii_lowercase()
+}
+
+fn valid_hostname(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+}
+
+/// Split `host[:port]`; a bracketed IPv6 literal must carry its port.
+fn split_host_port(spec: &str) -> Option<(String, Option<u16>)> {
+    if let Some(rest) = spec.strip_prefix('[') {
+        let (host, port) = rest.split_once("]:")?;
+        return Some((host.to_ascii_lowercase(), Some(port.parse().ok()?)));
+    }
+    match spec.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => Some((
+            normalize_host(host),
+            Some(port.parse().ok().filter(|p| *p > 0)?),
+        )),
+        Some(_) => None,
+        None => Some((normalize_host(spec), None)),
+    }
+}
+
+fn egress_policy(egress: Egress, credential: Option<Provider>) -> Result<EgressPolicy> {
+    let hub = egress
+        .hub
+        .map(|spec| match split_host_port(&spec) {
+            Some((host, Some(port)))
+                if valid_hostname(&host) || host.parse::<std::net::IpAddr>().is_ok() =>
+            {
+                Ok((host, port))
+            }
+            _ => Err(invalid(format!(
+                "egress hub must be host:port, not {spec:?}"
+            ))),
+        })
+        .transpose()?;
+    let mut rules = Vec::new();
+    for host in credential.map_or(&[][..], Provider::api_hosts) {
+        rules.push(Rule {
+            host: (*host).into(),
+            port: Some(443),
+            private: false,
+            source: credential.unwrap().as_str(),
+        });
+    }
+    for spec in egress.allow {
+        let (host, port) = split_host_port(&spec)
+            .filter(|(host, _)| valid_hostname(host.strip_prefix("*.").unwrap_or(host)))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "egress allow entry must be a host name pattern, not {spec:?}"
+                ))
+            })?;
+        rules.push(Rule {
+            host,
+            port: Some(port.unwrap_or(443)),
+            private: false,
+            source: "operator",
+        });
+    }
+    for spec in egress.private_hosts {
+        let host = normalize_host(&spec);
+        if !valid_hostname(&host) && host.parse::<std::net::IpAddr>().is_err() {
+            return Err(invalid(format!("egress private host is invalid: {spec:?}")));
+        }
+        rules.push(Rule {
+            host,
+            port: None,
+            private: true,
+            source: "local-model",
+        });
+    }
+    Ok(EgressPolicy { hub, rules })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +388,8 @@ pub struct Request {
     pub overlays: Vec<CacheOverlay>,
     pub masks: Vec<FileMask>,
     pub limits: Limits,
+    /// `None` leaves the sandbox with loopback only.
+    pub egress: Option<Egress>,
 }
 
 #[derive(Clone, Debug)]
@@ -208,8 +467,8 @@ impl ValidatedPlan {
     pub fn limits(&self) -> Limits {
         self.limits
     }
-    pub fn network(&self) -> Network {
-        self.network
+    pub fn network(&self) -> &Network {
+        &self.network
     }
     pub fn cgroup(&self) -> Option<Cgroup> {
         self.cgroup
@@ -262,6 +521,7 @@ impl Policy {
                 || request.credential.is_some()
                 || !request.overlays.is_empty()
                 || !request.masks.is_empty()
+                || request.egress.is_some()
             {
                 return Err(invalid(
                     "direct host processes cannot carry sandbox mounts or credentials",
@@ -283,7 +543,7 @@ impl Policy {
                 overlays: Vec::new(),
                 masks: Vec::new(),
                 limits: request.limits,
-                network: Network::Shared,
+                network: Network::Host,
                 cgroup: None,
             });
         }
@@ -462,7 +722,9 @@ impl Policy {
             .map(|provider| {
                 if matches!(
                     request.workload,
-                    Workload::SharedNodeJob | Workload::ReadOnlyHelper(_)
+                    Workload::SharedNodeJob
+                        | Workload::ReadOnlyHelper(_)
+                        | Workload::CheckpointHelper
                 ) {
                     return Err(invalid(
                         "jobs and helpers cannot receive provider credentials",
@@ -496,6 +758,10 @@ impl Policy {
             .into_iter()
             .map(|mask| validate_mask(mask, &state, &grants))
             .collect::<Result<Vec<_>>>()?;
+        let network = match request.egress {
+            Some(egress) => Network::Proxied(egress_policy(egress, request.credential)?),
+            None => Network::Loopback,
+        };
         Ok(ValidatedPlan {
             kind: PlanKind::Sandboxed,
             workload: request.workload,
@@ -508,7 +774,7 @@ impl Policy {
             overlays,
             masks,
             limits: request.limits,
-            network: Network::Shared,
+            network,
             cgroup: Some(if nested {
                 Cgroup::DelegatedNested
             } else {
@@ -901,7 +1167,7 @@ fn validate_private_home(path: &Path, state: &Path, workload: Workload) -> Resul
             "sleeves"
         }
         Workload::SharedNodeJob => "jobs",
-        Workload::ReadOnlyHelper(_) => "helpers",
+        Workload::ReadOnlyHelper(_) | Workload::CheckpointHelper => "helpers",
         Workload::PlainNodeJob | Workload::DirectHarnessDriver => {
             return Err(invalid("direct host processes have no private home"))
         }

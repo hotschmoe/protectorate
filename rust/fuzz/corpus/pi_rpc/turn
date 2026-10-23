@@ -1,0 +1,8 @@
+{"type":"response","id":"c2","command":"prompt","success":true}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"hmm"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"answer"}}
+{"type":"tool_execution_start","toolCallId":"t1","toolName":"bash","args":{"command":"ls"}}
+{"type":"tool_execution_end","toolCallId":"t1","toolName":"bash","result":{"content":[{"type":"text","text":"a"}]},"isError":false}
+{"type":"message_end","message":{"role":"assistant","model":"test-model","provider":"test-local","usage":{"totalTokens":13,"input":10,"output":3}}}
+{"type":"agent_settled","aborted":false}

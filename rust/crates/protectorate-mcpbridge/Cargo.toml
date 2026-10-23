@@ -27,8 +27,3 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [[bin]]
 name = "protectorate-mcpbridge"
 path = "src/main.rs"
-
-[dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
-tempfile = "3"
-rcgen = "0.14"

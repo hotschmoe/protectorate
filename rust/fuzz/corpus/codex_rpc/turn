@@ -1,0 +1,7 @@
+{"method":"turn/started","params":{"turn":{"id":"fuzz-turn"},"threadId":"fuzz-thread"}}
+{"method":"item/started","params":{"item":{"id":"exec-1","type":"commandExecution","command":"printf ok"},"threadId":"fuzz-thread"}}
+{"method":"item/completed","params":{"item":{"id":"exec-1","type":"commandExecution","aggregatedOutput":"ok","exitCode":0},"threadId":"fuzz-thread"}}
+{"method":"item/agentMessage/delta","params":{"itemId":"msg-1","delta":"answer","threadId":"fuzz-thread"}}
+{"method":"item/reasoning/textDelta","params":{"itemId":"r-1","delta":"thinking","threadId":"fuzz-thread"}}
+{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"last":{"inputTokens":10,"outputTokens":3,"cachedInputTokens":4,"totalTokens":13},"modelContextWindow":258400},"threadId":"fuzz-thread"}}
+{"method":"turn/completed","params":{"turn":{"id":"fuzz-turn","status":"completed"},"threadId":"fuzz-thread"}}

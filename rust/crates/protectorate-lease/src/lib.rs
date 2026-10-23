@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 pub const MAX_LEASE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-pub const DEFAULT_CLAIM_WINDOW: Duration = Duration::from_secs(120);
+const CLAIM_WINDOW: Duration = Duration::from_secs(120);
 pub const MAX_QUEUE_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
 #[derive(Debug)]
 pub enum Error {
@@ -71,18 +71,10 @@ fn valid_node(n: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
 }
 fn valid_resource(r: &Resource) -> bool {
-    valid_node(&r.node) || r.gpu.is_none() && r.node.strip_prefix("desk:").is_some_and(valid_node)
+    valid_node(&r.node)
 }
 pub fn parse_resource(raw: &str) -> Result<Resource> {
     let raw = raw.trim().to_ascii_lowercase();
-    if let Some(node) = raw.strip_prefix("desk:") {
-        if valid_node(node) {
-            return Ok(Resource {
-                node: raw,
-                gpu: None,
-            });
-        }
-    }
     let (node, gpu) = match raw.split_once(':') {
         Some((node, suffix)) => {
             let n = suffix
@@ -206,7 +198,6 @@ pub struct LeaseTable {
     disk: Mutex<Disk>,
     chooser: Chooser,
     admission: Option<Arc<std::sync::RwLock<()>>>,
-    claim_window: Duration,
     on_event: Option<EventHandler>,
     on_grant: Option<GrantHandler>,
 }
@@ -298,7 +289,6 @@ impl LeaseTable {
                 Ok(resource)
             }),
             admission: None,
-            claim_window: DEFAULT_CLAIM_WINDOW,
             on_event: None,
             on_grant: None,
         }
@@ -359,11 +349,6 @@ impl LeaseTable {
     pub fn with_admission(mut self, admission: Arc<std::sync::RwLock<()>>) -> Self {
         self.admission = Some(admission);
         self
-    }
-    pub fn with_claim_window(mut self, window: Duration) -> Result<Self> {
-        ttl_millis(window)?;
-        self.claim_window = window;
-        Ok(self)
     }
     /// Notifications run after persistence and outside the lock; reentry is allowed.
     pub fn with_on_event(mut self, handler: impl Fn(&Event) + Send + Sync + 'static) -> Self {
@@ -440,7 +425,7 @@ impl LeaseTable {
                 ));
                 continue;
             }
-            let ttl = self.claim_window.min(ticket.ttl);
+            let ttl = CLAIM_WINDOW.min(ticket.ttl);
             match acquire_into(
                 d,
                 &self.chooser,
@@ -603,16 +588,5 @@ impl LeaseTable {
             &self.disk.lock().unwrap_or_else(|e| e.into_inner()),
             resource,
         ))
-    }
-    pub fn node_lease(&self, node: &str, now: i64) -> Result<Option<Lease>> {
-        self.sweep(now)?;
-        Ok(self
-            .disk
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .leases
-            .values()
-            .find(|l| l.resource.node == node && l.resource.gpu.is_none())
-            .cloned())
     }
 }

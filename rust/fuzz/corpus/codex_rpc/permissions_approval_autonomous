@@ -1,0 +1,2 @@
+#autonomous
+{"id":0,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true}},"reason":"network"}}

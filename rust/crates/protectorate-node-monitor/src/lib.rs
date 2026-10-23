@@ -329,11 +329,6 @@ impl Monitor {
         }
     }
 
-    /// Records a successful metrics poll. Hub tests inject GPU figures this way.
-    pub fn record_success(&self, name: &str, address: &str, metrics: Value) {
-        self.record(name, address, false, false, Ok(metrics));
-    }
-
     pub fn status(&self, name: &str, address: &str, invited: bool) -> Value {
         if invited {
             return json!({"freshness":"NODE_FRESHNESS_INVITED", "error":"invited, not yet joined"});

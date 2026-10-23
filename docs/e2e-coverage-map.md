@@ -39,8 +39,8 @@ but no successful behavioral scenario unless an optional lane is named.
 | Service | Successful behavior and scenario | Remaining functional gaps |
 |---|---|---|
 | HubService | GetStatus: Cluster, CLI/MCP | None |
-| NodeAgentService | GetMetrics: every cluster; PrepareJob, UploadJobData, RunJob, AttachJob, ListJobs: Cluster and Artifact; CancelJob: Cancel, Remove; PutFile, GetFile: Transfer; ApplyUpdate: Cluster; GetDeskState: State (unsupported Linux desktop) | WatchMetrics; DeskAction on a real desktop; Uninstall/service deregistration |
-| NodeService | ListNodes, GetNode, AddNode: cluster setup, CLI/MCP, Service; RemoveNode: Remove; PutFile, GetFile: Transfer, Credentials; ApplyUpdate, UpdateNode: Cluster; SetDeskPolicy, GetDeskPolicy: State; SetNodeTier: Cluster, Credentials | InviteNode, WatchNodeSetup (tailnet enrollment); physical desktop enforcement |
+| NodeAgentService | GetMetrics: every cluster; PrepareJob, UploadJobData, RunJob, AttachJob, ListJobs: Cluster and Artifact; CancelJob: Cancel, Remove; PutFile, GetFile: Transfer; ApplyUpdate: Cluster | WatchMetrics; Uninstall/service deregistration |
+| NodeService | ListNodes, GetNode, AddNode: cluster setup, CLI/MCP, Service; RemoveNode: Remove; PutFile, GetFile: Transfer, Credentials; ApplyUpdate, UpdateNode: Cluster; SetNodeTier: Cluster, Credentials | InviteNode, WatchNodeSetup (tailnet enrollment) |
 | JobService | SubmitJob, GetJob: Cluster, Cancel, Artifact; ListJobs: Artifact; CancelJob: Cancel; WatchJob: CLI/MCP and Artifact through CLI execution/replay | CLI signal cancellation while submission is in flight; lost-node recovery deadline; multiple execution slots; same-repo serialization under contention |
 | LeaseService | AcquireLease, RenewLease, ReleaseLease, ListLeases: Cluster, Remove, State | Claim-window expiry and GPU contention need deterministic hardware/time lanes |
 | TokenService | CreateToken, UpdateTokenScopes, RevokeToken: Cluster, Stream, Credentials | ListTokens positive listing; last-used flush timing |
@@ -55,7 +55,6 @@ but no successful behavioral scenario unless an optional lane is named.
 | BacklogService | None | ListNotes, GetNote, CreateNote, UpdateNote, DeleteNote; note state belongs to w4-notes |
 | QuotaService | Provider probing starts in every cluster; no successful API assertion | GetQuota, Suggest; real provider freshness/quota ranking |
 | TailnetService | Lower transport/enrollment: optional `TestTailnetEndToEnd`, `TestNodeRestartRecovery`, `TestDERPRelay` | GetStatus hub projection; full binary invitation/client enrollment/service lifecycle |
-| DeskService | None on a physical desktop; policy persistence uses NodeService | Screenshot, ListWindows, Foreground, Click, Move, Type, Key, Run (Windows interactive lane) |
 
 ## Every CLI command
 
@@ -74,7 +73,6 @@ leases/lease and message/msg (message inbox also has an execution assertion).
 | chat | Native chat HTTP host scenarios exercise the underlying RPCs | compact, interrupt, models, respond, send, settings, watch CLI rendering |
 | client | None | invite, register |
 | completion | None | bash, fish, powershell, zsh |
-| desk | policy set/off: State | policy show; desk's screenshot/windows/foreground/click/move/type/key/run actions |
 | driver | Official protocol process scenarios in `internal/driver` | run CLI |
 | events | Event stream checked by Stream | events CLI |
 | grant | GrantService exercised in Cluster/Credentials | admin CLI |
@@ -113,7 +111,6 @@ name, for example `job_` + `cancel_job` = `job_cancel_job`.
 |---|---|
 | backlog_ | create_note, delete_note, get_note, list_notes, update_note |
 | chat_ | compact, interrupt, list_models, respond, send, set_selection |
-| desk_ | click, foreground, key, list_windows, move, run, screenshot, type |
 | directory_ | get_project, list_projects |
 | grant_ | admin |
 | hub_ | get_status |
@@ -151,8 +148,6 @@ by their owning directory; this is not a claim to cover their internal format.
 | directory.json | Host project-addressing/dependency scenarios; every cluster opens the store | Restart with advanced refs and interrupted writes |
 | mailbox.jsonl | Cluster dedupe/ack/restart; host delivery/thread/escalation scenarios | Torn final append and compaction failures |
 | notes.json | Store opened by cluster; no functional mutation here | Backlog CRUD/state delegated to w4-notes |
-| desk-policies.json; node desk-policy.json | State set/invalid replacement/denied clear/restart/clear persistence | Physical activity/locked-window revocation |
-| desk-use.json | Host `TestDeskEndedNotice` exercises notices, not persisted desk-use reload | Active input accounting across restart |
 | handoffs/NAME/*; workspace .protectorate/HANDOFF.md and .git/info/exclude | No live resleeve replacement | Two-harness handoff, jailed git facts, transcript parsing/truncation |
 | node-files/* and .protectorate-put-* staging | Transfer corruption/offset/archive refusal, cleanup, directory modes, skipped symlinks, overwrite; Credentials care gates | Transfer TTL sweep and interrupted process during rename |
 | node-jobs/repos/*, jobs/* upload.part/upload, runs/* out.log/artifacts | Cluster git/incremental bundles/warm worktrees and restart attachment; Artifact directory/file upload and workdir confinement | Node restart deliberately loses runs; contention and ZIP parser fuzzing |

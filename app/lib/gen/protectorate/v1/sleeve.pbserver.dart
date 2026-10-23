@@ -39,6 +39,14 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $4.SpawnEnvoyRequest request);
   $async.Future<$4.PruneSleevesResponse> pruneSleeves(
       $pb.ServerContext ctx, $4.PruneSleevesRequest request);
+  $async.Future<$4.CreateCheckpointResponse> createCheckpoint(
+      $pb.ServerContext ctx, $4.CreateCheckpointRequest request);
+  $async.Future<$4.ListCheckpointsResponse> listCheckpoints(
+      $pb.ServerContext ctx, $4.ListCheckpointsRequest request);
+  $async.Future<$4.DiffCheckpointResponse> diffCheckpoint(
+      $pb.ServerContext ctx, $4.DiffCheckpointRequest request);
+  $async.Future<$4.RestoreCheckpointResponse> restoreCheckpoint(
+      $pb.ServerContext ctx, $4.RestoreCheckpointRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
@@ -60,6 +68,14 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return $4.SpawnEnvoyRequest();
       case 'PruneSleeves':
         return $4.PruneSleevesRequest();
+      case 'CreateCheckpoint':
+        return $4.CreateCheckpointRequest();
+      case 'ListCheckpoints':
+        return $4.ListCheckpointsRequest();
+      case 'DiffCheckpoint':
+        return $4.DiffCheckpointRequest();
+      case 'RestoreCheckpoint':
+        return $4.RestoreCheckpointRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -86,6 +102,14 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return spawnEnvoy(ctx, request as $4.SpawnEnvoyRequest);
       case 'PruneSleeves':
         return pruneSleeves(ctx, request as $4.PruneSleevesRequest);
+      case 'CreateCheckpoint':
+        return createCheckpoint(ctx, request as $4.CreateCheckpointRequest);
+      case 'ListCheckpoints':
+        return listCheckpoints(ctx, request as $4.ListCheckpointsRequest);
+      case 'DiffCheckpoint':
+        return diffCheckpoint(ctx, request as $4.DiffCheckpointRequest);
+      case 'RestoreCheckpoint':
+        return restoreCheckpoint(ctx, request as $4.RestoreCheckpointRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

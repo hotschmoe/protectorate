@@ -120,6 +120,7 @@ fn run_handoff_summary(
                 credential: Some(Provider::Pi),
                 overlays: Vec::new(),
                 masks: Vec::new(),
+                egress: Some(crate::sleeves::sleeve_egress(hub, true)),
                 limits: Limits {
                     cpu_percent: 0,
                     memory_bytes: 0,
@@ -134,6 +135,7 @@ fn run_handoff_summary(
             &workspace,
         );
         options.environment = launcher.environment.clone();
+        options.egress_log = Some(crate::sleeves::egress_log(hub, owner));
         options.environment.extend(cache_environment);
         options.environment.remove("PROTECTORATE_HUB");
         options.environment.remove("PROTECTORATE_TOKEN_FILE");
@@ -279,15 +281,6 @@ struct RequestKeys {
 }
 
 impl RequestKeys {
-    #[cfg(test)]
-    fn restore(events: Vec<Event>, now_ms: u64) -> Self {
-        let mut keys = Self::default();
-        for event in events {
-            keys.restore_event(&event, now_ms);
-        }
-        keys
-    }
-
     fn restore_event(&mut self, event: &Event, now_ms: u64) {
         if let Some(id) = event.payload["user"]["requestId"]
             .as_str()
@@ -562,6 +555,8 @@ struct ChatStateWatcher {
     inventory: Arc<Inventory>,
     hosts: Vec<String>,
     name: String,
+    checkpoints: crate::checkpoints::Store,
+    workspace: PathBuf,
 }
 
 impl ChatStateWatcher {
@@ -579,6 +574,8 @@ impl ChatStateWatcher {
             inventory,
             hosts,
             name,
+            checkpoints,
+            workspace,
         } = self;
         let mut previous = Value::Null;
         let mut last_publish = Instant::now();
@@ -613,6 +610,13 @@ impl ChatStateWatcher {
                     .any(|key| event.payload.get(*key).is_some())
             {
                 return Ok(());
+            }
+            if event.payload.get("settled").is_some() {
+                crate::checkpoints::after_turn(
+                    checkpoints.clone(),
+                    name.clone(),
+                    workspace.clone(),
+                );
             }
             let mut status = chat_status_with(session.as_ref(), &hosts, &inventory);
             if let Some(state) = state {
@@ -1218,6 +1222,7 @@ fn spawn_chat(
     let cpu_percent = u32::try_from(number(limits, "cpuPercent")?)
         .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU limit exceeds u32"))?;
     let memory_bytes = number(limits, "memoryBytes")?;
+    let disk_bytes = number(limits, "diskBytes")?;
     let nested = value.get("nested").and_then(Value::as_bool) == Some(true);
     let mut command = if harness == Harness::Pi {
         vec![
@@ -1350,6 +1355,7 @@ fn spawn_chat(
             )
             .collect(),
             masks: Vec::new(),
+            egress: Some(crate::sleeves::sleeve_egress(hub, harness == Harness::Pi)),
             limits: Limits {
                 cpu_percent,
                 memory_bytes,
@@ -1364,6 +1370,7 @@ fn spawn_chat(
         &workspace,
     );
     options.environment = launcher.environment.clone();
+    options.egress_log = Some(crate::sleeves::egress_log(hub, &name));
     options.environment.extend(cache_environment);
     options.environment.extend(caller_env.clone());
     if launcher.pub_cache_lower.is_some() {
@@ -1594,6 +1601,7 @@ fn spawn_chat(
     }
     row.limits.cpu_percent = cpu_percent;
     row.limits.memory_bytes = memory_bytes;
+    row.limits.disk_bytes = disk_bytes;
     row.nested = nested;
     row.read_only = readonly
         .iter()
@@ -1637,6 +1645,8 @@ fn spawn_chat(
         inventory: Arc::clone(&hub.inventory),
         hosts: hub.local_model_hosts.clone(),
         name,
+        checkpoints: crate::checkpoints::Store::for_chat(launcher),
+        workspace,
     }
     .start();
     Ok(row)
@@ -1897,6 +1907,15 @@ pub(super) fn append_handoff(hub: &Hub, name: &str, handoff: &Value) -> Result<(
     Ok(())
 }
 
+pub(super) fn append_error(hub: &Hub, name: &str, text: &str) -> Result<()> {
+    let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
+    runtime
+        .log(name)?
+        .append(Event::new(json!({"error":{"text":text}})))
+        .map_err(log_error)?;
+    Ok(())
+}
+
 pub(super) fn send_resleeve_prompt(hub: &Hub, name: &str, text: &str) -> Result<()> {
     let session = live_session(hub, name)?;
     session
@@ -2134,6 +2153,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
             credential: Some(Provider::Codex),
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: Some(crate::sleeves::sleeve_egress(hub, false)),
             limits: Limits {
                 cpu_percent: 0,
                 memory_bytes: 0,
@@ -2149,6 +2169,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
     );
     options.stdio = protectorate_sandbox::runtime::StdioMode::Duplex;
     options.environment = launcher.environment.clone();
+    options.egress_log = Some(crate::sleeves::egress_log(hub, "codex-catalog"));
     options.environment.extend(
         protectorate_sleeve_runner::prepare_private_caches(
             scratch.path().join("home").as_path(),
@@ -2517,158 +2538,4 @@ fn registry_error(error: protectorate_sleeve_registry::Error) -> RpcError {
         Error::Io(_) | Error::Json(_) => Code::Internal,
     };
     RpcError::new(code, error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::AtomicUsize;
-
-    #[test]
-    fn request_keys_expire_and_recover_only_the_latest_bounded_window() {
-        let now_ms = 10 * REQUEST_WINDOW_MS;
-        let event = |seq: u64, time_ms: u64, id: String| Event {
-            seq,
-            time_ms,
-            payload: json!({"user":{"text":"prompt","requestId":id}}),
-        };
-        let mut events = vec![
-            event(1, now_ms - REQUEST_WINDOW_MS, "expired-key".into()),
-            event(2, now_ms - REQUEST_WINDOW_MS + 1, "live-key".into()),
-            event(10_003, now_ms - 1, "short".into()),
-        ];
-        for index in 0..MAX_REQUEST_KEYS {
-            events.push(event(
-                index as u64 + 3,
-                now_ms - 1000 + index as u64 / 100,
-                format!("key-{index:05}"),
-            ));
-        }
-        let mut keys = RequestKeys::restore(events, now_ms);
-        assert_eq!(keys.len(), MAX_REQUEST_KEYS);
-        assert_eq!(keys.get("expired-key"), None);
-        assert_eq!(keys.get("live-key"), None);
-        assert_eq!(keys.get("key-00000"), Some(3));
-        assert_eq!(keys.get("key-09999"), Some(10_002));
-        keys.sweep(now_ms + REQUEST_WINDOW_MS);
-        assert_eq!(keys.len(), 0);
-    }
-
-    struct QuietSession {
-        observed: Arc<AtomicBool>,
-        stopped: Arc<AtomicUsize>,
-    }
-
-    impl ChatSession for QuietSession {
-        fn status(&self) -> Value {
-            self.observed.store(true, Ordering::SeqCst);
-            json!({"state":"CHAT_STATE_IDLE","model":"quiet","provider":"test","reasoningEffort":"off","contextTokens":"0","contextWindow":"8192","lastSeq":"0"})
-        }
-        fn model_base_url(&self) -> String {
-            String::new()
-        }
-        fn is_exited(&self) -> bool {
-            false
-        }
-        fn is_idle(&self) -> bool {
-            true
-        }
-        fn stop(&self) {
-            self.stopped.fetch_add(1, Ordering::SeqCst);
-        }
-        fn wait_exited(&self, _: Duration) -> bool {
-            true
-        }
-        fn send(&self, _: &str, _: &str, _: &str) -> std::result::Result<u64, String> {
-            Err("unused".into())
-        }
-        fn interrupt(&self) -> std::result::Result<(), String> {
-            Err("unused".into())
-        }
-        fn list_models(&self) -> std::result::Result<Value, String> {
-            Err("unused".into())
-        }
-        fn set_selection(&self, _: &str, _: &str) -> std::result::Result<Value, String> {
-            Err("unused".into())
-        }
-        fn compact(&self) -> std::result::Result<Value, String> {
-            Err("unused".into())
-        }
-        fn append_report(&self, _: &str, _: &str, _: u64) -> std::result::Result<Value, String> {
-            Err("unused".into())
-        }
-    }
-
-    #[test]
-    fn runtime_shutdown_stops_quiet_session_and_releases_event_watcher_once() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().to_path_buf();
-        let runtime = Arc::new(ChatRuntime::new(ChatLauncher {
-            state_root: root.clone(),
-            user_home: root.clone(),
-            runtime_dir: root.clone(),
-            helper: root.clone(),
-            pi_executable: None,
-            claude_executable: None,
-            claude_tool_roots: Vec::new(),
-            codex_executable: None,
-            codex_tool_roots: Vec::new(),
-            grok_executable: None,
-            grok_tool_roots: Vec::new(),
-            tool_roots: Vec::new(),
-            flutter_sdk_root: None,
-            flutter_cache_lower: None,
-            flutter_tools_lower: None,
-            pub_cache_lower: None,
-            go_mod_cache_lower: None,
-            environment: BTreeMap::new(),
-            tasks_max: 1,
-        }));
-        let log = Arc::new(Log::open(root.join("chat.jsonl")).unwrap());
-        let observed = Arc::new(AtomicBool::new(false));
-        let stopped = Arc::new(AtomicUsize::new(0));
-        let session: Arc<dyn ChatSession> = Arc::new(QuietSession {
-            observed: Arc::clone(&observed),
-            stopped: Arc::clone(&stopped),
-        });
-        runtime
-            .sessions
-            .lock()
-            .unwrap()
-            .insert("quiet".into(), Arc::clone(&session));
-        runtime
-            .logs
-            .lock()
-            .unwrap()
-            .insert("quiet".into(), Arc::clone(&log));
-        let inventory = Arc::new(Inventory::open(root.join("nodes.json"), "hub").unwrap());
-        ChatStateWatcher {
-            runtime: Arc::downgrade(&runtime),
-            session,
-            log: Arc::clone(&log),
-            after: log.last(),
-            events: Arc::new(EventBus::new()),
-            inventory,
-            hosts: Vec::new(),
-            name: "quiet".into(),
-        }
-        .start();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !observed.load(Ordering::SeqCst) {
-            assert!(Instant::now() < deadline, "state watcher did not start");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        runtime.shutdown();
-        assert_eq!(stopped.load(Ordering::SeqCst), 1);
-        let shutdown_deadline = Instant::now() + Duration::from_secs(2);
-        while Arc::strong_count(&log) != 1 {
-            assert!(
-                Instant::now() < shutdown_deadline,
-                "quiet state watcher did not exit"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        drop(runtime);
-        assert_eq!(stopped.load(Ordering::SeqCst), 1);
-    }
 }

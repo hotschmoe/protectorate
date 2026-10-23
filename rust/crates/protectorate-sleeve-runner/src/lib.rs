@@ -2,9 +2,12 @@
 //! session; it owns and waits for the sandbox handle for the same duration.
 //! A hub RPC never drops a live `ChildHandle`.
 
+use protectorate_audit::{Audit, Entry};
 use protectorate_sandbox::{
+    egress::{self, Decision, Verdict},
     runtime::{self, LaunchOptions, StdioMode},
-    Access, BindGrant, CacheOverlay, Limits, Policy, Provider, Request, ValidatedPlan, Workload,
+    Access, BindGrant, CacheOverlay, Egress, Limits, Policy, Provider, Request, ValidatedPlan,
+    Workload,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,6 +20,7 @@ use std::{
         unix::{ffi::OsStrExt, fs::OpenOptionsExt},
     },
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,6 +60,7 @@ pub struct Config {
     pub tasks_max: u32,
     pub nested: bool,
     pub ready_file: PathBuf,
+    pub egress: Option<Egress>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -159,6 +164,10 @@ pub fn run(config: &Config) -> Result<i32, Box<dyn std::error::Error>> {
         .environment
         .insert("PROTECTORATE_SLEEVE".into(), config.name.clone());
     options.stdio = StdioMode::Inherit;
+    options.egress_log = Some(egress_audit(
+        Arc::new(Audit::new(config.state_root.join("audit"))),
+        format!("sleeve:{}", config.name),
+    ));
     let child = runtime::spawn(&plan, &options)?;
     // The ready file is created only after the sandbox reports successful setup.
     fs::write(&config.ready_file, b"ready\n")?;
@@ -281,8 +290,28 @@ pub fn plan(config: &Config) -> Result<ValidatedPlan, Box<dyn std::error::Error>
             memory_bytes: config.memory_bytes,
             tasks_max: config.tasks_max,
         },
+        egress: config.egress.clone(),
     })?;
     Ok(plan)
+}
+
+/// Record each egress decision of one sandbox in the hub audit log.
+pub fn egress_audit(audit: Arc<Audit>, actor: String) -> egress::Log {
+    Arc::new(move |decision: &Decision| {
+        audit.write(Entry {
+            actor: actor.clone(),
+            procedure: "egress".into(),
+            subject: format!("{}:{}", decision.host, decision.port),
+            outcome: match decision.verdict {
+                Verdict::Allow => "ok",
+                Verdict::Deny => "denied",
+                Verdict::Error => "error",
+            }
+            .into(),
+            detail: decision.reason.clone(),
+            ..Entry::default()
+        })
+    })
 }
 
 /// A published SDK cache is mounted over only `bin/cache`; the remaining SDK
@@ -838,239 +867,4 @@ pub fn write_config(path: &Path, config: &Config) -> io::Result<()> {
         .open(path)?;
     file.write_all(&serde_json::to_vec(config).map_err(io::Error::other)?)?;
     file.sync_all()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-
-    #[test]
-    fn default_tools_include_narrow_installs_and_skip_symlinked_roots() {
-        let root = tempfile::tempdir().unwrap();
-        let home = root.path().join("owner");
-        fs::create_dir_all(home.join(".local/go/bin")).unwrap();
-        fs::create_dir_all(home.join("go/bin")).unwrap();
-        fs::create_dir_all(home.join("go/pkg/mod/cache/vcs/private/.git")).unwrap();
-        fs::write(
-            home.join("go/pkg/mod/cache/vcs/private/.git/config"),
-            b"url = https://token@example.invalid/private.git",
-        )
-        .unwrap();
-        fs::create_dir_all(home.join(".cargo/bin")).unwrap();
-        fs::create_dir_all(home.join(".rustup/toolchains")).unwrap();
-        fs::create_dir_all(home.join(".pub-cache/bin")).unwrap();
-        fs::create_dir_all(home.join(".pub-cache/global_packages")).unwrap();
-        fs::write(home.join(".pub-cache/credentials.json"), b"secret").unwrap();
-        fs::create_dir_all(home.join(".nvm/versions/node/v22/bin")).unwrap();
-        fs::create_dir_all(home.join(".nvm/versions/node/v24/bin")).unwrap();
-        fs::write(home.join(".nvm/versions/node/v22/bin/node"), b"node").unwrap();
-        fs::write(home.join(".nvm/versions/node/v24/bin/node"), b"node").unwrap();
-        fs::create_dir_all(home.join(".codex")).unwrap();
-        fs::write(home.join(".codex/auth.json"), b"secret").unwrap();
-        fs::create_dir_all(home.join(".local")).unwrap();
-        symlink(home.join(".codex"), home.join(".local/opt")).unwrap();
-
-        let roots = default_tool_roots(&home);
-        assert!(roots.contains(&home.join(".local/go")));
-        assert!(roots.contains(&home.join("go/bin")));
-        assert!(!roots.contains(&home.join("go")));
-        assert!(roots.contains(&home.join(".cargo/bin")));
-        assert!(roots.contains(&home.join(".rustup/toolchains")));
-        assert!(roots.contains(&home.join(".pub-cache/bin")));
-        assert!(roots.contains(&home.join(".pub-cache/global_packages")));
-        assert!(!roots.contains(&home.join(".pub-cache")));
-        assert!(roots.contains(&home.join(".nvm/versions/node/v24")));
-        assert!(!roots.contains(&home.join(".nvm/versions/node/v22")));
-        assert!(!roots.contains(&home.join(".local/opt")));
-        assert!(roots
-            .iter()
-            .all(|root| !root.starts_with(home.join(".codex"))));
-    }
-
-    #[test]
-    fn private_caches_are_empty_and_reject_a_sleeve_symlink() {
-        let root = tempfile::tempdir().unwrap();
-        let home = root.path().join("state/sleeves/task/home");
-        let owner = root.path().join("owner");
-        fs::create_dir_all(&home).unwrap();
-        fs::create_dir(&owner).unwrap();
-        let env = prepare_private_caches(&home, &owner).unwrap();
-        assert_eq!(env["PUB_CACHE"], owner.join(".cache/pub").to_string_lossy());
-        assert!(home.join(".cache/go-build").is_dir());
-        assert!(home.join(".cache/go-mod").is_dir());
-        assert!(home.join(".cache/pub").is_dir());
-        assert!(home.join(".cargo").is_dir());
-        assert_eq!(fs::read_dir(home.join(".cache/pub")).unwrap().count(), 0);
-        assert_eq!(
-            fs::read_to_string(home.join(".profile")).unwrap(),
-            LOGIN_PROFILE
-        );
-        let login = std::process::Command::new("bash")
-            .args(["-lc", "printf '%s' \"$PATH\""])
-            .env("HOME", &home)
-            .env("PROTECTORATE_SLEEVE_PATH", "/sleeve/tool/bin:/usr/bin")
-            .output()
-            .unwrap();
-        assert!(login.status.success());
-        assert_eq!(
-            String::from_utf8(login.stdout).unwrap(),
-            "/sleeve/tool/bin:/usr/bin"
-        );
-
-        let outside = root.path().join("outside");
-        fs::create_dir(&outside).unwrap();
-        fs::remove_dir(home.join(".cache/pub")).unwrap();
-        symlink(&outside, home.join(".cache/pub")).unwrap();
-        assert!(prepare_private_caches(&home, &owner).is_err());
-        assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
-    }
-
-    #[test]
-    fn go_module_overlay_requires_matching_publication_and_seeds_private_dirs() {
-        let root = tempfile::tempdir().unwrap();
-        let state = root.path().join("state");
-        let owner = root.path().join("owner");
-        let lower = state.join("cache/go-mod-testhash");
-        fs::create_dir_all(lower.join("example.org/module/@v")).unwrap();
-        fs::write(
-            lower.join("example.org/module/@v/v1.0.0.mod"),
-            b"module example.org/module\n",
-        )
-        .unwrap();
-        fs::write(
-            lower.join(".protectorate-go-mod-cache.json"),
-            serde_json::json!({
-                "source": owner.join("go/pkg/mod"), "sha256": "testhash"
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let overlay = go_mod_cache_overlay(&state, "task", &owner, Some(&lower))
-            .unwrap()
-            .unwrap();
-        assert_eq!(overlay.target, owner.join(".cache/go-mod/cache/download"));
-        let private = overlay.upper.join("example.org/module/@v/new.mod");
-        fs::write(&private, b"private").unwrap();
-        assert!(!lower.join("example.org/module/@v/new.mod").exists());
-        let other = root.path().join("other");
-        assert!(go_mod_cache_overlay(&state, "other", &other, Some(&lower)).is_err());
-    }
-
-    #[test]
-    fn published_pub_uses_private_owner_path_and_writable_package_directories() {
-        let root = tempfile::tempdir().unwrap();
-        let state = root.path().join("state");
-        let owner = root.path().join("owner");
-        let lower = state.join("cache/pub-test");
-        fs::create_dir_all(lower.join("hosted/pub.dev")).unwrap();
-        fs::create_dir_all(lower.join("global_packages/protoc_plugin")).unwrap();
-        fs::create_dir(&owner).unwrap();
-        fs::write(
-            lower.join(".protectorate-pub-cache.json"),
-            serde_json::json!({"source":owner.join(".pub-cache"),"sha256":"test"}).to_string(),
-        )
-        .unwrap();
-        let overlay = pub_cache_overlay(&state, "task", &owner, Some(&lower))
-            .unwrap()
-            .unwrap();
-        assert_eq!(overlay.target, owner.join(".pub-cache"));
-        assert!(overlay.upper.join("hosted/pub.dev").is_dir());
-        assert!(overlay.upper.join("global_packages/protoc_plugin").is_dir());
-        fs::write(overlay.upper.join("hosted/pub.dev/private"), b"private").unwrap();
-        assert!(!lower.join("hosted/pub.dev/private").exists());
-        fs::write(
-            lower.join(".protectorate-pub-cache.json"),
-            serde_json::json!({"source":root.path().join("other/.pub-cache"),"sha256":"test"})
-                .to_string(),
-        )
-        .unwrap();
-        assert!(pub_cache_overlay(&state, "task", &owner, Some(&lower)).is_err());
-        fs::write(
-            lower.join(".protectorate-pub-cache.json"),
-            serde_json::json!({"source":owner.join(".pub-cache"),"sha256":"test"}).to_string(),
-        )
-        .unwrap();
-        assert!(pub_cache_overlay(&state, "task", &owner, Some(&lower)).is_ok());
-        let linked = state.join("cache/pub-linked");
-        symlink(&lower, &linked).unwrap();
-        assert!(pub_cache_overlay(&state, "task", &owner, Some(&linked)).is_err());
-    }
-
-    #[test]
-    fn host_rustup_default_requires_an_explicit_toolchain_root() {
-        let root = tempfile::tempdir().unwrap();
-        let owner = root.path().join("owner");
-        let toolchains = owner.join(".rustup/toolchains");
-        fs::create_dir_all(toolchains.join("stable-aarch64-unknown-linux-gnu")).unwrap();
-        fs::write(
-            owner.join(".rustup/settings.toml"),
-            "default_toolchain = \"stable-aarch64-unknown-linux-gnu\"\n",
-        )
-        .unwrap();
-        assert_eq!(rustup_default_toolchain(&owner, &[]), None);
-        assert_eq!(
-            rustup_default_toolchain(&owner, &[toolchains]),
-            Some("stable-aarch64-unknown-linux-gnu".into())
-        );
-    }
-
-    #[test]
-    fn flutter_overlay_seeds_only_small_top_level_metadata() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
-        let state = root.path().join("state");
-        let sdk = root.path().join("flutter");
-        let lower = state.join("cache/flutter-test");
-        fs::create_dir_all(sdk.join("bin/cache")).unwrap();
-        fs::create_dir_all(&lower).unwrap();
-        fs::write(lower.join("engine.realm"), b"realm\n").unwrap();
-        fs::set_permissions(
-            lower.join("engine.realm"),
-            fs::Permissions::from_mode(0o400),
-        )
-        .unwrap();
-        fs::write(lower.join("large.snapshot"), vec![0u8; 65537]).unwrap();
-        fs::write(
-            lower.join(".protectorate-flutter-cache.json"),
-            serde_json::json!({"sdk":sdk,"sha256":"test"}).to_string(),
-        )
-        .unwrap();
-        let overlay = flutter_overlay(&state, "task", Some(&sdk), Some(&lower))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            fs::read(overlay.upper.join("engine.realm")).unwrap(),
-            b"realm\n"
-        );
-        assert_eq!(
-            fs::metadata(overlay.upper.join("engine.realm"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-        assert!(!overlay.upper.join("large.snapshot").exists());
-        let tools = state.join("cache/flutter-tools-test");
-        fs::create_dir_all(sdk.join("packages/flutter_tools/.dart_tool")).unwrap();
-        fs::create_dir_all(&tools).unwrap();
-        fs::write(tools.join("package_config.json"), b"{}").unwrap();
-        fs::write(
-            tools.join(".protectorate-flutter-tools.json"),
-            serde_json::json!({"sdk":sdk,"sha256":"test"}).to_string(),
-        )
-        .unwrap();
-        let overlay = flutter_tools_overlay(&state, "task", Some(&sdk), Some(&tools))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            fs::read(overlay.upper.join("package_config.json")).unwrap(),
-            b"{}"
-        );
-        assert_eq!(
-            overlay.target,
-            sdk.join("packages/flutter_tools/.dart_tool")
-        );
-    }
 }

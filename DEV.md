@@ -28,7 +28,7 @@ before accepting it.
 
 ## Research references and access
 
-`archive/` and `references/` are read-only research material, not the current
+`references/` (gitignored clones) is read-only research material, not the current
 implementation. Relevant owner-provided sources are
 `references/t3code` (native model catalogs and model/effort selection) and
 `references/secondary/pi/packages/durable` (checkpoint/replay design). They

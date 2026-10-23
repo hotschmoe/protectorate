@@ -1,0 +1,27 @@
+[package]
+name = "protectorate-fuzz"
+version = "0.1.0"
+edition.workspace = true
+description = "Fuzz targets over the parsers that read untrusted input; rust/fuzz runs them under libFuzzer"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+protectorate-backlog = { path = "../protectorate-backlog" }
+protectorate-chatlog = { path = "../protectorate-chatlog" }
+protectorate-claude-driver = { path = "../protectorate-claude-driver" }
+protectorate-cli = { path = "../protectorate-cli" }
+protectorate-codex-driver = { path = "../protectorate-codex-driver" }
+protectorate-directory = { path = "../protectorate-directory" }
+protectorate-grok-driver = { path = "../protectorate-grok-driver" }
+protectorate-identity = { path = "../protectorate-identity" }
+protectorate-mailbox = { path = "../protectorate-mailbox" }
+protectorate-mcpbridge = { path = "../protectorate-mcpbridge" }
+protectorate-pi-driver = { path = "../protectorate-pi-driver" }
+protectorate-quota = { path = "../protectorate-quota", default-features = false }
+protectorate-release = { path = "../protectorate-release" }
+protectorate-sandbox = { path = "../protectorate-sandbox" }
+protectorate-wire = { path = "../protectorate-wire" }
+protectorate-xfer = { path = "../protectorate-xfer" }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"

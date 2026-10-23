@@ -11,6 +11,3 @@ protectorate-tls = { path = "../protectorate-tls" }
 protectorate-wire = { path = "../protectorate-wire" }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-
-[dev-dependencies]
-tempfile = "3"

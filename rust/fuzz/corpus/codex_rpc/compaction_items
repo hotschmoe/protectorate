@@ -1,0 +1,3 @@
+{"method":"item/started","params":{"item":{"id":"comp-1","type":"contextCompaction"},"threadId":"fuzz-thread"}}
+{"method":"item/completed","params":{"item":{"id":"comp-1","type":"contextCompaction"},"threadId":"fuzz-thread"}}
+{"method":"turn/completed","params":{"turn":{"id":"comp-turn","status":"completed"},"threadId":"fuzz-thread"}}

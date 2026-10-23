@@ -246,7 +246,37 @@ pub struct PreparedFile {
 pub struct PreparedDirectory {
     dest: PathBuf,
     overwrite: bool,
-    stage: TempDir,
+    stage: Stage,
+}
+
+/// An extraction stage. Archive modes such as 0o000 directories would make
+/// the tree unremovable, so dropping it first restores owner access.
+struct Stage(TempDir);
+
+impl Stage {
+    fn path(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+impl Drop for Stage {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        unlock_tree(self.0.path());
+    }
+}
+
+#[cfg(unix)]
+fn unlock_tree(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).is_err() {
+        return;
+    }
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            unlock_tree(&entry.path());
+        }
+    }
 }
 
 impl PreparedDirectory {
@@ -435,7 +465,7 @@ impl Sink {
         spool.as_file_mut().sync_all()?;
         check_destination(&self.dest, Kind::Directory, self.overwrite)?;
         let parent = destination_parent(&self.dest)?;
-        let stage = TempDir::new_in(parent)?;
+        let stage = Stage(TempDir::new_in(parent)?);
         archive::extract_directory(spool.as_file_mut(), stage.path())?;
         set_mode(stage.path(), self.header.mode)?;
         check_destination(&self.dest, Kind::Directory, self.overwrite)?;

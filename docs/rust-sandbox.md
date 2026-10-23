@@ -67,15 +67,14 @@ directory and confirms the sibling account file is hidden.
 
 | Profile | Visible writable paths | Extra authority | Process and resource rules |
 |---|---|---|---|
-| Chat or terminal sleeve | Its workspace and private home | Its selected provider credential directory, read-only toolchain and named references | Private PID/IPC/UTS and mount namespaces; host network; optional CPU/memory caps; terminate descendants with the supervisor |
+| Chat or terminal sleeve | Its workspace and private home | Its selected provider credential directory, read-only toolchain and named references | Private PID/IPC/UTS, mount and network namespaces; egress only through the allowlisting proxy; optional CPU/memory caps; terminate descendants with the supervisor |
 | Nested runtime sleeve | Same as a sleeve | One delegated cgroup subtree, mounted inside its own cgroup namespace | Parent caps remain effective; child scopes cannot write parent controls |
 | Shared-node job | Its job directory, warm worktree and private job home | Read-only system/tool directories; no hub or node identity | Same process boundary, with CPU/memory/task limits and cancellation of all descendants |
 | Read-only helper | Private temporary home, optional scratch directory | Only the named source repositories, selected tools and inputs | Short deadline and no writable source mount |
 | Care-node or admin job | As authorized by node job policy | Host access is explicit in the job record | Never label this execution as sandboxed |
 
-Network stays shared with the host at first: chat protocols, Git, package
-registries and node work need it. A network namespace can be added as an
-explicit profile capability after its routing and service access are defined.
+Every sandbox has its own network namespace with only loopback; the next
+section describes the egress proxy that is its only way out.
 
 ## Implementation shape
 
@@ -109,13 +108,109 @@ explicit profile capability after its routing and service access are defined.
    cancellation and parent death. Run the shared-node job scenario separately.
    Cover this host's overlay and no-overlay configurations.
 
+## Egress
+
+A sandboxed workload has a private network namespace containing only
+loopback; it cannot open a socket to the host or the network. A plan with
+egress gets one host-side HTTP CONNECT proxy per sandbox, started by the
+launcher in the supervising process (the hub for chat sleeves and helpers,
+the sleeve runner for terminal sleeves, the node for jobs). If the proxy
+cannot start, the launch fails. The proxy's Unix socket is bound read-only
+into the sandbox at `/run/protectorate/egress/proxy`, and its host name is
+unlinked once setup finishes, so a killed supervisor leaves nothing behind.
+A small relay process, forked by the helper into the workload's PID
+namespace with no capabilities and not dumpable, listens on `127.0.0.1:3128`
+and forwards each connection to that socket. The launcher sets
+`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` (and their lowercase forms) to it,
+`NO_PROXY=localhost,127.0.0.1,::1`, and `NODE_USE_ENV_PROXY=1`, the switch
+Node's own fetch needs.
+
+The proxy accepts only `CONNECT host:port`. It never terminates TLS. A
+target is admitted by, in order: the hub's own `host:port`; the API and
+token hosts of the plan's provider credential (`Provider::api_hosts`);
+operator entries from `hub serve --egress-allow` or `node serve
+--egress-allow` (`host`, `host:port` or `*.domain`, port 443 by default);
+and, for Pi only, the hub's `--local-model-host` names on any port. IP
+literals are refused unless they are the hub or a local model host. The
+proxy resolves the name on the host and connects only to an address its rule
+permits: provider and operator rules reach only globally routable addresses,
+so loopback, RFC 1918, CGNAT, link-local (including `169.254.169.254`),
+unique-local, documentation, multicast and reserved ranges are refused. Each
+decision (allow, deny, or allowed-but-unreachable) is appended to the hub
+audit log as procedure `egress` with actor `sleeve:NAME`; node jobs write it
+to the node's log. Plain HTTP requests through the proxy get `405`.
+
+When the hub listens on loopback, its port is also relayed inside the
+namespace to a plain tunnel to the hub, so `PROTECTORATE_HUB` stays
+unchanged for the CLI and MCP bridge. A non-loopback hub is reached through
+the proxy like any other destination. Git helpers have loopback only, and
+node jobs default to an empty allowlist. SSH remotes cannot work; use HTTPS
+remotes.
+
+Each harness was run in a real sandbox with a dummy key on this host
+(2026-10-24) and its traffic was observed at the proxy:
+
+| Workload | Honors the proxy | Destinations seen |
+|---|---|---|
+| Claude Code 2.1.309 (native) | yes | `api.anthropic.com` (401); telemetry to `http-intake.logs.us5.datadoghq.com` denied |
+| Codex (npm, Node 22.23) | yes | `chatgpt.com`, `api.openai.com` (401); `github.com`, `api.github.com`, `files.openai.com` denied |
+| Grok 1.0.67 (native) | yes | `api.x.ai` (key rejected) |
+| Pi 1.4.0 (Node 24.22) | yes | `api.anthropic.com` (401) |
+| `git ls-remote https://github.com/...` | yes | `github.com` allowed with an operator entry, `403` without |
+
+A tool that ignores the proxy variables simply has no route and fails to
+connect; nothing leaves the namespace. `tests/egress.rs` in the sandbox crate
+checks the allowed, IP-literal, metadata, non-allowlisted, private-address,
+non-CONNECT, direct-connection and hub-relay cases in a real sandbox.
+
+## Workspace checkpoints
+
+The hub snapshots a sleeve's git workspace when a chat turn settles, before
+a resleeve, and on `CreateCheckpoint` (`protectorate sleeve checkpoint NAME
+create`, MCP `sleeve_create_checkpoint`). A checkpoint is a parentless
+commit of the workspace's tracked and untracked non-ignored files, under
+`refs/protectorate/checkpoints/N` in a private Git directory at
+`STATE/helpers/checkpoint-NAME/home/store`, built with a private index
+beside it. It is never part of the workspace repository, so no push can
+carry it, and hub backups do not include `helpers/`. The newest 20 are kept
+and unreferenced objects are pruned. An unchanged tree reuses the latest
+checkpoint. The workspace's own `.git/info/exclude` is honored and
+`.protectorate-token` is always excluded.
+
+Git never runs on the host for this. Each operation runs in a
+`CheckpointHelper` sandbox that sees only the workspace (writable, for
+restore) and the store in its own private home, with no network and no
+credentials. So the workspace's config, hooks, filters and symlinks cannot
+make the hub execute or read anything, and the sleeve, which cannot see
+`helpers/`, cannot read or rewrite its checkpoints. `ListCheckpoints`,
+`DiffCheckpoint` (between two checkpoints, or to the live workspace, cut at
+1 MiB) and `RestoreCheckpoint` are open to the owner, devices, the sleeve's
+own token and the identity that spawned it. Restore first checkpoints the
+current state and returns it as `before`, then resets the non-ignored files
+to the checkpoint, removing files it lacks; ignored files and the
+workspace's `.git` and index are untouched. A busy chat sleeve refuses a
+restore. The Flutter client has no checkpoint view yet.
+
+## Disk limits
+
+`SleeveLimits.disk_bytes` (`sleeve spawn --disk SIZE`) bounds a sleeve's
+workspace, private home, cache overlay uppers and checkpoint store. There is
+no unprivileged hard quota for an arbitrary directory, so the hub enforces
+it from its disk sampler: running sleeves with a limit are measured every 10
+seconds (every sleeve still every 5 minutes for status). At 90% the hub
+emits `sleeve.disk_warning` once per crossing. At 100% it stops the harness
+as Kill would, writes the reason into the chat log of a chat sleeve, emits
+`sleeve.disk_limit` and audits procedure `disk-limit`. Writes between
+samples are not blocked, so a fast writer can overshoot by what it writes in
+about 10 seconds; `/tmp` stays bounded by its tmpfs ceiling.
+
 ## Current launcher and limits
 
 `protectorate-sandbox` now has a dedicated helper and direct Linux launcher.
 It creates a fresh tmpfs root, user/mount/PID/IPC/UTS namespaces, read-only
 system and selected tool mounts, a private home, ordinary empty-file masks,
-`/dev` and `/proc`, and a bounded transient systemd user scope. It shares the
-host network. Cancellation kills the scope and process group. Launch fails if
+`/dev` and `/proc`, a private network namespace, and a bounded transient
+systemd user scope. Cancellation kills the scope and process group. Launch fails if
 the helper, user namespaces, mount APIs, or user systemd manager are missing.
 
 Live tests on this machine proved workspace/private-home writes, denial of

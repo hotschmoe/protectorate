@@ -37,6 +37,7 @@ fn direct_harness_wait_kills_descendants_before_reaping_leader() {
                 credential: None,
                 overlays: Vec::new(),
                 masks: Vec::new(),
+                egress: None,
                 limits: Limits {
                     cpu_percent: 0,
                     memory_bytes: 0,
@@ -159,6 +160,7 @@ impl Fixture {
                 source: self.policy.state_root.join("masks/empty"),
                 target: self.reference.join("config"),
             }],
+            egress: None,
             limits: Limits {
                 cpu_percent: 100,
                 memory_bytes: 256 << 20,
@@ -792,6 +794,7 @@ fn git_helper_can_status_a_linked_worktree() {
         credential: None,
         overlays: Vec::new(),
         masks: Vec::new(),
+        egress: None,
         limits: Limits {
             cpu_percent: 100,
             memory_bytes: 128 << 20,

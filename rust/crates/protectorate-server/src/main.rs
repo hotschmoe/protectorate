@@ -152,6 +152,7 @@ struct Options {
     quota_interval: Duration,
     local_llm_urls: Vec<String>,
     local_model_hosts: Vec<String>,
+    egress_allow: Vec<String>,
     trusted_proxies: Vec<std::net::IpAddr>,
     public_url: Option<String>,
     hub_watch_paths: Vec<PathBuf>,
@@ -207,7 +208,7 @@ struct NodeUninstallCommand {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  protectorate-rs version --json\n  protectorate-rs serve --home DIR --owner-token-file FILE [--listen 127.0.0.1:7470] [--tls-listen IP:PORT]... [--tls-name HOST]... [--public-url URL] [--web DIR] [--workspace-root DIR] [--reference-dir DIR] [--sleeve-effort high] [--msg-ack-timeout 30m] [--dead-retention 24h|0] [--node-interval 30s] [--quota-interval 5m] [--local-llm-url URL] [--local-model-host HOST] [--trusted-proxy IP] [--watch DIR] [--tmux-socket NAME] [--orchestrator-admin-grants] [--release-repo OWNER/REPO] [--update-channel stable|dev] [--release-api-url URL] [--release-dir DIR] [--node-binary-dir DIR] [--pi-executable FILE] [--pi-tool-root DIR] [--claude-executable FILE] [--claude-tool-root DIR] [--codex-executable FILE] [--codex-tool-root DIR] [--grok-executable FILE] [--grok-tool-root DIR] [--terminal-tool-root DIR] [--flutter-sdk-root DIR --flutter-cache-lower DIR] [--flutter-tools-lower DIR] [--pub-cache-lower DIR] [--go-mod-cache-lower DIR] [--backup-dir DIR] [--backup-every 6h]\n  protectorate-rs hub backup [--home DIR] [--to DIR]\n  protectorate-rs hub restore FILE --home DIR\n  protectorate-rs hub publish-flutter-cache --home DIR --flutter-sdk-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-flutter-tools --home DIR --flutter-sdk-root DIR [--max-bytes 4194304]\n  protectorate-rs hub publish-pub-cache --home DIR --pub-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-go-mod-cache --home DIR --go-mod-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs node join --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR]\n  protectorate-rs node install --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR] [--allow-plain-jobs] [--dry-run] [--no-start] [-- serve-flags]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node doctor [--home DIR] [--json]\n  protectorate-rs node serve [--home DIR] [--listen IP:PORT] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--sandbox-helper FILE] [--allow-plain-jobs] [--watch-dir DIR] [--docker-host URL]\n  protectorate-rs api call Service/Method [JSON] [--hub URL] [--token-file FILE] [--json]\n\nListeners bind explicit private addresses only: loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10. The hub serves plain HTTP on its loopback --listen and HTTPS with its own CA (HOME/ca/ca.pem) on each --tls-listen; --tls-name adds a DNS name to its certificate. A node joins with an invite code (PROTECTORATE_JOIN_CODE) and serves only mutual TLS, to the hub, on the address it joined with.\n"
+    "Usage:\n  protectorate-rs version --json\n  protectorate-rs serve --home DIR --owner-token-file FILE [--listen 127.0.0.1:7470] [--tls-listen IP:PORT]... [--tls-name HOST]... [--public-url URL] [--web DIR] [--workspace-root DIR] [--reference-dir DIR] [--sleeve-effort high] [--msg-ack-timeout 30m] [--dead-retention 24h|0] [--node-interval 30s] [--quota-interval 5m] [--local-llm-url URL] [--local-model-host HOST] [--egress-allow HOST[:PORT]] [--trusted-proxy IP] [--watch DIR] [--tmux-socket NAME] [--orchestrator-admin-grants] [--release-repo OWNER/REPO] [--update-channel stable|dev] [--release-api-url URL] [--release-dir DIR] [--node-binary-dir DIR] [--pi-executable FILE] [--pi-tool-root DIR] [--claude-executable FILE] [--claude-tool-root DIR] [--codex-executable FILE] [--codex-tool-root DIR] [--grok-executable FILE] [--grok-tool-root DIR] [--terminal-tool-root DIR] [--flutter-sdk-root DIR --flutter-cache-lower DIR] [--flutter-tools-lower DIR] [--pub-cache-lower DIR] [--go-mod-cache-lower DIR] [--backup-dir DIR] [--backup-every 6h]\n  protectorate-rs hub backup [--home DIR] [--to DIR]\n  protectorate-rs hub restore FILE --home DIR\n  protectorate-rs hub publish-flutter-cache --home DIR --flutter-sdk-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-flutter-tools --home DIR --flutter-sdk-root DIR [--max-bytes 4194304]\n  protectorate-rs hub publish-pub-cache --home DIR --pub-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-go-mod-cache --home DIR --go-mod-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs node join --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR]\n  protectorate-rs node install --hub URL --ca-cert FILE [--code CODE | --code-file FILE] [--name NAME] [--listen IP:PORT] [--home DIR] [--allow-plain-jobs] [--dry-run] [--no-start] [-- serve-flags]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node doctor [--home DIR] [--json]\n  protectorate-rs node serve [--home DIR] [--listen IP:PORT] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--sandbox-helper FILE] [--allow-plain-jobs] [--egress-allow HOST[:PORT]] [--watch-dir DIR] [--docker-host URL]\n  protectorate-rs api call Service/Method [JSON] [--hub URL] [--token-file FILE] [--json]\n\nListeners bind explicit private addresses only: loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10. The hub serves plain HTTP on its loopback --listen and HTTPS with its own CA (HOME/ca/ca.pem) on each --tls-listen; --tls-name adds a DNS name to its certificate. A node joins with an invite code (PROTECTORATE_JOIN_CODE) and serves only mutual TLS, to the hub, on the address it joined with.\n"
 }
 
 fn default_home() -> Result<PathBuf, String> {
@@ -441,6 +442,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     let mut quota_interval = Duration::from_secs(5 * 60);
     let mut local_llm_urls = Vec::new();
     let mut local_model_hosts = Vec::new();
+    let mut egress_allow = Vec::new();
     let mut trusted_proxies = Vec::new();
     let mut public_url = None;
     let mut hub_watch_paths = Vec::new();
@@ -531,6 +533,9 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
                     return Err("--local-model-host requires a hostname or IP address".into());
                 }
                 local_model_hosts.push(host);
+            }
+            "--egress-allow" => {
+                egress_allow.push(args.next().ok_or("--egress-allow requires HOST[:PORT]")?);
             }
             "--trusted-proxy" if !node => {
                 let address = args.next().ok_or("--trusted-proxy requires IP address")?;
@@ -766,6 +771,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
         quota_interval,
         local_llm_urls,
         local_model_hosts,
+        egress_allow,
         trusted_proxies,
         public_url,
         hub_watch_paths,
@@ -1065,6 +1071,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     hub = hub.with_node_monitor(Arc::new(monitor))?;
     hub = hub.with_quota_sources(options.quota_interval, &options.local_llm_urls);
     hub = hub.with_local_model_hosts(options.local_model_hosts.clone());
+    hub = hub.with_egress_allow(options.egress_allow.clone());
     hub = hub.with_sleeve_effort(options.sleeve_effort.clone());
     hub = hub.with_dead_retention(options.dead_retention);
     hub = hub.with_trusted_proxies(options.trusted_proxies.clone());
@@ -1484,6 +1491,20 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
         }
         let runtime_dir = home.join("runtime");
         fs::create_dir_all(&runtime_dir)?;
+        let mut sandbox_options = protectorate_sandbox::runtime::LaunchOptions::new(
+            helper,
+            runtime_dir,
+            user_home.clone(),
+            home.clone(),
+        );
+        sandbox_options.egress_log = Some(Arc::new(
+            |decision: &protectorate_sandbox::egress::Decision| {
+                eprintln!(
+                    "job egress {:?} {}:{}: {}",
+                    decision.verdict, decision.host, decision.port, decision.reason
+                )
+            },
+        ));
         jobs = jobs.with_sandbox(protectorate_node::SandboxConfig {
             policy: protectorate_sandbox::Policy {
                 state_root: home.clone(),
@@ -1494,12 +1515,12 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
                 immutable_cache_roots: Vec::new(),
                 nested_cgroups_available: false,
             },
-            options: protectorate_sandbox::runtime::LaunchOptions::new(
-                helper,
-                runtime_dir,
-                user_home,
-                home.clone(),
-            ),
+            options: sandbox_options,
+            egress: Some(protectorate_sandbox::Egress {
+                hub: None,
+                allow: options.egress_allow.clone(),
+                private_hosts: Vec::new(),
+            }),
         });
     }
     let restart_requested = Arc::new(AtomicBool::new(false));
@@ -1514,7 +1535,6 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
     });
     let agent = protectorate_node::Agent::new(collector)
         .with_certificate_renewal(renew)
-        .with_desk_home(&home)?
         .with_files_durable(file_root, options.file_unconfined, &home)?
         .with_jobs(jobs)
         .with_update(std::env::current_exe()?, build_version(), restart)?;

@@ -510,7 +510,6 @@ async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
     });
     let agent = protectorate_node::Agent::new(collector)
         .with_certificate_renewal(renew)
-        .with_desk_home(&home)?
         .with_files_durable(file_root, options.file_unconfined, &home)?
         .with_jobs(jobs)
         .with_update(env::current_exe()?, build_version(), restart)?;

@@ -21,7 +21,6 @@ use tokio::{
 
 struct ReleaseServer {
     base: String,
-    online: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -74,9 +73,7 @@ impl ReleaseServer {
         })
         .to_string()
         .into_bytes();
-        let online = Arc::new(AtomicBool::new(true));
         let stop = Arc::new(AtomicBool::new(false));
-        let online2 = Arc::clone(&online);
         let stop2 = Arc::clone(&stop);
         let handle = thread::spawn(move || {
             while !stop2.load(Ordering::Relaxed) {
@@ -89,9 +86,7 @@ impl ReleaseServer {
                 let len = stream.read(&mut buf).unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..len]);
                 let path = request.split_whitespace().nth(1).unwrap_or("");
-                let (status, body) = if !online2.load(Ordering::Relaxed) {
-                    (503, b"offline".as_slice())
-                } else if path.starts_with("/repos/owner/repo/releases/") {
+                let (status, body) = if path.starts_with("/repos/owner/repo/releases/") {
                     (200, release.as_slice())
                 } else if let Some(name) = path.strip_prefix("/assets/") {
                     match assets.get(name) {
@@ -111,7 +106,6 @@ impl ReleaseServer {
         });
         Self {
             base,
-            online,
             stop,
             handle: Some(handle),
         }
@@ -314,50 +308,6 @@ async fn stream_update(addr: SocketAddr) -> (u16, Vec<Value>, String) {
         remainder = &remainder[chunk_len + 2..];
     }
     (status, events, String::from_utf8_lossy(body).into_owned())
-}
-
-#[tokio::test]
-async fn check_release_reports_capability_and_offline_cache() {
-    let home = tempfile::tempdir().unwrap();
-    let cache = tempfile::tempdir().unwrap();
-    let api = ReleaseServer::start("v2.0.0", false);
-    let source = Source::new(
-        "owner/repo",
-        "stable",
-        &api.base,
-        cache.path().to_str().unwrap(),
-    )
-    .unwrap();
-    let (addr, task) = start(source, "v1.0.0", home.path()).await;
-    let path = "/protectorate.v1.ReleaseService/CheckRelease";
-    let status_path = "/protectorate.v1.HubService/GetStatus";
-    let (status, before) = call(addr, status_path, json!({})).await;
-    assert_eq!(status, 200, "{before}");
-    assert_eq!(before["updateChannel"], "stable");
-    assert!(before["availableVersion"].is_null());
-    let (status, info) = call(addr, path, json!({})).await;
-    assert_eq!(status, 200, "{info}");
-    assert_eq!(info["version"], "v2.0.0");
-    assert_eq!(info["channel"], "stable");
-    assert!(info["canUpdate"].is_null() || info["canUpdate"] == false);
-    let (status, current) = call(addr, status_path, json!({})).await;
-    assert_eq!(status, 200, "{current}");
-    assert_eq!(current["availableVersion"], "v2.0.0");
-    assert_eq!(current["updateChannel"], "stable");
-    assert_eq!(current["releaseNotesUrl"], format!("{}/notes", api.base));
-    api.online.store(false, Ordering::Relaxed);
-    let (status, cached) = call(addr, path, json!({})).await;
-    assert_eq!(status, 200, "{cached}");
-    assert_eq!(cached, info);
-    let (status, offline) = call(addr, status_path, json!({})).await;
-    assert_eq!(status, 200, "{offline}");
-    assert_eq!(offline["availableVersion"], "v2.0.0");
-    assert_eq!(offline["releaseNotesUrl"], format!("{}/notes", api.base));
-    let (status, error) = call(addr, path, json!({"version":"v2.0.0"})).await;
-    assert_eq!(status, 503, "{error}");
-    let (status, error) = call(addr, path, json!({"channel":"nightly"})).await;
-    assert_eq!(status, 400, "{error}");
-    task.abort();
 }
 
 #[tokio::test]

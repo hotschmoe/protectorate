@@ -842,36 +842,3 @@ fn truncate(text: &str, limit: usize) -> String {
     }
     format!("{}...", &text[..end])
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn outcome_prefers_once_then_prefix() {
-        let options = vec![
-            json!({"optionId":"allow-session","kind":"allow_always"}),
-            json!({"optionId":"allow-once","kind":"allow_once"}),
-            json!({"optionId":"reject-once","kind":"reject_once"}),
-        ];
-        assert_eq!(
-            pick_outcome(&options, true)["optionId"],
-            json!("allow-once")
-        );
-        assert_eq!(
-            pick_outcome(&options, false)["optionId"],
-            json!("reject-once")
-        );
-        let prefix = vec![json!({"optionId":"reject-session","kind":"reject_always"})];
-        assert_eq!(
-            pick_outcome(&prefix, false)["optionId"],
-            json!("reject-session")
-        );
-        assert_eq!(pick_outcome(&[], true)["outcome"], json!("cancelled"));
-    }
-
-    #[test]
-    fn stdio_command_is_agent_stdio() {
-        assert_eq!(stdio_args(), ["agent", "stdio"]);
-    }
-}

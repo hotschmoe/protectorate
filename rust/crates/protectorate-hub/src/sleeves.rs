@@ -68,6 +68,15 @@ impl SpawnParent {
     }
 }
 
+/// Whether the caller is the identity that spawned this sleeve.
+pub(super) fn spawned_by(auth: &AuthContext, row: &Record) -> bool {
+    let same_token = !row.parent_token_id.is_empty() && row.parent_token_id == auth.token_id;
+    let same_sleeve = auth.actor.starts_with("token:sleeve:")
+        && auth.actor.strip_prefix("token:") == Some(row.parent.as_str());
+    let same_envoy = row.parent == "envoy" && auth.actor == "token:orchestrator-envoy";
+    same_token || same_sleeve || same_envoy
+}
+
 fn has_kill_scope(auth: &AuthContext) -> bool {
     super::auth::scopes_allow(
         &auth.scopes.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -185,6 +194,7 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         document.as_bytes(),
     )
     .ok();
+    crate::checkpoints::before_resleeve(hub, &old);
     let launch_request = resleeve_launch_request(&old, to, &chosen_selection);
     {
         let _guard = hub.sleeve_launch_lock.lock().unwrap();
@@ -464,6 +474,7 @@ fn sandboxed_git_facts(
             credential: None,
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: None,
             limits: SandboxLimits {
                 cpu_percent: 100,
                 memory_bytes: 128 << 20,
@@ -665,17 +676,23 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             }
         });
         let weak = Arc::downgrade(&hub);
+        // Running sleeves with a disk limit are sampled every tick; every
+        // sleeve is sampled for status every 30th tick.
         runtime.spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
+            let mut warned = BTreeSet::new();
+            for tick in 0_u64.. {
                 interval.tick().await;
                 let Some(hub) = weak.upgrade() else { break };
-                if tokio::task::spawn_blocking(move || sample_sleeve_disks(&hub))
-                    .await
-                    .is_err()
+                match tokio::task::spawn_blocking(move || {
+                    sample_sleeve_disks(&hub, tick % 30 == 0, &mut warned);
+                    warned
+                })
+                .await
                 {
-                    break;
+                    Ok(kept) => warned = kept,
+                    Err(_) => break,
                 }
             }
         });
@@ -813,13 +830,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     let _guard = hub.sleeve_launch_lock.lock().unwrap();
                     if !auth.owner && !auth.device && !has_kill_scope(&auth) {
                         let row = hub.sleeves.get(&name).map_err(registry_error)?;
-                        let same_token =
-                            !row.parent_token_id.is_empty() && row.parent_token_id == auth.token_id;
-                        let same_sleeve = auth.actor.starts_with("token:sleeve:")
-                            && auth.actor.strip_prefix("token:") == Some(row.parent.as_str());
-                        let same_envoy =
-                            row.parent == "envoy" && auth.actor == "token:orchestrator-envoy";
-                        if name == "envoy" || !(same_token || same_sleeve || same_envoy) {
+                        if name == "envoy" || !spawned_by(&auth, &row) {
                             return Err(RpcError::new(
                                 Code::PermissionDenied,
                                 "sleeve is owned by another identity",
@@ -1525,6 +1536,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     let cpu_percent = u32::try_from(number(&limits, "cpuPercent")?)
         .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU percent exceeds u32"))?;
     let memory_bytes = number(&limits, "memoryBytes")?;
+    let disk_bytes = number(&limits, "diskBytes")?;
     let nested = value
         .get("nested")
         .and_then(Value::as_bool)
@@ -1647,6 +1659,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         tasks_max: launcher.tasks_max,
         nested,
         ready_file: ready.clone(),
+        egress: Some(sleeve_egress(hub, harness == Harness::Pi)),
     };
     protectorate_sleeve_runner::plan(&config)
         .map_err(|e| RpcError::new(Code::InvalidArgument, e.to_string()))?;
@@ -1714,6 +1727,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     row.limits = Limits {
         cpu_percent,
         memory_bytes,
+        disk_bytes,
     };
     row.nested = nested;
     row.parent = parent.label.clone();
@@ -1910,6 +1924,7 @@ fn prune_sleeves(hub: &Hub, options: &Value) -> Result<Vec<Value>> {
         .cloned()
         .collect::<Vec<_>>();
     let state = open_root_directory(hub.workspaces.state_root()).map_err(cache_error)?;
+    let helpers = open_child_directory(&state, OsStr::new("helpers")).map_err(cache_error)?;
     let mut entries = Vec::new();
     if let Some(sleeves) =
         open_child_directory(&state, OsStr::new("sleeves")).map_err(cache_error)?
@@ -1986,6 +2001,21 @@ fn prune_sleeves(hub: &Hub, options: &Value) -> Result<Vec<Value>> {
                     OsStr::new("home"),
                     &home_path,
                     "home",
+                    homes,
+                    yes,
+                    busy.as_deref(),
+                    true,
+                )?;
+            }
+            if let Some(helpers) = &helpers {
+                let store = format!("checkpoint-{name_str}");
+                prune_one(
+                    &mut entries,
+                    name_str,
+                    helpers,
+                    OsStr::new(&store),
+                    &hub.workspaces.state_root().join("helpers").join(&store),
+                    "checkpoints",
                     homes,
                     yes,
                     busy.as_deref(),
@@ -2277,6 +2307,8 @@ fn prune_one(
         "clone requires Git history and working-tree verification".to_owned()
     } else if kind == "home" {
         "whole home, including auth, sessions, history and config".to_owned()
+    } else if kind == "checkpoints" {
+        "workspace checkpoints, pruned with the home".to_owned()
     } else {
         "regenerable cache".to_owned()
     };
@@ -2347,8 +2379,12 @@ fn overlay_upper_size(path: &Path) -> io::Result<(u64, u64)> {
     Ok((total, go_build))
 }
 
-fn sample_sleeve_disks(hub: &Hub) {
+fn sample_sleeve_disks(hub: &Hub, all: bool, warned: &mut BTreeSet<String>) {
     for row in hub.sleeves.list() {
+        let limited = row.state == State::Running && row.limits.disk_bytes > 0;
+        if !all && !limited {
+            continue;
+        }
         let mut sample = DiskUsage::default();
         let workspace = Path::new(&row.workspace);
         match disk_size_path(workspace) {
@@ -2399,13 +2435,86 @@ fn sample_sleeve_disks(hub: &Hub) {
                 eprintln!("sleeve {}: measure Go cache disk: {error}", row.name)
             }
         }
+        let used = match (sample.workspace_bytes, sample.home_bytes, &overlays) {
+            (Some(workspace), Some(home), Ok((overlay, _))) => Some(
+                workspace
+                    .saturating_add(home)
+                    .saturating_add(*overlay)
+                    .saturating_add(
+                        disk_size_path(
+                            &hub.workspaces
+                                .state_root()
+                                .join("helpers")
+                                .join(format!("checkpoint-{}", row.name)),
+                        )
+                        .unwrap_or(0),
+                    ),
+            ),
+            _ => None,
+        };
         if let Err(error) = hub
             .sleeves
             .set_disk_usage(&row.name, &row.created_at, sample, now())
         {
             eprintln!("sleeve {}: save disk usage: {error}", row.name);
         }
+        if let (true, Some(used)) = (limited, used) {
+            enforce_disk_limit(hub, &row, used, warned);
+        }
     }
+}
+
+/// Warn once at 90% of a sleeve's disk limit and stop its harness at 100%.
+fn enforce_disk_limit(hub: &Hub, row: &Record, used: u64, warned: &mut BTreeSet<String>) {
+    let limit = row.limits.disk_bytes;
+    let name = row.name.as_str();
+    if used < limit {
+        if used.saturating_mul(10) >= limit.saturating_mul(9) {
+            if warned.insert(name.to_owned()) {
+                hub.emit(
+                    "sleeve.disk_warning",
+                    name,
+                    json!({"usedBytes": used, "limitBytes": limit}),
+                );
+            }
+        } else {
+            warned.remove(name);
+        }
+        return;
+    }
+    warned.remove(name);
+    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+    let current = hub.sleeves.get(name).ok();
+    if hub.resleeving.lock().unwrap().contains(name)
+        || current.is_none_or(|current| {
+            current.created_at != row.created_at || current.state != State::Running
+        })
+    {
+        return;
+    }
+    let text = format!("disk limit reached: {used} of {limit} bytes used; the harness was stopped");
+    let stopped = if row.mode == Mode::Chat {
+        let _ = crate::chat::append_error(hub, name, &text);
+        crate::chat::kill_pi(hub, name)
+    } else {
+        kill_shell(hub, name)
+    };
+    hub.emit(
+        "sleeve.disk_limit",
+        name,
+        json!({"usedBytes": used, "limitBytes": limit, "stopped": stopped.is_ok()}),
+    );
+    hub.audit.write(AuditEntry {
+        actor: "hub".into(),
+        procedure: "disk-limit".into(),
+        subject: name.into(),
+        outcome: if stopped.is_ok() { "denied" } else { "error" }.into(),
+        detail: match stopped {
+            Ok(()) => text,
+            Err(error) => format!("{text}; stop failed: {}", error.message),
+        },
+        ..AuditEntry::default()
+    });
 }
 
 fn cache_error(error: io::Error) -> RpcError {
@@ -2663,6 +2772,48 @@ fn internal(error: std::io::Error) -> RpcError {
 }
 fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
+/// The egress a sleeve or harness helper gets: its provider's API hosts
+/// (added by the sandbox policy), the hub, the operator's allowlist and, for
+/// Pi, the configured local model servers.
+pub(super) fn sleeve_egress(hub: &Hub, pi: bool) -> protectorate_sandbox::Egress {
+    let url = hub
+        .terminal_launcher
+        .as_ref()
+        .map(|launcher| launcher.hub_url.clone())
+        .or_else(|| crate::chat::hub_url(hub));
+    let authority = url.and_then(|url| {
+        let (default_port, rest) = if let Some(rest) = url.strip_prefix("https://") {
+            (443, rest.to_owned())
+        } else {
+            (80, url.strip_prefix("http://")?.to_owned())
+        };
+        let authority = rest.split('/').next().unwrap_or_default();
+        let has_port = if authority.starts_with('[') {
+            authority.contains("]:")
+        } else {
+            authority.contains(':')
+        };
+        Some(if has_port {
+            authority.to_owned()
+        } else {
+            format!("{authority}:{default_port}")
+        })
+    });
+    protectorate_sandbox::Egress {
+        hub: authority,
+        allow: hub.egress_allow.clone(),
+        private_hosts: if pi {
+            hub.local_model_hosts.clone()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+pub(super) fn egress_log(hub: &Hub, name: &str) -> protectorate_sandbox::egress::Log {
+    protectorate_sleeve_runner::egress_audit(Arc::clone(&hub.audit), format!("sleeve:{name}"))
 }
 
 pub(super) fn sleeve_json(sleeve: &Record) -> Value {

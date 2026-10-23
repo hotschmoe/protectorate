@@ -151,15 +151,7 @@ fn subject(method: &Method, auth: &AuthContext, request: &DynamicMessage, succes
                 })
         })
         .unwrap_or_default();
-    let subject = if method
-        .procedure
-        .starts_with("/protectorate.v1.DeskService/")
-    {
-        match request.get_field_by_name("target").as_deref() {
-            Some(FieldValue::Message(target)) => field_string(target, "name"),
-            _ => String::new(),
-        }
-    } else if method.procedure == "/protectorate.v1.ReleaseService/UpdateHub" {
+    let subject = if method.procedure == "/protectorate.v1.ReleaseService/UpdateHub" {
         "hub".to_owned()
     } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
         String::new()

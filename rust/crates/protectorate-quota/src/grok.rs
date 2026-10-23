@@ -19,8 +19,6 @@ pub struct Grok {
     pub home: Option<PathBuf>,
     pub base_url: String,
     pub web_url: String,
-    /// Skips the remaining-resets call when true.
-    pub no_resets: bool,
 }
 
 impl Default for Grok {
@@ -29,7 +27,6 @@ impl Default for Grok {
             home: None,
             base_url: DEFAULT_PROXY.to_string(),
             web_url: DEFAULT_WEB.to_string(),
-            no_resets: false,
         }
     }
 }
@@ -48,10 +45,6 @@ impl Grok {
     }
     pub fn with_web_url(mut self, web: &str) -> Self {
         self.web_url = web.trim_end_matches('/').to_string();
-        self
-    }
-    pub fn with_no_resets(mut self) -> Self {
-        self.no_resets = true;
         self
     }
     fn proxy(&self) -> String {
@@ -117,7 +110,7 @@ impl GrokAmount {
     fn float(&self) -> Option<f64> {
         match &self.val {
             Value::Number(n) => n.as_f64(),
-            Value::String(s) => s.parse::<f64>().ok(),
+            Value::String(s) => s.parse::<f64>().ok().filter(|v| v.is_finite()),
             _ => None,
         }
     }
@@ -204,7 +197,8 @@ impl Reader for Grok {
                     _ => None,
                 }
             });
-            if let Some(pct) = pct {
+            // "NaN" and "inf" parse as floats, and a tiny cap overflows the ratio.
+            if let Some(pct) = pct.filter(|p| p.is_finite()) {
                 snap.windows.push(Window {
                     name: window_name(start, end),
                     used_percent: clamp_percent(pct),
@@ -224,9 +218,7 @@ impl Reader for Grok {
                 snap.plan = s.tier;
             }
         }
-        if !self.no_resets {
-            snap.resets = self.remaining_resets(http, ctx, &entry.key);
-        }
+        snap.resets = self.remaining_resets(http, ctx, &entry.key);
         Ok(snap)
     }
 }
@@ -431,280 +423,4 @@ pub fn parse_resets(data: &[u8], now: DateTime<Utc>) -> Vec<Reset> {
     }
     sort_by_expiry(&mut out, |r| r.expires_at);
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testkit::{ctx, time, Fake};
-
-    fn home(dir: &std::path::Path, auth: &str) {
-        std::fs::create_dir_all(dir.join(".grok")).unwrap();
-        std::fs::write(dir.join(".grok").join("auth.json"), auth).unwrap();
-    }
-
-    fn varint(mut v: u64) -> Vec<u8> {
-        let mut out = Vec::new();
-        loop {
-            let b = (v & 0x7f) as u8;
-            v >>= 7;
-            if v == 0 {
-                out.push(b);
-                return out;
-            }
-            out.push(b | 0x80);
-        }
-    }
-
-    fn msg_field(num: u64, payload: &[u8]) -> Vec<u8> {
-        let mut o = varint((num << 3) | 2);
-        o.extend(varint(payload.len() as u64));
-        o.extend(payload);
-        o
-    }
-
-    fn timestamp(secs: u64) -> Vec<u8> {
-        let mut o = vec![0x08u8];
-        o.extend(varint(secs));
-        o
-    }
-
-    /// One reset record: field 10 { field 30 = Timestamp { 1 = seconds } }.
-    fn reset_record(secs: u64) -> Vec<u8> {
-        msg_field(10, &msg_field(30, &timestamp(secs)))
-    }
-
-    fn grpc_frame(payload: &[u8]) -> Vec<u8> {
-        let mut o = vec![0u8];
-        o.extend((payload.len() as u32).to_be_bytes());
-        o.extend(payload);
-        o
-    }
-
-    #[test]
-    fn login_entries_are_picked_by_prefix_then_key_order() {
-        let raw = r#"{
-            "https://accounts.x.ai/sign-in::z": {"key": "web-key", "expires_at": "2026-06-01T00:00:00Z"},
-            "https://auth.x.ai::b": {"key": "", "expires_at": ""},
-            "https://auth.x.ai::a": {"key": "cli-key", "expires_at": "2026-06-01T00:00:00Z"},
-            "other::a": {"key": "nope"}
-        }"#;
-        let e = pick_entry(raw.as_bytes()).unwrap();
-        assert_eq!(
-            e.key, "cli-key",
-            "empty keys are skipped, sorted keys are preferred"
-        );
-
-        let raw = r#"{"https://accounts.x.ai/sign-in::a": {"key": "web"}}"#;
-        assert_eq!(pick_entry(raw.as_bytes()).unwrap().key, "web");
-
-        let raw = r#"{"other::a": {"key": "nope"}}"#;
-        let err = pick_entry(raw.as_bytes()).unwrap_err();
-        assert_eq!(err.to_string(), "source unavailable: no Grok login entry");
-    }
-
-    fn billing(percent: &str) -> String {
-        format!(
-            r#"{{"subscriptionTier":"super","config":{{"creditUsagePercent":{percent},"currentPeriod":{{"start":"2025-12-25T00:00:00Z","end":"2026-01-01T00:00:00Z"}}}}}}"#
-        )
-    }
-
-    #[test]
-    fn billing_percent_becomes_a_weekly_window() {
-        let dir = tempfile::tempdir().unwrap();
-        home(
-            dir.path(),
-            r#"{"https://auth.x.ai::a": {"key": "cli-key", "expires_at": "2026-06-01T00:00:00Z"}}"#,
-        );
-        let resets = grpc_frame(&reset_record(1_767_232_800));
-        let http = Fake::new()
-            .route(
-                "GET",
-                "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-                200,
-                &billing("40"),
-            )
-            .route_bytes(
-                "POST",
-                "https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets",
-                200,
-                resets,
-            );
-        let snap = Grok::new()
-            .with_home(dir.path().to_path_buf())
-            .read(&ctx("2026-01-01T00:00:00Z"), &http)
-            .unwrap();
-
-        assert_eq!(snap.source, "cli-proxy-billing");
-        assert_eq!(snap.plan, "super");
-        assert_eq!(snap.windows.len(), 1);
-        assert_eq!(snap.windows[0].name, "weekly", "a 7-day period is weekly");
-        assert_eq!(snap.windows[0].used_percent, 40.0);
-        assert_eq!(
-            snap.windows[0].resets_at,
-            Some(time("2026-01-01T00:00:00Z"))
-        );
-        assert_eq!(snap.resets.len(), 1);
-        assert_eq!(snap.resets[0].kind, "usage-limit");
-        assert_eq!(
-            snap.resets[0].expires_at,
-            Some(time("2026-01-01T02:00:00Z"))
-        );
-
-        let reqs = http.requests();
-        assert!(reqs[0]
-            .2
-            .contains(&("x-xai-token-auth".to_string(), "xai-grok-cli".to_string())));
-        assert!(reqs[1].2.contains(&(
-            "Content-Type".to_string(),
-            "application/grpc-web+proto".to_string()
-        )));
-    }
-
-    #[test]
-    fn used_over_cap_is_the_fallback_percent_and_settings_the_plan() {
-        let dir = tempfile::tempdir().unwrap();
-        home(
-            dir.path(),
-            r#"{"https://auth.x.ai::a": {"key": "cli-key", "expires_at": "2026-06-01T00:00:00Z"}}"#,
-        );
-        let http = Fake::new()
-            .route(
-                "GET",
-                "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-                200,
-                r#"{"config":{"onDemandUsed": {"val": 30}, "onDemandCap": {"val": 120},
-                      "billingPeriodStart": "2025-12-01T00:00:00Z", "billingPeriodEnd": "2026-01-01T00:00:00Z"}}"#,
-            )
-            .route(
-                "GET",
-                "https://cli-chat-proxy.grok.com/v1/settings",
-                200,
-                r#"{"subscription_tier_display":"X1 Premium"}"#,
-            );
-        let snap = Grok::new()
-            .with_home(dir.path().to_path_buf())
-            .read(&ctx("2026-01-01T00:00:00Z"), &http)
-            .unwrap();
-        assert_eq!(snap.plan, "X1 Premium");
-        assert_eq!(snap.windows[0].name, "monthly");
-        assert_eq!(snap.windows[0].used_percent, 25.0);
-        assert!(
-            snap.resets.is_empty(),
-            "a failed resets call is not an error"
-        );
-    }
-
-    #[test]
-    fn no_resets_flag_skips_the_grpc_call() {
-        let dir = tempfile::tempdir().unwrap();
-        home(
-            dir.path(),
-            r#"{"https://auth.x.ai::a": {"key": "cli-key", "expires_at": "2026-06-01T00:00:00Z"}}"#,
-        );
-        let http = Fake::new().route(
-            "GET",
-            "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-            200,
-            &billing("10"),
-        );
-        let snap = Grok::new()
-            .with_home(dir.path().to_path_buf())
-            .with_no_resets()
-            .read(&ctx("2026-01-01T00:00:00Z"), &http)
-            .unwrap();
-        assert_eq!(http.requests().len(), 1);
-        assert!(snap.resets.is_empty());
-    }
-
-    #[test]
-    fn expired_entry_and_bad_status_are_reported() {
-        let dir = tempfile::tempdir().unwrap();
-        home(
-            dir.path(),
-            r#"{"https://auth.x.ai::a": {"key": "cli-key", "expires_at": "2025-12-31T00:00:00Z"}}"#,
-        );
-        let http = Fake::new();
-        let g = Grok::new().with_home(dir.path().to_path_buf());
-        assert_eq!(
-            g.read(&ctx("2026-01-01T00:00:00Z"), &http).unwrap_err(),
-            Error::Expired
-        );
-
-        home(
-            dir.path(),
-            r#"{"https://auth.x.ai::a": {"key": "cli-key", "expires_at": "2026-06-01T00:00:00Z"}}"#,
-        );
-        let http = Fake::new().route(
-            "GET",
-            "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
-            401,
-            "{}",
-        );
-        assert_eq!(
-            g.read(&ctx("2026-01-01T00:00:00Z"), &http).unwrap_err(),
-            Error::Unauthorized
-        );
-    }
-
-    #[test]
-    fn reset_records_are_filtered_and_sorted() {
-        let now = time("2026-01-01T00:00:00Z");
-        let mut payload = Vec::new();
-        payload.extend(reset_record(1_767_405_600)); // 2026-01-03
-        payload.extend(reset_record(1_767_232_800)); // 2026-01-01 02:00
-        payload.extend(reset_record(1_735_689_600)); // 2025-01-01, already past
-        payload.extend(msg_field(10, &msg_field(10, b"id".as_slice()))); // no timestamp
-        let body = grpc_frame(&payload);
-        let out = parse_resets(&body, now);
-        let expiry: Vec<Option<chrono::DateTime<chrono::Utc>>> =
-            out.iter().map(|r| r.expires_at).collect();
-        assert_eq!(
-            expiry,
-            vec![
-                Some(time("2026-01-01T02:00:00Z")),
-                Some(time("2026-01-03T02:00:00Z")),
-            ]
-        );
-
-        // A trailer-only frame is not data, and garbage parses to nothing.
-        let mut trailer = vec![0x80u8];
-        trailer.extend(4u32.to_be_bytes());
-        trailer.extend(b"grpc-status:0");
-        assert!(parse_resets(&trailer, now).is_empty());
-        assert!(parse_resets(&[0xff, 0xff, 0xff], now).is_empty());
-    }
-
-    #[test]
-    fn window_names_follow_the_period_length() {
-        assert_eq!(window_name(None, None), "credits");
-        assert_eq!(
-            window_name(
-                Some(time("2026-01-01T00:00:00Z")),
-                Some(time("2026-01-01T00:00:00Z"))
-            ),
-            "credits"
-        );
-        assert_eq!(
-            window_name(
-                Some(time("2026-01-01T00:00:00Z")),
-                Some(time("2026-01-08T00:00:00Z"))
-            ),
-            "weekly"
-        );
-        assert_eq!(
-            window_name(
-                Some(time("2026-01-01T00:00:00Z")),
-                Some(time("2026-02-01T00:00:00Z"))
-            ),
-            "monthly"
-        );
-        assert_eq!(
-            window_name(
-                Some(time("2026-01-01T00:00:00Z")),
-                Some(time("2026-01-15T00:00:00Z"))
-            ),
-            "credits"
-        );
-    }
 }

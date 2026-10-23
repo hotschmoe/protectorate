@@ -1,8 +1,7 @@
 //! Initial Rust hub service wiring for the existing Connect API.
 mod audit;
 mod chat;
-mod desk_policy;
-mod desk_service;
+mod checkpoints;
 mod device;
 mod diagnostics;
 mod directory;
@@ -105,8 +104,6 @@ pub struct Hub {
     pub directory: Arc<Directory>,
     directory_kick: Arc<tokio::sync::Notify>,
     pub leases: Arc<LeaseTable>,
-    desk_policies: Arc<desk_policy::Store>,
-    desk_use: Arc<desk_service::UseCounts>,
     pub inventory: Arc<Inventory>,
     pub jobs: Arc<jobs::Jobs>,
     node_admission: Arc<std::sync::RwLock<()>>,
@@ -128,6 +125,7 @@ pub struct Hub {
     chat_recovery: Vec<SleeveRecord>,
     sleeve_effort: String,
     local_model_hosts: Vec<String>,
+    egress_allow: Vec<String>,
     sleeve_launch_lock: std::sync::Mutex<()>,
     resleeving: std::sync::Mutex<std::collections::BTreeSet<String>>,
     envoy_spawn_lock: std::sync::Mutex<()>,
@@ -260,16 +258,11 @@ impl Hub {
             }
         }
         let lease_path = home.join("leases.json");
-        let desk_policies = Arc::new(
-            desk_policy::Store::open(home.join("desk-policies.json"))
-                .map_err(identity::Error::Invalid)?,
-        );
         let leases = Arc::new(
             lease::open_table(
                 &lease_path,
                 Arc::clone(&events),
                 Arc::clone(&mail),
-                lease::DeskNotifications::new(Arc::clone(&desk_policies), Arc::clone(&node_files)),
                 lease::default_chooser(
                     Arc::clone(&inventory),
                     Arc::clone(&node_monitor),
@@ -301,11 +294,6 @@ impl Hub {
             directory: Arc::new(directory),
             directory_kick: Arc::new(tokio::sync::Notify::new()),
             leases,
-            desk_policies,
-            desk_use: Arc::new(
-                desk_service::UseCounts::open(home.join("desk-use.json"))
-                    .map_err(identity::Error::Invalid)?,
-            ),
             inventory,
             jobs,
             node_admission,
@@ -327,6 +315,7 @@ impl Hub {
             chat_recovery,
             sleeve_effort: "high".into(),
             local_model_hosts: Vec::new(),
+            egress_allow: Vec::new(),
             sleeve_launch_lock: std::sync::Mutex::new(()),
             resleeving: std::sync::Mutex::new(std::collections::BTreeSet::new()),
             envoy_spawn_lock: std::sync::Mutex::new(()),
@@ -430,6 +419,12 @@ impl Hub {
         self.local_model_hosts = hosts;
         self
     }
+    /// Operator-approved destinations, such as package registries and Git
+    /// hosts, that every sleeve may reach besides its provider and the hub.
+    pub fn with_egress_allow(mut self, hosts: Vec<String>) -> Self {
+        self.egress_allow = hosts;
+        self
+    }
     pub fn with_directory(mut self, directory: Arc<Directory>) -> Self {
         self.directory = directory;
         self
@@ -456,10 +451,6 @@ impl Hub {
             &self.lease_path,
             Arc::clone(&self.events),
             Arc::clone(&self.mail),
-            lease::DeskNotifications::new(
-                Arc::clone(&self.desk_policies),
-                Arc::clone(&self.node_files),
-            ),
             lease::default_chooser(
                 Arc::clone(&self.inventory),
                 Arc::clone(&monitor),
@@ -478,10 +469,6 @@ impl Hub {
             &self.lease_path,
             Arc::clone(&self.events),
             Arc::clone(&self.mail),
-            lease::DeskNotifications::new(
-                Arc::clone(&self.desk_policies),
-                Arc::clone(&self.node_files),
-            ),
             chooser,
             Arc::clone(&self.node_admission),
             Arc::clone(&self.node_draining),
@@ -665,12 +652,11 @@ impl Hub {
         lease::register(&mut server, Arc::clone(&hub))?;
         mail::register(&mut server, Arc::clone(&hub))?;
         nodes::register(&mut server, Arc::clone(&hub))?;
-        desk_policy::register(&mut server, Arc::clone(&hub))?;
-        desk_service::register(&mut server, Arc::clone(&hub))?;
         node_files::register(&mut server, Arc::clone(&hub))?;
         node_update::register(&mut server, Arc::clone(&hub))?;
         jobs::register(&mut server, Arc::clone(&hub))?;
         sleeves::register(&mut server, Arc::clone(&hub))?;
+        checkpoints::register(&mut server, Arc::clone(&hub))?;
         workspaces::register(&mut server, Arc::clone(&hub))?;
         chat::register(&mut server, Arc::clone(&hub))?;
         let subscribe = Arc::clone(&hub);
@@ -1559,24 +1545,4 @@ fn no_local_agent() -> RpcError {
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {
     RpcError::new(Code::Internal, error.to_string())
-}
-
-#[cfg(test)]
-mod authorization_tests {
-    use super::can_kill_owned_sleeve;
-
-    #[test]
-    fn kill_ownership_gate_requires_spawn_scope() {
-        for (scopes, allowed) in [
-            (vec![], false),
-            (vec!["read"], false),
-            (vec!["sleeve_spawn_sleeve"], true),
-            (vec!["sleeve_*"], true),
-        ] {
-            assert_eq!(
-                can_kill_owned_sleeve(&scopes.into_iter().map(str::to_owned).collect::<Vec<_>>()),
-                allowed,
-            );
-        }
-    }
 }

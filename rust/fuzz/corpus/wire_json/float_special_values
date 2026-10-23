@@ -1,0 +1,2 @@
+/protectorate.v1.NodeAgentService/GetMetrics out
+{"cpu":{"usagePercent":"Infinity","load1":-0.0,"load5":1e308}}

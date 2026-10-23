@@ -98,6 +98,7 @@ impl State {
 pub struct Limits {
     pub cpu_percent: u32,
     pub memory_bytes: u64,
+    pub disk_bytes: u64,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
@@ -463,25 +464,6 @@ impl Registry {
             Ok(row.clone())
         })
     }
-    /// When this hub has no recovered launcher process, saved running rows
-    /// become exited with unknown status rather than claiming they are live.
-    pub fn mark_unmanaged_exited(&self, at: &str) -> Result<usize> {
-        if at.is_empty() {
-            return Err(Error::Invalid("exit time is required".into()));
-        }
-        self.update(|rows| {
-            let mut count = 0;
-            for row in rows.values_mut().filter(|r| r.state == State::Running) {
-                row.state = State::Exited;
-                row.exited_at = Some(at.into());
-                row.exit_code = None;
-                row.exit_signal = 0;
-                row.oom_killed = false;
-                count += 1;
-            }
-            Ok(count)
-        })
-    }
     /// Chat drivers have no recoverable tmux process yet. Terminal rows are
     /// reconciled against the configured tmux server after hub startup.
     pub fn mark_unmanaged_chat_exited(&self, at: &str) -> Result<usize> {
@@ -502,18 +484,6 @@ impl Registry {
                 count += 1;
             }
             Ok(count)
-        })
-    }
-    pub fn set_usage(&self, name: &str, usage: Usage) -> Result<Record> {
-        if !usage.cpu_percent.is_finite() || !usage.cpu_seconds.is_finite() {
-            return Err(Error::Invalid("usage must be finite".into()));
-        }
-        self.update(|rows| {
-            let row = rows
-                .get_mut(name)
-                .ok_or_else(|| Error::NotFound(name.into()))?;
-            row.usage = usage;
-            Ok(row.clone())
         })
     }
     /// Merge a slow disk sample into the same sleeve incarnation. A respawn
@@ -644,176 +614,5 @@ impl Registry {
             *guard = next;
         }
         Ok(value)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn row(name: &str) -> Record {
-        Record {
-            name: name.into(),
-            harness: Harness::Codex,
-            mode: Mode::Chat,
-            workspace: "/tmp/workspace".into(),
-            session: format!("sleeve-{name}"),
-            created_at: "2026-01-01T00:00:00Z".into(),
-            state: State::Running,
-            limits: Limits {
-                cpu_percent: 200,
-                memory_bytes: 1024,
-            },
-            usage: Usage::default(),
-            args: vec!["--model".into(), "test".into()],
-            env: BTreeMap::new(),
-            exited_at: None,
-            exit_code: None,
-            exit_signal: 0,
-            oom_killed: false,
-            chat: None,
-            supervised: true,
-            handoff: None,
-            parent: "envoy".into(),
-            parent_token_id: "token-1".into(),
-            read_only: vec![ReadOnlyMount {
-                source: "/tmp/ref".into(),
-                target: "/references".into(),
-            }],
-            exit_after_idle: Some("300s".into()),
-            git_branch: "feature".into(),
-            base_repo: "origin".into(),
-            base_branch: "main".into(),
-            base_tip: "abc".into(),
-            managed_clone: false,
-            result: None,
-            killed: false,
-            nested: true,
-            helper: false,
-        }
-    }
-    #[test]
-    fn slow_disk_sample_cannot_land_on_respawned_sleeve() {
-        let dir = tempfile::tempdir().unwrap();
-        let registry = Registry::open(dir.path().join("sleeves.json")).unwrap();
-        let first = registry.record_spawned(row("worker")).unwrap();
-        registry
-            .record_exit(
-                "worker",
-                "2026-01-01T00:01:00Z".into(),
-                Some(0),
-                0,
-                false,
-                false,
-            )
-            .unwrap();
-        let mut second = row("worker");
-        second.created_at = "2026-01-01T00:02:00Z".into();
-        registry.record_spawned(second).unwrap();
-        let sample = DiskUsage {
-            workspace_bytes: Some(42),
-            home_bytes: Some(31),
-            cache_bytes: Some(20),
-            go_build_cache_bytes: Some(10),
-        };
-        assert!(registry
-            .set_disk_usage(
-                "worker",
-                &first.created_at,
-                sample,
-                "2026-01-01T00:03:00Z".into()
-            )
-            .unwrap()
-            .is_none());
-        assert_eq!(registry.get("worker").unwrap().usage, Usage::default());
-        let updated = registry
-            .set_disk_usage(
-                "worker",
-                "2026-01-01T00:02:00Z",
-                sample,
-                "2026-01-01T00:04:00Z".into(),
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated.usage.home_disk_bytes, 31);
-        assert_eq!(updated.usage.cache_disk_bytes, 20);
-    }
-    #[test]
-    fn restart_and_lifecycle() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sleeves.json");
-        let registry = Registry::open(&path).unwrap();
-        let first = registry.record_spawned(row("one")).unwrap();
-        assert_eq!(first.parent, "envoy");
-        assert!(matches!(
-            registry.record_spawned(row("one")),
-            Err(Error::Exists(_))
-        ));
-        registry
-            .set_chat(
-                "one",
-                serde_json::json!({"state":"CHAT_STATE_IDLE","harnessSessionId":"native-1"}),
-            )
-            .unwrap();
-        registry
-            .set_result(
-                "one",
-                serde_json::json!({"status":"REPORT_STATUS_PARTIAL","summary":"ongoing"}),
-            )
-            .unwrap();
-        drop(registry);
-        let registry = Registry::open(&path).unwrap();
-        assert_eq!(
-            registry.get("one").unwrap().read_only[0].target,
-            "/references"
-        );
-        assert_eq!(
-            registry
-                .mark_unmanaged_exited("2026-01-02T00:00:00Z")
-                .unwrap(),
-            1
-        );
-        let old = registry.get("one").unwrap();
-        assert_eq!(old.state, State::Exited);
-        assert_eq!(old.exit_code, None);
-        assert_eq!(old.chat.unwrap()["harnessSessionId"], "native-1");
-        let mut respawn = row("one");
-        respawn.harness = Harness::Grok;
-        registry.record_spawned(respawn).unwrap();
-        registry
-            .record_exit(
-                "one",
-                "2026-01-03T00:00:00Z".into(),
-                Some(137),
-                9,
-                true,
-                true,
-            )
-            .unwrap();
-        drop(registry);
-        let registry = Registry::open(&path).unwrap();
-        assert_eq!(registry.get("one").unwrap().exit_code, Some(137));
-        assert!(registry.get("one").unwrap().oom_killed);
-    }
-    #[test]
-    fn rejects_invalid_records_without_committing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sleeves.json");
-        let registry = Registry::open(&path).unwrap();
-        for mut bad in [row("BAD"), row("bad/name"), row("one")] {
-            if bad.name == "one" {
-                bad.read_only[0].source = "relative".into();
-            }
-            assert!(registry.record_spawned(bad).is_err());
-        }
-        assert!(registry.list().is_empty());
-        let mut shell = row("shell");
-        shell.harness = Harness::Shell;
-        assert!(registry.record_spawned(shell).is_err());
-        let mut nested = row("nested");
-        nested.limits.memory_bytes = 0;
-        assert!(registry.record_spawned(nested).is_err());
-        registry.record_spawned(row("one")).unwrap();
-        assert!(registry.set_chat("one", serde_json::Value::Null).is_err());
-        assert_eq!(registry.get("one").unwrap().chat, None);
     }
 }

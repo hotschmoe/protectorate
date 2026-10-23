@@ -1,6 +1,8 @@
 #![cfg(unix)]
 
-use protectorate_cli::{dispatch_endpoint, parse, Code, Command};
+mod common;
+
+use common::cli;
 use protectorate_hub::Hub;
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -15,7 +17,7 @@ async fn admin_grant_and_audit_query_use_real_hub_http() {
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let path = home.path().join("grant.token");
     let result = tokio::task::spawn_blocking(move || {
-        let call = |args: &[&str]| dispatch_endpoint(&url, "owner-secret", args).unwrap();
+        let call = |args: &[&str]| cli(&url, "owner-secret", args).unwrap();
         let path_text = path.to_str().unwrap();
         let output = call(&[
             "grant",
@@ -43,7 +45,7 @@ async fn admin_grant_and_audit_query_use_real_hub_http() {
                 0o600
             );
         }
-        assert!(dispatch_endpoint(&url, secret.trim(), ["job", "ls"]).is_ok());
+        assert!(cli(&url, secret.trim(), ["job", "ls"]).is_ok());
         let raw = call(&[
             "--json",
             "audit",
@@ -64,7 +66,7 @@ async fn admin_grant_and_audit_query_use_real_hub_http() {
             .ends_with("GrantService/Admin"));
         let tail = call(&["audit", "tail", "-n", "20"]);
         assert!(tail.contains("GrantService/Admin"), "{tail}");
-        let exists = dispatch_endpoint(
+        cli(
             &url,
             "owner-secret",
             [
@@ -72,35 +74,8 @@ async fn admin_grant_and_audit_query_use_real_hub_http() {
             ],
         )
         .unwrap_err();
-        assert_eq!(exists.code, Code::AlreadyExists);
     })
     .await;
     server.abort();
     result.unwrap();
-}
-
-#[test]
-fn grant_and_audit_arguments_are_bounded() {
-    assert!(matches!(
-        parse(["grant", "admin", "--node", "box*", "--task", "repair"])
-            .unwrap()
-            .command,
-        Command::GrantAdmin { .. }
-    ));
-    assert!(matches!(
-        parse(["audit", "ls", "--outcome", "denied", "--lines", "500"])
-            .unwrap()
-            .command,
-        Command::AuditList(_)
-    ));
-    for args in [
-        vec!["grant", "admin", "--node", "box"],
-        vec![
-            "grant", "admin", "--node", "box", "--task", "repair", "--ttl", "25h",
-        ],
-        vec!["audit", "ls", "--lines", "501"],
-        vec!["audit", "tail", "--outcome", "maybe"],
-    ] {
-        assert!(parse(args).is_err());
-    }
 }

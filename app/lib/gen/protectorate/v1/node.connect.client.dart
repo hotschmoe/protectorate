@@ -7,7 +7,6 @@ import "package:connectrpc/connect.dart" as connect;
 import "node.pb.dart" as protectoratev1node;
 import "node.connect.spec.dart" as specs;
 import "job.pb.dart" as protectoratev1job;
-import "desk.pb.dart" as protectoratev1desk;
 
 /// NodeAgentService runs on every node. The hub polls GetMetrics; WatchMetrics
 /// is for live views. The job RPCs are called by the hub only and are unary
@@ -203,25 +202,6 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// DeskAction runs one desktop command in the node agent's interactive
-  /// session. See DeskService.
-  Future<protectoratev1desk.DeskActionResponse> deskAction(
-    protectoratev1desk.DeskActionRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.NodeAgentService.deskAction,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
   /// ApplyUpdate swaps the agent's binary for a file already transferred into
   /// its file root and restarts the agent. See NodeService.ApplyUpdate.
   Future<protectoratev1node.ApplyUpdateResponse> applyUpdate(
@@ -233,26 +213,6 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.NodeAgentService.applyUpdate,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  /// GetDeskState adopts the desk policy the hub sends (none clears it) and
-  /// evaluates it now. The node enforces the policy itself on every input
-  /// command, so the hub's view can be a few seconds old without harm.
-  Future<protectoratev1desk.DeskState> getDeskState(
-    protectoratev1node.GetDeskStateRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.NodeAgentService.getDeskState,
       input,
       signal: signal,
       headers: headers,
@@ -539,45 +499,6 @@ extension type NodeServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).server(
       specs.NodeService.updateNode,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  /// SetDeskPolicy sets or clears (policy unset) when agents may drive a
-  /// node's desktop. Only the owner token may call it. The hub keeps the
-  /// policy and sends it to the node, which enforces it.
-  Future<protectoratev1node.DeskPolicyStatus> setDeskPolicy(
-    protectoratev1node.SetDeskPolicyRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.NodeService.setDeskPolicy,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  /// GetDeskPolicy returns a node's policy, its current evaluation and who
-  /// holds the desktop lease.
-  Future<protectoratev1node.DeskPolicyStatus> getDeskPolicy(
-    protectoratev1node.GetDeskPolicyRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.NodeService.getDeskPolicy,
       input,
       signal: signal,
       headers: headers,

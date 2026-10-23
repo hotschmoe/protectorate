@@ -1,0 +1,3 @@
+{"op":"send","at":"2026-10-19T12:00:01Z","extra":1,"msg":{"id":"m1","thread":"t1","from":"a","to":"b","kind":"custom","body":"hi","created":"2026-10-19T12:00:01Z","recipients":["b"],"deliveries":{"b":{"since":"0001-01-01T00:00:00Z"}},"whatever":null}}
+{"op":"nonsense","at":"2026-10-19T12:00:02Z","id":"m1","rcpt":"b"}
+{"op":"ack","at":"2026-10-19T12:00:03Z","id":"gone","rcpt":"b"}

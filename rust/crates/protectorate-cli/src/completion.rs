@@ -11,7 +11,6 @@ const ROOT: &[Candidate] = &[
     ("backlog", "Manage notes"),
     ("chat", "Talk to a sleeve"),
     ("completion", "Generate shell completion"),
-    ("desk", "Control a desktop"),
     ("devices", "Manage trusted devices"),
     ("events", "Stream hub events"),
     ("grant", "Mint task grants"),
@@ -172,17 +171,6 @@ fn children(path: &str) -> &'static [Candidate] {
             ("zsh", "Zsh script"),
             ("powershell", "PowerShell script"),
         ],
-        "desk" => &[("policy", "Show or set policy")],
-        "desk node" => &[
-            ("screenshot", "Capture the desktop"),
-            ("windows", "List windows"),
-            ("foreground", "Show the foreground window"),
-            ("click", "Click a screen point"),
-            ("move", "Move the pointer"),
-            ("type", "Type text"),
-            ("key", "Press a key chord"),
-            ("run", "Run a program"),
-        ],
         "devices" => &[
             ("ls", "List devices"),
             ("pending", "Pending requests"),
@@ -268,6 +256,7 @@ fn children(path: &str) -> &'static [Candidate] {
             ("browse", "Browse workspaces"),
             ("show", "Show a sleeve"),
             ("kill", "Kill a sleeve"),
+            ("checkpoint", "List, diff or restore workspace checkpoints"),
             ("attach", "Attach terminal"),
             ("spawn", "Spawn a sleeve"),
             ("envoy", "Spawn Envoy"),
@@ -409,6 +398,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--harness", "Harness"),
             ("--cpu", "CPU limit"),
             ("--mem", "Memory limit"),
+            ("--disk", "Disk limit"),
             ("--mode", "Chat or terminal"),
             ("--supervised", "Supervise"),
             ("--nested", "Nested sleeve"),
@@ -522,30 +512,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--status", "Result status"),
             ("--summary-file", "Summary file"),
         ],
-        "desk policy" => &[
-            ("--window", "Access window"),
-            ("--idle", "Idle duration"),
-            ("--tz", "Time zone"),
-            ("--lock-after", "Lock after window"),
-            ("--off", "Disable policy"),
-        ],
-        "desk node screenshot" => &[
-            ("--lease", "Desk lease"),
-            ("--output", "Image output path"),
-            ("-o", "Image output path"),
-            ("--max-width", "Maximum image width"),
-        ],
-        "desk node click" => &[
-            ("--lease", "Desk lease"),
-            ("--button", "Mouse button"),
-            ("--double", "Double click"),
-        ],
-        "desk node windows"
-        | "desk node foreground"
-        | "desk node move"
-        | "desk node type"
-        | "desk node key"
-        | "desk node run" => &[("--lease", "Desk lease")],
         "msg threads" => &[
             ("--sleeve", "Sleeve"),
             ("--project", "Project"),
@@ -672,8 +638,6 @@ fn complete(args: &[String], leading: &[String], descriptions: bool) -> String {
                 path.push(' ');
             }
             path.push_str(name);
-        } else if path == "desk" {
-            path = "desk node".to_owned();
         } else if !path.is_empty() && children(&path).is_empty() {
             positionals += 1;
         }
@@ -698,20 +662,6 @@ fn complete(args: &[String], leading: &[String], descriptions: bool) -> String {
     }) {
         let inline_flag = inline_target.map(|_| prefix.split_once('=').unwrap().0);
         let mut seen = HashSet::new();
-        if path == "desk" {
-            for (name, label) in children(&path)
-                .iter()
-                .filter(|(name, _)| name.starts_with(prefix))
-            {
-                seen.insert((*name).to_owned());
-                output.push_str(name);
-                if descriptions {
-                    output.push('\t');
-                    output.push_str(label);
-                }
-                output.push('\n');
-            }
-        }
         for (name, label) in resource_names(kind, leading, words, lookup_prefix).unwrap_or_default()
         {
             if !seen.insert(name.clone()) {
@@ -789,7 +739,6 @@ impl ResourceKind {
 
 fn resource_kind(path: &str, positionals: usize) -> Option<ResourceKind> {
     match path {
-        "desk" | "desk policy" if positionals == 0 => Some(ResourceKind::Node),
         "node show" | "node rm" | "node tier" | "node update" | "node put" | "node get"
             if positionals == 0 =>
         {

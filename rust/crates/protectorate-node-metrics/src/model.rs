@@ -159,15 +159,3 @@ pub struct JobIsolation {
     pub note: String,
     pub admin: String,
 }
-
-pub fn primary_filesystem(metrics: &NodeMetrics) -> Option<&FilesystemMetrics> {
-    metrics.filesystems.iter().find(|fs| fs.primary)
-}
-
-pub fn worst_filesystem(metrics: &NodeMetrics) -> Option<&FilesystemMetrics> {
-    metrics.filesystems.iter().max_by(|a, b| {
-        a.used_percent
-            .partial_cmp(&b.used_percent)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
-}

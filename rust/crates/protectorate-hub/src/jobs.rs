@@ -635,9 +635,6 @@ impl Jobs {
                     "lease is queued and not active",
                 ));
             };
-            if lease.resource.node.starts_with("desk:") {
-                return Err(RpcError::invalid("desktop lease cannot run jobs"));
-            }
             Some(lease.resource)
         } else {
             None

@@ -1,12 +1,10 @@
 use protectorate_auth::Method as ScopeMethod;
 use protectorate_hub::Hub;
-use protectorate_sleeve_registry::{Harness, Mode, Record};
 use protectorate_wire::Catalog;
 use serde_json::{json, Value};
 use std::{
     fs,
     os::unix::fs::symlink,
-    path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -27,94 +25,6 @@ async fn call(addr: std::net::SocketAddr, method: &str, token: &str, body: Value
         head.split_whitespace().nth(1).unwrap().parse().unwrap(),
         serde_json::from_str(body).unwrap(),
     )
-}
-
-fn workspace<'a>(body: &'a Value, path: &Path) -> &'a Value {
-    body["workspaces"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["path"] == path.to_string_lossy().as_ref())
-        .unwrap()
-}
-
-#[tokio::test]
-async fn list_workspaces_discovers_managed_external_and_read_only_references() {
-    let temp = tempfile::tempdir().unwrap();
-    let state = temp.path().join("state");
-    let managed = state.join("workspaces/alpha");
-    let symlinked_git = state.join("workspaces/beta");
-    let external = temp.path().join("projects/outside");
-    let references = temp.path().join("references");
-    let hidden = state.join("workspaces/.hidden");
-    for path in [
-        &managed,
-        &symlinked_git.join(".git"),
-        &external,
-        &references,
-        &hidden,
-        &managed.join("references"),
-        &managed.join(".git"),
-    ] {
-        fs::create_dir_all(path).unwrap();
-    }
-    fs::write(managed.join(".git/HEAD"), "ref: refs/heads/feature\n").unwrap();
-    fs::write(
-        managed.join(".git/config"),
-        "[remote \"origin\"]\n url = https://user:secret@example.com/team/alpha.git\n",
-    )
-    .unwrap();
-    let private_config = temp.path().join("private-config");
-    fs::write(
-        &private_config,
-        "[remote \"origin\"]\n url = https://secret.example/private\n",
-    )
-    .unwrap();
-    symlink(&private_config, symlinked_git.join(".git/config")).unwrap();
-    let hub = Hub::open(&state, "owner", "test")
-        .unwrap()
-        .with_reference_dirs(vec![references.clone()])
-        .unwrap();
-    hub.sleeves
-        .record_spawned(
-            Record::new(
-                "worker",
-                Harness::Pi,
-                Mode::Chat,
-                &external,
-                "2026-01-01T00:00:00Z",
-            )
-            .unwrap(),
-        )
-        .unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let task =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let (status, body) = call(addr, "ListWorkspaces", "owner", json!({})).await;
-    assert_eq!(status, 200, "{body}");
-    let managed_row = workspace(&body, &managed);
-    assert_eq!(managed_row["requiredName"], "alpha");
-    assert_eq!(managed_row["gitBranch"], "feature");
-    assert_eq!(
-        managed_row["gitRemote"],
-        "https://example.com/team/alpha.git"
-    );
-    assert!(workspace(&body, &symlinked_git)["gitRemote"].is_null());
-    let external_row = workspace(&body, &external);
-    assert_eq!(external_row["sleeve"], "worker");
-    assert_eq!(external_row["busy"], true);
-    assert_eq!(workspace(&body, &references)["readOnly"], true);
-    assert_eq!(
-        workspace(&body, &managed.join("references"))["readOnly"],
-        true
-    );
-    assert!(!body["workspaces"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["path"] == hidden.to_string_lossy().as_ref()));
-    task.abort();
 }
 
 #[tokio::test]

@@ -304,72 +304,6 @@ async fn hub_check(home: &Path, joined: Option<Joined>) -> Check {
     }
 }
 
-#[cfg(windows)]
-fn desktop_checks(home: &Path) -> Vec<Check> {
-    let controller = match protectorate_desk_node::Controller::open(home.to_path_buf()) {
-        Ok(controller) => controller,
-        Err(error) => {
-            return vec![Check::new(
-                "desk policy",
-                Level::Fail,
-                format!("cannot load local desktop policy: {error}"),
-            )];
-        }
-    };
-    let state = match controller.inspect_state() {
-        Ok(state) => state,
-        Err(error) => {
-            return vec![Check::new(
-                "desk policy",
-                Level::Fail,
-                format!("cannot inspect local desktop state: {error}"),
-            )];
-        }
-    };
-    desktop_checks_from_state(&state)
-}
-
-#[cfg(windows)]
-fn desktop_checks_from_state(state: &serde_json::Value) -> Vec<Check> {
-    let ready = state["sessionReady"] == true;
-    let screen = state["screenState"].as_str().unwrap_or("unknown");
-    vec![
-        Check::new(
-            "session",
-            if ready { Level::Ok } else { Level::Fail },
-            if ready {
-                "interactive desktop session (desk commands can run)"
-            } else {
-                "not in an interactive desktop session; desk commands cannot run"
-            },
-        ),
-        Check::new(
-            "screen",
-            if !ready {
-                Level::Info
-            } else if screen == "unlocked" {
-                Level::Ok
-            } else if screen == "locked" {
-                Level::Fail
-            } else {
-                Level::Warn
-            },
-            if !ready {
-                "not checked: this process is not in an interactive session"
-            } else if screen == "locked" {
-                "locked or showing the logon screen; desk input fails until it is unlocked"
-            } else {
-                screen
-            },
-        ),
-        Check::new(
-            "desk policy",
-            Level::Info,
-            state["detail"].as_str().unwrap_or("unavailable"),
-        ),
-    ]
-}
-
 pub(crate) async fn run(options: Command) -> Result<(), Box<dyn Error>> {
     let mut checks = vec![Check::new(
         "platform",
@@ -381,18 +315,6 @@ pub(crate) async fn run(options: Command) -> Result<(), Box<dyn Error>> {
             crate::build_version()
         ),
     )];
-    #[cfg(windows)]
-    checks.extend(desktop_checks(&options.home));
-    #[cfg(not(windows))]
-    {
-        checks.push(Check::new(
-            "session",
-            Level::Info,
-            "desk commands are Windows only",
-        ));
-        checks.push(Check::new("screen", Level::Info, "not applicable"));
-        checks.push(Check::new("desk policy", Level::Info, "not applicable"));
-    }
     checks.push(startup_check().await);
     let (check, joined) = enrollment(&options.home);
     checks.push(check);
@@ -413,8 +335,6 @@ pub(crate) async fn run(options: Command) -> Result<(), Box<dyn Error>> {
                 check.detail
             );
         }
-        #[cfg(windows)]
-        println!("\nUnattended use: desk input fails on a locked screen and on the logon screen. A machine agents will drive must stay logged in and unlocked. This command changes none of those settings.");
     }
     if failed > 0 {
         return Err(io::Error::other(format!("{failed} node doctor check(s) failed")).into());
