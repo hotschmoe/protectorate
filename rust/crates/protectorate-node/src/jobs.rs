@@ -1468,7 +1468,6 @@ fn parse_duration(s: &str) -> Option<Duration> {
 fn internal(e: serde_json::Error) -> RpcError {
     RpcError::new(Code::Internal, e.to_string())
 }
-#[cfg(not(windows))]
 /// How a command that the node did not stop itself ended: a signal nobody on
 /// the node sent is a kill (a resource limit or the OOM killer).
 fn exit_outcome(
@@ -1510,15 +1509,13 @@ async fn spawn_unless_busy(command: &mut Command) -> io::Result<tokio::process::
     }
 }
 
+#[cfg(not(windows))]
 fn kill_group(pid: u32) {
-    #[cfg(unix)]
     if pid > 0 {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
     }
-    #[cfg(not(unix))]
-    let _ = pid;
 }
 
 #[cfg(target_os = "linux")]
