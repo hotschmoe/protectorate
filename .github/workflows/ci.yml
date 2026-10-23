@@ -9,94 +9,226 @@ permissions:
   contents: read
 
 jobs:
-  race:
+  rust:
     runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            Makefile
-      - name: Race detector, fuzz seeds and binary end-to-end tests
-        run: make test-race
-
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           flutter-version: 3.44.1
           cache: true
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          version: 1.74.0
-      - name: Generator plugins
+      - name: Prepare Flutter client for Rust hub integration tests
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
-          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.1
-          dart pub global activate protoc_plugin 25.1.0
-          dart pub global activate connectrpc 2.0.0
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+          cd app && flutter pub get
+          cd .. && make app-check
+      - name: Prepare verified Headscale for node invitation trial
+        run: |
+          cargo build --locked -p protectorate-server --bin protectorate-rs
+          target/debug/protectorate-rs hub tailnet install --home "$RUNNER_TEMP/protectorate-flutter-tailnet"
+          echo "PROT_HEADSCALE_BINARY=$RUNNER_TEMP/protectorate-flutter-tailnet/bin/headscale-0.29.5" >> "$GITHUB_ENV"
+      - name: Rust workspace
+        env:
+          PROTECTORATE_REQUIRE_FLUTTER_TEST: "1"
+        run: make rust-check
+      - name: Rust Linux installer checks
+        run: bash scripts/test-rust-installers.sh
+
+  rust-arm64:
+    runs-on: ubuntu-24.04-arm
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build Rust Linux arm64 bundle
+        run: |
+          version=$(git describe --tags --match 'v[0-9]*' --always)
+          PROTECTORATE_BUILD_VERSION="$version" cargo build --locked --release -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+          mkdir -p dist
+          for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+            cp "target/release/$name" "dist/$name-linux-arm64"
+          done
+          test "$(dist/protectorate-rs-linux-arm64 version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-linux-arm64
+          path: dist/*
+          if-no-files-found: error
+
+  rust-windows-amd64:
+    runs-on: windows-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build native Windows Rust backend and CLI
+        shell: pwsh
+        run: |
+          $version = git describe --tags --match 'v[0-9]*' --always
+          ./scripts/build-rust-windows.ps1 -Version $version -Architecture amd64
+      - name: Verify Windows node installer with PowerShell 5.1
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-install-node-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-windows-amd64
+          path: |
+            dist/protectorate-rs-windows-amd64.exe
+            dist/protectorate-cli-windows-amd64.exe
+            dist/protectorate-mcpbridge-windows-amd64.exe
+          if-no-files-found: error
+
+  rust-windows-arm64:
+    runs-on: windows-11-arm
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable-aarch64-pc-windows-msvc --profile minimal
+          rustup default stable-aarch64-pc-windows-msvc
+      - name: Build native Windows ARM64 Rust backend and CLI
+        shell: pwsh
+        run: |
+          $version = git describe --tags --match 'v[0-9]*' --always
+          ./scripts/build-rust-windows.ps1 -Version $version -Architecture arm64
+      - name: Verify Windows node installer with PowerShell 5.1
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-install-node-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-windows-arm64
+          path: |
+            dist/protectorate-rs-windows-arm64.exe
+            dist/protectorate-cli-windows-arm64.exe
+            dist/protectorate-mcpbridge-windows-arm64.exe
+          if-no-files-found: error
+
+  rust-termux-arm64:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Rust Android target and pinned NDK
+        run: |
+          rustup target add aarch64-linux-android
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'ndk;28.2.13676358'
+      - name: Build Termux node
+        run: |
+          version=$(git describe --tags --match 'v[0-9]*' --always)
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" PROTECTORATE_BUILD_VERSION="$version" bash scripts/build-rust-termux.sh release
+          mkdir -p dist
+          cp target/aarch64-linux-android/release/protectorate-rs-termux dist/protectorate-rs-android-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-android-arm64
+          path: dist/protectorate-rs-android-arm64
+          if-no-files-found: error
+
+  package:
+    needs: [rust, rust-arm64, rust-windows-amd64, rust-windows-arm64, rust-termux-arm64, desktop-windows]
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.1
+          cache: true
       - name: Version
         run: |
-          echo "version $(make -s version), app $(make -s version-app)" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: gofmt
-        run: test -z "$(gofmt -l cmd internal)"
-      - name: Vet, fuzz seeds and binary end-to-end tests
-        run: make test
-      - run: make check-gen
-      - run: make check-version
-      - name: Go binaries for every target
-        run: make cross
-      - run: make app-check
-      - run: make app-build-web
-      - name: Android release signing key
+          version=$(git describe --tags --match 'v[0-9]*' --always)
+          echo "BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "Rust package $version" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Build Rust Linux amd64 bundle
+        run: PROTECTORATE_BUILD_VERSION="$BUILD_VERSION" cargo build --locked --release -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+      - name: Verify embedded server version
+        run: test "$(target/release/protectorate-rs version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$BUILD_VERSION"
+      - name: Exercise installed Rust bundle
         env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [ -z "$KEYSTORE" ]; then echo "no signing secrets (fork or PR): debug-signed APK"; exit 0; fi
-          umask 077
-          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
-          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$RUNNER_TEMP/release.jks" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > "$RUNNER_TEMP/signing.properties"
-          echo "PROTECTORATE_ANDROID_SIGNING=$RUNNER_TEMP/signing.properties" >> "$GITHUB_ENV"
-      - run: make apk
-      - name: Assemble release assets
-        run: |
-          version=$(make -s version)
-          mkdir -p dist
-          cp bin/protectorate-* dist/
-          tar -czf "dist/protectorate-web-$version.tar.gz" -C app/build/web .
-          printf '%s\n' "$version" > dist/VERSION
-          cp app/build/app/outputs/flutter-apk/app-release.apk "dist/protectorate-$version.apk"
-          cd dist
-          sha256sum * > SHA256SUMS
+          PROTECTORATE_TEST_RUST_BIN_DIR: target/release
+        run: bash scripts/test-rust-installed-bundle.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-linux-arm64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-windows-amd64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-windows-arm64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-android-arm64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist
+      - name: Prepare Flutter client
+        run: cd app && flutter pub get
+      - run: make app-build-web
+      - name: Assemble checked Rust release assets
+        run: bash scripts/package-rust-release.sh "$BUILD_VERSION"
+      - name: Verify packaged hub with installer
+        run: bash install-hub.sh --bundle-dir "$PWD/dist" --dry-run
       - uses: actions/upload-artifact@v4
         with:
           name: protectorate-${{ github.sha }}
           path: dist/*
+          if-no-files-found: error
 
   desktop-windows:
     uses: ./.github/workflows/desktop-windows.yml
 
   dev-release:
-    needs: [race, check, desktop-windows]
+    needs: [package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev-hotschmoe'
     runs-on: ubuntu-latest
     permissions:
@@ -122,7 +254,7 @@ jobs:
             echo "A newer green push superseded this build; leaving dev unchanged."
             exit 0
           fi
-          version=$(make -s version)
+          version=$(git describe --tags --match 'v[0-9]*' --always)
           test "$(cat dist/VERSION)" = "$version"
           (cd dist && sha256sum --check SHA256SUMS)
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/dev" >/dev/null 2>&1; then
@@ -133,10 +265,7 @@ jobs:
           notes="Rolling development build $version from $GITHUB_SHA."
           if gh release view dev >/dev/null 2>&1; then
             gh release edit dev --title "$version" --notes "$notes" --prerelease --latest=false
-            gh release view dev --json assets --jq '.assets[].name' | while IFS= read -r asset; do
-              gh release delete-asset dev "$asset" --yes
-            done
-            gh release upload dev dist/*
+            gh release upload dev dist/* --clobber
           else
             gh release create dev dist/* --title "$version" --notes "$notes" --prerelease --latest=false --verify-tag
           fi

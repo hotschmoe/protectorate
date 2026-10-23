@@ -42,7 +42,20 @@ TAILSCALE_TAGS := \
 TARGETS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 android/arm64
 E2E_COVER_BINARY ?= bin/protectorate-cover
 
-.PHONY: gen check-gen build build-tags test test-race e2e-cover e2e-cover-build vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check
+.PHONY: gen check-gen build build-tags test test-race e2e-cover e2e-cover-build vet cross app-check app-build-web apk app-build-linux app-build-windows version version-app check-version check rust-build rust-test rust-check
+
+rust-build rust-test rust-check: export CARGO_INCREMENTAL ?= 0
+
+rust-build:
+	cargo build --workspace
+
+rust-test:
+	cargo test --workspace
+
+rust-check:
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets -- -D warnings
+	cargo test --workspace
 
 gen:
 	buf lint
