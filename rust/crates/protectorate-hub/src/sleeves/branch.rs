@@ -351,16 +351,21 @@ fn create_base_view(
     Ok(view)
 }
 
+/// Copies the source's packed refs into the view. The write is anchored to
+/// descriptors opened without following links, so swapping the view or its
+/// parent for a symlink after the check cannot redirect it.
 fn refresh_packed_refs(view: &Path, common: &Path) -> io::Result<()> {
-    for directory in [view.parent().unwrap(), view] {
-        let metadata = fs::symlink_metadata(directory)?;
-        if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "base view is not an ordinary directory",
-            ));
-        }
-    }
+    let ordinary = |error: io::Error| match error.raw_os_error() {
+        Some(libc::ELOOP | libc::ENOTDIR) => io::Error::new(
+            io::ErrorKind::InvalidData,
+            "base view is not an ordinary directory",
+        ),
+        _ => error,
+    };
+    let parent = open_root_directory(view.parent().unwrap()).map_err(ordinary)?;
+    let directory = open_child_directory(&parent, view.file_name().unwrap_or_default())
+        .map_err(ordinary)?
+        .ok_or(io::ErrorKind::NotFound)?;
     let source = common.join("packed-refs");
     let bytes = if source.exists() {
         let metadata = fs::symlink_metadata(&source)?;
@@ -374,15 +379,42 @@ fn refresh_packed_refs(view: &Path, common: &Path) -> io::Result<()> {
     } else {
         Vec::new()
     };
-    let target = view.join("packed-refs");
-    if fs::read(&target).is_ok_and(|current| current == bytes) {
+    let open = |name: &CString, flags: libc::c_int| -> io::Result<fs::File> {
+        let flags = flags | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags, 0o600) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { fs::File::from_raw_fd(fd) })
+    };
+    let target = c"packed-refs".to_owned();
+    let mut current = Vec::new();
+    if open(&target, libc::O_RDONLY)
+        .and_then(|mut file| file.read_to_end(&mut current))
+        .is_ok()
+        && current == bytes
+    {
         return Ok(());
     }
-    let mut temporary = tempfile::NamedTempFile::new_in(view)?;
-    temporary.write_all(&bytes)?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(&target).map_err(|error| error.error)?;
-    Ok(())
+    let mut suffix = [0_u8; 8];
+    getrandom::getrandom(&mut suffix).map_err(|error| io::Error::other(error.to_string()))?;
+    let suffix: String = suffix.iter().map(|byte| format!("{byte:02x}")).collect();
+    let temporary = CString::new(format!(".packed-refs.{suffix}")).map_err(io::Error::other)?;
+    let mut file = open(&temporary, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL)?;
+    let written = file
+        .write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .and_then(|_| {
+            let fd = directory.as_raw_fd();
+            match unsafe { libc::renameat(fd, temporary.as_ptr(), fd, target.as_ptr()) } {
+                0 => Ok(()),
+                _ => Err(io::Error::last_os_error()),
+            }
+        });
+    if written.is_err() {
+        unsafe { libc::unlinkat(directory.as_raw_fd(), temporary.as_ptr(), 0) };
+    }
+    written
 }
 
 fn valid_branch(branch: &str) -> bool {
