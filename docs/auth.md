@@ -107,16 +107,12 @@ agent's user on any node the caller can target, and source paths are read from
 the hub's disk. Node agents accept the job RPCs only from the hub (tailnet
 WhoIs `tag:hub`, or the node token); the hub never serves `NodeAgentService`.
 
-File transfer and desktop control are separate grants, none part of `read`:
-`node_put_file`, `node_get_file` (`node_put_*`, `node_get_*`) and `desk_*`
-(`desk_screenshot`, `desk_list_windows`, `desk_foreground`, `desk_click`, `desk_move`,
-`desk_type`, `desk_key`, `desk_run`). File calls are confined to the node's
-file root unless the agent runs with `--file-unconfined`, which makes them as
-broad as a job; the mutating desk calls also need a lease on `desk:<node>`.
-Node agents take these from the hub only, like jobs. Puts are audited at the
-first and last chunk (and any failing chunk), gets and every desk call once,
-with the node name as subject and never the path, text or image. See
-docs/desk.md.
+File transfer is a separate grant, not part of `read`: `node_put_file`,
+`node_get_file` (`node_put_*`, `node_get_*`). File calls are confined to the
+node's file root unless the agent runs with `--file-unconfined`, which makes
+them as broad as a job. Node agents take these from the hub only, like jobs.
+Puts are audited at the first and last chunk (and any failing chunk) and gets
+once, with the node name as subject and never the path.
 
 Services marked `(protectorate.v1.owner_only)` (TokenService, AuditService) and RPCs marked
 `(protectorate.v1.owner_only_rpc)` accept only the owner token whatever the

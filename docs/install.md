@@ -60,7 +60,7 @@ Place the six resulting binaries in one directory with the published platform na
 
 The Windows installer selects the native Rust `protectorate-rs`, `protectorate-cli`, and `protectorate-mcpbridge` release assets for the machine's x64 or ARM64 OS. Each asset is named `COMPONENT-windows-amd64.exe` or `COMPONENT-windows-arm64.exe`. It requires a trusted SHA256 digest of the release's `SHA256SUMS` manifest, then checks all three selected assets against that manifest before writing state or registering a task. Get the digest through a trusted release channel; a manifest downloaded from an untrusted mirror is not its own proof. Windows CI builds both architectures and gates publication on all six assets.
 
-Run PowerShell as the user whose interactive desktop the node should drive. Put the one-use enrollment key in a private file and use a reachable HTTPS control URL:
+Run PowerShell as the user the node should run as. Put the one-use enrollment key in a private file and use a reachable HTTPS control URL:
 
 ```powershell
 $version = "vX.Y.Z"
