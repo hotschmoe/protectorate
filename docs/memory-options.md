@@ -8,7 +8,7 @@ only). The orchestration layer may be as robust as needed.
 
 | | Problem | Solved today? |
 |---|---|---|
-| a | Continuity inside one harness across restarts | Yes. Native resume keeps the same id in all four (`spikes/drivers/`): `claude --resume`, `thread/resume`, `session/load`, `pi --session`. `{harness, cwd, session_id}` suffices. |
+| a | Continuity inside one harness across restarts | Yes. Native resume keeps the same id in all four: `claude --resume`, `thread/resume`, `session/load`, `pi --session`. `{harness, cwd, session_id}` suffices. |
 | b | Switch harness mid-task (quota low) | No. Session ids and stores are per vendor (`~/.claude/projects/*.jsonl`, `~/.codex/sessions/..`, `~/.grok/sessions/..`, `~/.pi/agent/sessions/..`). The new harness starts blind. |
 | c | Long-term per-workspace knowledge (decisions, learnings) | Partly. Each harness reads its context file (CLAUDE.md / AGENTS.md); nothing writes to it on purpose. |
 | d | Messaging: orchestrator <-> sleeves, sleeve <-> sleeve | No. Archive needlecast never got a backend (V1_GAP: 5%). Hub has EventService (hub -> clients) only. |
@@ -192,7 +192,7 @@ model behaviours. Never bust a harness's native prompt cache without reason.
    in every project, with `CLAUDE.md` a symlink to it. No project specifics, no
    hub-managed sections, no hooks or skills added to harnesses. Decisions and
    learnings (c) live elsewhere. Consequence: the orchestrator's generated
-   role document (`internal/orchestrator/doc.go`) must move out of AGENTS.md.
+   role document must move out of AGENTS.md.
 5. **Coordination: open.** Candidates: an excluded mailbox file, GitHub issues
    with the orchestrator pinging the workspace, a small in-binary mailbox in
    the shape of mcp_agent_mail, or a separate coordinator (deterministic
@@ -218,5 +218,6 @@ model behaviours. Never bust a harness's native prompt cache without reason.
    harness's native compaction first (at a turn boundary), and the summary may
    run in parallel while the outgoing sleeve winds down.
 
-Runtime: sleeves stay bwrap in a systemd scope (no Docker); per-sleeve network
-namespaces are being evaluated in `spikes/netns/`.
+Runtime: sleeves run in protectorate's own namespace sandbox in a systemd
+scope (no Docker), each with its own network namespace and egress proxy
+([rust-sandbox.md](rust-sandbox.md)).
