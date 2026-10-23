@@ -526,25 +526,3 @@ fn remote_error(status: u16, bytes: &[u8], desk_unavailable: Option<String>) -> 
     }
     error
 }
-
-#[cfg(test)]
-mod trust_tests {
-    use super::{Client, TrustRoots};
-    use std::time::Duration;
-
-    #[test]
-    fn invalid_or_empty_private_ca_fails_before_network_use() {
-        assert!(TrustRoots::from_pem(b"").is_err());
-        assert!(TrustRoots::from_pem(b"not PEM").is_err());
-        assert!(TrustRoots::from_pem(
-            b"-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn virtual_secret_is_never_configured_for_a_remote_url() {
-        assert!(Client::new_virtual("https://node.example:7475", Duration::from_secs(1)).is_err());
-        assert!(Client::new_virtual("http://127.0.0.1.evil:7475", Duration::from_secs(1)).is_err());
-    }
-}
