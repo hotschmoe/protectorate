@@ -5,3 +5,9 @@ members = ["rust/crates/*"]
 [workspace.package]
 edition = "2021"
 
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
