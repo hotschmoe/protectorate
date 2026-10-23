@@ -1,4 +1,7 @@
 //! Per-sleeve append-only chat events, with replay and gap-free live watches.
+mod cache;
+
+use cache::Telemetry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -135,6 +138,7 @@ struct Inner {
     watchers: HashMap<u64, Arc<Watcher>>,
     next_watcher: u64,
     closed: bool,
+    cache: Telemetry,
 }
 
 pub struct Log {
@@ -171,6 +175,7 @@ impl Log {
             watchers: HashMap::new(),
             next_watcher: 0,
             closed: false,
+            cache: Telemetry::default(),
         };
         let mut reader = BufReader::new(inner.file.try_clone()?);
         let mut line = Vec::new();
@@ -184,7 +189,7 @@ impl Log {
                 inner.file.set_len(inner.size)?;
                 break;
             }
-            let event: Event = serde_json::from_slice(&line).map_err(|e| {
+            let mut event: Event = serde_json::from_slice(&line).map_err(|e| {
                 Error::InvalidLog(format!(
                     "{} line {}: {e}",
                     path.display(),
@@ -199,10 +204,12 @@ impl Log {
                     event.seq
                 )));
             }
+            inner.cache.observe(&mut event.payload);
             inner.offsets.push(inner.size);
             inner.size += count as u64;
             inner.last = event.seq;
         }
+        inner.cache.begin_run();
         inner.file.seek(SeekFrom::Start(inner.size))?;
         Ok(Self {
             path,
@@ -212,6 +219,11 @@ impl Log {
 
     pub fn last(&self) -> u64 {
         lock(&self.inner).last
+    }
+
+    /// Prompt-cache telemetry in the ChatStatus `cache` JSON shape.
+    pub fn cache(&self) -> Value {
+        lock(&self.inner).cache.json()
     }
 
     /// Appends a non-text event, flushing an open assistant message first.
@@ -225,6 +237,7 @@ impl Log {
         if event.time_ms == 0 {
             event.time_ms = now_ms();
         }
+        inner.cache.observe(&mut event.payload);
         inner.persist(&event)?;
         inner.last = event.seq;
         inner.fanout(event.clone());

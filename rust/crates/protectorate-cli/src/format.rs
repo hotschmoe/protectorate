@@ -1667,6 +1667,79 @@ pub(crate) fn chat_settings_text(chat: &Value) -> String {
     out
 }
 
+fn token_counts_text(counts: &Value) -> String {
+    format!(
+        "{} calls, in {} out {} read {} write {}, {} read",
+        fmt_int(number(counts, "calls")),
+        fmt_int(number(counts, "inputTokens")),
+        fmt_int(number(counts, "outputTokens")),
+        fmt_int(number(counts, "cacheReadTokens")),
+        fmt_int(number(counts, "cacheWriteTokens")),
+        percent(number(counts, "readRatio").unwrap_or_default() * 100.0),
+    )
+}
+
+/// Sequence, cache expiry, activity and prompt-cache rows of a chat status.
+fn chat_tail_text(chat: &Value) -> String {
+    let mut out = String::new();
+    row(&mut out, "last sequence", fmt_int(number(chat, "lastSeq")));
+    if !text(chat, "cacheExpiresAt").is_empty() {
+        row(
+            &mut out,
+            "cache expires",
+            local_stamp(text(chat, "cacheExpiresAt")),
+        );
+    }
+    if !text(chat, "lastActivityAt").is_empty() {
+        row(
+            &mut out,
+            "last activity",
+            local_stamp(text(chat, "lastActivityAt")),
+        );
+    }
+    let cache = at(chat, "cache").filter(|cache| !cache.is_null());
+    if let Some(total) = cache.and_then(|cache| at(cache, "total")) {
+        if number(total, "calls").unwrap_or_default() > 0.0 {
+            row(&mut out, "cache total", token_counts_text(total));
+        }
+    }
+    if let Some(cache) = cache {
+        if let Some(first) = at(cache, "firstCall") {
+            let verdict = if boolean(cache, "coldResume") {
+                "resumed but nothing was read from the cache"
+            } else if boolean(cache, "resumed") {
+                "resumed"
+            } else {
+                "fresh"
+            };
+            row(
+                &mut out,
+                "cache first call",
+                format!("{}, {verdict}", token_counts_text(first)),
+            );
+        }
+    }
+    out
+}
+
+/// What `chat status` prints: state, context size and cache telemetry.
+pub(crate) fn chat_status_text(chat: &Value) -> String {
+    let mut out = String::new();
+    row(&mut out, "chat state", text(chat, "state"));
+    row(&mut out, "model", text(chat, "model"));
+    row(
+        &mut out,
+        "context tokens",
+        format!(
+            "{}/{}",
+            fmt_int(number(chat, "contextTokens")),
+            fmt_int(number(chat, "contextWindow"))
+        ),
+    );
+    out.push_str(&chat_tail_text(chat));
+    align(&out)
+}
+
 pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
     let mut out = String::new();
     row(&mut out, "name", text(sleeve, "name"));
@@ -1756,21 +1829,7 @@ pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
                 fmt_int(number(chat, "contextWindow"))
             ),
         );
-        row(&mut out, "last sequence", fmt_int(number(chat, "lastSeq")));
-        if !text(chat, "cacheExpiresAt").is_empty() {
-            row(
-                &mut out,
-                "cache expires",
-                local_stamp(text(chat, "cacheExpiresAt")),
-            );
-        }
-        if !text(chat, "lastActivityAt").is_empty() {
-            row(
-                &mut out,
-                "last activity",
-                local_stamp(text(chat, "lastActivityAt")),
-            );
-        }
+        out.push_str(&chat_tail_text(chat));
     }
     if let Some(handoff) = at(sleeve, "handoff").filter(|value| !value.is_null()) {
         append_handoff(&mut out, handoff);

@@ -152,6 +152,7 @@ impl Session {
             "contextWindow": state.context_window.to_string(),
             "contextTokens": state.context_tokens.to_string(),
             "lastSeq": self.log.last().to_string(),
+            "cache": self.log.cache(),
             "settings": {
                 "requested":{"model":state.requested_model,"effort":state.requested_effort},
                 "effective":{"model":format_model(&state.provider,&state.model),"effort":state.effort},

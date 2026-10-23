@@ -287,6 +287,14 @@ const ChatStatus$json = {
       '6': '.protectorate.v1.ModelSettings',
       '10': 'settings'
     },
+    {
+      '1': 'cache',
+      '3': 13,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.CacheTelemetry',
+      '10': 'cache'
+    },
   ],
 };
 
@@ -301,7 +309,67 @@ final $typed_data.Uint8List chatStatusDescriptor = $convert.base64Decode(
     'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSDmxhc3RBY3Rpdml0eUF0EhoKCHByb3ZpZGVyGA'
     'kgASgJUghwcm92aWRlchIfCgtsb2NhbF9tb2RlbBgKIAEoCFIKbG9jYWxNb2RlbBIpChByZWFz'
     'b25pbmdfZWZmb3J0GAsgASgJUg9yZWFzb25pbmdFZmZvcnQSOgoIc2V0dGluZ3MYDCABKAsyHi'
-    '5wcm90ZWN0b3JhdGUudjEuTW9kZWxTZXR0aW5nc1IIc2V0dGluZ3M=');
+    '5wcm90ZWN0b3JhdGUudjEuTW9kZWxTZXR0aW5nc1IIc2V0dGluZ3MSNQoFY2FjaGUYDSABKAsy'
+    'Hy5wcm90ZWN0b3JhdGUudjEuQ2FjaGVUZWxlbWV0cnlSBWNhY2hl');
+
+@$core.Deprecated('Use tokenCountsDescriptor instead')
+const TokenCounts$json = {
+  '1': 'TokenCounts',
+  '2': [
+    {'1': 'calls', '3': 1, '4': 1, '5': 4, '10': 'calls'},
+    {'1': 'input_tokens', '3': 2, '4': 1, '5': 4, '10': 'inputTokens'},
+    {'1': 'output_tokens', '3': 3, '4': 1, '5': 4, '10': 'outputTokens'},
+    {'1': 'cache_read_tokens', '3': 4, '4': 1, '5': 4, '10': 'cacheReadTokens'},
+    {
+      '1': 'cache_write_tokens',
+      '3': 5,
+      '4': 1,
+      '5': 4,
+      '10': 'cacheWriteTokens'
+    },
+    {'1': 'read_ratio', '3': 6, '4': 1, '5': 1, '10': 'readRatio'},
+  ],
+};
+
+/// Descriptor for `TokenCounts`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List tokenCountsDescriptor = $convert.base64Decode(
+    'CgtUb2tlbkNvdW50cxIUCgVjYWxscxgBIAEoBFIFY2FsbHMSIQoMaW5wdXRfdG9rZW5zGAIgAS'
+    'gEUgtpbnB1dFRva2VucxIjCg1vdXRwdXRfdG9rZW5zGAMgASgEUgxvdXRwdXRUb2tlbnMSKgoR'
+    'Y2FjaGVfcmVhZF90b2tlbnMYBCABKARSD2NhY2hlUmVhZFRva2VucxIsChJjYWNoZV93cml0ZV'
+    '90b2tlbnMYBSABKARSEGNhY2hlV3JpdGVUb2tlbnMSHQoKcmVhZF9yYXRpbxgGIAEoAVIJcmVh'
+    'ZFJhdGlv');
+
+@$core.Deprecated('Use cacheTelemetryDescriptor instead')
+const CacheTelemetry$json = {
+  '1': 'CacheTelemetry',
+  '2': [
+    {
+      '1': 'total',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenCounts',
+      '10': 'total'
+    },
+    {
+      '1': 'first_call',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenCounts',
+      '10': 'firstCall'
+    },
+    {'1': 'resumed', '3': 3, '4': 1, '5': 8, '10': 'resumed'},
+    {'1': 'cold_resume', '3': 4, '4': 1, '5': 8, '10': 'coldResume'},
+  ],
+};
+
+/// Descriptor for `CacheTelemetry`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List cacheTelemetryDescriptor = $convert.base64Decode(
+    'Cg5DYWNoZVRlbGVtZXRyeRIyCgV0b3RhbBgBIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tlbk'
+    'NvdW50c1IFdG90YWwSOwoKZmlyc3RfY2FsbBgCIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tl'
+    'bkNvdW50c1IJZmlyc3RDYWxsEhgKB3Jlc3VtZWQYAyABKAhSB3Jlc3VtZWQSHwoLY29sZF9yZX'
+    'N1bWUYBCABKAhSCmNvbGRSZXN1bWU=');
 
 @$core.Deprecated('Use chatEventDescriptor instead')
 const ChatEvent$json = {
@@ -599,12 +667,21 @@ const TurnSettled$json = {
   '1': 'TurnSettled',
   '2': [
     {'1': 'stop_reason', '3': 1, '4': 1, '5': 9, '10': 'stopReason'},
+    {
+      '1': 'usage',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenCounts',
+      '10': 'usage'
+    },
   ],
 };
 
 /// Descriptor for `TurnSettled`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List turnSettledDescriptor = $convert.base64Decode(
-    'CgtUdXJuU2V0dGxlZBIfCgtzdG9wX3JlYXNvbhgBIAEoCVIKc3RvcFJlYXNvbg==');
+    'CgtUdXJuU2V0dGxlZBIfCgtzdG9wX3JlYXNvbhgBIAEoCVIKc3RvcFJlYXNvbhIyCgV1c2FnZR'
+    'gCIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tlbkNvdW50c1IFdXNhZ2U=');
 
 @$core.Deprecated('Use compactionDescriptor instead')
 const Compaction$json = {
@@ -1017,6 +1094,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ApprovalResolved': ApprovalResolved$json,
   '.protectorate.v1.UsageUpdate': UsageUpdate$json,
   '.protectorate.v1.TurnSettled': TurnSettled$json,
+  '.protectorate.v1.TokenCounts': TokenCounts$json,
   '.protectorate.v1.Compaction': Compaction$json,
   '.protectorate.v1.ChatError': ChatError$json,
   '.protectorate.v1.StateChange': StateChange$json,
@@ -1038,6 +1116,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SetSelectionRequest': SetSelectionRequest$json,
   '.protectorate.v1.SetSelectionResponse': SetSelectionResponse$json,
   '.protectorate.v1.ChatStatus': ChatStatus$json,
+  '.protectorate.v1.CacheTelemetry': CacheTelemetry$json,
   '.protectorate.v1.ReportRequest': ReportRequest$json,
   '.protectorate.v1.ReportResponse': ReportResponse$json,
   '.protectorate.v1.WaitRequest': WaitRequest$json,

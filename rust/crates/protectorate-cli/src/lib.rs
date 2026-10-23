@@ -779,6 +779,9 @@ pub enum Command {
     ChatCompact {
         sleeve: String,
     },
+    ChatStatus {
+        sleeve: String,
+    },
     ChatModels {
         sleeve: Option<String>,
         harness: String,
@@ -948,6 +951,7 @@ fn usage() -> &'static str {
      chat wait <sleeve> [sleeve...]  block until every sleeve is idle or reports (--until idle|report, --timeout DURATION)\n  \
      chat interrupt <sleeve>    cancel the running turn\n  \
      chat compact <sleeve>      compact chat history while idle\n  \
+     chat status <sleeve>       chat state, context and prompt-cache telemetry\n  \
      chat models [sleeve]       list native models and efforts (--harness, default codex)\n  \
      chat settings <sleeve>     show model and effort, or change them (--model, --effort, --native-defaults)\n  \
      report --status complete|partial|blocked  report this sleeve's result (--summary-file FILE|-; 32 KiB limit)\n  \
@@ -2145,6 +2149,19 @@ fn execute_commands(
                     tokens("tokensBefore"),
                     tokens("tokensAfter")
                 ))
+            }
+        }
+        Command::ChatStatus { sleeve } => {
+            let response = client.call(GET_SLEEVE, &json!({"name": sleeve}))?;
+            let chat = response
+                .get("sleeve")
+                .and_then(|sleeve| sleeve.get("chat"))
+                .filter(|chat| !chat.is_null())
+                .ok_or_else(|| RpcError::new(Code::FailedPrecondition, "sleeve has no chat"))?;
+            if json {
+                json_line(chat)
+            } else {
+                Ok(format::chat_status_text(chat))
             }
         }
         Command::ChatModels { sleeve, harness } => {

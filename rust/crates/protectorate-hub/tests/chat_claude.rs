@@ -63,7 +63,7 @@ for line in sys.stdin:
    assert response['type']=='control_response' and response['response']['request_id']=='perm-1'
    assert response['response']['response']['behavior']==('allow' if txt=='approve' else 'deny')
    if txt=='deny': assert response['response']['response']['message']=='nope'
-  emit({'type':'assistant','message':{'id':'msg-'+txt,'model':'claude-test','content':[{'type':'text','text':'answer: '+txt},{'type':'tool_use','id':'tool-1','name':'Bash','input':{'command':'printf ok'}}], 'usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':4}}})
+  emit({'type':'assistant','message':{'id':'msg-'+txt,'model':'claude-test','content':[{'type':'text','text':'answer: '+txt},{'type':'tool_use','id':'tool-1','name':'Bash','input':{'command':'printf ok'}}], 'usage':{'input_tokens':2,'output_tokens':3,'cache_creation_input_tokens':9} if txt=='cold' else {'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':4}}})
   emit({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'tool-1','content':'ok','is_error':False}]}})
   emit({'type':'result','session_id':sid,'subtype':'success','is_error':False,'modelUsage':{'claude-test':{'contextWindow':200000}}})
  elif m.get('type')=='control_request' and m['request']['subtype']=='interrupt':
@@ -248,7 +248,7 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
         addr,
         "SleeveService/SpawnSleeve",
         json!({
-            "name":"claude-one","harness":"HARNESS_CLAUDE","workspace":work,"brief":"restarted"
+            "name":"claude-one","harness":"HARNESS_CLAUDE","workspace":work,"brief":"cold"
         }),
     )
     .await;
@@ -264,6 +264,27 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     )
     .await;
     assert_eq!(status, 200, "{idle}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cold = loop {
+        let (_, got) = call(
+            addr,
+            "SleeveService/GetSleeve",
+            json!({"name":"claude-one"}),
+        )
+        .await;
+        if got["sleeve"]["chat"]["cache"].get("firstCall").is_some() {
+            break got;
+        }
+        assert!(Instant::now() < deadline, "no first call: {got}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let cache = &cold["sleeve"]["chat"]["cache"];
+    assert_eq!(cache["resumed"], true, "{cold}");
+    assert_eq!(cache["coldResume"], true, "{cold}");
+    assert_eq!(cache["firstCall"]["cacheWriteTokens"], "9", "{cold}");
+    assert!(cache["firstCall"].get("readRatio").is_none(), "{cold}");
+    assert_eq!(cache["total"]["calls"], "4", "{cold}");
+    assert_eq!(cache["total"]["cacheReadTokens"], "12", "{cold}");
     let (status, sent) = call(
         addr,
         "ChatService/Send",
@@ -310,6 +331,23 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     .await;
     assert_eq!(status, 200, "{idle}");
     let events = protectorate_chatlog::read_all(&path).unwrap();
+    let turn = events
+        .iter()
+        .rev()
+        .find_map(|event| event.payload["settled"].get("usage"))
+        .expect("settled turn carries usage");
+    assert_eq!(turn["cacheReadTokens"], "4", "{turn}");
+    assert!((turn["readRatio"].as_f64().unwrap() - 4.0 / 6.0).abs() < 1e-9);
+    let (_, warm) = call(
+        addr,
+        "SleeveService/GetSleeve",
+        json!({"name":"claude-one"}),
+    )
+    .await;
+    assert_eq!(
+        warm["sleeve"]["chat"]["cache"]["coldResume"], true,
+        "{warm}"
+    );
     assert!(events.iter().any(|event| {
         event.payload["approvalResolved"]["by"] == "autonomous"
             && event.payload["approvalResolved"]["allow"] == true

@@ -177,7 +177,7 @@ impl Session {
         json!({"state":if s.exited {"CHAT_STATE_EXITED"} else if !s.approvals.is_empty() {"CHAT_STATE_AWAITING_APPROVAL"}
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.thread_id,"model":s.model,"provider":"openai","reasoningEffort":s.effort,
-            "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),"lastSeq":self.log.last().to_string(),
+            "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),"lastSeq":self.log.last().to_string(),"cache":self.log.cache(),
             "settings":{"requested":{"model":s.requested_model,"effort":s.requested_effort},
                 "effective":{"model":s.model,"effort":s.effort},
                 "nativeDefaults":{"model":s.default_model,"effort":s.default_effort}}})

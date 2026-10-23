@@ -1583,18 +1583,18 @@ fn selection_value(flag: &str, text: &str, limit: usize) -> Result<String> {
 fn chat(args: &[String], index: &mut usize) -> Result<Command> {
     let action = next(args, *index + 1).ok_or_else(|| {
         bad_argument(
-            "chat needs watch, send, wait, respond, interrupt, compact, models or settings",
+            "chat needs watch, send, wait, respond, interrupt, compact, status, models or settings",
         )
     })?;
     *index += 1;
     match action {
-        "interrupt" | "compact" => {
+        "interrupt" | "compact" | "status" => {
             let sleeve = argument(args, index, &format!("chat {action} <sleeve>"))?;
-            if action == "interrupt" {
-                Ok(Command::ChatInterrupt { sleeve })
-            } else {
-                Ok(Command::ChatCompact { sleeve })
-            }
+            Ok(match action {
+                "interrupt" => Command::ChatInterrupt { sleeve },
+                "compact" => Command::ChatCompact { sleeve },
+                _ => Command::ChatStatus { sleeve },
+            })
         }
         "models" => {
             let mut sleeve = None;

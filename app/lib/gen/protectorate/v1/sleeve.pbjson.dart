@@ -1073,6 +1073,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveUsage': SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $1.ChatStatus$json,
   '.protectorate.v1.ModelSettings': $1.ModelSettings$json,
+  '.protectorate.v1.CacheTelemetry': $1.CacheTelemetry$json,
+  '.protectorate.v1.TokenCounts': $1.TokenCounts$json,
   '.protectorate.v1.Handoff': $1.Handoff$json,
   '.protectorate.v1.SleeveResult': $1.SleeveResult$json,
   '.protectorate.v1.ListSleevesRequest': ListSleevesRequest$json,

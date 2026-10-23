@@ -162,6 +162,7 @@ fn children(path: &str) -> &'static [Candidate] {
             ("respond", "Answer approval"),
             ("interrupt", "Interrupt a turn"),
             ("compact", "Compact history"),
+            ("status", "Show chat state and cache use"),
             ("models", "List models"),
             ("settings", "Show or change selection"),
         ],
@@ -748,7 +749,7 @@ fn resource_kind(path: &str, positionals: usize) -> Option<ResourceKind> {
             Some(ResourceKind::Sleeve)
         }
         "chat send" | "chat watch" | "chat respond" | "chat interrupt" | "chat compact"
-        | "chat settings" | "chat models"
+        | "chat status" | "chat settings" | "chat models"
             if positionals == 0 =>
         {
             Some(ResourceKind::Sleeve)

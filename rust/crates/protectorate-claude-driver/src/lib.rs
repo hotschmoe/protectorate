@@ -110,7 +110,7 @@ impl Session {
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.session_id,"model":s.model,"provider":"anthropic",
             "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),
-            "lastSeq":self.log.last().to_string()})
+            "lastSeq":self.log.last().to_string(),"cache":self.log.cache()})
     }
     pub fn is_exited(&self) -> bool {
         self.state.lock().unwrap().exited
