@@ -46,18 +46,6 @@ impl Codex {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn with_home(mut self, home: PathBuf) -> Self {
-        self.home = Some(home);
-        self
-    }
-    pub fn with_bin(mut self, bin: &str) -> Self {
-        self.bin = bin.to_string();
-        self
-    }
-    pub fn with_base_url(mut self, base: &str) -> Self {
-        self.base_url = base.trim_end_matches('/').to_string();
-        self
-    }
     fn base(&self) -> String {
         if self.base_url.is_empty() {
             DEFAULT_BASE.to_string()

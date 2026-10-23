@@ -75,21 +75,24 @@ pub fn quota_responses(data: &[u8]) {
     .unwrap();
     fs::set_permissions(&agy, fs::Permissions::from_mode(0o755)).unwrap();
     let readers: Vec<Arc<dyn Reader>> = vec![
-        Arc::new(Claude::new().with_home(h.into()).with_base_url(BASE)),
-        Arc::new(
-            Codex::new()
-                .with_home(h.into())
-                .with_bin("/nonexistent/codex")
-                .with_base_url(BASE),
-        ),
-        Arc::new(
-            Grok::new()
-                .with_home(h.into())
-                .with_base_url(BASE)
-                .with_web_url(BASE),
-        ),
+        Arc::new(Claude {
+            home: Some(h.into()),
+            base_url: BASE.into(),
+        }),
+        Arc::new(Codex {
+            home: Some(h.into()),
+            bin: "/nonexistent/codex".into(),
+            base_url: BASE.into(),
+        }),
+        Arc::new(Grok {
+            home: Some(h.into()),
+            base_url: BASE.into(),
+            web_url: BASE.into(),
+        }),
         Arc::new(Local::new(BASE)),
-        Arc::new(Antigravity::new().with_bin(&agy.to_string_lossy())),
+        Arc::new(Antigravity {
+            bin: agy.to_string_lossy().into_owned(),
+        }),
     ];
     let transport = Bodies(parts[..7].iter().map(|p| p.to_vec()).collect());
     let cache = QuotaCache::new(readers, QuotaOptions::default());
