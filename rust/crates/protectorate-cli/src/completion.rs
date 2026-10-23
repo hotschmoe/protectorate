@@ -420,6 +420,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--exit-after-idle", "Exit after idle"),
             ("--model", "Model"),
             ("--effort", "Reasoning effort"),
+            ("--budget", "Token budget"),
         ],
         "sleeve resleeve" => &[
             ("--to", "Target harness"),
@@ -461,6 +462,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--ttl", "Grant lifetime"),
             ("--model", "Model"),
             ("--effort", "Reasoning effort"),
+            ("--budget", "Token budget"),
         ],
         "sleeve attach" | "session attach" => {
             &[("--readonly", "Read only"), ("--escape", "Detach key")]

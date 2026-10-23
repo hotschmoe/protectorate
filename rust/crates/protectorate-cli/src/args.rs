@@ -2043,6 +2043,7 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
     let mut mode = SleeveModeName::Default;
     let mut supervised = false;
     let mut nested = false;
+    let mut token_budget = 0;
     let mut selection = ModelChoice::default();
     let mut read_only = Vec::new();
     let mut exit_after_idle = Duration::ZERO;
@@ -2133,6 +2134,10 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
                     *index += 1;
                     nested = bool_flag("--nested", inline)?;
                 }
+                "--budget" => {
+                    *index += 1;
+                    token_budget = budget_flag(&value(args, index, "--budget", inline)?)?;
+                }
                 _ => break,
             }
         } else if name.is_some() {
@@ -2171,7 +2176,13 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
         new_branch,
         brief_file,
         nested,
+        token_budget,
     }))
+}
+
+fn budget_flag(text: &str) -> Result<u64> {
+    text.parse()
+        .map_err(|_| bad_argument("--budget is a count of weighted tokens"))
 }
 
 fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
@@ -2180,6 +2191,7 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
     let mut add_scopes = Vec::new();
     let mut ttl = DEFAULT_ENVOY_TTL;
     let mut selection = ModelChoice::default();
+    let mut token_budget = 0;
     while let Some(token) = next(args, *index + 1) {
         if !token.starts_with('-') {
             return Err(bad_argument("sleeve envoy takes no arguments"));
@@ -2210,6 +2222,10 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
                 *index += 1;
                 selection.effort = value(args, index, "--effort", inline)?;
             }
+            "--budget" => {
+                *index += 1;
+                token_budget = budget_flag(&value(args, index, "--budget", inline)?)?;
+            }
             _ => break,
         }
     }
@@ -2224,6 +2240,7 @@ fn sleeve_envoy(args: &[String], index: &mut usize) -> Result<Command> {
         add_scopes,
         ttl,
         selection,
+        token_budget,
     }))
 }
 

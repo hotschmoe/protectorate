@@ -203,6 +203,15 @@ pub struct Record {
     /// sleeve's audit entries, jobs, mail, leases, checkpoints and egress.
     #[serde(default)]
     pub run_id: String,
+    /// Weighted tokens the run may use (zero: no cap) and has used, its own
+    /// and its children's.
+    #[serde(default)]
+    pub token_budget: u64,
+    #[serde(default)]
+    pub tokens_used: u64,
+    /// The parent's run at spawn; children's usage counts against it.
+    #[serde(default)]
+    pub parent_run_id: String,
     /// The last approved launch of each harness this sleeve ran, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pins: BTreeMap<String, Pin>,
@@ -249,6 +258,9 @@ impl Record {
             nested: false,
             helper: false,
             run_id: String::new(),
+            token_budget: 0,
+            tokens_used: 0,
+            parent_run_id: String::new(),
             pins: BTreeMap::new(),
         };
         row.validate()?;
@@ -590,6 +602,20 @@ impl Registry {
                 .ok_or_else(|| Error::NotFound(name.into()))?;
             row.pins.insert(harness.into(), pin);
             Ok(row.clone())
+        })
+    }
+    /// Adds usage to the sleeve's run; None when the sleeve has since been
+    /// respawned into another run.
+    pub fn charge(&self, name: &str, run_id: &str, tokens: u64) -> Result<Option<Record>> {
+        self.update(|rows| {
+            let row = rows
+                .get_mut(name)
+                .ok_or_else(|| Error::NotFound(name.into()))?;
+            if row.run_id != run_id {
+                return Ok(None);
+            }
+            row.tokens_used = row.tokens_used.saturating_add(tokens);
+            Ok(Some(row.clone()))
         })
     }
     pub fn set_result(&self, name: &str, result: serde_json::Value) -> Result<Record> {

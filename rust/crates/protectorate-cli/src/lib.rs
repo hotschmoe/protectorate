@@ -529,6 +529,8 @@ pub struct SleeveSpawn {
     /// Path of the brief file, read by this CLI. Empty means no brief.
     pub brief_file: String,
     pub nested: bool,
+    /// Weighted tokens the run may use; zero means no cap.
+    pub token_budget: u64,
 }
 
 /// The token lifetime `sleeve envoy` sends when `--ttl` is omitted: 720h.
@@ -543,6 +545,7 @@ pub struct SleeveEnvoy {
     pub add_scopes: Vec<String>,
     pub ttl: Duration,
     pub selection: ModelChoice,
+    pub token_budget: u64,
 }
 
 /// `sleeve resleeve`. `to` none is auto. A zero `wait` leaves the hub's
@@ -974,8 +977,8 @@ fn usage() -> &'static str {
      sleeve kill <name>         stop a sleeve and its processes (--drop-caches)\n  \
      sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
-     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, -- args)\n  \
-     sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --ttl, --model, --effort)\n  \
+     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, --budget TOKENS, -- args)\n  \
+     sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --ttl, --model, --effort, --budget TOKENS)\n  \
      orchestrator spawn         create or respawn Envoy (same options as sleeve envoy)\n  \
      orchestrator status        show Envoy sleeve and latest token\n  \
      orchestrator scopes        change the newest active Envoy token (--add, --remove)\n  \
@@ -3297,6 +3300,9 @@ fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
     if spawn.nested {
         request["nested"] = json!(true);
     }
+    if spawn.token_budget > 0 {
+        request["tokenBudget"] = json!(spawn.token_budget.to_string());
+    }
     request
 }
 
@@ -3313,6 +3319,9 @@ fn envoy_body(envoy: &SleeveEnvoy) -> Value {
     }
     if let Some(selection) = selection_body(&envoy.selection) {
         request["selection"] = selection;
+    }
+    if envoy.token_budget > 0 {
+        request["tokenBudget"] = json!(envoy.token_budget.to_string());
     }
     request
 }

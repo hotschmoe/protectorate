@@ -294,6 +294,10 @@ message Sleeve {
   // did.
   string harness_sha256 = 32;
   string profile_sha256 = 33;
+  // token_budget is the run's cap in weighted tokens (zero: none) and
+  // tokens_used what the run and the sleeves it spawned have used.
+  uint64 token_budget = 34;
+  uint64 tokens_used = 35;
 }
 
 message BrowseWorkspacesRequest {
@@ -356,6 +360,14 @@ message SpawnSleeveRequest {
   string brief = 14;
   // Delegates a private cgroup subtree; requires CPU and memory limits.
   bool nested = 17;
+  // token_budget caps the run's weighted tokens, counted from the harness's
+  // usage reports: input + output + 0.1 x cache reads + 1.25 x cache writes.
+  // At 90% the hub posts a chat notice; at 100% it interrupts the turn and
+  // refuses new ones. Zero means no cap. A sleeve spawned by Envoy or another
+  // sleeve with a budget gets at most that parent's remaining budget (all of
+  // it when zero), and its usage counts against the parent too. Chat mode
+  // only.
+  uint64 token_budget = 18;
 }
 
 message SpawnSleeveResponse {
@@ -444,6 +456,8 @@ message SpawnEnvoyRequest {
   // renews the token before it expires without restarting the harness.
   google.protobuf.Duration ttl = 4;
   ModelSelection selection = 5;
+  // token_budget caps Envoy's run like SpawnSleeveRequest.token_budget.
+  uint64 token_budget = 6;
 }
 
 message SpawnEnvoyResponse {

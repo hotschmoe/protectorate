@@ -1731,6 +1731,20 @@ pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
         row(&mut out, "base tip", text(sleeve, "baseTip"));
     }
     row(&mut out, "parent", text(sleeve, "parent"));
+    optional_row(&mut out, "run", text(sleeve, "runId"));
+    optional_row(&mut out, "harness sha256", text(sleeve, "harnessSha256"));
+    optional_row(&mut out, "profile sha256", text(sleeve, "profileSha256"));
+    if number(sleeve, "tokenBudget").unwrap_or_default() > 0.0 {
+        row(
+            &mut out,
+            "token budget",
+            format!(
+                "{} of {} weighted tokens used",
+                fmt_int(number(sleeve, "tokensUsed")),
+                fmt_int(number(sleeve, "tokenBudget"))
+            ),
+        );
+    }
     row(&mut out, "mode", mode_label(sleeve));
     if let Some(result) = at(sleeve, "result").filter(|value| !value.is_null()) {
         out.push_str(&format!(

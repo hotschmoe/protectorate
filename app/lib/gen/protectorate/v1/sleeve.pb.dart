@@ -1031,6 +1031,8 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.String? runId,
     $core.String? harnessSha256,
     $core.String? profileSha256,
+    $fixnum.Int64? tokenBudget,
+    $fixnum.Int64? tokensUsed,
   }) {
     final result$ = Sleeve._();
     if (name != null) result$.name = name;
@@ -1063,6 +1065,8 @@ class Sleeve extends $pb.GeneratedMessage {
     if (runId != null) result$.runId = runId;
     if (harnessSha256 != null) result$.harnessSha256 = harnessSha256;
     if (profileSha256 != null) result$.profileSha256 = profileSha256;
+    if (tokenBudget != null) result$.tokenBudget = tokenBudget;
+    if (tokensUsed != null) result$.tokensUsed = tokensUsed;
     return result$;
   }
 
@@ -1122,6 +1126,12 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOS(31, _omitFieldNames ? '' : 'runId')
     ..aOS(32, _omitFieldNames ? '' : 'harnessSha256')
     ..aOS(33, _omitFieldNames ? '' : 'profileSha256')
+    ..a<$fixnum.Int64>(
+        34, _omitFieldNames ? '' : 'tokenBudget', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        35, _omitFieldNames ? '' : 'tokensUsed', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1446,6 +1456,26 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasProfileSha256() => $_has(29);
   @$pb.TagNumber(33)
   void clearProfileSha256() => $_clearField(33);
+
+  /// token_budget is the run's cap in weighted tokens (zero: none) and
+  /// tokens_used what the run and the sleeves it spawned have used.
+  @$pb.TagNumber(34)
+  $fixnum.Int64 get tokenBudget => $_getI64(30);
+  @$pb.TagNumber(34)
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(30, value);
+  @$pb.TagNumber(34)
+  $core.bool hasTokenBudget() => $_has(30);
+  @$pb.TagNumber(34)
+  void clearTokenBudget() => $_clearField(34);
+
+  @$pb.TagNumber(35)
+  $fixnum.Int64 get tokensUsed => $_getI64(31);
+  @$pb.TagNumber(35)
+  set tokensUsed($fixnum.Int64 value) => $_setInt64(31, value);
+  @$pb.TagNumber(35)
+  $core.bool hasTokensUsed() => $_has(31);
+  @$pb.TagNumber(35)
+  void clearTokensUsed() => $_clearField(35);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {
@@ -1831,6 +1861,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     $core.String? newBranch,
     $core.String? brief,
     $core.bool? nested,
+    $fixnum.Int64? tokenBudget,
   }) {
     final result = SpawnSleeveRequest._();
     if (name != null) result.name = name;
@@ -1848,6 +1879,7 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     if (newBranch != null) result.newBranch = newBranch;
     if (brief != null) result.brief = brief;
     if (nested != null) result.nested = nested;
+    if (tokenBudget != null) result.tokenBudget = tokenBudget;
     return result;
   }
 
@@ -1890,6 +1922,9 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
     ..aOS(13, _omitFieldNames ? '' : 'newBranch')
     ..aOS(14, _omitFieldNames ? '' : 'brief')
     ..aOB(17, _omitFieldNames ? '' : 'nested')
+    ..a<$fixnum.Int64>(
+        18, _omitFieldNames ? '' : 'tokenBudget', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2051,6 +2086,22 @@ class SpawnSleeveRequest extends $pb.GeneratedMessage {
   $core.bool hasNested() => $_has(14);
   @$pb.TagNumber(17)
   void clearNested() => $_clearField(17);
+
+  /// token_budget caps the run's weighted tokens, counted from the harness's
+  /// usage reports: input + output + 0.1 x cache reads + 1.25 x cache writes.
+  /// At 90% the hub posts a chat notice; at 100% it interrupts the turn and
+  /// refuses new ones. Zero means no cap. A sleeve spawned by Envoy or another
+  /// sleeve with a budget gets at most that parent's remaining budget (all of
+  /// it when zero), and its usage counts against the parent too. Chat mode
+  /// only.
+  @$pb.TagNumber(18)
+  $fixnum.Int64 get tokenBudget => $_getI64(15);
+  @$pb.TagNumber(18)
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(15, value);
+  @$pb.TagNumber(18)
+  $core.bool hasTokenBudget() => $_has(15);
+  @$pb.TagNumber(18)
+  void clearTokenBudget() => $_clearField(18);
 }
 
 class SpawnSleeveResponse extends $pb.GeneratedMessage {
@@ -2895,6 +2946,7 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? addScopes,
     $2.Duration? ttl,
     $1.ModelSelection? selection,
+    $fixnum.Int64? tokenBudget,
   }) {
     final result = SpawnEnvoyRequest._();
     if (harness != null) result.harness = harness;
@@ -2902,6 +2954,7 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
     if (addScopes != null) result.addScopes.addAll(addScopes);
     if (ttl != null) result.ttl = ttl;
     if (selection != null) result.selection = selection;
+    if (tokenBudget != null) result.tokenBudget = tokenBudget;
     return result;
   }
 
@@ -2927,6 +2980,9 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
         subBuilder: $2.Duration.$_createMessage)
     ..aOM<$1.ModelSelection>(5, _omitFieldNames ? '' : 'selection',
         subBuilder: $1.ModelSelection.$_createMessage)
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'tokenBudget', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2994,6 +3050,16 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
   void clearSelection() => $_clearField(5);
   @$pb.TagNumber(5)
   $1.ModelSelection ensureSelection() => $_ensure(4);
+
+  /// token_budget caps Envoy's run like SpawnSleeveRequest.token_budget.
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get tokenBudget => $_getI64(5);
+  @$pb.TagNumber(6)
+  set tokenBudget($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasTokenBudget() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearTokenBudget() => $_clearField(6);
 }
 
 class SpawnEnvoyResponse extends $pb.GeneratedMessage {

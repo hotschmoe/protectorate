@@ -61,7 +61,8 @@ where
 }
 
 /// A stream-json harness: "egress" asks the sandbox proxy for a blocked
-/// host, "burn N" reports N input tokens, anything else reports 10.
+/// host, "burn N" reports N input tokens, "hold N" reports N and keeps the
+/// turn open until interrupted, anything else reports 10.
 fn fake_claude(path: &Path, variant: &str) {
     let script = format!(
         r#"#!/usr/bin/python3
@@ -86,9 +87,15 @@ for line in sys.stdin:
   s=socket.create_connection(('127.0.0.1',3128))
   s.sendall(b'CONNECT blocked.invalid:443 HTTP/1.1\r\nHost: blocked.invalid:443\r\n\r\n')
   answer=s.recv(64).decode(errors='replace').split('\r\n')[0]
- elif txt.startswith('burn '):
+ elif txt.split()[0] in ('burn','hold'):
   tokens=int(txt.split()[1])
  emit({{'type':'assistant','message':{{'id':'msg-%d'%n,'model':'claude-test','content':[{{'type':'text','text':answer}}],'usage':{{'input_tokens':tokens,'output_tokens':0}}}}}})
+ if txt.startswith('hold '):
+  for line in sys.stdin:
+   m=json.loads(line)
+   if m.get('type')=='control_request' and m['request']['subtype']=='interrupt': break
+  emit({{'type':'result','session_id':sid,'subtype':'interrupted','is_error':False}})
+  continue
  emit({{'type':'result','session_id':sid,'subtype':'success','is_error':False}})
 "#
     );
@@ -526,5 +533,127 @@ async fn a_changed_harness_needs_approval_before_an_agent_launches_it() {
         .as_str()
         .unwrap()
         .contains("chat/claude executable"));
+    server.abort();
+}
+
+async fn send(addr: std::net::SocketAddr, name: &str, text: &str) -> (u16, Value) {
+    call(
+        addr,
+        "ChatService/Send",
+        OWNER,
+        json!({"sleeve":name,"text":text}),
+    )
+    .await
+}
+
+async fn used(addr: std::net::SocketAddr, name: &str) -> (u64, u64) {
+    let (_, sleeve) = call(addr, "SleeveService/GetSleeve", OWNER, json!({"name":name})).await;
+    let field = |key: &str| {
+        sleeve["sleeve"][key]
+            .as_str()
+            .map_or(0, |n| n.parse::<u64>().unwrap())
+    };
+    (field("tokensUsed"), field("tokenBudget"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn budgets_warn_at_90_percent_and_stop_the_turn_at_100_including_children() {
+    let (setup, hub) = setup();
+    let (addr, server) = serve(hub.router().unwrap()).await;
+    let (status, spawned) = call(
+        addr,
+        "SleeveService/SpawnSleeve",
+        OWNER,
+        json!({"name":"parent","harness":"HARNESS_CLAUDE","workspace":setup.work,"tokenBudget":"200"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{spawned}");
+    let run = spawned["sleeve"]["runId"].as_str().unwrap().to_owned();
+    let (_, tokens) = call(addr, "TokenService/ListTokens", OWNER, json!({})).await;
+    let token_id = tokens["tokens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "sleeve:parent" && t.get("revokedAt").is_none())
+        .unwrap()["id"]
+        .clone();
+    call(
+        addr,
+        "TokenService/UpdateTokenScopes",
+        OWNER,
+        json!({"id":token_id,"add":["sleeve_spawn_sleeve"]}),
+    )
+    .await;
+    let parent = sleeve_token(&setup.state, "parent");
+    let kid_work = setup.work.with_file_name("kid-work");
+    fs::create_dir_all(&kid_work).unwrap();
+    let (status, kid) = call(
+        addr,
+        "SleeveService/SpawnSleeve",
+        &parent,
+        json!({"name":"kid","harness":"HARNESS_CLAUDE","workspace":kid_work,"tokenBudget":"5000"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{kid}");
+    assert_eq!(kid["sleeve"]["tokenBudget"], "200", "{kid}");
+
+    assert_eq!(send(addr, "parent", "burn 120").await.0, 200);
+    wait_idle(addr, "parent").await;
+    assert_eq!(used(addr, "parent").await, (120, 200));
+    assert_eq!(send(addr, "kid", "burn 65").await.0, 200);
+    wait_idle(addr, "kid").await;
+    assert_eq!(used(addr, "kid").await, (65, 200));
+    assert_eq!(used(addr, "parent").await, (185, 200));
+    let chat = setup.state.join("sleeves/parent/chat.jsonl");
+    let notices = || {
+        protectorate_chatlog::read_all(&chat)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| e.payload["error"]["text"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(notices().len(), 1, "{:?}", notices());
+    assert!(notices()[0].starts_with("Token budget 90% used: 185 of 200"));
+
+    assert_eq!(send(addr, "parent", "hold 20").await.0, 200);
+    wait_idle(addr, "parent").await;
+    assert_eq!(used(addr, "parent").await, (205, 200));
+    assert!(
+        notices()
+            .iter()
+            .any(|n| n.starts_with("Token budget spent: 205 of 200")),
+        "{:?}",
+        notices()
+    );
+    let (status, refused) = send(addr, "parent", "more").await;
+    assert_eq!(status, 429, "{refused}");
+    let (status, refused) = call(
+        addr,
+        "SleeveService/SpawnSleeve",
+        &parent,
+        json!({"name":"kid2","harness":"HARNESS_CLAUDE","workspace":kid_work}),
+    )
+    .await;
+    assert_eq!(status, 429, "{refused}");
+    assert_eq!(send(addr, "kid", "burn 5").await.0, 200);
+    wait_idle(addr, "kid").await;
+    let (_, audit) = call(
+        addr,
+        "AuditService/ListAuditEntries",
+        OWNER,
+        json!({"runId":run,"procedure":"budget.","limit":50}),
+    )
+    .await;
+    let procedures = audit["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["procedure"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        procedures,
+        ["budget.exhausted", "budget.warning"],
+        "{audit}"
+    );
     server.abort();
 }

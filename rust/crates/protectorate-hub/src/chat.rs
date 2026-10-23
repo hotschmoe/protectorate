@@ -562,8 +562,10 @@ struct ChatStateWatcher {
     inventory: Arc<Inventory>,
     hosts: Vec<String>,
     name: String,
+    run_id: String,
     checkpoints: crate::checkpoints::Store,
     sleeves: Arc<SleeveRegistry>,
+    audit: Arc<protectorate_audit::Audit>,
 }
 
 impl ChatStateWatcher {
@@ -572,40 +574,38 @@ impl ChatStateWatcher {
     }
 
     fn run(self) {
-        let Self {
-            runtime,
-            session,
-            log,
-            after,
-            events,
-            inventory,
-            hosts,
-            name,
-            checkpoints,
-            sleeves,
-        } = self;
+        let (session, name, events) = (&self.session, &self.name, &self.events);
+        let (hosts, inventory) = (&self.hosts, &self.inventory);
         let mut previous = Value::Null;
         let mut last_publish = Instant::now();
         publish_chat_state(
-            &events,
-            &name,
-            &chat_status_with(session.as_ref(), &hosts, &inventory),
+            events,
+            name,
+            &chat_status_with(session.as_ref(), hosts, inventory),
             &mut previous,
             &mut last_publish,
         );
         let cancelled = AtomicBool::new(false);
-        let _ = log.watch(after, &cancelled, |event| {
-            let Some(current) = runtime.upgrade() else {
+        let _ = self.log.watch(self.after, &cancelled, |event| {
+            let Some(current) = self.runtime.upgrade() else {
                 return Err("chat runtime stopped".into());
             };
             if !current
                 .sessions
                 .lock()
                 .unwrap()
-                .get(&name)
-                .is_some_and(|live| Arc::ptr_eq(live, &session))
+                .get(name)
+                .is_some_and(|live| Arc::ptr_eq(live, session))
             {
                 return Err("chat session replaced".into());
+            }
+            if let Some(tokens) = event
+                .payload
+                .get("usage")
+                .map(weighted_tokens)
+                .filter(|tokens| *tokens > 0)
+            {
+                charge_budgets(&self, &current, tokens);
             }
             let state = event.payload["state"]["state"]
                 .as_str()
@@ -619,15 +619,15 @@ impl ChatStateWatcher {
                 return Ok(());
             }
             if event.payload.get("settled").is_some() {
-                if let Ok(row) = sleeves.get(&name) {
-                    crate::checkpoints::after_turn(checkpoints.clone(), row);
+                if let Ok(row) = self.sleeves.get(name) {
+                    crate::checkpoints::after_turn(self.checkpoints.clone(), row);
                 }
             }
-            let mut status = chat_status_with(session.as_ref(), &hosts, &inventory);
+            let mut status = chat_status_with(session.as_ref(), hosts, inventory);
             if let Some(state) = state {
                 status["state"] = json!(state);
             }
-            publish_chat_state(&events, &name, &status, &mut previous, &mut last_publish);
+            publish_chat_state(events, name, &status, &mut previous, &mut last_publish);
             Ok(())
         });
     }
@@ -1602,6 +1602,14 @@ fn spawn_chat(
         previous.as_ref().and_then(|row| row.pins.get(&pin_key)),
         &pin,
     )?;
+    let budget = if resleeve {
+        previous.as_ref().map_or((0, 0, String::new()), |old| {
+            (old.token_budget, old.tokens_used, old.parent_run_id.clone())
+        })
+    } else {
+        let (budget, parent_run) = spawn_budget(hub, parent, number(value, "tokenBudget")?)?;
+        (budget, 0, parent_run)
+    };
     let log = runtime.log(&name)?;
     if envoy {
         revoke_identity(hub, &name)?;
@@ -1700,8 +1708,9 @@ fn spawn_chat(
     }
     row.chat = Some(chat_status(hub, session.as_ref()));
     row.env = caller_env;
-    row.run_id = run_id;
+    row.run_id = run_id.clone();
     row.pins.insert(pin_key, pin);
+    (row.token_budget, row.tokens_used, row.parent_run_id) = budget;
     let state_event_cursor = log.last();
     row.supervised = value["supervised"] == true;
     if !resleeve && !exit_after_idle.is_zero() {
@@ -1757,11 +1766,121 @@ fn spawn_chat(
         inventory: Arc::clone(&hub.inventory),
         hosts: hub.local_model_hosts.clone(),
         name,
+        run_id,
         checkpoints: crate::checkpoints::Store::for_chat(launcher),
         sleeves: Arc::clone(&hub.sleeves),
+        audit: Arc::clone(&hub.audit),
     }
     .start();
     Ok(row)
+}
+
+/// A child of a sleeve or Envoy with a budget gets at most what the parent
+/// has left, and its usage is charged to the parent's run too.
+fn spawn_budget(
+    hub: &Hub,
+    parent: &crate::sleeves::SpawnParent,
+    requested: u64,
+) -> Result<(u64, String)> {
+    let Some(row) =
+        crate::sleeves::parent_sleeve(&parent.label).and_then(|name| hub.sleeves.get(name).ok())
+    else {
+        return Ok((requested, String::new()));
+    };
+    if row.token_budget == 0 {
+        return Ok((requested, row.run_id));
+    }
+    let remaining = row.token_budget.saturating_sub(row.tokens_used);
+    if remaining == 0 {
+        return Err(RpcError::new(
+            Code::ResourceExhausted,
+            format!("{} has spent its token budget", row.name),
+        ));
+    }
+    let budget = if requested == 0 {
+        remaining
+    } else {
+        requested.min(remaining)
+    };
+    Ok((budget, row.run_id))
+}
+
+/// Usage weighted like provider billing of the cached prefix: reads at 0.1x
+/// and writes at 1.25x of input.
+fn weighted_tokens(usage: &Value) -> u64 {
+    let field = |key: &str| {
+        usage[key]
+            .as_str()
+            .and_then(|n| n.parse::<u64>().ok())
+            .or_else(|| usage[key].as_u64())
+            .unwrap_or_default()
+    };
+    let write = field("cacheWriteTokens");
+    field("inputTokens")
+        .saturating_add(field("outputTokens"))
+        .saturating_add(field("cacheReadTokens") / 10)
+        .saturating_add(write.saturating_add(write / 4))
+}
+
+/// Charges usage to the sleeve's run and each ancestor run it was spawned
+/// under. Crossing 90% of a budget posts a notice; reaching it interrupts the
+/// turn, after which sends are refused.
+fn charge_budgets(watcher: &ChatStateWatcher, runtime: &ChatRuntime, tokens: u64) {
+    let (mut name, mut run) = (watcher.name.clone(), watcher.run_id.clone());
+    for _ in 0..16 {
+        let Ok(Some(row)) = watcher.sleeves.charge(&name, &run, tokens) else {
+            return;
+        };
+        let (used, budget) = (row.tokens_used as u128, row.token_budget as u128);
+        let before = used - tokens as u128;
+        let crossed =
+            |percent: u128| before * 100 < budget * percent && used * 100 >= budget * percent;
+        let state = if budget == 0 {
+            None
+        } else if crossed(100) {
+            if let Some(session) = runtime.sessions.lock().unwrap().get(&name).cloned() {
+                let _ = session.interrupt();
+            }
+            Some((
+                "exhausted",
+                "spent",
+                " The hub stopped this turn and refuses new ones.",
+            ))
+        } else if crossed(90) {
+            Some(("warning", "90% used", ""))
+        } else {
+            None
+        };
+        if let Some((state, what, then)) = state {
+            let text = format!(
+                "Token budget {what}: {used} of {budget} weighted tokens (run {run}).{then}"
+            );
+            if let Ok(log) = runtime.log(&name) {
+                let _ = log.append(Event::new(json!({"error":{"text":text}})));
+            }
+            watcher.audit.write(protectorate_audit::Entry {
+                actor: "hub".into(),
+                run_id: run.clone(),
+                procedure: format!("budget.{state}"),
+                subject: name.clone(),
+                outcome: "ok".into(),
+                detail: format!("{used} of {budget} weighted tokens"),
+                ..Default::default()
+            });
+            watcher.events.publish(
+                "sleeve.budget",
+                &name,
+                json!({"state": state, "used": used as u64, "budget": budget as u64, "run_id": run}),
+            );
+        }
+        let Some(parent) = crate::sleeves::parent_sleeve(&row.parent) else {
+            return;
+        };
+        if row.parent_run_id.is_empty() {
+            return;
+        }
+        (name, run) = (parent.to_owned(), row.parent_run_id);
+    }
 }
 
 pub(super) fn kill_pi(hub: &Hub, name: &str) -> Result<()> {
@@ -1898,6 +2017,15 @@ fn send_inner(
         return Err(RpcError::new(
             Code::FailedPrecondition,
             "chat sleeve is not running",
+        ));
+    }
+    if row.token_budget > 0 && row.tokens_used >= row.token_budget {
+        return Err(RpcError::new(
+            Code::ResourceExhausted,
+            format!(
+                "{name} has spent its token budget ({} of {} weighted tokens); respawn it with a larger one",
+                row.tokens_used, row.token_budget
+            ),
         ));
     }
     let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;

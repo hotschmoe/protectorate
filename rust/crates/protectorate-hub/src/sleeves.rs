@@ -43,6 +43,15 @@ pub(super) const SLEEVE_SCOPES: [&str; 6] = [
     "chat_report",
 ];
 
+/// The sleeve a parent label names: Envoy or another sleeve.
+pub(super) fn parent_sleeve(label: &str) -> Option<&str> {
+    if label == "envoy" {
+        Some(label)
+    } else {
+        label.strip_prefix("sleeve:")
+    }
+}
+
 /// Pins are kept per mode and harness: a resleeve onto another harness is
 /// compared with that harness's own last launch.
 pub(super) fn pin_key(mode: Mode, harness: Harness) -> String {
@@ -1158,6 +1167,7 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
                 "name":"envoy", "workspace":workspace, "harness":harness.proto(),
                 "mode":"SLEEVE_MODE_CHAT", "selection":selection,
                 "requester": {"actor":"owner", "gated":false},
+                "tokenBudget": value["tokenBudget"],
             }),
             harness,
         )
@@ -1463,6 +1473,12 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         return Err(RpcError::new(
             Code::InvalidArgument,
             "brief requires chat mode",
+        ));
+    }
+    if number(value, "tokenBudget")? > 0 {
+        return Err(RpcError::new(
+            Code::InvalidArgument,
+            "a token budget requires chat mode, where the harness reports usage",
         ));
     }
     let workspace = PathBuf::from(string(value, "workspace"));
@@ -2902,6 +2918,7 @@ pub(super) fn sleeve_json(sleeve: &Record) -> Value {
     object.remove("managedClone");
     object.remove("env");
     object.remove("pins");
+    object.remove("parentRunId");
     if let Some(pin) = sleeve.pins.get(&pin_key(sleeve.mode, sleeve.harness)) {
         object.insert("harnessSha256".into(), json!(pin.executable_sha256));
         object.insert("profileSha256".into(), json!(pin.profile_sha256));

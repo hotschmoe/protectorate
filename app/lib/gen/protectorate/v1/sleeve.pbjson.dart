@@ -423,6 +423,8 @@ const Sleeve$json = {
     {'1': 'run_id', '3': 31, '4': 1, '5': 9, '10': 'runId'},
     {'1': 'harness_sha256', '3': 32, '4': 1, '5': 9, '10': 'harnessSha256'},
     {'1': 'profile_sha256', '3': 33, '4': 1, '5': 9, '10': 'profileSha256'},
+    {'1': 'token_budget', '3': 34, '4': 1, '5': 4, '10': 'tokenBudget'},
+    {'1': 'tokens_used', '3': 35, '4': 1, '5': 4, '10': 'tokensUsed'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -452,7 +454,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0EhYKBmtpbGxlZBgcIAEoCF'
     'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkEhUKBnJ1bl9pZBgfIAEoCVIFcnVuSWQS'
     'JQoOaGFybmVzc19zaGEyNTYYICABKAlSDWhhcm5lc3NTaGEyNTYSJQoOcHJvZmlsZV9zaGEyNT'
-    'YYISABKAlSDXByb2ZpbGVTaGEyNTZCDAoKX2V4aXRfY29kZQ==');
+    'YYISABKAlSDXByb2ZpbGVTaGEyNTYSIQoMdG9rZW5fYnVkZ2V0GCIgASgEUgt0b2tlbkJ1ZGdl'
+    'dBIfCgt0b2tlbnNfdXNlZBgjIAEoBFIKdG9rZW5zVXNlZEIMCgpfZXhpdF9jb2Rl');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -597,6 +600,7 @@ const SpawnSleeveRequest$json = {
     {'1': 'new_branch', '3': 13, '4': 1, '5': 9, '10': 'newBranch'},
     {'1': 'brief', '3': 14, '4': 1, '5': 9, '10': 'brief'},
     {'1': 'nested', '3': 17, '4': 1, '5': 8, '10': 'nested'},
+    {'1': 'token_budget', '3': 18, '4': 1, '5': 4, '10': 'tokenBudget'},
   ],
   '3': [SpawnSleeveRequest_EnvEntry$json],
 };
@@ -624,8 +628,9 @@ final $typed_data.Uint8List spawnSleeveRequestDescriptor = $convert.base64Decode
     'ZWFkT25seU1vdW50UghyZWFkT25seRJBCg9leGl0X2FmdGVyX2lkbGUYCyABKAsyGS5nb29nbG'
     'UucHJvdG9idWYuRHVyYXRpb25SDWV4aXRBZnRlcklkbGUSFgoGYnJhbmNoGAwgASgJUgZicmFu'
     'Y2gSHQoKbmV3X2JyYW5jaBgNIAEoCVIJbmV3QnJhbmNoEhQKBWJyaWVmGA4gASgJUgVicmllZh'
-    'IWCgZuZXN0ZWQYESABKAhSBm5lc3RlZBo2CghFbnZFbnRyeRIQCgNrZXkYASABKAlSA2tleRIU'
-    'CgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgB');
+    'IWCgZuZXN0ZWQYESABKAhSBm5lc3RlZBIhCgx0b2tlbl9idWRnZXQYEiABKARSC3Rva2VuQnVk'
+    'Z2V0GjYKCEVudkVudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgJUgV2YWx1ZT'
+    'oCOAE=');
 
 @$core.Deprecated('Use spawnSleeveResponseDescriptor instead')
 const SpawnSleeveResponse$json = {
@@ -877,6 +882,7 @@ const SpawnEnvoyRequest$json = {
       '6': '.protectorate.v1.ModelSelection',
       '10': 'selection'
     },
+    {'1': 'token_budget', '3': 6, '4': 1, '5': 4, '10': 'tokenBudget'},
   ],
 };
 
@@ -886,7 +892,7 @@ final $typed_data.Uint8List spawnEnvoyRequestDescriptor = $convert.base64Decode(
     'hhcm5lc3NSB2hhcm5lc3MSFgoGc2NvcGVzGAIgAygJUgZzY29wZXMSHQoKYWRkX3Njb3BlcxgD'
     'IAMoCVIJYWRkU2NvcGVzEisKA3R0bBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbl'
     'IDdHRsEj0KCXNlbGVjdGlvbhgFIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbGVjdGlv'
-    'blIJc2VsZWN0aW9u');
+    'blIJc2VsZWN0aW9uEiEKDHRva2VuX2J1ZGdldBgGIAEoBFILdG9rZW5CdWRnZXQ=');
 
 @$core.Deprecated('Use spawnEnvoyResponseDescriptor instead')
 const SpawnEnvoyResponse$json = {
