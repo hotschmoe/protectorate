@@ -6,7 +6,6 @@ use cap_std::{
     fs::{Dir, OpenOptions},
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -299,16 +298,11 @@ fn lock_db(home: &Dir, cancel: &Cancellation) -> Result<Vec<File>> {
             .into_std();
         loop {
             cancel.check()?;
-            match file.try_lock_exclusive() {
+            match file.try_lock() {
                 Ok(()) => break,
-                Err(e)
-                    if e.kind() == io::ErrorKind::WouldBlock
-                        || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
-                {
-                    std::thread::sleep(Duration::from_millis(50))
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e.into()),
+                Err(fs::TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(50)),
+                Err(fs::TryLockError::Error(e)) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(fs::TryLockError::Error(e)) => return Err(e.into()),
             }
         }
         held.push(file);
