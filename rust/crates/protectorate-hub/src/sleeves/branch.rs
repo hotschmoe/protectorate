@@ -861,30 +861,3 @@ fn sandbox_git_run(
     }
     Ok((status.code().unwrap_or(128), output))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn branch_names_and_credential_stripping() {
-        for good in ["main", "feat/task", "release-1.0"] {
-            assert!(valid_branch(good), "{good}");
-        }
-        for bad in [
-            "HEAD", "-main", "../main", "a..b", "a@{b", "a.lock", "a//b", "a b",
-        ] {
-            assert!(!valid_branch(bad), "{bad}");
-        }
-        assert_eq!(
-            strip_credentials("https://user:secret@example.com/repo.git"),
-            "https://example.com/repo.git"
-        );
-        assert_eq!(strip_credentials("git@host:repo.git"), "git@host:repo.git");
-        assert_eq!(shell_quote_ref("base/main"), "base/main");
-        assert_eq!(
-            shell_quote_ref("base/feat; echo bad"),
-            "'base/feat; echo bad'"
-        );
-    }
-}

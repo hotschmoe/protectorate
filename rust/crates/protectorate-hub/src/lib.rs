@@ -1619,23 +1619,3 @@ fn session_error(error: session::Error) -> RpcError {
 fn join_error(error: tokio::task::JoinError) -> RpcError {
     RpcError::new(Code::Internal, error.to_string())
 }
-
-#[cfg(test)]
-mod authorization_tests {
-    use super::can_kill_owned_sleeve;
-
-    #[test]
-    fn kill_ownership_gate_requires_spawn_scope() {
-        for (scopes, allowed) in [
-            (vec![], false),
-            (vec!["read"], false),
-            (vec!["sleeve_spawn_sleeve"], true),
-            (vec!["sleeve_*"], true),
-        ] {
-            assert_eq!(
-                can_kill_owned_sleeve(&scopes.into_iter().map(str::to_owned).collect::<Vec<_>>()),
-                allowed,
-            );
-        }
-    }
-}

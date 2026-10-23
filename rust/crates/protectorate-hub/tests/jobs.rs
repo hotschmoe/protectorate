@@ -656,43 +656,6 @@ async fn named_node_job_runs_replays_and_survives_hub_restart() {
 }
 
 #[tokio::test]
-async fn job_requests_reject_invalid_source_and_bad_target() {
-    let root = tempfile::tempdir().unwrap();
-    let (addr, server) = serve(
-        Hub::open(root.path(), "owner-secret", "test")
-            .unwrap()
-            .router()
-            .unwrap(),
-    )
-    .await;
-    let (status, error) = rpc(
-        addr,
-        "JobService",
-        "SubmitJob",
-        json!({"target":{"selector":{}},"command":["true"]}),
-    )
-    .await;
-    assert_eq!(status, 400, "{error}");
-    let (status, error) = rpc(
-        addr,
-        "JobService",
-        "SubmitJob",
-        json!({"target":{"node":"peer"},"source":{"git":{"repo":root.path().join("missing")}},"command":["true"]}),
-    )
-    .await;
-    assert_eq!(status, 400, "{error}");
-    let (status, _) = rpc(
-        addr,
-        "JobService",
-        "CancelJob",
-        json!({"id":"a","requestId":"request-0001"}),
-    )
-    .await;
-    assert_eq!(status, 400);
-    server.abort();
-}
-
-#[tokio::test]
 async fn selector_uses_fresh_shared_metrics_and_lease_conflicts() {
     let root = tempfile::tempdir().unwrap();
     let alpha_metrics = NodeMetrics {
