@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fuzz-session","update":{"sessionUpdate":"agent_thought_chunk","messageId":"m1","content":{"type":"text","text":"hmm"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fuzz-session","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"hello"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fuzz-session","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Run ls","rawInput":{"command":"ls"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fuzz-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"a\nb"}}],"rawOutput":{"exit":0}}}}
+{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"sessionId":"fuzz-session","update":{"usage":{"input_tokens":5,"output_tokens":2,"cache_read_input_tokens":1,"cache_creation_input_tokens":0}}}}
+{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn","_meta":{"usage":{"inputTokens":10,"outputTokens":3,"cachedReadTokens":4}}}}

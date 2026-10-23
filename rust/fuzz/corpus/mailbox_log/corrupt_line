@@ -1,0 +1,2 @@
+{"op":"send","at":"2026-10-19T12:00:01Z","msg":{"id":"m1","thread":"t1","from":"a","to":"b","kind":"note","body":"ok","created":"2026-10-19T12:00:01Z"}}
+{"op":"ack","at":oops}

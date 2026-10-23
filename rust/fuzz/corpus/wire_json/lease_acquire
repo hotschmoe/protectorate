@@ -1,0 +1,2 @@
+/protectorate.v1.LeaseService/Acquire
+{"resource":"node","selector":{"gpuVramBytes":"18446744073709551615"},"ttl":"1.500s"}

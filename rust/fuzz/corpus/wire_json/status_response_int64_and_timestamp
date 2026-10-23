@@ -1,0 +1,2 @@
+/protectorate.v1.HubService/GetStatus out
+{"version":"v1-rust","hostname":"hub","os":"linux","arch":"arm64","uptimeSeconds":"9007199254740993","startedAt":"2026-10-22T00:00:00.123456789Z"}

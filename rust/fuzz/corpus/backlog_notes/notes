@@ -1,0 +1,28 @@
+{
+  "notes": [
+    {
+      "id": "1",
+      "title": "Fix the parser",
+      "body": "markdown",
+      "created_at": "2026-10-19T12:00:00Z",
+      "updated_at": "2026-10-19T12:00:00Z",
+      "pinned": true,
+      "project": "protectorate",
+      "state": "open"
+    },
+    {
+      "id": "2",
+      "title": "Ship",
+      "created_at": "2026-10-19T12:00:00Z",
+      "updated_at": "2026-10-20T12:00:00Z",
+      "state": "done",
+      "done_at": "2026-10-20T12:00:00Z",
+      "done_by": "owner",
+      "resolution": "shipped"
+    },
+    {
+      "id": "3",
+      "title": "legacy without state"
+    }
+  ]
+}

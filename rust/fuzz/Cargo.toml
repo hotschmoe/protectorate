@@ -1,0 +1,133 @@
+[package]
+name = "protectorate-fuzz-targets"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+protectorate-fuzz = { path = "../crates/protectorate-fuzz" }
+
+[workspace]
+
+[[bin]]
+name = "backlog_notes"
+path = "fuzz_targets/backlog_notes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chatlog"
+path = "fuzz_targets/chatlog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "claude_stream"
+path = "fuzz_targets/claude_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cli_args"
+path = "fuzz_targets/cli_args.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codex_rpc"
+path = "fuzz_targets/codex_rpc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "directory_state"
+path = "fuzz_targets/directory_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "grok_acp"
+path = "fuzz_targets/grok_acp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "identity_tokens"
+path = "fuzz_targets/identity_tokens.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mailbox_log"
+path = "fuzz_targets/mailbox_log.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_stdio"
+path = "fuzz_targets/mcp_stdio.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pi_rpc"
+path = "fuzz_targets/pi_rpc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "quota_responses"
+path = "fuzz_targets/quota_responses.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "release_manifest"
+path = "fuzz_targets/release_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "release_web_archive"
+path = "fuzz_targets/release_web_archive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sandbox_plan"
+path = "fuzz_targets/sandbox_plan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wire_json"
+path = "fuzz_targets/wire_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xfer_archive"
+path = "fuzz_targets/xfer_archive.rs"
+test = false
+doc = false
+bench = false

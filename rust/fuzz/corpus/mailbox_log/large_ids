@@ -1,0 +1,1 @@
+{"op":"send","at":"2026-10-19T12:00:01Z","msg":{"id":"m9223372036854775806","thread":"t9","from":"a","to":"peer","kind":"note","body":"x","created":"2026-10-19T12:00:01Z","recipients":["peer"]}}

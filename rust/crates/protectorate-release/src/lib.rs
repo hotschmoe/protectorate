@@ -23,7 +23,9 @@ use std::{
 };
 
 pub use extract::{extract_web, safe_web_path, MAX_WEB_BYTES};
-pub use transport::{Budget, Got, Transport, CHECK_TIMEOUT, FETCH_TIMEOUT};
+pub use transport::{
+    resolve_url, validate_url, Budget, Got, Transport, CHECK_TIMEOUT, FETCH_TIMEOUT,
+};
 
 /// Response body caps copied from the Go source.
 pub const MAX_RELEASE_JSON: u64 = 4 << 20;
