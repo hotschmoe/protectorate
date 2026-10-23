@@ -222,7 +222,6 @@ class AuditEntry extends $pb.GeneratedMessage {
     $0.Timestamp? time,
     $core.String? actor,
     $core.String? tokenId,
-    $core.String? tailnet,
     $core.String? procedure,
     $core.String? subject,
     $core.String? outcome,
@@ -234,7 +233,6 @@ class AuditEntry extends $pb.GeneratedMessage {
     if (time != null) result.time = time;
     if (actor != null) result.actor = actor;
     if (tokenId != null) result.tokenId = tokenId;
-    if (tailnet != null) result.tailnet = tailnet;
     if (procedure != null) result.procedure = procedure;
     if (subject != null) result.subject = subject;
     if (outcome != null) result.outcome = outcome;
@@ -262,7 +260,6 @@ class AuditEntry extends $pb.GeneratedMessage {
         subBuilder: $0.Timestamp.$_createMessage)
     ..aOS(2, _omitFieldNames ? '' : 'actor')
     ..aOS(3, _omitFieldNames ? '' : 'tokenId')
-    ..aOS(4, _omitFieldNames ? '' : 'tailnet')
     ..aOS(5, _omitFieldNames ? '' : 'procedure')
     ..aOS(6, _omitFieldNames ? '' : 'subject')
     ..aOS(7, _omitFieldNames ? '' : 'outcome')
@@ -321,72 +318,62 @@ class AuditEntry extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   void clearTokenId() => $_clearField(3);
 
-  /// tailnet is the WhoIs identity of a tailnet caller.
-  @$pb.TagNumber(4)
-  $core.String get tailnet => $_getSZ(3);
-  @$pb.TagNumber(4)
-  set tailnet($core.String value) => $_setString(3, value);
-  @$pb.TagNumber(4)
-  $core.bool hasTailnet() => $_has(3);
-  @$pb.TagNumber(4)
-  void clearTailnet() => $_clearField(4);
-
   /// procedure is the Connect procedure, or the terminal path.
   @$pb.TagNumber(5)
-  $core.String get procedure => $_getSZ(4);
+  $core.String get procedure => $_getSZ(3);
   @$pb.TagNumber(5)
-  set procedure($core.String value) => $_setString(4, value);
+  set procedure($core.String value) => $_setString(3, value);
   @$pb.TagNumber(5)
-  $core.bool hasProcedure() => $_has(4);
+  $core.bool hasProcedure() => $_has(3);
   @$pb.TagNumber(5)
   void clearProcedure() => $_clearField(5);
 
   /// subject is the request's name or id, nothing else from the body.
   @$pb.TagNumber(6)
-  $core.String get subject => $_getSZ(5);
+  $core.String get subject => $_getSZ(4);
   @$pb.TagNumber(6)
-  set subject($core.String value) => $_setString(5, value);
+  set subject($core.String value) => $_setString(4, value);
   @$pb.TagNumber(6)
-  $core.bool hasSubject() => $_has(5);
+  $core.bool hasSubject() => $_has(4);
   @$pb.TagNumber(6)
   void clearSubject() => $_clearField(6);
 
   /// outcome is "ok", "denied" or "error"; code is the Connect code.
   @$pb.TagNumber(7)
-  $core.String get outcome => $_getSZ(6);
+  $core.String get outcome => $_getSZ(5);
   @$pb.TagNumber(7)
-  set outcome($core.String value) => $_setString(6, value);
+  set outcome($core.String value) => $_setString(5, value);
   @$pb.TagNumber(7)
-  $core.bool hasOutcome() => $_has(6);
+  $core.bool hasOutcome() => $_has(5);
   @$pb.TagNumber(7)
   void clearOutcome() => $_clearField(7);
 
   @$pb.TagNumber(8)
-  $core.String get code => $_getSZ(7);
+  $core.String get code => $_getSZ(6);
   @$pb.TagNumber(8)
-  set code($core.String value) => $_setString(7, value);
+  set code($core.String value) => $_setString(6, value);
   @$pb.TagNumber(8)
-  $core.bool hasCode() => $_has(7);
+  $core.bool hasCode() => $_has(6);
   @$pb.TagNumber(8)
   void clearCode() => $_clearField(8);
 
   /// task is the task of the admin grant that made the call.
   @$pb.TagNumber(9)
-  $core.String get task => $_getSZ(8);
+  $core.String get task => $_getSZ(7);
   @$pb.TagNumber(9)
-  set task($core.String value) => $_setString(8, value);
+  set task($core.String value) => $_setString(7, value);
   @$pb.TagNumber(9)
-  $core.bool hasTask() => $_has(8);
+  $core.bool hasTask() => $_has(7);
   @$pb.TagNumber(9)
   void clearTask() => $_clearField(9);
 
   /// detail is what the handler added, such as a job's node and mode.
   @$pb.TagNumber(10)
-  $core.String get detail => $_getSZ(9);
+  $core.String get detail => $_getSZ(8);
   @$pb.TagNumber(10)
-  set detail($core.String value) => $_setString(9, value);
+  set detail($core.String value) => $_setString(8, value);
   @$pb.TagNumber(10)
-  $core.bool hasDetail() => $_has(9);
+  $core.bool hasDetail() => $_has(8);
   @$pb.TagNumber(10)
   void clearDetail() => $_clearField(10);
 }

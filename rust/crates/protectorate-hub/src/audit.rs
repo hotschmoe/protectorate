@@ -46,7 +46,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             "time": entry.time.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
                             "actor": entry.actor,
                             "tokenId": entry.token_id,
-                            "tailnet": entry.tailnet,
                             "procedure": entry.procedure,
                             "subject": entry.subject,
                             "outcome": entry.outcome,
@@ -117,7 +116,6 @@ pub(super) fn record_completion(
     audit.write(Entry {
         actor: auth.actor.clone(),
         token_id: auth.token_id.clone(),
-        tailnet: auth.tailnet.clone(),
         task: auth.task.clone(),
         procedure: method.procedure.clone(),
         subject,
@@ -205,7 +203,6 @@ pub(super) fn record_denied(
     audit.write(Entry {
         actor: auth.actor.clone(),
         token_id: auth.token_id.clone(),
-        tailnet: auth.tailnet.clone(),
         task: auth.task.clone(),
         procedure: method.procedure.clone(),
         subject: message
@@ -244,7 +241,6 @@ pub(super) fn record_rejection(
             .map_or("unauthenticated", |auth| auth.actor.as_str())
             .into(),
         token_id: auth.map_or("", |auth| auth.token_id.as_str()).into(),
-        tailnet: auth.map_or("", |auth| auth.tailnet.as_str()).into(),
         task: auth.map_or("", |auth| auth.task.as_str()).into(),
         procedure: method.procedure.clone(),
         detail: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
@@ -285,7 +281,6 @@ pub(super) fn record_terminal(
     audit: &Audit,
     actor: &str,
     token_id: &str,
-    tailnet: &str,
     subject: &str,
     read_only: bool,
     result: (&str, &str),
@@ -293,7 +288,6 @@ pub(super) fn record_terminal(
     audit.write(Entry {
         actor: actor.into(),
         token_id: token_id.into(),
-        tailnet: tailnet.into(),
         procedure: if read_only {
             "terminal.attach.readonly"
         } else {

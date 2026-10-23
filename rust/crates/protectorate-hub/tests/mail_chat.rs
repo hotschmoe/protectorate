@@ -251,7 +251,7 @@ async fn idle_reaper_waits_for_work_and_pending_mail() {
         assert_eq!(spawned["sleeve"]["exitAfterIdle"], "0.200s");
     }
     let persisted =
-        protectorate_sleeve_registry::Registry::open(state.join("sleeves-rust.json")).unwrap();
+        protectorate_sleeve_registry::Registry::open(state.join("sleeves.json")).unwrap();
     assert_eq!(
         persisted.get("busy").unwrap().exit_after_idle.as_deref(),
         Some("0.200s")

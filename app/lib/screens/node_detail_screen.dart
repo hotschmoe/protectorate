@@ -296,14 +296,14 @@ class _ManagePanel extends StatelessWidget {
         children: [
           if (pending)
             Text(
-              'The machine has not enrolled yet. A new key replaces the old one.',
+              'The machine has not joined yet. A new code replaces the old one.',
               style: t.small(),
             ),
           if (onReissue != null)
             OutlinedButton(
               key: const ValueKey('reissue-key'),
               onPressed: onReissue,
-              child: const Text('REISSUE KEY'),
+              child: const Text('REISSUE CODE'),
             ),
           if (onRemove != null)
             OutlinedButton(

@@ -3,7 +3,6 @@ use protectorate_hub::Hub;
 use protectorate_inventory::Node;
 use protectorate_node::{Agent, Jobs, MetricsCollector};
 use protectorate_node_metrics::{FilesystemMetrics, MemoryMetrics, NodeMetrics};
-use protectorate_tailnet_admin::Admin;
 use protectorate_wire::Code;
 use serde_json::{json, Value};
 use std::{io, sync::Arc, time::Duration};
@@ -117,9 +116,9 @@ fn node_row(listing: &Value, name: &str) -> Value {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn node_status_alerts_report_full_filesystems_and_memory_pressure() {
     let root = tempfile::tempdir().unwrap();
-    let agent = Agent::new(Arc::new(Pressure), "node-secret");
+    let agent = Agent::new(Arc::new(Pressure));
     let (agent_url, agent_task) = serve(agent.router().unwrap()).await;
-    let calm = Agent::new(Arc::new(Calm), "node-secret");
+    let calm = Agent::new(Arc::new(Calm));
     let (calm_url, calm_task) = serve(calm.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     for (name, url) in [("peer", address(&agent_url)), ("calm", address(&calm_url))] {
@@ -134,7 +133,6 @@ async fn node_status_alerts_report_full_filesystems_and_memory_pressure() {
             )
             .unwrap();
     }
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let monitor = Arc::clone(&hub.node_monitor);
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     tokio::task::spawn_blocking(move || monitor.poll_all())
@@ -192,7 +190,7 @@ async fn node_status_marks_a_node_while_the_hub_drains_it() {
     let jobs = Jobs::new(root.path().join("node-jobs"), 2)
         .unwrap()
         .with_plain_mode();
-    let agent = Agent::new(Arc::new(Pressure), "node-secret").with_jobs(jobs);
+    let agent = Agent::new(Arc::new(Pressure)).with_jobs(jobs);
     let (agent_url, agent_task) = serve(agent.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -205,7 +203,6 @@ async fn node_status_marks_a_node_while_the_hub_drains_it() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let monitor = Arc::clone(&hub.node_monitor);
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     tokio::task::spawn_blocking(move || monitor.poll_node("peer"))
@@ -280,125 +277,4 @@ async fn node_status_marks_a_node_while_the_hub_drains_it() {
     assert_eq!(gone.code, Code::NotFound);
     hub_task.abort();
     agent_task.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn invited_name_mismatch_uses_exact_key_and_reaches_status_watch_and_events() {
-    use axum::routing::get;
-    let root = tempfile::tempdir().unwrap();
-    let admin_router = axum::Router::new().route(
-        "/api/v1/node",
-        get(|| async {
-            axum::Json(json!({"nodes": [
-                {"id":"1","name":"peer","givenName":"peer","preAuthKey":{"id":"99"}},
-                {"id":"2","name":"renamed","givenName":"renamed","preAuthKey":{"id":"42"}}
-            ]}))
-        }),
-    );
-    let (admin_url, admin_task) = serve(admin_router).await;
-    let admin = Arc::new(Admin::new(&admin_url, "test-key", Duration::from_secs(3)).unwrap());
-    let hub = Hub::open(root.path().join("hub"), "owner-secret", "test")
-        .unwrap()
-        .with_tailnet_admin(admin);
-    hub.inventory
-        .add(
-            Node {
-                name: "peer".into(),
-                address: "peer".into(),
-                invited: true,
-                invite_key_id: 42,
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
-    let (url, hub_task) = serve(hub.router().unwrap()).await;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let subscriber = tokio::task::spawn_blocking({
-        let url = url.clone();
-        move || {
-            let _ = client(&url).stream(
-                "/protectorate.v1.EventService/Subscribe",
-                &json!({}),
-                |event| {
-                    tx.send(event.clone()).unwrap();
-                    if event["kind"] == "node.name_mismatch" {
-                        Err(protectorate_wire::RpcError::new(
-                            Code::Canceled,
-                            "received mismatch",
-                        ))
-                    } else {
-                        Ok(())
-                    }
-                },
-            );
-        }
-    });
-    let first = rx.recv_timeout(Duration::from_secs(3)).unwrap();
-    assert_eq!(first["kind"], "heartbeat");
-    // The subscriber is the only observer until the background refresh emits.
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    let event = loop {
-        let next = rx
-            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
-            .unwrap();
-        if next["kind"] == "node.name_mismatch" {
-            break next;
-        }
-    };
-    assert_eq!(event["kind"], "node.name_mismatch", "{event}");
-    assert_eq!(event["subject"], "peer");
-    assert_eq!(
-        event["payload"],
-        json!({"invited_as":"peer","joined_as":"renamed"})
-    );
-    subscriber.await.unwrap();
-    let status = tokio::task::spawn_blocking({
-        let url = url.clone();
-        move || {
-            client(&url)
-                .call(GET_NODE, &json!({"name":"peer"}))
-                .unwrap()
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(status["freshness"], "NODE_FRESHNESS_INVITED", "{status}");
-    assert_eq!(
-        status["alerts"][0]["kind"], "ALERT_KIND_NAME_MISMATCH",
-        "{status}"
-    );
-    assert_eq!(status["alerts"][0]["subject"], "renamed");
-    assert!(status["error"].as_str().unwrap().contains("renamed"));
-    let listing = tokio::task::spawn_blocking({
-        let url = url.clone();
-        move || client(&url).call(LIST_NODES, &json!({})).unwrap()
-    })
-    .await
-    .unwrap();
-    assert_eq!(node_row(&listing, "peer")["alerts"], status["alerts"]);
-    let watch = tokio::task::spawn_blocking(move || {
-        let mut events = Vec::new();
-        let _ = client(&url).stream(
-            "/protectorate.v1.NodeService/WatchNodeSetup",
-            &json!({"name":"peer"}),
-            |event| {
-                events.push(event);
-                Err(protectorate_wire::RpcError::new(
-                    Code::Canceled,
-                    "read first stage",
-                ))
-            },
-        );
-        events
-    })
-    .await
-    .unwrap();
-    assert_eq!(watch[0]["stage"], "NODE_SETUP_STAGE_ATTENTION", "{watch:?}");
-    assert!(watch[0]["problems"][0]
-        .as_str()
-        .unwrap()
-        .contains("renamed"));
-    hub_task.abort();
-    admin_task.abort();
 }

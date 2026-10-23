@@ -161,9 +161,7 @@ impl MetricsCollector for Fixed {
 async fn get_metrics_serializes_every_available_section() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Complete), "node-secret")
-        .router()
-        .unwrap();
+    let router = Agent::new(Arc::new(Complete)).router().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let (code, body) = unary(addr, "node-secret").await;
     assert_eq!(code, 200, "{body}");
@@ -200,7 +198,7 @@ async fn live_job_capability_replaces_stale_collector_job_metadata() {
     let expected = jobs.isolation();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Complete), "node-secret")
+    let router = Agent::new(Arc::new(Complete))
         .with_jobs(jobs)
         .router()
         .unwrap();
@@ -279,7 +277,7 @@ async fn line(stream: &mut TcpStream) -> String {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn linux_desk_rpc_is_authenticated_and_explicitly_unsupported() {
-    let agent = Agent::new(Arc::new(Fixed), "agent-secret");
+    let agent = Agent::new(Arc::new(Fixed));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -288,8 +286,6 @@ async fn linux_desk_rpc_is_authenticated_and_explicitly_unsupported() {
             .unwrap()
     });
     for method in ["DeskAction", "GetDeskState"] {
-        let (status, denied) = rpc(addr, method, "wrong-secret", json!({})).await;
-        assert_eq!(status, 401, "{denied}");
         let (status, unsupported) = rpc(addr, method, "agent-secret", json!({})).await;
         assert_eq!(status, 501, "{unsupported}");
         assert_eq!(unsupported["code"], "unimplemented");
@@ -345,7 +341,7 @@ async fn desk_rpc_applies_policy_and_dispatches_authenticated_actions() {
         Arc::new(DeskFixture),
     )
     .unwrap();
-    let agent = Agent::new(Arc::new(Fixed), "agent-secret").with_desktop(Arc::new(controller));
+    let agent = Agent::new(Arc::new(Fixed)).with_desktop(Arc::new(controller));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -353,8 +349,6 @@ async fn desk_rpc_applies_policy_and_dispatches_authenticated_actions() {
             .await
             .unwrap()
     });
-    let (status, _) = rpc(addr, "DeskAction", "wrong-secret", json!({"foreground":{}})).await;
-    assert_eq!(status, 401);
     let (status, foreground) =
         rpc(addr, "DeskAction", "agent-secret", json!({"foreground":{}})).await;
     assert_eq!(status, 200, "{foreground}");
@@ -405,10 +399,8 @@ async fn desk_rpc_applies_policy_and_dispatches_authenticated_actions() {
 async fn node_metrics_unary_and_watch_use_connect_json() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret").router().unwrap();
+    let router = Agent::new(Arc::new(Fixed)).router().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let (code, _) = unary(addr, "wrong").await;
-    assert_eq!(code, 401);
     let (code, body) = unary(addr, "node-secret").await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["hostname"], "node-a");
@@ -463,7 +455,7 @@ async fn file_rpc_round_trip_boundary_and_confinement() {
     std::fs::write(&input, &bytes).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_files(&root, false)
         .unwrap()
         .router()
@@ -621,7 +613,7 @@ async fn unconfined_file_rpc_accepts_absolute_destination() {
     let target = tmp.path().join("outside");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_files(&root, true)
         .unwrap()
         .router()
@@ -655,7 +647,7 @@ async fn node_jobs_run_replay_cancel_and_authenticate() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let jobs = Jobs::new(tmp.path(), 1).unwrap().with_plain_mode();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(jobs)
         .router()
         .unwrap();
@@ -690,8 +682,6 @@ async fn node_jobs_run_replay_cancel_and_authenticate() {
         3
     );
     assert_eq!(replay.last().unwrap()["finished"]["end"], "JOB_END_EXITED");
-    let (code, _) = rpc(addr, "CancelJob", "wrong", json!({"jobId":"first"})).await;
-    assert_eq!(code, 401);
     let (code, result) = rpc(addr, "CancelJob", "node-secret", json!({"jobId":"first"})).await;
     assert_eq!(code, 200);
     assert!(result.get("found").is_none_or(|value| value == false));
@@ -735,7 +725,7 @@ async fn node_job_defaults_to_sandbox_and_fails_closed_without_configuration() {
     let tmp = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(Jobs::new(tmp.path(), 1).unwrap())
         .router()
         .unwrap();
@@ -783,7 +773,7 @@ async fn node_job_upload_file_and_replay_artifact() {
     let tmp = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(Jobs::new(tmp.path(), 1).unwrap().with_plain_mode())
         .router()
         .unwrap();
@@ -837,7 +827,7 @@ async fn node_job_upload_file_and_replay_artifact() {
     let _ = server.await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let restarted_addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(Jobs::new(tmp.path(), 1).unwrap().with_plain_mode())
         .router()
         .unwrap();
@@ -861,7 +851,7 @@ async fn node_job_artifact_disk_limit_is_reported() {
             git_cache_bytes: 32 << 30,
             artifact_bytes: 4,
         });
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(jobs)
         .router()
         .unwrap();
@@ -893,7 +883,7 @@ async fn node_job_archive_workdir_and_git_cache() {
     let tmp = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(
             Jobs::new(tmp.path().join("node"), 1)
                 .unwrap()
@@ -1047,7 +1037,7 @@ async fn node_job_outlives_disconnected_run_stream() {
     let tmp = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(Jobs::new(tmp.path(), 1).unwrap().with_plain_mode())
         .router()
         .unwrap();
@@ -1141,7 +1131,7 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
         .with_sandbox(SandboxConfig { policy, options });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(jobs)
         .router()
         .unwrap();
@@ -1264,7 +1254,7 @@ async fn sandboxed_git_job_can_read_its_own_metadata() {
         .with_plain_mode();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(jobs)
         .router()
         .unwrap();
@@ -1499,7 +1489,7 @@ async fn windows_runner_git_filter_has_only_runner_authority() {
     assert_eq!(jobs.isolation().sandbox, "runner");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(jobs)
         .router()
         .unwrap();
@@ -1624,7 +1614,7 @@ async fn windows_runner_stages_file_and_archive_sources() {
     let jobs = Jobs::open_windows(&runner_home, 1).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let router = Agent::new(Arc::new(Fixed), "node-secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_jobs(jobs)
         .router()
         .unwrap();

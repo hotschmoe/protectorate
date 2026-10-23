@@ -141,7 +141,7 @@ impl Plan {
         ];
         let release_root = self
             .user_home
-            .join(".local/share/protectorate-rust/node-install");
+            .join(".local/share/protectorate/node-install");
         if self.executable.starts_with(&release_root) {
             left.push(format!("{} (Rust node releases)", release_root.display()));
         }
@@ -284,8 +284,7 @@ mod tests {
     fn managed_install_reports_release_root_as_leftover() {
         let dir = tempfile::tempdir().unwrap();
         let user = dir.path().join("user");
-        let exe =
-            user.join(".local/share/protectorate-rust/node-install/release-1/protectorate-rs");
+        let exe = user.join(".local/share/protectorate/node-install/release-1/protectorate-rs");
         let plan = Plan::new(dir.path().join("state"), &user, exe, false).unwrap();
         assert!(plan
             .left()

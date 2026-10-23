@@ -51,7 +51,7 @@ async fn lost_node_chunk_reply_can_be_replayed_without_publishing_partial_file()
     let files = root.path().join("node-files");
     let hits = Arc::new(AtomicUsize::new(0));
     let fault_hits = Arc::clone(&hits);
-    let node = Agent::new(Arc::new(Metrics), "node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_files(&files, false)
         .unwrap();
     let node_router = node.router().unwrap().layer(from_fn(
@@ -84,7 +84,6 @@ async fn lost_node_chunk_reply_can_be_replayed_without_publishing_partial_file()
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (hub_url, hub_task) = serve(hub.router().unwrap()).await;
 
     let first = json!({
@@ -169,10 +168,10 @@ async fn lost_node_chunk_reply_can_be_replayed_without_publishing_partial_file()
 }
 
 #[tokio::test]
-async fn named_and_local_file_transfers_relay_without_hub_staging() {
+async fn named_file_transfers_relay_without_hub_staging() {
     let root = tempfile::tempdir().unwrap();
     let files = root.path().join("node-files");
-    let node = Agent::new(Arc::new(Metrics), "node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_files(&files, false)
         .unwrap();
     let (node_url, node_task) = serve(node.router().unwrap()).await;
@@ -188,14 +187,9 @@ async fn named_and_local_file_transfers_relay_without_hub_staging() {
             false,
         )
         .unwrap();
-    let local = hub.hostname.clone();
-    let hub = hub
-        .with_node_token("node-secret".into())
-        .unwrap()
-        .with_local_node_endpoint(node_url);
     let (hub_url, hub_task) = serve(hub.router().unwrap()).await;
 
-    for (index, name) in ["peer", local.as_str()].into_iter().enumerate() {
+    for (index, name) in ["peer"].into_iter().enumerate() {
         let path = format!("through-hub-{index}");
         let id = format!("transfer-{index:04}");
         let first = call(
@@ -295,25 +289,9 @@ async fn named_and_local_file_transfers_relay_without_hub_staging() {
         .filter(|entry| entry["procedure"] == PUT && entry["outcome"] == "ok")
         .count();
     assert_eq!(
-        successful_puts, 4,
+        successful_puts, 2,
         "first and final chunks are audited; middle chunks are omitted"
     );
-    for name in ["peer", local.as_str()] {
-        assert_eq!(
-            audit["entries"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|entry| {
-                    entry["procedure"] == PUT
-                        && entry["outcome"] == "ok"
-                        && entry["subject"] == name
-                })
-                .count(),
-            2,
-            "first and final chunk must both be recorded for {name}"
-        );
-    }
     assert!(audit["entries"].as_array().unwrap().iter().any(|entry| {
         entry["procedure"] == PUT
             && entry["outcome"] == "error"
@@ -328,7 +306,7 @@ async fn named_and_local_file_transfers_relay_without_hub_staging() {
 async fn node_selection_and_node_agent_auth_fail_closed() {
     let root = tempfile::tempdir().unwrap();
     let files = root.path().join("node-files");
-    let node = Agent::new(Arc::new(Metrics), "actual-node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_files(&files, false)
         .unwrap();
     let (node_url, node_task) = serve(node.router().unwrap()).await;
@@ -355,7 +333,6 @@ async fn node_selection_and_node_agent_auth_fail_closed() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("wrong-node-secret".into()).unwrap();
     let (hub_url, hub_task) = serve(hub.router().unwrap()).await;
     let request = |name: &str| json!({"name":name,"transferId":"transfer-test","path":"dest","kind":"FILE_KIND_FILE","last":true,"trailer":{"size":"0","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}});
     assert_eq!(
@@ -371,13 +348,6 @@ async fn node_selection_and_node_agent_auth_fail_closed() {
             .unwrap_err()
             .code,
         Code::FailedPrecondition
-    );
-    assert_eq!(
-        call(hub_url.clone(), PUT, request("care"))
-            .await
-            .unwrap_err()
-            .code,
-        Code::Unauthenticated
     );
     assert!(!files.join("dest").exists());
     hub_task.abort();

@@ -79,7 +79,7 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
     task.abort();
     let _ = task.await;
 
-    let jobs = source.path().join("jobs-rust");
+    let jobs = source.path().join("jobs");
     fs::write(jobs.join("retained.log"), b"job output\n").unwrap();
     fs::write(
         jobs.join("retained.json"),
@@ -114,15 +114,15 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
     .unwrap();
     let destination = backups.path().join("restored");
     let manifest = restore(&backup, &destination, &cancel).unwrap();
-    assert!(manifest.files.iter().any(|f| f.path == "sleeves-rust.json"));
+    assert!(manifest.files.iter().any(|f| f.path == "sleeves.json"));
     assert!(manifest
         .files
         .iter()
-        .any(|f| f.path == "desk-policies-rust.json"));
+        .any(|f| f.path == "desk-policies.json"));
     assert!(manifest
         .files
         .iter()
-        .any(|f| f.path == "jobs-rust/retained.artifacts/nested/result.txt"));
+        .any(|f| f.path == "jobs/retained.artifacts/nested/result.txt"));
 
     let (address, task) = serve(Hub::open(&destination, "owner-secret", "test").unwrap()).await;
     let (status, sleeve) = call(
@@ -151,7 +151,7 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
     assert_eq!(job["state"], "JOB_STATE_SUCCEEDED");
     assert_eq!(job["artifacts"][0]["path"], "nested/result.txt");
     assert_eq!(
-        fs::read(destination.join("jobs-rust/retained.artifacts/nested/result.txt")).unwrap(),
+        fs::read(destination.join("jobs/retained.artifacts/nested/result.txt")).unwrap(),
         b"result"
     );
     task.abort();
@@ -161,7 +161,7 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
 async fn restored_job_artifacts_and_record_survive_hub_restart() {
     let source = tempfile::tempdir().unwrap();
     let backups = tempfile::tempdir().unwrap();
-    let jobs = source.path().join("jobs-rust");
+    let jobs = source.path().join("jobs");
     fs::create_dir_all(jobs.join("retained.artifacts/nested")).unwrap();
     fs::write(jobs.join("retained.log"), b"job output\n").unwrap();
     fs::write(
@@ -206,7 +206,7 @@ async fn restored_job_artifacts_and_record_survive_hub_restart() {
     assert_eq!(job["state"], "JOB_STATE_SUCCEEDED");
     assert_eq!(job["artifacts"][0]["path"], "nested/result.txt");
     assert_eq!(
-        fs::read(destination.join("jobs-rust/retained.artifacts/nested/result.txt")).unwrap(),
+        fs::read(destination.join("jobs/retained.artifacts/nested/result.txt")).unwrap(),
         b"result"
     );
     task.abort();
@@ -246,7 +246,7 @@ async fn restored_hub_rejects_submit_canceled_before_backup() {
     assert!(manifest
         .files
         .iter()
-        .any(|file| file.path == "jobs-rust/canceled-requests"));
+        .any(|file| file.path == "jobs/canceled-requests"));
     let (address, task) = serve(Hub::open(&destination, "owner-secret", "test").unwrap()).await;
     let (status, rejected) = call(
         address,

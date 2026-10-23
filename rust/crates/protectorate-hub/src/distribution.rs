@@ -1,44 +1,45 @@
-//! Public installers for the verified Rust node release.
-use crate::{download, nodes, Hub};
+//! Public installers for the verified Rust node release and the hub CA they
+//! pin every download to.
+use crate::{download, Hub};
 use axum::{
     body::Body,
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use protectorate_release::{self as release, MAX_SUMS};
 use sha2::{Digest, Sha256};
 use std::{io::Read, sync::Arc};
 
-fn request_base(hub: &Hub, headers: &HeaderMap) -> Result<String, StatusCode> {
-    if let Some(public_url) = &hub.public_url {
-        return Ok(public_url.clone());
+/// The hub's HTTPS URL; installers and joins never use plain HTTP.
+fn hub_base(hub: &Hub) -> Result<String, StatusCode> {
+    match (&hub.public_url, &hub.ca) {
+        (Some(url), Some(_)) if url.starts_with("https://") => Ok(url.clone()),
+        _ => Err(StatusCode::SERVICE_UNAVAILABLE),
     }
-    let host = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .ok_or(StatusCode::BAD_REQUEST)?;
-    let scheme = if headers
-        .get("x-forwarded-proto")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("https"))
-    {
-        "https"
-    } else {
-        "http"
-    };
-    nodes::validate_install_base(&format!("{scheme}://{host}")).map_err(|_| StatusCode::BAD_REQUEST)
 }
 
-fn script_response(body: String) -> Response {
+fn text_response(body: String, content_type: &'static str) -> Response {
     let mut response = Response::new(Body::from(body));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+fn script_response(body: String) -> Response {
+    text_response(body, "text/plain; charset=utf-8")
+}
+
+/// The CA certificate. Clients check its SHA-256 against the invite before
+/// trusting it.
+pub(super) async fn ca(hub: Arc<Hub>) -> Response {
+    match &hub.ca {
+        Some(ca) => text_response(ca.pem().to_owned(), "application/x-pem-file"),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 pub(crate) fn shell_word(value: &str) -> String {
@@ -88,11 +89,8 @@ fn release_manifest(hub: &Hub) -> Result<(String, String, String, String), Statu
     Ok((version, tag, repo, format!("{:x}", Sha256::digest(&bytes))))
 }
 
-pub(super) async fn linux(hub: Arc<Hub>, headers: HeaderMap) -> Response {
-    let Some(admin) = hub.tailnet_admin.as_ref() else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    };
-    let base = match request_base(&hub, &headers) {
+pub(super) async fn linux(hub: Arc<Hub>) -> Response {
+    let base = match hub_base(&hub) {
         Ok(base) => base,
         Err(status) => return status.into_response(),
     };
@@ -100,19 +98,19 @@ pub(super) async fn linux(hub: Arc<Hub>, headers: HeaderMap) -> Response {
         Ok(manifest) => manifest,
         Err(status) => return status.into_response(),
     };
-    let control = shell_word(admin.control_url());
     let base = shell_word(&base);
     script_response(format!(
         r#"#!/bin/sh
 # Rust node installer supplied by this hub. The two assets are verified against
 # the active release before the hub serves them and checked again on the node.
+# Every request is pinned to the hub CA in PROTECTORATE_CA_CERT.
 set -eu
 hub={base}
-control={control}
 manifest={manifest_sha}
 name=${{PROTECTORATE_NODE_NAME:-}}
 print=0
 ca_cert=${{PROTECTORATE_CA_CERT:-}}
+listen=
 plain=0
 dry=0
 no_start=0
@@ -121,6 +119,7 @@ while [ "$#" -gt 0 ]; do
         --name) [ "$#" -ge 2 ] || {{ echo '--name requires a value' >&2; exit 2; }}; name=$2; shift 2 ;;
         --name=*) name=${{1#--name=}}; shift ;;
         --ca-cert) [ "$#" -ge 2 ] || {{ echo '--ca-cert requires a file' >&2; exit 2; }}; ca_cert=$2; shift 2 ;;
+        --listen) [ "$#" -ge 2 ] || {{ echo '--listen requires IP:PORT' >&2; exit 2; }}; listen=$2; shift 2 ;;
         --allow-plain-jobs) plain=1; shift ;;
         --dry-run) dry=1; shift ;;
         --no-start) no_start=1; shift ;;
@@ -135,15 +134,16 @@ case "$(uname -s):$(uname -m)" in
 esac
 file=protectorate-rs-linux-$arch
 if [ "$print" -eq 1 ]; then printf '%s\n' "$file"; exit 0; fi
-[ -n "${{PROTECTORATE_ENROLL_KEY:-}}" ] || {{ echo 'set PROTECTORATE_ENROLL_KEY from the node invite' >&2; exit 2; }}
+[ -n "${{PROTECTORATE_JOIN_CODE:-}}" ] || {{ echo 'set PROTECTORATE_JOIN_CODE from the node invite' >&2; exit 2; }}
+[ -n "$ca_cert" ] && [ -f "$ca_cert" ] || {{ echo 'set PROTECTORATE_CA_CERT to the hub CA checked against the invite' >&2; exit 2; }}
 command -v curl >/dev/null || {{ echo 'curl is required' >&2; exit 2; }}
 command -v sha256sum >/dev/null || {{ echo 'sha256sum is required' >&2; exit 2; }}
-cache=${{XDG_CACHE_HOME:-$HOME/.cache}}/protectorate-rust
+cache=${{XDG_CACHE_HOME:-$HOME/.cache}}/protectorate
 mkdir -p "$cache"
 server=protectorate-rs-linux-$arch
 helper=protectorate-node-sandbox-helper-linux-$arch
-server_sum=$(curl -fsS --max-redirs 0 "$hub/dl/$server.sha256")
-helper_sum=$(curl -fsS --max-redirs 0 "$hub/dl/$helper.sha256")
+server_sum=$(curl -fsS --max-redirs 0 --cacert "$ca_cert" "$hub/dl/$server.sha256")
+helper_sum=$(curl -fsS --max-redirs 0 --cacert "$ca_cert" "$hub/dl/$helper.sha256")
 stage=
 for candidate in "$cache"/node-install."$manifest"."$arch".*; do
     [ -d "$candidate" ] || continue
@@ -163,16 +163,16 @@ for component in protectorate-rs protectorate-node-sandbox-helper; do
         protectorate-rs) checksum=$server_sum ;;
         protectorate-node-sandbox-helper) checksum=$helper_sum ;;
     esac
-    curl -fsS --max-redirs 0 "$hub/dl/$asset" -o "$stage/$asset"
+    curl -fsS --max-redirs 0 --cacert "$ca_cert" "$hub/dl/$asset" -o "$stage/$asset"
     printf '%s\n' "$checksum" > "$stage/$asset.sha256"
     (cd "$stage" && sha256sum --check --status "$asset.sha256") || {{ echo "checksum mismatch: $asset" >&2; exit 1; }}
     chmod 755 "$stage/$asset"
     ln "$stage/$asset" "$stage/$component"
 done
 fi
-set -- "$stage/protectorate-rs" node install --control "$control"
+set -- "$stage/protectorate-rs" node install --hub "$hub" --ca-cert "$ca_cert"
 if [ -n "$name" ]; then set -- "$@" --name "$name"; fi
-if [ -n "$ca_cert" ]; then set -- "$@" --ca-cert "$ca_cert"; fi
+if [ -n "$listen" ]; then set -- "$@" --listen "$listen"; fi
 if [ "$plain" -eq 1 ]; then set -- "$@" --allow-plain-jobs; fi
 if [ "$dry" -eq 1 ]; then set -- "$@" --dry-run; fi
 if [ "$no_start" -eq 1 ]; then set -- "$@" --no-start; fi
@@ -181,11 +181,8 @@ exec "$@"
     ))
 }
 
-pub(super) async fn termux(hub: Arc<Hub>, headers: HeaderMap) -> Response {
-    let Some(admin) = hub.tailnet_admin.as_ref() else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    };
-    let base = match request_base(&hub, &headers) {
+pub(super) async fn termux(hub: Arc<Hub>) -> Response {
+    let base = match hub_base(&hub) {
         Ok(base) => base,
         Err(status) => return status.into_response(),
     };
@@ -200,16 +197,16 @@ pub(super) async fn termux(hub: Arc<Hub>, headers: HeaderMap) -> Response {
     {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
-    let control = shell_word(admin.control_url());
     let base = shell_word(&base);
     script_response(format!(
         r#"#!/bin/sh
-# Rust standalone Termux node installer supplied by this hub.
+# Rust standalone Termux node installer supplied by this hub. Every request is
+# pinned to the hub CA in PROTECTORATE_CA_CERT.
 set -eu
 hub={base}
-control={control}
 name=${{PROTECTORATE_NODE_NAME:-}}
 ca_cert=${{PROTECTORATE_CA_CERT:-}}
+listen=
 print=0
 plain=0
 dry=0
@@ -219,6 +216,7 @@ while [ "$#" -gt 0 ]; do
         --name) [ "$#" -ge 2 ] || {{ echo '--name requires a value' >&2; exit 2; }}; name=$2; shift 2 ;;
         --name=*) name=${{1#--name=}}; shift ;;
         --ca-cert) [ "$#" -ge 2 ] || {{ echo '--ca-cert requires a file' >&2; exit 2; }}; ca_cert=$2; shift 2 ;;
+        --listen) [ "$#" -ge 2 ] || {{ echo '--listen requires IP:PORT' >&2; exit 2; }}; listen=$2; shift 2 ;;
         --allow-plain-jobs) plain=1; shift ;;
         --dry-run) dry=1; shift ;;
         --no-start) no_start=1; shift ;;
@@ -236,21 +234,22 @@ case "$(uname -m)" in
     aarch64|arm64) ;;
     *) echo 'the Rust Termux node requires Android arm64' >&2; exit 2 ;;
 esac
-[ -n "${{PROTECTORATE_ENROLL_KEY:-}}" ] || {{ echo 'set PROTECTORATE_ENROLL_KEY from the node invite' >&2; exit 2; }}
+[ -n "${{PROTECTORATE_JOIN_CODE:-}}" ] || {{ echo 'set PROTECTORATE_JOIN_CODE from the node invite' >&2; exit 2; }}
+[ -n "$ca_cert" ] && [ -f "$ca_cert" ] || {{ echo 'set PROTECTORATE_CA_CERT to the hub CA checked against the invite' >&2; exit 2; }}
 command -v curl >/dev/null || {{ echo 'curl is required' >&2; exit 2; }}
 command -v sha256sum >/dev/null || {{ echo 'sha256sum is required' >&2; exit 2; }}
-cache=${{XDG_CACHE_HOME:-$HOME/.cache}}/protectorate-rust
+cache=${{XDG_CACHE_HOME:-$HOME/.cache}}/protectorate
 mkdir -p "$cache"
 stage=$(mktemp -d "$cache/node-install.XXXXXXXX")
 trap 'rm -f "$stage/$asset" "$stage/$asset.sha256"; rmdir "$stage"' 0
 trap 'exit 1' 1 2 3 15
-curl -fsS --max-redirs 0 "$hub/dl/$asset" -o "$stage/$asset"
-curl -fsS --max-redirs 0 "$hub/dl/$asset.sha256" -o "$stage/$asset.sha256"
+curl -fsS --max-redirs 0 --cacert "$ca_cert" "$hub/dl/$asset" -o "$stage/$asset"
+curl -fsS --max-redirs 0 --cacert "$ca_cert" "$hub/dl/$asset.sha256" -o "$stage/$asset.sha256"
 (cd "$stage" && sha256sum --check --status "$asset.sha256") || {{ echo "checksum mismatch: $asset" >&2; exit 1; }}
 chmod 755 "$stage/$asset"
-set -- "$stage/$asset" node install --control "$control"
+set -- "$stage/$asset" node install --hub "$hub" --ca-cert "$ca_cert"
 if [ -n "$name" ]; then set -- "$@" --name "$name"; fi
-if [ -n "$ca_cert" ]; then set -- "$@" --ca-cert "$ca_cert"; fi
+if [ -n "$listen" ]; then set -- "$@" --listen "$listen"; fi
 if [ "$plain" -eq 1 ]; then set -- "$@" --allow-plain-jobs; fi
 if [ "$dry" -eq 1 ]; then set -- "$@" --dry-run; fi
 if [ "$no_start" -eq 1 ]; then set -- "$@" --no-start; fi
@@ -259,13 +258,11 @@ if [ "$no_start" -eq 1 ]; then set -- "$@" --no-start; fi
     ))
 }
 
-pub(super) async fn windows(hub: Arc<Hub>, headers: HeaderMap) -> Response {
-    let Some(admin) = hub.tailnet_admin.as_ref() else {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+pub(super) async fn windows(hub: Arc<Hub>) -> Response {
+    let base = match hub_base(&hub) {
+        Ok(base) => base,
+        Err(status) => return status.into_response(),
     };
-    if let Err(status) = request_base(&hub, &headers) {
-        return status.into_response();
-    }
     let (version, tag, repo, manifest_sha) = match release_manifest(&hub) {
         Ok(pair) => pair,
         Err(status) => return status.into_response(),
@@ -317,11 +314,8 @@ pub(super) async fn windows(hub: Arc<Hub>, headers: HeaderMap) -> Response {
             1,
         )
         .replacen(
-            "[string]$Control = \"\",",
-            &format!(
-                "[string]$Control = {},",
-                powershell_word(admin.control_url())
-            ),
+            "[string]$Hub = \"\",",
+            &format!("[string]$Hub = {},", powershell_word(&base)),
             1,
         )
         .replacen(
@@ -330,32 +324,9 @@ pub(super) async fn windows(hub: Arc<Hub>, headers: HeaderMap) -> Response {
             1,
         )
         .replacen(
-            "[string]$KeyFile = \"\",",
-            "[string]$KeyFile = $env:PROTECTORATE_ENROLL_KEY_FILE,",
-            1,
-        )
-        .replacen(
             "[string]$CaCert = \"\",",
             "[string]$CaCert = $env:PROTECTORATE_CA_CERT,",
             1,
         );
     script_response(script)
-}
-
-#[cfg(test)]
-mod public_url_tests {
-    use super::*;
-
-    #[test]
-    fn installer_uses_configured_origin_without_request_host() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path(), "owner-secret", "test")
-            .unwrap()
-            .with_public_url("https://public.example.test".into())
-            .unwrap();
-        assert_eq!(
-            request_base(&hub, &HeaderMap::new()).unwrap(),
-            "https://public.example.test"
-        );
-    }
 }

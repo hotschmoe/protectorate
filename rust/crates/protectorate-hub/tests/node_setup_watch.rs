@@ -47,7 +47,7 @@ impl protectorate_node::MetricsCollector for Report {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn setup_watch_polls_the_node_it_watches() {
     let dir = tempfile::tempdir().unwrap();
-    let agent = Agent::new(Arc::new(Report), "node-secret");
+    let agent = Agent::new(Arc::new(Report));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let agent_addr = listener.local_addr().unwrap();
     let agent_task = tokio::spawn(async move {
@@ -73,7 +73,6 @@ async fn setup_watch_polls_the_node_it_watches() {
         hub.hostname.clone(),
         dir.path().to_path_buf(),
     ));
-    monitor.set_token("node-secret".into()).unwrap();
     let hub_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub_addr = hub_listener.local_addr().unwrap();
     let hub_task = tokio::spawn(async move {
@@ -169,10 +168,7 @@ async fn windows_setup_waits_for_desktop_probe_then_reports_attention_and_ready(
         tokio::spawn(async move { axum::serve(agent_listener, agent_router).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "test")
-        .unwrap()
-        .with_node_token("node-secret".into())
-        .unwrap();
+    let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
     hub.inventory
         .add(
             Node {

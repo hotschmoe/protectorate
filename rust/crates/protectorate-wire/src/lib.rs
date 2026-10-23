@@ -378,7 +378,6 @@ impl Catalog {
 pub struct AuthContext {
     pub actor: String,
     pub token_id: String,
-    pub tailnet: String,
     pub task: String,
     pub scopes: Vec<String>,
     pub owner: bool,
@@ -386,9 +385,6 @@ pub struct AuthContext {
     /// Direct transport peer for public device pairing audit entries.
     pub requesting_ip: Option<std::net::IpAddr>,
 }
-/// Identity supplied by the authenticated virtual tailnet listener.
-#[derive(Clone, Debug)]
-pub struct TailnetIdentity(pub String);
 #[derive(Clone, Debug)]
 pub struct RpcRequest {
     pub method: Method,
@@ -418,11 +414,8 @@ type StreamingHandler = Arc<dyn Fn(RpcRequest, StreamSender) -> StreamingFuture 
 /// The hook decides public, owner, device, scope and node-local policies.
 /// It runs before JSON decoding and handlers, and must not block on network IO.
 pub type Authorizer = Arc<dyn Fn(&Method, &HeaderMap) -> Result<AuthContext> + Send + Sync>;
-pub type PeerAuthorizer = Arc<
-    dyn Fn(&Method, &HeaderMap, Option<SocketAddr>, Option<&str>) -> Result<AuthContext>
-        + Send
-        + Sync,
->;
+pub type PeerAuthorizer =
+    Arc<dyn Fn(&Method, &HeaderMap, Option<SocketAddr>) -> Result<AuthContext> + Send + Sync>;
 enum Admission {
     Headers(Authorizer),
     Peer(PeerAuthorizer),
@@ -439,14 +432,8 @@ pub type RejectionObserver = Arc<dyn Fn(&Method, Option<&AuthContext>, &RpcError
 /// hook receives headers so the service can identify the rejected credential;
 /// it must never write bearer tokens or message bodies to an audit log.
 pub type AdmissionDenialObserver = Arc<
-    dyn Fn(
-            &Method,
-            &HeaderMap,
-            Option<SocketAddr>,
-            Option<&str>,
-            Option<&DynamicMessage>,
-            &RpcError,
-        ) + Send
+    dyn Fn(&Method, &HeaderMap, Option<SocketAddr>, Option<&DynamicMessage>, &RpcError)
+        + Send
         + Sync,
 >;
 struct AdmissionDenialGuard {
@@ -454,21 +441,13 @@ struct AdmissionDenialGuard {
     method: Method,
     headers: HeaderMap,
     peer: Option<SocketAddr>,
-    tailnet: Option<String>,
     error: RpcError,
     finished: bool,
 }
 impl AdmissionDenialGuard {
     fn finish(&mut self, message: Option<&DynamicMessage>) {
         self.finished = true;
-        (self.observer)(
-            &self.method,
-            &self.headers,
-            self.peer,
-            self.tailnet.as_deref(),
-            message,
-            &self.error,
-        );
+        (self.observer)(&self.method, &self.headers, self.peer, message, &self.error);
     }
 }
 impl Drop for AdmissionDenialGuard {
@@ -872,13 +851,9 @@ async fn dispatch_inner(
         ));
     }
     let peer_addr = request.extensions().get::<SocketAddr>().copied();
-    let tailnet = request
-        .extensions()
-        .get::<TailnetIdentity>()
-        .map(|identity| identity.0.as_str());
     let admission = match &server.authorize {
         Admission::Headers(authorize) => authorize(&method, request.headers()),
-        Admission::Peer(authorize) => authorize(&method, request.headers(), peer_addr, tailnet),
+        Admission::Peer(authorize) => authorize(&method, request.headers(), peer_addr),
     };
     let auth = match admission {
         Ok(auth) => auth,
@@ -889,7 +864,6 @@ async fn dispatch_inner(
                     method: method.clone(),
                     headers: request.headers().clone(),
                     peer: peer_addr,
-                    tailnet: tailnet.map(str::to_owned),
                     error: error.clone(),
                     finished: false,
                 };

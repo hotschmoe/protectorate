@@ -5,32 +5,28 @@ use protectorate_wire::{
     FLAG_END_STREAM,
 };
 use serde_json::Value;
-use std::{io::Read, path::Path, sync::OnceLock, time::Duration};
+use std::{
+    io::Read,
+    net::{SocketAddr, ToSocketAddrs},
+    path::Path,
+    time::Duration,
+};
+use ureq::unversioned::{
+    resolver::{ResolvedSocketAddrs, Resolver},
+    transport::{DefaultConnector, NextTimeout},
+};
 use zeroize::Zeroizing;
 
 const MAX_UNARY_BYTES: u64 = 16 << 20;
 const MAX_STREAM_MESSAGE_BYTES: usize = 8 << 20;
 const MAX_ERROR_BYTES: u64 = 64 << 10;
-const PUBLIC_DEVICE_START: &str = "/protectorate.v1.DeviceService/StartDeviceAuth";
-const PUBLIC_DEVICE_POLL: &str = "/protectorate.v1.DeviceService/PollDeviceAuth";
-static VIRTUAL_PROXY_SECRET: OnceLock<Zeroizing<String>> = OnceLock::new();
-
-/// Per-process credential for the local TCP adapter. The adapter strips this
-/// header before dialing the virtual tailnet stream.
-pub fn virtual_proxy_secret() -> Result<String> {
-    if let Some(secret) = VIRTUAL_PROXY_SECRET.get() {
-        return Ok(secret.to_string());
-    }
-    let mut bytes = [0_u8; 32];
-    getrandom::getrandom(&mut bytes)
-        .map_err(|error| RpcError::new(Code::Internal, format!("proxy entropy: {error}")))?;
-    let secret = Zeroizing::new(bytes.iter().map(|byte| format!("{byte:02x}")).collect());
-    let _ = VIRTUAL_PROXY_SECRET.set(secret);
-    Ok(VIRTUAL_PROXY_SECRET
-        .get()
-        .expect("proxy secret initialized")
-        .to_string())
-}
+/// Procedures a client without a token may call: device pairing and a new
+/// node redeeming its join code.
+const PUBLIC: [&str; 3] = [
+    "/protectorate.v1.DeviceService/StartDeviceAuth",
+    "/protectorate.v1.DeviceService/PollDeviceAuth",
+    "/protectorate.v1.NodeService/JoinNode",
+];
 
 /// Parsed private CA bundle for explicit daemon-to-node TLS trust.
 #[derive(Clone)]
@@ -67,12 +63,67 @@ impl TrustRoots {
     }
 }
 
+/// What the hub presents to node agents: its certificate and key, and the hub
+/// CA that a node's certificate must chain to.
+#[derive(Clone)]
+pub struct NodeTls {
+    roots: TrustRoots,
+    identity: ureq::tls::ClientCert,
+}
+
+impl NodeTls {
+    pub fn from_pem(ca: &[u8], cert: &[u8], key: &[u8]) -> Result<Self> {
+        let certs = ureq::tls::parse_pem(cert)
+            .filter_map(|item| match item {
+                Ok(ureq::tls::PemItem::Certificate(cert)) => Some(cert),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let key = ureq::tls::PrivateKey::from_pem(key)
+            .map_err(|e| RpcError::invalid(format!("hub key: {e}")))?;
+        if certs.is_empty() {
+            return Err(RpcError::invalid("hub certificate PEM is empty"));
+        }
+        Ok(Self {
+            roots: TrustRoots::from_pem(ca)?,
+            identity: ureq::tls::ClientCert::new_with_certs(&certs, key),
+        })
+    }
+}
+
+/// Dials one fixed address whatever host the URL names, so a node's
+/// certificate is checked against its identity rather than its address.
+#[derive(Debug)]
+struct Fixed(SocketAddr);
+
+impl Resolver for Fixed {
+    fn resolve(
+        &self,
+        _: &ureq::http::Uri,
+        _: &ureq::config::Config,
+        _: NextTimeout,
+    ) -> std::result::Result<ResolvedSocketAddrs, ureq::Error> {
+        let mut addrs = self.empty();
+        addrs.push(self.0);
+        Ok(addrs)
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
     base: String,
     token: Zeroizing<String>,
+    public: bool,
+    dial: Option<SocketAddr>,
     agent: ureq::Agent,
     catalog: Catalog,
+}
+
+fn agent(config: ureq::config::Config, dial: Option<SocketAddr>) -> ureq::Agent {
+    match dial {
+        Some(addr) => ureq::Agent::with_parts(config, DefaultConnector::default(), Fixed(addr)),
+        None => config.into(),
+    }
 }
 
 /// Response metadata used by desktop input commands to show an automatic lease.
@@ -90,7 +141,9 @@ impl Client {
         Self {
             base: self.base.clone(),
             token: self.token.clone(),
-            agent: ureq::Agent::new_with_config(self.agent.config().clone()),
+            public: self.public,
+            dial: self.dial,
+            agent: agent(self.agent.config().clone(), self.dial),
             catalog: self.catalog.clone(),
         }
     }
@@ -100,15 +153,56 @@ impl Client {
         self.agent.shutdown();
     }
 
-    /// The caller must supply the Protectorate loopback proxy. Its per-process
-    /// credential is checked locally and stripped before the tailnet dial.
-    pub fn new_virtual(base: &str, timeout: Duration) -> Result<Self> {
-        if !base.starts_with("http://127.0.0.1:") {
+    /// A hub-to-node client. With `tls` it dials `address` over mutual TLS
+    /// and requires the node's certificate to name `server_name`; without it
+    /// `address` must be a loopback agent that takes plain HTTP.
+    pub fn new_node(
+        server_name: &str,
+        address: &str,
+        tls: Option<&NodeTls>,
+        timeout: Duration,
+    ) -> Result<Self> {
+        let config = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .max_redirects_will_error(false)
+            .timeout_global(Some(timeout));
+        let (base, config, dial) = match tls {
+            Some(tls) => {
+                let addr = address
+                    .to_socket_addrs()
+                    .ok()
+                    .and_then(|mut addrs| addrs.next())
+                    .ok_or_else(|| {
+                        RpcError::new(Code::Unavailable, format!("cannot resolve {address}"))
+                    })?;
+                let config = config.tls_config(
+                    ureq::tls::TlsConfig::builder()
+                        .root_certs(ureq::tls::RootCerts::new_with_certs(&tls.roots.0))
+                        .client_cert(Some(tls.identity.clone()))
+                        .build(),
+                );
+                (
+                    format!("https://{server_name}:{}", addr.port()),
+                    config,
+                    Some(addr),
+                )
+            }
+            None => (format!("http://{address}"), config, None),
+        };
+        if !valid_endpoint(&base) {
             return Err(RpcError::invalid(
-                "virtual client requires a 127.0.0.1 proxy",
+                "a node without a certificate must be a loopback agent",
             ));
         }
-        Self::new_with_trust(base, virtual_proxy_secret()?, timeout, None)
+        Ok(Self {
+            base,
+            token: Zeroizing::new(String::new()),
+            public: false,
+            dial,
+            agent: agent(config.build(), dial),
+            catalog: Catalog::embedded()?,
+        })
     }
     pub fn new(base: &str, token: impl Into<String>, timeout: Duration) -> Result<Self> {
         if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
@@ -121,8 +215,9 @@ impl Client {
         Self::new_with_ca(base, token, timeout, ca.as_deref().map(Path::new))
     }
 
-    /// Connect to the public device authorization procedures without a bearer
-    /// credential. The same endpoint, TLS and response limits apply.
+    /// Connect to the public device authorization and node join procedures
+    /// without a bearer credential. The same endpoint, TLS and response limits
+    /// apply.
     pub fn new_public(base: &str, timeout: Duration) -> Result<Self> {
         Self::new(base, "", timeout)
     }
@@ -200,11 +295,12 @@ impl Client {
                 );
             }
         }
-        let config = config.build();
         Ok(Self {
             base: base.into(),
+            public: token.is_empty(),
             token,
-            agent: config.into(),
+            dial: None,
+            agent: config.build().into(),
             catalog: Catalog::embedded()?,
         })
     }
@@ -241,10 +337,10 @@ impl Client {
         input: &Value,
         timeout: Option<Duration>,
     ) -> Result<(Value, UnaryMetadata)> {
-        if self.token.is_empty() && !matches!(procedure, PUBLIC_DEVICE_START | PUBLIC_DEVICE_POLL) {
+        if self.public && !PUBLIC.contains(&procedure) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
-                "public client only permits device authorization",
+                "a client without a token may only pair a device or join a node",
             ));
         }
         let method = self.method(procedure)?;
@@ -327,10 +423,10 @@ impl Client {
         timeout: Option<Duration>,
         on_message: &mut impl FnMut(Value) -> Result<()>,
     ) -> Result<()> {
-        if self.token.is_empty() {
+        if self.public {
             return Err(RpcError::new(
                 Code::PermissionDenied,
-                "public client only permits device authorization",
+                "a client without a token may only pair a device or join a node",
             ));
         }
         let method = self.method(procedure)?;
@@ -525,26 +621,4 @@ fn remote_error(status: u16, bytes: &[u8], desk_unavailable: Option<String>) -> 
         error.headers.insert("Protectorate-Desk-Unavailable", value);
     }
     error
-}
-
-#[cfg(test)]
-mod trust_tests {
-    use super::{Client, TrustRoots};
-    use std::time::Duration;
-
-    #[test]
-    fn invalid_or_empty_private_ca_fails_before_network_use() {
-        assert!(TrustRoots::from_pem(b"").is_err());
-        assert!(TrustRoots::from_pem(b"not PEM").is_err());
-        assert!(TrustRoots::from_pem(
-            b"-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n"
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn virtual_secret_is_never_configured_for_a_remote_url() {
-        assert!(Client::new_virtual("https://node.example:7475", Duration::from_secs(1)).is_err());
-        assert!(Client::new_virtual("http://127.0.0.1.evil:7475", Duration::from_secs(1)).is_err());
-    }
 }

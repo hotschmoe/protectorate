@@ -5,10 +5,10 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{DateTime, Utc};
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_auth as auth;
-use protectorate_connect_client::{Client, TrustRoots};
+use protectorate_connect_client::Client;
 use protectorate_inventory::{Inventory, CARE, SHARED};
 use protectorate_lease::{Entry, LeaseTable, Resource};
-use protectorate_node_monitor::{Monitor, NodeRoute, VIRTUAL_PREFIX};
+use protectorate_node_monitor::{Dialer, Monitor};
 use protectorate_wire::{
     self as wire, Code, Result, RpcError, RpcRequest, StreamSender, UnaryServer,
 };
@@ -22,14 +22,10 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock,
-    },
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Notify;
-use zeroize::Zeroizing;
 
 const MAX_JOBS: usize = 4096;
 const MAX_LOG_BYTES: u64 = 64 << 20;
@@ -79,11 +75,7 @@ pub struct Jobs {
     root: PathBuf,
     inventory: Arc<Inventory>,
     local_name: String,
-    local_endpoint: Mutex<Option<String>>,
-    token: Mutex<Option<Zeroizing<String>>>,
-    trust: Mutex<Option<TrustRoots>>,
-    route: Mutex<Option<NodeRoute>>,
-    resume_deferred: AtomicBool,
+    dialer: Dialer,
     state: Mutex<BTreeMap<String, Stored>>,
     canceled_request_ids: Mutex<BTreeMap<String, u64>>,
     changed: Notify,
@@ -95,13 +87,11 @@ pub struct Jobs {
 struct Stored {
     job: Value,
     request_id: String,
-    endpoint: String,
     cancel_requested: bool,
 }
 
 struct Placement {
     node: String,
-    endpoint: String,
     mode: &'static str,
     gpu: Option<u32>,
 }
@@ -478,11 +468,6 @@ impl Jobs {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .into(),
-                endpoint: value
-                    .get("endpoint")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
                 cancel_requested: value
                     .get("cancelRequested")
                     .and_then(Value::as_bool)
@@ -516,11 +501,7 @@ impl Jobs {
             root,
             inventory,
             local_name,
-            local_endpoint: Mutex::new(None),
-            token: Mutex::new(None),
-            trust: Mutex::new(None),
-            route: Mutex::new(None),
-            resume_deferred: AtomicBool::new(false),
+            dialer: Dialer::default(),
             state: Mutex::new(state),
             canceled_request_ids: Mutex::new(canceled_request_ids),
             changed: Notify::new(),
@@ -555,68 +536,23 @@ impl Jobs {
             .is_some_and(|set| set.lock().unwrap().contains(name))
     }
 
-    pub(super) fn uninstall_node(&self, address: &str) -> Result<Value> {
-        let resolved = self.resolve_endpoint(address, address)?;
-        if let Some(url) = resolved.strip_prefix(VIRTUAL_PREFIX) {
-            return Client::new_virtual(url, Duration::from_secs(30))?
-                .call("/protectorate.v1.NodeAgentService/Uninstall", &json!({}));
-        }
-        let token = self
-            .token
-            .lock()
-            .unwrap()
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                RpcError::new(Code::Unavailable, "node agent token is not configured")
-            })?;
-        let trust = self.trust.lock().unwrap().clone();
-        let client = Client::new_with_trust(
-            &resolved,
-            token.to_string(),
-            Duration::from_secs(30),
-            trust.as_ref(),
-        )?;
-        client.call("/protectorate.v1.NodeAgentService/Uninstall", &json!({}))
+    pub(super) fn uninstall_node(&self, name: &str) -> Result<Value> {
+        self.client_with_timeout(name, Duration::from_secs(30))?
+            .call("/protectorate.v1.NodeAgentService/Uninstall", &json!({}))
     }
 
-    pub fn set_token(self: &Arc<Self>, token: String) -> std::result::Result<(), &'static str> {
-        if token.is_empty() || token.contains(['\r', '\n']) {
-            return Err("invalid node agent token");
-        }
-        *self.token.lock().unwrap() = Some(Zeroizing::new(token));
-        if self.resume_deferred.load(Ordering::Acquire) {
-            self.resume_pending(Some(false));
-            return Ok(());
-        }
-        self.resume_pending(None);
-        Ok(())
+    pub fn set_node_tls(&self, tls: protectorate_connect_client::NodeTls) {
+        self.dialer.set(tls);
     }
 
-    /// Keep persisted jobs dormant until startup has installed the live node route.
-    pub fn defer_resume(&self) {
-        self.resume_deferred.store(true, Ordering::Release);
-    }
-
-    /// Launch persisted jobs once after the authenticated tailnet is ready.
-    pub fn resume_deferred(self: &Arc<Self>) {
-        if self.resume_deferred.swap(false, Ordering::AcqRel) {
-            self.resume_pending(Some(true));
-        }
-    }
-
-    fn resume_pending(self: &Arc<Self>, remote: Option<bool>) {
+    /// Launches every persisted job that has not finished.
+    pub(super) fn resume(self: &Arc<Self>) {
         let resume = self
             .state
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, s)| {
-                !terminal(&s.job)
-                    && remote.is_none_or(|remote| {
-                        (s.job["node"].as_str() != Some(self.local_name.as_str())) == remote
-                    })
-            })
+            .filter(|(_, s)| !terminal(&s.job))
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
         for id in resume {
@@ -624,64 +560,27 @@ impl Jobs {
         }
     }
 
-    pub fn set_local_endpoint(&self, endpoint: String) {
-        *self.local_endpoint.lock().unwrap() = Some(endpoint);
-    }
-
-    pub fn set_trust(&self, trust: TrustRoots) {
-        *self.trust.lock().unwrap() = Some(trust);
-    }
-
-    pub fn set_route(&self, route: NodeRoute) {
-        *self.route.lock().unwrap() = Some(route);
-    }
-
-    fn resolve_endpoint(&self, name: &str, address: &str) -> Result<String> {
-        match self.route.lock().unwrap().clone() {
-            Some(route) => {
-                route(name, address).map_err(|error| RpcError::new(Code::Unavailable, error))
-            }
-            None => endpoint(address),
-        }
-    }
-
-    fn job_endpoint(&self, id: &str) -> Result<String> {
+    fn job_node(&self, id: &str) -> Result<String> {
         let state = self.state.lock().unwrap();
         let stored = state
             .get(id)
             .ok_or_else(|| RpcError::new(Code::NotFound, "job not found"))?;
-        let name = stored.job["node"].as_str().unwrap_or_default().to_owned();
-        let old = stored.endpoint.clone();
-        drop(state);
-        if name == self.local_name || self.route.lock().unwrap().is_none() {
-            return Ok(old);
+        Ok(stored.job["node"].as_str().unwrap_or_default().to_owned())
+    }
+
+    fn client(&self, node: &str) -> Result<Client> {
+        self.client_with_timeout(node, NODE_CALL_TIMEOUT)
+    }
+
+    fn client_with_timeout(&self, node: &str, timeout: Duration) -> Result<Client> {
+        if node == self.local_name {
+            return Err(super::no_local_agent());
         }
-        let node = self
+        let info = self
             .inventory
-            .get(&name)
+            .get(node)
             .map_err(|error| RpcError::new(Code::Unavailable, error.to_string()))?;
-        self.resolve_endpoint(&name, &node.address)
-    }
-
-    fn client(&self, endpoint: &str) -> Result<Client> {
-        self.client_with_timeout(endpoint, NODE_CALL_TIMEOUT)
-    }
-
-    fn client_with_timeout(&self, endpoint: &str, timeout: Duration) -> Result<Client> {
-        if let Some(endpoint) = endpoint.strip_prefix(VIRTUAL_PREFIX) {
-            return Client::new_virtual(endpoint, timeout);
-        }
-        let token = self
-            .token
-            .lock()
-            .unwrap()
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                RpcError::new(Code::Unavailable, "node agent token is not configured")
-            })?;
-        let trust = self.trust.lock().unwrap().clone();
-        Client::new_with_trust(endpoint, token.to_string(), timeout, trust.as_ref())
+        self.dialer.client(&info, timeout)
     }
 
     fn snapshot(&self, id: &str) -> Result<Value> {
@@ -811,19 +710,11 @@ impl Jobs {
                     return Err(RpcError::new(Code::ResourceExhausted, "node is leased"));
                 }
             }
-            let endpoint = if name == self.local_name {
-                self.local_endpoint.lock().unwrap().clone().ok_or_else(|| {
-                    RpcError::new(
-                        Code::Unavailable,
-                        "local node agent endpoint is not configured",
-                    )
-                })?
-            } else {
-                self.resolve_endpoint(&name, &address)?
-            };
+            if name == self.local_name {
+                return Err(super::no_local_agent());
+            }
             return Ok(Placement {
                 node: name,
-                endpoint,
                 mode: if tier == CARE {
                     "JOB_MODE_PLAIN"
                 } else {
@@ -835,22 +726,15 @@ impl Jobs {
         let selector = target
             .get("selector")
             .ok_or_else(|| RpcError::invalid("target is required"))?;
-        let mut choices = Vec::new();
-        let local = self.local_endpoint.lock().unwrap().clone();
-        if let Some(url) = local {
-            choices.push((self.local_name.clone(), "local".to_string(), url));
-        }
-        for info in self.inventory.list() {
-            if info.tier != SHARED || info.invited {
-                continue;
-            }
-            if let Ok(url) = self.resolve_endpoint(&info.name, &info.address) {
-                choices.push((info.name, info.address, url));
-            }
-        }
+        let choices = self
+            .inventory
+            .list()
+            .into_iter()
+            .filter(|info| info.tier == SHARED && !info.invited)
+            .map(|info| (info.name, info.address));
         let mut best: Option<(f64, Placement)> = None;
         let mut saw_lease = false;
-        for (name, address, url) in choices {
+        for (name, address) in choices {
             if self.is_draining(&name) {
                 continue;
             }
@@ -948,7 +832,6 @@ impl Jobs {
             let score = (cpu + memory) / 2.0 + active * 100.0 / cores;
             let candidate = Placement {
                 node: name.clone(),
-                endpoint: url,
                 mode: "JOB_MODE_SANDBOXED",
                 gpu,
             };
@@ -1124,7 +1007,7 @@ impl Jobs {
             }
             placement.mode = "JOB_MODE_ADMIN";
         }
-        self.client(&placement.endpoint)?;
+        self.client(&placement.node)?;
         // Placement may have read leases while a drain was starting. Commit
         // the new record only after crossing the shared admission barrier.
         let _admission = self
@@ -1156,7 +1039,6 @@ impl Jobs {
         let stored = Stored {
             job: job.clone(),
             request_id: key.into(),
-            endpoint: placement.endpoint,
             cancel_requested: false,
         };
         let mut options = OpenOptions::new();
@@ -1384,13 +1266,7 @@ impl Jobs {
     }
     fn run(self: Arc<Self>, id: String, run: Option<(Value, SourcePlan)>) {
         if let Some((mut request, source)) = run {
-            let client = match self.job_endpoint(&id).and_then(|endpoint| {
-                if endpoint.is_empty() {
-                    Err(RpcError::new(Code::Unavailable, "node endpoint is missing"))
-                } else {
-                    self.client(&endpoint)
-                }
-            }) {
+            let client = match self.job_node(&id).and_then(|node| self.client(&node)) {
                 Ok(client) => client,
                 Err(error) => {
                     let _ = self.fail(&id, &error.message);
@@ -1449,10 +1325,9 @@ impl Jobs {
                 return;
             }
         }
-        // RunJob may have started before transport dropped. The authenticated
-        // route can be temporarily unavailable during a hub or tailnet restart;
-        // resolve it again on every attempt rather than failing a live job or
-        // holding a stale endpoint forever.
+        // RunJob may have started before transport dropped. The node can be
+        // unreachable for a while (a restart, a moved address); look it up
+        // again on every attempt rather than failing a live job.
         let deadline = self
             .snapshot(&id)
             .map(|job| recovery_deadline(&job))
@@ -1468,13 +1343,10 @@ impl Jobs {
                 );
                 return;
             }
-            let client = match self.job_endpoint(&id).and_then(|endpoint| {
-                if endpoint.is_empty() {
-                    Err(RpcError::new(Code::Unavailable, "node endpoint is missing"))
-                } else {
-                    self.client_with_timeout(&endpoint, RECOVERY_CALL_TIMEOUT)
-                }
-            }) {
+            let client = match self
+                .job_node(&id)
+                .and_then(|node| self.client_with_timeout(&node, RECOVERY_CALL_TIMEOUT))
+            {
                 Ok(client) => client,
                 Err(error) => {
                     if self
@@ -1546,8 +1418,7 @@ impl Jobs {
                 .get(id)
                 .is_some_and(|s| s.cancel_requested);
             if cancel {
-                let endpoint = self.job_endpoint(id)?;
-                self.client(&endpoint)?.call(
+                self.client(&self.job_node(id)?)?.call(
                     "/protectorate.v1.NodeAgentService/CancelJob",
                     &json!({"jobId":id}),
                 )?;
@@ -1665,8 +1536,7 @@ impl Jobs {
             return self.snapshot(id);
         }
         self.update(id, |s| s.cancel_requested = true)?;
-        let endpoint = self.job_endpoint(id)?;
-        let client = self.client(&endpoint)?;
+        let client = self.client(&self.job_node(id)?)?;
         let reply = client.call(
             "/protectorate.v1.NodeAgentService/CancelJob",
             &json!({"jobId":id}),
@@ -1728,7 +1598,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             hub.audit.write(AuditEntry {
                 actor: request.auth.actor.clone(),
                 token_id: request.auth.token_id.clone(),
-                tailnet: request.auth.tailnet.clone(),
                 task: request.auth.task.clone(),
                 procedure: request.method.procedure.clone(),
                 subject: job["id"].as_str().unwrap_or_default().into(),
@@ -1883,7 +1752,7 @@ async fn send(request: &RpcRequest, sender: &StreamSender, value: Value) -> Resu
         .await
 }
 fn persist(root: &Path, id: &str, stored: &Stored) -> Result<()> {
-    let bytes=serde_json::to_vec(&json!({"id":id,"job":stored.job,"requestId":stored.request_id,"endpoint":stored.endpoint,"cancelRequested":stored.cancel_requested})).map_err(internal)?;
+    let bytes=serde_json::to_vec(&json!({"id":id,"job":stored.job,"requestId":stored.request_id,"cancelRequested":stored.cancel_requested})).map_err(internal)?;
     let mut nonce = [0_u8; 8];
     getrandom::getrandom(&mut nonce).map_err(internal)?;
     let temp = root.join(format!(
@@ -1995,33 +1864,6 @@ fn random_id() -> Result<String> {
         bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
     ))
 }
-fn endpoint(address: &str) -> Result<String> {
-    let (scheme, authority) = if let Some(a) = address.strip_prefix("https://") {
-        ("https", a)
-    } else if let Some(a) = address.strip_prefix("http://") {
-        ("http", a)
-    } else if address.starts_with("127.0.0.1") || address.starts_with("[::1]") {
-        ("http", address)
-    } else {
-        ("https", address)
-    };
-    let has_port = if authority.starts_with('[') {
-        authority.contains("]:")
-    } else {
-        authority.contains(':')
-    };
-    let authority = if has_port {
-        authority.to_string()
-    } else {
-        format!("{authority}:7475")
-    };
-    let url = format!("{scheme}://{authority}");
-    if scheme == "http" && !authority.starts_with("127.0.0.1:") && !authority.starts_with("[::1]:")
-    {
-        return Err(RpcError::invalid("node HTTP endpoint requires loopback"));
-    }
-    Ok(url)
-}
 fn lease_error(error: protectorate_lease::Error) -> RpcError {
     RpcError::new(Code::Internal, error.to_string())
 }
@@ -2076,134 +1918,4 @@ fn gpu_busy(gpu: &Value) -> bool {
     let used = gpu.get("memoryUsedBytes").and_then(number).unwrap_or(0);
     gpu["utilizationPercent"].as_f64().unwrap_or(0.0) >= 90.0
         || total > 0 && used.saturating_mul(100) / total >= 90
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{endpoint, recovery_deadline, Jobs, Stored};
-    use protectorate_inventory::{Inventory, Node};
-    use serde_json::json;
-    use std::{
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-        time::{Duration, SystemTime},
-    };
-
-    #[test]
-    fn recovery_deadline_is_bounded_by_original_job_timeout() {
-        let old = json!({"submittedAt":"2020-01-01T00:00:00Z","timeout":"1s"});
-        assert!(recovery_deadline(&old) < SystemTime::now());
-        let current = json!({"submittedAt":chrono::Utc::now().to_rfc3339(),"timeout":"10s"});
-        assert!(recovery_deadline(&current) > SystemTime::now());
-    }
-
-    #[test]
-    fn cancel_before_submit_persists_across_restart() {
-        let temp = tempfile::tempdir().unwrap();
-        let inventory = Arc::new(Inventory::open(temp.path().join("nodes.json"), "hub").unwrap());
-        let root = temp.path().join("jobs");
-        let jobs = Jobs::open(&root, Arc::clone(&inventory), "hub".into()).unwrap();
-        let key = "cancel-before-submit-0001";
-        assert_eq!(
-            jobs.job_for_request_id_or_cancel(key).unwrap_err().code,
-            protectorate_wire::Code::NotFound
-        );
-        drop(jobs);
-        let reopened = Jobs::open(&root, inventory, "hub".into()).unwrap();
-        assert!(reopened
-            .canceled_request_ids
-            .lock()
-            .unwrap()
-            .get(key)
-            .is_some_and(|expires| *expires > super::unix_seconds()));
-        assert_eq!(
-            reopened
-                .job_for_request_id_or_cancel("bad")
-                .unwrap_err()
-                .code,
-            protectorate_wire::Code::InvalidArgument
-        );
-    }
-
-    #[test]
-    fn persisted_job_resumes_once_after_route_installation() {
-        let temp = tempfile::tempdir().unwrap();
-        let inventory = Arc::new(Inventory::open(temp.path().join("nodes.json"), "hub").unwrap());
-        inventory
-            .add(
-                Node {
-                    name: "node".into(),
-                    address: "node".into(),
-                    ..Node::default()
-                },
-                false,
-            )
-            .unwrap();
-        let jobs = Arc::new(Jobs::open(temp.path().join("jobs"), inventory, "hub".into()).unwrap());
-        jobs.state.lock().unwrap().insert(
-            "job1".into(),
-            Stored {
-                job: json!({"node":"node","state":"JOB_STATE_RUNNING"}),
-                request_id: String::new(),
-                endpoint: "http://127.0.0.1:1".into(),
-                cancel_requested: false,
-            },
-        );
-        jobs.state.lock().unwrap().insert(
-            "local1".into(),
-            Stored {
-                job: json!({"node":"hub","state":"JOB_STATE_RUNNING"}),
-                request_id: String::new(),
-                endpoint: String::new(),
-                cancel_requested: false,
-            },
-        );
-        jobs.defer_resume();
-        jobs.set_token("legacy-direct-token".into()).unwrap();
-        for _ in 0..100 {
-            if jobs.state.lock().unwrap()["local1"].job["state"] == "JOB_STATE_FAILED" {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(
-            jobs.state.lock().unwrap()["local1"].job["state"],
-            "JOB_STATE_FAILED"
-        );
-        assert_eq!(
-            jobs.state.lock().unwrap()["job1"].job["state"],
-            "JOB_STATE_RUNNING"
-        );
-
-        let calls = Arc::new(AtomicUsize::new(0));
-        let route_calls = Arc::clone(&calls);
-        jobs.set_route(Arc::new(move |_, _| {
-            route_calls.fetch_add(1, Ordering::SeqCst);
-            Err("authenticated node is unavailable".into())
-        }));
-        jobs.resume_deferred();
-        for _ in 0..100 {
-            if calls.load(Ordering::SeqCst) == 1 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        jobs.resume_deferred();
-        std::thread::sleep(Duration::from_millis(50));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        jobs.state.lock().unwrap().get_mut("job1").unwrap().job["state"] =
-            json!("JOB_STATE_SUCCEEDED");
-    }
-
-    #[test]
-    fn endpoint_defaults_ports_and_keeps_http_on_loopback() {
-        assert_eq!(endpoint("127.0.0.1").unwrap(), "http://127.0.0.1:7475");
-        assert_eq!(endpoint("[::1]").unwrap(), "http://[::1]:7475");
-        assert_eq!(endpoint("https://compute").unwrap(), "https://compute:7475");
-        assert!(endpoint("http://compute:7475").is_err());
-        assert!(endpoint("http://127.0.0.1.evil:7475").is_err());
-    }
 }

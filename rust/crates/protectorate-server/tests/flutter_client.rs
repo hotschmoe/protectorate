@@ -17,7 +17,7 @@ mod unix {
 
     #[cfg(target_os = "linux")]
     use std::{
-        os::unix::{fs::symlink, process::CommandExt},
+        os::unix::process::CommandExt,
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -68,17 +68,6 @@ mod unix {
             eprintln!("skipping node invitation trial: flutter is unavailable");
             return;
         }
-        let Some(headscale) = std::env::var_os("PROT_HEADSCALE_BINARY") else {
-            assert!(
-                !required,
-                "PROT_HEADSCALE_BINARY must point to pinned Headscale 0.29.5"
-            );
-            eprintln!("skipping node invitation trial: PROT_HEADSCALE_BINARY is unset");
-            return;
-        };
-        let headscale = fs::canonicalize(headscale).expect("resolve Headscale binary");
-        assert!(headscale.is_file(), "Headscale binary is not a file");
-
         let app = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../app");
         assert!(
             app.join(".dart_tool/package_config.json").is_file(),
@@ -97,45 +86,21 @@ mod unix {
         eprintln!("retained node invitation fixture: {}", root.display());
         let home = root.join("hub");
         fs::create_dir(&home).unwrap();
-        fs::create_dir(home.join("bin")).unwrap();
-        symlink(&headscale, home.join("bin/headscale-0.29.5")).unwrap();
         let token_file = root.join("owner-token");
-        let agent_token_file = root.join("agent-token");
         let token = "rust-flutter-node-invite-e2e-token";
         fs::write(&token_file, token).unwrap();
-        fs::write(&agent_token_file, "rust-flutter-node-agent-e2e-token").unwrap();
         fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
-        fs::set_permissions(&agent_token_file, fs::Permissions::from_mode(0o600)).unwrap();
 
-        let reservations = (0..6)
+        let reservations = (0..3)
             .map(|_| TcpListener::bind("127.0.0.1:0").unwrap())
             .collect::<Vec<_>>();
         let addresses = reservations
             .iter()
             .map(|listener| listener.local_addr().unwrap())
             .collect::<Vec<_>>();
-        let [hub_addr, control_addr, grpc_addr, metrics_addr, derp_addr, stun_addr] =
-            <[_; 6]>::try_from(addresses).unwrap();
+        let [hub_addr, tls_addr, node_addr] = <[_; 3]>::try_from(addresses).unwrap();
         drop(reservations);
         let bin = env!("CARGO_BIN_EXE_protectorate-rs");
-        let output = Command::new(bin)
-            .args(["hub", "tailnet", "init", "--home"])
-            .arg(&home)
-            .args(["--server-url", &format!("http://{control_addr}")])
-            .args(["--listen", &control_addr.to_string()])
-            .args(["--grpc-listen", &grpc_addr.to_string()])
-            .args(["--metrics-listen", &metrics_addr.to_string()])
-            .args(["--derp-listen", &derp_addr.to_string()])
-            .args(["--stun-listen", &stun_addr.to_string()])
-            .args(["--hub-name", "flutter-invite-hub"])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "tailnet init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
         let tmux_socket = format!("p-rust-flutter-invite-{}", std::process::id());
         let log = fs::File::create(root.join("hub.log")).unwrap();
         let server = Command::new(bin)
@@ -144,10 +109,10 @@ mod unix {
             .arg(&home)
             .arg("--owner-token-file")
             .arg(&token_file)
-            .arg("--agent-token-file")
-            .arg(&agent_token_file)
             .arg("--listen")
             .arg(hub_addr.to_string())
+            .arg("--tls-listen")
+            .arg(tls_addr.to_string())
             .arg("--node-interval")
             .arg("1s")
             .arg("--release-api-url")
@@ -196,11 +161,14 @@ mod unix {
                 root.join("node").display()
             ))
             .arg(format!(
-                "--dart-define=PROTECTORATE_E2E_CONTROL_URL=http://{control_addr}"
+                "--dart-define=PROTECTORATE_E2E_TLS_URL=https://{tls_addr}"
             ))
             .arg(format!(
-                "--dart-define=PROTECTORATE_E2E_AGENT_TOKEN_FILE={}",
-                agent_token_file.display()
+                "--dart-define=PROTECTORATE_E2E_CA_CERT={}",
+                home.join("ca/ca.pem").display()
+            ))
+            .arg(format!(
+                "--dart-define=PROTECTORATE_E2E_NODE_LISTEN={node_addr}"
             ))
             .arg("tool/node_invite_ui_e2e.dart")
             .current_dir(&app)

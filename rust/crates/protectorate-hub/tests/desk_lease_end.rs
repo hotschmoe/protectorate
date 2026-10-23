@@ -133,7 +133,7 @@ async fn release_expiry_and_policy_refusal_notify_real_node() {
         Arc::new(Controller::with_desktop(home.path().join("node"), desktop.clone()).unwrap());
     let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
     let capture = Arc::clone(&seen);
-    let node = Agent::new(Arc::new(Metrics), "node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_desktop(controller)
         .router()
         .unwrap()
@@ -169,7 +169,6 @@ async fn release_expiry_and_policy_refusal_notify_real_node() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     hub.node_monitor.poll_node("peer");
     let leases = Arc::clone(&hub.leases);
     let (hub_addr, hub_task) = serve(hub.router().unwrap()).await;

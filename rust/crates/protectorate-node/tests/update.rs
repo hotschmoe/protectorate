@@ -72,7 +72,7 @@ async fn apply_update_checks_digest_platform_and_records_trial_over_http() {
     let restart: UpdateRestart = Arc::new(move || {
         counts.fetch_add(1, Ordering::SeqCst);
     });
-    let agent = Agent::new(Arc::new(Metrics), "node-secret")
+    let agent = Agent::new(Arc::new(Metrics))
         .with_files(&root, false)
         .unwrap()
         .with_update(&exe, "v1", restart)
@@ -126,7 +126,7 @@ async fn apply_update_checks_digest_platform_and_records_trial_over_http() {
     assert_eq!(restart_count.load(Ordering::SeqCst), 1);
     server.abort();
 
-    let trial = Agent::new(Arc::new(Metrics), "node-secret")
+    let trial = Agent::new(Arc::new(Metrics))
         .with_files(&root, false)
         .unwrap()
         .with_update(&exe, "v2", Arc::new(|| {}))
@@ -154,7 +154,7 @@ async fn apply_update_checks_digest_platform_and_records_trial_over_http() {
         "a mismatched metrics version cannot confirm the trial"
     );
     trial_server.abort();
-    let retried = Agent::new(Arc::new(Metrics), "node-secret")
+    let retried = Agent::new(Arc::new(Metrics))
         .with_files(&root, false)
         .unwrap()
         .with_update(&exe, "v2", Arc::new(|| {}))

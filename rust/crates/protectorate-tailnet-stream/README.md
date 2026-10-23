@@ -1,9 +1,0 @@
-# protectorate-tailnet-stream
-
-This crate adapts `protectorate-tailnet-tcp::Endpoint` to Tokio `DuplexStream` connections for an HTTP/1.1 server. `Driver::new_with_generation(listener, generation)` returns a driver and bounded ports. Spawn `driver.run()`, send verified plaintext IP packets and their authenticated peer IDs through `ports.ingress`, forward packets from `ports.egress` through WireGuard, and serve each `ports.accepted` stream with an HTTP connection handler. `Accepted` carries the peer ID and generation bound at the TCP handshake. Call `ports.shutdown()` to stop the driver and cancel bridge tasks.
-
-**Authenticate before ingress.** The caller must map each plaintext packet's source IP to the authenticated WireGuard peer and enforce destination policy before calling `Ingress::send(peer_id, packet)`. The driver binds that ID to the TCP connection and drops later packets with a different ID. It relies on the TCP crate for IP/TCP parsing and checksums; plaintext packets alone cannot establish peer identity.
-
-Ingress, egress, command, acceptance, and per-stream buffers are bounded. If the HTTP handler stops reading and the bounded stream buffer fills, the driver pauses before forwarding the corresponding TCP ACK. If a write fails, it stops the driver before forwarding that event's ACK. Bytes already written into the stream buffer may have been acknowledged before the application consumes them. Outbound writes pause when the TCP endpoint's queue is full; retransmission and inbound ACKs can continue to make space.
-
-The TCP implementation still lacks out-of-order buffering, zero-window probes, SACK, congestion control, and path MTU discovery. This adapter does not establish a WireGuard session, route packets, or run an HTTP server. Its integration test exercises an HTTP/1.1 request and response over a synthetic IPv4 packet peer and a virtual server stream.

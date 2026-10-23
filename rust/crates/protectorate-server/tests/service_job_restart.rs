@@ -1,27 +1,22 @@
 //! A user systemd service restarts a killed hub and reattaches a running node job.
 
 #[cfg(target_os = "linux")]
+mod support;
+
+#[cfg(target_os = "linux")]
 mod linux {
+    use super::support::{free_port, run, serve_node};
     use protectorate_connect_client::Client;
     use protectorate_svcgen::{self, Spec, ROLE_HUB};
     use serde_json::{json, Value};
     use std::{
         fs,
-        net::TcpListener,
         os::unix::fs::PermissionsExt,
         path::Path,
-        process::{Child, Command, Stdio},
+        process::Command,
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
-
-    struct Node(Child);
-    impl Drop for Node {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
 
     struct UserService(String);
     impl UserService {
@@ -49,14 +44,6 @@ mod linux {
             let _ = self.systemctl(&["stop"]);
             let _ = self.systemctl(&["reset-failed"]);
         }
-    }
-
-    fn free_port() -> String {
-        TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .to_string()
     }
 
     fn token(path: &Path, value: &str) {
@@ -138,58 +125,11 @@ mod linux {
         let node_home = root.path().join("node");
         fs::create_dir(&user_home).unwrap();
         fs::create_dir(&hub_home).unwrap();
-        fs::create_dir(&node_home).unwrap();
         let owner = root.path().join("owner-token");
-        let agent = root.path().join("agent-token");
         token(&owner, "service-restart-owner-token");
-        token(&agent, "service-restart-agent-token");
-        let node_addr = free_port();
         let hub_addr = free_port();
+        let tls_addr = free_port();
         let binary = env!("CARGO_BIN_EXE_protectorate-rs");
-        let helper = Path::new(binary).with_file_name("protectorate-node-sandbox-helper");
-        let node_log = fs::File::create(root.path().join("node.stderr")).unwrap();
-        let node = Command::new(binary)
-            .args([
-                "node",
-                "serve",
-                "--home",
-                node_home.to_str().unwrap(),
-                "--agent-token-file",
-                agent.to_str().unwrap(),
-                "--allow-plain-jobs",
-                "--sandbox-helper",
-                helper.to_str().unwrap(),
-                "--listen",
-                &node_addr,
-            ])
-            .env("HOME", &user_home)
-            .env_remove("PROTECTORATE_HOME")
-            .env_remove("PROTECTORATE_HUB")
-            .env_remove("PROTECTORATE_TOKEN")
-            .env_remove("PROTECTORATE_TOKEN_FILE")
-            .stdout(Stdio::null())
-            .stderr(Stdio::from(node_log))
-            .spawn()
-            .unwrap();
-        let mut node = Node(node);
-        let node_client = Client::new(
-            &format!("http://{node_addr}"),
-            "service-restart-agent-token",
-            Duration::from_millis(500),
-        )
-        .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(15);
-        loop {
-            if node_client
-                .call("/protectorate.v1.NodeAgentService/GetMetrics", &json!({}))
-                .is_ok()
-            {
-                break;
-            }
-            assert!(node.0.try_wait().unwrap().is_none(), "node exited");
-            assert!(Instant::now() < deadline, "node did not become ready");
-            thread::sleep(Duration::from_millis(50));
-        }
         let spec = Spec {
             role: ROLE_HUB.into(),
             binary: binary.into(),
@@ -198,10 +138,12 @@ mod linux {
                 hub_home.to_str().unwrap().into(),
                 "--owner-token-file".into(),
                 owner.to_str().unwrap().into(),
-                "--agent-token-file".into(),
-                agent.to_str().unwrap().into(),
                 "--listen".into(),
                 hub_addr.clone(),
+                "--tls-listen".into(),
+                tls_addr,
+                "--node-interval".into(),
+                "1s".into(),
                 "--release-api-url".into(),
                 "http://127.0.0.1:1".into(),
             ],
@@ -216,11 +158,48 @@ mod linux {
         )
         .unwrap();
         wait_ready(&client, &service);
-        call(
+        let invite = call(
             &client,
-            "/protectorate.v1.NodeService/AddNode",
-            json!({"node":{"name":"service-restart-peer","address":node_addr,"tier":"care"}}),
+            "/protectorate.v1.NodeService/InviteNode",
+            json!({"name":"service-restart-peer","tier":"care"}),
         );
+        let joined = run(
+            &[
+                "node",
+                "join",
+                "--hub",
+                invite["hubUrl"].as_str().unwrap(),
+                "--code",
+                invite["code"].as_str().unwrap(),
+                "--ca-cert",
+                hub_home.join("ca/ca.pem").to_str().unwrap(),
+                "--name",
+                "service-restart-peer",
+                "--listen",
+                &free_port(),
+                "--home",
+                node_home.to_str().unwrap(),
+            ],
+            &user_home,
+        );
+        assert!(
+            joined.status.success(),
+            "{}",
+            String::from_utf8_lossy(&joined.stderr)
+        );
+        let mut node = serve_node(&node_home, &user_home, &root.path().join("node.stderr"));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while call(
+            &client,
+            "/protectorate.v1.NodeService/GetNode",
+            json!({"name":"service-restart-peer"}),
+        )["freshness"]
+            != "NODE_FRESHNESS_FRESH"
+        {
+            assert!(node.0.try_wait().unwrap().is_none(), "node exited");
+            assert!(Instant::now() < deadline, "hub did not reach the node");
+            thread::sleep(Duration::from_millis(50));
+        }
         let submitted = call(
             &client,
             "/protectorate.v1.JobService/SubmitJob",
@@ -228,7 +207,7 @@ mod linux {
                 "command":["/bin/sh","-c","printf start; sleep 12; printf finish"],"timeout":"30s"}),
         );
         let id = submitted["id"].as_str().unwrap();
-        let job_log = hub_home.join("jobs-rust").join(format!("{id}.log"));
+        let job_log = hub_home.join("jobs").join(format!("{id}.log"));
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if fs::read(&job_log).is_ok_and(|bytes| bytes == b"start") {

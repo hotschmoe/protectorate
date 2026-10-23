@@ -95,10 +95,12 @@ async fn lease_change_reaches_event_subscriber() {
     stream.write_all(&body).await.unwrap();
     assert!(read_line(&mut stream).await.contains("200"));
     while read_line(&mut stream).await != "\r\n" {}
-    let heartbeat = tokio::time::timeout(Duration::from_secs(2), read_event(&mut stream))
-        .await
-        .unwrap();
-    assert_eq!(heartbeat["kind"], "heartbeat");
+    // The AddNode poll of the unreachable peer may announce itself first.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while read_event(&mut stream).await["kind"] != "heartbeat" {}
+    })
+    .await
+    .unwrap();
 
     let (status, lease) = call(
         addr,

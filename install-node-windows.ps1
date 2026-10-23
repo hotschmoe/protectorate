@@ -4,9 +4,8 @@ param(
     [string]$ReleaseTag = "",
     [string]$BundleDir = "",
     [string]$ReleaseRepo = "hotschmoe/protectorate",
-    [string]$Control = "",
+    [string]$Hub = "",
     [string]$Name = "",
-    [string]$KeyFile = "",
     [string]$CaCert = "",
     [string]$Architecture = "",
     [switch]$VerifyOnly,
@@ -81,10 +80,9 @@ if ($Architecture) {
     $Architecture = $nativeArchitecture
 }
 $assets = @("protectorate-rs-windows-$Architecture.exe", "protectorate-cli-windows-$Architecture.exe", "protectorate-mcpbridge-windows-$Architecture.exe")
-$taskName = "Protectorate-Rust-Node"
-$stateHome = Join-Path $env:LOCALAPPDATA "Protectorate-Rust-Node"
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\Protectorate-Rust-Node"
-$tokenFile = Join-Path $stateHome "agent-token"
+$taskName = "Protectorate-Node"
+$stateHome = Join-Path $env:LOCALAPPDATA "Protectorate-Node"
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\Protectorate-Node"
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("protectorate-node-install-" + [Guid]::NewGuid().ToString("N"))
 $createdState = $false
 $createdInstall = $false
@@ -93,18 +91,14 @@ $conhost = ""
 $taskArguments = ""
 
 if (-not $VerifyOnly) {
-    if (-not $Control -or -not $Name -or -not $KeyFile) { throw "Control, Name and KeyFile are required for installation" }
-    $controlUri = $null
-    if (-not [Uri]::TryCreate($Control, [UriKind]::Absolute, [ref]$controlUri) -or $controlUri.Scheme -ne "https") {
-        throw "Control must be an HTTPS URL"
+    if (-not $Hub -or -not $Name -or -not $CaCert -or -not $env:PROTECTORATE_JOIN_CODE) { throw "Hub, Name, CaCert and PROTECTORATE_JOIN_CODE are required for installation" }
+    $hubUri = $null
+    if (-not [Uri]::TryCreate($Hub, [UriKind]::Absolute, [ref]$hubUri) -or $hubUri.Scheme -ne "https") {
+        throw "Hub must be an HTTPS URL"
     }
     if ($Name -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}$') { throw "Name must be a lowercase DNS label" }
-    Require-AbsolutePath $KeyFile "KeyFile"
-    $null = Require-RegularFile $KeyFile 4096
-    if ($CaCert) {
-        Require-AbsolutePath $CaCert "CaCert"
-        $null = Require-RegularFile $CaCert 61440
-    }
+    Require-AbsolutePath $CaCert "CaCert"
+    $null = Require-RegularFile $CaCert 61440
     if (Test-Path -LiteralPath $stateHome -PathType Any) { throw "Rust node state already exists: $stateHome" }
     if (Test-Path -LiteralPath $installDir -PathType Any) { throw "Rust node install directory already exists: $installDir" }
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw "Scheduled task already exists: $taskName" }
@@ -156,23 +150,16 @@ try {
     Copy-Item -LiteralPath (Join-Path $stage $assets[1]) -Destination (Join-Path $installDir "protectorate-cli.exe")
     Copy-Item -LiteralPath (Join-Path $stage $assets[2]) -Destination (Join-Path $installDir "protectorate-mcpbridge.exe")
 
-    $secret = New-Object byte[] 32
-    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($secret) } finally { $rng.Dispose() }
-    $token = [BitConverter]::ToString($secret).Replace("-", "").ToLowerInvariant()
-    [IO.File]::WriteAllText($tokenFile, $token, [Text.Encoding]::ASCII)
-    [Array]::Clear($secret, 0, $secret.Length)
-
     $installedServer = Join-Path $installDir "protectorate-rs.exe"
     $installedGuardian = Join-Path $installDir "protectorate-rs-guardian.exe"
-    $join = @("node", "join", "--control", $Control, "--name", $Name, "--key-file", $KeyFile, "--home", $stateHome)
-    if ($CaCert) { $join += @("--ca-cert", $CaCert) }
+    # The join code reaches the node binary through PROTECTORATE_JOIN_CODE.
+    $join = @("node", "join", "--hub", $Hub, "--name", $Name, "--ca-cert", $CaCert, "--home", $stateHome)
     & $installedServer @join
-    if ($LASTEXITCODE -ne 0) { throw "Node enrollment failed" }
+    if ($LASTEXITCODE -ne 0) { throw "Joining the hub failed" }
 
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
-    $taskArguments = '--headless "' + $installedGuardian + '" node serve --home "' + $stateHome + '" --agent-token-file "' + $tokenFile + '"'
+    $taskArguments = '--headless "' + $installedGuardian + '" node serve --home "' + $stateHome + '"'
     if ($AllowPlainJobs) { $taskArguments += ' --allow-plain-jobs' }
     $action = New-ScheduledTaskAction -Execute $conhost -Argument $taskArguments
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user

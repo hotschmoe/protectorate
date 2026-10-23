@@ -147,7 +147,7 @@ fn parse(args: &[String]) -> Result<Option<Request>, String> {
                 env::var_os("HOME")
                     .map(PathBuf::from)
                     .unwrap_or_default()
-                    .join(".protectorate-rust")
+                    .join(".protectorate")
             }),
     };
     if home.as_os_str().is_empty() || !home.is_absolute() {

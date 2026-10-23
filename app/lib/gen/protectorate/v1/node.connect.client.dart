@@ -280,6 +280,26 @@ extension type NodeAgentServiceClient (connect.Transport _transport) {
       onTrailer: onTrailer,
     );
   }
+
+  /// RenewCertificate swaps in a later certificate the hub CA issued for the
+  /// node's own key and identity. The node checks both, stores it and serves
+  /// it from the next handshake on.
+  Future<protectoratev1node.RenewCertificateResponse> renewCertificate(
+    protectoratev1node.RenewCertificateRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeAgentService.renewCertificate,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
 }
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
 /// node. Polls are announced on EventService as "node.metrics" (subject = node
@@ -324,8 +344,10 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// AddNode adds or updates a node in the hub inventory. The hub polls the
-  /// address with its node token, so only the owner token may call it.
+  /// AddNode adds or updates a node in the hub inventory, such as a joined
+  /// node's address. Remote nodes are added with InviteNode and JoinNode: the
+  /// hub reaches a node only over mutual TLS with the certificate it issued.
+  /// Only the owner token may call it.
   Future<protectoratev1node.NodeInfo> addNode(
     protectoratev1node.AddNodeRequest input, {
     connect.Headers? headers,
@@ -346,10 +368,10 @@ extension type NodeServiceClient (connect.Transport _transport) {
   /// RemoveNode takes a node out of service and forgets it. It drains the
   /// node first (no new jobs or leases; running jobs are waited for or
   /// cancelled as jobs says), optionally asks the agent to uninstall itself,
-  /// expires an unused invite key, revokes the node's tailnet enrollment,
-  /// releases its leases and removes the inventory entry. It streams the
-  /// steps and fails, leaving the node in service, if any step fails. A
-  /// revoked machine that comes back cannot rejoin without a new invite.
+  /// releases its leases and removes the inventory entry, which revokes the
+  /// node's certificate and any unused enrollment code. It streams the steps
+  /// and fails, leaving the node in service, if any step fails. A revoked
+  /// machine that comes back cannot rejoin without a new invite.
   /// Cancelling a pending invite is the same call. Only the owner token may
   /// call it.
   Stream<protectoratev1node.RemoveNodeProgress> removeNode(
@@ -369,10 +391,10 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// InviteNode creates a single-use tailnet enrollment key for a new node,
-  /// records the node in the inventory as invited and returns the one-line
-  /// installers that use it. Inviting a pending node again expires its
-  /// previous key. Only the owner token may call it.
+  /// InviteNode creates a single-use enrollment code for a new node, records
+  /// the node in the inventory as invited and returns the one-line installers
+  /// that use it. Inviting a pending node again replaces its previous code.
+  /// Only the owner token may call it.
   Future<protectoratev1node.InviteNodeResponse> inviteNode(
     protectoratev1node.InviteNodeRequest input, {
     connect.Headers? headers,
@@ -382,6 +404,27 @@ extension type NodeServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.NodeService.inviteNode,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// JoinNode redeems an InviteNode code from the new machine. The node sends
+  /// the public half of a key it generated and a signature over the code made
+  /// with that key; the hub CA returns a certificate for the key that names
+  /// the node. No token is needed: the single-use code is the credential.
+  Future<protectoratev1node.JoinNodeResponse> joinNode(
+    protectoratev1node.JoinNodeRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeService.joinNode,
       input,
       signal: signal,
       headers: headers,
@@ -543,9 +586,9 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
-  /// SetNodeTier changes a node's tier in the inventory and its
-  /// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
-  /// owner token may call it. The hub's own node is always "shared".
+  /// SetNodeTier changes a node's tier in the inventory and announces
+  /// "node.tier". Only the owner token may call it. The hub's own node is
+  /// always "shared".
   Future<protectoratev1node.NodeInfo> setNodeTier(
     protectoratev1node.SetNodeTierRequest input, {
     connect.Headers? headers,

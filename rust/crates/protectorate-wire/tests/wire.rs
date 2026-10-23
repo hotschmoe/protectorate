@@ -64,9 +64,8 @@ async fn peer_authorizer_receives_transport_extension_and_handler_sees_same_peer
     let peer: std::net::SocketAddr = "192.168.2.3:45000".parse().unwrap();
     let mut server = UnaryServer::new_with_peer(
         catalog,
-        Arc::new(move |_, _, got, tailnet| {
+        Arc::new(move |_, _, got| {
             assert_eq!(got, Some(peer));
-            assert_eq!(tailnet, None);
             Ok(AuthContext::default())
         }),
     );

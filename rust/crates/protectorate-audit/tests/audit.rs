@@ -12,7 +12,6 @@ fn entry(time: &str, actor: &str, subject: &str, outcome: &str) -> Entry {
         procedure: "/protectorate.v1.JobService/Run".into(),
         outcome: outcome.into(),
         token_id: "token-id".into(),
-        tailnet: "node.example".into(),
         code: if outcome == OUTCOME_ERROR {
             "internal"
         } else {

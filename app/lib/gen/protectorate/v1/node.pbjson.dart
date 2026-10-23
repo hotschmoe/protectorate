@@ -89,7 +89,9 @@ const AlertKind$json = {
     {'1': 'ALERT_KIND_DISK_PERCENT', '2': 1},
     {'1': 'ALERT_KIND_MEM_PRESSURE', '2': 2},
     {'1': 'ALERT_KIND_UNREACHABLE', '2': 3},
-    {'1': 'ALERT_KIND_NAME_MISMATCH', '2': 4},
+  ],
+  '4': [
+    {'1': 4, '2': 4},
   ],
 };
 
@@ -97,7 +99,7 @@ const AlertKind$json = {
 final $typed_data.Uint8List alertKindDescriptor = $convert.base64Decode(
     'CglBbGVydEtpbmQSGgoWQUxFUlRfS0lORF9VTlNQRUNJRklFRBAAEhsKF0FMRVJUX0tJTkRfRE'
     'lTS19QRVJDRU5UEAESGwoXQUxFUlRfS0lORF9NRU1fUFJFU1NVUkUQAhIaChZBTEVSVF9LSU5E'
-    'X1VOUkVBQ0hBQkxFEAMSHAoYQUxFUlRfS0lORF9OQU1FX01JU01BVENIEAQ=');
+    'X1VOUkVBQ0hBQkxFEAMiBAgEEAQ=');
 
 @$core.Deprecated('Use removeJobsDescriptor instead')
 const RemoveJobs$json = {
@@ -1091,7 +1093,9 @@ const NodeInfo$json = {
     {'1': 'notes', '3': 8, '4': 1, '5': 9, '10': 'notes'},
     {'1': 'local', '3': 9, '4': 1, '5': 8, '10': 'local'},
     {'1': 'invited', '3': 10, '4': 1, '5': 8, '10': 'invited'},
-    {'1': 'invite_key_id', '3': 11, '4': 1, '5': 4, '10': 'inviteKeyId'},
+  ],
+  '9': [
+    {'1': 11, '2': 12},
   ],
 };
 
@@ -1101,7 +1105,7 @@ final $typed_data.Uint8List nodeInfoDescriptor = $convert.base64Decode(
     'MSDgoCb3MYAyABKAlSAm9zEhIKBGFyY2gYBCABKAlSBGFyY2gSEgoEdGFncxgFIAMoCVIEdGFn'
     'cxIbCglzc2hfYWxpYXMYBiABKAlSCHNzaEFsaWFzEhIKBHRpZXIYByABKAlSBHRpZXISFAoFbm'
     '90ZXMYCCABKAlSBW5vdGVzEhQKBWxvY2FsGAkgASgIUgVsb2NhbBIYCgdpbnZpdGVkGAogASgI'
-    'UgdpbnZpdGVkEiIKDWludml0ZV9rZXlfaWQYCyABKARSC2ludml0ZUtleUlk');
+    'UgdpbnZpdGVkSgQICxAM');
 
 @$core.Deprecated('Use nodeStatusDescriptor instead')
 const NodeStatus$json = {
@@ -1414,8 +1418,8 @@ const InviteNodeResponse$json = {
       '6': '.protectorate.v1.NodeInfo',
       '10': 'node'
     },
-    {'1': 'control_url', '3': 2, '4': 1, '5': 9, '10': 'controlUrl'},
-    {'1': 'key', '3': 3, '4': 1, '5': 9, '10': 'key'},
+    {'1': 'hub_url', '3': 2, '4': 1, '5': 9, '10': 'hubUrl'},
+    {'1': 'code', '3': 3, '4': 1, '5': 9, '10': 'code'},
     {
       '1': 'expires_at',
       '3': 4,
@@ -1433,16 +1437,73 @@ const InviteNodeResponse$json = {
       '6': '.protectorate.v1.InstallCommand',
       '10': 'commands'
     },
+    {'1': 'ca_sha256', '3': 7, '4': 1, '5': 9, '10': 'caSha256'},
   ],
 };
 
 /// Descriptor for `InviteNodeResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List inviteNodeResponseDescriptor = $convert.base64Decode(
     'ChJJbnZpdGVOb2RlUmVzcG9uc2USLQoEbm9kZRgBIAEoCzIZLnByb3RlY3RvcmF0ZS52MS5Ob2'
-    'RlSW5mb1IEbm9kZRIfCgtjb250cm9sX3VybBgCIAEoCVIKY29udHJvbFVybBIQCgNrZXkYAyAB'
-    'KAlSA2tleRI5CgpleHBpcmVzX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcF'
-    'IJZXhwaXJlc0F0Eh8KC2luc3RhbGxfdXJsGAUgASgJUgppbnN0YWxsVXJsEjsKCGNvbW1hbmRz'
-    'GAYgAygLMh8ucHJvdGVjdG9yYXRlLnYxLkluc3RhbGxDb21tYW5kUghjb21tYW5kcw==');
+    'RlSW5mb1IEbm9kZRIXCgdodWJfdXJsGAIgASgJUgZodWJVcmwSEgoEY29kZRgDIAEoCVIEY29k'
+    'ZRI5CgpleHBpcmVzX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJZXhwaX'
+    'Jlc0F0Eh8KC2luc3RhbGxfdXJsGAUgASgJUgppbnN0YWxsVXJsEjsKCGNvbW1hbmRzGAYgAygL'
+    'Mh8ucHJvdGVjdG9yYXRlLnYxLkluc3RhbGxDb21tYW5kUghjb21tYW5kcxIbCgljYV9zaGEyNT'
+    'YYByABKAlSCGNhU2hhMjU2');
+
+@$core.Deprecated('Use joinNodeRequestDescriptor instead')
+const JoinNodeRequest$json = {
+  '1': 'JoinNodeRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'code', '3': 2, '4': 1, '5': 9, '10': 'code'},
+    {'1': 'public_key', '3': 3, '4': 1, '5': 12, '10': 'publicKey'},
+    {'1': 'proof', '3': 4, '4': 1, '5': 12, '10': 'proof'},
+    {'1': 'address', '3': 5, '4': 1, '5': 9, '10': 'address'},
+  ],
+};
+
+/// Descriptor for `JoinNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List joinNodeRequestDescriptor = $convert.base64Decode(
+    'Cg9Kb2luTm9kZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRISCgRjb2RlGAIgASgJUgRjb2'
+    'RlEh0KCnB1YmxpY19rZXkYAyABKAxSCXB1YmxpY0tleRIUCgVwcm9vZhgEIAEoDFIFcHJvb2YS'
+    'GAoHYWRkcmVzcxgFIAEoCVIHYWRkcmVzcw==');
+
+@$core.Deprecated('Use joinNodeResponseDescriptor instead')
+const JoinNodeResponse$json = {
+  '1': 'JoinNodeResponse',
+  '2': [
+    {'1': 'certificate', '3': 1, '4': 1, '5': 9, '10': 'certificate'},
+    {'1': 'ca', '3': 2, '4': 1, '5': 9, '10': 'ca'},
+  ],
+};
+
+/// Descriptor for `JoinNodeResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List joinNodeResponseDescriptor = $convert.base64Decode(
+    'ChBKb2luTm9kZVJlc3BvbnNlEiAKC2NlcnRpZmljYXRlGAEgASgJUgtjZXJ0aWZpY2F0ZRIOCg'
+    'JjYRgCIAEoCVICY2E=');
+
+@$core.Deprecated('Use renewCertificateRequestDescriptor instead')
+const RenewCertificateRequest$json = {
+  '1': 'RenewCertificateRequest',
+  '2': [
+    {'1': 'certificate', '3': 1, '4': 1, '5': 9, '10': 'certificate'},
+  ],
+};
+
+/// Descriptor for `RenewCertificateRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List renewCertificateRequestDescriptor =
+    $convert.base64Decode(
+        'ChdSZW5ld0NlcnRpZmljYXRlUmVxdWVzdBIgCgtjZXJ0aWZpY2F0ZRgBIAEoCVILY2VydGlmaW'
+        'NhdGU=');
+
+@$core.Deprecated('Use renewCertificateResponseDescriptor instead')
+const RenewCertificateResponse$json = {
+  '1': 'RenewCertificateResponse',
+};
+
+/// Descriptor for `RenewCertificateResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List renewCertificateResponseDescriptor =
+    $convert.base64Decode('ChhSZW5ld0NlcnRpZmljYXRlUmVzcG9uc2U=');
 
 @$core.Deprecated('Use watchNodeSetupRequestDescriptor instead')
 const WatchNodeSetupRequest$json = {
@@ -1570,6 +1631,11 @@ const $core.Map<$core.String, $core.dynamic> NodeAgentServiceBase$json = {
       '2': '.protectorate.v1.UninstallRequest',
       '3': '.protectorate.v1.UninstallResponse'
     },
+    {
+      '1': 'RenewCertificate',
+      '2': '.protectorate.v1.RenewCertificateRequest',
+      '3': '.protectorate.v1.RenewCertificateResponse'
+    },
   ],
   '3': {},
 };
@@ -1656,6 +1722,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.UninstallRequest': UninstallRequest$json,
   '.protectorate.v1.UninstallResponse': UninstallResponse$json,
+  '.protectorate.v1.RenewCertificateRequest': RenewCertificateRequest$json,
+  '.protectorate.v1.RenewCertificateResponse': RenewCertificateResponse$json,
 };
 
 /// Descriptor for `NodeAgentService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -1682,7 +1750,9 @@ final $typed_data.Uint8List nodeAgentServiceDescriptor = $convert.base64Decode(
     'N0GiQucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRlUmVzcG9uc2USUAoMR2V0RGVza1N0YXRl'
     'EiQucHJvdGVjdG9yYXRlLnYxLkdldERlc2tTdGF0ZVJlcXVlc3QaGi5wcm90ZWN0b3JhdGUudj'
     'EuRGVza1N0YXRlElIKCVVuaW5zdGFsbBIhLnByb3RlY3RvcmF0ZS52MS5Vbmluc3RhbGxSZXF1'
-    'ZXN0GiIucHJvdGVjdG9yYXRlLnYxLlVuaW5zdGFsbFJlc3BvbnNlGgSQtRgB');
+    'ZXN0GiIucHJvdGVjdG9yYXRlLnYxLlVuaW5zdGFsbFJlc3BvbnNlEmcKEFJlbmV3Q2VydGlmaW'
+    'NhdGUSKC5wcm90ZWN0b3JhdGUudjEuUmVuZXdDZXJ0aWZpY2F0ZVJlcXVlc3QaKS5wcm90ZWN0'
+    'b3JhdGUudjEuUmVuZXdDZXJ0aWZpY2F0ZVJlc3BvbnNlGgSQtRgB');
 
 const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
   '1': 'NodeService',
@@ -1717,6 +1787,11 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '2': '.protectorate.v1.InviteNodeRequest',
       '3': '.protectorate.v1.InviteNodeResponse',
       '4': {}
+    },
+    {
+      '1': 'JoinNode',
+      '2': '.protectorate.v1.JoinNodeRequest',
+      '3': '.protectorate.v1.JoinNodeResponse'
     },
     {
       '1': 'WatchNodeSetup',
@@ -1812,6 +1887,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.InviteNodeRequest': InviteNodeRequest$json,
   '.protectorate.v1.InviteNodeResponse': InviteNodeResponse$json,
   '.protectorate.v1.InstallCommand': InstallCommand$json,
+  '.protectorate.v1.JoinNodeRequest': JoinNodeRequest$json,
+  '.protectorate.v1.JoinNodeResponse': JoinNodeResponse$json,
   '.protectorate.v1.WatchNodeSetupRequest': WatchNodeSetupRequest$json,
   '.protectorate.v1.NodeSetupProgress': NodeSetupProgress$json,
   '.protectorate.v1.PutFileRequest': PutFileRequest$json,
@@ -1841,17 +1918,18 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'RlY3RvcmF0ZS52MS5SZW1vdmVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5SZW1vdmVO'
     'b2RlUHJvZ3Jlc3MiCIi1GAGgtRgBMAESWwoKSW52aXRlTm9kZRIiLnByb3RlY3RvcmF0ZS52MS'
     '5JbnZpdGVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5JbnZpdGVOb2RlUmVzcG9uc2Ui'
-    'BKC1GAESYwoOV2F0Y2hOb2RlU2V0dXASJi5wcm90ZWN0b3JhdGUudjEuV2F0Y2hOb2RlU2V0dX'
-    'BSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLk5vZGVTZXR1cFByb2dyZXNzIgOQAgEwARJMCgdQ'
-    'dXRGaWxlEh8ucHJvdGVjdG9yYXRlLnYxLlB1dEZpbGVSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLn'
-    'YxLlB1dEZpbGVSZXNwb25zZRJOCgdHZXRGaWxlEh8ucHJvdGVjdG9yYXRlLnYxLkdldEZpbGVS'
-    'ZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLkdldEZpbGVSZXNwb25zZTABEl4KC0FwcGx5VXBkYX'
-    'RlEiMucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYXRlUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52'
-    'MS5BcHBseVVwZGF0ZVJlc3BvbnNlIgSgtRgBEmEKClVwZGF0ZU5vZGUSIi5wcm90ZWN0b3JhdG'
-    'UudjEuVXBkYXRlTm9kZVJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuVXBkYXRlTm9kZVByb2dy'
-    'ZXNzIgigtRgBqLUYATABEl8KDVNldERlc2tQb2xpY3kSJS5wcm90ZWN0b3JhdGUudjEuU2V0RG'
-    'Vza1BvbGljeVJlcXVlc3QaIS5wcm90ZWN0b3JhdGUudjEuRGVza1BvbGljeVN0YXR1cyIEoLUY'
-    'ARJZCg1HZXREZXNrUG9saWN5EiUucHJvdGVjdG9yYXRlLnYxLkdldERlc2tQb2xpY3lSZXF1ZX'
-    'N0GiEucHJvdGVjdG9yYXRlLnYxLkRlc2tQb2xpY3lTdGF0dXMSUwoLU2V0Tm9kZVRpZXISIy5w'
-    'cm90ZWN0b3JhdGUudjEuU2V0Tm9kZVRpZXJSZXF1ZXN0GhkucHJvdGVjdG9yYXRlLnYxLk5vZG'
-    'VJbmZvIgSgtRgB');
+    'BKC1GAESTwoISm9pbk5vZGUSIC5wcm90ZWN0b3JhdGUudjEuSm9pbk5vZGVSZXF1ZXN0GiEucH'
+    'JvdGVjdG9yYXRlLnYxLkpvaW5Ob2RlUmVzcG9uc2USYwoOV2F0Y2hOb2RlU2V0dXASJi5wcm90'
+    'ZWN0b3JhdGUudjEuV2F0Y2hOb2RlU2V0dXBSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLk5vZG'
+    'VTZXR1cFByb2dyZXNzIgOQAgEwARJMCgdQdXRGaWxlEh8ucHJvdGVjdG9yYXRlLnYxLlB1dEZp'
+    'bGVSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLlB1dEZpbGVSZXNwb25zZRJOCgdHZXRGaWxlEh'
+    '8ucHJvdGVjdG9yYXRlLnYxLkdldEZpbGVSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLkdldEZp'
+    'bGVSZXNwb25zZTABEl4KC0FwcGx5VXBkYXRlEiMucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYX'
+    'RlUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5BcHBseVVwZGF0ZVJlc3BvbnNlIgSgtRgBEmEK'
+    'ClVwZGF0ZU5vZGUSIi5wcm90ZWN0b3JhdGUudjEuVXBkYXRlTm9kZVJlcXVlc3QaIy5wcm90ZW'
+    'N0b3JhdGUudjEuVXBkYXRlTm9kZVByb2dyZXNzIgigtRgBqLUYATABEl8KDVNldERlc2tQb2xp'
+    'Y3kSJS5wcm90ZWN0b3JhdGUudjEuU2V0RGVza1BvbGljeVJlcXVlc3QaIS5wcm90ZWN0b3JhdG'
+    'UudjEuRGVza1BvbGljeVN0YXR1cyIEoLUYARJZCg1HZXREZXNrUG9saWN5EiUucHJvdGVjdG9y'
+    'YXRlLnYxLkdldERlc2tQb2xpY3lSZXF1ZXN0GiEucHJvdGVjdG9yYXRlLnYxLkRlc2tQb2xpY3'
+    'lTdGF0dXMSUwoLU2V0Tm9kZVRpZXISIy5wcm90ZWN0b3JhdGUudjEuU2V0Tm9kZVRpZXJSZXF1'
+    'ZXN0GhkucHJvdGVjdG9yYXRlLnYxLk5vZGVJbmZvIgSgtRgB');

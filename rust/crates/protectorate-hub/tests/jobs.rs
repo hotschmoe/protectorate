@@ -8,14 +8,7 @@ use protectorate_node_metrics::{
 use protectorate_wire::{Code, RpcError};
 use serde_json::{json, Value};
 use std::{fs, process::Command};
-use std::{
-    io,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{io, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -91,7 +84,7 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
     let node_jobs = Jobs::new(root.path().join("node"), 2)
         .unwrap()
         .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(node_jobs);
+    let node = Agent::new(Arc::new(Metrics)).with_jobs(node_jobs);
     let (node_addr, node_server) = serve(node.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -105,7 +98,6 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (addr, hub_server) = serve(hub.router().unwrap()).await;
 
     let script = root.path().join("script.sh");
@@ -146,7 +138,7 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
     assert_eq!(
         fs::read(
             root.path()
-                .join("hub/jobs-rust")
+                .join("hub/jobs")
                 .join(format!("{id}.artifacts/result.txt"))
         )
         .unwrap(),
@@ -169,7 +161,7 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
     assert_eq!(
         fs::read(
             root.path()
-                .join("hub/jobs-rust")
+                .join("hub/jobs")
                 .join(format!("{id}.artifacts/result.txt"))
         )
         .unwrap(),
@@ -198,7 +190,7 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
     assert_eq!(
         fs::read_to_string(
             root.path()
-                .join("hub/jobs-rust")
+                .join("hub/jobs")
                 .join(format!("{id}.artifacts/result.txt"))
         )
         .unwrap()
@@ -271,7 +263,7 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
     assert_eq!(
         fs::read(
             root.path()
-                .join("hub/jobs-rust")
+                .join("hub/jobs")
                 .join(format!("{id}.artifacts/result.txt"))
         )
         .unwrap(),
@@ -313,7 +305,7 @@ async fn ships_file_directory_and_git_sources_and_collects_artifacts() {
     assert_eq!(
         fs::read(
             root.path()
-                .join("hub/jobs-rust")
+                .join("hub/jobs")
                 .join(format!("{id}.artifacts/result.txt"))
         )
         .unwrap(),
@@ -334,18 +326,15 @@ async fn admin_jobs_require_node_grant_and_fresh_capability_and_audit_command() 
         ..NodeMetrics::default()
     };
     let (node_addr, node_server) = serve(
-        Agent::new(Arc::new(FixedMetrics(metrics)), "node-secret")
+        Agent::new(Arc::new(FixedMetrics(metrics)))
             .router()
             .unwrap(),
     )
     .await;
     let (limited_addr, limited_server) = serve(
-        Agent::new(
-            Arc::new(FixedMetrics(NodeMetrics::default())),
-            "node-secret",
-        )
-        .router()
-        .unwrap(),
+        Agent::new(Arc::new(FixedMetrics(NodeMetrics::default())))
+            .router()
+            .unwrap(),
     )
     .await;
     let hub = Hub::open(root.path(), "owner-secret", "test").unwrap();
@@ -371,7 +360,6 @@ async fn admin_jobs_require_node_grant_and_fresh_capability_and_audit_command() 
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let monitor = Arc::clone(&hub.node_monitor);
     let monitor_for_poll = Arc::clone(&monitor);
     let audit = Arc::clone(&hub.audit);
@@ -498,7 +486,7 @@ async fn named_node_job_runs_replays_and_survives_hub_restart() {
     let node_jobs = Jobs::new(root.path().join("node"), 2)
         .unwrap()
         .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(node_jobs);
+    let node = Agent::new(Arc::new(Metrics)).with_jobs(node_jobs);
     let (node_addr, node_server) = serve(node.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -512,7 +500,6 @@ async fn named_node_job_runs_replays_and_survives_hub_restart() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (addr, server) = serve(hub.router().unwrap()).await;
     let request = json!({"requestId":"request-0001","target":{"node":"peer"},"command":["/bin/sh","-c","printf alpha; sleep 0.05; printf beta"],"timeout":"5s"});
     let (status, submitted) = rpc(addr, "JobService", "SubmitJob", request.clone()).await;
@@ -537,7 +524,7 @@ async fn named_node_job_runs_replays_and_survives_hub_restart() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let dir = root.path().join("hub/jobs-rust");
+        let dir = root.path().join("hub/jobs");
         assert_eq!(
             std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
             0o700
@@ -643,10 +630,7 @@ async fn named_node_job_runs_replays_and_survives_hub_restart() {
         "JOB_STATE_CANCELED"
     );
     server.abort();
-    let hub = Hub::open(root.path().join("hub"), "owner-secret", "test")
-        .unwrap()
-        .with_node_token("node-secret".into())
-        .unwrap();
+    let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     let (addr, restarted) = serve(hub.router().unwrap()).await;
     let (_, persisted) = rpc(addr, "JobService", "ListJobs", json!({})).await;
     assert_eq!(persisted["jobs"][0]["state"], "JOB_STATE_CANCELED");
@@ -742,13 +726,13 @@ async fn selector_uses_fresh_shared_metrics_and_lease_conflicts() {
         ..NodeMetrics::default()
     };
     let (alpha_addr, alpha_server) = serve(
-        Agent::new(Arc::new(FixedMetrics(alpha_metrics)), "node-secret")
+        Agent::new(Arc::new(FixedMetrics(alpha_metrics)))
             .router()
             .unwrap(),
     )
     .await;
     let (beta_addr, beta_server) = serve(
-        Agent::new(Arc::new(FixedMetrics(beta_metrics)), "node-secret")
+        Agent::new(Arc::new(FixedMetrics(beta_metrics)))
             .router()
             .unwrap(),
     )
@@ -767,7 +751,6 @@ async fn selector_uses_fresh_shared_metrics_and_lease_conflicts() {
             )
             .unwrap();
     }
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let monitor = Arc::clone(&hub.node_monitor);
     tokio::task::spawn_blocking(move || {
         monitor.poll_node("alpha");
@@ -901,7 +884,7 @@ async fn lease_target_uses_live_gpu_lease_and_rejects_released_or_expired_ids() 
         ..NodeMetrics::default()
     };
     let (node_addr, node_server) = serve(
-        Agent::new(Arc::new(FixedMetrics(metrics)), "node-secret")
+        Agent::new(Arc::new(FixedMetrics(metrics)))
             .router()
             .unwrap(),
     )
@@ -918,7 +901,6 @@ async fn lease_target_uses_live_gpu_lease_and_rejects_released_or_expired_ids() 
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let monitor = Arc::clone(&hub.node_monitor);
     tokio::task::spawn_blocking(move || monitor.poll_node("alpha"))
         .await
@@ -1005,7 +987,7 @@ async fn hub_reattaches_a_node_job_after_restart() {
         .unwrap()
         .with_plain_mode();
     let (node_addr, node_server) = serve(
-        Agent::new(Arc::new(Metrics), "node-secret")
+        Agent::new(Arc::new(Metrics))
             .with_jobs(node_jobs)
             .router()
             .unwrap(),
@@ -1035,30 +1017,16 @@ async fn hub_reattaches_a_node_job_after_restart() {
         )
         .unwrap();
     drop(hub);
-    let dir = home.join("jobs-rust");
+    let dir = home.join("jobs");
     std::fs::write(dir.join(format!("{id}.log")), b"").unwrap();
     let job = json!({"id":id,"state":"JOB_STATE_RUNNING","target":{"node":"peer"},"node":"peer","command":["/bin/sh","-c","sleep 0.2; printf recovered"],"mode":"JOB_MODE_PLAIN","timeout":"10s","submittedAt":chrono::Utc::now().to_rfc3339()});
-    std::fs::write(dir.join(format!("{id}.json")),json!({"id":id,"job":job,"requestId":"","endpoint":format!("http://{node_addr}"),"cancelRequested":false}).to_string()).unwrap();
+    std::fs::write(
+        dir.join(format!("{id}.json")),
+        json!({"id":id,"job":job,"requestId":"","cancelRequested":false}).to_string(),
+    )
+    .unwrap();
     let hub = Hub::open(&home, "owner-secret", "test").unwrap();
-    hub.jobs.defer_resume();
-    let route_ready = Arc::new(AtomicBool::new(false));
-    let ready = Arc::clone(&route_ready);
-    let hub = hub
-        .with_node_token("node-secret".into())
-        .unwrap()
-        .with_node_route(Arc::new(move |_, _| {
-            if ready.load(Ordering::SeqCst) {
-                Ok(format!("http://{node_addr}"))
-            } else {
-                Err("tailnet route is still starting".into())
-            }
-        }));
-    hub.jobs.resume_deferred();
     let (addr, server) = serve(hub.router().unwrap()).await;
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    let (_, waiting) = rpc(addr, "JobService", "GetJob", json!({"id":id})).await;
-    assert_eq!(waiting["state"], "JOB_STATE_RUNNING", "{waiting}");
-    route_ready.store(true, Ordering::SeqCst);
     let mut recovered = false;
     for _ in 0..150 {
         let (_, job) = rpc(addr, "JobService", "GetJob", json!({"id":id})).await;
@@ -1075,110 +1043,5 @@ async fn hub_reattaches_a_node_job_after_restart() {
         b"recovered"
     );
     server.abort();
-    node_server.abort();
-}
-
-#[tokio::test]
-async fn running_job_reattaches_after_its_node_route_drops() {
-    let root = tempfile::tempdir().unwrap();
-    let node_jobs = Jobs::new(root.path().join("node"), 1)
-        .unwrap()
-        .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(node_jobs);
-    let (node_addr, node_server) = serve(node.router().unwrap()).await;
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let proxy_addr = listener.local_addr().unwrap();
-    let (disconnect, _) = tokio::sync::watch::channel(0_u64);
-    let cut = disconnect.clone();
-    let proxy_server = tokio::spawn(async move {
-        loop {
-            let (mut inbound, _) = listener.accept().await.unwrap();
-            let mut cut = cut.subscribe();
-            tokio::spawn(async move {
-                let Ok(mut outbound) = TcpStream::connect(node_addr).await else {
-                    return;
-                };
-                tokio::select! {
-                    _ = cut.changed() => {}
-                    _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound) => {}
-                }
-            });
-        }
-    });
-
-    let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
-    hub.inventory
-        .add(
-            Node {
-                name: "peer".into(),
-                address: "peer".into(),
-                tier: CARE.into(),
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
-    let ready = Arc::new(AtomicBool::new(true));
-    let route_ready = Arc::clone(&ready);
-    let hub = hub
-        .with_node_token("node-secret".into())
-        .unwrap()
-        .with_node_route(Arc::new(move |_, _| {
-            if route_ready.load(Ordering::SeqCst) {
-                Ok(format!("http://{proxy_addr}"))
-            } else {
-                Err("node route is temporarily unavailable".into())
-            }
-        }));
-    let (addr, server) = serve(hub.router().unwrap()).await;
-    let request = json!({"requestId":"route-outage-001","target":{"node":"peer"},
-        "command":["/bin/sh","-c","printf start; sleep 4; printf finish"],"timeout":"20s"});
-    let (status, submitted) = rpc(addr, "JobService", "SubmitJob", request.clone()).await;
-    assert_eq!(status, 200, "{submitted}");
-    let id = submitted["id"].as_str().unwrap();
-    let log = root.path().join("hub/jobs-rust").join(format!("{id}.log"));
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if fs::read(&log).is_ok_and(|bytes| bytes == b"start") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("job did not persist its first output before the route cut");
-
-    ready.store(false, Ordering::SeqCst);
-    disconnect.send_replace(1);
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let (status, running) = rpc(addr, "JobService", "GetJob", json!({"id":id})).await;
-    assert_eq!(status, 200, "{running}");
-    assert_ne!(running["state"], "JOB_STATE_FAILED", "{running}");
-    ready.store(true, Ordering::SeqCst);
-    let finished = tokio::time::timeout(Duration::from_secs(20), async {
-        loop {
-            let (status, job) = rpc(addr, "JobService", "GetJob", json!({"id":id})).await;
-            assert_eq!(status, 200, "{job}");
-            if matches!(
-                job["state"].as_str(),
-                Some("JOB_STATE_SUCCEEDED" | "JOB_STATE_FAILED" | "JOB_STATE_TIMED_OUT")
-            ) {
-                return job;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("job did not recover after its node route returned");
-    assert_eq!(finished["state"], "JOB_STATE_SUCCEEDED", "{finished}");
-    assert_eq!(finished["logBytes"], "11");
-    assert_eq!(fs::read(&log).unwrap(), b"startfinish");
-    let (status, replay) = rpc(addr, "JobService", "SubmitJob", request).await;
-    assert_eq!(status, 200, "{replay}");
-    assert_eq!(replay["id"], id);
-
-    server.abort();
-    proxy_server.abort();
     node_server.abort();
 }

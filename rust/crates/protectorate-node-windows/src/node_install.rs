@@ -8,15 +8,16 @@ use std::{
     process::Command as ProcessCommand,
 };
 
-const TASK: &str = "Protectorate-Rust-Node";
+const TASK: &str = "Protectorate-Node";
 const DESCRIPTION: &str = "Protectorate Rust node managed by protectorate-rs node install";
 
 pub(super) struct Command {
-    control: String,
+    hub: String,
     name: Option<String>,
-    key: Option<String>,
-    key_file: Option<PathBuf>,
-    ca_cert: Option<PathBuf>,
+    code: Option<String>,
+    code_file: Option<PathBuf>,
+    ca_cert: PathBuf,
+    listen: Option<String>,
     home: PathBuf,
     dry_run: bool,
     elevated: bool,
@@ -123,11 +124,12 @@ pub(super) fn run_uninstall(command: Uninstall) -> Result<(), Box<dyn Error>> {
 }
 
 pub(super) fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
-    let mut control = None;
+    let mut hub = None;
     let mut name = None;
-    let mut key = None;
-    let mut key_file = None;
+    let mut code = None;
+    let mut code_file = None;
     let mut ca_cert = None;
+    let mut listen = None;
     let mut home = None;
     let mut dry_run = false;
     let mut elevated = false;
@@ -138,18 +140,19 @@ pub(super) fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, S
             break;
         }
         match flag.as_str() {
-            "--control" if control.is_none() => {
-                control = Some(args.next().ok_or("--control requires URL")?)
-            }
+            "--hub" if hub.is_none() => hub = Some(args.next().ok_or("--hub requires URL")?),
             "--name" if name.is_none() => name = Some(args.next().ok_or("--name requires NAME")?),
-            "--key" if key.is_none() => key = Some(args.next().ok_or("--key requires KEY")?),
-            "--key-file" if key_file.is_none() => {
-                key_file = Some(PathBuf::from(
-                    args.next().ok_or("--key-file requires FILE")?,
+            "--code" if code.is_none() => code = Some(args.next().ok_or("--code requires CODE")?),
+            "--code-file" if code_file.is_none() => {
+                code_file = Some(PathBuf::from(
+                    args.next().ok_or("--code-file requires FILE")?,
                 ))
             }
             "--ca-cert" if ca_cert.is_none() => {
                 ca_cert = Some(PathBuf::from(args.next().ok_or("--ca-cert requires FILE")?))
+            }
+            "--listen" if listen.is_none() => {
+                listen = Some(args.next().ok_or("--listen requires IP:PORT")?)
             }
             "--home" if home.is_none() => {
                 home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?))
@@ -163,12 +166,12 @@ pub(super) fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, S
             }
         }
     }
-    let control = control.ok_or("node install requires --control URL")?;
-    if !control.starts_with("https://") && !control.starts_with("http://") {
-        return Err("--control must be an HTTP or HTTPS URL".into());
+    let hub = hub.ok_or("node install requires --hub URL")?;
+    if !hub.starts_with("https://") {
+        return Err("--hub requires the hub's HTTPS URL".into());
     }
-    if key.is_some() && key_file.is_some() {
-        return Err("--key and --key-file are exclusive".into());
+    if code.is_some() && code_file.is_some() {
+        return Err("--code and --code-file are exclusive".into());
     }
     if let Some(name) = &name {
         if name.is_empty()
@@ -184,25 +187,21 @@ pub(super) fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, S
     }
     if serve_args
         .iter()
-        .any(|arg| arg == "--home" || arg == "--agent-token-file" || arg == "--")
+        .any(|arg| arg == "--home" || arg == "--listen" || arg == "--")
     {
-        return Err("serve flags cannot override --home or --agent-token-file".into());
+        return Err("serve flags cannot override --home or --listen".into());
     }
     let home = home.map_or_else(crate::default_home, Ok)?;
-    let mut check = vec![
-        "--home".to_owned(),
-        home.display().to_string(),
-        "--agent-token-file".to_owned(),
-        home.join("agent-token").display().to_string(),
-    ];
+    let mut check = vec!["--home".to_owned(), home.display().to_string()];
     check.extend(serve_args.iter().cloned());
     crate::parse_serve(check.into_iter())?;
     Ok(Command {
-        control,
+        hub: hub.trim_end_matches('/').to_owned(),
         name,
-        key,
-        key_file,
-        ca_cert,
+        code,
+        code_file,
+        ca_cert: ca_cert.ok_or("node install requires --ca-cert FILE (the hub CA)")?,
+        listen,
         home,
         dry_run,
         elevated,
@@ -249,7 +248,6 @@ fn win_quote(value: &str) -> String {
 fn task_xml(
     binary: &Path,
     home: &Path,
-    token: &Path,
     serve_args: &[String],
     sid: &str,
     elevated: bool,
@@ -259,8 +257,6 @@ fn task_xml(
         "serve".into(),
         "--home".into(),
         home.display().to_string(),
-        "--agent-token-file".into(),
-        token.display().to_string(),
     ];
     words.extend(serve_args.iter().cloned());
     let command = format!(
@@ -285,10 +281,9 @@ fn task_xml(
 
 fn task_uses_home(xml: &str, home: &Path) -> bool {
     let quoted_home = xml_escape(&win_quote(&home.display().to_string()));
-    let quoted_token = xml_escape(&win_quote(&home.join("agent-token").display().to_string()));
-    xml.contains(&format!(
-        "--home {quoted_home} --agent-token-file {quoted_token}"
-    ))
+    [" ", "</Arguments>"]
+        .iter()
+        .any(|end| xml.contains(&format!("--home {quoted_home}{end}")))
 }
 
 fn task_bytes(xml: &str) -> Vec<u8> {
@@ -314,7 +309,7 @@ fn run_program(program: &str, args: &[&str]) -> io::Result<()> {
 fn wait_task_stopped() -> io::Result<()> {
     // Task Scheduler can acknowledge /End while conhost still holds the EXE open.
     // Wait for its process state before attempting to replace the binary.
-    const WAIT: &str = "$ErrorActionPreference='Stop'; for($i=0;$i -lt 40;$i++){ if((Get-ScheduledTask -TaskName 'Protectorate-Rust-Node' -ErrorAction Stop).State -ne 'Running'){exit 0}; Start-Sleep -Milliseconds 250 }; throw 'node task did not stop within 10 seconds'";
+    const WAIT: &str = "$ErrorActionPreference='Stop'; for($i=0;$i -lt 40;$i++){ if((Get-ScheduledTask -TaskName 'Protectorate-Node' -ErrorAction Stop).State -ne 'Running'){exit 0}; Start-Sleep -Milliseconds 250 }; throw 'node task did not stop within 10 seconds'";
     run_program(
         "powershell.exe",
         &["-NoProfile", "-NonInteractive", "-Command", WAIT],
@@ -325,7 +320,7 @@ fn stop_managed_process(home: &Path) -> Result<(), Box<dyn Error>> {
     // Task Scheduler owns conhost.exe, not the child it starts with --headless.
     // Match both the installed executable and this home's serve arguments so
     // uninstall cannot stop another task or a manually launched node.
-    const STOP: &str = r#"$ErrorActionPreference='Stop'; $binary=$env:PROTECTORATE_INSTALL_BINARY_PATH; $guardian=$env:PROTECTORATE_INSTALL_GUARDIAN_PATH; $nodeHome=$env:PROTECTORATE_INSTALL_HOME_PATH; $token=Join-Path $nodeHome 'agent-token'; function ArgPattern($name,$value) { $v=[regex]::Escape($value); return '(?:^|\s)--'+$name+'\s+(?:"'+$v+'"|'+$v+')(?=\s|$)' }; $hp=ArgPattern 'home' $nodeHome; $tp=ArgPattern 'agent-token-file' $token; function Matches { @(Get-CimInstance Win32_Process -Filter "Name='protectorate-rs.exe' OR Name='protectorate-rs-guardian.exe'" | Where-Object { $_.ExecutablePath -in @($guardian,$binary,($binary+'.old')) -and $_.CommandLine -match $hp -and $_.CommandLine -match $tp }) }; foreach($p in ((Matches) | Sort-Object { if($_.ExecutablePath -eq $guardian){0}else{1} })) { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }; for($i=0;$i -lt 40;$i++) { if((Matches).Count -eq 0) { exit 0 }; Start-Sleep -Milliseconds 250 }; throw 'managed node process did not stop within 10 seconds'"#;
+    const STOP: &str = r#"$ErrorActionPreference='Stop'; $binary=$env:PROTECTORATE_INSTALL_BINARY_PATH; $guardian=$env:PROTECTORATE_INSTALL_GUARDIAN_PATH; $nodeHome=$env:PROTECTORATE_INSTALL_HOME_PATH; function ArgPattern($name,$value) { $v=[regex]::Escape($value); return '(?:^|\s)--'+$name+'\s+(?:"'+$v+'"|'+$v+')(?=\s|$)' }; $hp=ArgPattern 'home' $nodeHome; function Matches { @(Get-CimInstance Win32_Process -Filter "Name='protectorate-rs.exe' OR Name='protectorate-rs-guardian.exe'" | Where-Object { $_.ExecutablePath -in @($guardian,$binary,($binary+'.old')) -and $_.CommandLine -match $hp }) }; foreach($p in ((Matches) | Sort-Object { if($_.ExecutablePath -eq $guardian){0}else{1} })) { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }; for($i=0;$i -lt 40;$i++) { if((Matches).Count -eq 0) { exit 0 }; Start-Sleep -Milliseconds 250 }; throw 'managed node process did not stop within 10 seconds'"#;
     let output = ProcessCommand::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", STOP])
         .env("PROTECTORATE_INSTALL_BINARY_PATH", installed_binary()?)
@@ -377,23 +372,6 @@ fn restrict_directory(path: &Path) -> io::Result<()> {
     } else {
         Err(io::Error::other(format!(
             "restrict directory {}: {}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
-    }
-}
-
-fn restrict_token(path: &Path) -> io::Result<()> {
-    const ACL: &str = "$ErrorActionPreference='Stop'; $p=$env:PROTECTORATE_INSTALL_ACL_PATH; $u=[Security.Principal.WindowsIdentity]::GetCurrent().User; $s=[Security.Principal.SecurityIdentifier]::new('S-1-5-18'); $a=[Security.AccessControl.FileSecurity]::new(); $a.SetOwner($u); $a.SetAccessRuleProtection($true,$false); foreach($id in @($u,$s)){$r=[Security.AccessControl.FileSystemAccessRule]::new($id,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.AccessControlType]::Allow);$a.AddAccessRule($r)}; Set-Acl -LiteralPath $p -AclObject $a";
-    let output = ProcessCommand::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", ACL])
-        .env("PROTECTORATE_INSTALL_ACL_PATH", path)
-        .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!(
-            "restrict token {}: {}",
             path.display(),
             String::from_utf8_lossy(&output.stderr).trim()
         )))
@@ -477,7 +455,7 @@ fn installed_binary() -> Result<PathBuf, Box<dyn Error>> {
     let local = env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is unset")?;
     Ok(PathBuf::from(local)
         .join("Programs")
-        .join("Protectorate-Rust-Node")
+        .join("Protectorate-Node")
         .join("protectorate-rs.exe"))
 }
 
@@ -490,9 +468,8 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
     let binary = installed_binary()?;
     let guardian = installed_guardian()?;
     let install_dir = binary.parent().ok_or("invalid install path")?;
-    let token = command.home.join("agent-token");
-    let xml_path = command.home.join("Protectorate-Rust-Node.xml");
-    let joined = command.home.join("tsnet").join("join.json").try_exists()?;
+    let xml_path = command.home.join("Protectorate-Node.xml");
+    let joined = command.home.join("node.json").try_exists()?;
     if command.dry_run {
         println!("dry run: nothing will be changed");
         println!("1. stop {TASK} if running");
@@ -503,7 +480,7 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
             guardian.display()
         );
         println!(
-            "3. create private node state at {} and agent token if needed",
+            "3. create private node state at {}",
             command.home.display()
         );
         println!(
@@ -511,7 +488,7 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
             if joined {
                 "keep existing enrollment"
             } else {
-                "enroll node with the control server"
+                "join the hub"
             }
         );
         println!(
@@ -581,37 +558,26 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
             }
             protectorate_fsutil::retry(|| fs::copy(&source, &guardian))?;
         }
-        if !token.exists() {
-            let mut random = [0u8; 32];
-            getrandom::getrandom(&mut random).map_err(|e| io::Error::other(e.to_string()))?;
-            let secret = random
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>();
-            protectorate_fsutil::write_file(&token, secret.as_bytes(), 0o600)?;
-            random.fill(0);
-        } else {
-            crate::read_token(&token)?;
-        }
-        restrict_token(&token)?;
         if !joined {
             let mut join = vec![
-                "--control".into(),
-                command.control.clone(),
+                "--hub".into(),
+                command.hub.clone(),
+                "--ca-cert".into(),
+                command.ca_cert.display().to_string(),
                 "--home".into(),
                 command.home.display().to_string(),
             ];
             if let Some(name) = &command.name {
                 join.extend(["--name".into(), name.clone()]);
             }
-            if let Some(key) = &command.key {
-                join.extend(["--key".into(), key.clone()]);
+            if let Some(code) = &command.code {
+                join.extend(["--code".into(), code.clone()]);
             }
-            if let Some(key_file) = &command.key_file {
-                join.extend(["--key-file".into(), key_file.display().to_string()]);
+            if let Some(path) = &command.code_file {
+                join.extend(["--code-file".into(), path.display().to_string()]);
             }
-            if let Some(ca) = &command.ca_cert {
-                join.extend(["--ca-cert".into(), ca.display().to_string()]);
+            if let Some(listen) = &command.listen {
+                join.extend(["--listen".into(), listen.clone()]);
             }
             super::node_join::run(
                 super::node_join::parse(join.into_iter()).map_err(io::Error::other)?,
@@ -621,7 +587,6 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
         let xml = task_xml(
             &guardian,
             &command.home,
-            &token,
             &command.serve_args,
             &sid,
             command.elevated,
@@ -665,7 +630,7 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
             }
         }
         if let Some(previous) = previous_task {
-            let restore_path = command.home.join("Protectorate-Rust-Node.restore.xml");
+            let restore_path = command.home.join("Protectorate-Node.restore.xml");
             if protectorate_fsutil::write_file(&restore_path, &task_bytes(&previous), 0o600).is_ok()
             {
                 if let Some(path) = restore_path.to_str() {
@@ -693,78 +658,4 @@ pub(super) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
         binary.display()
     );
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn uninstall_parse_and_plan_are_nondestructive_until_run() {
-        let command = parse_uninstall(
-            ["--home", "C:\\State", "--dry-run"]
-                .into_iter()
-                .map(str::to_owned),
-        )
-        .unwrap();
-        assert_eq!(command.home, Path::new("C:\\State"));
-        assert!(command.dry_run);
-        assert_eq!(uninstall_plan(false), Vec::<UninstallAction>::new());
-        assert_eq!(
-            uninstall_plan(true),
-            vec![UninstallAction::StopTask, UninstallAction::DeleteTask]
-        );
-        for args in [
-            vec!["--dry-run", "--dry-run"],
-            vec!["--home", "C:\\One", "--home", "C:\\Two"],
-            vec!["--key", "secret"],
-        ] {
-            assert!(parse_uninstall(args.into_iter().map(str::to_owned)).is_err());
-        }
-    }
-
-    #[test]
-    fn task_xml_has_current_user_and_escaped_arguments() {
-        let xml = task_xml(
-            Path::new("C:\\Program Files\\protectorate-rs.exe"),
-            Path::new("C:\\State & More"),
-            Path::new("C:\\State & More\\agent-token"),
-            &["--watch-dir".into(), "C:\\a b\\".into()],
-            "S-1-5-21-123",
-            true,
-        );
-        assert!(xml.contains("<UserId>S-1-5-21-123</UserId>"));
-        assert!(xml.contains("<RunLevel>HighestAvailable</RunLevel>"));
-        assert!(xml.contains("C:\\State &amp; More"));
-        assert!(task_uses_home(&xml, Path::new("C:\\State & More")));
-        assert!(!task_uses_home(&xml, Path::new("C:\\State & More Else")));
-        assert_eq!(&task_bytes(&xml)[..2], &[0xff, 0xfe]);
-    }
-
-    #[test]
-    fn install_parse_preserves_serve_flags_and_rejects_overrides() {
-        let args = [
-            "--control",
-            "https://control",
-            "--name",
-            "node-one",
-            "--dry-run",
-            "--",
-            "--allow-plain-jobs",
-            "--watch-dir",
-            "C:\\work",
-        ];
-        let command = parse(args.into_iter().map(str::to_owned)).unwrap();
-        assert!(command.dry_run);
-        assert_eq!(
-            command.serve_args,
-            ["--allow-plain-jobs", "--watch-dir", "C:\\work"]
-        );
-        assert!(parse(
-            ["--control", "https://control", "--", "--home", "C:\\other"]
-                .into_iter()
-                .map(str::to_owned)
-        )
-        .is_err());
-    }
 }

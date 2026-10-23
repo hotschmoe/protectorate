@@ -113,7 +113,7 @@ async fn cross_test_compiles_and_executes_a_real_rust_test_on_a_node() {
     let jobs = Jobs::new(root.path().join("node-jobs"), 1)
         .unwrap()
         .with_plain_mode();
-    let node = Agent::new(Arc::new(Metrics), "node-secret").with_jobs(jobs);
+    let node = Agent::new(Arc::new(Metrics)).with_jobs(jobs);
     let (node_url, node_task) = serve(node.router().unwrap()).await;
     let hub = Hub::open(root.path().join("hub"), "owner-secret", "test").unwrap();
     hub.inventory
@@ -127,7 +127,6 @@ async fn cross_test_compiles_and_executes_a_real_rust_test_on_a_node() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     let results = tokio::task::spawn_blocking(move || {
         let call = |source: &str| {

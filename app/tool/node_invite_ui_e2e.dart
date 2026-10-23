@@ -19,18 +19,17 @@ import 'package:protectorate/screens/nodes_tab.dart';
 import 'package:protectorate/theme/tokens.dart';
 import 'package:protectorate/vfd/lamp.dart';
 
-// Tailnet invitation setup against a configured Rust hub: the hub holds a real
-// Headscale, so InviteNode issues a real single-use key and WatchNodeSetup
-// streams the real setup stages.
+// Node invitation against a real Rust hub with a TLS listener: InviteNode
+// issues a real single-use join code, the node joins with it over TLS pinned
+// to the hub CA, and WatchNodeSetup streams the real setup stages.
 void main() {
   const baseUrl = String.fromEnvironment('PROTECTORATE_E2E_HUB_URL');
   const token = String.fromEnvironment('PROTECTORATE_E2E_TOKEN');
   const nodeBinary = String.fromEnvironment('PROTECTORATE_E2E_NODE_BINARY');
   const nodeHome = String.fromEnvironment('PROTECTORATE_E2E_NODE_HOME');
-  const controlUrl = String.fromEnvironment('PROTECTORATE_E2E_CONTROL_URL');
-  const agentTokenFile = String.fromEnvironment(
-    'PROTECTORATE_E2E_AGENT_TOKEN_FILE',
-  );
+  const tlsUrl = String.fromEnvironment('PROTECTORATE_E2E_TLS_URL');
+  const caCert = String.fromEnvironment('PROTECTORATE_E2E_CA_CERT');
+  const nodeListen = String.fromEnvironment('PROTECTORATE_E2E_NODE_LISTEN');
   final http = io.HttpClient()..connectionTimeout = const Duration(seconds: 8);
 
   HubClient hubClient() => HubClient.withTransport(
@@ -147,10 +146,11 @@ void main() {
     final first = tester
         .widget<SelectableText>(find.byKey(const ValueKey('add-command-text')))
         .data!;
-    expect(first, contains(Uri.parse(baseUrl).host));
+    expect(first, contains(Uri.parse(tlsUrl).host));
+    expect(first, contains('ca.pem'));
     expect(first, contains('install.sh'));
     expect(first, contains(name));
-    expect(find.textContaining('KEY UNTIL'), findsOneWidget);
+    expect(find.textContaining('CODE UNTIL'), findsOneWidget);
 
     // The hub's setup stream reached the dialog, not just the local guess.
     await wait(tester, find.byKey(const ValueKey('setup-message')));
@@ -174,7 +174,7 @@ void main() {
         .widget<SelectableText>(find.byKey(const ValueKey('add-command-text')))
         .data!;
     expect(windows, contains('install.ps1'));
-    expect(windows, contains('irm'));
+    expect(windows, contains('Get-FileHash'));
 
     await tester.tap(find.byKey(const ValueKey('choice-TERMUX')));
     await tester.pump();
@@ -222,9 +222,8 @@ void main() {
     );
     expect(before, isNotNull);
     expect(before!.node.invited, isTrue);
-    final keyIdBefore = before.node.inviteKeyId;
 
-    // Reissue from the node detail replaces the key on the hub.
+    // Reissue from the node detail replaces the code on the hub.
     await tester.ensureVisible(card);
     await tester.pump();
     await tester.tap(card);
@@ -233,7 +232,7 @@ void main() {
     expect(find.text('PENDING INVITE'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('reissue-key')));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Reissue key'), findsOneWidget);
+    expect(find.text('Reissue code'), findsOneWidget);
     await wait(tester, find.byKey(const ValueKey('add-command')));
     await tester.tap(find.byKey(const ValueKey('choice-LINUX')));
     await tester.pump();
@@ -250,8 +249,7 @@ void main() {
       () => client.node.getNode(GetNodeRequest(name: name)),
     );
     expect(after, isNotNull);
-    expect(after!.node.inviteKeyId, isNot(keyIdBefore));
-    expect(after.node.invited, isTrue);
+    expect(after!.node.invited, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 16));
@@ -307,7 +305,7 @@ void main() {
             find.byKey(const ValueKey('add-command-text')),
           )
           .data,
-      isNot(contains(invite.key)),
+      isNot(contains(invite.code)),
     );
     expect(
       tester
@@ -332,8 +330,9 @@ void main() {
   ) async {
     expect(nodeBinary, isNotEmpty);
     expect(nodeHome, isNotEmpty);
-    expect(controlUrl, isNotEmpty);
-    expect(agentTokenFile, isNotEmpty);
+    expect(tlsUrl, isNotEmpty);
+    expect(caCert, isNotEmpty);
+    expect(nodeListen, isNotEmpty);
     final name = 'ui-ready-${io.pid}';
     final client = hubClient();
     final feed = EventFeed((_) => const Stream<Event>.empty());
@@ -376,10 +375,10 @@ void main() {
     final command = tester
         .widget<SelectableText>(find.byKey(const ValueKey('add-command-text')))
         .data!;
-    final key = RegExp(
-      "PROTECTORATE_ENROLL_KEY='([^']+)'",
+    final code = RegExp(
+      "PROTECTORATE_JOIN_CODE='([^']+)'",
     ).firstMatch(command)?.group(1);
-    expect(key, isNotNull, reason: 'Linux command has no enrollment key');
+    expect(code, isNotNull, reason: 'Linux command has no join code');
     await wait(
       tester,
       find.text('waiting for the machine to run the installer'),
@@ -389,43 +388,38 @@ void main() {
       isTrue,
     );
 
-    // Use the key displayed by Flutter with the current Rust binary. This
-    // exercises enrollment without installing a systemd service on this host.
+    // Use the code displayed by Flutter with the current Rust binary. This
+    // joins the hub without installing a systemd service on this host.
     final joined = await tester.runAsync(
       () => io.Process.run(
         nodeBinary,
         [
           'node',
           'join',
-          '--control',
-          controlUrl,
+          '--hub',
+          tlsUrl,
+          '--ca-cert',
+          caCert,
           '--name',
           name,
+          '--listen',
+          nodeListen,
           '--home',
           nodeHome,
         ],
-        environment: {'PROTECTORATE_ENROLL_KEY': key!},
+        environment: {'PROTECTORATE_JOIN_CODE': code!},
       ),
     );
     expect(joined, isNotNull);
     expect(joined!.exitCode, 0, reason: '${joined.stdout}\n${joined.stderr}');
-    await wait(tester, find.textContaining('enrolled in the tailnet'));
+    await wait(tester, find.textContaining('waiting for the hub to reach'));
     expect(
       tester.widget<LampLegend>(find.byKey(const ValueKey('stage-JOINED'))).on,
       isTrue,
     );
 
     node = await tester.runAsync(
-      () => io.Process.start(nodeBinary, [
-        'node',
-        'serve',
-        '--home',
-        nodeHome,
-        '--agent-token-file',
-        agentTokenFile,
-        '--listen',
-        '127.0.0.1:0',
-      ]),
+      () => io.Process.start(nodeBinary, ['node', 'serve', '--home', nodeHome]),
     );
     node!.stdout.drain<void>();
     node.stderr.drain<void>();

@@ -3463,7 +3463,6 @@ class NodeInfo extends $pb.GeneratedMessage {
     $core.String? notes,
     $core.bool? local,
     $core.bool? invited,
-    $fixnum.Int64? inviteKeyId,
   }) {
     final result = NodeInfo._();
     if (name != null) result.name = name;
@@ -3476,7 +3475,6 @@ class NodeInfo extends $pb.GeneratedMessage {
     if (notes != null) result.notes = notes;
     if (local != null) result.local = local;
     if (invited != null) result.invited = invited;
-    if (inviteKeyId != null) result.inviteKeyId = inviteKeyId;
     return result;
   }
 
@@ -3504,9 +3502,6 @@ class NodeInfo extends $pb.GeneratedMessage {
     ..aOS(8, _omitFieldNames ? '' : 'notes')
     ..aOB(9, _omitFieldNames ? '' : 'local')
     ..aOB(10, _omitFieldNames ? '' : 'invited')
-    ..a<$fixnum.Int64>(
-        11, _omitFieldNames ? '' : 'inviteKeyId', $pb.PbFieldType.OU6,
-        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3538,8 +3533,8 @@ class NodeInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   void clearName() => $_clearField(1);
 
-  /// address is the tailnet name or an address; ":7475" is assumed when no
-  /// port is given.
+  /// address is where the hub reaches the node agent, host:port (":7475" is
+  /// assumed when no port is given). The node reports it when it joins.
   @$pb.TagNumber(2)
   $core.String get address => $_getSZ(1);
   @$pb.TagNumber(2)
@@ -3610,7 +3605,7 @@ class NodeInfo extends $pb.GeneratedMessage {
   @$pb.TagNumber(9)
   void clearLocal() => $_clearField(9);
 
-  /// invited marks a node whose enrollment key was issued but which has not
+  /// invited marks a node whose enrollment code was issued but which has not
   /// answered a poll yet; the hub clears it on the first successful poll.
   @$pb.TagNumber(10)
   $core.bool get invited => $_getBF(9);
@@ -3620,17 +3615,6 @@ class NodeInfo extends $pb.GeneratedMessage {
   $core.bool hasInvited() => $_has(9);
   @$pb.TagNumber(10)
   void clearInvited() => $_clearField(10);
-
-  /// invite_key_id is the tailnet pre-auth key id issued for the invite, used
-  /// to notice a node that joined under a different name.
-  @$pb.TagNumber(11)
-  $fixnum.Int64 get inviteKeyId => $_getI64(10);
-  @$pb.TagNumber(11)
-  set inviteKeyId($fixnum.Int64 value) => $_setInt64(10, value);
-  @$pb.TagNumber(11)
-  $core.bool hasInviteKeyId() => $_has(10);
-  @$pb.TagNumber(11)
-  void clearInviteKeyId() => $_clearField(11);
 }
 
 class NodeStatus extends $pb.GeneratedMessage {
@@ -4498,11 +4482,11 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearTier() => $_clearField(2);
 
-  /// pools are build pools configured on the hub's tailnet.
+  /// pools become pool-<name> tags on the node.
   @$pb.TagNumber(3)
   $pb.PbList<$core.String> get pools => $_getList(2);
 
-  /// ttl is how long the key can be redeemed; unset means 1h, at most 24h.
+  /// ttl is how long the code can be redeemed; unset means 1h, at most 24h.
   @$pb.TagNumber(4)
   $4.Duration get ttl => $_getN(3);
   @$pb.TagNumber(4)
@@ -4514,8 +4498,9 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $4.Duration ensureTtl() => $_ensure(3);
 
-  /// install_url is the hub URL the new machine downloads from. Empty means
-  /// the hub's --public-url, else the URL this request was sent to.
+  /// install_url is the hub's HTTPS URL the new machine downloads from and
+  /// joins through. Empty means the hub's --public-url, else its first TLS
+  /// listener.
   @$pb.TagNumber(5)
   $core.String get installUrl => $_getSZ(4);
   @$pb.TagNumber(5)
@@ -4603,8 +4588,9 @@ class InstallCommand extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearShell() => $_clearField(2);
 
-  /// command is one line that downloads the hub's installer and runs it with
-  /// the key. It holds the key: treat it like one.
+  /// command is one line that fetches the hub CA, checks its SHA-256, then
+  /// downloads the hub's installer over TLS pinned to that CA and runs it
+  /// with the code. It holds the code: treat it like a password.
   @$pb.TagNumber(3)
   $core.String get command => $_getSZ(2);
   @$pb.TagNumber(3)
@@ -4627,19 +4613,21 @@ class InstallCommand extends $pb.GeneratedMessage {
 class InviteNodeResponse extends $pb.GeneratedMessage {
   factory InviteNodeResponse({
     NodeInfo? node,
-    $core.String? controlUrl,
-    $core.String? key,
+    $core.String? hubUrl,
+    $core.String? code,
     $1.Timestamp? expiresAt,
     $core.String? installUrl,
     $core.Iterable<InstallCommand>? commands,
+    $core.String? caSha256,
   }) {
     final result = InviteNodeResponse._();
     if (node != null) result.node = node;
-    if (controlUrl != null) result.controlUrl = controlUrl;
-    if (key != null) result.key = key;
+    if (hubUrl != null) result.hubUrl = hubUrl;
+    if (code != null) result.code = code;
     if (expiresAt != null) result.expiresAt = expiresAt;
     if (installUrl != null) result.installUrl = installUrl;
     if (commands != null) result.commands.addAll(commands);
+    if (caSha256 != null) result.caSha256 = caSha256;
     return result;
   }
 
@@ -4659,13 +4647,14 @@ class InviteNodeResponse extends $pb.GeneratedMessage {
       createEmptyInstance: InviteNodeResponse.$_createMessage)
     ..aOM<NodeInfo>(1, _omitFieldNames ? '' : 'node',
         subBuilder: NodeInfo.$_createMessage)
-    ..aOS(2, _omitFieldNames ? '' : 'controlUrl')
-    ..aOS(3, _omitFieldNames ? '' : 'key')
+    ..aOS(2, _omitFieldNames ? '' : 'hubUrl')
+    ..aOS(3, _omitFieldNames ? '' : 'code')
     ..aOM<$1.Timestamp>(4, _omitFieldNames ? '' : 'expiresAt',
         subBuilder: $1.Timestamp.$_createMessage)
     ..aOS(5, _omitFieldNames ? '' : 'installUrl')
     ..pPM<InstallCommand>(6, _omitFieldNames ? '' : 'commands',
         subBuilder: InstallCommand.$_createMessage)
+    ..aOS(7, _omitFieldNames ? '' : 'caSha256')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -4701,24 +4690,25 @@ class InviteNodeResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   NodeInfo ensureNode() => $_ensure(0);
 
-  /// control_url and key are for the manual path (`node install --control`).
+  /// hub_url, code and ca_sha256 are for the manual path
+  /// (`node install --hub URL --code CODE --ca-cert FILE`).
   @$pb.TagNumber(2)
-  $core.String get controlUrl => $_getSZ(1);
+  $core.String get hubUrl => $_getSZ(1);
   @$pb.TagNumber(2)
-  set controlUrl($core.String value) => $_setString(1, value);
+  set hubUrl($core.String value) => $_setString(1, value);
   @$pb.TagNumber(2)
-  $core.bool hasControlUrl() => $_has(1);
+  $core.bool hasHubUrl() => $_has(1);
   @$pb.TagNumber(2)
-  void clearControlUrl() => $_clearField(2);
+  void clearHubUrl() => $_clearField(2);
 
   @$pb.TagNumber(3)
-  $core.String get key => $_getSZ(2);
+  $core.String get code => $_getSZ(2);
   @$pb.TagNumber(3)
-  set key($core.String value) => $_setString(2, value);
+  set code($core.String value) => $_setString(2, value);
   @$pb.TagNumber(3)
-  $core.bool hasKey() => $_has(2);
+  $core.bool hasCode() => $_has(2);
   @$pb.TagNumber(3)
-  void clearKey() => $_clearField(3);
+  void clearCode() => $_clearField(3);
 
   @$pb.TagNumber(4)
   $1.Timestamp get expiresAt => $_getN(3);
@@ -4742,6 +4732,307 @@ class InviteNodeResponse extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(6)
   $pb.PbList<InstallCommand> get commands => $_getList(5);
+
+  /// ca_sha256 is the hex SHA-256 of the hub CA certificate PEM served at
+  /// /ca.pem.
+  @$pb.TagNumber(7)
+  $core.String get caSha256 => $_getSZ(6);
+  @$pb.TagNumber(7)
+  set caSha256($core.String value) => $_setString(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasCaSha256() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearCaSha256() => $_clearField(7);
+}
+
+class JoinNodeRequest extends $pb.GeneratedMessage {
+  factory JoinNodeRequest({
+    $core.String? name,
+    $core.String? code,
+    $core.List<$core.int>? publicKey,
+    $core.List<$core.int>? proof,
+    $core.String? address,
+  }) {
+    final result = JoinNodeRequest._();
+    if (name != null) result.name = name;
+    if (code != null) result.code = code;
+    if (publicKey != null) result.publicKey = publicKey;
+    if (proof != null) result.proof = proof;
+    if (address != null) result.address = address;
+    return result;
+  }
+
+  JoinNodeRequest._();
+
+  factory JoinNodeRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JoinNodeRequest()..mergeFromBuffer(data, registry);
+  factory JoinNodeRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JoinNodeRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'JoinNodeRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: JoinNodeRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..aOS(2, _omitFieldNames ? '' : 'code')
+    ..a<$core.List<$core.int>>(
+        3, _omitFieldNames ? '' : 'publicKey', $pb.PbFieldType.OY)
+    ..a<$core.List<$core.int>>(
+        4, _omitFieldNames ? '' : 'proof', $pb.PbFieldType.OY)
+    ..aOS(5, _omitFieldNames ? '' : 'address')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JoinNodeRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JoinNodeRequest copyWith(void Function(JoinNodeRequest) updates) =>
+      super.copyWith((message) => updates(message as JoinNodeRequest))
+          as JoinNodeRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use JoinNodeRequest() / JoinNodeRequest.new instead')
+  static JoinNodeRequest create() => JoinNodeRequest._();
+  static $pb.GeneratedMessage $_createMessage() => JoinNodeRequest._();
+  @$core.override
+  JoinNodeRequest createEmptyInstance() => JoinNodeRequest._();
+  @$core.pragma('dart2js:noInline')
+  static JoinNodeRequest getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<JoinNodeRequest>(
+          JoinNodeRequest.$_createMessage);
+  static JoinNodeRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get code => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set code($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCode() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCode() => $_clearField(2);
+
+  /// public_key is the uncompressed P-256 point the node generated.
+  @$pb.TagNumber(3)
+  $core.List<$core.int> get publicKey => $_getN(2);
+  @$pb.TagNumber(3)
+  set publicKey($core.List<$core.int> value) => $_setBytes(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPublicKey() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPublicKey() => $_clearField(3);
+
+  /// proof is an ECDSA P-256 SHA-256 (ASN.1) signature over
+  /// "protectorate-join:" + name + ":" + code made with that key.
+  @$pb.TagNumber(4)
+  $core.List<$core.int> get proof => $_getN(3);
+  @$pb.TagNumber(4)
+  set proof($core.List<$core.int> value) => $_setBytes(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasProof() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearProof() => $_clearField(4);
+
+  /// address is the private host:port the node agent listens on.
+  @$pb.TagNumber(5)
+  $core.String get address => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set address($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasAddress() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearAddress() => $_clearField(5);
+}
+
+class JoinNodeResponse extends $pb.GeneratedMessage {
+  factory JoinNodeResponse({
+    $core.String? certificate,
+    $core.String? ca,
+  }) {
+    final result = JoinNodeResponse._();
+    if (certificate != null) result.certificate = certificate;
+    if (ca != null) result.ca = ca;
+    return result;
+  }
+
+  JoinNodeResponse._();
+
+  factory JoinNodeResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JoinNodeResponse()..mergeFromBuffer(data, registry);
+  factory JoinNodeResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      JoinNodeResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'JoinNodeResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: JoinNodeResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'certificate')
+    ..aOS(2, _omitFieldNames ? '' : 'ca')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JoinNodeResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  JoinNodeResponse copyWith(void Function(JoinNodeResponse) updates) =>
+      super.copyWith((message) => updates(message as JoinNodeResponse))
+          as JoinNodeResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use JoinNodeResponse() / JoinNodeResponse.new instead')
+  static JoinNodeResponse create() => JoinNodeResponse._();
+  static $pb.GeneratedMessage $_createMessage() => JoinNodeResponse._();
+  @$core.override
+  JoinNodeResponse createEmptyInstance() => JoinNodeResponse._();
+  @$core.pragma('dart2js:noInline')
+  static JoinNodeResponse getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<JoinNodeResponse>(
+          JoinNodeResponse.$_createMessage);
+  static JoinNodeResponse? _defaultInstance;
+
+  /// certificate is the node's PEM certificate, valid for client and server
+  /// use and naming the node.
+  @$pb.TagNumber(1)
+  $core.String get certificate => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set certificate($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCertificate() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCertificate() => $_clearField(1);
+
+  /// ca is the hub CA certificate PEM, the only root the node trusts.
+  @$pb.TagNumber(2)
+  $core.String get ca => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set ca($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasCa() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearCa() => $_clearField(2);
+}
+
+class RenewCertificateRequest extends $pb.GeneratedMessage {
+  factory RenewCertificateRequest({
+    $core.String? certificate,
+  }) {
+    final result = RenewCertificateRequest._();
+    if (certificate != null) result.certificate = certificate;
+    return result;
+  }
+
+  RenewCertificateRequest._();
+
+  factory RenewCertificateRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RenewCertificateRequest()..mergeFromBuffer(data, registry);
+  factory RenewCertificateRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RenewCertificateRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RenewCertificateRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: RenewCertificateRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'certificate')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RenewCertificateRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RenewCertificateRequest copyWith(
+          void Function(RenewCertificateRequest) updates) =>
+      super.copyWith((message) => updates(message as RenewCertificateRequest))
+          as RenewCertificateRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use RenewCertificateRequest() / RenewCertificateRequest.new instead')
+  static RenewCertificateRequest create() => RenewCertificateRequest._();
+  static $pb.GeneratedMessage $_createMessage() => RenewCertificateRequest._();
+  @$core.override
+  RenewCertificateRequest createEmptyInstance() => RenewCertificateRequest._();
+  @$core.pragma('dart2js:noInline')
+  static RenewCertificateRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RenewCertificateRequest>(
+          RenewCertificateRequest.$_createMessage);
+  static RenewCertificateRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get certificate => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set certificate($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCertificate() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCertificate() => $_clearField(1);
+}
+
+class RenewCertificateResponse extends $pb.GeneratedMessage {
+  factory RenewCertificateResponse() => RenewCertificateResponse._();
+
+  RenewCertificateResponse._();
+
+  factory RenewCertificateResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RenewCertificateResponse()..mergeFromBuffer(data, registry);
+  factory RenewCertificateResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      RenewCertificateResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'RenewCertificateResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: RenewCertificateResponse.$_createMessage)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RenewCertificateResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  RenewCertificateResponse copyWith(
+          void Function(RenewCertificateResponse) updates) =>
+      super.copyWith((message) => updates(message as RenewCertificateResponse))
+          as RenewCertificateResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use RenewCertificateResponse() / RenewCertificateResponse.new instead')
+  static RenewCertificateResponse create() => RenewCertificateResponse._();
+  static $pb.GeneratedMessage $_createMessage() => RenewCertificateResponse._();
+  @$core.override
+  RenewCertificateResponse createEmptyInstance() =>
+      RenewCertificateResponse._();
+  @$core.pragma('dart2js:noInline')
+  static RenewCertificateResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<RenewCertificateResponse>(
+          RenewCertificateResponse.$_createMessage);
+  static RenewCertificateResponse? _defaultInstance;
 }
 
 class WatchNodeSetupRequest extends $pb.GeneratedMessage {
@@ -5021,6 +5312,14 @@ class NodeAgentServiceApi {
           $pb.ClientContext? ctx, UninstallRequest request) =>
       _client.invoke<UninstallResponse>(
           ctx, 'NodeAgentService', 'Uninstall', request, UninstallResponse());
+
+  /// RenewCertificate swaps in a later certificate the hub CA issued for the
+  /// node's own key and identity. The node checks both, stores it and serves
+  /// it from the next handshake on.
+  $async.Future<RenewCertificateResponse> renewCertificate(
+          $pb.ClientContext? ctx, RenewCertificateRequest request) =>
+      _client.invoke<RenewCertificateResponse>(ctx, 'NodeAgentService',
+          'RenewCertificate', request, RenewCertificateResponse());
 }
 
 /// NodeService runs on the hub: the inventory plus the latest metrics of each
@@ -5046,8 +5345,10 @@ class NodeServiceApi {
       _client.invoke<NodeStatus>(
           ctx, 'NodeService', 'GetNode', request, NodeStatus());
 
-  /// AddNode adds or updates a node in the hub inventory. The hub polls the
-  /// address with its node token, so only the owner token may call it.
+  /// AddNode adds or updates a node in the hub inventory, such as a joined
+  /// node's address. Remote nodes are added with InviteNode and JoinNode: the
+  /// hub reaches a node only over mutual TLS with the certificate it issued.
+  /// Only the owner token may call it.
   $async.Future<NodeInfo> addNode(
           $pb.ClientContext? ctx, AddNodeRequest request) =>
       _client.invoke<NodeInfo>(
@@ -5056,10 +5357,10 @@ class NodeServiceApi {
   /// RemoveNode takes a node out of service and forgets it. It drains the
   /// node first (no new jobs or leases; running jobs are waited for or
   /// cancelled as jobs says), optionally asks the agent to uninstall itself,
-  /// expires an unused invite key, revokes the node's tailnet enrollment,
-  /// releases its leases and removes the inventory entry. It streams the
-  /// steps and fails, leaving the node in service, if any step fails. A
-  /// revoked machine that comes back cannot rejoin without a new invite.
+  /// releases its leases and removes the inventory entry, which revokes the
+  /// node's certificate and any unused enrollment code. It streams the steps
+  /// and fails, leaving the node in service, if any step fails. A revoked
+  /// machine that comes back cannot rejoin without a new invite.
   /// Cancelling a pending invite is the same call. Only the owner token may
   /// call it.
   $async.Future<RemoveNodeProgress> removeNode(
@@ -5067,14 +5368,23 @@ class NodeServiceApi {
       _client.invoke<RemoveNodeProgress>(
           ctx, 'NodeService', 'RemoveNode', request, RemoveNodeProgress());
 
-  /// InviteNode creates a single-use tailnet enrollment key for a new node,
-  /// records the node in the inventory as invited and returns the one-line
-  /// installers that use it. Inviting a pending node again expires its
-  /// previous key. Only the owner token may call it.
+  /// InviteNode creates a single-use enrollment code for a new node, records
+  /// the node in the inventory as invited and returns the one-line installers
+  /// that use it. Inviting a pending node again replaces its previous code.
+  /// Only the owner token may call it.
   $async.Future<InviteNodeResponse> inviteNode(
           $pb.ClientContext? ctx, InviteNodeRequest request) =>
       _client.invoke<InviteNodeResponse>(
           ctx, 'NodeService', 'InviteNode', request, InviteNodeResponse());
+
+  /// JoinNode redeems an InviteNode code from the new machine. The node sends
+  /// the public half of a key it generated and a signature over the code made
+  /// with that key; the hub CA returns a certificate for the key that names
+  /// the node. No token is needed: the single-use code is the credential.
+  $async.Future<JoinNodeResponse> joinNode(
+          $pb.ClientContext? ctx, JoinNodeRequest request) =>
+      _client.invoke<JoinNodeResponse>(
+          ctx, 'NodeService', 'JoinNode', request, JoinNodeResponse());
 
   /// WatchNodeSetup follows a node from its invite to ready. It sends the
   /// current stage at once and again whenever the stage or its problems
@@ -5145,9 +5455,9 @@ class NodeServiceApi {
       _client.invoke<DeskPolicyStatus>(
           ctx, 'NodeService', 'GetDeskPolicy', request, DeskPolicyStatus());
 
-  /// SetNodeTier changes a node's tier in the inventory and its
-  /// tag:tier-<tier> tag on the tailnet, and announces "node.tier". Only the
-  /// owner token may call it. The hub's own node is always "shared".
+  /// SetNodeTier changes a node's tier in the inventory and announces
+  /// "node.tier". Only the owner token may call it. The hub's own node is
+  /// always "shared".
   $async.Future<NodeInfo> setNodeTier(
           $pb.ClientContext? ctx, SetNodeTierRequest request) =>
       _client.invoke<NodeInfo>(

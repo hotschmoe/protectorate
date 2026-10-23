@@ -178,15 +178,6 @@ async fn serve(
         })
         .unwrap();
     server
-        .register("/protectorate.v1.TailnetService/GetStatus", |request| async move {
-            respond(&request, json!({
-                "backendState":"Running",
-                "self":{"name":"hubone","ips":["100.64.0.1"],"tags":["tag:hub"]},
-                "peers":[{"name":"compute","ips":["100.64.0.2"],"tags":["tag:node"],"online":true}]
-            }))
-        })
-        .unwrap();
-    server
         .register("/protectorate.v1.QuotaService/GetQuota", |request| async move {
             let refresh = input(&request)?["refresh"].as_bool().unwrap_or_default();
             respond(&request, json!({"quotas":[{"provider":"codex","plan":"plus","freshness":"FRESHNESS_FRESH","windows":[{"name":"5h","usedPercent":20.0}],"models":[if refresh { "gpt-6" } else { "gpt-5" }]}]}))
@@ -253,8 +244,9 @@ async fn serve(
                     &request,
                     json!({
                         "node": {"name":"gpu1", "tier":"shared", "invited":true},
-                        "key": "secret-test-key",
-                        "controlUrl": "https://control.example",
+                        "code": "secret-test-key",
+                        "hubUrl": "https://hub.example",
+                        "caSha256": "abc123",
                         "expiresAt": "2026-10-22T12:00:00Z",
                         "installUrl": "https://hub.example",
                     }),
@@ -798,7 +790,15 @@ fn local_node() -> Value {
 
 fn node_json(node: &Node) -> Value {
     let mut out = serde_json::to_value(node).unwrap();
-    out["inviteKeyId"] = json!(node.invite_key_id.to_string());
+    for private in [
+        "codeSha256",
+        "codeExpires",
+        "certId",
+        "certExpires",
+        "publicKey",
+    ] {
+        out.as_object_mut().unwrap().remove(private);
+    }
     out
 }
 
@@ -884,26 +884,6 @@ async fn quota_and_suggest_use_real_connect_routes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tailnet_status_uses_real_connect_route() {
-    let home = tempfile::tempdir().unwrap();
-    let (addr, server, _, _, _) = serve(home.path(), false).await;
-    let base = format!("http://{addr}");
-    let output = tokio::task::spawn_blocking(move || {
-        let human = dispatch_endpoint(&base, OWNER, ["tailnet", "status"])?;
-        let json = dispatch_endpoint(&base, OWNER, ["tailnet", "status", "--json"])?;
-        Ok::<_, RpcError>((human, json))
-    })
-    .await
-    .unwrap()
-    .unwrap();
-    assert!(output.0.contains("hubone"));
-    assert!(output.0.contains("compute"));
-    assert!(output.0.contains("100.64.0.2"));
-    assert!(output.1.contains("\"backendState\":\"Running\""));
-    server.abort();
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn node_invite_sends_options_and_reports_registration_limit() {
     let home = tempfile::tempdir().unwrap();
     let (addr, server, _, _, _) = serve(home.path(), false).await;
@@ -932,7 +912,7 @@ async fn node_invite_sends_options_and_reports_registration_limit() {
     assert!(result.contains("secret-test-key"), "{result}");
     assert!(result.contains("protectorate-rs node install"), "{result}");
     assert!(
-        result.contains("For a private HTTPS CA, add --ca-cert FILE"),
+        result.contains("--ca-cert ca.pem") && result.contains("abc123"),
         "{result}"
     );
     server.abort();

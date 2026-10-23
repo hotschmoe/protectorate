@@ -64,7 +64,6 @@ async fn care_node_allows_explicit_desk_lease_but_not_compute_lease() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     hub.node_monitor.poll_node("care-peer");
     assert!(hub
         .node_monitor
@@ -165,11 +164,7 @@ async fn desk_actions_require_and_manage_leases_and_forward_to_node() {
         }
         Ok(resource)
     });
-    let hub = hub
-        .with_lease_chooser(chooser)
-        .unwrap()
-        .with_node_token("node-secret".into())
-        .unwrap();
+    let hub = hub.with_lease_chooser(chooser).unwrap();
     let leases = Arc::clone(&hub.leases);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -370,7 +365,7 @@ async fn desk_actions_require_and_manage_leases_and_forward_to_node() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(home.path().join("desk-use-rust.json"))
+        let mode = std::fs::metadata(home.path().join("desk-use.json"))
             .unwrap()
             .permissions()
             .mode();
@@ -449,7 +444,6 @@ async fn watcher_revokes_unavailable_desk_and_notifies_sleeve_holder() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     hub.node_monitor.poll_node("win-desk");
     let leases = Arc::clone(&hub.leases);
     let mail = Arc::clone(&hub.mail);

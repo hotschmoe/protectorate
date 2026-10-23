@@ -26,14 +26,11 @@ protectorate-release = { path = "../protectorate-release" }
 protectorate-lease = { path = "../protectorate-lease" }
 protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-node-monitor = { path = "../protectorate-node-monitor" }
-protectorate-tailnet-admin = { path = "../protectorate-tailnet-admin" }
+protectorate-tls = { path = "../protectorate-tls" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }
 protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }
 protectorate-desk-policy = { path = "../protectorate-desk-policy" }
-protectorate-tailnet-map = { path = "../protectorate-tailnet-map" }
-protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
-protectorate-tailnet-packets = { path = "../protectorate-tailnet-packets" }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "json"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }

@@ -30,7 +30,7 @@ async fn upload_retries_chunks_whose_node_replies_are_lost() {
     let hits = Arc::new(AtomicUsize::new(0));
     let fault_hits = Arc::clone(&hits);
     let staged_root = root.clone();
-    let router = Agent::new(Arc::new(Fixed), "secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_files(&root, false)
         .unwrap()
         .router()
@@ -83,7 +83,7 @@ async fn real_node_file_and_directory_round_trip() {
     fs::create_dir(&root).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    let router = Agent::new(Arc::new(Fixed), "secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_files(&root, false)
         .unwrap()
         .router()
@@ -168,7 +168,7 @@ async fn existing_file_and_directory_need_force_and_replace_atomically() {
     fs::create_dir(&root).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    let router = Agent::new(Arc::new(Fixed), "secret")
+    let router = Agent::new(Arc::new(Fixed))
         .with_files(&root, false)
         .unwrap()
         .router()

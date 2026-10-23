@@ -60,7 +60,7 @@ async fn next_kind(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Value>, kind: &
 async fn node_poll_events_match_live_status_and_emit_once_per_down_transition() {
     let home = tempfile::tempdir().unwrap();
     let failing = Arc::new(AtomicBool::new(false));
-    let agent = Agent::new(Arc::new(Metrics(Arc::clone(&failing))), "node-secret");
+    let agent = Agent::new(Arc::new(Metrics(Arc::clone(&failing))));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap().to_string();
     let agent_task = tokio::spawn(async move {
@@ -75,7 +75,6 @@ async fn node_poll_events_match_live_status_and_emit_once_per_down_transition() 
                 name: "peer".into(),
                 address: address.clone(),
                 invited: true,
-                invite_key_id: 42,
                 ..Node::default()
             },
             false,
@@ -92,7 +91,6 @@ async fn node_poll_events_match_live_status_and_emit_once_per_down_transition() 
             fetch_timeout: Duration::from_secs(2),
         }),
     );
-    monitor.set_token("node-secret".into()).unwrap();
     let hub = hub.with_node_monitor(Arc::clone(&monitor)).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub_addr = listener.local_addr().unwrap();

@@ -1,10 +1,9 @@
 use protectorate_hub::Hub;
 use protectorate_release::{Info, Source};
-use protectorate_tailnet_admin::Admin;
 use sha2::{Digest, Sha256};
 use std::{
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -81,36 +80,31 @@ async fn public_installers_and_owner_diagnostics_are_explicit_routes() {
     std::fs::write(release_dir.join(&helper_asset), fake_helper).unwrap();
     std::fs::write(release_dir.join(android_asset), fake_android).unwrap();
     source.activate(&info.version).unwrap();
-    let admin = Arc::new(
-        Admin::new(
-            "https://control.example.test",
-            "test-api-key",
-            Duration::from_secs(1),
-        )
-        .unwrap(),
-    );
+    let ca = protectorate_tls::Ca::open_or_create(&root.join("ca")).unwrap();
+    let ca_pem = ca.pem().to_owned();
     let hub = Hub::open(root.join("home"), "owner-secret", "v1-test")
         .unwrap()
         .with_release_source(source)
-        .with_tailnet_admin(admin);
+        .with_ca(Arc::new(ca))
+        .with_public_url("https://hub.example.test:7470".into())
+        .unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
 
-    let (status, headers, body) = get(
-        addr,
-        "/install.sh",
-        &format!("127.0.0.1:{}", addr.port()),
-        "",
-    )
-    .await;
+    let (status, headers, body) = get(addr, "/ca.pem", "hub.example.test", "").await;
+    assert_eq!(status, 200);
+    assert!(headers.contains("application/x-pem-file"));
+    assert_eq!(body, ca_pem.as_bytes());
+    let (status, headers, body) = get(addr, "/install.sh", "hub.example.test", "").await;
     assert_eq!(status, 200);
     assert!(headers.contains("cache-control: no-store"));
     assert!(headers.contains("content-type: text/plain; charset=utf-8"));
     let script = String::from_utf8(body).unwrap();
     assert!(script.contains("protectorate-rs-linux-$arch"));
-    assert!(script.contains("https://control.example.test"));
+    assert!(script.contains("hub='https://hub.example.test:7470'"));
+    assert!(script.contains("--cacert \"$ca_cert\""));
     assert!(script.contains("sha256sum --check --status"));
     let (status, headers, bytes) = get(
         addr,
@@ -139,7 +133,7 @@ async fn public_installers_and_owner_diagnostics_are_explicit_routes() {
     assert!(headers.contains("cache-control: no-store"));
     let termux = String::from_utf8(body).unwrap();
     assert!(termux.contains("protectorate-rs-android-arm64"));
-    assert!(termux.contains("https://control.example.test"));
+    assert!(termux.contains("hub='https://hub.example.test:7470'"));
     assert!(termux.contains("sha256sum --check --status"));
     #[cfg(target_os = "linux")]
     {
@@ -181,33 +175,6 @@ async fn public_installers_and_owner_diagnostics_are_explicit_routes() {
             String::from_utf8_lossy(&output.stdout).trim(),
             android_asset
         );
-
-        let mut child = tokio::process::Command::new("sh")
-            .args(["-s", "--", "--name", "worker", "--dry-run"])
-            .env("PROTECTORATE_ENROLL_KEY", "test-enrollment-key")
-            .env("XDG_CACHE_HOME", root.join("cache"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(script.as_bytes())
-            .await
-            .unwrap();
-        let output = child.wait_with_output().await.unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
-            "node install --control https://control.example.test --name worker --dry-run"
-        );
     }
 
     let (status, _, body) = get(addr, "/install.ps1", "hub.example.test", "").await;
@@ -217,12 +184,10 @@ async fn public_installers_and_owner_diagnostics_are_explicit_routes() {
     assert!(script.contains("$ReleaseTag = 'dev'"));
     assert!(script.contains("$ReleaseRepo = 'owner/repo'"));
     assert!(script.contains("$ReleaseRepo -ne 'owner/repo'"));
-    assert!(script.contains("$Control = 'https://control.example.test'"));
+    assert!(script.contains("$Hub = 'https://hub.example.test:7470'"));
     assert!(script.contains("$ManifestSha256 = '"));
     assert!(script.contains("$Name = $env:PROTECTORATE_NODE_NAME"));
-    assert!(script.contains("$KeyFile = $env:PROTECTORATE_ENROLL_KEY_FILE"));
-    let (status, _, _) = get(addr, "/install.sh", "user@bad.example", "").await;
-    assert_eq!(status, 400);
+    assert!(script.contains("$CaCert = $env:PROTECTORATE_CA_CERT"));
 
     for path in [
         "/debug/metrics",
@@ -292,7 +257,7 @@ async fn public_installers_and_owner_diagnostics_are_explicit_routes() {
 }
 
 #[tokio::test]
-async fn installer_without_tailnet_is_unavailable() {
+async fn installer_without_ca_is_unavailable() {
     let hub = Hub::open(home(), "owner-secret", "v-test").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

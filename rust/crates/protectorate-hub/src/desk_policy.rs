@@ -621,8 +621,6 @@ mod tests {
             )
             .unwrap();
         *hub.desk_policies.runtime.lock().unwrap() = Some(tokio::runtime::Handle::current());
-        hub.node_monitor
-            .set_route(Arc::new(|_, _| Err("fixture offline".into())));
         let weak = Arc::downgrade(&hub);
         hub.node_monitor.set_event_sink(Arc::new(move |event| {
             if let Some(hub) = weak.upgrade() {
@@ -635,10 +633,10 @@ mod tests {
         tokio::task::spawn_blocking(move || monitor.poll_all())
             .await
             .unwrap();
-        assert_eq!(
+        assert_ne!(
             hub.node_monitor
                 .status("windows-peer", "127.0.0.1:17484", false)["error"],
-            "fixture offline"
+            ""
         );
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {

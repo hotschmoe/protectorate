@@ -258,7 +258,7 @@ pub(crate) fn state_home(invocation: &Invocation) -> Result<PathBuf> {
     #[cfg(windows)]
     let profile = profile.or_else(|| env::var_os("USERPROFILE"));
     profile
-        .map(|home| PathBuf::from(home).join(".protectorate-rust"))
+        .map(|home| PathBuf::from(home).join(".protectorate"))
         .ok_or_else(|| {
             RpcError::invalid(format!(
                 "no state home: pass --home DIR or set {} or HOME/USERPROFILE",

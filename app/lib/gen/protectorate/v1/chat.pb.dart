@@ -767,8 +767,8 @@ class ChatStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(9)
   void clearProvider() => $_clearField(9);
 
-  /// local_model is true when the model is served from this machine, the LAN
-  /// or the tailnet (a user-run LLM server) rather than a hosted API. The hub
+  /// local_model is true when the model is served from this machine or the
+  /// private network (a user-run LLM server) rather than a hosted API. The hub
   /// decides it from the provider's base URL.
   @$pb.TagNumber(10)
   $core.bool get localModel => $_getBF(9);

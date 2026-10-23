@@ -2,7 +2,6 @@
 use protectorate_connect_client::Client;
 use protectorate_node::{Agent, MetricsCollector, UninstallPlan};
 use protectorate_node_metrics::NodeMetrics;
-use protectorate_wire::Code;
 use std::{
     fs, io,
     os::unix::fs::PermissionsExt,
@@ -21,7 +20,7 @@ impl MetricsCollector for Metrics {
 }
 
 #[tokio::test]
-async fn authenticated_uninstall_responds_before_disabling_and_stopping() {
+async fn uninstall_responds_before_disabling_and_stopping() {
     let dir = tempfile::tempdir().unwrap();
     let user = dir.path().join("user");
     let home = dir.path().join("state");
@@ -42,7 +41,7 @@ async fn authenticated_uninstall_responds_before_disabling_and_stopping() {
     let stopped = Arc::new(AtomicBool::new(false));
     let stop = Arc::clone(&stopped);
     let plan = UninstallPlan::new(&home, &user, &exe, true).unwrap();
-    let agent = Agent::new(Arc::new(Metrics), "node-secret").with_uninstall(
+    let agent = Agent::new(Arc::new(Metrics)).with_uninstall(
         plan,
         fake,
         Arc::new(move || stop.store(true, Ordering::SeqCst)),
@@ -54,19 +53,6 @@ async fn authenticated_uninstall_responds_before_disabling_and_stopping() {
             .await
             .unwrap()
     });
-    let url = endpoint.clone();
-    let denied = tokio::task::spawn_blocking(move || {
-        Client::new(&url, "wrong", Duration::from_secs(2))
-            .unwrap()
-            .call(
-                "/protectorate.v1.NodeAgentService/Uninstall",
-                &serde_json::json!({}),
-            )
-    })
-    .await
-    .unwrap()
-    .unwrap_err();
-    assert_eq!(denied.code, Code::Unauthenticated);
     assert!(!log.exists());
     let reply = tokio::task::spawn_blocking(move || {
         Client::new(&endpoint, "node-secret", Duration::from_secs(2))

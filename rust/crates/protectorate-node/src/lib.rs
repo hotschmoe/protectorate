@@ -1,4 +1,5 @@
-//! Authenticated node metrics, file transfer and job RPCs.
+//! Node metrics, file transfer and job RPCs. The listener authenticates the
+//! hub with mutual TLS before any request reaches this router.
 mod admin;
 mod artifacts;
 mod files;
@@ -12,10 +13,7 @@ mod update;
 mod windows_process;
 #[cfg(windows)]
 mod windows_runner;
-use axum::{
-    http::{header, HeaderMap},
-    Router,
-};
+use axum::{http::HeaderMap, Router};
 use files::Files;
 pub use jobs::Jobs;
 use jobs::Jobs as JobStore;
@@ -30,7 +28,6 @@ use protectorate_xfer::Kind;
 pub use retention::DiskLimits;
 use serde_json::{json, Value};
 use std::{io, path::Path, sync::Arc, time::Duration};
-use subtle::ConstantTimeEq;
 pub use uninstall::{Plan as UninstallPlan, Stop as UninstallStop};
 pub use update::Restart as UpdateRestart;
 pub use update::{
@@ -38,7 +35,10 @@ pub use update::{
 };
 #[cfg(windows)]
 pub use windows_runner::install_windows_runner;
-use zeroize::Zeroizing;
+
+/// Checks and serves a renewed node certificate (PEM) from the next TLS
+/// handshake on.
+pub type CertRenewal = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
 
 pub trait MetricsCollector: Send + Sync + 'static {
     fn collect(&self) -> io::Result<NodeMetrics>;
@@ -52,7 +52,7 @@ impl<P: Probe> MetricsCollector for Collector<P> {
 #[derive(Clone)]
 pub struct Agent {
     collector: Arc<dyn MetricsCollector>,
-    token: Arc<Zeroizing<String>>,
+    renew: Option<CertRenewal>,
     files: Option<Arc<Files>>,
     jobs: Option<Arc<JobStore>>,
     updater: Option<Arc<update::Updater>>,
@@ -60,16 +60,20 @@ pub struct Agent {
     desk: Option<Arc<protectorate_desk_node::Controller>>,
 }
 impl Agent {
-    pub fn new(collector: Arc<dyn MetricsCollector>, token: impl Into<String>) -> Self {
+    pub fn new(collector: Arc<dyn MetricsCollector>) -> Self {
         Self {
             collector,
-            token: Arc::new(Zeroizing::new(token.into())),
+            renew: None,
             files: None,
             jobs: None,
             updater: None,
             uninstaller: None,
             desk: None,
         }
+    }
+    pub fn with_certificate_renewal(mut self, renew: CertRenewal) -> Self {
+        self.renew = Some(renew);
+        self
     }
     /// Enables file RPCs. Relative remote paths resolve under `root`.
     pub fn with_files(mut self, root: impl AsRef<Path>, unconfined: bool) -> io::Result<Self> {
@@ -153,42 +157,12 @@ impl Agent {
             .map_or(Ok(false), |updater| updater.start())
     }
     pub fn router(self) -> wire::Result<Router> {
-        self.build_router(false)
-    }
-
-    /// Serve only behind a transport that checks the authenticated tailnet
-    /// peer ID and current `tag:hub` membership for every HTTP request.
-    pub fn router_trusted_tailnet(self) -> wire::Result<Router> {
-        self.build_router(true)
-    }
-
-    fn build_router(self, trusted_tailnet: bool) -> wire::Result<Router> {
         let catalog = Catalog::embedded()?;
-        let secret = Arc::clone(&self.token);
-        let authorize = Arc::new(move |method: &Method, headers: &HeaderMap| {
+        let authorize = Arc::new(|method: &Method, _: &HeaderMap| {
             if !method.node_local {
                 return Err(RpcError::new(
                     Code::PermissionDenied,
                     "node-local procedure required",
-                ));
-            }
-            if trusted_tailnet {
-                return Ok(AuthContext {
-                    actor: "hub".into(),
-                    ..AuthContext::default()
-                });
-            }
-            let got = headers
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "))
-                .ok_or_else(|| {
-                    RpcError::new(Code::Unauthenticated, "missing or invalid bearer token")
-                })?;
-            if secret.is_empty() || !bool::from(secret.as_bytes().ct_eq(got.as_bytes())) {
-                return Err(RpcError::new(
-                    Code::Unauthenticated,
-                    "missing or invalid bearer token",
                 ));
             }
             Ok(AuthContext {
@@ -333,6 +307,23 @@ impl Agent {
                         .await
                         .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
                     respond(&request, result)
+                }
+            },
+        )?;
+        let renew = agent.renew.clone();
+        server.register(
+            "/protectorate.v1.NodeAgentService/RenewCertificate",
+            move |request| {
+                let renew = renew.clone();
+                async move {
+                    let renew = renew.ok_or_else(|| {
+                        RpcError::new(Code::Unimplemented, "this agent serves no certificate")
+                    })?;
+                    let input = serde_json::to_value(&request.message)
+                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                    let pem = input["certificate"].as_str().unwrap_or_default();
+                    renew(pem).map_err(|e| RpcError::invalid(format!("certificate: {e}")))?;
+                    respond(&request, json!({}))
                 }
             },
         )?;

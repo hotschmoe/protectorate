@@ -1,4 +1,5 @@
 use super::{input, respond, string, Hub};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use protectorate_inventory::{Error, Node, CARE, SHARED};
 use protectorate_lease::Entry;
 use protectorate_node_monitor::PollEvent;
@@ -6,8 +7,8 @@ use protectorate_wire::{
     self as wire, Code, Result, RpcError, RpcRequest, StreamSender, UnaryServer,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -17,167 +18,50 @@ const DRAIN_POLL: Duration = Duration::from_millis(200);
 // NodeStatus alerts the hub judges itself from the node's reported figures.
 const DISK_ALERT_PERCENT: f64 = 90.0;
 const MEM_ALERT_PERCENT: f64 = 90.0;
-const INVITE_REFRESH_INTERVAL: Duration = Duration::from_secs(15);
 // How often WatchNodeSetup re-reads progress, and how often it kicks the
 // monitor's poll while a node is between joining and ready.
 const SETUP_POLL: Duration = Duration::from_secs(1);
 
-fn install_commands(base: &str, key: &str, name: &str) -> Result<Vec<Value>> {
-    if !(8..=256).contains(&key.len())
-        || !key
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._~+/=-".contains(&b))
-    {
-        return Err(RpcError::new(
-            Code::Internal,
-            "the enrollment key has unexpected characters",
-        ));
-    }
-    let sh_key = super::distribution::shell_word(key);
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// One-line installers: fetch the CA, check its SHA-256 against the invite,
+/// then fetch and run the installer over TLS pinned to that CA.
+fn install_commands(base: &str, code: &str, name: &str, ca_sha256: &str) -> Vec<Value> {
+    let sh_code = super::distribution::shell_word(code);
     let sh_name = super::distribution::shell_word(name);
-    let sh_url = super::distribution::shell_word(&format!("{base}/install.sh"));
-    let termux_url = super::distribution::shell_word(&format!("{base}/install-termux.sh"));
-    let ps_key = super::distribution::powershell_word(key);
+    let sh_ca = super::distribution::shell_word(&format!("{base}/ca.pem"));
+    let sh_pin = format!(
+        "ca=$(mktemp) && curl -fsSk --max-redirs 0 {sh_ca} -o \"$ca\" && [ \"$(sha256sum < \"$ca\" | cut -d' ' -f1)\" = {ca_sha256} ]"
+    );
+    let sh = |script: &str| {
+        let url = super::distribution::shell_word(&format!("{base}/{script}"));
+        format!("{sh_pin} && script=$(curl -fsSL --cacert \"$ca\" {url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_CA_CERT=\"$ca\" PROTECTORATE_JOIN_CODE={sh_code} sh -s -- --name {sh_name}")
+    };
+    let ps_code = super::distribution::powershell_word(code);
     let ps_name = super::distribution::powershell_word(name);
-    let ps_url = super::distribution::powershell_word(&format!("{base}/install.ps1"));
-    Ok(vec![
+    let ps_base = super::distribution::powershell_word(base);
+    let windows = format!(
+        "$ErrorActionPreference='Stop'; $h={ps_base}; [Net.ServicePointManager]::SecurityProtocol='Tls12'; [Net.ServicePointManager]::ServerCertificateValidationCallback={{$true}}; $p=Join-Path $env:TEMP ('protectorate-ca-'+[guid]::NewGuid()+'.pem'); (New-Object Net.WebClient).DownloadFile(\"$h/ca.pem\",$p); if((Get-FileHash $p -Algorithm SHA256).Hash -ne '{ca_sha256}'){{throw 'hub CA fingerprint mismatch'}}; $ca=New-Object Security.Cryptography.X509Certificates.X509Certificate2 $p; [Net.ServicePointManager]::ServerCertificateValidationCallback={{param($s,$c,$x,$e) $k=New-Object Security.Cryptography.X509Certificates.X509Chain; $k.ChainPolicy.RevocationMode='NoCheck'; $k.ChainPolicy.VerificationFlags='AllowUnknownCertificateAuthority'; [void]$k.ChainPolicy.ExtraStore.Add($ca); (($e -band 3) -eq 0) -and $k.Build([Security.Cryptography.X509Certificates.X509Certificate2]$c) -and ($k.ChainElements[$k.ChainElements.Count-1].Certificate.Thumbprint -eq $ca.Thumbprint)}}; $env:PROTECTORATE_CA_CERT=$p; $env:PROTECTORATE_JOIN_CODE={ps_code}; $env:PROTECTORATE_NODE_NAME={ps_name}; iex ((New-Object Net.WebClient).DownloadString(\"$h/install.ps1\"))"
+    );
+    vec![
         json!({
-            "platform": "INSTALL_PLATFORM_WINDOWS", "shell": "PowerShell",
-            "command": format!("$ErrorActionPreference='Stop'; $env:PROTECTORATE_ENROLL_KEY={ps_key}; $env:PROTECTORATE_NODE_NAME={ps_name}; irm {ps_url} | iex"),
-            "note": "Paste into a normal PowerShell as the signed-in user, not as administrator. Installs a logon task in that user's desktop session. x64 and ARM64.",
+            "platform": "INSTALL_PLATFORM_WINDOWS", "shell": "Windows PowerShell",
+            "command": windows,
+            "note": "Paste into Windows PowerShell (powershell.exe, not pwsh) as the signed-in user, not as administrator. Installs a logon task in that user's desktop session. x64 and ARM64.",
         }),
         json!({
             "platform": "INSTALL_PLATFORM_LINUX", "shell": "sh",
-            "command": format!("script=$(curl -fsSL {sh_url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_ENROLL_KEY={sh_key} sh -s -- --name {sh_name}"),
+            "command": sh("install.sh"),
             "note": "Paste into a terminal as the user the agent should run as, not root. Needs curl and installs a systemd user unit. To keep it running while logged out, enable linger for that user.",
         }),
         json!({
             "platform": "INSTALL_PLATFORM_TERMUX", "shell": "Termux",
-            "command": format!("script=$(curl -fsSL {termux_url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_ENROLL_KEY={sh_key} sh -s -- --name {sh_name}"),
+            "command": sh("install-termux.sh"),
             "note": "Paste into Termux on Android aarch64. For boot startup, install termux-services, restart Termux, and open Termux:Boot once.",
         }),
-    ])
-}
-
-#[derive(Default)]
-pub(super) struct InviteMismatches {
-    last_refresh: Option<Instant>,
-    refreshing: bool,
-    // Name -> (invite key, actual tailnet name).
-    names: BTreeMap<String, (u64, String)>,
-}
-
-struct InviteRefresh<'a>(&'a Hub);
-impl Drop for InviteRefresh<'_> {
-    fn drop(&mut self) {
-        self.0.invite_mismatches.lock().unwrap().refreshing = false;
-    }
-}
-
-pub(super) fn start_invite_refresh(hub: &Arc<Hub>) {
-    if hub.tailnet_admin.is_none() {
-        return;
-    }
-    let weak = Arc::downgrade(hub);
-    if let Err(error) = std::thread::Builder::new()
-        .name("node-invite-refresh".into())
-        .spawn(move || loop {
-            std::thread::sleep(INVITE_REFRESH_INTERVAL);
-            let Some(hub) = weak.upgrade() else {
-                break;
-            };
-            refresh_invite_mismatches_blocking(&hub);
-        })
-    {
-        eprintln!("node invites: start refresh: {error}");
-    }
-}
-
-async fn refresh_invite_mismatches(hub: Arc<Hub>) {
-    if let Err(error) =
-        tokio::task::spawn_blocking(move || refresh_invite_mismatches_blocking(&hub)).await
-    {
-        eprintln!("node invites: refresh: {error}");
-    }
-}
-
-fn refresh_invite_mismatches_blocking(hub: &Hub) {
-    let Some(admin) = hub.tailnet_admin.clone() else {
-        return;
-    };
-    let invited = hub
-        .inventory
-        .list()
-        .into_iter()
-        .filter(|node| node.invited && node.invite_key_id != 0)
-        .map(|node| (node.name, node.invite_key_id))
-        .collect::<BTreeMap<_, _>>();
-    {
-        let mut cache = hub.invite_mismatches.lock().unwrap();
-        if cache.refreshing
-            || cache
-                .last_refresh
-                .is_some_and(|last| last.elapsed() < INVITE_REFRESH_INTERVAL)
-        {
-            return;
-        }
-        cache.refreshing = true;
-        cache.last_refresh = Some(Instant::now());
-    }
-    let _refresh = InviteRefresh(hub);
-    let peers = if invited.is_empty() {
-        Vec::new()
-    } else {
-        match admin.nodes() {
-            Ok(peers) => peers,
-            Err(error) => {
-                eprintln!("node invites: list tailnet peers: {error}");
-                return;
-            }
-        }
-    };
-    let current = hub
-        .inventory
-        .list()
-        .into_iter()
-        .filter(|node| node.invited && node.invite_key_id != 0)
-        .map(|node| (node.name, node.invite_key_id))
-        .collect::<BTreeMap<_, _>>();
-    let mut found = BTreeMap::new();
-    for (name, key) in invited {
-        if current.get(&name) != Some(&key) {
-            continue;
-        }
-        if let Some(peer) = peers.iter().find(|peer| peer.enrolled_with() == Some(key)) {
-            let joined_as = &peer.given_name;
-            if !joined_as.is_empty() && joined_as != &name {
-                found.insert(name, (key, joined_as.clone()));
-            }
-        }
-    }
-    let changes = {
-        let mut cache = hub.invite_mismatches.lock().unwrap();
-        let changes = found
-            .iter()
-            .filter(|(name, value)| cache.names.get(*name) != Some(*value))
-            .map(|(name, (_, joined_as))| (name.clone(), joined_as.clone()))
-            .collect::<Vec<_>>();
-        cache.names = found;
-        changes
-    };
-    for (name, joined_as) in changes {
-        hub.emit(
-            "node.name_mismatch",
-            &name,
-            json!({"invited_as": name, "joined_as": joined_as}),
-        );
-    }
-}
-
-fn invalidate_invite_mismatch(hub: &Hub, name: &str) {
-    let mut cache = hub.invite_mismatches.lock().unwrap();
-    cache.names.remove(name);
-    cache.last_refresh = None;
+    ]
 }
 
 struct Drain<'a> {
@@ -214,7 +98,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     server.register("/protectorate.v1.NodeService/ListNodes", move |request| {
         let hub = Arc::clone(&list);
         async move {
-            refresh_invite_mismatches(Arc::clone(&hub)).await;
             let mut nodes = vec![status(&hub, local_node(&hub))];
             nodes.extend(
                 hub.inventory
@@ -229,7 +112,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     server.register("/protectorate.v1.NodeService/GetNode", move |request| {
         let hub = Arc::clone(&get);
         async move {
-            refresh_invite_mismatches(Arc::clone(&hub)).await;
             let name = string(&input(&request)?, "name");
             let node = if name.eq_ignore_ascii_case(&hub.hostname) {
                 local_node(&hub)
@@ -268,7 +150,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             })
             .await
             .map_err(super::join_error)??;
-            invalidate_invite_mismatch(&hub, &node.name);
             hub.node_monitor.invalidate(&node.name);
             let monitor = Arc::clone(&hub.node_monitor);
             let name = node.name.clone();
@@ -280,6 +161,11 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     server.register("/protectorate.v1.NodeService/InviteNode", move |request| {
         let hub = Arc::clone(&invite);
         async move { invite_node(hub, request).await }
+    })?;
+    let join = Arc::clone(&hub);
+    server.register("/protectorate.v1.NodeService/JoinNode", move |request| {
+        let hub = Arc::clone(&join);
+        async move { join_node(hub, request).await }
     })?;
     let set_tier = Arc::clone(&hub);
     server.register("/protectorate.v1.NodeService/SetNodeTier", move |request| {
@@ -303,7 +189,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let inventory = Arc::clone(&hub.inventory);
             let admission = Arc::clone(&hub.node_admission);
             let draining = Arc::clone(&hub.node_draining);
-            let tailnet = hub.tailnet_admin.clone();
             let name_for_store = name.clone();
             let node = tokio::task::spawn_blocking(move || {
                 let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
@@ -320,26 +205,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         format!("{name_for_store} is invited but has not joined"),
                     ));
                 }
-                let retagged = if let Some(admin) = &tailnet {
-                    admin.set_tier(&name_for_store, &tier).map_err(|error| {
-                        RpcError::new(Code::Unavailable, format!("retag {name_for_store} on the tailnet: {error}"))
-                    })?
-                } else {
-                    false
-                };
-                match inventory.set_tier(&name_for_store, &tier) {
-                    Ok(node) => Ok(node),
-                    Err(error) => {
-                        if retagged {
-                            if let Some(admin) = tailnet {
-                                if let Err(rollback) = admin.set_tier(&name_for_store, &prev.tier) {
-                                    eprintln!("node tier {name_for_store}: restore tailnet tag {}: {rollback}", prev.tier);
-                                }
-                            }
-                        }
-                        Err(node_error(error))
-                    }
-                }
+                inventory
+                    .set_tier(&name_for_store, &tier)
+                    .map_err(node_error)
             })
             .await
             .map_err(super::join_error)??;
@@ -381,10 +249,9 @@ async fn watch_node_setup(
     // does not sit at JOINED for a whole poll interval.
     let mut kicked = None::<Instant>;
     loop {
-        refresh_invite_mismatches(Arc::clone(&hub)).await;
         let node = hub.inventory.get(&name).map_err(node_error)?;
         let status = status(&hub, node_json(&node, false));
-        let progress = setup_progress(&hub, &node, status).await;
+        let progress = setup_progress(&hub, &node, status);
         let stage = string(&progress, "stage").to_owned();
         let changed = last.as_ref().is_none_or(|previous: &Value| {
             ["stage", "message", "problems", "notes"]
@@ -417,34 +284,17 @@ async fn watch_node_setup(
     }
 }
 
-async fn setup_progress(hub: &Hub, node: &Node, status: Value) -> Value {
+fn setup_progress(hub: &Hub, node: &Node, status: Value) -> Value {
     let mut problems = Vec::<String>::new();
     let mut notes = Vec::<String>::new();
     let (mut stage, message) = if node.invited {
-        let enrolled = if node.invite_key_id != 0 {
-            if let Some(admin) = hub.tailnet_admin.clone() {
-                let name = node.name.clone();
-                let invite_key = node.invite_key_id;
-                tokio::task::spawn_blocking(move || {
-                    admin.nodes().is_ok_and(|nodes| {
-                        nodes.iter().any(|candidate| {
-                            (candidate.given_name == name || candidate.name == name)
-                                && candidate.enrolled_with() == Some(invite_key)
-                        })
-                    })
-                })
-                .await
-                .unwrap_or(false)
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-        if enrolled {
+        if !node.cert_id.is_empty() {
             (
                 "NODE_SETUP_STAGE_JOINED",
-                "enrolled in the tailnet; waiting for the hub to reach the agent".to_owned(),
+                format!(
+                    "joined; waiting for the hub to reach the agent at {}",
+                    node.address
+                ),
             )
         } else {
             (
@@ -542,10 +392,10 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
             "name must be a lowercase DNS label, at most 63 characters",
         ));
     }
-    let admin = hub.tailnet_admin.clone().ok_or_else(|| {
+    let ca = hub.ca.clone().ok_or_else(|| {
         RpcError::new(
             Code::FailedPrecondition,
-            "this hub has no tailnet: run `protectorate hub tailnet init` and restart the hub",
+            "this hub has no CA to issue node certificates",
         )
     })?;
     let tier = body
@@ -564,22 +414,9 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
     if ttl.is_zero() || ttl > Duration::from_secs(24 * 3600) {
         return Err(RpcError::invalid("ttl must be positive and at most 24h"));
     }
-    let pools = match body.get("pools") {
-        None => Vec::new(),
-        Some(value) => value
-            .as_array()
-            .ok_or_else(|| RpcError::invalid("pools must be an array"))?
-            .iter()
-            .map(|pool| {
-                pool.as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| RpcError::invalid("pool must be a string"))
-            })
-            .collect::<Result<Vec<_>>>()?,
-    };
+    let pools = super::strings(&body, "pools");
     let base = install_base(
         &hub,
-        &request.headers,
         body.get("installUrl").and_then(Value::as_str).unwrap_or(""),
     )?;
     if name == hub.hostname {
@@ -588,73 +425,127 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
             format!("{name} is the hub's own node"),
         ));
     }
+    let mut secret = [0_u8; 32];
+    getrandom::getrandom(&mut secret).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+    let code = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret);
+    let ca_sha256 = hex(&Sha256::digest(ca.pem().as_bytes()));
+    let expires = protectorate_tls::unix_now() + ttl.as_secs() as i64;
+    let node = Node {
+        name: name.clone(),
+        tier,
+        tags: pools.iter().map(|pool| format!("pool-{pool}")).collect(),
+        invited: true,
+        code_sha256: hex(&Sha256::digest(code.as_bytes())),
+        code_expires: expires,
+        ..Node::default()
+    };
     let inventory = Arc::clone(&hub.inventory);
     let admission = Arc::clone(&hub.node_admission);
     let draining = Arc::clone(&hub.node_draining);
-    let configured_pools = hub.tailnet_pools.clone();
-    let hub_name = hub
-        .tailnet_hub_name
-        .clone()
-        .unwrap_or_else(|| hub.hostname.clone());
-    let control_url = admin.control_url().to_owned();
-    let name_for_store = name.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let node = tokio::task::spawn_blocking(move || {
         let _admission = admission.write().unwrap_or_else(|error| error.into_inner());
-        if draining.lock().unwrap().contains(&name_for_store) {
-            return Err(RpcError::new(Code::FailedPrecondition, "node is being removed"));
+        if draining.lock().unwrap().contains(&node.name) {
+            return Err(RpcError::new(
+                Code::FailedPrecondition,
+                "node is being removed",
+            ));
         }
-        let prev = match inventory.get(&name_for_store) {
-            Ok(node) if !node.invited => return Err(RpcError::new(Code::AlreadyExists, format!("{name_for_store} is already in the inventory: remove it first"))),
-            Ok(node) => Some(node),
-            Err(Error::NotFound(_)) => None,
+        let pending = match inventory.get(&node.name) {
+            Ok(old) if !old.invited => {
+                return Err(RpcError::new(
+                    Code::AlreadyExists,
+                    format!("{} is already in the inventory: remove it first", node.name),
+                ))
+            }
+            Ok(_) => true,
+            Err(Error::NotFound(_)) => false,
             Err(error) => return Err(node_error(error)),
         };
-        let issued = admin.invite_node(&name_for_store, &hub_name, &tier, &pools, &configured_pools, ttl)
-            .map_err(|error| RpcError::new(Code::FailedPrecondition, error.to_string()))?;
-        let commands = match install_commands(&base, &issued.key, &name_for_store) {
-            Ok(commands) => commands,
-            Err(error) => {
-                if let Err(expire) = admin.expire_key(issued.id) {
-                    eprintln!("invite {name_for_store}: expire unusable key {}: {expire}", issued.id);
-                }
-                return Err(error);
-            }
-        };
-        let node = Node {
-            name: name_for_store.clone(),
-            address: name_for_store.clone(),
-            tier,
-            tags: pools.iter().map(|pool| format!("pool-{pool}")).collect(),
-            invited: true,
-            invite_key_id: issued.id,
-            ..Node::default()
-        };
-        let node = match inventory.add(node, prev.is_some()) {
-            Ok(node) => node,
-            Err(error) => {
-                if let Err(expire) = admin.expire_key(issued.id) { eprintln!("invite {name_for_store}: expire unused key {}: {expire}", issued.id); }
-                return Err(node_error(error));
-            }
-        };
-        if let Some(prev) = prev {
-            if prev.invite_key_id != 0 && prev.invite_key_id != issued.id {
-                if let Err(error) = admin.expire_key(prev.invite_key_id) {
-                    eprintln!("invite {name_for_store}: expire previous key {}: {error}", prev.invite_key_id);
-                }
-            }
-        }
-        Ok(json!({
-            "node": node_json(&node, false),
-            "controlUrl": control_url,
-            "key": issued.key,
-            "expiresAt": super::timestamp(chrono::Utc::now() + chrono::Duration::from_std(ttl).expect("bounded ttl")),
-            "installUrl": base,
-            "commands": commands,
-        }))
-    }).await.map_err(super::join_error)??;
+        inventory.add(node, pending).map_err(node_error)
+    })
+    .await
+    .map_err(super::join_error)??;
+    let result = json!({
+        "node": node_json(&node, false),
+        "hubUrl": base,
+        "code": code,
+        "expiresAt": super::unix_timestamp(expires),
+        "installUrl": base,
+        "commands": install_commands(&base, &code, &name, &ca_sha256),
+        "caSha256": ca_sha256,
+    });
+    hub.node_monitor.invalidate(&name);
     hub.emit("node.invited", &name, Value::Null);
-    invalidate_invite_mismatch(&hub, &name);
     respond(&request, result)
+}
+
+async fn join_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResponse> {
+    let body = input(&request)?;
+    let name = string(&body, "name");
+    let code = string(&body, "code");
+    let ca = hub.ca.clone().ok_or_else(|| {
+        RpcError::new(
+            Code::FailedPrecondition,
+            "this hub has no CA to issue node certificates",
+        )
+    })?;
+    let bytes = |field: &str| {
+        STANDARD
+            .decode(string(&body, field))
+            .map_err(|_| RpcError::invalid(format!("{field} must be base64")))
+    };
+    let public_key = bytes("publicKey")?;
+    if !protectorate_tls::verify_proof(
+        &public_key,
+        &protectorate_tls::join_message(&name, &code),
+        &bytes("proof")?,
+    ) {
+        return Err(RpcError::invalid(
+            "proof must sign the join message with the uncompressed P-256 key",
+        ));
+    }
+    let address: std::net::SocketAddr = string(&body, "address")
+        .parse()
+        .map_err(|_| RpcError::invalid("address must be IP:PORT"))?;
+    protectorate_tls::check_listen(address)
+        .map_err(|error| RpcError::invalid(error.to_string()))?;
+    let mut id = [0_u8; 8];
+    getrandom::getrandom(&mut id).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+    let cert_id = hex(&id);
+    let (certificate, cert_expires) = ca
+        .issue_node(&name, &cert_id, &public_key)
+        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    let inventory = Arc::clone(&hub.inventory);
+    let code_sha256 = hex(&Sha256::digest(code.as_bytes()));
+    let joined = Node {
+        address: address.to_string(),
+        cert_id,
+        cert_expires,
+        public_key: STANDARD.encode(&public_key),
+        ..Node::default()
+    };
+    let node_name = name.clone();
+    tokio::task::spawn_blocking(move || {
+        inventory.redeem(
+            &node_name,
+            &code_sha256,
+            protectorate_tls::unix_now(),
+            joined,
+        )
+    })
+    .await
+    .map_err(super::join_error)?
+    .map_err(|error| match error {
+        Error::Io(_) | Error::Json(_) => node_error(error),
+        _ => RpcError::new(
+            Code::PermissionDenied,
+            "the join code is unknown, used or expired: invite the node again",
+        ),
+    })?;
+    hub.node_monitor.invalidate(&name);
+    let monitor = Arc::clone(&hub.node_monitor);
+    tokio::task::spawn_blocking(move || monitor.poll_node(&name));
+    respond(&request, json!({"certificate": certificate}))
 }
 
 fn valid_invite_name(name: &str) -> bool {
@@ -670,31 +561,23 @@ fn label_byte(byte: u8) -> bool {
     byte.is_ascii_lowercase() || byte.is_ascii_digit()
 }
 
-fn install_base(hub: &Hub, headers: &axum::http::HeaderMap, asked: &str) -> Result<String> {
-    let from_header;
-    let raw = if asked.is_empty() {
-        if let Some(public_url) = &hub.public_url {
-            return Ok(public_url.clone());
-        }
-        let host = headers
-            .get("host")
-            .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| RpcError::invalid("install URL is unavailable: missing Host header"))?;
-        let scheme = if headers
-            .get("x-forwarded-proto")
-            .and_then(|h| h.to_str().ok())
-            .is_some_and(|s| s.eq_ignore_ascii_case("https"))
-        {
-            "https"
-        } else {
-            "http"
-        };
-        from_header = format!("{scheme}://{host}");
-        &from_header
+fn install_base(hub: &Hub, asked: &str) -> Result<String> {
+    let base = if asked.is_empty() {
+        hub.public_url.clone().ok_or_else(|| {
+            RpcError::new(
+                Code::FailedPrecondition,
+                "the hub has no TLS listener: start it with --tls-listen or --public-url",
+            )
+        })?
     } else {
-        asked
+        validate_install_base(asked)?
     };
-    validate_install_base(raw)
+    if !base.starts_with("https://") {
+        return Err(RpcError::invalid(
+            "the install URL must be the hub's HTTPS URL",
+        ));
+    }
+    Ok(base)
 }
 
 pub(super) fn validate_install_base(raw: &str) -> Result<String> {
@@ -847,8 +730,8 @@ async fn remove_node(
             "not uninstalled: the node is not reachable now; run `protectorate node uninstall` on the machine".to_owned()
         } else {
             let jobs = Arc::clone(&hub.jobs);
-            let address = info.address.clone();
-            match tokio::task::spawn_blocking(move || jobs.uninstall_node(&address))
+            let node = name.clone();
+            match tokio::task::spawn_blocking(move || jobs.uninstall_node(&node))
                 .await.map_err(super::join_error)? {
                 Ok(reply) => {
                     let actions = reply["actions"].as_array().into_iter().flatten()
@@ -865,33 +748,10 @@ async fn remove_node(
         };
         progress(&request, &sender, "REMOVE_PHASE_UNINSTALLING", 0, message).await?;
     }
-    let revoke_message = if let Some(admin) = &hub.tailnet_admin {
-        let admin = Arc::clone(admin);
-        let name = name.clone();
-        let key_id = info.invite_key_id;
-        let invited = info.invited;
-        tokio::task::spawn_blocking(move || {
-            let mut actions = Vec::new();
-            if invited && key_id != 0 {
-                admin.expire_key(key_id).map_err(|error| {
-                    RpcError::new(Code::Unavailable, format!("expire invite key: {error}"))
-                })?;
-                actions.push("expired the invite key".to_owned());
-            }
-            let revoked = admin.revoke(&name).map_err(|error| {
-                RpcError::new(Code::Unavailable, format!("revoke tailnet node: {error}"))
-            })?;
-            actions.push(if revoked {
-                "revoked the tailnet enrollment".to_owned()
-            } else {
-                "not enrolled in the tailnet".to_owned()
-            });
-            Ok::<_, RpcError>(actions.join("; "))
-        })
-        .await
-        .map_err(super::join_error)??
+    let revoke_message = if info.invited && info.cert_id.is_empty() {
+        "the unused join code stops working"
     } else {
-        "no tailnet revoker is configured on this hub; no tailnet enrollment was revoked".to_owned()
+        "the node certificate is no longer trusted"
     };
     progress(
         &request,
@@ -927,7 +787,6 @@ async fn remove_node(
         .map_err(super::join_error)?
         .map_err(node_error)?;
     hub.node_monitor.invalidate(&name);
-    invalidate_invite_mismatch(&hub, &name);
     hub.emit("node.removed", &name, Value::Null);
     let mut message = format!("removed {name} from the inventory");
     if released > 0 {
@@ -961,20 +820,23 @@ fn parse_node(mut value: Value) -> Result<Node> {
         .as_object_mut()
         .ok_or_else(|| RpcError::new(Code::InvalidArgument, "node must be an object"))?;
     object.remove("local");
-    if let Some(id) = object.get_mut("inviteKeyId") {
-        if let Some(s) = id.as_str() {
-            *id = json!(s
-                .parse::<u64>()
-                .map_err(|_| RpcError::new(Code::InvalidArgument, "invalid inviteKeyId"))?);
-        }
-    }
     serde_json::from_value(value)
         .map_err(|error| RpcError::new(Code::InvalidArgument, error.to_string()))
 }
 
 fn node_json(node: &Node, local: bool) -> Value {
     let mut out = serde_json::to_value(node).expect("node serialization");
-    out["inviteKeyId"] = json!(node.invite_key_id.to_string());
+    if let Some(object) = out.as_object_mut() {
+        for private in [
+            "codeSha256",
+            "codeExpires",
+            "certId",
+            "certExpires",
+            "publicKey",
+        ] {
+            object.remove(private);
+        }
+    }
     if local {
         out["local"] = json!(true);
     }
@@ -999,7 +861,10 @@ pub(super) fn publish_poll_event(hub: &Arc<Hub>, event: PollEvent) {
     };
     let status = status(hub, node);
     let payload = match event.kind {
-        "node.metrics" => metrics_summary(&status),
+        "node.metrics" => {
+            renew_if_due(hub, &event.name);
+            metrics_summary(&status)
+        }
         "node.unreachable" => json!({
             "error": status["error"],
             "address": event.address,
@@ -1065,29 +930,6 @@ fn status(hub: &Arc<Hub>, node: Value) -> Value {
     let mut status = hub
         .node_monitor
         .status(name, address, node["invited"] == true);
-    if node["invited"] == true {
-        let key = node["inviteKeyId"]
-            .as_str()
-            .and_then(|id| id.parse::<u64>().ok());
-        let cache = hub.invite_mismatches.lock().unwrap();
-        if let Some((_, joined_as)) = cache
-            .names
-            .get(name)
-            .filter(|(cached, _)| Some(*cached) == key)
-        {
-            status["error"] = json!(format!(
-                "joined the tailnet as {joined_as:?}, not the invited name {name:?}"
-            ));
-            push_alert(
-                &mut status,
-                json!({
-                    "kind": "ALERT_KIND_NAME_MISMATCH",
-                    "subject": joined_as,
-                    "message": format!("invited as {name:?} but joined as {joined_as:?}: `node rm {name}`, then `node add {joined_as} --addr {joined_as}`"),
-                }),
-            );
-        }
-    }
     if hub
         .node_draining
         .lock()
@@ -1117,6 +959,51 @@ fn status(hub: &Arc<Hub>, node: Value) -> Value {
     }
     status["node"] = node;
     status
+}
+
+/// Pushes a fresh certificate for the node's own key once its current one
+/// is within RENEW_BEFORE of expiry. The node swaps it in without a restart.
+fn renew_if_due(hub: &Arc<Hub>, name: &str) {
+    let Ok(node) = hub.inventory.get(name) else {
+        return;
+    };
+    let Some(ca) = hub.ca.clone() else {
+        return;
+    };
+    if node.cert_id.is_empty()
+        || node.cert_expires - protectorate_tls::unix_now()
+            > protectorate_tls::RENEW_BEFORE.as_secs() as i64
+        || !hub.renewing.lock().unwrap().insert(node.name.clone())
+    {
+        return;
+    }
+    let hub = Arc::clone(hub);
+    std::thread::spawn(move || {
+        let result = (|| {
+            let key = STANDARD
+                .decode(&node.public_key)
+                .map_err(|e| e.to_string())?;
+            let (certificate, expires) = ca
+                .issue_node(&node.name, &node.cert_id, &key)
+                .map_err(|e| e.to_string())?;
+            hub.node_files
+                .internal_client_with_timeout(&node.name, Duration::from_secs(30))
+                .and_then(|client| {
+                    client.call(
+                        "/protectorate.v1.NodeAgentService/RenewCertificate",
+                        &json!({"certificate": certificate}),
+                    )
+                })
+                .map_err(|e| e.message)?;
+            hub.inventory
+                .renewed(&node.name, &node.cert_id, expires)
+                .map_err(|e| e.to_string())
+        })();
+        if let Err(error) = result {
+            eprintln!("renew certificate for {}: {error}", node.name);
+        }
+        hub.renewing.lock().unwrap().remove(&node.name);
+    });
 }
 
 fn push_alert(status: &mut Value, alert: Value) {
@@ -1198,105 +1085,4 @@ fn node_error(error: Error) -> RpcError {
         Error::Io(_) | Error::Json(_) => Code::Internal,
     };
     RpcError::new(code, error.to_string())
-}
-
-#[cfg(test)]
-mod public_url_tests {
-    use super::*;
-    use axum::http::HeaderMap;
-
-    #[test]
-    fn configured_origin_is_default_but_explicit_invite_origin_wins() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path(), "owner-secret", "test")
-            .unwrap()
-            .with_public_url("https://public.example.test:7480/".into())
-            .unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("host", "internal.example.test:7470".parse().unwrap());
-        assert_eq!(
-            install_base(&hub, &headers, "").unwrap(),
-            "https://public.example.test:7480"
-        );
-        assert_eq!(
-            install_base(&hub, &headers, "https://other.example.test").unwrap(),
-            "https://other.example.test"
-        );
-        assert!(hub
-            .with_public_url("https://user@bad.example".into())
-            .is_err());
-    }
-}
-
-#[cfg(test)]
-mod setup_progress_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn windows_setup_waits_for_desktop_check_and_reports_noninteractive_agent() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
-        let node = Node {
-            name: "windows-peer".into(),
-            os: "windows".into(),
-            ..Node::default()
-        };
-        let status = json!({
-            "freshness":"NODE_FRESHNESS_FRESH",
-            "metrics": {
-                "os":"windows", "arch":"amd64", "agentVersion":"test",
-                "warnings":["low disk space"]
-            },
-            "alerts":[
-                {"kind":"ALERT_KIND_UNREACHABLE","message":"old unreachable alert"},
-                {"kind":"ALERT_KIND_DISK_PERCENT","message":"disk is 91% full"}
-            ]
-        });
-
-        let pending = setup_progress(&hub, &node, status.clone()).await;
-        assert_eq!(pending["stage"], "NODE_SETUP_STAGE_METRICS", "{pending}");
-        assert_eq!(pending["message"], "waiting for the desktop check");
-        assert_eq!(
-            pending["notes"],
-            json!(["low disk space", "disk is 91% full"])
-        );
-
-        let mut checked = status;
-        checked["desk"] = json!({
-            "reason":"DESK_REASON_NOT_INTERACTIVE",
-            "detail":"session 0 has no interactive desktop"
-        });
-        let attention = setup_progress(&hub, &node, checked.clone()).await;
-        assert_eq!(
-            attention["stage"], "NODE_SETUP_STAGE_ATTENTION",
-            "{attention}"
-        );
-        assert!(attention["problems"][0]
-            .as_str()
-            .unwrap()
-            .contains("start it with the logon task `node install` registers"));
-        assert!(attention["problems"][0]
-            .as_str()
-            .unwrap()
-            .contains("session 0 has no interactive desktop"));
-
-        checked["desk"] = json!({"reason":"DESK_REASON_UNKNOWN","detail":"probe failed"});
-        let unknown = setup_progress(&hub, &node, checked.clone()).await;
-        assert_eq!(unknown["stage"], "NODE_SETUP_STAGE_READY", "{unknown}");
-        assert_eq!(unknown["notes"][0], "desktop state unknown: probe failed");
-
-        checked["desk"] = json!({"reason":"DESK_REASON_AVAILABLE","available":true});
-        let ready = setup_progress(&hub, &node, checked.clone()).await;
-        assert_eq!(ready["stage"], "NODE_SETUP_STAGE_READY", "{ready}");
-        assert_eq!(ready["message"], "windows/amd64, agent test");
-
-        checked["freshness"] = json!("NODE_FRESHNESS_STALE");
-        checked["error"] = json!("agent went away");
-        let stale = setup_progress(&hub, &node, checked).await;
-        assert_eq!(stale["stage"], "NODE_SETUP_STAGE_ATTENTION", "{stale}");
-        assert_eq!(
-            stale["problems"][0],
-            "the hub cannot reach the agent now: agent went away"
-        );
-    }
 }

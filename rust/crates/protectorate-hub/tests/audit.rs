@@ -4,7 +4,6 @@ use protectorate_hub::Hub;
 use protectorate_inventory::Node;
 use protectorate_node::{Agent, MetricsCollector};
 use protectorate_node_metrics::NodeMetrics;
-use protectorate_wire::TailnetIdentity;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{io, sync::Arc, time::Duration};
@@ -170,71 +169,6 @@ async fn denied_mutation_with_invalid_body_is_audited_once() {
     assert_eq!(entries[0]["subject"].as_str().unwrap_or_default(), "");
     assert!(!audit.to_string().contains("SECRET-PARTIAL"));
     server.abort();
-}
-
-#[tokio::test]
-async fn audit_records_trusted_tailnet_identity_and_leaves_loopback_blank() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
-    let router = hub.router().unwrap();
-    let ordinary_router = router.clone();
-    let ordinary_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let ordinary_addr = ordinary_listener.local_addr().unwrap();
-    let ordinary = tokio::spawn(async move {
-        axum::serve(ordinary_listener, ordinary_router)
-            .await
-            .unwrap()
-    });
-    let tailnet_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let tailnet_addr = tailnet_listener.local_addr().unwrap();
-    let trusted = router.layer(axum::middleware::from_fn(
-        |mut request: axum::extract::Request, next: axum::middleware::Next| async move {
-            request
-                .extensions_mut()
-                .insert(TailnetIdentity("client.example".into()));
-            next.run(request).await
-        },
-    ));
-    let tailnet =
-        tokio::spawn(async move { axum::serve(tailnet_listener, trusted).await.unwrap() });
-    let create = "/protectorate.v1.BacklogService/CreateNote";
-    let (status, first) = call_path(
-        tailnet_addr,
-        create,
-        "owner-secret",
-        json!({"title":"tailnet-note"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{first}");
-    let (status, second) = call_path(
-        ordinary_addr,
-        create,
-        "owner-secret",
-        json!({"title":"loopback-note"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{second}");
-    let (status, _) = call_path(
-        tailnet_addr,
-        create,
-        "invalid-token",
-        json!({"title":"denied-note"}),
-    )
-    .await;
-    assert_eq!(status, 401);
-    let (status, audit) = call(ordinary_addr, "owner-secret", json!({})).await;
-    assert_eq!(status, 200, "{audit}");
-    let entries = audit["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 3, "{audit}");
-    assert_eq!(entries[0]["actor"], "unauthenticated");
-    assert_eq!(entries[0]["outcome"], "denied");
-    assert_eq!(entries[0]["tailnet"], "client.example");
-    assert_eq!(entries[1]["actor"], "owner");
-    assert_eq!(entries[1]["tailnet"].as_str().unwrap_or_default(), "");
-    assert_eq!(entries[2]["actor"], "owner");
-    assert_eq!(entries[2]["tailnet"], "client.example");
-    ordinary.abort();
-    tailnet.abort();
 }
 
 async fn raw_call(
@@ -929,7 +863,7 @@ async fn node_file_download_is_audited_without_logging_its_path_or_contents() {
         b"SECRET-DOWNLOAD-CONTENTS",
     )
     .unwrap();
-    let node = Agent::new(Arc::new(Metrics), "node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_files(&files, false)
         .unwrap();
     let node_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -951,7 +885,6 @@ async fn node_file_download_is_audited_without_logging_its_path_or_contents() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let hub_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub_address = hub_listener.local_addr().unwrap();
     let hub_task = tokio::spawn(async move {
@@ -1018,7 +951,7 @@ async fn node_file_download_is_audited_without_logging_its_path_or_contents() {
 async fn file_upload_audits_first_last_and_failed_chunks_without_payload() {
     let home = tempfile::tempdir().unwrap();
     let files = home.path().join("node-files");
-    let node = Agent::new(Arc::new(Metrics), "node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_files(&files, false)
         .unwrap();
     let node_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1040,7 +973,6 @@ async fn file_upload_audits_first_last_and_failed_chunks_without_payload() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let hub_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let hub_address = hub_listener.local_addr().unwrap();
     let hub_task = tokio::spawn(async move {

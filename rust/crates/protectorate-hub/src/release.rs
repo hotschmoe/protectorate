@@ -199,7 +199,6 @@ fn record_update(hub: &Hub, request: &wire::RpcRequest, info: &Info) {
     hub.audit.write(AuditEntry {
         actor: request.auth.actor.clone(),
         token_id: request.auth.token_id.clone(),
-        tailnet: request.auth.tailnet.clone(),
         task: request.auth.task.clone(),
         procedure: request.method.procedure.clone(),
         subject: "hub".into(),

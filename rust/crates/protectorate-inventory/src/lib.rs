@@ -57,7 +57,15 @@ pub struct Node {
     pub tier: String,
     pub notes: String,
     pub invited: bool,
-    pub invite_key_id: u64,
+    /// SHA-256 (hex) of the unredeemed join code and its expiry, Unix seconds.
+    pub code_sha256: String,
+    pub code_expires: i64,
+    /// The identity component of the node's certificate name. Only the
+    /// certificate issued with the current id is trusted.
+    pub cert_id: String,
+    pub cert_expires: i64,
+    /// The node's uncompressed P-256 public key, base64, for renewal.
+    pub public_key: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -155,9 +163,20 @@ impl Inventory {
             return Err(Error::Exists(name));
         }
         let mut node = node;
-        if let Some(old) = at.map(|i| &nodes[i]) {
+        // An edit keeps the enrollment and every field it leaves empty; a new
+        // invite (it carries a code) replaces the record and its certificate.
+        if let Some(old) = at
+            .map(|i| &nodes[i])
+            .filter(|_| node.code_sha256.is_empty())
+        {
+            node.code_expires = old.code_expires;
+            node.code_sha256 = old.code_sha256.clone();
+            node.cert_id = old.cert_id.clone();
+            node.cert_expires = old.cert_expires;
+            node.public_key = old.public_key.clone();
             for (field, saved) in [
                 (&mut node.address, &old.address),
+                (&mut node.tier, &old.tier),
                 (&mut node.os, &old.os),
                 (&mut node.arch, &old.arch),
                 (&mut node.ssh_alias, &old.ssh_alias),
@@ -215,7 +234,46 @@ impl Inventory {
             return Ok(());
         }
         node.invited = false;
-        node.invite_key_id = 0;
+        self.commit(&mut nodes, next)
+    }
+    /// Redeems an invited node's join code once: records the certificate
+    /// issued for it and forgets the code. NotFound covers every refusal.
+    pub fn redeem(&self, name: &str, code_sha256: &str, now: i64, joined: Node) -> Result<Node> {
+        let name = name.trim().to_ascii_lowercase();
+        let mut nodes = self.nodes.lock().unwrap();
+        let mut next = nodes.clone();
+        let node = next
+            .iter_mut()
+            .find(|node| {
+                node.name == name
+                    && node.invited
+                    && !node.code_sha256.is_empty()
+                    && node.code_sha256 == code_sha256
+                    && now < node.code_expires
+            })
+            .ok_or_else(|| Error::NotFound(name.clone()))?;
+        node.address = joined.address;
+        node.code_sha256.clear();
+        node.code_expires = 0;
+        node.cert_id = joined.cert_id;
+        node.cert_expires = joined.cert_expires;
+        node.public_key = joined.public_key;
+        *node = normalize(node.clone())?;
+        let node = node.clone();
+        self.commit(&mut nodes, next)?;
+        Ok(node)
+    }
+    /// Records a renewed certificate for the node's current enrollment.
+    pub fn renewed(&self, name: &str, cert_id: &str, cert_expires: i64) -> Result<()> {
+        let mut nodes = self.nodes.lock().unwrap();
+        let mut next = nodes.clone();
+        let Some(node) = next
+            .iter_mut()
+            .find(|node| node.name == name && node.cert_id == cert_id)
+        else {
+            return Err(Error::NotFound(name.to_owned()));
+        };
+        node.cert_expires = cert_expires;
         self.commit(&mut nodes, next)
     }
     /// Caches OS and architecture reported by a successful metrics poll.
@@ -267,7 +325,8 @@ fn normalize(mut node: Node) -> Result<Node> {
     {
         return Err(Error::Invalid(format!("name {:?}", node.name)));
     }
-    if !valid_address(&node.address) {
+    let pending = node.invited && node.address.is_empty();
+    if !pending && !valid_address(&node.address) {
         return Err(Error::Invalid(format!("address {:?}", node.address)));
     }
     let alias = node.ssh_alias.as_bytes();

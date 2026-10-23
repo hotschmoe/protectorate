@@ -149,14 +149,14 @@ class _RemoveNodeDialogState extends State<RemoveNodeDialog> {
     if (_pending) {
       return [
         Text(
-          'The key for $_name stops working and the pending entry is removed. Nothing was installed yet, or it never reached the hub.',
+          'The join code for $_name stops working and the pending entry is removed. Nothing was installed yet, or it never reached the hub.',
           style: t.body(),
         ),
       ];
     }
     return [
       NoteStrip(
-        'No new jobs or leases go to $_name. Its tailnet enrollment is revoked, so it cannot rejoin without a new invite, and its inventory entry is removed.',
+        'No new jobs or leases go to $_name. The hub stops trusting its certificate, so it cannot rejoin without a new invite, and its inventory entry is removed.',
         tone: Tone.alarm,
       ),
       const SizedBox(height: Tokens.gapL),

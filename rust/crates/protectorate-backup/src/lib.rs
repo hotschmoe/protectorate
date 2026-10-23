@@ -6,7 +6,6 @@ use cap_std::{
     fs::{Dir, OpenOptions},
 };
 use chrono::{DateTime, NaiveDateTime, Utc};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -147,38 +146,11 @@ pub fn safe_relative(name: &str) -> bool {
             .split('/')
             .all(|p| !p.is_empty() && p != "." && p != ".." && !p.ends_with(['.', ' ']))
 }
-fn keep_tailnet(rel: &str) -> bool {
-    let name = rel.rsplit('/').next().unwrap_or("");
-    !rel.starts_with("tailnet/db.sqlite")
-        && !name.contains(".log")
-        && ![
-            "headscale.sock",
-            "headscale.yaml",
-            "policy.json",
-            "derpmap.json",
-            "apikey",
-            "backup-request.lock",
-            "database.lock",
-        ]
-        .contains(&name)
-}
 fn keep(rel: &str) -> bool {
     let parts: Vec<_> = rel.split('/').collect();
     match parts[0] {
         "audit" | "ca" => true,
-        "tailnet" => keep_tailnet(rel),
-        "tsnet" => {
-            parts.len() == 2
-                && [
-                    "join.json",
-                    "machine.key",
-                    "node.key",
-                    "control-key.json",
-                    "disco.key",
-                ]
-                .contains(&parts[1])
-        }
-        "jobs-rust" => {
+        "jobs" => {
             (parts.len() == 2
                 && (parts[1].ends_with(".json")
                     || parts[1].ends_with(".log")
@@ -206,7 +178,7 @@ fn job_artifact_paths(record: impl Read, id: &str) -> Result<Vec<String>> {
             if !safe_relative(path) {
                 return invalid("job artifact has an unsafe path");
             }
-            paths.push(format!("jobs-rust/{id}.artifacts/{path}"));
+            paths.push(format!("jobs/{id}.artifacts/{path}"));
         }
     }
     Ok(paths)
@@ -218,10 +190,10 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
         "tokens.json",
         "identity.json",
         "nodes.json",
-        "sleeves-rust.json",
+        "sleeves.json",
         "leases.json",
-        "desk-policies-rust.json",
-        "desk-use-rust.json",
+        "desk-policies.json",
+        "desk-use.json",
         "directory.json",
         "mailbox.jsonl",
         "notes.json",
@@ -250,7 +222,7 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
                 if rel.starts_with("sleeves/") && rel.matches('/').count() >= 2 {
                     continue;
                 }
-                if let Some(jobs_path) = rel.strip_prefix("jobs-rust/") {
+                if let Some(jobs_path) = rel.strip_prefix("jobs/") {
                     let job_dir = jobs_path.split('/').next().unwrap_or_default();
                     if !job_dir.ends_with(".artifacts") {
                         continue;
@@ -269,53 +241,13 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
         }
         Ok(())
     }
-    for dir in [
-        "audit",
-        "ca",
-        "tailnet",
-        "tsnet",
-        "jobs-rust",
-        "handoffs",
-        "sleeves",
-    ] {
+    for dir in ["audit", "ca", "jobs", "handoffs", "sleeves"] {
         if home.symlink_metadata(dir).is_ok_and(|m| m.is_symlink()) {
             continue;
         }
         walk(home, Path::new(dir), &mut paths)?;
     }
     Ok(paths.into_iter().collect())
-}
-fn lock_db(home: &Dir, cancel: &Cancellation) -> Result<Vec<File>> {
-    home.create_dir_all("tailnet")?;
-    let mut held = Vec::new();
-    for name in ["backup-request.lock", "database.lock"] {
-        let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            use cap_std::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = home
-            .open_with(format!("tailnet/{name}"), &options)?
-            .into_std();
-        loop {
-            cancel.check()?;
-            match file.try_lock_exclusive() {
-                Ok(()) => break,
-                Err(e)
-                    if e.kind() == io::ErrorKind::WouldBlock
-                        || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
-                {
-                    std::thread::sleep(Duration::from_millis(50))
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e.into()),
-            }
-        }
-        held.push(file);
-    }
-    Ok(held)
 }
 fn copy_exact(
     reader: &mut impl Read,
@@ -335,36 +267,6 @@ fn copy_exact(
         left -= count as u64;
     }
     Ok(hex(hash.finalize()))
-}
-fn snapshot_db(home: &Dir, dir: &Path, cancel: &Cancellation) -> Result<tempfile::TempDir> {
-    let held = lock_db(home, cancel)?;
-    let snapshot = tempfile::Builder::new()
-        .prefix(".backup-db-")
-        .tempdir_in(dir)?;
-    private_temp(snapshot.path())?;
-    for name in ["db.sqlite", "db.sqlite-wal"] {
-        let mut source = match home.open(format!("tailnet/{name}")) {
-            Ok(f) => f,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.into()),
-        };
-        if !source.metadata()?.is_file() {
-            return invalid("headscale database is not a plain file");
-        }
-        let mut dest = tempfile::NamedTempFile::new_in(snapshot.path())?;
-        let size = source.metadata()?.len();
-        copy_exact(&mut source, &mut dest, size, cancel)?;
-        dest.as_file().sync_all()?;
-        dest.persist(snapshot.path().join(name))
-            .map_err(|e| e.error)?;
-    }
-    if snapshot.path().join("db.sqlite").exists() {
-        check_database(&snapshot.path().join("db.sqlite"), cancel)?
-    } else if snapshot.path().join("db.sqlite-wal").exists() {
-        return invalid("headscale WAL exists without a database");
-    }
-    drop(held);
-    Ok(snapshot)
 }
 struct HashWriter<W> {
     writer: W,
@@ -391,21 +293,14 @@ fn header(writer: &mut impl Write, h: &Header) -> Result<()> {
     writer.write_all(&bytes)?;
     Ok(())
 }
-/// Snapshots the database under supervisor locks, then releases them before
-/// archiving other state. No credentials from harness homes are included.
+/// Archives the hub state, including its CA. No credentials from harness
+/// homes are included.
 pub fn create(options: &Options, cancel: &Cancellation) -> Result<PathBuf> {
     cancel.check()?;
     let home = fs::canonicalize(&options.home)?;
     let home_root = root(&home)?;
     private_dir(&options.dir)?;
-    let db = snapshot_db(&home_root, &options.dir, cancel)?;
-    let mut sources: Vec<_> = plan(&home_root)?.into_iter().map(|s| (s, false)).collect();
-    for name in ["db.sqlite", "db.sqlite-wal"] {
-        if db.path().join(name).exists() {
-            sources.push((format!("tailnet/{name}"), true))
-        }
-    }
-    sources.sort();
+    let sources = plan(&home_root)?;
     let created = options
         .created_at
         .unwrap_or_else(|| std::time::SystemTime::now().into());
@@ -433,16 +328,12 @@ pub fn create(options: &Options, cancel: &Cancellation) -> Result<PathBuf> {
             hash: Sha256::new(),
         };
         writer.write_all(MAGIC)?;
-        for (rel, is_db) in sources {
+        for rel in sources {
             cancel.check()?;
-            let mut f = if is_db {
-                File::open(db.path().join(rel.rsplit('/').next().unwrap()))?
-            } else {
-                match home_root.open(&rel) {
-                    Ok(f) => f.into_std(),
-                    Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-                    Err(e) => return Err(e.into()),
-                }
+            let mut f = match home_root.open(&rel) {
+                Ok(f) => f.into_std(),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
             };
             let meta = f.metadata()?;
             if !meta.is_file() {
@@ -474,7 +365,7 @@ pub fn create(options: &Options, cancel: &Cancellation) -> Result<PathBuf> {
             if let Some(id) = manifest
                 .files
                 .last()
-                .and_then(|file| file.path.strip_prefix("jobs-rust/"))
+                .and_then(|file| file.path.strip_prefix("jobs/"))
                 .and_then(|name| name.strip_suffix(".json"))
                 .filter(|id| !id.contains('/'))
             {
@@ -678,7 +569,7 @@ pub fn restore(
     for record in &manifest.files {
         let Some(id) = record
             .path
-            .strip_prefix("jobs-rust/")
+            .strip_prefix("jobs/")
             .and_then(|name| name.strip_suffix(".json"))
             .filter(|id| !id.contains('/'))
         else {
@@ -694,11 +585,6 @@ pub fn restore(
         }
     }
     drop(stage_root);
-    if stage.path().join("tailnet/db.sqlite").exists() {
-        check_database(&stage.path().join("tailnet/db.sqlite"), cancel)?
-    } else if stage.path().join("tailnet/db.sqlite-wal").exists() {
-        return invalid("restored WAL has no database");
-    }
     cancel.check()?;
     empty_destination(home)?;
     #[cfg(windows)]
@@ -708,27 +594,6 @@ pub fn restore(
     fs::rename(stage.path(), home)?;
     let _ = stage.keep();
     Ok(manifest)
-}
-pub fn check_database(path: &Path, cancel: &Cancellation) -> Result<()> {
-    cancel.check()?;
-    let mut f = File::open(path)?;
-    let mut h = [0u8; 100];
-    f.read_exact(&mut h)?;
-    let size = f.metadata()?.len();
-    let page = u16::from_be_bytes([h[16], h[17]]);
-    let page = if page == 1 { 65536 } else { page as u64 };
-    if &h[..16] != b"SQLite format 3\0"
-        || !(512..=65536).contains(&page)
-        || !page.is_power_of_two()
-        || size < page
-        || size % page != 0
-        || ![1, 2].contains(&h[18])
-        || ![1, 2].contains(&h[19])
-        || h[21..24] != [64, 32, 32]
-    {
-        return invalid("invalid SQLite header or page alignment");
-    }
-    Ok(())
 }
 pub fn latest(dir: impl AsRef<Path>) -> Result<Option<(PathBuf, DateTime<Utc>)>> {
     let dir = dir.as_ref();

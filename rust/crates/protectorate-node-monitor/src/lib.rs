@@ -1,16 +1,16 @@
 //! Polls registered node agents and keeps the last successful metrics for hub
 //! status and lease admission. HTTP work never holds the status lock.
 use chrono::{DateTime, SecondsFormat, Utc};
-use protectorate_connect_client::{Client, TrustRoots};
+use protectorate_connect_client::{Client, NodeTls};
 use protectorate_inventory::{Inventory, Node};
 use protectorate_node_metrics::{Collector, Options};
+use protectorate_wire::{Code, RpcError};
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
-use zeroize::Zeroizing;
 
 const BUSY_VRAM_FRACTION: f64 = 0.5;
 const BUSY_UTIL: f64 = 60.0;
@@ -26,9 +26,6 @@ pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const AGENT_PORT: u16 = 7475;
 const POLL_CONCURRENCY: usize = 16;
 
-/// Resolve an inventory node to a transport endpoint. A tailnet resolver
-/// returns a loopback proxy only after matching the authenticated netmap.
-pub type NodeRoute = Arc<dyn Fn(&str, &str) -> Result<String, String> + Send + Sync>;
 pub type PollSink = Arc<dyn Fn(PollEvent) + Send + Sync>;
 #[derive(Clone, Debug)]
 pub struct PollEvent {
@@ -36,7 +33,54 @@ pub struct PollEvent {
     pub name: String,
     pub address: String,
 }
-pub const VIRTUAL_PREFIX: &str = "tailnet+";
+
+/// How the hub reaches node agents: mutual TLS, checking that the node shows
+/// the certificate the hub CA issued at its current join. A node without a
+/// certificate is reachable only as a plain loopback agent on this machine.
+#[derive(Default)]
+pub struct Dialer(Mutex<Option<NodeTls>>);
+
+impl Dialer {
+    pub fn set(&self, tls: NodeTls) {
+        *self.0.lock().unwrap() = Some(tls);
+    }
+
+    pub fn client(&self, node: &Node, timeout: Duration) -> Result<Client, RpcError> {
+        if node.address.is_empty() {
+            return Err(RpcError::new(
+                Code::FailedPrecondition,
+                format!("{} has not joined", node.name),
+            ));
+        }
+        let address = node
+            .address
+            .trim_start_matches("https://")
+            .trim_start_matches("http://");
+        let has_port = if address.starts_with('[') {
+            address.contains("]:")
+        } else {
+            address.contains(':')
+        };
+        let address = if has_port {
+            address.to_owned()
+        } else {
+            format!("{address}:{AGENT_PORT}")
+        };
+        if node.cert_id.is_empty() {
+            return Client::new_node("", &address, None, timeout);
+        }
+        let tls =
+            self.0.lock().unwrap().clone().ok_or_else(|| {
+                RpcError::new(Code::Unavailable, "the hub has no node certificate")
+            })?;
+        Client::new_node(
+            &protectorate_tls::node_name(&node.name, &node.cert_id),
+            &address,
+            Some(&tls),
+            timeout,
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Timing {
@@ -87,9 +131,7 @@ pub struct Monitor {
     inventory: Arc<Inventory>,
     local_name: String,
     local: Option<Collector>,
-    token: Mutex<Option<Zeroizing<String>>>,
-    trust: Mutex<Option<TrustRoots>>,
-    route: Mutex<Option<NodeRoute>>,
+    pub dialer: Dialer,
     events: Mutex<Option<PollSink>>,
     timing: Timing,
     state: Mutex<HashMap<String, State>>,
@@ -119,9 +161,7 @@ impl Monitor {
             inventory,
             local_name,
             local,
-            token: Mutex::new(None),
-            trust: Mutex::new(None),
-            route: Mutex::new(None),
+            dialer: Dialer::default(),
             events: Mutex::new(None),
             timing: Timing::default(),
             state: Mutex::new(HashMap::new()),
@@ -132,28 +172,6 @@ impl Monitor {
     pub fn with_timing(mut self, timing: Timing) -> Self {
         self.timing = timing;
         self
-    }
-
-    pub fn set_token(&self, token: String) -> Result<(), &'static str> {
-        if token.is_empty() || token.contains(['\r', '\n']) {
-            return Err("invalid node agent token");
-        }
-        *self.token.lock().unwrap() = Some(Zeroizing::new(token));
-        self.state
-            .lock()
-            .unwrap()
-            .retain(|name, _| name == &self.local_name);
-        Ok(())
-    }
-
-    pub fn set_trust(&self, trust: TrustRoots) {
-        *self.trust.lock().unwrap() = Some(trust);
-        self.state.lock().unwrap().clear();
-    }
-
-    pub fn set_route(&self, route: NodeRoute) {
-        *self.route.lock().unwrap() = Some(route);
-        self.state.lock().unwrap().clear();
     }
 
     pub fn set_event_sink(&self, sink: PollSink) {
@@ -210,35 +228,16 @@ impl Monitor {
     }
 
     fn poll_remote(&self, node: &Node) {
-        let result = (|| {
-            let route = self.route.lock().unwrap().clone();
-            let endpoint = match route {
-                Some(route) => route(&node.name, &node.address)?,
-                None => agent_url(&node.address)?,
-            };
-            let client = if let Some(endpoint) = endpoint.strip_prefix(VIRTUAL_PREFIX) {
-                Client::new_virtual(endpoint, self.timing.fetch_timeout)
-            } else {
-                let token = self
-                    .token
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .cloned()
-                    .ok_or_else(|| "node agent token is not configured".to_owned())?;
-                let trust = self.trust.lock().unwrap().clone();
-                Client::new_with_trust(
-                    &endpoint,
-                    token.to_string(),
-                    self.timing.fetch_timeout,
-                    trust.as_ref(),
-                )
-            }
-            .map_err(|error| error.to_string())?;
-            client
-                .call("/protectorate.v1.NodeAgentService/GetMetrics", &json!({}))
-                .map_err(|error| error.to_string())
-        })();
+        if node.address.is_empty() {
+            return;
+        }
+        let result = self
+            .dialer
+            .client(node, self.timing.fetch_timeout)
+            .and_then(|client| {
+                client.call("/protectorate.v1.NodeAgentService/GetMetrics", &json!({}))
+            })
+            .map_err(|error| error.to_string());
         if self
             .inventory
             .get(&node.name)
@@ -394,46 +393,6 @@ impl Monitor {
                     .is_some_and(|good| good.at.elapsed() <= self.timing.stale_after)
         })
     }
-}
-
-fn agent_url(address: &str) -> Result<String, String> {
-    let (scheme, authority) = if let Some(authority) = address.strip_prefix("https://") {
-        ("https", authority)
-    } else if let Some(authority) = address.strip_prefix("http://") {
-        ("http", authority)
-    } else {
-        let loopback = address == "127.0.0.1"
-            || address.starts_with("127.0.0.1:")
-            || address == "[::1]"
-            || address.starts_with("[::1]:");
-        if loopback {
-            ("http", address)
-        } else {
-            ("https", address)
-        }
-    };
-    let has_port = if authority.starts_with('[') {
-        authority.contains("]:")
-    } else {
-        authority.contains(':')
-    };
-    let authority = if has_port {
-        authority.to_owned()
-    } else {
-        format!("{authority}:{AGENT_PORT}")
-    };
-    if scheme == "http" {
-        let port = authority
-            .strip_prefix("127.0.0.1:")
-            .or_else(|| authority.strip_prefix("[::1]:"))
-            .ok_or_else(|| {
-                "node agent HTTP requires loopback; configure TLS for remote nodes".to_owned()
-            })?;
-        if port.parse::<u16>().ok().filter(|port| *port != 0).is_none() {
-            return Err("invalid node agent port".into());
-        }
-    }
-    Ok(format!("{scheme}://{authority}"))
 }
 
 fn age(later: SystemTime, earlier: SystemTime) -> Duration {
@@ -646,170 +605,4 @@ fn gpu_free_from_status(name: &str, gpu: Option<u32>, status: &Value) -> Result<
         "node {name} gpu {index} is busy: {reason}{}; freeing it is a person's call, ask: protectorate msg send orchestrator \"please free {name} gpu {index} for ...\" (or msg send owner)",
         holders(status)
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::time::{Duration, SystemTime};
-
-    fn gpu(
-        index: i32,
-        used: Option<u64>,
-        total: u64,
-        util: f64,
-        temp: f64,
-        integrated: bool,
-    ) -> Value {
-        let mut value = json!({
-            "index": index,
-            "memoryTotalBytes": total.to_string(),
-            "utilizationPercent": util,
-            "temperatureCelsius": temp,
-            "integrated": integrated,
-        });
-        if let Some(used) = used {
-            value["memoryUsedBytes"] = json!(used.to_string());
-        }
-        value
-    }
-
-    fn metrics(gpus: Vec<Value>) -> Value {
-        json!({"gpus": gpus})
-    }
-
-    fn hist(samples: &[(u64, Value)]) -> Vec<GpuSample> {
-        let origin = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        samples
-            .iter()
-            .map(|(offset, gpus)| GpuSample {
-                at: origin + Duration::from_secs(*offset),
-                gpus: gpu_points(gpus),
-            })
-            .collect()
-    }
-
-    fn now_of(hist: &[GpuSample], extra: u64) -> SystemTime {
-        hist.last().unwrap().at + Duration::from_secs(extra)
-    }
-
-    #[test]
-    fn agent_address_defaults_and_http_boundary() {
-        assert_eq!(agent_url("127.0.0.1").unwrap(), "http://127.0.0.1:7475");
-        assert_eq!(agent_url("[::1]").unwrap(), "http://[::1]:7475");
-        assert_eq!(agent_url("compute").unwrap(), "https://compute:7475");
-        assert_eq!(
-            agent_url("https://compute").unwrap(),
-            "https://compute:7475"
-        );
-        assert_eq!(agent_url("compute:7443").unwrap(), "https://compute:7443");
-        assert!(agent_url("http://compute:7475").is_err());
-        assert!(agent_url("http://127.0.0.1:7475.evil").is_err());
-    }
-
-    #[test]
-    fn vram_over_half_is_immediately_busy() {
-        let latest = metrics(vec![gpu(0, Some(501), 1000, 0.0, 30.0, false)]);
-        let samples = hist(&[(0, latest)]);
-        let busy = busy_gpus(&samples, now_of(&samples, 0));
-        assert_eq!(busy[0]["index"], 0);
-        assert_eq!(busy[0]["reason"], "50% of its VRAM is in use");
-        let half = metrics(vec![gpu(0, Some(500), 1000, 0.0, 30.0, false)]);
-        let samples = hist(&[(0, half)]);
-        assert!(busy_gpus(&samples, now_of(&samples, 0)).is_empty());
-    }
-
-    #[test]
-    fn sustained_util_and_temp_need_three_polls_spanning_two_minutes() {
-        let polls = [
-            (0, metrics(vec![gpu(1, None, 0, 60.0, 40.0, false)])),
-            (60, metrics(vec![gpu(1, None, 0, 70.0, 40.0, false)])),
-            (120, metrics(vec![gpu(1, None, 0, 80.0, 40.0, false)])),
-        ];
-        let window = hist(&polls);
-        let busy = busy_gpus(&window, now_of(&window, 0));
-        assert_eq!(busy[0]["reason"], "utilization at least 60% for 2m0s");
-
-        let short = hist(&polls[..2]);
-        assert!(busy_gpus(&short, now_of(&short, 0)).is_empty());
-
-        let hot = [
-            (0, metrics(vec![gpu(2, None, 0, 10.0, 75.0, false)])),
-            (60, metrics(vec![gpu(2, None, 0, 10.0, 80.0, false)])),
-            (120, metrics(vec![gpu(2, None, 0, 10.0, 90.0, false)])),
-        ];
-        let window = hist(&hot);
-        assert_eq!(
-            busy_gpus(&window, now_of(&window, 0))[0]["reason"],
-            "at 75C or more for 2m0s"
-        );
-    }
-
-    #[test]
-    fn history_drops_old_samples_and_caps_at_thirty_two() {
-        let origin = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let mut hist = Vec::new();
-        for i in 0..40 {
-            let at = origin + Duration::from_secs(i);
-            hist = add_gpu_sample(hist, at, &metrics(vec![gpu(0, None, 0, 0.0, 0.0, false)]));
-        }
-        assert_eq!(hist.len(), GPU_HISTORY);
-        hist = add_gpu_sample(
-            hist,
-            origin + Duration::from_secs(40 + BUSY_WINDOW.as_secs() + 1),
-            &metrics(vec![gpu(0, None, 0, 0.0, 0.0, false)]),
-        );
-        assert_eq!(hist.len(), 1);
-    }
-
-    #[test]
-    fn gpu_free_names_discrete_gpu_and_running_containers() {
-        let status = json!({
-            "busyGpus": [{"index": 0, "reason": "60% of its VRAM is in use"}],
-            "metrics": {
-                "gpus": [
-                    {"index": 0, "integrated": false},
-                    {"index": 1, "integrated": true}
-                ],
-                "engine": {"containers": [
-                    {"name": "ollama", "state": "running"},
-                    {"name": "stopped", "state": "exited"}
-                ]}
-            }
-        });
-        let err = gpu_free_from_status("box", None, &status).unwrap_err();
-        assert!(err.contains(
-            "node box gpu 0 is busy: 60% of its VRAM is in use (running containers: ollama)"
-        ));
-        assert!(err.contains("protectorate msg send orchestrator"));
-        let igpu = json!({
-            "busyGpus": [{"index": 1, "reason": "90% of its VRAM is in use"}],
-            "metrics": {"gpus": [
-                {"index": 0, "integrated": false},
-                {"index": 1, "integrated": true}
-            ]}
-        });
-        assert!(gpu_free_from_status("box", None, &igpu).is_ok());
-        assert!(gpu_free_from_status("box", Some(1), &igpu)
-            .unwrap_err()
-            .contains("gpu 1 is busy"));
-    }
-
-    #[test]
-    fn monitor_status_exposes_busy_gpus() {
-        let dir = tempfile::tempdir().unwrap();
-        let inventory = Arc::new(Inventory::open(dir.path().join("nodes.json"), "hub").unwrap());
-        let monitor = Monitor::new(inventory, "hub".into(), dir.path().to_path_buf());
-        monitor.record_success(
-            "hub",
-            "local",
-            metrics(vec![gpu(0, Some(600), 1000, 0.0, 30.0, false)]),
-        );
-        let status = monitor.status("hub", "local", false);
-        assert_eq!(status["freshness"], "NODE_FRESHNESS_FRESH");
-        assert_eq!(status["busyGpus"][0]["index"], 0);
-        assert_eq!(status["busyGpus"][0]["reason"], "60% of its VRAM is in use");
-        monitor.gpu_free("hub", "local", Some(0)).unwrap_err();
-    }
 }

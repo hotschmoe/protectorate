@@ -26,7 +26,7 @@ async fn serve(router: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
 async fn file_and_directory_round_trip_through_hub() {
     let root = tempfile::tempdir().unwrap();
     let files = root.path().join("node-files");
-    let node = Agent::new(Arc::new(Metrics), "node-secret")
+    let node = Agent::new(Arc::new(Metrics))
         .with_files(&files, false)
         .unwrap();
     let (node_url, node_task) = serve(node.router().unwrap()).await;
@@ -41,7 +41,6 @@ async fn file_and_directory_round_trip_through_hub() {
             false,
         )
         .unwrap();
-    let hub = hub.with_node_token("node-secret".into()).unwrap();
     let (hub_url, hub_task) = serve(hub.router().unwrap()).await;
 
     let source = root.path().join("source");

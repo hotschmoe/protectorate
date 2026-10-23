@@ -13,7 +13,7 @@ import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
 
-// The hub's rule for invite names: a tailnet machine name (DNS label).
+// The hub's rule for invite names: a DNS label.
 final _nameRe = RegExp(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$');
 
 String? nodeNameError(String name) {
@@ -102,7 +102,7 @@ class AddNodeDialog extends StatefulWidget {
 
   final HubClient client;
   final String initialName;
-  // reissue issues a new key for a pending node at once.
+  // reissue issues a new join code for a pending node at once.
   final bool reissue;
   final TargetPlatform? platform;
   final VoidCallback? onChanged;
@@ -206,7 +206,7 @@ class _AddNodeDialogState extends State<AddNodeDialog> {
     final ready = _progress?.stage == NodeSetupStage.NODE_SETUP_STAGE_READY;
     final phone = MediaQuery.sizeOf(context).width < phoneBreakpoint;
     return AlertDialog(
-      title: Text(widget.reissue ? 'Reissue key' : 'Add node'),
+      title: Text(widget.reissue ? 'Reissue code' : 'Add node'),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
@@ -279,7 +279,7 @@ class _AddNodeDialogState extends State<AddNodeDialog> {
       const BusyBar()
     else
       const NoteStrip(
-        'The hub issues a single-use key for this name, valid for one hour, and shows the line to paste on the new machine. Anyone with the line can enroll a machine until it is used.',
+        'The hub issues a single-use join code for this name, valid for one hour, and shows the line to paste on the new machine. The line checks the hub CA before it trusts the hub. Anyone with the line can join a machine until it is used.',
         tone: Tone.info,
       ),
   ];
@@ -294,7 +294,7 @@ class _AddNodeDialogState extends State<AddNodeDialog> {
         children: [
           Expanded(child: Text(inv.node.name, style: t.title())),
           Text(
-            'KEY UNTIL ${two(exp.hour)}:${two(exp.minute)}',
+            'CODE UNTIL ${two(exp.hour)}:${two(exp.minute)}',
             style: t.legend(),
           ),
         ],

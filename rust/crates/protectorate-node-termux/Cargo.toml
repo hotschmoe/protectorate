@@ -14,19 +14,14 @@ protectorate-fsutil = { path = "../protectorate-fsutil" }
 [target.'cfg(target_os = "android")'.dependencies]
 protectorate-node = { path = "../protectorate-node" }
 protectorate-node-metrics = { path = "../protectorate-node-metrics" }
-protectorate-tailnet = { path = "../protectorate-tailnet" }
-protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
-protectorate-tailnet-stream = { path = "../protectorate-tailnet-stream" }
-protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
-protectorate-tailnet-discovery = { path = "../protectorate-tailnet-discovery" }
 protectorate-wire = { path = "../protectorate-wire" }
+protectorate-tls = { path = "../protectorate-tls" }
+protectorate-connect-client = { path = "../protectorate-connect-client" }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "io-util", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
-rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ureq = "3"
+base64 = "0.22"
 libc = "0.2"
 
-[dev-dependencies]
-tempfile = "3"
