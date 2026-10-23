@@ -97,9 +97,9 @@ application-data paths (including `.ssh`, `.codex`, `.config`, `.cargo` and
 `.local/share` under the real home). Hub state and its ancestors are refused;
 within hub state only `workspaces/<sleeve-name>` and its descendants are allowed
 for an ordinary sleeve. Envoy has its own orchestrator workspace exception.
-The complete checks are `CheckWorkspace`/`CheckBind` in
-`internal/sleeve/plan.go` and the protected paths in `internal/sleeve/sleeve.go`.
-These checks do not scan arbitrary project files for embedded secrets.
+The checks live in `protectorate-hub/src/workspaces.rs` and the sandbox plan
+validation in `protectorate-sandbox`. They do not scan project files for
+embedded secrets.
 
 `protectorate sleeve workspaces` discovers immediate managed workspace
 directories and known sleeve workspaces, filtered by the sandbox checks. It
@@ -245,17 +245,15 @@ update: claude `anthropic`, codex `openai`, grok `xai`. pi reports the
 `rpc-commands.md#model-object`), and the `provider` of each assistant
 message; a message with a different provider than `get_state` drops the
 `baseUrl`, since pi's message carries no endpoint. The hub sets `local_model`
-when the base URL host is loopback, private (RFC1918, fc00::/7 including the
-tailnet ULA fd7a:115c:a1e0::/48), link-local, CGNAT (100.64.0.0/10, tailnet),
-a single-label name, `.local`, `.localhost` or `.ts.net`, or a host or name in
+when the base URL host is loopback, private (RFC1918, fc00::/7), link-local,
+CGNAT (100.64.0.0/10), a single-label name, `.local`, `.localhost` or
+`.ts.net`, or a host or name in
 the node inventory or in `hub serve --local-model-host` (repeatable). No base URL (a named hosted provider) is never local, so
 DeepSeek, GLM, Kimi and the like over API keys show no warning. Like the model
 name, both fields are empty until the first model call. Example: a pi provider `hotschmoe-local` with baseUrl
 `https://llm.hotschmoe.com/v1` is a public DNS name for the user's own server,
 so it is local only with `--local-model-host llm.hotschmoe.com`; a provider
 `hotschmoe` at `http://192.168.10.5:18080/v1` is local by its private address.
-A tailnet with a custom
-MagicDNS suffix other than `.ts.net` is only recognised by IP or inventory entry.
 
 ## Resleeve
 
@@ -273,8 +271,8 @@ anything. Decision record: `docs/memory-options.md`, sections 3 and 4.
    `failed_precondition` (the mailbox waits), then it waits for IDLE. A turn
    still running after `--wait` (default 5m), or at once with `--interrupt`,
    is interrupted; one that does not settle 30s later is closed under it.
-2. Facts, composed in code (`internal/handoff`): git status, `diff --stat
-   HEAD` and the last 10 commits (run in a read-only bwrap jail, since the
+2. Facts, composed in code (protectorate-handoff): git status, `diff --stat
+   HEAD` and the last 10 commits (run in a read-only sandbox helper, since the
    repository config is agent-written), the hub notes the sleeve wrote or
    tagged with its project, open ack-required messages, whether
    `.protectorate/NOTES.md` exists, and from the outgoing harness's own
@@ -294,7 +292,7 @@ anything. Decision record: `docs/memory-options.md`, sections 3 and 4.
    facts only. It runs while the outgoing turn winds down, on the facts known
    when the resleeve started; the file's facts are read after the turn ended.
 4. `<workspace>/.protectorate/HANDOFF.md` is overwritten (atomically, through
-   an `os.Root`, refusing a symlinked `.protectorate`), after `.protectorate/`
+   a directory handle, refusing a symlinked `.protectorate`), after `.protectorate/`
    is added to the repository's `info/exclude`; a copy goes to
    `<state dir>/handoffs/<name>/<time>-<from>-to-<to>.md`.
 5. The sleeve is stopped and spawned again on the new harness: same name,
@@ -378,30 +376,3 @@ order.
 Native auto-compaction is left at each harness's defaults; when one happens the
 log gets a Compaction event with `native=true`. Context and cache numbers come
 from per-call usage and are zero until the first call.
-
-## Verified live (2026-10-20, ms-r1, real logins via `protectorate login`)
-
-One chat sleeve per harness on a scratch git workspace, prompt "Read the file
-hello.txt in the current directory and reply with only its first word":
-
-| | Tool call seen | Answer | Context / window | Cache read on 2nd call | Manual compact |
-|---|---|---|---|---|---|
-| Claude | `Bash` head | banana | 23677 / 1000000 | 23554 | 23681 -> 1978 |
-| Codex | `commandExecution` | banana | 14372 / 475000 | 12288 | 14372 -> 8377 |
-| Grok | `read_file` | banana | 16594 / unknown | 16384 | unimplemented |
-| pi (hotschmoe-local / hotschmoe-dd) | `read` | banana | 1724 / 200000 | 1679 | "nothing to compact" (too small) |
-
-pi's thinking and answer arrive as separate events under one message id. Hub
-restart: drivers die with the hub (`--die-with-parent`, no orphans), and the
-next Send resumed Claude's native session after its compaction (it recalled
-the earlier answer; context 24468, consistent with the compacted history).
-
-Verified in the dogfood run (`docs/dogfood-2026-10-20.md`): a real Claude
-approval from a `--supervised` sleeve answered through `Respond`, and two
-resleeves (Claude to Codex while idle, Codex to Claude interrupting a turn),
-whose new harness read the handoff on its first turn.
-
-Not verified: Grok compaction over ACP, Claude cache expiry against the
-subscription TTL, approvals from Codex and Grok, reconnect mid-message from
-the app against a real stream, the local-model summary fallback with a real
-pi.

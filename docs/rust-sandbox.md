@@ -1,14 +1,13 @@
 # Rust sandbox runtime
 
-The Rust backend has a first small Linux launcher for Protectorate's workloads.
-The boundary is the selected workspace, private sleeve home, selected
-provider credentials, and explicitly granted references. The launcher will
-replace the `bwrap` invocation in sleeves and shared-node jobs. It does not
-need to reproduce `bwrap` arguments or Go's persisted launch format.
+`protectorate-sandbox` is the Linux launcher for sleeves, read-only helpers and
+shared-node jobs. The boundary is the selected workspace, private sleeve home,
+selected provider credentials, and explicitly granted references. It replaced
+the bwrap invocation of the Go hub; no bwrap is used.
 
 ## Evidence from this machine
 
-The 2026-10-20 [dogfood record](dogfood-2026-10-20.md) and the 2026-10-19
+The requirements below came from the Go hub's bwrap sandbox in use. The 2026-10-20 [dogfood record](dogfood-2026-10-20.md) and the 2026-10-19
 through 2026-10-22 sleeve chat logs under
 `~/.protectorate/sleeves/*/chat.jsonl` show the following constraints:
 
@@ -296,8 +295,8 @@ second file bind. A real-sandbox test runs `protectorate mcp --list` through
 the two actual binaries inside a terminal sleeve. A self-hosting sleeve may bind the CLI binary from its
 own writable checkout; the separate read-only bind does not make the checkout
 copy immutable. A live terminal test checks the mount, token access, hub
-restart, Kill revocation and background revocation after a natural exit. These
-must pass before the Go `bwrap` path can be retired. Owner-only Kill with
+restart, Kill revocation and background revocation after a natural exit.
+Owner-only Kill with
 `dropCaches` now removes named regenerable home caches and Rust overlay state
 through descriptor-anchored paths while retaining the workspace, transcripts
 and credentials.
@@ -332,8 +331,7 @@ excludes VCS state, lock files, checksum-server state and the owner's build
 cache. The default budget is 3 GiB and the hard limit is 8 GiB. A fresh
 sandboxed sleeve built a Go program offline with normal parallelism from a
 369 MB published snapshot; writes remained private. Terminal and chat sleeves
-now allow up to 4096 tasks, matching the previous Go default that the cold
-build needed.
+allow up to 4096 tasks, which the cold build needed.
 
 Both chat and terminal home preparation now seeds `.profile` before launch.
 The seed restores `PROTECTORATE_SLEEVE_PATH` after `/etc/profile` changes PATH

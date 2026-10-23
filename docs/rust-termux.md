@@ -1,8 +1,7 @@
 # Rust node on Termux
 
-The Android app remains outside the Rust rewrite. A Termux node is part of the
-fleet, so the node-only `protectorate-rs-termux` target provides `version --json`,
-`node join`, `node install`, `node doctor`, `node uninstall`, and `node serve`
+A Termux node is part of the fleet. The node-only `protectorate-rs-termux`
+target provides `version --json`, `node join`, `node install`, `node doctor`, `node uninstall`, and `node serve`
 without linking the Linux hub or its namespace sandbox. `node install` copies
 the binary to `$PREFIX/bin/protectorate-rs`, joins the hub, writes managed
 termux-services and Termux:Boot scripts, and tries
@@ -44,4 +43,4 @@ the node reports that capability as absent. Linux `/proc` metrics can be
 unavailable or restricted on Android and are reported as probe warnings.
 The cross-build checks compilation and linking; a real Termux device still
 needs join, mutual TLS reachability, job, service registration, and update
-rollback trials. Hub release asset selection for Android is tracked separately.
+rollback trials.

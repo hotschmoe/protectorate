@@ -83,4 +83,4 @@ For shared-node jobs, provision a separate local runner account once from an ele
 
 Without provisioning, the node reports no sandbox and rejects sandboxed jobs. Run provisioning from the user's interactive session; user-scoped DPAPI sealing fails from an elevated SSH session.
 
-The release workflow requires the Rust Linux amd64 and arm64 bundles, the native Windows backend, CLI and MCP bridge trio, the Termux arm64 node cross-build, and Flutter desktop and web builds before publishing. The Termux binary is published as `protectorate-rs-android-arm64` and joins and serves like the Linux node. The broader rewrite status is in [rust-migration.md](rust-migration.md).
+The release workflow requires the Rust Linux amd64 and arm64 bundles, the native Windows backend, CLI and MCP bridge trio, the Termux arm64 node cross-build, and Flutter desktop and web builds before publishing. The Termux binary is published as `protectorate-rs-android-arm64` and joins and serves like the Linux node ([rust-termux.md](rust-termux.md)).

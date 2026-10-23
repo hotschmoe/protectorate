@@ -5,7 +5,7 @@ This is a thinking document, not a spec. Started 2026-10-19.
 
 Status key: `[idea]` the user's proposed direction, `[decided]` settled in
 discussion, `[note]` discussion and suggestions, `[open]` unanswered questions
-for the interview.
+for the interview, `[done]` built (see ARCHITECTURE.md).
 
 ---
 
@@ -66,6 +66,9 @@ time and redeemable resets, so I can spend each allotment before it resets.
 - The local LLM has no quota. Its useful metrics are availability, current load
   and tokens/sec. It works as the "free" fallback tier.
 
+`[done]` `protectorate quota` and the app's QUOTA view read every provider
+(protectorate-quota); `quota suggest` ranks spare capacity.
+
 `[open]` Do the Codex banked resets match what you see, or do you also get them
 on Claude or Grok?
 
@@ -105,17 +108,23 @@ other machines. There's a list of machines with add and remove.
 
 `[decided]` Agents get admin on the other machines.
 
-`[open]` (revisit) Gate it so nothing accidental or malicious can come through
-the tunnel. Options to weigh later:
-- the node accepts commands only from the hub's identity (mutual TLS / pinned
-  key), never from arbitrary peers on the network,
-- a per-host policy: allowlisted commands run freely, everything else needs
-  approval (from the phone),
-- extra confirmation for destructive classes (rm, disk/partition, service
-  removal, user/credential changes),
-- short-lived credentials (SSH certs with a TTL) instead of standing keys,
-- an append-only audit log of every remote command, kept on a machine the
-  agent can't write to.
+`[done]` The hub holds every login; nodes run a small agent and take work as
+hub jobs, never SSH sessions from sleeves. Gates built so far:
+- a node accepts only the hub's client certificate from the hub CA (mutual
+  TLS); being on the network grants nothing,
+- `care` machines are never scheduled, and admin work anywhere needs a
+  short-lived, task-scoped `node_admin` grant,
+- agent calls that are destructive, mint admin grants or run admin jobs wait
+  for the owner's approval from the phone or CLI,
+- every remote command run under a grant is in a hash-chained audit log in
+  hub state, which sleeves cannot reach.
+
+`[open]` (revisit) Still to weigh:
+- a per-host allowlist of commands that run without approval,
+- extra confirmation for destructive command classes inside a job (rm,
+  disk/partition, service removal, user/credential changes),
+- short-lived SSH certificates for interactive needs,
+- keeping the audit head on a machine the hub user cannot write.
 
 ---
 
@@ -148,8 +157,8 @@ across real architectures.
 - Android as a target: Termux (native ARM64 Linux userland) or `adb` from a
   Linux node. Its role is probably "run tests", not "build host".
 
-`[done]` Job dispatch and leases are implemented: see "Leases and jobs" in
-ARCHITECTURE.md (`protectorate lease ...`, `protectorate job run|test-cross`).
+`[done]` Job dispatch and leases are implemented: see "Nodes, leases and jobs"
+in ARCHITECTURE.md (`protectorate lease ...`, `protectorate job run|test-cross`).
 
 `[decided]` The main goal is **using idle resources** (offloading build
 throughput). Cross-arch testing is a bonus.
@@ -205,6 +214,10 @@ companion app.
 - Useful extras: a compose box for longer prompts (type the whole message,
   then send it), plus voice input.
 
+`[done]` The Flutter app (desktop, Android, web) reaches the hub over the
+routers' WireGuard, with chat sleeves, xterm terminals on tmux, approvals and
+an Envoy-first phone layout.
+
 ---
 
 ## P5. One harness for everything?
@@ -235,7 +248,7 @@ Web research (2026-10-19, confidence in parentheses):
 So pi can legitimately run Codex, Grok and the local LLM on plan quota. Claude
 and Antigravity stay in their own harnesses.
 
-Leaning: **stay multi-harness.** It matches the ethos (each vendor tunes its own
+`[decided]` (2026-10-24) **Stay multi-harness.** It matches the ethos (each vendor tunes its own
 harness), keeps every subscription's included usage, and avoids ban risk. pi is
 the harness for the local LLM, and possibly for Codex/xAI if their terms
 allow. That puts the switching logic in *our* layer (which harness gets the next
@@ -283,11 +296,14 @@ reference for how others do it.
 backlog on the hub that covers all projects (including public repos we don't
 own)? A central backlog seems necessary for the "donate" case at least.
 
+`[done]` Central notes on the hub (`protectorate backlog`, the app's NOTES,
+docs/backlog.md). Quota-aware dispatch of notes is not built.
+
 ---
 
 ## P7. Architecture of the thing itself (revisiting the archive)
 
-**Problem/idea.** The earlier design (`archive/`) used containers per
+**Problem/idea.** The earlier design (`archive/`, now only in git history) used containers per
 workspace for isolation, shared persistent memory (cortical stack) and
 inter-sleeve messaging (needlecast). I still like it. Shared memory across
 harnesses is what makes switching harness by remaining quota possible,
@@ -309,31 +325,38 @@ Questions raised:
   namespaces solve, and containers give you that cheaply. MicroVMs
   (Firecracker, Cloud Hypervisor) mainly add a security boundary against
   hostile code, at the cost of more complexity, and aren't needed for your own
-  agents on your own repos. Lighter options exist (bubblewrap,
-  `systemd-run --scope` / `unshare --pid`). Rootless podman/docker is a good
-  middle ground.
+  agents on your own repos. Plain kernel namespaces in a `systemd-run --scope`
+  are lighter still.
 - **Elixir.** OTP supervision trees fit "many long-lived workers that crash and
   restart" well, but the BEAM runtime has to be on every node, which fights the
-  single-tiny-binary goal. Go or Rust static binaries cross-compile to all five
+  single-tiny-binary goal. Static native binaries cross-compile to all five
   targets (Android via Termux) from one machine.
 - **Language split.** Flutter is the only option that gives desktop + Android +
   web from one UI codebase with a mature mobile story. Rust-native UI (egui,
-  Dioxus, Tauri) is weaker on Android. My leaning is a Flutter UI plus a
-  Go-or-Rust engine, but this deserves its own conversation.
+  Dioxus, Tauri) is weaker on Android, so: a Flutter UI plus a native engine.
 - **Build vs fork.** Studying is cheap, and both are in `references/`. Forking
   takes on their stack (TypeScript/Node for t3code) and their assumptions. Given
   the "lightweight, ours" ethos, I lean toward building from scratch and
   borrowing ideas, but let's look at their internals first.
-- **Networking.** Tailscale is WireGuard plus a coordination server for keys
-  and NAT traversal. **Headscale** is an open-source, self-hosted coordination
-  server, so you get the convenience without the corporate dependency. Simplest
-  of all: nodes *dial out* to the hub over TLS (WebSocket/QUIC) on one of your
-  domains. No inbound ports on nodes, and it works behind any NAT.
+- **Networking.** Considered: Tailscale/Headscale, our own tunnel, nodes
+  dialing out to the hub over TLS.
 - **Messaging.** References: the archive's needlecast (markdown inbox/outbox),
   `mcp_agent_mail` (identities, inboxes, file-reservation leases; note the
   Python repo says it's superseded by `mcp_agent_mail_rust`), and Tincan
   (hosted rooms for cross-harness agent chat). An MCP server is the most
   harness-neutral way to give every CLI the same messaging tools.
+
+`[decided]` (2026-10-24, see docs/2026-10-24-rust-direction.md):
+1. Isolation: our own Linux namespace sandbox in a systemd scope, no
+   containers or microVMs.
+2. Language: Rust for hub, node, CLI and bridge; Flutter for every UI.
+3. Messaging: hub-native mailbox and coordination, exposed through the CLI
+   and MCP.
+4. Build our own, borrowing ideas.
+5. Networking: the routers own connectivity (site-to-site WireGuard, phones
+   as road warriors); protectorate binds private addresses and authenticates
+   with its own CA and mutual TLS. No overlay of our own.
+6. Node: one native binary per platform, installed as a user service.
 
 ---
 
@@ -347,9 +370,12 @@ agent's PID.
 aren't the final answer.
 
 `[note]` The minimum fix is a separate PID namespace per workspace, so an agent
-can't *see* other agents' processes. Containers do this. So do
-`unshare --pid --fork` and bubblewrap, if we want something lighter. Cgroups
-per workspace also give per-workspace CPU/RAM limits and accounting for free.
+can't *see* other agents' processes. Cgroups per workspace also give
+per-workspace CPU/RAM limits and accounting for free.
+
+`[done]` Every sleeve and shared-node job runs in its own user, mount, PID,
+IPC, UTS and network namespaces inside a systemd scope with CPU, memory and
+task limits (protectorate-sandbox).
 
 ---
 
@@ -372,7 +398,11 @@ and get results or build artifacts back.
 hundreds of GB of build caches and images, so a bird's-eye view of CPU, GPU,
 memory and disk for every node is how we spot that something is wrong.
 **Per-sleeve/container resource usage** is shown too, as the archived design
-did (`archive/internal/envoy/host_stats.go` and parallel Docker stats).
+did (host stats and parallel Docker stats).
+
+`[done]` Node metrics (CPU, GPUs, NPUs, memory, every filesystem, Docker disk,
+per-container and per-sleeve usage), leases with TTLs, busy-GPU placement and
+`sleeve prune` (inventory first, removal only with `--yes`).
 
 `[note]` What disk should break down into:
 - per filesystem: used/free, with alert thresholds,
@@ -411,8 +441,8 @@ audited, and the key is never written into the sleeve.
   UNKNOWN.
 - `[decided]` The app's "local model" warning keys on local serving, not on
   pi or the model name: DeepSeek via API is remote and strong. The hub sets
-  `ChatStatus.local_model` from the provider's base URL (loopback, private,
-  tailnet or inventory host); the app only reads that flag. Cards and badges
+  `ChatStatus.local_model` from the provider's base URL (loopback, private
+  or inventory host); the app only reads that flag. Cards and badges
   are coloured by `ChatStatus.provider` as well as harness.
 - `[decided]` Quota for API-key providers waits until more models are added;
   until then they report UNKNOWN.
@@ -429,8 +459,8 @@ need Windows, with Claude or Grok driving them. Today that is SSH to the
 Windows machine. Keep that, or build a tool into the single pane of glass?
 
 `[note]` Two separate questions:
-1. **Reaching the machine.** This is P2/P3: the hub holds the keys and the
-   tailnet reaches the node. Let the sleeve use plain `ssh` (its own tools),
+1. **Reaching the machine.** This is P2/P3: the hub holds the keys and reaches
+   the node over the routers' network. Let the sleeve use plain `ssh` (its own tools),
    but with a short-lived SSH certificate the hub signs for that sleeve and
    that node, valid for the length of a lease, instead of a long-lived private
    key inside the sleeve. Windows OpenSSH accepts user CAs
@@ -444,9 +474,8 @@ Windows machine. Keep that, or build a tool into the single pane of glass?
   on localhost and a Python package; ENERCALC's automation surface is
   unverified). Agents call it through `ssh` or `job run`. Repeatable and cheap.
 - **Files in, files out**: `node put` and `node get` move files and directories
-  (zstd only where it shrinks, size and sha256 checked, atomic, confined to the
-  node's file root); a batch/export runs as a job or over `ssh`. Also
-  deterministic.
+  (compressed only where it shrinks, size and sha256 checked, atomic, confined
+  to the node's file root); a batch/export runs as a job. Also deterministic.
 
 `[open]` Which ArchiCAD and ENERCALC workflows are first, and whether they can
 be done through APIs and files without the GUI.
@@ -475,16 +504,16 @@ The problems reduce to a handful of primitives:
 |  Workspaces   isolated (pid ns / container) + memory      P7 P8 |
 |  Backlog      low-priority work, quota-aware dispatch     P6    |
 +---------------------------------------------------------------+
-        |  dial-out tunnel (TLS / WireGuard / Headscale)
+        |  mutual TLS over the routers' WireGuard
         v
    node agents: win-x86, win-arm, linux-x86, linux-arm, android
 ```
 
-Possible order (each step useful on its own):
-1. Quota dashboard (P1)
-2. Node inventory + SSH keys, exposed to harnesses (P2)
-3. Session viewer, web first and phone-reachable (P4)
-4. Workspace isolation (P8)
-5. Node agent: metrics, then leases, then job dispatch (P3, P9)
-6. Quota-aware backlog dispatch (P6)
-7. Cross-harness memory and messaging (P7)
+Order (each step useful on its own):
+1. Quota dashboard (P1) - done
+2. Node inventory, exposed to harnesses (P2) - done, as hub jobs instead of SSH keys
+3. Session viewer, web first and phone-reachable (P4) - done
+4. Workspace isolation (P8) - done
+5. Node agent: metrics, then leases, then job dispatch (P3, P9) - done
+6. Quota-aware backlog dispatch (P6) - open: notes exist, dispatch does not
+7. Cross-harness memory and messaging (P7) - done: mailbox, resleeve handoff

@@ -82,21 +82,21 @@ Not deleted (not on any approved list): old Go binaries in ignored `bin/`, `arch
 | # | Decision | Rationale | Status |
 |---|---|---|---|
 | 1 | `rust-yolo` is Rust (backend) + Flutter (UI) only; no Go | Owner: "on the rust branch we want only rust (and flutter for ui)". `master` keeps the Go release history. | Done (`bc9b87a`) |
-| 2 | Tests are real-binary e2e and fuzz only; remove all unit tests (772 `#[test]`, library-level tests that are not end to end) and add fuzz targets with seed replay in `make test` | Owner rule (memory `tests-e2e-fuzz-only`); Rust tree had no fuzz targets | In progress (wip/tests) |
-| 3 | Minimal dependencies and fewer LOC everywhere; every agent trims as it goes | Owner's first stack preference | In progress (aws-lc removed; further plan in section 3.1) |
-| 4 | Shelve Windows desktop control: remove DeskService, `protectorate-desk-node`, `protectorate-desk-policy`, CLI `desk`, hub `desk_service.rs`, node wiring and Flutter screens | Owner: "we dont need windows desktop control right now so you can shelve that for pickup later". Drops 9 packages and about 1.8k lines. Pick up from tag `shelf/windows-desk`. | In progress (wip/desk) |
-| 5 | Remove the tailnet overlay: Headscale supervision, the hand-written WireGuard, userspace TCP, netmap, DERP and STUN (about 15k lines, 14 crates), TailnetService | Largest correctness and security liability (no WireGuard cookie/rate-limit defense, no NAT traversal, no congestion control, unaudited); owner's machines are already on LANs and a WireGuard VPN; owner proposed letting the routers own connectivity | In progress (wip/net) |
-| 6 | Hub and node identity by mutual TLS with a hub CA issued at pairing; bind only to private addresses; node token removed | Network location is not identity; existing opt-in TLS listener and private-CA trust already present | In progress (wip/net) |
+| 2 | Tests are real-binary e2e and fuzz only; remove all unit tests (772 `#[test]`, library-level tests that are not end to end) and add fuzz targets with seed replay in `make test` | Owner rule (memory `tests-e2e-fuzz-only`); Rust tree had no fuzz targets | Done (`d824dbc`, `1c8eaa5`, `b8d2e67`) |
+| 3 | Minimal dependencies and fewer LOC everywhere; every agent trims as it goes | Owner's first stack preference | Partly done: aws-lc, fs2, zstd, rustls-pemfile, native roots removed (`5a1fa24`, `bd3c69c`); toml, glob, the CLI tungstenite client and base64 alignment remain |
+| 4 | Shelve Windows desktop control: remove DeskService, `protectorate-desk-node`, `protectorate-desk-policy`, CLI `desk`, hub `desk_service.rs`, node wiring and Flutter screens | Owner: "we dont need windows desktop control right now so you can shelve that for pickup later". Drops 9 packages and about 1.8k lines. Pick up from tag `shelf/windows-desk`. | Done (`b9de260`) |
+| 5 | Remove the tailnet overlay: Headscale supervision, the hand-written WireGuard, userspace TCP, netmap, DERP and STUN (about 15k lines, 14 crates), TailnetService | Largest correctness and security liability (no WireGuard cookie/rate-limit defense, no NAT traversal, no congestion control, unaudited); owner's machines are already on LANs and a WireGuard VPN; owner proposed letting the routers own connectivity | Done (`a2d1588`) |
+| 6 | Hub and node identity by mutual TLS with a hub CA issued at pairing; bind only to private addresses; node token removed | Network location is not identity; existing opt-in TLS listener and private-CA trust already present | Done (`a2d1588`) |
 | 7 | Keep hub-dials-node for now; node-initiated connections (nodes never listen) recorded as a future attack-surface cut | Smallest change to the existing node-client architecture | Decided (deferred option) |
-| 8 | Auth: no OIDC. Device-bound keys (Android Keystore, non-extractable WebCrypto) registered in the existing device flow, short-lived (about 15 min) access tokens with DPoP-style request proofs, drop `?token=` WebSocket fallback. Sleeve and Envoy capability tokens (hand-rolled HMAC macaroons preferred over biscuit-auth for deps) with about 1 h expiry, attenuation only. Owner passkey (WebAuthn) optional and last. Break-glass `token` file stays local to the hub host. | OIDC solves many users and apps; one owner, no WAN. Real hole is permanent, copyable bearer tokens. | Decided; wave 2 |
+| 8 | Auth: no OIDC. Device-bound keys (Android Keystore, non-extractable WebCrypto) registered in the existing device flow, short-lived (about 15 min) access tokens with DPoP-style request proofs, drop `?token=` WebSocket fallback. Sleeve and Envoy capability tokens (hand-rolled HMAC macaroons preferred over biscuit-auth for deps) with about 1 h expiry, attenuation only. Owner passkey (WebAuthn) optional and last. Break-glass `token` file stays local to the hub host. | OIDC solves many users and apps; one owner, no WAN. Real hole is permanent, copyable bearer tokens. | Done (`8831b9f`) except passkeys; Android Keystore and browser key paths unverified on real devices |
 | 9 | Headscale ACL lockdown | Moot once the overlay is removed; the proposed policy is kept below for the record. Equivalent lockdown moves to the router firewall (section 4). | Superseded by 5 |
-| 10 | Adopt from agentbaseline: per-sleeve egress allowlist (own network namespace, default deny, metadata and private ranges blocked except the hub), hash-chained audit with one `run_id` across sleeve/job/mail/lease, delegation subset check (child scopes subset of minter), phone approval gates for irreversible actions (pushes to protected branches, merges, admin grants), hash pinning of harness binaries, MCP allowlists and profiles with alerts on change, enforced per-task quota budgets, effective-access view with toxic-combination lint | Closes the largest gaps against the reference architecture | Decided; wave 2 |
+| 10 | Adopt from agentbaseline: per-sleeve egress allowlist (own network namespace, default deny, metadata and private ranges blocked except the hub), hash-chained audit with one `run_id` across sleeve/job/mail/lease, delegation subset check (child scopes subset of minter), phone approval gates for irreversible actions (pushes to protected branches, merges, admin grants), hash pinning of harness binaries, MCP allowlists and profiles with alerts on change, enforced per-task quota budgets, effective-access view with toxic-combination lint | Closes the largest gaps against the reference architecture | Done (`1955db2`, `d45cc42`, `8831b9f`) except the effective-access view and toxic-combination lint, and alerts on MCP profile change beyond the pin hash |
 | 11 | Skip from agentbaseline: microVM tier, SBOM/provenance machinery, compliance retention and legal hold, risk classes and exception owners, LLM monitoring agents, step-up beyond owner-only RPCs, non-agent fallback programs | Enterprise overkill for a single-owner private deployment | Decided |
-| 12 | layerfs: no dependency. Port the idea: git-tree checkpoints per turn or resleeve under hidden refs (rollback, "what did the agent change"), overlay uppers as change reports, real per-sleeve disk quotas | 242k lines, FUSE, no crash durability, single squashed commit; kernel overlayfs already used | Decided; pi-durable compared (section 5): build our own git-tree checkpoints |
+| 12 | layerfs: no dependency. Port the idea: git-tree checkpoints per turn or resleeve under hidden refs (rollback, "what did the agent change"), overlay uppers as change reports, real per-sleeve disk quotas | 242k lines, FUSE, no crash durability, single squashed commit; kernel overlayfs already used | Checkpoints and disk limits done (`1955db2`); overlay uppers as change reports not built |
 | 13 | herdr: inspiration only (see list below) | Not a library; would add a second server, Zig toolchain, about 330k lines | Decided |
-| 14 | Cloudflare post lessons: per-session first-turn cache-read ratio telemetry (Claude driver already parses cache fields), never put volatile data (timestamps, node names, lease ids) early in what we send a harness, cache-weighted quota math (writes 1.25x, reads 0.1x), track calls per job, confirm cancellation kills the process tree, classify timeouts separately from provider failures | Only the hosted-harness lessons apply; local inference out of scope | Decided; wave 2 |
+| 14 | Cloudflare post lessons: per-session first-turn cache-read ratio telemetry (Claude driver already parses cache fields), never put volatile data (timestamps, node names, lease ids) early in what we send a harness, cache-weighted quota math (writes 1.25x, reads 0.1x), track calls per job, confirm cancellation kills the process tree, classify timeouts separately from provider failures | Only the hosted-harness lessons apply; local inference out of scope | Done (`34a991a`, `d45cc42`) except calls-per-job tracking |
 | 15 | Verus vs Bend: Bend rejected (irrelevant to an I/O-bound orchestrator). Verus deferred for "a long look" later; its best target (WireGuard replay window) disappears with the overlay. First: fuzz targets, Kani on arithmetic kernels, loom on the lease table | Assurance per hour | Bend: decided. Verus: deferred |
-| 16 | Live Go hub cutover: fresh start. Every node and device re-pairs anyway under the new identity model, so no Go state importer. Remove `--adopt-go-unit` / `--rollback-go-unit` and the `-rust` state file suffixes. `notes.json`, `leases.json`, `directory.json`, `mailbox.jsonl` are file-compatible and can be copied by hand if wanted. | No compat shims rule; identity change forces re-pairing | Decided |
+| 16 | Live Go hub cutover: fresh start. Every node and device re-pairs anyway under the new identity model, so no Go state importer. Remove `--adopt-go-unit` / `--rollback-go-unit` and the `-rust` state file suffixes. `notes.json`, `leases.json`, `directory.json`, `mailbox.jsonl` are file-compatible and can be copied by hand if wanted. | No compat shims rule; identity change forces re-pairing | Done: no importer, no `-rust` suffixes or Go unit flags; `tokens.json` dropped from backups (`ad29e75`) |
 | 17 | Router-owned connectivity: site-to-site WireGuard between home and office UDMs, phone as road-warrior to office (section 4) | Smallest WAN surface, no VPN clients on family/care machines | Decided in principle; UniFi specifics open |
 
 ### herdr: ideas to steal and not to copy
@@ -227,6 +227,70 @@ Wave 2 (after wave 1 merges):
 | Observability | First-turn cache-read telemetry; herdr-style detection manifests; sequence-numbered reports. |
 | Dependencies | toml, fs2, glob, tungstenite client, base64 alignment. |
 | Docs | Rewrite ARCHITECTURE.md, README, DEV.md and docs/ for Rust-only and this design; retire Go-era docs. |
+
+## 7. Status at end of session
+
+Implemented on `rust-yolo` (`git log --merges --first-parent --oneline master..rust-yolo`):
+
+| Commit | Branch | What |
+|---|---|---|
+| `b9de260` | wip/desk | Windows desktop control shelved (tag `shelf/windows-desk`) |
+| `d824dbc` | wip/tests | Unit tests removed; e2e and fuzz only, seed replay in `make test` |
+| `1955db2` | wip/sandbox | Per-sleeve egress allowlist proxy, private git checkpoints, disk limits |
+| `a2d1588` | wip/net | Tailnet overlay removed; hub CA, mutual TLS, private-address listeners, node token gone |
+| `bd3c69c` | wip/deps | fs2, native roots, zstd, rustls-pemfile dropped; mailbox log on serde |
+| `e7fec55` | wip/windows | Update guardian over mutual TLS; Windows CI lane runs the node, CLI and bridge suites |
+| `34a991a` | wip/obs | Prompt-cache telemetry, terminal status detection, sequenced reports, failure classes |
+| `d45cc42` | wip/gov | Hash-chained audit, run ids, owner approvals, harness pinning, token budgets |
+| `8831b9f` | wip/auth | Device-signed requests, loopback-only owner token, HMAC capability tokens |
+| `1c8eaa5` | wip/coverage | E2e scenarios for leases, nodes, mail, audit, CLI chat, releases, backups, wire, MCP HTTP; four bugs fixed |
+| `b8d2e67` | wip/flaky | Real-binary tests deterministic under load; three product races fixed |
+
+Direct commits: `9033df6` removed `archive/`; `814a840` cleared Windows-only
+warnings; `8f3ed2b` keeps a resleeved sleeve within its original spawner's
+scopes (test `b87d16e`). The documentation pass (wip/docs) rewrote
+ARCHITECTURE, PROBLEMS, README, DEV and the guides for this design.
+
+Numbers at `b8d2e67`:
+
+| Measure | Start of session | End |
+|---|---|---|
+| Rust lines (`find rust -name '*.rs' \| xargs cat \| wc -l`) | about 152k | 107,402 (25,687 of them in `tests/`) |
+| Crates | 55 | 40 |
+| Cargo.lock packages | 301 (about 246 external) | 232 (192 external) |
+| Tests | 1003 passed, 1 failed, 20 ignored, 772 unit tests | 220 passed, 0 failed, 6 ignored (`cargo test --locked --workspace --no-fail-fast` after `flutter pub get` in `app/`); 101 test files, 24 fuzz targets |
+| Proto | 103 RPCs | 100 RPCs in 19 services |
+
+Open items:
+
+- Android Keystore and browser (WebCrypto) device-key paths are unverified on
+  real devices.
+- A real Windows hub-to-node join is not automated: the Windows Firewall
+  prompt on the node's listener needs a person.
+- Codex updated itself from 0.163 to 0.164 during a pane capture; harness
+  pinning flags such a change, but self-updating harnesses remain a source of
+  drift.
+- The device-proof replay cache is in memory, so a hub restart forgets seen
+  nonces (proofs still expire after 60 seconds).
+- The MCP bridge's HTTP and HTTPS modes accept only the bearer the bridge read
+  at startup, while it renews its own token file.
+- Owner approval pending for deleting stale Go-era files:
+  `docs/e2e-coverage-map.md`, `docs/footprint.md`, `docs/footprint-tags.csv`,
+  `docs/testing-deletions.md`, `scripts/test-inventory.py`,
+  `scripts/e2e-screens.sh`; and for `cargo clean` of the main checkout.
+- The live Go hub on this machine is still running; it is to be replaced by a
+  fresh Rust install (decision 16).
+- The Rust-versus-Go architecture discussion is still to come.
+- Verus deferred (decision 15).
+- Found during the docs pass: the MCP bridge's `--https` binds any address
+  (the private-address rule is not applied there); `node invite --pool` only
+  writes `pool-<name>` inventory tags that nothing reads; no crate uses
+  `protectorate-sleeve-layout`, so sleeves get no seeded `.gitconfig`
+  identity; the Go hub's CPU-derived build concurrency defaults
+  (`GOMAXPROCS`, `GOFLAGS=-p`, `FLUTTER_TEST_CONCURRENCY`) were not ported;
+  Windows nodes report no admin jobs; local-model detection still treats
+  `.ts.net` names as local; a few crate doc comments still say "port of
+  internal/..." or compare with Go.
 
 ## Appendix A: research reports (full text)
 
