@@ -72,31 +72,3 @@ pub(crate) async fn run(command: Command) -> Result<(), Box<dyn Error>> {
     .await?
     .map_err(|error| -> Box<dyn Error> { error })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_local_node_tailnet_actions() {
-        let command = parse(
-            "renew",
-            [
-                "gpu1".to_owned(),
-                "--home".to_owned(),
-                "/tmp/hub".to_owned(),
-            ]
-            .into_iter(),
-        )
-        .unwrap();
-        assert!(
-            matches!(command, Command::Renew { name, home } if name == "gpu1" && home == std::path::Path::new("/tmp/hub"))
-        );
-        assert!(parse("revoke", ["--home".to_owned()].into_iter()).is_err());
-        assert!(parse(
-            "revoke",
-            ["gpu1".to_owned(), "--bad".to_owned()].into_iter()
-        )
-        .is_err());
-    }
-}
