@@ -2050,10 +2050,12 @@ class TurnSettled extends $pb.GeneratedMessage {
   factory TurnSettled({
     $core.String? stopReason,
     TokenCounts? usage,
+    TurnEnd? end,
   }) {
     final result = TurnSettled._();
     if (stopReason != null) result.stopReason = stopReason;
     if (usage != null) result.usage = usage;
+    if (end != null) result.end = end;
     return result;
   }
 
@@ -2074,6 +2076,7 @@ class TurnSettled extends $pb.GeneratedMessage {
     ..aOS(1, _omitFieldNames ? '' : 'stopReason')
     ..aOM<TokenCounts>(2, _omitFieldNames ? '' : 'usage',
         subBuilder: TokenCounts.$_createMessage)
+    ..aE<TurnEnd>(3, _omitFieldNames ? '' : 'end', enumValues: TurnEnd.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2118,6 +2121,15 @@ class TurnSettled extends $pb.GeneratedMessage {
   void clearUsage() => $_clearField(2);
   @$pb.TagNumber(2)
   TokenCounts ensureUsage() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  TurnEnd get end => $_getN(2);
+  @$pb.TagNumber(3)
+  set end(TurnEnd value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasEnd() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearEnd() => $_clearField(3);
 }
 
 class Compaction extends $pb.GeneratedMessage {
@@ -2208,9 +2220,11 @@ class Compaction extends $pb.GeneratedMessage {
 class ChatError extends $pb.GeneratedMessage {
   factory ChatError({
     $core.String? text,
+    ChatErrorKind? kind,
   }) {
     final result = ChatError._();
     if (text != null) result.text = text;
+    if (kind != null) result.kind = kind;
     return result;
   }
 
@@ -2229,6 +2243,8 @@ class ChatError extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ChatError.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'text')
+    ..aE<ChatErrorKind>(2, _omitFieldNames ? '' : 'kind',
+        enumValues: ChatErrorKind.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2259,6 +2275,15 @@ class ChatError extends $pb.GeneratedMessage {
   $core.bool hasText() => $_has(0);
   @$pb.TagNumber(1)
   void clearText() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  ChatErrorKind get kind => $_getN(1);
+  @$pb.TagNumber(2)
+  set kind(ChatErrorKind value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasKind() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearKind() => $_clearField(2);
 }
 
 class StateChange extends $pb.GeneratedMessage {

@@ -255,6 +255,16 @@ message TurnSettled {
   string stop_reason = 1;
   // usage sums the turn's model calls; absent when the harness reported none.
   TokenCounts usage = 2;
+  TurnEnd end = 3;
+}
+
+enum TurnEnd {
+  TURN_END_UNSPECIFIED = 0;
+  TURN_END_COMPLETED = 1;
+  // CANCELED: an interrupt was requested during the turn.
+  TURN_END_CANCELED = 2;
+  // ERROR: the harness or its provider reported a failure during the turn.
+  TURN_END_ERROR = 3;
 }
 
 message Compaction {
@@ -266,6 +276,18 @@ message Compaction {
 
 message ChatError {
   string text = 1;
+  ChatErrorKind kind = 2;
+}
+
+enum ChatErrorKind {
+  // UNSPECIFIED: the harness or its provider reported the error.
+  CHAT_ERROR_KIND_UNSPECIFIED = 0;
+  // EXITED: the harness process ended without a signal, or because the hub
+  // stopped it.
+  CHAT_ERROR_KIND_EXITED = 1;
+  // KILLED: a signal nobody on the hub asked for ended the harness process,
+  // which is how a resource limit or the kernel's OOM killer stops it.
+  CHAT_ERROR_KIND_KILLED = 2;
 }
 
 message StateChange {

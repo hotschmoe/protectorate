@@ -1,4 +1,5 @@
-//! Prompt-cache telemetry derived from the usage events a log carries.
+//! Per-turn facts derived from the events a log carries: token usage and
+//! prompt-cache telemetry, and how a turn ended.
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Default)]
@@ -59,15 +60,23 @@ pub(crate) struct Telemetry {
     turn: Counts,
     first: Option<Counts>,
     resumed: bool,
+    interrupted: bool,
+    errored: bool,
 }
 
 impl Telemetry {
+    pub(crate) fn interrupt(&mut self) {
+        self.interrupted = true;
+    }
+
     pub(crate) fn begin_run(&mut self) {
         self.first = None;
         self.resumed = self.total.calls > 0;
     }
 
-    /// Folds one event in. A settled turn is annotated with its totals.
+    /// Folds one event in. A settled turn is annotated with its totals and
+    /// how it ended: canceled when an interrupt was requested, else an error
+    /// when the harness reported one during the turn, else completed.
     pub(crate) fn observe(&mut self, payload: &mut Value) {
         if payload.get("usage").is_some() {
             let call = Counts::of(&payload["usage"]);
@@ -76,6 +85,10 @@ impl Telemetry {
             self.first.get_or_insert(call);
         } else if payload.get("user").is_some() {
             self.turn = Counts::default();
+            self.interrupted = false;
+            self.errored = false;
+        } else if payload.get("error").is_some() {
+            self.errored = true;
         } else if payload.get("handoff").is_some() {
             self.first = None;
             self.resumed = false;
@@ -83,7 +96,17 @@ impl Telemetry {
             if self.turn.calls > 0 {
                 settled.insert("usage".into(), self.turn.json());
             }
+            let end = if self.interrupted {
+                "TURN_END_CANCELED"
+            } else if self.errored {
+                "TURN_END_ERROR"
+            } else {
+                "TURN_END_COMPLETED"
+            };
+            settled.insert("end".into(), json!(end));
             self.turn = Counts::default();
+            self.interrupted = false;
+            self.errored = false;
         }
     }
 

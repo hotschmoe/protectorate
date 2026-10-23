@@ -825,15 +825,9 @@ impl Jobs {
         }
         match result.1 {
             Ok(status) => {
-                self.finish_with_artifacts(
-                    spec,
-                    &workdir,
-                    run,
-                    result.0,
-                    status.code().unwrap_or(-1),
-                    "",
-                )
-                .await
+                let (end, code, error) = exit_outcome(result.0, &status);
+                self.finish_with_artifacts(spec, &workdir, run, end, code, &error)
+                    .await
             }
             Err(e) => {
                 #[cfg(windows)]
@@ -1151,15 +1145,9 @@ impl Jobs {
         }
         match result {
             Ok(Ok(status)) => {
-                self.finish_with_artifacts(
-                    spec,
-                    &workdir,
-                    run,
-                    end,
-                    status.code().unwrap_or(-1),
-                    "",
-                )
-                .await;
+                let (end, code, error) = exit_outcome(end, &status);
+                self.finish_with_artifacts(spec, &workdir, run, end, code, &error)
+                    .await;
             }
             Ok(Err(e)) => run.finish("JOB_END_ERROR", -1, &e.to_string()).await,
             Err(e) => run.finish("JOB_END_ERROR", -1, &e.to_string()).await,
@@ -1175,7 +1163,10 @@ impl Jobs {
         error: &str,
     ) {
         let mut result_error = error.to_string();
-        if matches!(end, "JOB_END_EXITED" | "JOB_END_TIMED_OUT") && !spec.artifact_globs.is_empty()
+        if matches!(
+            end,
+            "JOB_END_EXITED" | "JOB_END_TIMED_OUT" | "JOB_END_KILLED"
+        ) && !spec.artifact_globs.is_empty()
         {
             let _retention_guard = self.artifact_lock.lock().await;
             let root = self.root.clone();
@@ -1477,6 +1468,28 @@ fn internal(e: serde_json::Error) -> RpcError {
     RpcError::new(Code::Internal, e.to_string())
 }
 #[cfg(not(windows))]
+/// How a command that the node did not stop itself ended: a signal nobody on
+/// the node sent is a kill (a resource limit or the OOM killer).
+fn exit_outcome(
+    end: &'static str,
+    status: &std::process::ExitStatus,
+) -> (&'static str, i32, String) {
+    // The sandbox helper reports a signal that ends its workload as status 137.
+    let signal = if end == "JOB_END_EXITED" {
+        #[cfg(unix)]
+        let signal = std::os::unix::process::ExitStatusExt::signal(status);
+        #[cfg(not(unix))]
+        let signal = None;
+        signal.or_else(|| (status.code() == Some(137)).then_some(9))
+    } else {
+        None
+    };
+    if let Some(signal) = signal {
+        return ("JOB_END_KILLED", -1, format!("killed by signal {signal}"));
+    }
+    (end, status.code().unwrap_or(-1), String::new())
+}
+
 fn kill_group(pid: u32) {
     #[cfg(unix)]
     if pid > 0 {

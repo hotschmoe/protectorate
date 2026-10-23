@@ -225,6 +225,7 @@ pub enum JobState {
     Failed,
     Canceled,
     TimedOut,
+    Killed,
 }
 
 impl JobState {
@@ -237,6 +238,7 @@ impl JobState {
             Self::Failed => "failed",
             Self::Canceled => "canceled",
             Self::TimedOut => "timed-out",
+            Self::Killed => "killed",
         }
     }
 
@@ -249,6 +251,7 @@ impl JobState {
             Self::Failed => "JOB_STATE_FAILED",
             Self::Canceled => "JOB_STATE_CANCELED",
             Self::TimedOut => "JOB_STATE_TIMED_OUT",
+            Self::Killed => "JOB_STATE_KILLED",
         }
     }
 
@@ -260,6 +263,7 @@ impl JobState {
             "failed" => Some(Self::Failed),
             "canceled" => Some(Self::Canceled),
             "timed-out" => Some(Self::TimedOut),
+            "killed" => Some(Self::Killed),
             _ => None,
         }
     }
@@ -272,6 +276,7 @@ impl JobState {
             Self::Failed,
             Self::Canceled,
             Self::TimedOut,
+            Self::Killed,
         ]
         .map(|state| state.as_str())
         .join("|")
@@ -941,7 +946,7 @@ fn usage() -> &'static str {
      lease acquire             reserve a node or matching selector (--node, --os, --arch, --min-free-mem, --gpu-vram, --gpu, --npu, --holder, --ttl, --wait, --priority)\n  \
      lease renew <id>           claim or extend a lease (--ttl DURATION)\n  \
      lease release <id>...      free leases or withdraw queued tickets\n  \
-     job ls | job list          jobs, newest first (--state preparing|running|succeeded|failed|canceled|timed-out, --limit N)\n  \
+     job ls | job list          jobs, newest first (--state preparing|running|succeeded|failed|canceled|timed-out|killed, --limit N)\n  \
      job show <id>              one job record\n  \
      job cancel <id>            stop a job and its process tree\n  \
      job run --on <target> -- <cmd...>\n                             \

@@ -85,9 +85,7 @@ impl Session {
         thread::spawn(move || {
             let result = child.wait();
             let _gate = waiter.event_gate.lock().unwrap();
-            let _ = waiter.log.append(Event::new(
-                json!({"error":{"text":format!("claude exited: {result:?}")}}),
-            ));
+            let _ = waiter.log.append_exit("claude", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
@@ -120,6 +118,7 @@ impl Session {
         !s.exited && !s.busy && !s.compacting && s.approvals.is_empty()
     }
     pub fn stop(&self) {
+        self.log.note_stop();
         self.kill.kill();
     }
     pub fn wait_exited(&self, timeout: Duration) -> bool {
@@ -169,6 +168,7 @@ impl Session {
         if s.exited || !s.busy {
             return Ok(());
         }
+        self.log.note_interrupt();
         s.next_control += 1;
         self.write(
             &json!({"type":"control_request","request_id":format!("int-{}",s.next_control),

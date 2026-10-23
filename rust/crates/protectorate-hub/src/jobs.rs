@@ -1502,6 +1502,7 @@ impl Jobs {
                 "JOB_END_EXITED" | "JOB_END_ERROR" => "JOB_STATE_FAILED",
                 "JOB_END_TIMED_OUT" => "JOB_STATE_TIMED_OUT",
                 "JOB_END_CANCELED" => "JOB_STATE_CANCELED",
+                "JOB_END_KILLED" => "JOB_STATE_KILLED",
                 _ => "JOB_STATE_FAILED",
             });
             s.job["exitCode"] = json!(code);
@@ -1806,6 +1807,7 @@ fn terminal(job: &Value) -> bool {
                 | "JOB_STATE_FAILED"
                 | "JOB_STATE_CANCELED"
                 | "JOB_STATE_TIMED_OUT"
+                | "JOB_STATE_KILLED"
         )
     )
 }

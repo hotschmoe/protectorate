@@ -70,6 +70,12 @@ class JobState extends $pb.ProtobufEnum {
   static const JobState JOB_STATE_TIMED_OUT =
       JobState._(6, _omitEnumNames ? '' : 'JOB_STATE_TIMED_OUT');
 
+  /// JOB_STATE_KILLED: the command was ended by a signal the node did not send,
+  /// which is how a resource limit or the kernel's OOM killer stops it. The
+  /// error names the signal.
+  static const JobState JOB_STATE_KILLED =
+      JobState._(7, _omitEnumNames ? '' : 'JOB_STATE_KILLED');
+
   static const $core.List<JobState> values = <JobState>[
     JOB_STATE_UNSPECIFIED,
     JOB_STATE_PREPARING,
@@ -78,10 +84,11 @@ class JobState extends $pb.ProtobufEnum {
     JOB_STATE_FAILED,
     JOB_STATE_CANCELED,
     JOB_STATE_TIMED_OUT,
+    JOB_STATE_KILLED,
   ];
 
   static final $core.List<JobState?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 6);
+      $pb.ProtobufEnum.$_initByValueList(values, 7);
   static JobState? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 
@@ -102,16 +109,21 @@ class JobEnd extends $pb.ProtobufEnum {
   static const JobEnd JOB_END_ERROR =
       JobEnd._(4, _omitEnumNames ? '' : 'JOB_END_ERROR');
 
+  /// JOB_END_KILLED: see JOB_STATE_KILLED.
+  static const JobEnd JOB_END_KILLED =
+      JobEnd._(5, _omitEnumNames ? '' : 'JOB_END_KILLED');
+
   static const $core.List<JobEnd> values = <JobEnd>[
     JOB_END_UNSPECIFIED,
     JOB_END_EXITED,
     JOB_END_TIMED_OUT,
     JOB_END_CANCELED,
     JOB_END_ERROR,
+    JOB_END_KILLED,
   ];
 
   static final $core.List<JobEnd?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 4);
+      $pb.ProtobufEnum.$_initByValueList(values, 5);
   static JobEnd? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

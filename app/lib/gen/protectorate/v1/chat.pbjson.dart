@@ -56,6 +56,37 @@ final $typed_data.Uint8List chatStateDescriptor = $convert.base64Decode(
     'X0NPTVBBQ1RJTkcQAxITCg9DSEFUX1NUQVRFX0lETEUQBBIVChFDSEFUX1NUQVRFX0ZBSUxFRB'
     'AFEhUKEUNIQVRfU1RBVEVfRVhJVEVEEAY=');
 
+@$core.Deprecated('Use turnEndDescriptor instead')
+const TurnEnd$json = {
+  '1': 'TurnEnd',
+  '2': [
+    {'1': 'TURN_END_UNSPECIFIED', '2': 0},
+    {'1': 'TURN_END_COMPLETED', '2': 1},
+    {'1': 'TURN_END_CANCELED', '2': 2},
+    {'1': 'TURN_END_ERROR', '2': 3},
+  ],
+};
+
+/// Descriptor for `TurnEnd`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List turnEndDescriptor = $convert.base64Decode(
+    'CgdUdXJuRW5kEhgKFFRVUk5fRU5EX1VOU1BFQ0lGSUVEEAASFgoSVFVSTl9FTkRfQ09NUExFVE'
+    'VEEAESFQoRVFVSTl9FTkRfQ0FOQ0VMRUQQAhISCg5UVVJOX0VORF9FUlJPUhAD');
+
+@$core.Deprecated('Use chatErrorKindDescriptor instead')
+const ChatErrorKind$json = {
+  '1': 'ChatErrorKind',
+  '2': [
+    {'1': 'CHAT_ERROR_KIND_UNSPECIFIED', '2': 0},
+    {'1': 'CHAT_ERROR_KIND_EXITED', '2': 1},
+    {'1': 'CHAT_ERROR_KIND_KILLED', '2': 2},
+  ],
+};
+
+/// Descriptor for `ChatErrorKind`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List chatErrorKindDescriptor = $convert.base64Decode(
+    'Cg1DaGF0RXJyb3JLaW5kEh8KG0NIQVRfRVJST1JfS0lORF9VTlNQRUNJRklFRBAAEhoKFkNIQV'
+    'RfRVJST1JfS0lORF9FWElURUQQARIaChZDSEFUX0VSUk9SX0tJTkRfS0lMTEVEEAI=');
+
 @$core.Deprecated('Use reportStatusDescriptor instead')
 const ReportStatus$json = {
   '1': 'ReportStatus',
@@ -675,13 +706,22 @@ const TurnSettled$json = {
       '6': '.protectorate.v1.TokenCounts',
       '10': 'usage'
     },
+    {
+      '1': 'end',
+      '3': 3,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.TurnEnd',
+      '10': 'end'
+    },
   ],
 };
 
 /// Descriptor for `TurnSettled`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List turnSettledDescriptor = $convert.base64Decode(
     'CgtUdXJuU2V0dGxlZBIfCgtzdG9wX3JlYXNvbhgBIAEoCVIKc3RvcFJlYXNvbhIyCgV1c2FnZR'
-    'gCIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tlbkNvdW50c1IFdXNhZ2U=');
+    'gCIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tlbkNvdW50c1IFdXNhZ2USKgoDZW5kGAMgASgO'
+    'MhgucHJvdGVjdG9yYXRlLnYxLlR1cm5FbmRSA2VuZA==');
 
 @$core.Deprecated('Use compactionDescriptor instead')
 const Compaction$json = {
@@ -703,12 +743,21 @@ const ChatError$json = {
   '1': 'ChatError',
   '2': [
     {'1': 'text', '3': 1, '4': 1, '5': 9, '10': 'text'},
+    {
+      '1': 'kind',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.ChatErrorKind',
+      '10': 'kind'
+    },
   ],
 };
 
 /// Descriptor for `ChatError`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List chatErrorDescriptor =
-    $convert.base64Decode('CglDaGF0RXJyb3ISEgoEdGV4dBgBIAEoCVIEdGV4dA==');
+final $typed_data.Uint8List chatErrorDescriptor = $convert.base64Decode(
+    'CglDaGF0RXJyb3ISEgoEdGV4dBgBIAEoCVIEdGV4dBIyCgRraW5kGAIgASgOMh4ucHJvdGVjdG'
+    '9yYXRlLnYxLkNoYXRFcnJvcktpbmRSBGtpbmQ=');
 
 @$core.Deprecated('Use stateChangeDescriptor instead')
 const StateChange$json = {

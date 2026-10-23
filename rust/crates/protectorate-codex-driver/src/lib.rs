@@ -104,9 +104,7 @@ impl Session {
             state.busy = false;
             waiter.changed.notify_all();
             drop(state);
-            let _ = waiter.log.append(Event::new(
-                json!({"error":{"text":format!("codex exited: {result:?}")}}),
-            ));
+            let _ = waiter.log.append_exit("codex", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
@@ -190,6 +188,7 @@ impl Session {
         !s.exited && !s.busy && !s.compacting && !s.selecting && s.approvals.is_empty()
     }
     pub fn stop(&self) {
+        self.log.note_stop();
         self.kill.kill();
     }
     pub fn wait_exited(&self, timeout: Duration) -> bool {
@@ -330,6 +329,7 @@ impl Session {
             }
             (s.thread_id.clone(), s.turn_id.clone())
         };
+        self.log.note_interrupt();
         self.rpc(
             "turn/interrupt",
             json!({"threadId":thread,"turnId":turn}),

@@ -657,7 +657,8 @@
             "JOB_STATE_SUCCEEDED",
             "JOB_STATE_FAILED",
             "JOB_STATE_CANCELED",
-            "JOB_STATE_TIMED_OUT"
+            "JOB_STATE_TIMED_OUT",
+            "JOB_STATE_KILLED"
           ],
           "type": "string"
         }

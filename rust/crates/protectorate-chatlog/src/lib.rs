@@ -1,7 +1,6 @@
 //! Per-sleeve append-only chat events, with replay and gap-free live watches.
-mod cache;
+mod telemetry;
 
-use cache::Telemetry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -12,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use telemetry::Telemetry;
 
 const MAX_QUEUE: usize = 4096;
 
@@ -89,6 +89,15 @@ impl OpenText {
 fn text_payload(id: &str, thinking: bool, delta: &str) -> Value {
     json!({"text":{"messageId":id,"delta":delta,"thinking":thinking}})
 }
+/// The signal that ended a process. The sandbox helper reports a signal that
+/// ends its workload as exit status 137, which stands for SIGKILL.
+fn signal(status: &std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        return Some(signal);
+    }
+    (status.code() == Some(137)).then_some(9)
+}
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -144,6 +153,7 @@ struct Inner {
 pub struct Log {
     path: PathBuf,
     inner: Mutex<Inner>,
+    stopping: AtomicBool,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -214,11 +224,48 @@ impl Log {
         Ok(Self {
             path,
             inner: Mutex::new(inner),
+            stopping: AtomicBool::new(false),
         })
     }
 
     pub fn last(&self) -> u64 {
         lock(&self.inner).last
+    }
+
+    /// Records that the running turn was asked to stop, so it settles as
+    /// canceled.
+    pub fn note_interrupt(&self) {
+        lock(&self.inner).cache.interrupt();
+    }
+
+    /// Records that the harness is being stopped on purpose, so its exit is
+    /// not reported as a kill.
+    pub fn note_stop(&self) {
+        self.stopping.store(true, Ordering::Relaxed);
+    }
+
+    /// Appends the error event for a harness process that ended. A signal the
+    /// owner did not ask for is a kill, which is how a resource limit or the
+    /// kernel's OOM killer ends a process; any other exit is a plain exit.
+    pub fn append_exit<E: fmt::Display>(
+        &self,
+        harness: &str,
+        result: &Result<std::process::ExitStatus, E>,
+    ) -> Result<u64, Error> {
+        let error = match result {
+            Err(error) => json!({"text": format!("{harness} wait failed: {error}")}),
+            Ok(status) => match signal(status).filter(|_| !self.stopping.load(Ordering::Relaxed)) {
+                Some(signal) => json!({
+                    "text": format!("{harness} killed by signal {signal}"),
+                    "kind": "CHAT_ERROR_KIND_KILLED",
+                }),
+                None => json!({
+                    "text": format!("{harness} exited: {status}"),
+                    "kind": "CHAT_ERROR_KIND_EXITED",
+                }),
+            },
+        };
+        self.append(Event::new(json!({ "error": error })))
     }
 
     /// Prompt-cache telemetry in the ChatStatus `cache` JSON shape.

@@ -90,13 +90,7 @@ impl Session {
         thread::spawn(move || {
             let result = child.wait();
             let _gate = waiter.event_gate.lock().unwrap();
-            let message = match result {
-                Ok(status) => format!("pi exited: {status}"),
-                Err(error) => format!("pi wait failed: {error}"),
-            };
-            let _ = waiter
-                .log
-                .append(Event::new(json!({"error":{"text":message}})));
+            let _ = waiter.log.append_exit("pi", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
@@ -404,10 +398,12 @@ impl Session {
         if state.exited || !state.busy {
             return Ok(());
         }
+        self.log.note_interrupt();
         self.write(&json!({"type":"abort"}))
     }
 
     pub fn stop(&self) {
+        self.log.note_stop();
         self.kill.kill();
     }
 
