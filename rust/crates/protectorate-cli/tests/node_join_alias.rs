@@ -1,21 +1,14 @@
-#[cfg(unix)]
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+#![cfg(unix)]
+mod common;
 
-#[cfg(unix)]
-fn installed_cli(root: &Path) -> std::path::PathBuf {
-    let cli = root.join("protectorate-cli");
-    fs::copy(env!("CARGO_BIN_EXE_protectorate-cli"), &cli).unwrap();
-    cli
-}
+use common::{echo_companion, installed_cli};
+use std::process::Command;
 
-#[cfg(unix)]
 #[test]
 fn installed_cli_node_join_uses_sibling_companion() {
     let root = tempfile::tempdir().unwrap();
     let cli = installed_cli(root.path());
-    let companion = root.path().join("protectorate-rs");
-    fs::write(&companion, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
-    fs::set_permissions(&companion, fs::Permissions::from_mode(0o755)).unwrap();
+    echo_companion(root.path());
     let join = Command::new(&cli)
         .args([
             "--home",
@@ -40,7 +33,6 @@ fn installed_cli_node_join_uses_sibling_companion() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn installed_cli_reports_missing_node_join_companion() {
     let root = tempfile::tempdir().unwrap();

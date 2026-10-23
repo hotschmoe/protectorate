@@ -1,46 +1,21 @@
-#[cfg(unix)]
+#![cfg(unix)]
+mod common;
+
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Output},
-    thread,
-    time::Duration,
+    process::Command,
 };
 
-#[cfg(unix)]
-trait CommandRetry {
-    fn output_retry(&mut self) -> std::io::Result<Output>;
-}
-
-#[cfg(unix)]
-impl CommandRetry for Command {
-    fn output_retry(&mut self) -> std::io::Result<Output> {
-        for attempt in 0..8 {
-            match self.output() {
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 7 =>
-                {
-                    thread::sleep(Duration::from_millis(250));
-                }
-                result => return result,
-            }
-        }
-        unreachable!()
-    }
-}
-
-#[cfg(unix)]
 fn installed_cli(root: &Path, with_companion: bool) -> PathBuf {
-    let cli = root.join("protectorate-cli");
-    fs::copy(env!("CARGO_BIN_EXE_protectorate-cli"), &cli).unwrap();
+    let cli = common::installed_cli(root);
     if with_companion {
         fs::write(root.join("protectorate-rs"), b"companion fixture").unwrap();
     }
     cli
 }
 
-#[cfg(unix)]
 #[test]
 fn systemd_generation_uses_sibling_rust_server_and_keeps_serve_flags() {
     let root = tempfile::tempdir().unwrap();
@@ -56,7 +31,7 @@ fn systemd_generation_uses_sibling_rust_server_and_keeps_serve_flags() {
             "--listen",
             "127.0.0.1:7480",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         output.status.success(),
@@ -78,7 +53,6 @@ fn systemd_generation_uses_sibling_rust_server_and_keeps_serve_flags() {
     assert!(!unit.contains("protectorate-cli hub serve"), "{unit}");
 }
 
-#[cfg(unix)]
 #[test]
 fn systemd_write_and_install_never_overwrite_existing_unit() {
     let root = tempfile::tempdir().unwrap();
@@ -94,7 +68,7 @@ fn systemd_write_and_install_never_overwrite_existing_unit() {
             "--write",
             out.to_str().unwrap(),
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         first.status.success(),
@@ -114,7 +88,7 @@ fn systemd_write_and_install_never_overwrite_existing_unit() {
             "--write",
             out.to_str().unwrap(),
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!second.status.success());
     assert_eq!(fs::read(&path).unwrap(), original);
@@ -131,7 +105,7 @@ fn systemd_write_and_install_never_overwrite_existing_unit() {
             "/tmp/hub",
             "--install",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         installed.status.success(),
@@ -151,13 +125,12 @@ fn systemd_write_and_install_never_overwrite_existing_unit() {
             "/tmp/hub",
             "--install",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!retry.status.success());
     assert_eq!(fs::read(&unit).unwrap(), original);
 }
 
-#[cfg(unix)]
 #[test]
 fn windows_task_file_is_utf16le_and_keeps_node_serve_arguments() {
     let root = tempfile::tempdir().unwrap();
@@ -178,7 +151,7 @@ fn windows_task_file_is_utf16le_and_keeps_node_serve_arguments() {
             "--",
             "--allow-plain-jobs",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         output.status.success(),
@@ -200,7 +173,6 @@ fn windows_task_file_is_utf16le_and_keeps_node_serve_arguments() {
     assert!(xml.contains("C:\\Node State"), "{xml}");
 }
 
-#[cfg(unix)]
 #[test]
 fn windows_service_prints_commands_and_missing_default_companion_is_clear() {
     let root = tempfile::tempdir().unwrap();
@@ -217,7 +189,7 @@ fn windows_service_prints_commands_and_missing_default_companion_is_clear() {
             "--listen",
             "127.0.0.1:7475",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         output.status.success(),
@@ -236,7 +208,7 @@ fn windows_service_prints_commands_and_missing_default_companion_is_clear() {
 
     let missing = Command::new(&cli)
         .args(["service", "systemd", "hub", "--home", "/tmp/hub"])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!missing.status.success());
     let stderr = String::from_utf8_lossy(&missing.stderr);
@@ -251,7 +223,6 @@ fn executable(path: &Path) -> bool {
     fs::metadata(path).unwrap().permissions().mode() & 0o100 != 0
 }
 
-#[cfg(unix)]
 #[test]
 fn termux_write_generates_executable_run_and_boot_scripts() {
     let root = tempfile::tempdir().unwrap();
@@ -273,7 +244,7 @@ fn termux_write_generates_executable_run_and_boot_scripts() {
         "127.0.0.1:7475",
     ];
 
-    let first = Command::new(&cli).args(args).output_retry().unwrap();
+    let first = Command::new(&cli).args(args).output().unwrap();
     assert!(
         first.status.success(),
         "{}",
@@ -305,7 +276,7 @@ fn termux_write_generates_executable_run_and_boot_scripts() {
     assert!(boot_text.contains("termux-wake-lock"), "{boot_text}");
     assert!(executable(&run) && executable(&boot));
 
-    let second = Command::new(&cli).args(args).output_retry().unwrap();
+    let second = Command::new(&cli).args(args).output().unwrap();
     assert!(!second.status.success());
     let stderr = String::from_utf8_lossy(&second.stderr);
     assert!(stderr.contains("exists"), "{stderr}");
@@ -313,7 +284,6 @@ fn termux_write_generates_executable_run_and_boot_scripts() {
     assert_eq!(fs::read_to_string(&boot).unwrap(), boot_text);
 }
 
-#[cfg(unix)]
 #[test]
 fn termux_write_checks_both_destinations_before_creating_either_script() {
     let root = tempfile::tempdir().unwrap();
@@ -334,7 +304,7 @@ fn termux_write_checks_both_destinations_before_creating_either_script() {
             "--write",
             out.to_str().unwrap(),
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("exists"));
@@ -342,7 +312,6 @@ fn termux_write_checks_both_destinations_before_creating_either_script() {
     assert_eq!(fs::read(boot).unwrap(), b"existing boot script");
 }
 
-#[cfg(unix)]
 #[test]
 fn termux_print_mode_labels_both_target_paths() {
     let root = tempfile::tempdir().unwrap();
@@ -356,7 +325,7 @@ fn termux_print_mode_labels_both_target_paths() {
             "--home",
             "/data/data/com.termux/files/home/.protectorate",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         output.status.success(),
@@ -383,7 +352,6 @@ fn termux_print_mode_labels_both_target_paths() {
     assert!(!root.path().join("protectorate-node").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn termux_install_writes_only_into_a_genuine_termux_layout() {
     let root = tempfile::tempdir().unwrap();
@@ -397,7 +365,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
     let missing = Command::new(&cli)
         .env_remove("PREFIX")
         .args(["service", "termux", "--binary", binary, "--install"])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!missing.status.success());
     let stderr = String::from_utf8_lossy(&missing.stderr);
@@ -406,7 +374,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
     let foreign = Command::new(&cli)
         .env("PREFIX", root.path().join("usr"))
         .args(["service", "termux", "--binary", binary, "--install"])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!foreign.status.success());
     let stderr = String::from_utf8_lossy(&foreign.stderr);
@@ -416,7 +384,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
         .env("PREFIX", &prefix)
         .env("HOME", root.path().join("elsewhere"))
         .args(["service", "termux", "--binary", binary, "--install"])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!foreign_home.status.success());
     let stderr = String::from_utf8_lossy(&foreign_home.stderr);
@@ -434,7 +402,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
             "/data/data/com.termux/files/home/.protectorate",
             "--install",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(
         installed.status.success(),
@@ -464,7 +432,7 @@ fn termux_install_writes_only_into_a_genuine_termux_layout() {
             "/data/data/com.termux/files/home/.protectorate",
             "--install",
         ])
-        .output_retry()
+        .output()
         .unwrap();
     assert!(!retry.status.success());
     let stderr = String::from_utf8_lossy(&retry.stderr);

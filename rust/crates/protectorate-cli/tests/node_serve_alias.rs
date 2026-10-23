@@ -1,22 +1,9 @@
-#[cfg(unix)]
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+#![cfg(unix)]
+mod common;
 
-#[cfg(unix)]
-fn installed_cli(root: &Path) -> std::path::PathBuf {
-    let cli = root.join("protectorate-cli");
-    fs::copy(env!("CARGO_BIN_EXE_protectorate-cli"), &cli).unwrap();
-    cli
-}
+use common::{echo_companion, installed_cli};
+use std::process::Command;
 
-#[cfg(unix)]
-fn echo_companion(root: &Path) -> std::path::PathBuf {
-    let companion = root.join("protectorate-rs");
-    fs::write(&companion, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
-    fs::set_permissions(&companion, fs::Permissions::from_mode(0o755)).unwrap();
-    companion
-}
-
-#[cfg(unix)]
 #[test]
 fn installed_cli_node_serve_forwards_agent_argv_to_sibling() {
     let root = tempfile::tempdir().unwrap();
@@ -49,7 +36,6 @@ fn installed_cli_node_serve_forwards_agent_argv_to_sibling() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn installed_cli_node_serve_drops_global_rpc_options_and_rejects_json() {
     let root = tempfile::tempdir().unwrap();
@@ -92,7 +78,6 @@ fn installed_cli_node_serve_drops_global_rpc_options_and_rejects_json() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn installed_cli_node_serve_reports_missing_companion() {
     let root = tempfile::tempdir().unwrap();

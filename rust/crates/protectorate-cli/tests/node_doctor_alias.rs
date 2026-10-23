@@ -1,15 +1,14 @@
 #![cfg(unix)]
+mod common;
 
-use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+use common::{echo_companion, installed_cli};
+use std::process::Command;
 
 #[test]
 fn installed_cli_doctor_uses_sibling_rust_binary() {
     let root = tempfile::tempdir().unwrap();
-    let cli = root.path().join("protectorate-cli");
-    fs::copy(env!("CARGO_BIN_EXE_protectorate-cli"), &cli).unwrap();
-    let companion = root.path().join("protectorate-rs");
-    fs::write(&companion, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
-    fs::set_permissions(&companion, fs::Permissions::from_mode(0o755)).unwrap();
+    let cli = installed_cli(root.path());
+    echo_companion(root.path());
     let output = Command::new(cli)
         .args([
             "--token-file",
