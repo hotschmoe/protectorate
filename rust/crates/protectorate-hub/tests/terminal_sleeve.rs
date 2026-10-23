@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/executable.rs"]
+mod executable;
 #[path = "support/private_tmux.rs"]
 mod private_tmux;
 use private_tmux::PrivateTmux;
@@ -8,7 +10,6 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -30,12 +31,10 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         fs::create_dir_all(&auth).unwrap();
         fs::write(auth.join("token"), provider).unwrap();
         let executable = tools.join(provider);
-        fs::write(
+        executable::write_executable(
             &executable,
             "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
-        )
-        .unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         executables.push(executable);
     }
     let socket = format!("p-rust-agent-tui-{}", std::process::id());
@@ -186,17 +185,15 @@ async fn default_tool_roots_run_go_without_exposing_owner_credentials() {
     let cargo_secret = owner_home.join(".cargo/credentials.toml");
     let codex_secret = owner_home.join(".codex/auth.json");
     let go_secret = owner_home.join("go/pkg/mod/cache/vcs/private/.git/config");
-    fs::write(
+    executable::write_executable(
         &go,
-        format!(
+        &format!(
             "#!/usr/bin/sh\nif [ -e '{cargo_secret}' ] || [ -e '{codex_secret}' ] || [ -e '{go_secret}' ]; then printf leak > proof; exit 1; fi\nprintf 'go-visible:%s' \"$PATH\" > proof\nexec /usr/bin/sh\n",
             cargo_secret = cargo_secret.display(),
             codex_secret = codex_secret.display(),
             go_secret = go_secret.display(),
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&go, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let tool_roots = protectorate_sleeve_runner::default_tool_roots(&owner_home);
     assert!(tool_roots.contains(&owner_home.join(".local/go")));
     let socket = format!("p-rust-default-tools-{}", std::process::id());
@@ -315,19 +312,15 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
     )
     .unwrap();
     let fake_cli = root.path().join("protectorate-cli");
-    fs::write(
+    executable::write_executable(
         &fake_cli,
         "#!/usr/bin/sh\nif [ \"$1\" = mcp ]; then shift; exec /opt/protectorate/bin/protectorate-mcpbridge \"$@\"; fi\nprintf 'cli-ok:%s' \"$PROTECTORATE_SLEEVE\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&fake_cli, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let fake_bridge = root.path().join("protectorate-mcpbridge");
-    fs::write(
+    executable::write_executable(
         &fake_bridge,
         "#!/usr/bin/sh\n[ \"$1\" = --list ] || exit 2\nprintf '{\"tools\":[]}'\n",
-    )
-    .unwrap();
-    fs::set_permissions(&fake_bridge, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let real_mcp = std::env::var_os("PROTECTORATE_TEST_REAL_MCP").is_some();
     let cli = if real_mcp {
         let build_dir = std::env::current_exe()
@@ -815,7 +808,7 @@ async fn http_chat_sleeve_mounts_published_pub_cache_privately() {
     .unwrap();
     fs::write(lower.join("hosted/pub.dev/published.txt"), "published").unwrap();
     let pi = tools.join("pi");
-    fs::write(
+    executable::write_executable(
         &pi,
         r#"#!/usr/bin/python3
 import json, os, sys
@@ -843,9 +836,7 @@ for line in sys.stdin:
     elif message.get('type') == 'set_thinking_level':
         print(json.dumps({'type':'response','id':message['id'],'command':'set_thinking_level','success':True}), flush=True)
 "#,
-    )
-    .unwrap();
-    fs::set_permissions(&pi, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let launcher = ChatLauncher {
         state_root: state.clone(),
         user_home: owner_home.clone(),

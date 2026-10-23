@@ -6,10 +6,31 @@ use protectorate_sandbox::{
 use std::{
     collections::BTreeMap,
     fs,
-    path::PathBuf,
-    process::Command,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
+
+/// Writes `body` as an executable script at `path` from a child process. A
+/// write descriptor opened in this process leaks into children that other
+/// test threads fork meanwhile, and running the file fails with ETXTBSY
+/// until they exec.
+fn write_executable(path: &Path, body: &str) {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(body.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success(), "write {}", path.display());
+}
 
 #[test]
 fn direct_harness_wait_kills_descendants_before_reaping_leader() {
@@ -574,13 +595,11 @@ fn missing_helper_fails_closed() {
 
 #[test]
 fn configured_sdk_bin_is_available_and_explicit_path_is_preserved() {
-    use std::os::unix::fs::PermissionsExt;
     let mut f = Fixture::new();
     let sdk = f.policy.user_home.join("development/flutter");
     fs::create_dir_all(sdk.join("bin")).unwrap();
     let executable = sdk.join("bin/flutter");
-    fs::write(&executable, "#!/usr/bin/sh\necho sdk-working\n").unwrap();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    write_executable(&executable, "#!/usr/bin/sh\necho sdk-working\n");
     f.policy.trusted_tool_roots.push(sdk.clone());
     let mut request = f.request("flutter > result".into());
     request.tool_roots.push(sdk.clone());
@@ -688,24 +707,20 @@ fn a_cli_built_inside_the_writable_workspace_can_be_mounted_on_path() {
 
 #[test]
 fn grok_download_binary_runs_without_mounting_grok_account_data() {
-    use std::os::unix::fs::PermissionsExt;
-
     let mut f = Fixture::new();
     let grok_home = f.policy.user_home.join(".grok");
     let downloads = grok_home.join("downloads");
     fs::create_dir_all(&downloads).unwrap();
     fs::write(grok_home.join("auth.json"), b"host-secret").unwrap();
     let executable = downloads.join("grok-linux-aarch64");
-    fs::write(
+    write_executable(
         &executable,
-        format!(
+        &format!(
             "#!/usr/bin/sh\ntest ! -e '{}/auth.json' && printf grok-tool-ok > '{}'/result\n",
             grok_home.display(),
             f.workspace.display()
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     f.policy.trusted_tool_roots.push(downloads.clone());
     let mut request = f.request(String::new());
     request.command = vec![executable.to_string_lossy().into_owned()];

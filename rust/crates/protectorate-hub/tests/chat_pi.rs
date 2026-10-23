@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/executable.rs"]
+mod executable;
 use protectorate_connect_client::Client;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_sleeve_registry::{Harness, Mode, Record};
@@ -6,7 +8,6 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     path::Path,
     sync::mpsc,
     time::{Duration, Instant},
@@ -115,8 +116,7 @@ for line in sys.stdin:
  elif k=='abort':
   emit({'type':'agent_settled','aborted':True})
 "#;
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, script);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

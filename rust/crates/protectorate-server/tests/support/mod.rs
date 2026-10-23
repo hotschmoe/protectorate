@@ -83,6 +83,27 @@ pub fn until(what: &str, log: &Path, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// Writes `body` as an executable script at `path` from a child process. A
+/// write descriptor opened in this process leaks into children that other
+/// test threads fork meanwhile, and running the file fails with ETXTBSY
+/// until they exec.
+pub fn write_executable(path: &Path, body: &str) {
+    use std::io::Write;
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(body.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success(), "write {}", path.display());
+}
+
 /// Stops a private tmux server and removes its socket, which tmux leaves.
 pub fn kill_tmux(socket: &str) {
     let _ = Command::new("tmux")

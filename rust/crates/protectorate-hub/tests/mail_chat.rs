@@ -1,10 +1,11 @@
 #![cfg(target_os = "linux")]
+#[path = "support/executable.rs"]
+mod executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     path::Path,
     time::{Duration, Instant},
 };
@@ -31,7 +32,9 @@ async fn call(addr: std::net::SocketAddr, method: &str, body: Value) -> (u16, Va
 /// A Pi whose `slow` prompt keeps its turn open until the workspace holds
 /// `release-slow`.
 fn fake_pi(path: &Path) {
-    fs::write(path, r#"#!/usr/bin/python3
+    executable::write_executable(
+        path,
+        r#"#!/usr/bin/python3
 import json,os,sys,time
 def emit(obj): print(json.dumps(obj),flush=True)
 for line in sys.stdin:
@@ -54,8 +57,8 @@ for line in sys.stdin:
   emit({'type':'message_end','message':{'role':'assistant','model':'test','provider':'local','usage':{'totalTokens':13,'input':10,'output':3}}})
   emit({'type':'agent_settled','aborted':False})
  elif k=='abort': emit({'type':'agent_settled','aborted':True})
-"#).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+"#,
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

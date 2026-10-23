@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/executable.rs"]
+mod executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
@@ -32,8 +34,7 @@ async fn call(addr: std::net::SocketAddr, method: &str, token: &str, body: Value
     )
 }
 fn executable(path: &Path, script: &str) {
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, script);
 }
 fn git(workspace: &Path, args: &[&str]) {
     let output = Command::new("git")
