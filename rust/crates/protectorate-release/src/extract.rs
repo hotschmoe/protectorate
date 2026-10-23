@@ -388,23 +388,30 @@ fn parse_number(field: &[u8]) -> Option<i64> {
     i64::from_str_radix(text.trim(), 8).ok()
 }
 
-/// The `path=` value of a pax extended header, when it has one.
+/// The `path=` value of a pax extended header, when it has one. Record
+/// lengths count bytes, so the records are split before any UTF-8 decoding.
 fn pax_path(data: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(data);
-    let mut rest: &str = &text;
+    let mut rest = data;
     let mut found = None;
     while !rest.is_empty() {
-        let space = rest.find(' ')?;
-        let Ok(length) = rest[..space].parse::<usize>() else {
+        let space = rest.iter().position(|&b| b == b' ')?;
+        let Some(length) = std::str::from_utf8(&rest[..space])
+            .ok()
+            .and_then(|digits| digits.parse::<usize>().ok())
+        else {
             break;
         };
         if length == 0 || length > rest.len() {
             break;
         }
-        let record = &rest[..length];
-        rest = &rest[length..];
-        if let Some(value) = record.get(space + 1..)?.strip_prefix("path=") {
-            found = Some(value.trim_end_matches('\n').to_string());
+        let (record, tail) = rest.split_at(length);
+        rest = tail;
+        if let Some(value) = record.get(space + 1..)?.strip_prefix(b"path=") {
+            found = Some(
+                String::from_utf8_lossy(value)
+                    .trim_end_matches('\n')
+                    .to_string(),
+            );
         }
     }
     found

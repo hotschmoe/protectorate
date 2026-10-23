@@ -322,19 +322,19 @@ pub struct Info {
 
 impl Info {
     pub fn asset_url(&self, name: &str) -> Result<String> {
-        let mut found = "";
+        let mut found: Option<&str> = None;
         for a in &self.assets {
             if a.name == name {
-                if !found.is_empty() {
+                if found.is_some() {
                     return Err(invalid(format!("duplicate release asset {name}")));
                 }
-                found = &a.url;
+                found = Some(&a.url);
             }
         }
-        if found.is_empty() {
-            return Err(invalid(format!("release {} has no {name}", self.tag)));
+        match found {
+            Some(url) if !url.is_empty() => Ok(url.to_string()),
+            _ => Err(invalid(format!("release {} has no {name}", self.tag))),
         }
-        Ok(found.to_string())
     }
 
     pub fn matches_channel(&self, channel: &str, version: &str) -> Result<()> {
