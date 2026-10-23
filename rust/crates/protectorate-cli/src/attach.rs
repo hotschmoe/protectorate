@@ -1,7 +1,8 @@
 //! Interactive terminal attach over the hub's framed WebSocket protocol.
 use crate::{hub_url, token, Client, Code, Invocation, Result, RpcError};
+use rustls::pki_types::{pem::PemObject, CertificateDer};
 use std::{
-    io::{BufReader, Read, Write},
+    io::{Read, Write},
     net::TcpStream,
     path::Path,
     sync::Arc,
@@ -46,22 +47,12 @@ fn tls_config(pem: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>> {
             if pem.is_empty() || pem.len() > 1024 * 1024 {
                 return Err(RpcError::invalid("TLS CA bundle must be under 1 MiB"));
             }
-            let mut reader = BufReader::new(pem);
-            while let Some(item) = rustls_pemfile::read_one(&mut reader)
-                .map_err(|e| RpcError::invalid(format!("invalid TLS CA PEM: {e}")))?
-            {
-                match item {
-                    rustls_pemfile::Item::X509Certificate(cert) => {
-                        roots.add(cert).map_err(|e| {
-                            RpcError::invalid(format!("invalid TLS CA certificate: {e}"))
-                        })?
-                    }
-                    _ => {
-                        return Err(RpcError::invalid(
-                            "TLS CA bundle must contain certificates only",
-                        ))
-                    }
-                }
+            for cert in CertificateDer::pem_slice_iter(pem) {
+                let cert =
+                    cert.map_err(|e| RpcError::invalid(format!("invalid TLS CA PEM: {e}")))?;
+                roots
+                    .add(cert)
+                    .map_err(|e| RpcError::invalid(format!("invalid TLS CA certificate: {e}")))?;
             }
             if roots.is_empty() {
                 return Err(RpcError::invalid("TLS CA bundle has no certificates"));

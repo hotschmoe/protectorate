@@ -23,7 +23,14 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore},
 };
-use tokio_rustls::{rustls, server::TlsStream, TlsAcceptor};
+use tokio_rustls::{
+    rustls::{
+        self,
+        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+    },
+    server::TlsStream,
+    TlsAcceptor,
+};
 
 const MAX_HANDSHAKES: usize = 32;
 const MAX_CONNECTIONS: usize = 256;
@@ -35,7 +42,9 @@ pub(crate) fn tls_config(cert: &Path, key: &Path) -> io::Result<Arc<rustls::Serv
     let cert = private_file(cert, false)?;
     let key = private_file(key, true)?;
     let mut cert = BufReader::new(cert);
-    let certs = rustls_pemfile::certs(&mut cert).collect::<Result<Vec<_>, _>>()?;
+    let certs = CertificateDer::pem_reader_iter(&mut cert)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(io::Error::other)?;
     if certs.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -43,8 +52,7 @@ pub(crate) fn tls_config(cert: &Path, key: &Path) -> io::Result<Arc<rustls::Serv
         ));
     }
     let mut key = BufReader::new(key);
-    let key = rustls_pemfile::private_key(&mut key)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "TLS private key is missing"))?;
+    let key = PrivateKeyDer::from_pem_reader(&mut key).map_err(io::Error::other)?;
     let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
@@ -474,7 +482,9 @@ pub(crate) async fn hub_health(
     }
     let result = tokio::time::timeout(Duration::from_secs(2), async {
         let mut pem = BufReader::new(private_file(cert, false)?);
-        let certs = rustls_pemfile::certs(&mut pem).collect::<Result<Vec<_>, _>>()?;
+        let certs = CertificateDer::pem_reader_iter(&mut pem)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io::Error::other)?;
         let mut roots = rustls::RootCertStore::empty();
         for cert in certs {
             roots.add(cert).map_err(io::Error::other)?;
