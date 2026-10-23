@@ -7,7 +7,6 @@ use protectorate_node_metrics::{
     docker,
 };
 use std::{
-    collections::BTreeSet,
     fs,
     io::{Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
@@ -23,15 +22,15 @@ use std::{
 
 /// Discrete NVIDIA, AMD and Intel cards and an integrated Intel GPU, so every
 /// vendor tool runs and its gauges are merged onto a sysfs card.
-const CARDS: &[(&str, &str, &str)] = &[
-    ("0000:00:02.0", "0x8086", "0x46a6"),
-    ("0000:01:00.0", "0x10de", "0x2684"),
-    ("0000:03:00.0", "0x1002", "0x744c"),
-    ("0000:04:00.0", "0x8086", "0x56a0"),
+const CARDS: &[(&str, &str, &str, &str)] = &[
+    ("0000:00:02.0", "0x8086", "0x46a6", "intel"),
+    ("0000:01:00.0", "0x10de", "0x2684", "nvidia"),
+    ("0000:03:00.0", "0x1002", "0x744c", "amd"),
+    ("0000:04:00.0", "0x8086", "0x56a0", "intel"),
 ];
 
 fn sysfs(root: &Path) {
-    for (bus, vendor, device) in CARDS {
+    for (bus, vendor, device, _) in CARDS {
         let dev = root.join("bus/pci/devices").join(bus);
         fs::create_dir_all(&dev).unwrap();
         fs::write(dev.join("class"), "0x030000\n").unwrap();
@@ -82,13 +81,13 @@ pub fn gpu_tools(data: &[u8]) {
         gpus.windows(2).all(|w| w[0].integrated <= w[1].integrated),
         "an integrated GPU sorts before a discrete one: {gpus:?}"
     );
-    let buses: BTreeSet<&str> = gpus.iter().map(|gpu| gpu.bus_id.as_str()).collect();
-    for (bus, _, _) in CARDS {
-        assert!(buses.contains(bus), "sysfs card {bus} lost: {gpus:?}");
+    for (bus, _, _, vendor) in CARDS {
         assert_eq!(
-            gpus.iter().filter(|gpu| gpu.bus_id == *bus).count(),
+            gpus.iter()
+                .filter(|gpu| gpu.bus_id == *bus && gpu.vendor == *vendor)
+                .count(),
             1,
-            "sysfs card {bus} duplicated: {gpus:?}"
+            "sysfs card {bus} lost or duplicated: {gpus:?}"
         );
     }
 }
