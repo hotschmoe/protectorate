@@ -253,15 +253,8 @@ class _HubShellState extends State<HubShell> {
       bottom: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        verticalDirection: VerticalDirection.up,
         children: [
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: available.clamp(0, double.infinity) * 0.28,
-            ),
-            child: SingleChildScrollView(
-              child: DeviceApprovalBanner(client: _client, feed: _feed),
-            ),
-          ),
           Expanded(
             child: NavigatorPopHandler<void>(
               onPopWithResult: (_) => _navigation.currentState?.maybePop(),
@@ -275,6 +268,14 @@ class _HubShellState extends State<HubShell> {
                   ),
                 ),
               ),
+            ),
+          ),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: available.clamp(0, double.infinity) * 0.28,
+            ),
+            child: SingleChildScrollView(
+              child: DeviceApprovalBanner(client: _client, feed: _feed),
             ),
           ),
         ],

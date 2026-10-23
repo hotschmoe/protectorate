@@ -30,6 +30,10 @@ Do not pass the `grpc` option to `protoc-gen-dart`.
 `build/web/canvaskit` to `canvaskit.js` and `canvaskit.wasm`. Use this entry
 point for release builds. The release archive, installer and `hub serve --web`
 consume that directory without changing its contents.
+The Rust hub serves the verified current release's extracted `web` directory on
+the API listener. For a local build, start `protectorate-rs serve ... --web
+app/build/web`; the Flutter app and Connect RPCs then share an origin. An
+explicit `--web` directory must contain `index.html`.
 
 The bootstrap pins the full CanvasKit renderer for Chromium, Firefox and Safari,
 with engine and fallback-font URLs resolved against the document base URL.
