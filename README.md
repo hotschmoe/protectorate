@@ -3,20 +3,19 @@
 # Protectorate
 
 One pane of glass over your coding-agent subscriptions, machines, sessions and
-work. The current Go release runs the hub, node agent and CLI. A Rust rewrite
-is in progress; it targets the same user features without requiring Go binary
-or state compatibility. Flutter clients (desktop, Android, web) remain in use.
+work. A Rust hub, node agent, CLI and MCP bridge; a Flutter client for
+desktop, Android and web.
 
 ## Start here
 
 | Task | Guide |
 |------|-------|
-| Install the hub and connect a client | [Install](docs/install.md) |
+| Install the hub and nodes, connect a client | [Install](docs/install.md) |
 | Start a sandboxed chat, choose a workspace, inspect model defaults | [Chat](docs/chat.md) |
 | Start Envoy or change its scopes | [Orchestrator](docs/orchestrator.md) |
 | Send work, acknowledge requests, understand delegation | [Coordination](docs/coordination.md) |
-| Understand owner authority and scoped tokens | [Authentication](docs/auth.md) |
-| Develop, select a branch, or inspect research references | [Development](DEV.md) |
+| Understand devices, capabilities, approvals and audit | [Authentication](docs/auth.md) |
+| Develop, test, release | [Development](DEV.md), [Testing](docs/testing.md) |
 
 ## Ethos
 
@@ -27,73 +26,76 @@ or state compatibility. Flutter clients (desktop, Android, web) remain in use.
 - **Everything is drivable from the CLI** (`--json` everywhere), so MCP bridges
   and an orchestrator agent can drive it too.
 
-## What works in the Go release
+## What it does
 
-| Area | Commands | Notes |
-|------|----------|-------|
-| Subscription quota (P1) | `quota [--refresh]`, `quota suggest` | Claude, Codex, Grok, Antigravity, local LLM; resets, reset credits, projected unused; never refreshes tokens or redeems resets |
-| Sessions (P4) | `session ls/new/attach/capture/kill` | tmux on a dedicated socket; WebSocket terminal at `/ws/terminal/{name}` |
-| Sleeves (P7, P8) | `sleeve spawn/ls/workspaces/show/attach/kill` | bwrap + systemd user scope: PID isolation, CPU/memory caps, shared live credentials |
-| Chat (`docs/chat.md`) | `chat watch/send/interrupt/respond/compact`, `sleeve spawn --mode` | a sleeve's harness driven through its headless protocol inside the sandbox, with a replayable event log any number of clients can watch |
-| Coordination (`docs/coordination.md`) | `who`, `msg send/reply/ack/inbox/thread`, `lease acquire --wait` | per-sleeve identity, a project directory from git remotes and manifests, a mailbox delivered into idle chats, a lease queue, dependency notices; all deterministic hub code |
-| Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, discrete and integrated GPUs, NPUs, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
-| Network (`docs/install.md`) | `serve --tls-listen`, `node invite/join`, `pair` | private addresses only; the routers' WireGuard carries traffic between sites; the hub CA issues the hub's HTTPS certificate and each node's certificate at join; hub-to-node calls are mutual TLS |
-| Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
-| Files (P11) | `node put/get` | deflate-adaptive, sha256-verified, atomic file copies confined to a node file root. Windows desktop control is shelved; see tag `shelf/windows-desk` |
-| Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("envoy") with a scoped token, driving the hub through the CLI |
-| Notes (backlog) | `backlog add/ls/show/edit/rm/pin` | the owner's notes, kept on the hub, editable in the app and by the orchestrator |
-| Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |
-| Clients | `pair`, `login`, `devices`, `mcp`, `hub serve --web` | URL-only QR links and trusted-device approval; MCP tools generated from the API |
-| Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
-| Nodes | `node install/uninstall/doctor/update` | one-command node setup per OS, dry-run first; uninstall deletes nothing; update pushes a build, swaps it with one rollback binary |
-| Add and remove nodes (`docs/install.md`) | app ADD NODE / REMOVE NODE, `node invite`, `node rm [--jobs wait\|cancel] [--uninstall]` | the hub serves `/ca.pem`, `/install.sh`, `/install.ps1` and sha256-checked builds under `/dl/`; the paste line pins the hub CA by SHA-256; a single-use join code from the environment, never a URL; live INVITED, JOINED, FIRST METRICS, READY; removal drains, revokes the node certificate and deletes nothing on the machine |
+| Area | Commands |
+|------|----------|
+| Subscription quota (P1) | `quota [--refresh]`, `quota suggest` |
+| Sleeves (P7, P8): a harness in a namespace sandbox with egress allowlist, checkpoints, disk limits, budgets | `sleeve spawn/ls/show/attach/kill/resleeve/checkpoint/prune` |
+| Chat ([chat](docs/chat.md)) | `chat send/watch/wait/interrupt/respond/compact/status` |
+| Sessions (P4) | `session ls/new/attach/capture/kill` (owner only, unsandboxed) |
+| Coordination ([coordination](docs/coordination.md)) | `who`, `msg send/reply/ack/inbox/thread/wait`, `lease acquire --wait` |
+| Nodes (P2, P9) | `node invite/ls/show/add/rm/tier/update/put/get`, app ADD NODE |
+| Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release`, `grant admin` |
+| Orchestrator | `sleeve envoy`, `orchestrator status` |
+| Notes | `backlog add/ls/show/edit/done/rm/pin` |
+| Auth and audit | `login`, `pair`, `devices`, `token`, `approvals`, `audit ls/tail/verify` |
+| Ops | `hub update`, `hub backup/restore`, `service systemd/windows-task/install-windows/termux`, `node doctor` |
+| MCP ([mcp](docs/mcp.md)) | `mcp [--allow GLOB] [--http ADDR]` |
+
+Windows desktop control is shelved (tag `shelf/windows-desk`).
 
 ## Install
 
-The [Linux installer guide](docs/install.md) covers verified Rust hub and node
-bundles, the network model (private addresses, router WireGuard, hub CA and
-mutual TLS) and the recommended router firewall.
-The Rust installer does not require bwrap. The [migration status](docs/rust-migration.md)
-tracks feature parity; use the Go release for features still listed there as
-incomplete. Branch and release rules are in [DEV.md](DEV.md).
+Hub (Linux amd64 or arm64, per user, no sudo):
+
+```
+curl -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/master/install-hub.sh
+bash install-hub.sh --tls-listen 192.168.22.5:7470 --tls-name stronghold.lan
+```
+
+Then add nodes from the app (NODES, ADD NODE) or `protectorate node invite
+NAME`, and pair the phone with `protectorate pair --app`. The
+[install guide](docs/install.md) covers the network model (private addresses,
+router WireGuard, hub CA and mutual TLS), Windows and Termux nodes, and the
+recommended router firewall.
+
+The CLI is `protectorate-cli` in the release directory
+(`~/.local/share/protectorate/releases/current/`); the docs call it
+`protectorate`, which is also its name inside sleeves.
 
 ## Build
 
-Contributors: read [DEV.md](DEV.md) first. Development starts from
-`dev-hotschmoe`; a fresh clone normally starts on the release branch, `master`.
+Read [DEV.md](DEV.md) first.
 
 ```
-make gen        # buf generate -> gen/ (Go) and app/lib/gen/ (Dart), both committed
+make gen        # buf generate: Dart client and the Rust descriptor set, both committed
 make check-gen  # fails if generated code is stale
-make build      # bin/protectorate
-make test       # tagged vet, fuzz seeds and real-binary e2e
-make cross      # linux/windows amd64+arm64, android/arm64 into bin/
-make app-check  # flutter analyze + test
-make rust-check # format, lint and test the Rust migration workspace
+make build      # release binaries for this host into target/release
+make test       # real-binary e2e scenarios and fuzz seeds
+make check      # fmt, clippy -D warnings, test, app-check, check-version
+make app-check  # flutter analyze
 ```
 
 ## Run
 
+The installer runs the hub as the `protectorate-hub` user service. On the hub:
+
 ```
-protectorate hub serve [--web app/build/web]   # --web defaults to ~/.local/share/protectorate/web when installed; owner token at ~/.protectorate/token
 protectorate login codex                        # once per harness, on the hub; --status lists them
 protectorate quota
 protectorate sleeve spawn alice --workspace https://github.com/owner/project.git --harness codex --mem 8G
 protectorate chat send alice "Read the repository instructions and report the current state."
 protectorate chat watch alice
-protectorate pair                               # QR code for the phone app
 ```
 
-Replace the example URL with a repository you can read. A clone is placed at
-`$PROTECTORATE_HOME/workspaces/alice` on the hub. An existing hub directory can
-also be selected; the sleeve edits it directly. See [workspace safety](docs/chat.md#workspaces)
-before selecting a checkout. Raw `session new` commands run outside the sleeve
-sandbox and require owner authority.
+A clone is placed at `$PROTECTORATE_HOME/workspaces/alice` on the hub. An
+existing hub directory can also be selected; the sleeve edits it directly. See
+[workspace safety](docs/chat.md#workspaces) before selecting a checkout.
 
 ## Docs
 
 - [PROBLEMS.md](PROBLEMS.md): what hurts and why
 - [ARCHITECTURE.md](ARCHITECTURE.md): the system and the decisions behind it
-- [docs/install.md](docs/install.md): hub, node and phone setup
-- [docs/node-work.md](docs/node-work.md) (tiers, jobs, admin grants, sandboxes, toolchains: design), [docs/auth.md](docs/auth.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md), [docs/coordination.md](docs/coordination.md)
-- `spikes/`: the experiments behind each decision, with measurements
+- [docs/2026-10-24-rust-direction.md](docs/2026-10-24-rust-direction.md): the Rust direction record
+- [docs/install.md](docs/install.md), [docs/auth.md](docs/auth.md), [docs/sleeves.md](docs/sleeves.md), [docs/rust-sandbox.md](docs/rust-sandbox.md), [docs/node-work.md](docs/node-work.md), [docs/mcp.md](docs/mcp.md), [docs/backlog.md](docs/backlog.md), [docs/testing.md](docs/testing.md)
