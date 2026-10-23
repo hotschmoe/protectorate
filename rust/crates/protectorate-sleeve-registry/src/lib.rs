@@ -130,6 +130,15 @@ pub struct ReadOnlyMount {
     pub target: String,
 }
 
+/// What a launch of one harness ran: the executable's bytes and the profile
+/// (sandbox plan inputs and tool scopes), each as SHA-256.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct Pin {
+    pub executable_sha256: String,
+    pub profile_sha256: String,
+}
+
 /// The nested protobuf-shaped summaries are retained without coupling this
 /// persistence crate to generated messages or a specific harness driver.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -194,6 +203,9 @@ pub struct Record {
     /// sleeve's audit entries, jobs, mail, leases, checkpoints and egress.
     #[serde(default)]
     pub run_id: String,
+    /// The last approved launch of each harness this sleeve ran, by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pins: BTreeMap<String, Pin>,
 }
 
 impl Record {
@@ -237,6 +249,7 @@ impl Record {
             nested: false,
             helper: false,
             run_id: String::new(),
+            pins: BTreeMap::new(),
         };
         row.validate()?;
         Ok(row)
@@ -567,6 +580,15 @@ impl Registry {
                 return Err(Error::State(format!("{name} is not a running chat sleeve")));
             }
             row.handoff = Some(handoff);
+            Ok(row.clone())
+        })
+    }
+    pub fn set_pin(&self, name: &str, harness: &str, pin: Pin) -> Result<Record> {
+        self.update(|rows| {
+            let row = rows
+                .get_mut(name)
+                .ok_or_else(|| Error::NotFound(name.into()))?;
+            row.pins.insert(harness.into(), pin);
             Ok(row.clone())
         })
     }

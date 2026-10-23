@@ -421,6 +421,8 @@ const Sleeve$json = {
     {'1': 'killed', '3': 28, '4': 1, '5': 8, '10': 'killed'},
     {'1': 'nested', '3': 30, '4': 1, '5': 8, '10': 'nested'},
     {'1': 'run_id', '3': 31, '4': 1, '5': 9, '10': 'runId'},
+    {'1': 'harness_sha256', '3': 32, '4': 1, '5': 9, '10': 'harnessSha256'},
+    {'1': 'profile_sha256', '3': 33, '4': 1, '5': 9, '10': 'profileSha256'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -448,8 +450,9 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
     'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXASNQoGcmVzdWx0GBkgASgL'
     'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0EhYKBmtpbGxlZBgcIAEoCF'
-    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkEhUKBnJ1bl9pZBgfIAEoCVIFcnVuSWRC'
-    'DAoKX2V4aXRfY29kZQ==');
+    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkEhUKBnJ1bl9pZBgfIAEoCVIFcnVuSWQS'
+    'JQoOaGFybmVzc19zaGEyNTYYICABKAlSDWhhcm5lc3NTaGEyNTYSJQoOcHJvZmlsZV9zaGEyNT'
+    'YYISABKAlSDXByb2ZpbGVTaGEyNTZCDAoKX2V4aXRfY29kZQ==');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {

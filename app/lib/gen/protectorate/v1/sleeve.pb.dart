@@ -1029,6 +1029,8 @@ class Sleeve extends $pb.GeneratedMessage {
     $core.bool? killed,
     $core.bool? nested,
     $core.String? runId,
+    $core.String? harnessSha256,
+    $core.String? profileSha256,
   }) {
     final result$ = Sleeve._();
     if (name != null) result$.name = name;
@@ -1059,6 +1061,8 @@ class Sleeve extends $pb.GeneratedMessage {
     if (killed != null) result$.killed = killed;
     if (nested != null) result$.nested = nested;
     if (runId != null) result$.runId = runId;
+    if (harnessSha256 != null) result$.harnessSha256 = harnessSha256;
+    if (profileSha256 != null) result$.profileSha256 = profileSha256;
     return result$;
   }
 
@@ -1116,6 +1120,8 @@ class Sleeve extends $pb.GeneratedMessage {
     ..aOB(28, _omitFieldNames ? '' : 'killed')
     ..aOB(30, _omitFieldNames ? '' : 'nested')
     ..aOS(31, _omitFieldNames ? '' : 'runId')
+    ..aOS(32, _omitFieldNames ? '' : 'harnessSha256')
+    ..aOS(33, _omitFieldNames ? '' : 'profileSha256')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1416,6 +1422,30 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasRunId() => $_has(27);
   @$pb.TagNumber(31)
   void clearRunId() => $_clearField(31);
+
+  /// harness_sha256 and profile_sha256 pin this harness's last approved
+  /// launch: the executable's bytes, and the sandbox inputs (mounts, tool
+  /// roots, limits, environment, egress allowlist) and token scopes. A later
+  /// launch that differs is recorded when the owner asked for it and needs
+  /// owner approval (ApprovalService) when Envoy, a sleeve or the hub itself
+  /// did.
+  @$pb.TagNumber(32)
+  $core.String get harnessSha256 => $_getSZ(28);
+  @$pb.TagNumber(32)
+  set harnessSha256($core.String value) => $_setString(28, value);
+  @$pb.TagNumber(32)
+  $core.bool hasHarnessSha256() => $_has(28);
+  @$pb.TagNumber(32)
+  void clearHarnessSha256() => $_clearField(32);
+
+  @$pb.TagNumber(33)
+  $core.String get profileSha256 => $_getSZ(29);
+  @$pb.TagNumber(33)
+  set profileSha256($core.String value) => $_setString(29, value);
+  @$pb.TagNumber(33)
+  $core.bool hasProfileSha256() => $_has(29);
+  @$pb.TagNumber(33)
+  void clearProfileSha256() => $_clearField(33);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {

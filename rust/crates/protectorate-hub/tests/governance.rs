@@ -100,6 +100,7 @@ struct Setup {
     _root: tempfile::TempDir,
     state: PathBuf,
     work: PathBuf,
+    harness: PathBuf,
 }
 
 fn setup() -> (Setup, Hub) {
@@ -150,6 +151,7 @@ fn setup() -> (Setup, Hub) {
             _root: root,
             state,
             work,
+            harness,
         },
         hub,
     )
@@ -339,4 +341,190 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
 
     server.abort();
     node_server.abort();
+}
+
+async fn call_approved(
+    addr: std::net::SocketAddr,
+    method: &str,
+    token: &str,
+    body: Value,
+    approval: &str,
+) -> (u16, Value) {
+    let body = body.to_string();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let request = format!("POST /protectorate.v1.{method} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {token}\r\nProtectorate-Approval: {approval}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes).await.unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    (
+        head.split_whitespace().nth(1).unwrap().parse().unwrap(),
+        serde_json::from_str(body).unwrap(),
+    )
+}
+
+fn envoy_token(hub: &Hub, scopes: &[&str]) -> String {
+    let catalog = protectorate_wire::Catalog::embedded().unwrap();
+    let methods: Vec<_> = catalog
+        .methods()
+        .map(|method| protectorate_auth::Method {
+            tool: &method.tool,
+            service: &method.service,
+            read_only: method.read_only,
+            owner_only: method.owner_only,
+        })
+        .collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    hub.identity
+        .create(
+            "orchestrator-envoy",
+            scopes,
+            Duration::from_secs(3600),
+            now,
+            &methods,
+        )
+        .unwrap()
+        .secret
+        .expose()
+        .to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_changed_harness_needs_approval_before_an_agent_launches_it() {
+    let (setup, hub) = setup();
+    let envoy = envoy_token(
+        &hub,
+        &["read", "sleeve_spawn_sleeve", "sleeve_resleeve_sleeve"],
+    );
+    let (addr, server) = serve(hub.router().unwrap()).await;
+    let spawn = json!({"name":"child","harness":"HARNESS_CLAUDE","workspace":setup.work});
+    let (status, first) = call(addr, "SleeveService/SpawnSleeve", &envoy, spawn.clone()).await;
+    assert_eq!(status, 200, "{first}");
+    let first_hash = first["sleeve"]["harnessSha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(first_hash.len(), 64);
+    let (status, killed) = call(
+        addr,
+        "SleeveService/KillSleeve",
+        OWNER,
+        json!({"name":"child"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{killed}");
+
+    fake_claude(&setup.harness, "v2");
+    let (status, pending) = call(addr, "SleeveService/SpawnSleeve", &envoy, spawn.clone()).await;
+    assert_eq!(status, 409, "{pending}");
+    let id = pending["details"][0]["debug"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (_, listed) = call(addr, "ApprovalService/ListApprovals", OWNER, json!({})).await;
+    let request = &listed["approvals"][0];
+    assert_eq!(request["procedure"], "harness.pin");
+    assert_eq!(request["subject"], "child");
+    assert_eq!(request["actor"], "token:orchestrator-envoy");
+    assert!(
+        request["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("chat/claude executable {}", &first_hash[..12])),
+        "{listed}"
+    );
+    let (_, sleeve) = call(
+        addr,
+        "SleeveService/GetSleeve",
+        OWNER,
+        json!({"name":"child"}),
+    )
+    .await;
+    assert_eq!(sleeve["sleeve"]["state"], "SLEEVE_STATE_EXITED");
+    let (status, decided) = call(
+        addr,
+        "ApprovalService/DecideApproval",
+        OWNER,
+        json!({"id":id,"approve":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    let (status, second) = call_approved(
+        addr,
+        "SleeveService/SpawnSleeve",
+        &envoy,
+        spawn.clone(),
+        &id,
+    )
+    .await;
+    assert_eq!(status, 200, "{second}");
+    let second_hash = second["sleeve"]["harnessSha256"].as_str().unwrap();
+    assert_ne!(second_hash, first_hash);
+
+    fake_claude(&setup.harness, "v3");
+    let resleeve = json!({"name":"child","to":"HARNESS_CLAUDE"});
+    let (status, pending) = call(
+        addr,
+        "SleeveService/ResleeveSleeve",
+        &envoy,
+        resleeve.clone(),
+    )
+    .await;
+    assert_eq!(status, 409, "{pending}");
+    let id = pending["details"][0]["debug"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (_, sleeve) = call(
+        addr,
+        "SleeveService/GetSleeve",
+        OWNER,
+        json!({"name":"child"}),
+    )
+    .await;
+    assert_eq!(sleeve["sleeve"]["state"], "SLEEVE_STATE_RUNNING");
+    assert_eq!(sleeve["sleeve"]["harnessSha256"], second_hash);
+    call(
+        addr,
+        "ApprovalService/DecideApproval",
+        OWNER,
+        json!({"id":id,"approve":false}),
+    )
+    .await;
+    let (status, denied) =
+        call_approved(addr, "SleeveService/ResleeveSleeve", &envoy, resleeve, &id).await;
+    assert_eq!(status, 403, "{denied}");
+
+    let (status, killed) = call(
+        addr,
+        "SleeveService/KillSleeve",
+        OWNER,
+        json!({"name":"child"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{killed}");
+    let (status, owner_spawn) = call(addr, "SleeveService/SpawnSleeve", OWNER, spawn).await;
+    assert_eq!(status, 200, "{owner_spawn}");
+    let (_, audit) = call(
+        addr,
+        "AuditService/ListAuditEntries",
+        OWNER,
+        json!({"subject":"child","limit":500}),
+    )
+    .await;
+    let entries = audit["entries"].as_array().unwrap();
+    let changed = entries
+        .iter()
+        .find(|e| e["procedure"] == "harness.pin_changed")
+        .unwrap();
+    assert_eq!(changed["actor"], "owner");
+    assert!(changed["detail"]
+        .as_str()
+        .unwrap()
+        .contains("chat/claude executable"));
+    server.abort();
 }

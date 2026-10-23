@@ -10,7 +10,7 @@ use protectorate_sandbox::{
 };
 use protectorate_session::{CreateOptions, Error as SessionError, State as SessionState};
 use protectorate_sleeve_registry::{
-    DiskUsage, Error, Harness, Limits, Mode, ReadOnlyMount, Record, State,
+    DiskUsage, Error, Harness, Limits, Mode, Pin, ReadOnlyMount, Record, State,
 };
 use protectorate_sleeve_runner::{Config, ReadOnly};
 use protectorate_wire::{AuthContext, Code, Result, RpcError, UnaryServer};
@@ -32,6 +32,29 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+/// The tool scopes of every sleeve's hub token.
+pub(super) const SLEEVE_SCOPES: [&str; 6] = [
+    "read",
+    "backlog_*",
+    "directory_*",
+    "lease_*",
+    "message_*",
+    "chat_report",
+];
+
+/// Pins are kept per mode and harness: a resleeve onto another harness is
+/// compared with that harness's own last launch.
+pub(super) fn pin_key(mode: Mode, harness: Harness) -> String {
+    format!(
+        "{}/{}",
+        match mode {
+            Mode::Chat => "chat",
+            Mode::Terminal => "terminal",
+        },
+        harness_name(harness)
+    )
+}
 
 struct ResleeveReservation<'a> {
     hub: &'a Hub,
@@ -163,6 +186,23 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         }
         None => Duration::from_secs(300),
     };
+    let mut launch_request = resleeve_launch_request(&old, to, &chosen_selection);
+    launch_request["requester"] = value["requester"].clone();
+    if let Some(pin) = crate::chat::chat_pin(hub, &launch_request, to)? {
+        let pin_key = pin_key(Mode::Chat, to);
+        crate::approvals::check_pin(
+            hub,
+            &launch_request,
+            &name,
+            &old.run_id,
+            &pin_key,
+            old.pins.get(&pin_key),
+            &pin,
+        )?;
+        hub.sleeves
+            .set_pin(&name, &pin_key, pin)
+            .map_err(registry_error)?;
+    }
     hub.emit(
         "resleeve.started",
         &name,
@@ -195,7 +235,6 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
     )
     .ok();
     crate::checkpoints::before_resleeve(hub, &old);
-    let launch_request = resleeve_launch_request(&old, to, &chosen_selection);
     {
         let _guard = hub.sleeve_launch_lock.lock().unwrap();
         crate::chat::kill_pi(hub, &name)?;
@@ -203,7 +242,8 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
     match crate::chat::spawn_resleeve(hub, &launch_request, to) {
         Ok(_) => {}
         Err(target_error) => {
-            let rollback = resleeve_launch_request(&old, old.harness, &previous_selection);
+            let mut rollback = resleeve_launch_request(&old, old.harness, &previous_selection);
+            rollback["requester"] = value["requester"].clone();
             match crate::chat::spawn_resleeve(hub, &rollback, old.harness) {
                 Ok(_) => {
                     return Err(RpcError::new(
@@ -738,7 +778,8 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         move |request| {
             let hub = Arc::clone(&spawn);
             async move {
-                let value = input(&request)?;
+                let mut value = input(&request)?;
+                value["requester"] = crate::approvals::requester(&hub, &request);
                 let parent = SpawnParent::from_auth(&request.auth);
                 request_env(&value)?;
                 let exit_after_idle = crate::chat::parse_exit_after_idle(&value)?;
@@ -893,7 +934,8 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         move |request| {
             let hub = Arc::clone(&resleeve);
             async move {
-                let value = input(&request)?;
+                let mut value = input(&request)?;
+                value["requester"] = crate::approvals::requester(&hub, &request);
                 let row = tokio::task::spawn_blocking(move || resleeve_sleeve(&hub, &value))
                     .await
                     .map_err(|error| RpcError::new(Code::Internal, error.to_string()))??;
@@ -1115,6 +1157,7 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
             &json!({
                 "name":"envoy", "workspace":workspace, "harness":harness.proto(),
                 "mode":"SLEEVE_MODE_CHAT", "selection":selection,
+                "requester": {"actor":"owner", "gated":false},
             }),
             harness,
         )
@@ -1665,6 +1708,33 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     };
     protectorate_sleeve_runner::plan(&config)
         .map_err(|e| RpcError::new(Code::InvalidArgument, e.to_string()))?;
+    let pin_key = pin_key(Mode::Terminal, harness);
+    let pin = Pin {
+        executable_sha256: crate::approvals::file_sha256(Path::new(&config.command[0]))?,
+        profile_sha256: crate::approvals::json_sha256(&json!({
+            "mode": "terminal",
+            "command": config.command,
+            "provider": config.provider,
+            "toolRoots": config.tool_roots,
+            "readOnly": config.read_only,
+            "cpuPercent": cpu_percent,
+            "memoryBytes": memory_bytes,
+            "diskBytes": disk_bytes,
+            "nested": nested,
+            "env": caller_env,
+            "egress": config.egress,
+            "scopes": SLEEVE_SCOPES,
+        })),
+    };
+    crate::approvals::check_pin(
+        hub,
+        value,
+        &name,
+        &run_id,
+        &pin_key,
+        old_base.as_ref().and_then(|row| row.pins.get(&pin_key)),
+        &pin,
+    )?;
     issue_terminal_identity(hub, &name)?;
     if let Err(error) = protectorate_sleeve_runner::write_config(&config_path, &config) {
         let _ = revoke_terminal_identity(hub, &name);
@@ -1714,6 +1784,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
             registry_error(error)
         })?;
     if let Ok(old) = hub.sleeves.get(&name) {
+        row.pins = old.pins;
         row.base_repo = old.base_repo;
         row.base_branch = old.base_branch;
         row.base_tip = old.base_tip;
@@ -1733,6 +1804,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     };
     row.nested = nested;
     row.run_id = run_id;
+    row.pins.insert(pin_key, pin);
     row.parent = parent.label.clone();
     row.parent_token_id = parent.token_id.clone();
     row.read_only = read_only
@@ -2680,14 +2752,7 @@ fn issue_terminal_identity(hub: &Hub, name: &str) -> Result<()> {
         .identity
         .create(
             &format!("sleeve:{name}"),
-            &[
-                "read",
-                "backlog_*",
-                "directory_*",
-                "lease_*",
-                "message_*",
-                "chat_report",
-            ],
+            &SLEEVE_SCOPES,
             Duration::ZERO,
             super::now_unix(),
             &scope_methods,
@@ -2836,6 +2901,11 @@ pub(super) fn sleeve_json(sleeve: &Record) -> Value {
     object.remove("helper");
     object.remove("managedClone");
     object.remove("env");
+    object.remove("pins");
+    if let Some(pin) = sleeve.pins.get(&pin_key(sleeve.mode, sleeve.harness)) {
+        object.insert("harnessSha256".into(), json!(pin.executable_sha256));
+        object.insert("profileSha256".into(), json!(pin.profile_sha256));
+    }
     object.insert("harness".into(), json!(sleeve.harness.proto()));
     object.insert("mode".into(), json!(sleeve.mode.proto()));
     object.insert("state".into(), json!(sleeve.state.proto()));

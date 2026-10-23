@@ -286,6 +286,14 @@ message Sleeve {
   // marks the sleeve's audit entries, jobs, mail, leases, checkpoints and
   // egress decisions; filter with ListAuditEntries.run_id.
   string run_id = 31;
+  // harness_sha256 and profile_sha256 pin this harness's last approved
+  // launch: the executable's bytes, and the sandbox inputs (mounts, tool
+  // roots, limits, environment, egress allowlist) and token scopes. A later
+  // launch that differs is recorded when the owner asked for it and needs
+  // owner approval (ApprovalService) when Envoy, a sleeve or the hub itself
+  // did.
+  string harness_sha256 = 32;
+  string profile_sha256 = 33;
 }
 
 message BrowseWorkspacesRequest {

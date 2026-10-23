@@ -3,14 +3,22 @@
 //! error carrying its id; the same call repeated with that id in the
 //! `protectorate-approval` header runs once the owner approves it, exactly
 //! once. Requests bind to the caller and the exact request (or launch
-//! inputs), live in hub memory and expire.
+//! inputs), live in hub memory and expire. Launch pins (rug-pull detection)
+//! use the same requests.
 use super::{input, respond, string, Hub};
 use chrono::{DateTime, Utc};
 use protectorate_audit::Entry as AuditEntry;
+use protectorate_sleeve_registry::Pin;
 use protectorate_wire::{encode_json, Code, Result, RpcError, RpcRequest, UnaryServer};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc, sync::Mutex, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 pub(crate) const HEADER: &str = "protectorate-approval";
 pub(crate) const DEFAULT_TTL: Duration = Duration::from_secs(10 * 60);
@@ -300,6 +308,102 @@ pub(crate) fn require(hub: &Hub, request: &RpcRequest, reason: &str) -> Result<(
             detail: String::new(),
             binding: encode_json(&request.message)?,
             hint: hint(&request.headers),
+        },
+    )
+}
+
+/// Who asked for a launch, carried in the launch request as `requester`. A
+/// launch without one is the hub's own, such as recovery after a restart,
+/// and is gated like an agent's.
+pub(crate) fn requester(hub: &Hub, request: &RpcRequest) -> Value {
+    let auth = &request.auth;
+    json!({
+        "actor": auth.actor,
+        "tokenId": auth.token_id,
+        "gated": !(auth.owner || auth.device) && is_agent(hub, &auth.actor, &auth.token_id),
+        "approval": hint(&request.headers),
+    })
+}
+
+pub(crate) fn file_sha256(path: &Path) -> Result<String> {
+    let mut hasher = Sha256::new();
+    fs::File::open(path)
+        .and_then(|mut file| io::copy(&mut file, &mut hasher))
+        .map_err(|e| RpcError::new(Code::Unavailable, format!("hash {}: {e}", path.display())))?;
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+pub(crate) fn json_sha256(value: &Value) -> String {
+    format!("{:x}", Sha256::digest(value.to_string()))
+}
+
+/// Compares a launch with the pin of the harness's last launch. A change the
+/// owner asked for is recorded; one an agent or the hub itself asked for
+/// needs the owner's approval of exactly the new hashes.
+pub(crate) fn check_pin(
+    hub: &Hub,
+    value: &Value,
+    name: &str,
+    run_id: &str,
+    harness: &str,
+    pinned: Option<&Pin>,
+    pin: &Pin,
+) -> Result<()> {
+    let Some(old) = pinned.filter(|old| *old != pin) else {
+        return Ok(());
+    };
+    let short = |hash: &str| hash.get(..12).unwrap_or(hash).to_owned();
+    let mut changes = Vec::new();
+    if old.executable_sha256 != pin.executable_sha256 {
+        changes.push(format!(
+            "{harness} executable {} -> {}",
+            short(&old.executable_sha256),
+            short(&pin.executable_sha256)
+        ));
+    }
+    if old.profile_sha256 != pin.profile_sha256 {
+        changes.push(format!(
+            "{harness} profile {} -> {}",
+            short(&old.profile_sha256),
+            short(&pin.profile_sha256)
+        ));
+    }
+    let detail = changes.join(", ");
+    let requester = &value["requester"];
+    let actor = requester["actor"].as_str().unwrap_or("hub");
+    let token_id = string(requester, "tokenId");
+    if requester["gated"] == false {
+        hub.audit.write(AuditEntry {
+            actor: actor.into(),
+            token_id,
+            run_id: run_id.into(),
+            procedure: "harness.pin_changed".into(),
+            subject: name.into(),
+            outcome: "ok".into(),
+            detail: detail.clone(),
+            ..AuditEntry::default()
+        });
+        hub.emit(
+            "sleeve.pin_changed",
+            name,
+            json!({"harness": harness, "detail": detail}),
+        );
+        return Ok(());
+    }
+    hub.approvals.check(
+        hub,
+        Ask {
+            actor: actor.into(),
+            token_id,
+            run_id: run_id.into(),
+            procedure: "harness.pin".into(),
+            subject: name.into(),
+            reason: "harness or profile changed".into(),
+            detail,
+            binding: [name, harness, &pin.executable_sha256, &pin.profile_sha256]
+                .join("\0")
+                .into_bytes(),
+            hint: string(requester, "approval"),
         },
     )
 }

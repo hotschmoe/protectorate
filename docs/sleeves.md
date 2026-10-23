@@ -263,6 +263,22 @@ the updated hub and respawn existing sleeves to opt into mounts or idle removal.
 systemctl --user restart protectorate-hub
 ```
 
+## Harness pinning
+
+Every launch records, per mode and harness (`chat/claude`, `terminal/shell`),
+the SHA-256 of the harness executable that runs and of its profile: tool
+roots, read-only mounts, limits, environment, the egress allowlist and the
+sleeve token's scopes (its MCP tool allowlist). `sleeve show` and the API
+report them as `harness_sha256` and `profile_sha256`. When a later spawn,
+resleeve or restart of the same sleeve would launch something different,
+for example after the harness updated itself, the hub compares before it
+stops anything: a launch the owner asked for is recorded as
+`harness.pin_changed` in the audit log and announced as `sleeve.pin_changed`;
+one Envoy, a sleeve or the hub itself (recovery after a restart, Envoy woken
+by mail) asked for opens an approval request (`harness.pin`, see
+[auth.md](auth.md#approval-gates)) naming the old and new hashes and does not
+launch until the owner approves exactly those hashes.
+
 ## Disk
 
 `sleeve ls` includes HOME; `sleeve show` and sleeve cards report total home

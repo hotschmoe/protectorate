@@ -12,7 +12,7 @@ use protectorate_sandbox::{
     runtime::LaunchOptions, Access, BindGrant, Limits, Policy, Provider, Request, Workload,
 };
 use protectorate_sleeve_registry::{
-    Harness, Mode, ReadOnlyMount, Record, Registry as SleeveRegistry, State,
+    Harness, Mode, Pin, ReadOnlyMount, Record, Registry as SleeveRegistry, State,
 };
 use protectorate_wire::{self as wire, Code, Result, RpcError, UnaryServer};
 use serde_json::{json, Value};
@@ -1067,6 +1067,90 @@ pub(super) fn resume_envoy_for_mail(hub: &Hub) -> Result<bool> {
     Ok(true)
 }
 
+/// The pin of a chat launch: the harness executable's hash and a hash of
+/// everything else that shapes its sandbox and tools. It reads the request a
+/// launch reads, so a resleeve checks it before stopping the outgoing harness.
+/// None when the harness is not installed, which the launch itself reports.
+pub(super) fn chat_pin(hub: &Hub, value: &Value, harness: Harness) -> Result<Option<Pin>> {
+    let launcher = &hub.chat_runtime.as_ref().ok_or_else(unavailable)?.launcher;
+    let name = string(value, "name");
+    let (executable, roots) = match harness {
+        Harness::Pi => (&launcher.pi_executable, &launcher.tool_roots),
+        Harness::Claude => (&launcher.claude_executable, &launcher.claude_tool_roots),
+        Harness::Codex => (&launcher.codex_executable, &launcher.codex_tool_roots),
+        Harness::Grok => (&launcher.grok_executable, &launcher.grok_tool_roots),
+        Harness::Shell => return Ok(None),
+    };
+    let Some(executable) = executable.as_ref().filter(|path| path.is_file()) else {
+        return Ok(None);
+    };
+    let mut tool_roots = roots
+        .iter()
+        .chain(&launcher.flutter_sdk_root)
+        .collect::<Vec<_>>();
+    tool_roots.sort();
+    tool_roots.dedup();
+    let base_repo = hub
+        .sleeves
+        .get(&name)
+        .map_or_else(|_| string(value, "baseRepo"), |row| row.base_repo);
+    let mut read_only = value["readOnly"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            let source = string(item, "source");
+            let target = string(item, "target");
+            (
+                source.clone(),
+                if target.is_empty() { source } else { target },
+            )
+        })
+        .chain(
+            crate::sleeves::branch::base_grants(&launcher.state_root, &name, &base_repo)?
+                .into_iter()
+                .map(|grant| {
+                    (
+                        grant.source.to_string_lossy().into_owned(),
+                        grant.target.to_string_lossy().into_owned(),
+                    )
+                }),
+        )
+        .collect::<Vec<_>>();
+    read_only.sort();
+    read_only.dedup();
+    let scopes = if name == "envoy" {
+        let now = super::now_unix();
+        hub.identity
+            .list()
+            .into_iter()
+            .find(|t| t.name == "orchestrator-envoy" && t.is_active(now))
+            .map(|t| t.scopes)
+            .unwrap_or_default()
+    } else {
+        crate::sleeves::SLEEVE_SCOPES.map(str::to_owned).to_vec()
+    };
+    let limits = &value["limits"];
+    let profile = json!({
+        "mode": "chat",
+        "executable": executable,
+        "toolRoots": tool_roots,
+        "readOnly": read_only,
+        "cpuPercent": number(limits, "cpuPercent")?,
+        "memoryBytes": number(limits, "memoryBytes")?,
+        "diskBytes": number(limits, "diskBytes")?,
+        "nested": value["nested"] == true,
+        "supervised": value["supervised"] == true,
+        "env": crate::sleeves::request_env(value)?,
+        "egress": crate::sleeves::sleeve_egress(hub, harness == Harness::Pi),
+        "scopes": scopes,
+    });
+    Ok(Some(Pin {
+        executable_sha256: crate::approvals::file_sha256(executable)?,
+        profile_sha256: crate::approvals::json_sha256(&profile),
+    }))
+}
+
 fn spawn_chat(
     hub: &Hub,
     value: &Value,
@@ -1502,6 +1586,22 @@ fn spawn_chat(
                 .into_owned(),
         );
     }
+    let pin_key = crate::sleeves::pin_key(Mode::Chat, harness);
+    let pin = chat_pin(hub, value, harness)?.ok_or_else(|| {
+        RpcError::new(
+            Code::Unavailable,
+            format!("{harness_name} executable is missing"),
+        )
+    })?;
+    crate::approvals::check_pin(
+        hub,
+        value,
+        &name,
+        &run_id,
+        &pin_key,
+        previous.as_ref().and_then(|row| row.pins.get(&pin_key)),
+        &pin,
+    )?;
     let log = runtime.log(&name)?;
     if envoy {
         revoke_identity(hub, &name)?;
@@ -1587,6 +1687,7 @@ fn spawn_chat(
         }
     }
     if let Some(old) = previous {
+        row.pins = old.pins;
         row.base_repo = old.base_repo;
         row.base_branch = old.base_branch;
         row.base_tip = old.base_tip;
@@ -1600,6 +1701,7 @@ fn spawn_chat(
     row.chat = Some(chat_status(hub, session.as_ref()));
     row.env = caller_env;
     row.run_id = run_id;
+    row.pins.insert(pin_key, pin);
     let state_event_cursor = log.last();
     row.supervised = value["supervised"] == true;
     if !resleeve && !exit_after_idle.is_zero() {
@@ -2024,14 +2126,7 @@ fn issue_identity(hub: &Hub, name: &str) -> Result<()> {
         .identity
         .create(
             &format!("sleeve:{name}"),
-            &[
-                "read",
-                "backlog_*",
-                "directory_*",
-                "lease_*",
-                "message_*",
-                "chat_report",
-            ],
+            &crate::sleeves::SLEEVE_SCOPES,
             std::time::Duration::ZERO,
             super::now_unix(),
             &scope_methods,
