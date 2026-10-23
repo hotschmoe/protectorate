@@ -117,7 +117,7 @@ impl GrokAmount {
     fn float(&self) -> Option<f64> {
         match &self.val {
             Value::Number(n) => n.as_f64(),
-            Value::String(s) => s.parse::<f64>().ok(),
+            Value::String(s) => s.parse::<f64>().ok().filter(|v| v.is_finite()),
             _ => None,
         }
     }
@@ -204,7 +204,8 @@ impl Reader for Grok {
                     _ => None,
                 }
             });
-            if let Some(pct) = pct {
+            // "NaN" and "inf" parse as floats, and a tiny cap overflows the ratio.
+            if let Some(pct) = pct.filter(|p| p.is_finite()) {
                 snap.windows.push(Window {
                     name: window_name(start, end),
                     used_percent: clamp_percent(pct),
