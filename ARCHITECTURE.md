@@ -89,7 +89,7 @@ the docs write the CLI as `protectorate`.
 | sandbox | validated Linux sandbox plans, launcher and egress proxy |
 | server | `protectorate-rs` entry points |
 | session | tmux sessions |
-| sleeve-layout | per-harness sleeve home plan; no crate depends on it yet |
+| sleeve-layout | unused (sleeve homes are prepared by hub and sleeve-runner); pending deletion |
 | sleeve-registry | durable sleeve lifecycle records |
 | sleeve-runner | terminal sleeve runner and sandbox helper |
 | svcgen | systemd, Windows task and Termux service definitions |
@@ -150,8 +150,9 @@ machine. Details: [sleeves](docs/sleeves.md), [sandbox](docs/rust-sandbox.md),
   CPU, memory and task limits. Writable: the workspace and a private home.
   Read-only: system and narrow tool directories, named references. The
   harness's credential directory is shared live, never copied (one canonical
-  login per provider on the hub; Claude `CLAUDE_SECURESTORAGE_CONFIG_DIR`,
-  Codex and Grok symlinked `auth.json`, Pi `PI_CODING_AGENT_DIR`). `--nested`
+  login per provider on the hub; Claude's symlinked `.credentials.json`,
+  Codex and Grok symlinked `auth.json`, Pi `PI_CODING_AGENT_DIR`). The home
+  is seeded once with the owner's global git name and email. `--nested`
   delegates a cgroup subtree for runtime tests. No bwrap.
 - **Egress:** the namespace has only loopback. A host-side CONNECT proxy per
   sandbox admits the hub, the provider's API hosts, `--egress-allow` entries

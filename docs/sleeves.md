@@ -128,6 +128,15 @@ harness subagents for parallel work in one workspace, and another sleeve for
 a separate branch, resource limits or isolation. See the official
 [subagent guidance](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
+A sleeve's first launch seeds `$HOME/.gitconfig` in its private home with the
+owner's global git `user.name` and `user.email` (`git config --global` as the
+hub user), so agents commit with a real identity; nothing is seeded unless
+both are set, and a sleeve's own `.gitconfig` is never replaced. The hub never
+changes global or workspace git config. Caller-provided `GIT_AUTHOR_*` and
+`GIT_COMMITTER_*` override the identity. Claude sleeves also get
+`DISABLE_AUTOUPDATER=1` (its install directories are read-only in the
+sandbox), and terminal Claude a `.claude.json` that skips first-run onboarding.
+
 Idle removal applies only to chat sleeves and defaults off. After continuous
 IDLE with no pending or queued mail for `--exit-after-idle`, the hub closes the
 harness, kills its scope, revokes its identity and publishes the normal sleeve

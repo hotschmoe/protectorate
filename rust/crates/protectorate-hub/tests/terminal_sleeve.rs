@@ -25,6 +25,11 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
     for dir in [&state, &owner_home, &workspace, &runtime, &tools] {
         fs::create_dir_all(dir).unwrap();
     }
+    fs::write(
+        owner_home.join(".gitconfig"),
+        "[user]\n\tname = Owner \\\"Q\\\" Name\n\temail = owner@example.com\n",
+    )
+    .unwrap();
     let mut executables = Vec::new();
     for provider in ["pi", "claude", "codex", "grok"] {
         let auth = state.join("auth").join(provider);
@@ -33,7 +38,7 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         let executable = tools.join(provider);
         executable::write_executable(
             &executable,
-            "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
+            "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s|%s <%s>|%s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" \"$(git config user.name)\" \"$(git config user.email)\" \"${DISABLE_AUTOUPDATER:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
         );
         executables.push(executable);
     }
@@ -137,6 +142,20 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
             _ => unreachable!(),
         };
         assert_eq!(fields[env_index], provider_env, "{provider}: {result}");
+        assert_eq!(
+            fields[6], "Owner \"Q\" Name <owner@example.com>",
+            "{provider}: {result}"
+        );
+        let claude = provider == "claude";
+        assert_eq!(fields[7], if claude { "1" } else { "" }, "{result}");
+        assert_eq!(
+            state
+                .join("sleeves")
+                .join(provider)
+                .join("home/.claude/.claude.json")
+                .exists(),
+            claude
+        );
         assert!(
             result.starts_with(if provider == "codex" {
                 "--disable daemon_auto_start --example"

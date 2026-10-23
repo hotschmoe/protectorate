@@ -1201,6 +1201,7 @@ fn spawn_chat(
     let cache_environment =
         protectorate_sleeve_runner::prepare_private_caches(&home, &launcher.user_home)
             .map_err(internal)?;
+    crate::sleeves::seed_git_identity(&home, &launcher.user_home)?;
     let (provider, executable, tool_roots, harness_name) = match harness {
         Harness::Pi => (
             Provider::Pi,
@@ -1512,6 +1513,9 @@ fn spawn_chat(
             )
             .map_err(internal)?;
         }
+        options
+            .environment
+            .insert("DISABLE_AUTOUPDATER".into(), "1".into());
         options.environment.insert(
             "CLAUDE_CONFIG_DIR".into(),
             launcher
@@ -1529,16 +1533,10 @@ fn spawn_chat(
             std::os::unix::fs::symlink("/run/protectorate/auth/codex/auth.json", &credential)
                 .map_err(internal)?;
         }
-        let config_file = config.join("config.toml");
-        if fs::symlink_metadata(&config_file).is_err() {
-            fs::write(
-                &config_file,
-                "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n",
-            )
-            .map_err(internal)?;
-            fs::set_permissions(&config_file, fs::Permissions::from_mode(0o600))
-                .map_err(internal)?;
-        }
+        crate::sleeves::seed_file(
+            &config.join("config.toml"),
+            "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n",
+        )?;
         options.environment.insert(
             "CODEX_HOME".into(),
             launcher
