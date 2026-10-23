@@ -51,21 +51,19 @@ pub type Log = Arc<dyn Fn(&Decision) + Send + Sync>;
 
 /// The host side of one sandbox's egress: a CONNECT listener, plus a plain
 /// tunnel to the hub when the hub listens on loopback, where the namespace
-/// relay reproduces its port.
-pub(crate) struct Proxy {
+/// relay reproduces its port. Public so the fuzz targets reach the CONNECT
+/// parser through its socket.
+pub struct Proxy {
     dir: tempfile::TempDir,
-    pub(crate) sockets: Vec<(PathBuf, PathBuf)>,
+    /// Host path and in-sandbox path of each socket, the proxy's first.
+    pub sockets: Vec<(PathBuf, PathBuf)>,
     pub(crate) relays: Vec<(u16, PathBuf)>,
     stop: Arc<AtomicBool>,
     listeners: Vec<(UnixListener, JoinHandle<()>)>,
 }
 
 impl Proxy {
-    pub(crate) fn start(
-        policy: &EgressPolicy,
-        runtime: &Path,
-        log: Option<Log>,
-    ) -> io::Result<Self> {
+    pub fn start(policy: &EgressPolicy, runtime: &Path, log: Option<Log>) -> io::Result<Self> {
         let dir = tempfile::Builder::new()
             .prefix("egress-")
             .tempdir_in(runtime)?;

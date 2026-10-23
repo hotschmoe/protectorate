@@ -17,6 +17,7 @@ protectorate-grok-driver = { path = "../protectorate-grok-driver" }
 protectorate-identity = { path = "../protectorate-identity" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-mcpbridge = { path = "../protectorate-mcpbridge" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 protectorate-pi-driver = { path = "../protectorate-pi-driver" }
 protectorate-quota = { path = "../protectorate-quota", default-features = false }
 protectorate-release = { path = "../protectorate-release" }

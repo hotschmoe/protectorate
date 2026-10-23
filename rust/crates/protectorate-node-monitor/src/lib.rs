@@ -434,6 +434,14 @@ fn int32(value: &Value, key: &str) -> Option<i32> {
     }
 }
 
+/// Protobuf JSON omits a zero index, so an absent one is the first GPU.
+fn gpu_index(gpu: &Value) -> Option<i32> {
+    match gpu.get("index") {
+        None => Some(0),
+        Some(_) => int32(gpu, "index"),
+    }
+}
+
 fn float(value: &Value, key: &str) -> f64 {
     match value.get(key) {
         Some(Value::Number(number)) => number.as_f64().unwrap_or(0.0),
@@ -450,7 +458,7 @@ fn gpu_points(metrics: &Value) -> Vec<GpuPoint> {
             gpus.iter()
                 .filter_map(|gpu| {
                     Some(GpuPoint {
-                        index: int32(gpu, "index")?,
+                        index: gpu_index(gpu)?,
                         memory_used_bytes: uint(gpu, "memoryUsedBytes"),
                         memory_total_bytes: uint(gpu, "memoryTotalBytes").unwrap_or(0),
                         utilization_percent: float(gpu, "utilizationPercent"),
@@ -574,7 +582,7 @@ fn busy_discrete(status: &Value) -> Option<(i32, String)> {
         if gpu.get("integrated").and_then(Value::as_bool) == Some(true) {
             continue;
         }
-        let Some(index) = int32(gpu, "index") else {
+        let Some(index) = gpu_index(gpu) else {
             continue;
         };
         let reason = busy_reason(status, index);
