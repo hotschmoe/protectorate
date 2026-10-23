@@ -14,13 +14,6 @@ case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *
 cat > "$temp/mock-bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$HOME/systemctl.log"
-if [[ "$*" == '--user show protectorate-hub.service -p FragmentPath --value' ]]; then
-  printf '%s\n' "$HOME/.config/systemd/user/protectorate-hub.service"
-  exit 0
-fi
-if [[ "$*" == '--user show protectorate-hub.service -p DropInPaths --value' ]]; then
-  exit 0
-fi
 if [[ "$*" == *' is-active '* && -f "$HOME/systemctl-inactive" ]]; then
   exit 3
 fi
@@ -69,7 +62,7 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --rel
   --public-url https://example.test/ --trusted-proxy 127.0.0.2 --trusted-proxy 127.0.0.3 \
   --local-llm-url http://127.0.0.1:1234 --local-llm-url http://127.0.0.1:5678 \
   --local-model-host model.test --local-model-host backup.test --dead-retention 0 \
-  --no-start > "$temp/hub.log"
+  --tls-listen 192.168.22.5:7470 --tls-name hub.lan --no-start > "$temp/hub.log"
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-rs" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-sleeve-runner" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-mcpbridge" ]]
@@ -78,6 +71,15 @@ grep -Fq '"version":"v9.8.7"' "$HOME/hub-releases/v9.8.7/release.json"
 [[ "$(readlink "$HOME/hub-releases/current")" == v9.8.7 ]]
 [[ "$(stat -c %a "$HOME/hub/token")" == 600 ]]
 grep -Fq -- '--owner-token-file' "$HOME/.config/systemd/user/protectorate-hub.service"
+grep -Fq -- '--listen "127.0.0.1:7470"' "$HOME/.config/systemd/user/protectorate-hub.service"
+grep -Fq -- '--tls-listen "192.168.22.5:7470"' "$HOME/.config/systemd/user/protectorate-hub.service"
+grep -Fq -- '--tls-name "hub.lan"' "$HOME/.config/systemd/user/protectorate-hub.service"
+grep -Fq 'Hub CA:' "$temp/hub.log"
+if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --listen 192.168.22.5:7470 --dry-run > "$temp/hub-plain-lan.log" 2>&1; then
+  echo 'hub accepted a plain HTTP LAN listener' >&2
+  exit 1
+fi
+grep -Fq -- 'must be loopback' "$temp/hub-plain-lan.log"
 grep -Fq -- '--public-url "https://example.test/"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--dead-retention "0"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--trusted-proxy "127.0.0.2"' "$HOME/.config/systemd/user/protectorate-hub.service"
@@ -184,12 +186,20 @@ assert '--user enable --now protectorate-hub.service' in calls
 assert '--user disable protectorate-hub.service' not in calls
 PY
 
-bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" --no-start > "$temp/node.log"
+printf '%s\n' join-code > "$temp/code"
+printf '%s\n' ca > "$temp/ca.pem"
+join=(--hub https://hub.test:7470 --name n1 --code-file "$temp/code" --ca-cert "$temp/ca.pem")
+if bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" --no-start > "$temp/node-unjoined.log" 2>&1; then
+  echo 'node installed without joining a hub' >&2
+  exit 1
+fi
+grep -Fq 'a node must join a hub' "$temp/node-unjoined.log"
+bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" "${join[@]}" --no-start > "$temp/node.log"
 [[ -x "$HOME/node-releases/v9.8.7/protectorate-node-sandbox-helper" ]]
 grep -Fq -- 'node serve' "$HOME/.config/systemd/user/protectorate-node.service"
-grep -Fq -- '--agent-token-file' "$HOME/.config/systemd/user/protectorate-node.service"
+! grep -Fq -- 'token' "$HOME/.config/systemd/user/protectorate-node.service"
 ! grep -Fq -- '--allow-plain-jobs' "$HOME/.config/systemd/user/protectorate-node.service"
-bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" --allow-plain-jobs --no-start > "$temp/node-care.log"
+bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" "${join[@]}" --allow-plain-jobs --no-start > "$temp/node-care.log"
 grep -Fq -- '--allow-plain-jobs' "$HOME/.config/systemd/user/protectorate-node.service"
 if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --allow-plain-jobs --dry-run > "$temp/hub-care.log" 2>&1; then
   echo 'hub accepted node-only plain job option' >&2
@@ -197,7 +207,7 @@ if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --allow-plain-jobs --
 fi
 grep -Fq -- '--allow-plain-jobs requires --role node' "$temp/hub-care.log"
 
-bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-node" --release-dir "$HOME/shared-releases" --no-start > "$temp/shared-node.log"
+bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-node" --release-dir "$HOME/shared-releases" "${join[@]}" --no-start > "$temp/shared-node.log"
 [[ ! -e "$HOME/shared-releases/v9.8.7/web" ]]
 original_binary=$(sha256sum "$HOME/shared-releases/v9.8.7/protectorate-rs-linux-$arch")
 bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-hub" --release-dir "$HOME/shared-releases" --no-start > "$temp/shared-hub.log"
@@ -212,12 +222,9 @@ if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-
 fi
 grep -Fq 'existing web archive differs' "$temp/shared-tamper.log"
 
-mkdir -p "$HOME/.protectorate"
-printf '%s\n' 'Go state stays here' > "$HOME/.protectorate/token"
 bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --no-start > "$temp/default.log"
-[[ -f "$HOME/.protectorate-rust/token" ]]
-[[ "$(cat "$HOME/.protectorate/token")" == 'Go state stays here' ]]
-[[ "$(readlink "$HOME/.local/share/protectorate-rust/releases/current")" == v9.8.7 ]]
+[[ -f "$HOME/.protectorate/token" ]]
+[[ "$(readlink "$HOME/.local/share/protectorate/releases/current")" == v9.8.7 ]]
 printf '%s\n' '[Service]' 'ExecStart=/bin/true' > "$HOME/.config/systemd/user/protectorate-hub.service"
 if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --no-start > "$temp/unmanaged.log" 2>&1; then
   echo 'unmanaged unit was overwritten' >&2
@@ -225,61 +232,6 @@ if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --no-start > "$temp/u
 fi
 grep -Fq 'existing unmanaged service unit' "$temp/unmanaged.log"
 grep -Fq 'ExecStart=/bin/true' "$HOME/.config/systemd/user/protectorate-hub.service"
-
-cut_home="$temp/cutover-home"
-mkdir -p "$cut_home/.config/systemd/user"
-go_unit="$cut_home/.config/systemd/user/protectorate-hub.service"
-printf '%s\n' '[Service]' 'ExecStart=/usr/local/bin/protectorate hub serve --listen 127.0.0.1:7470' > "$go_unit"
-go_sha=$(sha256sum "$go_unit")
-go_sha=${go_sha%% *}
-HOME="$cut_home" bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$cut_home/state" --release-dir "$cut_home/releases" --stage-for-cutover --no-start > "$temp/cutover-stage.log"
-[[ "$(sha256sum "$go_unit" | cut -d ' ' -f 1)" == "$go_sha" ]]
-[[ -f "$cut_home/.config/systemd/user/protectorate-rust-hub.service" ]]
-if HOME="$cut_home" bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$cut_home/state" --release-dir "$cut_home/releases" --listen 127.0.0.1:7470 --adopt-go-unit --expect-go-unit-sha256 "$go_sha" > "$temp/cutover-active.log" 2>&1; then
-  echo 'active Go unit was adopted' >&2
-  exit 1
-fi
-grep -Fq 'stop the Go hub service before adoption' "$temp/cutover-active.log"
-[[ "$(sha256sum "$go_unit" | cut -d ' ' -f 1)" == "$go_sha" ]]
-printf '%s\n' inactive > "$cut_home/systemctl-inactive"
-wrong_go_sha="0${go_sha:1}"
-[[ "$wrong_go_sha" != "$go_sha" ]] || wrong_go_sha="1${go_sha:1}"
-if HOME="$cut_home" bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$cut_home/state" --release-dir "$cut_home/releases" --listen 127.0.0.1:7470 --adopt-go-unit --expect-go-unit-sha256 "$wrong_go_sha" > "$temp/cutover-hash.log" 2>&1; then
-  echo 'changed Go unit fingerprint was accepted' >&2
-  exit 1
-fi
-grep -Fq 'existing Go unit fingerprint changed' "$temp/cutover-hash.log"
-HOME="$cut_home" bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$cut_home/state" --release-dir "$cut_home/releases" --listen 127.0.0.1:7470 --adopt-go-unit --expect-go-unit-sha256 "$go_sha" > "$temp/cutover-adopt.log"
-go_backup="$cut_home/.config/systemd/user/protectorate-hub.go-$go_sha.service.backup"
-[[ "$(sha256sum "$go_backup" | cut -d ' ' -f 1)" == "$go_sha" ]]
-grep -Fq '# Managed by Protectorate Rust installer' "$go_unit"
-rust_sha=$(sha256sum "$go_unit")
-rust_sha=${rust_sha%% *}
-wrong_rust_sha="0${rust_sha:1}"
-[[ "$wrong_rust_sha" != "$rust_sha" ]] || wrong_rust_sha="1${rust_sha:1}"
-if HOME="$cut_home" bash "$root/install-hub.sh" --rollback-go-unit --expect-go-unit-sha256 "$go_sha" --expect-rust-unit-sha256 "$wrong_rust_sha" > "$temp/cutover-rollback-hash.log" 2>&1; then
-  echo 'changed Rust unit fingerprint was accepted for rollback' >&2
-  exit 1
-fi
-grep -Fq 'current Rust unit fingerprint changed' "$temp/cutover-rollback-hash.log"
-[[ "$(sha256sum "$go_unit" | cut -d ' ' -f 1)" == "$rust_sha" ]]
-HOME="$cut_home" bash "$root/install-hub.sh" --rollback-go-unit --expect-go-unit-sha256 "$go_sha" --expect-rust-unit-sha256 "$rust_sha" > "$temp/cutover-rollback.log"
-[[ "$(sha256sum "$go_unit" | cut -d ' ' -f 1)" == "$go_sha" ]]
-[[ "$(sha256sum "$go_backup" | cut -d ' ' -f 1)" == "$go_sha" ]]
-[[ -f "$cut_home/.config/systemd/user/protectorate-hub.rust-before-rollback-$rust_sha.service.backup" ]]
-
-cut_fail_home="$temp/cutover-fail-home"
-mkdir -p "$cut_fail_home/.config/systemd/user"
-cut_fail_unit="$cut_fail_home/.config/systemd/user/protectorate-hub.service"
-printf '%s\n' '[Service]' 'ExecStart=/usr/local/bin/protectorate hub serve --listen 127.0.0.1:7470' > "$cut_fail_unit"
-printf '%s\n' inactive > "$cut_fail_home/systemctl-inactive"
-printf '%s\n' fail > "$cut_fail_home/systemctl-fail-once"
-if HOME="$cut_fail_home" bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$cut_fail_home/state" --release-dir "$cut_fail_home/releases" --listen 127.0.0.1:7470 --adopt-go-unit --expect-go-unit-sha256 "$go_sha" > "$temp/cutover-start-fail.log" 2>&1; then
-  echo 'failed Rust cutover start was accepted' >&2
-  exit 1
-fi
-grep -Fq 'restored the prior release and service' "$temp/cutover-start-fail.log"
-[[ "$(sha256sum "$cut_fail_unit" | cut -d ' ' -f 1)" == "$go_sha" ]]
 
 printf '%s\n' altered > "$temp/bundle/protectorate-cli-linux-$arch"
 if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/fail" --release-dir "$HOME/fail-releases" --dry-run > "$temp/fail.log" 2>&1; then

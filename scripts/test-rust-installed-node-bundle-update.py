@@ -14,6 +14,8 @@ print('fixture', fixture, flush=True)
 source = fixture/'source'; source.mkdir()
 spec = importlib.util.spec_from_file_location('installed_hub_update', repo/'scripts/test-rust-installed-hub-update.py')
 module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+spec = importlib.util.spec_from_file_location('installed_node_update', repo/'scripts/test-rust-installed-node-update.py')
+nodes = importlib.util.module_from_spec(spec); spec.loader.exec_module(nodes)
 builds = fixture/'binaries'; builds.mkdir()
 module.build_server('0.1.0', builds/'first')
 module.build_server('0.1.1', builds/'second')
@@ -43,61 +45,52 @@ mock = fixture / 'mock'; mock.mkdir()
 (mock / 'systemctl').chmod(0o755)
 (fixture / 'no-delete.bash').write_text('rm() { :; }\n')
 state = fixture / 'state'; releases = fixture / 'releases'
+release_binary_dir = fixture/'node-candidates'; release_binary_dir.mkdir()
+for asset in (source/'bundle-0.1.1').iterdir():
+    if asset.is_file() and asset.name != 'index.html':
+        shutil.copy2(asset, release_binary_dir/asset.name)
+for component in module.COMPONENTS:
+    os.link(release_binary_dir/f'{component}-linux-{arch}',release_binary_dir/component)
+hub_bin = fixture/'hub-bin'; hub_bin.mkdir()
+shutil.copy2(source/'bundle-0.1.1'/f'protectorate-rs-linux-{arch}', hub_bin/'protectorate-rs')
+hub, hub_url = nodes.start_hub(fixture, hub_bin/'protectorate-rs', '--node-binary-dir', str(release_binary_dir))
+owner_path = fixture/'owner-token'
+node_port = port()
+status, invite = nodes.hub_call(hub_url, 'NodeService/InviteNode', {'name': 'trial-peer', 'tier': 'care'})
+assert status == 200, invite
+code = fixture/'join.code'; code.write_text(invite['code']+'\n'); code.chmod(0o600)
 env = dict(os.environ, HOME=str(home), BASH_ENV=str(fixture/'no-delete.bash'), TMPDIR=str(fixture), PATH=str(mock)+os.pathsep+os.environ['PATH'])
-run('bash', str(repo/'install-node.sh'), '--bundle-dir', str(source/'bundle-0.1.0'), '--home', str(state), '--release-dir', str(releases), '--listen', '127.0.0.1:1', '--no-start', cwd=repo, env=env)
+run('bash', str(repo/'install-node.sh'), '--bundle-dir', str(source/'bundle-0.1.0'), '--home', str(state), '--release-dir', str(releases),
+    '--hub', invite['hubUrl'], '--name', 'trial-peer', '--code-file', str(code), '--ca-cert', str(fixture/'hub-state/ca/ca.pem'),
+    '--listen', '127.0.0.1:%d' % node_port, '--no-start', cwd=repo, env=env)
 assert os.readlink(releases/'current') == '0.1.0'
 unit_path = home/'.config/systemd/user/protectorate-node.service'
 assert 'current/protectorate-rs' in unit_path.read_text()
 first_installed = releases/'0.1.0/protectorate-rs'
 initial_hash = hashlib.sha256(first_installed.read_bytes()).hexdigest()
 assert initial_hash == hashlib.sha256((source/f'bundle-0.1.0/protectorate-rs-linux-{arch}').read_bytes()).hexdigest()
-node_port, hub_port = port(), port()
-node_token = (state/'agent-token').read_text().strip()
-owner_path = fixture/'owner-token'; owner_path.write_text('installed-node-layout-owner\n'); owner_path.chmod(0o600)
-release_binary_dir = fixture/'node-candidates'; release_binary_dir.mkdir()
 candidate = release_binary_dir/f'protectorate-rs-linux-{arch}'
-for asset in (source/'bundle-0.1.1').iterdir():
-    if asset.is_file() and asset.name != 'index.html':
-        shutil.copy2(asset, release_binary_dir/asset.name)
-for component in module.COMPONENTS:
-    os.link(release_binary_dir/f'{component}-linux-{arch}',release_binary_dir/component)
 expected_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
-hub_bin = fixture/'hub-bin'; hub_bin.mkdir()
-for component in ('protectorate-rs', 'protectorate-sleeve-runner', 'protectorate-sleeve-sandbox-helper'):
-    shutil.copy2(source/'bundle-0.1.1'/f'{component}-linux-{arch}', hub_bin/component)
 node_unit = 'protectorate-installed-node-layout-%d.service' % os.getpid()
 native_unit = 'protectorate-native-node-layout-%d.service' % os.getpid()
 native_started = False
-hub_log = (fixture/'hub.log').open('w')
-hub = None
-node_url = 'http://127.0.0.1:%d' % node_port
-hub_url = 'http://127.0.0.1:%d' % hub_port
 cli = str(repo/'target/debug/protectorate-cli')
 
 def cli_run(*args):
     return subprocess.run((cli, '--hub', hub_url, '--token-file', str(owner_path), *args), capture_output=True, text=True, timeout=180)
 
-def agent_call(method, body):
-    req=urllib.request.Request(node_url+'/protectorate.v1.NodeAgentService/'+method,
-        data=json.dumps(body).encode(), headers={'Authorization':'Bearer '+node_token,'Content-Type':'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=90) as res: return json.load(res)
-    except urllib.error.HTTPError as error:
-        raise AssertionError(f'{method}: HTTP {error.code}: {error.read().decode()}') from error
+def apply(name, body):
+    status, reply = nodes.hub_call(hub_url, 'NodeService/ApplyUpdate', dict(body, name=name), timeout=90)
+    assert status == 200, (status, reply)
+    return reply
 
 def agent_version():
-    try:
-        return agent_call('GetMetrics',{}).get('agentVersion')
-    except Exception: return None
+    return nodes.metrics(hub_url, 'trial-peer')
 
 try:
-    run('/usr/bin/systemd-run','--user','--collect','--unit',node_unit,'--property=Type=exec','--property=KillMode=control-group','--property=Restart=no',str(releases/'current/protectorate-rs'),'node','serve','--home',str(state),'--agent-token-file',str(state/'agent-token'),'--listen','127.0.0.1:%d'%node_port,'--file-root',str(fixture/'node-files'))
+    run('/usr/bin/systemd-run','--user','--collect','--unit',node_unit,'--property=Type=exec','--property=KillMode=control-group','--property=Restart=no',str(releases/'current/protectorate-rs'),'node','serve','--home',str(state),'--file-root',str(fixture/'node-files'))
     wait('node 0.1.0', lambda: agent_version()=='0.1.0')
     guardian = run('/usr/bin/systemctl','--user','show',node_unit,'--property=MainPID','--value',capture_output=True).stdout.strip()
-    hub = subprocess.Popen([str(hub_bin/'protectorate-rs'),'serve','--home',str(fixture/'hub-state'),'--owner-token-file',str(owner_path),'--agent-token-file',str(state/'agent-token'),'--node-binary-dir',str(release_binary_dir),'--listen','127.0.0.1:%d'%hub_port],stdout=hub_log,stderr=subprocess.STDOUT)
-    wait('hub', lambda: cli_run('status').returncode==0)
-    cli_run('node','add','trial-peer','--addr','127.0.0.1:%d'%node_port,'--json')
-    wait('node fresh', lambda: json.loads(cli_run('node','show','trial-peer','--json').stdout).get('freshness')=='NODE_FRESHNESS_FRESH')
     update = cli_run('node','update','trial-peer','--json')
     lines=[json.loads(line) for line in update.stdout.splitlines() if line.strip()]
     assert lines[-1]['phase']=='UPDATE_PHASE_CONFIRMED', lines
@@ -131,7 +124,7 @@ try:
         f'{hashlib.sha256((failed/f"{component}-linux-{arch}").read_bytes()).hexdigest()}  {component}-linux-{arch}\n'
         for component in module.COMPONENTS))
     failing_binary = failed/f'protectorate-rs-linux-{arch}'
-    applied = agent_call('ApplyUpdate', {'path':'updates/failed-bundle',
+    applied = apply('trial-peer', {'path':'updates/failed-bundle',
         'size':str(failing_binary.stat().st_size),
         'sha256':hashlib.sha256(failing_binary.read_bytes()).hexdigest(),
         'expectedVersion':'0.1.2'})
@@ -166,7 +159,7 @@ try:
         f'{hashlib.sha256((retry/f"{component}-linux-{arch}").read_bytes()).hexdigest()}  {component}-linux-{arch}\n'
         for component in module.COMPONENTS))
     retry_binary = retry/f'protectorate-rs-linux-{arch}'
-    agent_call('ApplyUpdate', {'path':'updates/failed-bundle-retry',
+    apply('trial-peer', {'path':'updates/failed-bundle-retry',
         'size':str(retry_binary.stat().st_size),
         'sha256':hashlib.sha256(retry_binary.read_bytes()).hexdigest(),
         'expectedVersion':'0.1.2'})
@@ -188,27 +181,17 @@ try:
     native_state = fixture/'native/state'; native_state.mkdir()
     native_files = fixture/'native/files'; native_files.mkdir()
     native_port = port()
-    native_url = f'http://127.0.0.1:{native_port}/protectorate.v1.NodeAgentService/'
-    def native_call(method, body):
-        req=urllib.request.Request(native_url+method, data=json.dumps(body).encode(),
-            headers={'Authorization':'Bearer '+node_token,'Content-Type':'application/json'})
-        with urllib.request.urlopen(req, timeout=5) as response:return json.load(response)
     def native_version():
-        try:return native_call('GetMetrics',{}).get('agentVersion')
-        except Exception:return None
+        return nodes.metrics(hub_url, 'trial-native')
+    nodes.join(hub_url, fixture, native_root/'current/protectorate-rs', native_state, 'trial-native', native_port)
     run('/usr/bin/systemd-run','--user','--collect','--unit',native_unit,
         '--property=Type=exec','--property=KillMode=control-group','--property=Restart=no',
         str(native_root/'current/protectorate-rs'),'node','serve','--home',str(native_state),
-        '--agent-token-file',str(state/'agent-token'),
-        '--listen',f'127.0.0.1:{native_port}','--file-root',str(native_files))
+        '--file-root',str(native_files))
     native_started = True
     wait('native initial node', lambda:native_version()=='0.1.0')
     native_guardian = run('/usr/bin/systemctl','--user','show',native_unit,
         '--property=MainPID','--value',capture_output=True).stdout.strip()
-    added = cli_run('node','add','trial-native','--addr',f'127.0.0.1:{native_port}','--json')
-    assert added.returncode == 0, (added.stdout,added.stderr)
-    wait('native hub poll',lambda:json.loads(cli_run('node','show','trial-native','--json').stdout)
-        .get('freshness')=='NODE_FRESHNESS_FRESH')
     native_update = cli_run('node','update','trial-native','--json')
     assert native_update.returncode == 0, (native_update.stdout,native_update.stderr)
     native_phases=[json.loads(line) for line in native_update.stdout.splitlines() if line.strip()]
@@ -229,12 +212,10 @@ try:
     (fixture/'native-evidence.json').write_text(json.dumps(native_evidence,indent=2)+'\n')
     print(json.dumps(native_evidence,indent=2),flush=True)
 finally:
-    if hub is not None:
-        hub.terminate()
-        try: hub.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            hub.kill(); hub.wait(timeout=10)
+    hub.terminate()
+    try: hub.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        hub.kill(); hub.wait(timeout=10)
     subprocess.run(['/usr/bin/systemctl','--user','stop',node_unit],check=False)
     if native_started:
         subprocess.run(['/usr/bin/systemctl','--user','stop',native_unit],check=False)
-    hub_log.close()

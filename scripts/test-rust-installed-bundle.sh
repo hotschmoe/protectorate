@@ -57,11 +57,11 @@ command = shlex.split(line.removeprefix('ExecStart='))
 state = pathlib.Path(token_path).parent
 job_id = 'installed-restore-job'
 artifact_body = b'installed restore artifact\n'
-artifact_path = state / 'jobs-rust' / f'{job_id}.artifacts' / 'nested' / 'result.txt'
+artifact_path = state / 'jobs' / f'{job_id}.artifacts' / 'nested' / 'result.txt'
 artifact_path.parent.mkdir(parents=True)
 artifact_path.write_bytes(artifact_body)
-(state / 'jobs-rust' / f'{job_id}.log').write_bytes(b'installed job output\n')
-(state / 'jobs-rust' / f'{job_id}.json').write_text(json.dumps({
+(state / 'jobs' / f'{job_id}.log').write_bytes(b'installed job output\n')
+(state / 'jobs' / f'{job_id}.json').write_text(json.dumps({
     'id': job_id,
     'requestId': 'installed-restore-request',
     'endpoint': '',
@@ -93,9 +93,9 @@ def assert_job_restored(state_path):
         job = json.load(response)
     assert job['state'] == 'JOB_STATE_SUCCEEDED', job
     assert job['artifacts'][0]['path'] == 'nested/result.txt', job
-    artifact = state_path / 'jobs-rust' / f'{job_id}.artifacts' / 'nested' / 'result.txt'
+    artifact = state_path / 'jobs' / f'{job_id}.artifacts' / 'nested' / 'result.txt'
     assert hashlib.sha256(artifact.read_bytes()).hexdigest() == artifact_hash
-    assert (state_path / 'jobs-rust' / f'{job_id}.log').read_bytes() == b'installed job output\n'
+    assert (state_path / 'jobs' / f'{job_id}.log').read_bytes() == b'installed job output\n'
 
 try:
     token = pathlib.Path(token_path).read_text().strip()
