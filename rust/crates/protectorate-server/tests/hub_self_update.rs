@@ -23,7 +23,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use support::{binary, free_port, OWNER};
+use support::{binary, free_port, kill_tmux, OWNER};
 
 type Files = Arc<Mutex<BTreeMap<String, Vec<u8>>>>;
 
@@ -123,7 +123,7 @@ impl Drop for ReleaseServer {
 
 /// The guardian in its own process group, so cleanup reaches every hub child
 /// and candidate it started.
-struct Guardian(Child);
+struct Guardian(Child, String);
 
 impl Drop for Guardian {
     fn drop(&mut self) {
@@ -138,6 +138,7 @@ impl Drop for Guardian {
         }
         unsafe { libc::kill(group, libc::SIGKILL) };
         let _ = self.0.wait();
+        kill_tmux(&self.1);
     }
 }
 
@@ -269,6 +270,7 @@ fn guardian_installs_verified_releases_refuses_tampering_and_rolls_back() {
     let api = ReleaseServer::start();
     let plain = free_port();
     let log = root.path().join("guardian.log");
+    let tmux = format!("p-update-{}", std::process::id());
     let _guardian = Guardian(
         Command::new(binary())
             .args(["serve", "--home"])
@@ -278,7 +280,7 @@ fn guardian_installs_verified_releases_refuses_tampering_and_rolls_back() {
             .args(["--listen", &plain, "--release-api-url", &api.base])
             .args(["--release-repo", "owner/repo", "--release-dir"])
             .arg(&releases)
-            .args(["--tmux-socket", &format!("p-update-{}", std::process::id())])
+            .args(["--tmux-socket", &tmux])
             .env("HOME", &user_home)
             .env_remove("PROTECTORATE_HOME")
             .env_remove("PROTECTORATE_HUB_GUARD_CHILD")
@@ -287,6 +289,7 @@ fn guardian_installs_verified_releases_refuses_tampering_and_rolls_back() {
             .stderr(fs::File::create(&log).unwrap())
             .spawn()
             .unwrap(),
+        tmux,
     );
     let client = Client::new(&format!("http://{plain}"), OWNER, Duration::from_secs(60)).unwrap();
     let serves = |version: &str| {
