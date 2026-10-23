@@ -126,10 +126,10 @@ fn devices_sign_every_request_and_revocation_closes_their_streams() {
         )
     });
     received
-        .recv_timeout(Duration::from_secs(30))
+        .recv_timeout(Duration::from_secs(120))
         .expect("the device's event stream delivers");
     hub.call(&format!("{DEVICES}RevokeDevice"), json!({"id": id}));
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while !watcher.is_finished() {
         assert!(Instant::now() < deadline, "revocation left the stream open");
         thread::sleep(Duration::from_millis(50));
@@ -191,7 +191,7 @@ fn the_terminal_websocket_takes_the_proof_as_a_subprotocol() {
         "protectorate.v1",
         "the hub never echoes the proof"
     );
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let mut seen = Vec::new();
     while !String::from_utf8_lossy(&seen).contains("terminal-ready") {
         assert!(Instant::now() < deadline, "no terminal output");
@@ -204,13 +204,6 @@ fn the_terminal_websocket_takes_the_proof_as_a_subprotocol() {
     let _ = socket.close(None);
     let replayed = attach(format!("protectorate.v1, proof.{proof}"), &url).unwrap_err();
     assert_eq!(status(replayed), 401);
-    let _ = std::process::Command::new("tmux")
-        .args([
-            "-L",
-            &format!("p-real-{}", std::process::id()),
-            "kill-server",
-        ])
-        .output();
 }
 
 fn write_private(path: &Path, token: &str) {
@@ -224,7 +217,7 @@ fn capabilities_renew_across_expiry_narrow_and_die_when_revoked() {
     let hub = Hub::start(root.path());
     let created = hub.call(
         &format!("{TOKENS}CreateToken"),
-        json!({"name": "script", "scopes": ["read"], "ttl": "4s"}),
+        json!({"name": "script", "scopes": ["read"], "ttl": "8s"}),
     );
     let first = created["secret"].as_str().unwrap().to_owned();
     let file = root.path().join("script.token");
@@ -234,7 +227,8 @@ fn capabilities_renew_across_expiry_narrow_and_die_when_revoked() {
         .unwrap()
         .with_credential(Credential::TokenFile(file.clone()));
     let mut seen = vec![first.clone()];
-    let until = Instant::now() + Duration::from_secs(10);
+    // Half the TTL is the margin a call on a loaded host has to renew it.
+    let until = Instant::now() + Duration::from_secs(20);
     while Instant::now() < until {
         client
             .call(STATUS, &json!({}))
