@@ -593,7 +593,6 @@ class ChatStatus extends $pb.GeneratedMessage {
     $core.String? model,
     $fixnum.Int64? contextTokens,
     $fixnum.Int64? contextWindow,
-    $0.Timestamp? cacheExpiresAt,
     $fixnum.Int64? lastSeq,
     $0.Timestamp? lastActivityAt,
     $core.String? provider,
@@ -608,7 +607,6 @@ class ChatStatus extends $pb.GeneratedMessage {
     if (model != null) result.model = model;
     if (contextTokens != null) result.contextTokens = contextTokens;
     if (contextWindow != null) result.contextWindow = contextWindow;
-    if (cacheExpiresAt != null) result.cacheExpiresAt = cacheExpiresAt;
     if (lastSeq != null) result.lastSeq = lastSeq;
     if (lastActivityAt != null) result.lastActivityAt = lastActivityAt;
     if (provider != null) result.provider = provider;
@@ -643,8 +641,6 @@ class ChatStatus extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         5, _omitFieldNames ? '' : 'contextWindow', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
-    ..aOM<$0.Timestamp>(6, _omitFieldNames ? '' : 'cacheExpiresAt',
-        subBuilder: $0.Timestamp.$_createMessage)
     ..a<$fixnum.Int64>(7, _omitFieldNames ? '' : 'lastSeq', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOM<$0.Timestamp>(8, _omitFieldNames ? '' : 'lastActivityAt',
@@ -726,48 +722,35 @@ class ChatStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   void clearContextWindow() => $_clearField(5);
 
-  /// cache_expires_at is when the harness's prompt cache goes cold if no new
-  /// turn starts, when the harness reports it.
-  @$pb.TagNumber(6)
-  $0.Timestamp get cacheExpiresAt => $_getN(5);
-  @$pb.TagNumber(6)
-  set cacheExpiresAt($0.Timestamp value) => $_setField(6, value);
-  @$pb.TagNumber(6)
-  $core.bool hasCacheExpiresAt() => $_has(5);
-  @$pb.TagNumber(6)
-  void clearCacheExpiresAt() => $_clearField(6);
-  @$pb.TagNumber(6)
-  $0.Timestamp ensureCacheExpiresAt() => $_ensure(5);
-
   @$pb.TagNumber(7)
-  $fixnum.Int64 get lastSeq => $_getI64(6);
+  $fixnum.Int64 get lastSeq => $_getI64(5);
   @$pb.TagNumber(7)
-  set lastSeq($fixnum.Int64 value) => $_setInt64(6, value);
+  set lastSeq($fixnum.Int64 value) => $_setInt64(5, value);
   @$pb.TagNumber(7)
-  $core.bool hasLastSeq() => $_has(6);
+  $core.bool hasLastSeq() => $_has(5);
   @$pb.TagNumber(7)
   void clearLastSeq() => $_clearField(7);
 
   @$pb.TagNumber(8)
-  $0.Timestamp get lastActivityAt => $_getN(7);
+  $0.Timestamp get lastActivityAt => $_getN(6);
   @$pb.TagNumber(8)
   set lastActivityAt($0.Timestamp value) => $_setField(8, value);
   @$pb.TagNumber(8)
-  $core.bool hasLastActivityAt() => $_has(7);
+  $core.bool hasLastActivityAt() => $_has(6);
   @$pb.TagNumber(8)
   void clearLastActivityAt() => $_clearField(8);
   @$pb.TagNumber(8)
-  $0.Timestamp ensureLastActivityAt() => $_ensure(7);
+  $0.Timestamp ensureLastActivityAt() => $_ensure(6);
 
   /// provider is who serves the model: anthropic, openai, xai, or the provider
   /// id pi reports (deepseek, zai, openrouter, a custom name, ...). Empty until
   /// the first model call.
   @$pb.TagNumber(9)
-  $core.String get provider => $_getSZ(8);
+  $core.String get provider => $_getSZ(7);
   @$pb.TagNumber(9)
-  set provider($core.String value) => $_setString(8, value);
+  set provider($core.String value) => $_setString(7, value);
   @$pb.TagNumber(9)
-  $core.bool hasProvider() => $_has(8);
+  $core.bool hasProvider() => $_has(7);
   @$pb.TagNumber(9)
   void clearProvider() => $_clearField(9);
 
@@ -775,45 +758,45 @@ class ChatStatus extends $pb.GeneratedMessage {
   /// private network (a user-run LLM server) rather than a hosted API. The hub
   /// decides it from the provider's base URL.
   @$pb.TagNumber(10)
-  $core.bool get localModel => $_getBF(9);
+  $core.bool get localModel => $_getBF(8);
   @$pb.TagNumber(10)
-  set localModel($core.bool value) => $_setBool(9, value);
+  set localModel($core.bool value) => $_setBool(8, value);
   @$pb.TagNumber(10)
-  $core.bool hasLocalModel() => $_has(9);
+  $core.bool hasLocalModel() => $_has(8);
   @$pb.TagNumber(10)
   void clearLocalModel() => $_clearField(10);
 
   @$pb.TagNumber(11)
-  $core.String get reasoningEffort => $_getSZ(10);
+  $core.String get reasoningEffort => $_getSZ(9);
   @$pb.TagNumber(11)
-  set reasoningEffort($core.String value) => $_setString(10, value);
+  set reasoningEffort($core.String value) => $_setString(9, value);
   @$pb.TagNumber(11)
-  $core.bool hasReasoningEffort() => $_has(10);
+  $core.bool hasReasoningEffort() => $_has(9);
   @$pb.TagNumber(11)
   void clearReasoningEffort() => $_clearField(11);
 
   @$pb.TagNumber(12)
-  ModelSettings get settings => $_getN(11);
+  ModelSettings get settings => $_getN(10);
   @$pb.TagNumber(12)
   set settings(ModelSettings value) => $_setField(12, value);
   @$pb.TagNumber(12)
-  $core.bool hasSettings() => $_has(11);
+  $core.bool hasSettings() => $_has(10);
   @$pb.TagNumber(12)
   void clearSettings() => $_clearField(12);
   @$pb.TagNumber(12)
-  ModelSettings ensureSettings() => $_ensure(11);
+  ModelSettings ensureSettings() => $_ensure(10);
 
   /// cache is the prompt-cache telemetry over the chat log.
   @$pb.TagNumber(13)
-  CacheTelemetry get cache => $_getN(12);
+  CacheTelemetry get cache => $_getN(11);
   @$pb.TagNumber(13)
   set cache(CacheTelemetry value) => $_setField(13, value);
   @$pb.TagNumber(13)
-  $core.bool hasCache() => $_has(12);
+  $core.bool hasCache() => $_has(11);
   @$pb.TagNumber(13)
   void clearCache() => $_clearField(13);
   @$pb.TagNumber(13)
-  CacheTelemetry ensureCache() => $_ensure(12);
+  CacheTelemetry ensureCache() => $_ensure(11);
 }
 
 /// TokenCounts sums the model calls of a span. input_tokens excludes the
@@ -1909,7 +1892,6 @@ class UsageUpdate extends $pb.GeneratedMessage {
     $fixnum.Int64? outputTokens,
     $fixnum.Int64? cacheReadTokens,
     $fixnum.Int64? cacheWriteTokens,
-    $0.Timestamp? cacheExpiresAt,
   }) {
     final result = UsageUpdate._();
     if (contextTokens != null) result.contextTokens = contextTokens;
@@ -1918,7 +1900,6 @@ class UsageUpdate extends $pb.GeneratedMessage {
     if (outputTokens != null) result.outputTokens = outputTokens;
     if (cacheReadTokens != null) result.cacheReadTokens = cacheReadTokens;
     if (cacheWriteTokens != null) result.cacheWriteTokens = cacheWriteTokens;
-    if (cacheExpiresAt != null) result.cacheExpiresAt = cacheExpiresAt;
     return result;
   }
 
@@ -1954,8 +1935,6 @@ class UsageUpdate extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         6, _omitFieldNames ? '' : 'cacheWriteTokens', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
-    ..aOM<$0.Timestamp>(7, _omitFieldNames ? '' : 'cacheExpiresAt',
-        subBuilder: $0.Timestamp.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -2033,17 +2012,6 @@ class UsageUpdate extends $pb.GeneratedMessage {
   $core.bool hasCacheWriteTokens() => $_has(5);
   @$pb.TagNumber(6)
   void clearCacheWriteTokens() => $_clearField(6);
-
-  @$pb.TagNumber(7)
-  $0.Timestamp get cacheExpiresAt => $_getN(6);
-  @$pb.TagNumber(7)
-  set cacheExpiresAt($0.Timestamp value) => $_setField(7, value);
-  @$pb.TagNumber(7)
-  $core.bool hasCacheExpiresAt() => $_has(6);
-  @$pb.TagNumber(7)
-  void clearCacheExpiresAt() => $_clearField(7);
-  @$pb.TagNumber(7)
-  $0.Timestamp ensureCacheExpiresAt() => $_ensure(6);
 }
 
 class TurnSettled extends $pb.GeneratedMessage {

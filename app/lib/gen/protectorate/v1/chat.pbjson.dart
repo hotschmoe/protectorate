@@ -290,14 +290,6 @@ const ChatStatus$json = {
     {'1': 'model', '3': 3, '4': 1, '5': 9, '10': 'model'},
     {'1': 'context_tokens', '3': 4, '4': 1, '5': 4, '10': 'contextTokens'},
     {'1': 'context_window', '3': 5, '4': 1, '5': 4, '10': 'contextWindow'},
-    {
-      '1': 'cache_expires_at',
-      '3': 6,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'cacheExpiresAt'
-    },
     {'1': 'last_seq', '3': 7, '4': 1, '5': 4, '10': 'lastSeq'},
     {
       '1': 'last_activity_at',
@@ -327,6 +319,10 @@ const ChatStatus$json = {
       '10': 'cache'
     },
   ],
+  '9': [
+    {'1': 6, '2': 7},
+  ],
+  '10': ['cache_expires_at'],
 };
 
 /// Descriptor for `ChatStatus`. Decode as a `google.protobuf.DescriptorProto`.
@@ -334,14 +330,13 @@ final $typed_data.Uint8List chatStatusDescriptor = $convert.base64Decode(
     'CgpDaGF0U3RhdHVzEjAKBXN0YXRlGAEgASgOMhoucHJvdGVjdG9yYXRlLnYxLkNoYXRTdGF0ZV'
     'IFc3RhdGUSLAoSaGFybmVzc19zZXNzaW9uX2lkGAIgASgJUhBoYXJuZXNzU2Vzc2lvbklkEhQK'
     'BW1vZGVsGAMgASgJUgVtb2RlbBIlCg5jb250ZXh0X3Rva2VucxgEIAEoBFINY29udGV4dFRva2'
-    'VucxIlCg5jb250ZXh0X3dpbmRvdxgFIAEoBFINY29udGV4dFdpbmRvdxJEChBjYWNoZV9leHBp'
-    'cmVzX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIOY2FjaGVFeHBpcmVzQX'
-    'QSGQoIbGFzdF9zZXEYByABKARSB2xhc3RTZXESRAoQbGFzdF9hY3Rpdml0eV9hdBgIIAEoCzIa'
-    'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSDmxhc3RBY3Rpdml0eUF0EhoKCHByb3ZpZGVyGA'
-    'kgASgJUghwcm92aWRlchIfCgtsb2NhbF9tb2RlbBgKIAEoCFIKbG9jYWxNb2RlbBIpChByZWFz'
-    'b25pbmdfZWZmb3J0GAsgASgJUg9yZWFzb25pbmdFZmZvcnQSOgoIc2V0dGluZ3MYDCABKAsyHi'
-    '5wcm90ZWN0b3JhdGUudjEuTW9kZWxTZXR0aW5nc1IIc2V0dGluZ3MSNQoFY2FjaGUYDSABKAsy'
-    'Hy5wcm90ZWN0b3JhdGUudjEuQ2FjaGVUZWxlbWV0cnlSBWNhY2hl');
+    'VucxIlCg5jb250ZXh0X3dpbmRvdxgFIAEoBFINY29udGV4dFdpbmRvdxIZCghsYXN0X3NlcRgH'
+    'IAEoBFIHbGFzdFNlcRJEChBsYXN0X2FjdGl2aXR5X2F0GAggASgLMhouZ29vZ2xlLnByb3RvYn'
+    'VmLlRpbWVzdGFtcFIObGFzdEFjdGl2aXR5QXQSGgoIcHJvdmlkZXIYCSABKAlSCHByb3ZpZGVy'
+    'Eh8KC2xvY2FsX21vZGVsGAogASgIUgpsb2NhbE1vZGVsEikKEHJlYXNvbmluZ19lZmZvcnQYCy'
+    'ABKAlSD3JlYXNvbmluZ0VmZm9ydBI6CghzZXR0aW5ncxgMIAEoCzIeLnByb3RlY3RvcmF0ZS52'
+    'MS5Nb2RlbFNldHRpbmdzUghzZXR0aW5ncxI1CgVjYWNoZRgNIAEoCzIfLnByb3RlY3RvcmF0ZS'
+    '52MS5DYWNoZVRlbGVtZXRyeVIFY2FjaGVKBAgGEAdSEGNhY2hlX2V4cGlyZXNfYXQ=');
 
 @$core.Deprecated('Use tokenCountsDescriptor instead')
 const TokenCounts$json = {
@@ -673,15 +668,11 @@ const UsageUpdate$json = {
       '5': 4,
       '10': 'cacheWriteTokens'
     },
-    {
-      '1': 'cache_expires_at',
-      '3': 7,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'cacheExpiresAt'
-    },
   ],
+  '9': [
+    {'1': 7, '2': 8},
+  ],
+  '10': ['cache_expires_at'],
 };
 
 /// Descriptor for `UsageUpdate`. Decode as a `google.protobuf.DescriptorProto`.
@@ -690,8 +681,8 @@ final $typed_data.Uint8List usageUpdateDescriptor = $convert.base64Decode(
     '5jb250ZXh0X3dpbmRvdxgCIAEoBFINY29udGV4dFdpbmRvdxIhCgxpbnB1dF90b2tlbnMYAyAB'
     'KARSC2lucHV0VG9rZW5zEiMKDW91dHB1dF90b2tlbnMYBCABKARSDG91dHB1dFRva2VucxIqCh'
     'FjYWNoZV9yZWFkX3Rva2VucxgFIAEoBFIPY2FjaGVSZWFkVG9rZW5zEiwKEmNhY2hlX3dyaXRl'
-    'X3Rva2VucxgGIAEoBFIQY2FjaGVXcml0ZVRva2VucxJEChBjYWNoZV9leHBpcmVzX2F0GAcgAS'
-    'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIOY2FjaGVFeHBpcmVzQXQ=');
+    'X3Rva2VucxgGIAEoBFIQY2FjaGVXcml0ZVRva2Vuc0oECAcQCFIQY2FjaGVfZXhwaXJlc19hdA'
+    '==');
 
 @$core.Deprecated('Use turnSettledDescriptor instead')
 const TurnSettled$json = {

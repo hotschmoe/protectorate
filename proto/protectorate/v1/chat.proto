@@ -128,9 +128,8 @@ message ChatStatus {
   // window), not a sum over the turn.
   uint64 context_tokens = 4;
   uint64 context_window = 5;
-  // cache_expires_at is when the harness's prompt cache goes cold if no new
-  // turn starts, when the harness reports it.
-  google.protobuf.Timestamp cache_expires_at = 6;
+  reserved 6;
+  reserved "cache_expires_at";
   uint64 last_seq = 7;
   google.protobuf.Timestamp last_activity_at = 8;
   // provider is who serves the model: anthropic, openai, xai, or the provider
@@ -248,7 +247,8 @@ message UsageUpdate {
   uint64 output_tokens = 4;
   uint64 cache_read_tokens = 5;
   uint64 cache_write_tokens = 6;
-  google.protobuf.Timestamp cache_expires_at = 7;
+  reserved 7;
+  reserved "cache_expires_at";
 }
 
 message TurnSettled {
