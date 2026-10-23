@@ -129,6 +129,8 @@ minutes of polls.
   --job-root ABSOLUTE_DIR`; the password is sealed with user-scoped DPAPI.
   Until then the node reports no sandbox and refuses sandboxed jobs.
 - **Termux:** no sandbox; plain jobs only with `--allow-plain-jobs`.
+- A sandboxed job's `--cpu` limit also sizes toolchain worker pools, as for
+  sleeves ([sleeves.md](sleeves.md#build-concurrency)).
 - Each node reports its isolation in metrics (`node show` `jobs` line, the
   app's JOBS panel, amber when unisolated), and each job records how it ran.
 - Not Docker on Windows: Docker Desktop is a large resident daemon with

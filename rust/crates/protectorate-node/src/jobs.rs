@@ -915,6 +915,7 @@ impl Jobs {
             env.insert("GIT_CONFIG_KEY_0".into(), "safe.directory".into());
             env.insert("GIT_CONFIG_VALUE_0".into(), safe);
         }
+        protectorate_sandbox::limit_build_jobs(&mut env, spec.cpu_percent);
         let id = spec.id.clone();
         let path = workdir.clone();
         let cpu = spec.cpu_percent;

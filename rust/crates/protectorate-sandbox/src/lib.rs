@@ -133,6 +133,25 @@ pub struct Limits {
     pub tasks_max: u32,
 }
 
+/// Sizes toolchain worker pools to a CPU quota of `cpu_percent` (100 per
+/// core, rounded down, at least one). A quota does not change the core count
+/// tools detect, so without this each would start a worker per host core.
+/// Values already in `environment` win; zero (unlimited) sets nothing.
+pub fn limit_build_jobs(environment: &mut BTreeMap<String, String>, cpu_percent: u32) {
+    if cpu_percent == 0 {
+        return;
+    }
+    let jobs = (cpu_percent / 100).max(1);
+    for (key, value) in [
+        ("GOMAXPROCS", jobs.to_string()),
+        ("GOFLAGS", format!("-p={jobs}")),
+        ("CARGO_BUILD_JOBS", jobs.to_string()),
+        ("FLUTTER_TEST_CONCURRENCY", jobs.to_string()),
+    ] {
+        environment.entry(key.into()).or_insert(value);
+    }
+}
+
 /// Outbound authority requested for a sandbox. The provider API hosts of the
 /// request's credential are added by the policy.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

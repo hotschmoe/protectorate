@@ -145,6 +145,16 @@ mail prevent removal. The home and workspace remain on disk. The timeout and
 mounts survive hub restarts and resleeves; the idle clock restarts after a hub
 restart.
 
+## Build concurrency
+
+A CPU quota does not change the core count toolchains detect, so the sandbox
+sizes their worker pools to it: `--cpu 250` sets `GOMAXPROCS=2`,
+`GOFLAGS=-p=2`, `CARGO_BUILD_JOBS=2` and `FLUTTER_TEST_CONCURRENCY=2`
+(fractional cores round down, at least one; unlimited CPU sets nothing). A
+value passed with `--env` wins. Flutter reads no variable itself; pass
+`--concurrency="$FLUTTER_TEST_CONCURRENCY"` to `flutter test`. Several heavy
+builds at once still share the sleeve's memory cap.
+
 ## What the hub puts in front of a harness
 
 Native prompt caches match on a prefix, so anything volatile near the start of

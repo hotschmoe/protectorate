@@ -38,7 +38,7 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         let executable = tools.join(provider);
         executable::write_executable(
             &executable,
-            "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s|%s <%s>|%s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" \"$(git config user.name)\" \"$(git config user.email)\" \"${DISABLE_AUTOUPDATER:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
+            "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s|%s <%s>|%s|%s %s %s %s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" \"$(git config user.name)\" \"$(git config user.email)\" \"${DISABLE_AUTOUPDATER:-}\" \"${GOMAXPROCS:-}\" \"${GOFLAGS:-}\" \"${CARGO_BUILD_JOBS:-}\" \"${FLUTTER_TEST_CONCURRENCY:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
         );
         executables.push(executable);
     }
@@ -100,7 +100,8 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         let (status, spawned) = call(
             addr,
             "/protectorate.v1.SleeveService/SpawnSleeve",
-            json!({"name":provider,"harness":harness,"mode":"SLEEVE_MODE_TERMINAL","workspace":workspace,"args":["--example"]}),
+            json!({"name":provider,"harness":harness,"mode":"SLEEVE_MODE_TERMINAL","workspace":workspace,"args":["--example"],
+                "limits":{"cpuPercent":250},"env":{"CARGO_BUILD_JOBS":"1"}}),
         )
         .await;
         assert_eq!(status, 200, "{provider}: {spawned}");
@@ -148,6 +149,8 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         );
         let claude = provider == "claude";
         assert_eq!(fields[7], if claude { "1" } else { "" }, "{result}");
+        // A 2.5-core quota sizes worker pools to two; the caller's value wins.
+        assert_eq!(fields[8], "2 -p=2 1 2", "{result}");
         assert_eq!(
             state
                 .join("sleeves")
