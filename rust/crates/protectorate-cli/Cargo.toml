@@ -1,0 +1,54 @@
+[package]
+name = "protectorate-cli"
+version = "0.1.0"
+edition.workspace = true
+description = "Reusable dispatcher for the basic owner CLI commands over Connect JSON"
+
+[dependencies]
+protectorate-connect-client = { path = "../protectorate-connect-client" }
+protectorate-pairing = { path = "../protectorate-pairing" }
+protectorate-wire = { path = "../protectorate-wire" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
+protectorate-svcgen = { path = "../protectorate-svcgen" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+sha2 = "0.10"
+protectorate-mailbox = { path = "../protectorate-mailbox" }
+serde_json = "1"
+base64 = "0.22"
+protectorate-xfer = { path = "../protectorate-xfer" }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+getrandom = "0.2"
+tungstenite = { version = "0.29", default-features = false, features = ["handshake", "rustls-tls-native-roots"] }
+rustls = "0.23"
+rustls-pemfile = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Memory", "Win32_System_Console"] }
+
+[[bin]]
+name = "protectorate-cli"
+path = "src/main.rs"
+
+[dev-dependencies]
+protectorate-backlog = { path = "../protectorate-backlog" }
+protectorate-directory = { path = "../protectorate-directory" }
+protectorate-auth = { path = "../protectorate-auth" }
+protectorate-inventory = { path = "../protectorate-inventory" }
+protectorate-lease = { path = "../protectorate-lease" }
+protectorate-identity = { path = "../protectorate-identity" }
+protectorate-node = { path = "../protectorate-node" }
+protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }
+protectorate-session = { path = "../protectorate-session" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tempfile = "3"
+rcgen = "0.14"
+tokio-rustls = "0.26"
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+
+[target.'cfg(unix)'.dev-dependencies]
+protectorate-hub = { path = "../protectorate-hub" }

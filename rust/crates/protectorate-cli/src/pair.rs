@@ -1,0 +1,69 @@
+//! Render browser and app enrollment links from a public hub URL.
+use crate::{hub_url, Invocation};
+use protectorate_pairing::{new_pair_links, write_qr};
+use protectorate_wire::{Code, Result, RpcError};
+use serde_json::json;
+
+pub(crate) fn run(invocation: &Invocation, url: Option<&str>, app_qr: bool) -> Result<String> {
+    let default_url;
+    let url = match url {
+        Some(url) => url,
+        None => {
+            default_url = hub_url(invocation);
+            &default_url
+        }
+    };
+    let links = new_pair_links(url)
+        .map_err(|error| RpcError::new(Code::InvalidArgument, error.to_string()))?;
+    if invocation.json {
+        return serde_json::to_string(&json!({"web": links.web, "app": links.app}))
+            .map(|line| format!("{line}\n"))
+            .map_err(|error| {
+                RpcError::new(Code::Internal, format!("encode pairing links: {error}"))
+            });
+    }
+    let qr_link = if app_qr { &links.app } else { &links.web };
+    let mut bytes = Vec::new();
+    write_qr(&mut bytes, qr_link)
+        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    let mut output = String::from_utf8(bytes)
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode pairing QR: {error}")))?;
+    output.push_str(&format!(
+        "\nweb:  {}\napp:  {}\n\nOpen the link, connect, then approve the matching code on a trusted device.\n",
+        links.web, links.app
+    ));
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{parse, run_with_status, Command};
+    use serde_json::Value;
+
+    #[test]
+    fn pair_works_without_a_token_and_selects_the_requested_qr() {
+        let invocation = parse(["--hub", "https://hub.example", "pair", "--app"]).unwrap();
+        assert_eq!(
+            invocation.command,
+            Command::Pair {
+                url: None,
+                app: true
+            }
+        );
+        let text = run_with_status(["pair", "--url", "https://hub.example", "--app"]).unwrap();
+        assert!(text.starts_with("\u{1b}["));
+        assert!(text.contains("web:  https://hub.example/#/pair?url="));
+        assert!(text.contains("app:  protectorate://pair?url="));
+        let line = run_with_status(["pair", "--url", "https://hub.example", "--json"]).unwrap();
+        let links: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            links["web"],
+            "https://hub.example/#/pair?url=https%3A%2F%2Fhub%2Eexample"
+        );
+        assert!(links["app"]
+            .as_str()
+            .unwrap()
+            .starts_with("protectorate://pair?url="));
+        assert!(parse(["pair", "extra"]).is_err());
+    }
+}

@@ -1,0 +1,61 @@
+[package]
+name = "protectorate-hub"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+protectorate-wire = { path = "../protectorate-wire" }
+prost-reflect = "0.16"
+protectorate-auth = { path = "../protectorate-auth" }
+protectorate-audit = { path = "../protectorate-audit" }
+protectorate-chatlog = { path = "../protectorate-chatlog" }
+protectorate-handoff = { path = "../protectorate-handoff" }
+protectorate-pi-driver = { path = "../protectorate-pi-driver" }
+protectorate-claude-driver = { path = "../protectorate-claude-driver" }
+protectorate-codex-driver = { path = "../protectorate-codex-driver" }
+protectorate-grok-driver = { path = "../protectorate-grok-driver" }
+protectorate-sandbox = { path = "../protectorate-sandbox" }
+protectorate-connect-client = { path = "../protectorate-connect-client" }
+protectorate-node-client = { path = "../protectorate-node-client" }
+protectorate-identity = { path = "../protectorate-identity" }
+protectorate-backlog = { path = "../protectorate-backlog" }
+protectorate-session = { path = "../protectorate-session" }
+protectorate-directory = { path = "../protectorate-directory" }
+protectorate-quota = { path = "../protectorate-quota" }
+protectorate-release = { path = "../protectorate-release" }
+protectorate-lease = { path = "../protectorate-lease" }
+protectorate-inventory = { path = "../protectorate-inventory" }
+protectorate-node-monitor = { path = "../protectorate-node-monitor" }
+protectorate-tailnet-admin = { path = "../protectorate-tailnet-admin" }
+protectorate-mailbox = { path = "../protectorate-mailbox" }
+protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }
+protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }
+protectorate-desk-policy = { path = "../protectorate-desk-policy" }
+protectorate-tailnet-map = { path = "../protectorate-tailnet-map" }
+protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
+protectorate-tailnet-packets = { path = "../protectorate-tailnet-packets" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "json"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+subtle = "2"
+zeroize = "1"
+base64 = "0.22"
+sha2 = "0.10"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+tempfile = "3"
+getrandom = "0.2"
+libc = "0.2"
+tokio = { version = "1", features = ["rt", "sync", "time", "net", "process"] }
+
+[dev-dependencies]
+protectorate-backup = { path = "../protectorate-backup" }
+protectorate-inventory = { path = "../protectorate-inventory" }
+protectorate-node = { path = "../protectorate-node" }
+protectorate-desk-node = { path = "../protectorate-desk-node" }
+protectorate-node-monitor = { path = "../protectorate-node-monitor" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+flate2 = "1"
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+

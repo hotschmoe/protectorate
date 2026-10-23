@@ -1,0 +1,387 @@
+//! Loopback device pairing and trusted-device management.
+use super::{input, now_unix, respond, string, token_json, unix_timestamp, Hub};
+use protectorate_audit::Entry as AuditEntry;
+use protectorate_identity::{self as identity, PollStatus};
+use protectorate_wire::{Code, Result, RpcError, UnaryServer};
+use serde_json::json;
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+const START: &str = "/protectorate.v1.DeviceService/StartDeviceAuth";
+const POLL: &str = "/protectorate.v1.DeviceService/PollDeviceAuth";
+const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+pub(super) fn start_expiry_sweep(hub: &Arc<Hub>) {
+    let weak = Arc::downgrade(hub);
+    if let Err(error) = std::thread::Builder::new()
+        .name("device-auth-expiry".into())
+        .spawn(move || loop {
+            let Some(hub) = weak.upgrade() else {
+                break;
+            };
+            sweep_expired(&hub, now_unix());
+            drop(hub);
+            std::thread::sleep(EXPIRY_SWEEP_INTERVAL);
+        })
+    {
+        eprintln!("device authorization: start expiry sweep: {error}");
+    }
+}
+
+fn sweep_expired(hub: &Hub, now: i64) {
+    if let Err(error) = hub.identity.sweep_devices(now) {
+        hub.audit.write(AuditEntry {
+            actor: "hub".into(),
+            procedure: "device_auth.sweep".into(),
+            outcome: "error".into(),
+            detail: error.to_string(),
+            ..AuditEntry::default()
+        });
+    }
+}
+
+pub(super) fn public_procedure(procedure: &str) -> bool {
+    procedure == START || procedure == POLL
+}
+
+#[derive(Clone)]
+struct Window {
+    since: Instant,
+    count: u32,
+}
+impl Default for Window {
+    fn default() -> Self {
+        Self {
+            since: Instant::now(),
+            count: 0,
+        }
+    }
+}
+#[derive(Default)]
+pub(super) struct Rates(Mutex<HashMap<String, Window>>);
+impl Rates {
+    pub(super) fn admit(&self, procedure: &str, ip: IpAddr) -> Result<()> {
+        let ip = normalize_ip(ip);
+        let is_lan = match ip {
+            IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+            IpAddr::V6(v6) => {
+                v6.is_unique_local() || v6.is_loopback() || v6.is_unicast_link_local()
+            }
+        };
+        if !is_lan {
+            return Err(RpcError::new(
+                Code::PermissionDenied,
+                "device authorization is available on the LAN only",
+            ));
+        }
+        let (kind, local_limit, global_limit) = if procedure == START {
+            ("start", 10, 60)
+        } else {
+            ("poll", 120, 1200)
+        };
+        let mut windows = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        windows.retain(|_, window| window.since.elapsed() < Duration::from_secs(60));
+        let global = format!("{kind}:global");
+        let local = format!("{kind}:{ip}");
+        if windows
+            .get(&global)
+            .is_some_and(|w| w.count >= global_limit)
+            || windows.get(&local).is_some_and(|w| w.count >= local_limit)
+        {
+            return Err(RpcError::new(
+                Code::ResourceExhausted,
+                "device authorization rate limit; retry after one minute",
+            ));
+        }
+        // Every accepted request is bounded by the global window, so at most
+        // 1,260 active entries can be created within one minute.
+        windows.entry(global).or_default().count += 1;
+        windows.entry(local).or_default().count += 1;
+        Ok(())
+    }
+}
+
+pub(super) fn normalize_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
+        _ => ip,
+    }
+}
+
+pub(super) fn source_ip(
+    peer: IpAddr,
+    headers: &axum::http::HeaderMap,
+    trusted_proxies: &[IpAddr],
+) -> IpAddr {
+    let peer = normalize_ip(peer);
+    if !trusted_proxies.contains(&peer) {
+        return peer;
+    }
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.rsplit(',').next())
+        .and_then(|value| value.trim().parse::<IpAddr>().ok())
+        .map(normalize_ip)
+        .unwrap_or(peer)
+}
+
+fn error(error: identity::Error) -> RpcError {
+    let code = match error {
+        identity::Error::Invalid(_) => Code::InvalidArgument,
+        identity::Error::DeviceCapacity => Code::ResourceExhausted,
+        identity::Error::DeviceRequest | identity::Error::UnknownToken => Code::NotFound,
+        _ => Code::Internal,
+    };
+    RpcError::new(code, error.to_string())
+}
+
+pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
+    let start = Arc::clone(&hub);
+    server.register(START, move |request| {
+        let hub = Arc::clone(&start);
+        async move {
+            let body = input(&request)?;
+            let started = hub
+                .identity
+                .start_device(
+                    string(&body, "name").trim(),
+                    string(&body, "platform").trim(),
+                    &request
+                        .auth
+                        .requesting_ip
+                        .map(|ip| ip.to_string())
+                        .unwrap_or_else(|| "127.0.0.1".into()),
+                    now_unix(),
+                )
+                .map_err(error)?;
+            hub.emit("device_auth.pending", "", json!({}));
+            respond(
+                &request,
+                json!({
+                    "deviceCode": started.device_code.expose(),
+                    "userCode": started.request.user_code,
+                    "expiresAt": unix_timestamp(started.request.expires),
+                    "interval": started.request.interval,
+                }),
+            )
+        }
+    })?;
+    let poll = Arc::clone(&hub);
+    server.register(POLL, move |request| {
+        let hub = Arc::clone(&poll);
+        async move {
+            let code = string(&input(&request)?, "deviceCode");
+            if code.len() > 128 {
+                return Err(RpcError::new(
+                    Code::InvalidArgument,
+                    "device code is too long",
+                ));
+            }
+            let outcome = hub.identity.poll_device(&code, now_unix()).map_err(error)?;
+            let status = match outcome.status {
+                PollStatus::Expired => "expired",
+                PollStatus::Pending => "pending",
+                PollStatus::SlowDown => "slow_down",
+                PollStatus::Denied => "denied",
+                PollStatus::Consumed => "consumed",
+                PollStatus::Approved => "approved",
+            };
+            let mut body = json!({"status": status, "interval": outcome.interval});
+            if let Some(issued) = outcome.issued {
+                hub.emit("devices.changed", &issued.token.id, json!({}));
+                body["secret"] = json!(issued.secret.expose());
+                body["token"] = token_json(&issued.token);
+            }
+            respond(&request, body)
+        }
+    })?;
+    let pending = Arc::clone(&hub);
+    server.register(
+        "/protectorate.v1.DeviceService/ListDeviceAuth",
+        move |request| {
+            let hub = Arc::clone(&pending);
+            async move {
+                let requests = hub
+                    .identity
+                    .pending_devices(now_unix())
+                    .into_iter()
+                    .map(|r| {
+                        json!({
+                            "userCode": r.user_code, "name": r.name, "platform": r.platform,
+                            "requestingIp": r.ip, "expiresAt": unix_timestamp(r.expires),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                respond(&request, json!({"requests": requests}))
+            }
+        },
+    )?;
+    for (procedure, approve) in [
+        ("/protectorate.v1.DeviceService/ApproveDeviceAuth", true),
+        ("/protectorate.v1.DeviceService/DenyDeviceAuth", false),
+    ] {
+        let decide = Arc::clone(&hub);
+        server.register(procedure, move |request| {
+            let hub = Arc::clone(&decide);
+            async move {
+                if !request.auth.owner && !request.auth.device {
+                    return Err(RpcError::new(
+                        Code::PermissionDenied,
+                        "approval requires the owner or a device token",
+                    ));
+                }
+                let code = string(&input(&request)?, "userCode");
+                let decided = hub
+                    .identity
+                    .decide_device(&code, &request.auth.actor, approve, now_unix())
+                    .map_err(error)?;
+                hub.audit.write(AuditEntry {
+                    actor: request.auth.actor.clone(),
+                    token_id: request.auth.token_id.clone(),
+                    tailnet: request.auth.tailnet.clone(),
+                    task: request.auth.task.clone(),
+                    procedure: procedure.into(),
+                    subject: decided.name,
+                    outcome: "ok".into(),
+                    detail: format!("platform={} requesting_ip={}", decided.platform, decided.ip),
+                    ..AuditEntry::default()
+                });
+                hub.emit("device_auth.changed", "", json!({}));
+                respond(&request, json!({}))
+            }
+        })?;
+    }
+    let list = Arc::clone(&hub);
+    server.register(
+        "/protectorate.v1.DeviceService/ListDevices",
+        move |request| {
+            let hub = Arc::clone(&list);
+            async move {
+                let devices = hub
+                    .identity
+                    .list()
+                    .into_iter()
+                    .filter(|t| t.device)
+                    .map(|t| token_json(&t))
+                    .collect::<Vec<_>>();
+                respond(&request, json!({"devices": devices}))
+            }
+        },
+    )?;
+    let revoke = Arc::clone(&hub);
+    server.register(
+        "/protectorate.v1.DeviceService/RevokeDevice",
+        move |request| {
+            let hub = Arc::clone(&revoke);
+            async move {
+                let id = string(&input(&request)?, "id");
+                if !hub.identity.list().iter().any(|t| t.id == id && t.device) {
+                    return Err(RpcError::new(Code::NotFound, "no such device"));
+                }
+                let token = hub.identity.revoke(&id, now_unix()).map_err(error)?;
+                hub.emit("devices.changed", &token.id, json!({}));
+                respond(&request, json!({"token": token_json(&token)}))
+            }
+        },
+    )?;
+    server.register(
+        "/protectorate.v1.DeviceService/RenameDevice",
+        move |request| {
+            let hub = Arc::clone(&hub);
+            async move {
+                let body = input(&request)?;
+                let token = hub
+                    .identity
+                    .rename_device(&string(&body, "id"), string(&body, "name").trim())
+                    .map_err(error)?;
+                hub.emit("devices.changed", &token.id, json!({}));
+                respond(&request, json!({"token": token_json(&token)}))
+            }
+        },
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwarded_client_ip_requires_an_exact_trusted_peer() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("x-forwarded-for", "8.8.8.8, 192.168.1.44".parse().unwrap());
+        let loopback = "127.0.0.1".parse().unwrap();
+        assert_eq!(source_ip(loopback, &headers, &[]), loopback);
+        assert_eq!(
+            source_ip(loopback, &headers, &[loopback]),
+            "192.168.1.44".parse::<IpAddr>().unwrap()
+        );
+        headers.insert("x-forwarded-for", "invalid".parse().unwrap());
+        assert_eq!(source_ip(loopback, &headers, &[loopback]), loopback);
+        headers.insert("x-forwarded-for", "::ffff:192.168.1.5".parse().unwrap());
+        assert_eq!(
+            source_ip(loopback, &headers, &[loopback]),
+            "192.168.1.5".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn pairing_admission_is_bounded_by_ip_and_procedure() {
+        let rates = Rates::default();
+        let ip = "192.168.1.2".parse().unwrap();
+        for _ in 0..10 {
+            rates.admit(START, ip).unwrap();
+        }
+        assert_eq!(
+            rates.admit(START, ip).unwrap_err().code,
+            Code::ResourceExhausted
+        );
+        rates.admit(START, "192.168.1.3".parse().unwrap()).unwrap();
+        for _ in 0..120 {
+            rates.admit(POLL, ip).unwrap();
+        }
+        assert_eq!(
+            rates.admit(POLL, ip).unwrap_err().code,
+            Code::ResourceExhausted
+        );
+        assert_eq!(
+            rates
+                .admit(START, "8.8.8.8".parse().unwrap())
+                .unwrap_err()
+                .code,
+            Code::PermissionDenied
+        );
+        assert_eq!(
+            rates
+                .admit(START, "::ffff:8.8.8.8".parse().unwrap())
+                .unwrap_err()
+                .code,
+            Code::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn pairing_global_limit_resets_after_the_window() {
+        let rates = Rates::default();
+        for octet in 2..8 {
+            let ip: IpAddr = format!("192.168.1.{octet}").parse().unwrap();
+            for _ in 0..10 {
+                rates.admit(START, ip).unwrap();
+            }
+        }
+        let next: IpAddr = "192.168.1.8".parse().unwrap();
+        assert_eq!(
+            rates.admit(START, next).unwrap_err().code,
+            Code::ResourceExhausted
+        );
+        for window in rates.0.lock().unwrap().values_mut() {
+            window.since = Instant::now() - Duration::from_secs(61);
+        }
+        rates.admit(START, next).unwrap();
+    }
+}

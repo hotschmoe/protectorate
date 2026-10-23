@@ -1,0 +1,63 @@
+[package]
+name = "protectorate-server"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "protectorate-rs"
+path = "src/main.rs"
+
+[dependencies]
+protectorate-hub = { path = "../protectorate-hub" }
+protectorate-wire = { path = "../protectorate-wire" }
+protectorate-node = { path = "../protectorate-node" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+protectorate-node-monitor = { path = "../protectorate-node-monitor" }
+protectorate-connect-client = { path = "../protectorate-connect-client" }
+protectorate-node-client = { path = "../protectorate-node-client" }
+protectorate-backup = { path = "../protectorate-backup" }
+protectorate-release = { path = "../protectorate-release" }
+protectorate-tailnet-install = { path = "../protectorate-tailnet-install" }
+protectorate-tailnet = { path = "../protectorate-tailnet" }
+protectorate-tailnet-admin = { path = "../protectorate-tailnet-admin" }
+protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
+protectorate-tailnet-discovery = { path = "../protectorate-tailnet-discovery" }
+protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
+protectorate-tailnet-stream = { path = "../protectorate-tailnet-stream" }
+protectorate-derp = { path = "../protectorate-derp" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
+protectorate-sandbox = { path = "../protectorate-sandbox" }
+protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }
+protectorate-session = { path = "../protectorate-session" }
+protectorate-svcgen = { path = "../protectorate-svcgen" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "io-util", "sync", "time"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+serde_json = "1"
+chrono = "0.4"
+futures-util = "0.3"
+sha2 = "0.10"
+libc = "0.2"
+ureq = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+protectorate-chatlog = { path = "../protectorate-chatlog" }
+protectorate-pi-driver = { path = "../protectorate-pi-driver" }
+protectorate-claude-driver = { path = "../protectorate-claude-driver" }
+protectorate-codex-driver = { path = "../protectorate-codex-driver" }
+protectorate-grok-driver = { path = "../protectorate-grok-driver" }
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+protectorate-desk-node = { path = "../protectorate-desk-node" }
+
+[dev-dependencies]
+tempfile = "3"
+rcgen = "0.14"
+base64 = "0.22"
+protectorate-inventory = { path = "../protectorate-inventory" }
+protectorate-tailnet-poll = { path = "../protectorate-tailnet-poll" }
+protectorate-tailnet-tcp = { path = "../protectorate-tailnet-tcp" }
+protectorate-tailnet-map = { path = "../protectorate-tailnet-map" }
+
