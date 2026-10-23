@@ -10,7 +10,7 @@ Branch and release rules.
 
 Generated code must be byte-identical everywhere. The pinned generators are buf 1.74.0, protoc-gen-go v1.36.12, protoc-gen-connect-go v1.21.1, Dart protoc_plugin 25.1.0 and connectrpc 2.0.0; Flutter is pinned to 3.44.1 in the hosted workflows. Upgrade the generators together with regenerated output. The Rust release lanes consume committed generated code and do not install Go generator plugins.
 
-Checks before every Rust merge: `make rust-check`, `make app-check`, the Linux installer checks, and the platform builds relevant to the change. `make rust-check` runs formatting, strict Clippy, and workspace tests; `make app-check` runs Flutter analysis. CI runs those checks and builds the Rust release assets on pushes to `master` and `dev-hotschmoe` and on pull requests. The Go `make check` lane remains available while the migration is in progress, but no longer gates Rust releases. Optional tailnet and host runtime lanes are documented in docs/testing.md.
+Checks before every Rust merge: `make rust-check`, `make app-check`, the Linux installer checks, and the platform builds relevant to the change. `make rust-check` runs formatting, strict Clippy, and workspace tests; `make app-check` runs Flutter analysis. CI runs those checks and builds the Rust release assets on pushes to `master` and `dev-hotschmoe` and on pull requests. The Go `make check` lane remains available while the migration is in progress, but no longer gates Rust releases. Optional host runtime lanes are documented in docs/testing.md.
 
 ## Coordinating sleeves
 
@@ -61,6 +61,6 @@ Hub (Linux x86_64 or aarch64, per user, no sudo; re-run to upgrade):
 curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/vX.Y.Z/install-hub.sh | bash
 ```
 
-Flags go after `bash -s --`: `--channel stable|dev`, `--version`, `--release-repo`, `--release-dir`, `--home`, `--listen`, `--tls-cert`, `--tls-key`, `--dry-run`, and `--no-start`. The installer verifies every required Rust binary and the Flutter web archive against `SHA256SUMS`, then stages them in `${XDG_DATA_HOME:-~/.local/share}/protectorate-rust/releases/<version>/` with an atomic `current` pointer. It writes and enables the `protectorate-hub` user unit and runs `hub tailnet install`. A working systemd user manager, systemd-run, Git, OpenSSL, Python 3 and curl are prerequisites. See `docs/install.md`.
+Flags go after `bash -s --`: `--channel stable|dev`, `--version`, `--release-repo`, `--release-dir`, `--home`, `--listen`, `--tls-listen`, `--tls-name`, `--dry-run`, and `--no-start`. The installer verifies every required Rust binary and the Flutter web archive against `SHA256SUMS`, then stages them in `${XDG_DATA_HOME:-~/.local/share}/protectorate/releases/<version>/` with an atomic `current` pointer. It writes and enables the `protectorate-hub` user unit; the hub creates its CA on first start. A working systemd user manager, systemd-run, Git, OpenSSL, Python 3 and curl are prerequisites. See `docs/install.md`.
 
 Nodes: open the hub's web app, NODES, ADD NODE, and paste the line it shows on the new machine.

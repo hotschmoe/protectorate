@@ -37,7 +37,7 @@ or state compatibility. Flutter clients (desktop, Android, web) remain in use.
 | Chat (`docs/chat.md`) | `chat watch/send/interrupt/respond/compact`, `sleeve spawn --mode` | a sleeve's harness driven through its headless protocol inside the sandbox, with a replayable event log any number of clients can watch |
 | Coordination (`docs/coordination.md`) | `who`, `msg send/reply/ack/inbox/thread`, `lease acquire --wait` | per-sleeve identity, a project directory from git remotes and manifests, a mailbox delivered into idle chats, a lease queue, dependency notices; all deterministic hub code |
 | Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, discrete and integrated GPUs, NPUs, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
-| Tailnet | `hub tailnet install/init`, `tailnet status`, `node invite/join/revoke`, `client invite` | embedded tsnet + supervised Headscale; in-process DERP relay over TLS with a pinned self-signed cert; WhoIs gating; verified direct and relay-only with a Windows node |
+| Network (`docs/install.md`) | `serve --tls-listen`, `node invite/join`, `pair` | private addresses only; the routers' WireGuard carries traffic between sites; the hub CA issues the hub's HTTPS certificate and each node's certificate at join; hub-to-node calls are mutual TLS |
 | Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
 | Files and desktop (P11, `docs/desk.md`) | `node put/get`, `desk <node> screenshot/windows/click/move/type/key/run` | zstd-adaptive, sha256-verified, atomic file copies confined to a node file root; Windows screen and input from the logged-in session behind a `desk:<node>` lease |
 | Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("envoy") with a scoped token, driving the hub through the CLI |
@@ -46,12 +46,13 @@ or state compatibility. Flutter clients (desktop, Android, web) remain in use.
 | Clients | `pair`, `login`, `devices`, `mcp`, `hub serve --web` | URL-only QR links and trusted-device approval; MCP tools generated from the API |
 | Ops | `service systemd/windows-task/install-windows/termux` | generates service definitions, never installs them |
 | Nodes | `node install/uninstall/doctor/update` | one-command node setup per OS, dry-run first; uninstall deletes nothing; update pushes a build, swaps it with one rollback binary |
-| Add and remove nodes (`docs/install.md`) | app ADD NODE / REMOVE NODE, `node invite`, `node rm [--jobs wait\|cancel] [--uninstall]` | the hub serves `/install.sh`, `/install.ps1` and sha256-checked builds under `/dl/`; a single-use key from the environment, never a URL; live INVITED, JOINED, FIRST METRICS, READY; removal drains, revokes the tailnet enrollment and deletes nothing on the machine |
+| Add and remove nodes (`docs/install.md`) | app ADD NODE / REMOVE NODE, `node invite`, `node rm [--jobs wait\|cancel] [--uninstall]` | the hub serves `/ca.pem`, `/install.sh`, `/install.ps1` and sha256-checked builds under `/dl/`; the paste line pins the hub CA by SHA-256; a single-use join code from the environment, never a URL; live INVITED, JOINED, FIRST METRICS, READY; removal drains, revokes the node certificate and deletes nothing on the machine |
 
 ## Install
 
 The [Linux installer guide](docs/install.md) covers verified Rust hub and node
-bundles, their current requirements, and the remaining node connectivity gap.
+bundles, the network model (private addresses, router WireGuard, hub CA and
+mutual TLS) and the recommended router firewall.
 The Rust installer does not require bwrap. The [migration status](docs/rust-migration.md)
 tracks feature parity; use the Go release for features still listed there as
 incomplete. Branch and release rules are in [DEV.md](DEV.md).

@@ -2,7 +2,8 @@
 
 Every way into the hub goes through one decision point, `internal/auth`
 (`Authorizer`): the Connect interceptor (unary and streaming), the WebSocket
-terminal, and the tailnet listener. Nothing else reads a token.
+terminal, on every hub listener. Nothing else reads a token. Node agents
+read no token at all: their listener admits only the hub's client certificate.
 
 ## Credentials
 
@@ -104,8 +105,9 @@ other, `read` admits `GetJob`, `ListJobs`, `WatchJob` and `ListLeases`, and
 `SubmitJob`, `CancelJob`, `AcquireLease`, `RenewLease` and `ReleaseLease` are
 audited. Treat `job_submit_job` as shell access: the command runs as the node
 agent's user on any node the caller can target, and source paths are read from
-the hub's disk. Node agents accept the job RPCs only from the hub (tailnet
-WhoIs `tag:hub`, or the node token); the hub never serves `NodeAgentService`.
+the hub's disk. Node agents accept the job RPCs only from the hub: their mutual TLS listener
+requires a client certificate from the hub CA that names the hub. The hub never
+serves `NodeAgentService`.
 
 File transfer and desktop control are separate grants, none part of `read`:
 `node_put_file`, `node_get_file` (`node_put_*`, `node_get_*`) and `desk_*`
@@ -122,9 +124,9 @@ Services marked `(protectorate.v1.owner_only)` (TokenService, AuditService) and 
 `(protectorate.v1.owner_only_rpc)` accept only the owner token whatever the
 scopes. The RPC form covers anything that runs code as the hub's OS user or
 aims the hub's credentials: `CreateSession` and `RespawnSession` (the command
-is unsandboxed and could read `$PROTECTORATE_HOME/token`), `AddNode` (the
-hub polls the address with the node token), `InviteNode` (it issues a tailnet
-enrollment key), `RemoveNode` (it revokes a node and can make it uninstall),
+is unsandboxed and could read `$PROTECTORATE_HOME/token`), `AddNode` (it
+points the hub's node calls at an address), `InviteNode` (it issues a join
+code), `RemoveNode` (it revokes a node and can make it uninstall),
 `SetNodeTier` (it decides which machines jobs may reach), `UpdateNode` (it
 replaces executable code on a node), and `ReleaseService.UpdateHub` (it
 replaces the hub executable and its fleet release). Owner-only RPCs match no scope
@@ -157,10 +159,10 @@ scope, which also permits typing into host sessions.
 `job_submit_job` is likewise shell access (on nodes, not the hub) and
 stays a deliberate grant.
 
-The hub sends its node token only to an address the owner added: inventory
-addresses must be a bare host or IP with an optional port (and optional
-`http(s)://`), with no path, credentials or query, and node polls and job calls
-never follow redirects.
+The hub dials only addresses in its inventory: a node reports a private
+IP:port when it joins, the owner can change it with `AddNode` (update), and
+node polls and job calls never follow redirects. Wherever the address points,
+the hub talks only to a peer holding the node's current certificate.
 
 ## Entry points
 
@@ -189,15 +191,15 @@ configured browser roots. It does not execute repository programs.
 | Entry point | Check |
 |-------------|-------|
 | Connect unary and server-streaming RPCs | interceptor: authenticate, then scope for the procedure |
-| `DeviceService.StartDeviceAuth`, `DeviceService.PollDeviceAuth` | unauthenticated, source-IP and global rate limits |
-| `GET /install.sh`, `GET /install.ps1`, `GET /dl/protectorate-<os>-<arch>[.exe][.sha256]` | none: generated installers and the builds, no secrets; the enrollment key travels in the environment of the command the owner pastes |
+| `DeviceService.StartDeviceAuth`, `DeviceService.PollDeviceAuth` | unauthenticated, private source address, source-IP and global rate limits |
+| `NodeService.JoinNode` | no token: the single-use, expiring join code (stored as SHA-256) and a signature over it by the joining key; private source address and rate limits |
+| `GET /ca.pem`, `GET /install.sh`, `GET /install.ps1`, `GET /dl/protectorate-<os>-<arch>[.exe][.sha256]` | none: the CA certificate, generated installers and the builds, no secrets; the join code travels in the environment of the command the owner pastes, which pins the CA by SHA-256 |
 | `GET /ws/terminal/{name}` | bearer header, `token.<value>` subprotocol or `?token=`; needs `terminal` (or `terminal:readonly` with `?readonly=1`) |
-| Tailnet listener | WhoIs first (hub and `tag:client` only, never `tag:node`), then exactly the checks above |
+| Node agent listener | mutual TLS: a hub-CA client certificate naming `hub.protectorate.internal`; nothing else |
 
-Decision: tailnet devices must also present a token. WhoIs proves which device
-is calling, not that its owner meant this request, and a compromised phone or
-laptop on the tailnet would otherwise have full access. The tailnet identity is
-recorded in the audit log next to the token.
+Decision: network location is never identity. Being on the LAN or the VPN
+grants nothing; every caller presents a token to the hub, and only the hub's
+certificate reaches a node.
 
 Terminal attach audits use `terminal.attach` for interactive requests and
 `terminal.attach.readonly` when `?readonly=1` is requested, including denied
@@ -209,7 +211,7 @@ attempts.
 with mode 0600. Logged: every mutating RPC (any RPC not marked
 `NO_SIDE_EFFECTS`, including denied and unauthenticated attempts) and every
 terminal attach. Not logged: reads and event streams. Fields: `time`, `actor`
-(`owner`, `token:<name>` or `unauthenticated`), `token_id`, `tailnet`,
+(`owner`, `token:<name>` or `unauthenticated`), `token_id`,
 `procedure`, `subject` (the request's `name` or `id`, nothing else from the
 body, or what the handler names, such as a new job's id), `outcome` (`ok`,
 `denied`, `error`), `code` (Connect code), `task` (the admin grant's task)
@@ -326,11 +328,13 @@ systemd user manager, the same Go harness also verifies persisted parent
 ownership and cross-sleeve denial. Runtime prerequisites produce explicit
 subscenario skips; the core authorization checks always run.
 
-## Shared node token
+## Node certificates
 
-Outside a tailnet, the hub and its node agents share a bearer. It is never a
-flag, because arguments are readable by every local user in the process list.
-Give `hub serve` and `node serve` `--node-token-file PATH` (mode 0600), or set
-env `PROTECTORATE_NODE_TOKEN`. The file wins over the env. The one-time
-enrollment key in `node join --key` is still an argument; it expires (default
-1h) and the process exits once joined.
+A node has no shared secret with the hub. `node join` creates a P-256 key on
+the node, signs the invite code with it and sends the public key; the hub CA
+returns a certificate naming `ID.NAME.node.protectorate.internal`, where `ID`
+is new on every join. The hub trusts only the certificate of the node's
+current join, so `node rm` revokes it; it renews certificates in place a month
+before their one-year expiry. The join code is an argument or environment
+value only for the joining process; it works once and expires (default 1h).
+
