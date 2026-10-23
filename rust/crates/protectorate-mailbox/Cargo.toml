@@ -2,7 +2,10 @@
 name = "protectorate-mailbox"
 version = "0.1.0"
 edition.workspace = true
-description = "Append-only JSONL message store, a Rust port of internal/mailbox"
+description = "Append-only JSONL message store"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }

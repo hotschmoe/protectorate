@@ -1,5 +1,6 @@
 //! MessageService projection of the durable mailbox.
 use super::{input, respond, string, Hub};
+use chrono::{SecondsFormat, Utc};
 use protectorate_mailbox::{self as mailbox, Action, Kind, Message, NewMessage, ThreadInfo, Time};
 use protectorate_sleeve_registry::{Mode, State};
 use protectorate_wire::{Code, Result, RpcError, RpcRequest, UnaryServer};
@@ -61,8 +62,8 @@ fn visible(message: &Message, actor: &str, owner: bool) -> bool {
     owner || message.from == actor || message.deliveries.contains_key(actor)
 }
 
-fn time(time: Option<Time>) -> Option<String> {
-    time.map(Time::format)
+fn rfc3339(time: Time) -> String {
+    time.to_rfc3339_opts(SecondsFormat::Nanos, true)
 }
 
 fn message_json(message: &Message) -> Value {
@@ -75,7 +76,7 @@ fn message_json(message: &Message) -> Value {
         "id": message.id, "threadId": message.thread, "from": message.from,
         "to": message.to, "kind": kind, "ackRequired": message.ack_required,
         "body": message.body, "replyTo": message.reply_to,
-        "createdAt": message.created.format(), "noteId": message.note_id,
+        "createdAt": rfc3339(message.created), "noteId": message.note_id,
         "deliveries": message.recipients.iter().map(|recipient| {
             let delivery = &message.deliveries[recipient];
             let mut value = json!({"recipient": recipient, "reminders": delivery.reminders.max(0)});
@@ -84,14 +85,14 @@ fn message_json(message: &Message) -> Value {
                 ("readAt", delivery.read),
                 ("ackedAt", delivery.acked),
             ] {
-                if let Some(at) = time(at) {
+                if let Some(at) = at.map(rfc3339) {
                     value[key] = json!(at);
                 }
             }
             value
         }).collect::<Vec<_>>(),
     });
-    if let Some(at) = time(message.escalated) {
+    if let Some(at) = message.escalated.map(rfc3339) {
         value["escalatedAt"] = json!(at);
     }
     value
@@ -388,9 +389,10 @@ fn delivery_pass(hub: &Hub, scanned: &mut BTreeMap<String, u64>, envoy_retry: &m
                 }
             }
             "chat" if !messages.is_empty() => {
-                if Time::now()
-                    .checked_duration_since(messages[0].created)
-                    .is_none_or(|elapsed| elapsed < Duration::from_secs(2))
+                if !Utc::now()
+                    .signed_duration_since(messages[0].created)
+                    .to_std()
+                    .is_ok_and(|elapsed| elapsed >= Duration::from_secs(2))
                 {
                     continue;
                 }
