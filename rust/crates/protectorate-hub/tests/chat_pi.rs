@@ -91,11 +91,12 @@ for line in sys.stdin:
    f.write('|'.join(os.environ.get(k,'') for k in ('PUB_CACHE','GOCACHE','GOMODCACHE','CARGO_HOME')))
   emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'sessionId':'pi-test-session','model':{'id':'test-model','provider':'test-local','baseUrl':'http://127.0.0.1:1234/v1','contextWindow':8192},'thinkingLevel':'medium'}})
  elif k=='get_available_models':
-  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'models':[{'id':'test-model','provider':'test-local','name':'Test Model','reasoning':True},{'id':'test-alt','provider':'test-local','name':'Alternate','reasoning':True}]}})
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'models':[{'id':'test-model','provider':'test-local','name':'Test Model','reasoning':True},{'id':'test-alt','provider':'test-local','name':'Alternate','reasoning':True},{'id':'test-tail','provider':'test-local','name':'Tailnet','reasoning':True},{'id':'test-named','provider':'test-local','name':'Named','reasoning':True}]}})
  elif k=='get_available_thinking_levels':
   emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'levels':['off','low','medium','high']}})
  elif k=='set_model':
-  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'id':m['modelId'],'provider':m['provider'],'baseUrl':'https://api.example.com/v1' if m['modelId']=='test-alt' else 'http://127.0.0.1:1234/v1'}})
+  base={'test-alt':'https://api.example.com/v1','test-tail':'http://gpu.example.ts.net:11434/v1','test-named':'https://LLM.example.com./v1'}.get(m['modelId'],'http://127.0.0.1:1234/v1')
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'id':m['modelId'],'provider':m['provider'],'baseUrl':base}})
  elif k=='set_thinking_level':
   emit({'type':'response','id':m['id'],'command':k,'success':True})
  elif k=='compact':
@@ -321,6 +322,7 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     };
     let hub = Hub::open(&state, "owner-secret", "test")
         .unwrap()
+        .with_local_model_hosts(vec!["llm.example.com".into()])
         .with_chat_runtime(ChatRuntime::new(launcher));
     let (addr, server) = serve(hub).await;
     let mut event_stream = subscribe(addr).await;
@@ -479,6 +481,22 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
             assert_eq!(event["payload"]["local_model"], false);
             break;
         }
+    }
+    // Only configured names and private addresses are local, never a
+    // tailnet name.
+    for (model, local) in [("test-tail", false), ("test-named", true)] {
+        let (status, selected) = call(
+            addr,
+            "ChatService/SetSelection",
+            json!({"sleeve":"pi-one","selection":{"model":format!("test-local/{model}"),"effort":"low"}}),
+        )
+        .await;
+        assert_eq!(status, 200, "{selected}");
+        assert_eq!(
+            selected["chat"]["localModel"].as_bool().unwrap_or(false),
+            local,
+            "{model}: {selected}"
+        );
     }
     let (status, compacted) = call(addr, "ChatService/Compact", json!({"sleeve":"pi-one"})).await;
     assert_eq!(status, 200, "{compacted}");

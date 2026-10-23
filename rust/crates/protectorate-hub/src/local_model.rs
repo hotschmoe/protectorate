@@ -1,6 +1,9 @@
 use protectorate_inventory::Inventory;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
+/// A model is local when its base URL names a `--local-model-host`, a node in
+/// the inventory, `localhost` or a private address. Any other name is not:
+/// network location says nothing about who runs a DNS name.
 pub(super) fn served_locally(base_url: &str, hosts: &[String], inventory: &Inventory) -> bool {
     let Ok(uri) = base_url.parse::<axum::http::Uri>() else {
         return false;
@@ -28,30 +31,10 @@ pub(super) fn served_locally(base_url: &str, hosts: &[String], inventory: &Inven
     {
         return true;
     }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(ip) => local_ipv4(ip),
-            IpAddr::V6(ip) => {
-                ip.to_ipv4_mapped().is_some_and(local_ipv4)
-                    || ip.is_loopback()
-                    || ip.is_unique_local()
-                    || ip.is_unicast_link_local()
-                    || ip.is_unspecified()
-            }
-        };
+    match host.parse::<IpAddr>() {
+        Ok(ip) => protectorate_tls::private_ip(ip),
+        Err(_) => host == "localhost" || host.ends_with(".localhost"),
     }
-    !host.contains('.')
-        || host.ends_with(".local")
-        || host.ends_with(".localhost")
-        || host.ends_with(".ts.net")
-}
-
-fn local_ipv4(ip: Ipv4Addr) -> bool {
-    ip.is_loopback()
-        || ip.is_private()
-        || ip.is_link_local()
-        || ip.is_unspecified()
-        || (ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
 }
 
 fn canonical_host(value: &str) -> String {

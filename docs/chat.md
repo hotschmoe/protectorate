@@ -245,10 +245,10 @@ update: claude `anthropic`, codex `openai`, grok `xai`. pi reports the
 `rpc-commands.md#model-object`), and the `provider` of each assistant
 message; a message with a different provider than `get_state` drops the
 `baseUrl`, since pi's message carries no endpoint. The hub sets `local_model`
-when the base URL host is loopback, private (RFC1918, fc00::/7), link-local,
-CGNAT (100.64.0.0/10), a single-label name, `.local`, `.localhost` or
-`.ts.net`, or a host or name in
-the node inventory or in `hub serve --local-model-host` (repeatable). No base URL (a named hosted provider) is never local, so
+when the base URL host is a private address (the listener rule: loopback,
+RFC 1918, 100.64.0.0/10, fc00::/7, fe80::/10), `localhost`, a name or address
+in the node inventory, or a `hub serve --local-model-host` name (repeatable);
+any other DNS name is not local. No base URL (a named hosted provider) is never local, so
 DeepSeek, GLM, Kimi and the like over API keys show no warning. Like the model
 name, both fields are empty until the first model call. Example: a pi provider `hotschmoe-local` with baseUrl
 `https://llm.hotschmoe.com/v1` is a public DNS name for the user's own server,
