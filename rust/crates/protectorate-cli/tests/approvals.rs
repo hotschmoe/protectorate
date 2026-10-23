@@ -31,43 +31,91 @@ fn finish(child: Child) -> (bool, String) {
     )
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
+/// A hub whose approval requests expire after `ttl`, with an Envoy and a
+/// sleeve capability.
+async fn serve(ttl: Duration) -> (String, String, String, tokio::task::JoinHandle<()>) {
     let home = tempfile::tempdir().unwrap();
     let hub = Hub::open(home.path(), "owner-secret", "test")
         .unwrap()
-        .with_approval_ttl(Duration::from_secs(5));
+        .with_approval_ttl(ttl);
     // Agent identities are hub-minted capabilities, never owner-created.
     let envoy = common::mint(&hub, "orchestrator-envoy", &["backlog_*", "read"]);
     let sleeve = common::mint(&hub, "sleeve:worker", &["backlog_*", "read"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let server =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let result = tokio::task::spawn_blocking(move || {
-        let owner = |args: &[&str]| cli(&url, "owner-secret", args).unwrap();
-        let json = |text: String| serde_json::from_str::<Value>(&text).unwrap();
-        let note = |title: &str| {
-            json(owner(&["--json", "backlog", "add", title]))["id"]
-                .as_str()
-                .unwrap()
-                .to_owned()
-        };
-        let pending = || {
-            let deadline = Instant::now() + Duration::from_secs(60);
-            loop {
-                let listed = json(owner(&["--json", "approvals", "ls"]));
-                if let Some(first) = listed["approvals"].as_array().and_then(|a| a.first()) {
-                    return first.clone();
-                }
-                assert!(Instant::now() < deadline, "no approval request appeared");
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        };
+    let server = tokio::spawn(async move {
+        let _home = home;
+        axum::serve(listener, hub.router().unwrap()).await.unwrap()
+    });
+    (url, envoy, sleeve, server)
+}
 
-        let doomed = note("doomed");
+fn owner(url: &str, args: &[&str]) -> String {
+    cli(url, "owner-secret", args).unwrap()
+}
+
+fn json(text: String) -> Value {
+    serde_json::from_str(&text).unwrap()
+}
+
+fn note(url: &str, title: &str) -> String {
+    json(owner(url, &["--json", "backlog", "add", title]))["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The newest approval request, waiting for one to appear. `all` includes
+/// requests that are no longer pending.
+fn first_approval(url: &str, all: bool) -> Value {
+    let mut args = vec!["--json", "approvals", "ls"];
+    if all {
+        args.push("--all");
+    }
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let listed = json(owner(url, &args));
+        if let Some(first) = listed["approvals"].as_array().and_then(|a| a.first()) {
+            return first.clone();
+        }
+        assert!(Instant::now() < deadline, "no approval request appeared");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn states(url: &str) -> Vec<String> {
+    json(owner(url, &["--json", "approvals", "ls", "--all"]))["approvals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["state"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+fn audit(url: &str) -> Vec<Value> {
+    let report = json(owner(url, &["--json", "audit", "verify"]));
+    assert_eq!(report["ok"], true);
+    json(owner(url, &["--json", "audit", "ls", "--lines", "100"]))["entries"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+fn count(entries: &[Value], procedure: &str) -> usize {
+    entries
+        .iter()
+        .filter(|e| e["procedure"] == procedure)
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_destructive_calls_wait_for_owner_approval_or_denial() {
+    // Long enough that the owner always decides first.
+    let (url, envoy, sleeve, server) = serve(Duration::from_secs(120)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        let doomed = note(&url, "doomed");
         let call = spawn_cli(&url, &envoy, &["backlog", "rm", &doomed]);
-        let request = pending();
+        let request = first_approval(&url, false);
         assert_eq!(request["actor"], "token:orchestrator-envoy");
         assert_eq!(
             request["procedure"],
@@ -75,10 +123,10 @@ async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
         );
         assert_eq!(request["subject"], doomed.as_str());
         assert_eq!(request["reason"], "destructive");
-        assert!(owner(&["backlog", "show", &doomed]).contains("doomed"));
+        assert!(owner(&url, &["backlog", "show", &doomed]).contains("doomed"));
         let id = request["id"].as_str().unwrap();
         assert_eq!(
-            owner(&["approvals", "approve", id]),
+            owner(&url, &["approvals", "approve", id]),
             format!("approved {id}\n")
         );
         let (ok, output) = finish(call);
@@ -89,12 +137,12 @@ async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
         );
         assert!(cli(&url, "owner-secret", ["backlog", "show", &doomed]).is_err());
 
-        let kept = note("kept");
+        let kept = note(&url, "kept");
         let call = spawn_cli(&url, &sleeve, &["backlog", "rm", &kept]);
-        let request = pending();
+        let request = first_approval(&url, false);
         assert_eq!(request["actor"], "token:sleeve:worker");
         let id = request["id"].as_str().unwrap();
-        owner(&["approvals", "deny", id]);
+        owner(&url, &["approvals", "deny", id]);
         let (ok, output) = finish(call);
         assert!(!ok, "{output}");
         assert!(
@@ -102,60 +150,29 @@ async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
             "{output}"
         );
 
+        // Asking again would wait out the TTL and end expired instead.
         let call = spawn_cli(&url, &sleeve, &["backlog", "rm", &kept]);
-        let started = Instant::now();
         let (ok, output) = finish(call);
         assert!(!ok, "{output}");
         assert!(
             output.contains("denied approval"),
             "a denied call asked again: {output}"
         );
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(owner(&url, &["backlog", "show", &kept]).contains("kept"));
+        owner(&url, &["backlog", "rm", &kept]);
 
-        let other = note("other");
-        let call = spawn_cli(&url, &sleeve, &["backlog", "rm", &other]);
-        let id = pending()["id"].as_str().unwrap().to_owned();
-        let (ok, output) = finish(call);
-        assert!(!ok, "{output}");
-        assert!(
-            output.contains(&format!("approval {id} expired")),
-            "{output}"
-        );
-        assert!(owner(&["backlog", "show", &kept]).contains("kept"));
-        assert!(owner(&["backlog", "show", &other]).contains("other"));
-
-        owner(&["backlog", "rm", &kept]);
-        let all = json(owner(&["--json", "approvals", "ls", "--all"]));
-        let states = all["approvals"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|a| a["state"].as_str().unwrap().to_owned())
-            .collect::<Vec<_>>();
         assert_eq!(
-            states,
-            [
-                "APPROVAL_STATE_USED",
-                "APPROVAL_STATE_DENIED",
-                "APPROVAL_STATE_EXPIRED"
-            ]
+            states(&url),
+            ["APPROVAL_STATE_USED", "APPROVAL_STATE_DENIED"]
         );
-        let audit = json(owner(&["--json", "audit", "ls", "--lines", "100"]));
-        let entries = audit["entries"].as_array().unwrap();
-        let count = |procedure: &str| {
-            entries
-                .iter()
-                .filter(|e| e["procedure"] == procedure)
-                .count()
-        };
-        assert_eq!(count("approval.request"), 3, "{audit}");
-        assert_eq!(count("approval.expired"), 1, "{audit}");
+        let entries = audit(&url);
+        assert_eq!(count(&entries, "approval.request"), 2, "{entries:?}");
         let decisions = entries
             .iter()
             .filter(|e| e["procedure"] == "/protectorate.v1.ApprovalService/DecideApproval")
             .map(|e| e["detail"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>();
-        assert_eq!(decisions.len(), 2, "{audit}");
+        assert_eq!(decisions.len(), 2, "{entries:?}");
         assert!(
             decisions[0].starts_with("denied destructive"),
             "{decisions:?}"
@@ -164,8 +181,33 @@ async fn agent_destructive_calls_wait_for_owner_approval_deny_or_expiry() {
             decisions[1].starts_with("approved destructive"),
             "{decisions:?}"
         );
-        let report = json(owner(&["--json", "audit", "verify"]));
-        assert_eq!(report["ok"], true);
+    })
+    .await;
+    server.abort();
+    result.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_undecided_approval_expires_and_the_call_fails() {
+    let (url, _envoy, sleeve, server) = serve(Duration::from_secs(3)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        let other = note(&url, "other");
+        let call = spawn_cli(&url, &sleeve, &["backlog", "rm", &other]);
+        let id = first_approval(&url, true)["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let (ok, output) = finish(call);
+        assert!(!ok, "{output}");
+        assert!(
+            output.contains(&format!("approval {id} expired")),
+            "{output}"
+        );
+        assert!(owner(&url, &["backlog", "show", &other]).contains("other"));
+        assert_eq!(states(&url), ["APPROVAL_STATE_EXPIRED"]);
+        let entries = audit(&url);
+        assert_eq!(count(&entries, "approval.request"), 1, "{entries:?}");
+        assert_eq!(count(&entries, "approval.expired"), 1, "{entries:?}");
     })
     .await;
     server.abort();

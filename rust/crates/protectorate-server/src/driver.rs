@@ -314,33 +314,24 @@ pub async fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or("pending")
     );
     let signals = Arc::clone(&session);
+    // Listen before the prompt goes out: a signal that came before a lazily
+    // registered listener was first polled would kill the driver outright.
     #[cfg(unix)]
-    let signal_task = tokio::spawn(async move {
-        let mut term =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
-        let mut count = 0;
-        loop {
-            tokio::select! {
-                result = tokio::signal::ctrl_c() => { if result.is_err() { break; } }
-                _ = async { if let Some(signal)=term.as_mut() { signal.recv().await; } else { std::future::pending::<()>().await; } } => {}
-            }
-            count += 1;
-            if count == 1 {
-                let _ = signals.interrupt();
-            } else {
-                signals.stop();
-                break;
-            }
-        }
-    });
+    let (mut interrupt, mut term) = (
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).ok(),
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok(),
+    );
     #[cfg(windows)]
+    let (mut interrupt, mut term) = (
+        tokio::signal::windows::ctrl_c().ok(),
+        tokio::signal::windows::ctrl_break().ok(),
+    );
     let signal_task = tokio::spawn(async move {
-        let mut break_signal = tokio::signal::windows::ctrl_break().ok();
         let mut count = 0;
         loop {
             tokio::select! {
-                result = tokio::signal::ctrl_c() => { if result.is_err() { break; } }
-                _ = async { if let Some(signal)=break_signal.as_mut() { signal.recv().await; } else { std::future::pending::<()>().await; } } => {}
+                _ = async { if let Some(signal)=interrupt.as_mut() { signal.recv().await; } else { std::future::pending::<()>().await; } } => {}
+                _ = async { if let Some(signal)=term.as_mut() { signal.recv().await; } else { std::future::pending::<()>().await; } } => {}
             }
             count += 1;
             if count == 1 {

@@ -23,12 +23,20 @@ impl Drop for Process {
     }
 }
 
+/// A loopback port for a listener that must be named before it binds, as a
+/// node's is when it joins. It lies below the ephemeral range, so neither an
+/// outgoing connection nor another test's port-0 listener takes it meanwhile.
 pub fn free_port() -> String {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .to_string()
+    use std::hash::{BuildHasher, Hasher};
+    loop {
+        let random = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        let port = 20000 + (random % 12000) as u16;
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return format!("127.0.0.1:{port}");
+        }
+    }
 }
 
 pub fn binary() -> &'static str {
@@ -62,8 +70,9 @@ pub fn spawn(args: &[&str], home: &Path, log: &Path) -> Process {
     )
 }
 
+/// Polls `done` until it holds; generous, for a host busy with other builds.
 pub fn until(what: &str, log: &Path, mut done: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while !done() {
         assert!(
             Instant::now() < deadline,
@@ -74,8 +83,52 @@ pub fn until(what: &str, log: &Path, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// Writes `body` as an executable script at `path` from a child process. A
+/// write descriptor opened in this process leaks into children that other
+/// test threads fork meanwhile, and running the file fails with ETXTBSY
+/// until they exec.
+pub fn write_executable(path: &Path, body: &str) {
+    use std::io::Write;
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(body.as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success(), "write {}", path.display());
+}
+
+/// Stops a private tmux server and removes its socket, which tmux leaves.
+pub fn kill_tmux(socket: &str) {
+    let _ = Command::new("tmux")
+        .args(["-L", socket, "kill-server"])
+        .stderr(Stdio::null())
+        .status();
+    let dir = std::env::var_os("TMUX_TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let _ = fs::remove_file(
+        dir.join(format!("tmux-{}", unsafe { libc::getuid() }))
+            .join(socket),
+    );
+}
+
+/// The address the hub logged for `label` ("serving" or "serving TLS")
+/// once it has bound that listener.
+pub fn bound(log: &Path, label: &str) -> Option<String> {
+    let prefix = format!("protectorate-rs {label} on ");
+    fs::read_to_string(log)
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix).map(str::to_owned))
+}
+
 /// A hub serving plain HTTP on loopback for the owner and HTTPS with its own
-/// CA for joining nodes.
+/// CA for joining nodes. Each start binds fresh ports.
 pub struct Hub {
     pub process: Option<Process>,
     pub client: Client,
@@ -85,6 +138,7 @@ pub struct Hub {
     pub tls: String,
     args: Vec<String>,
     log: PathBuf,
+    tmux: String,
 }
 
 impl Hub {
@@ -100,8 +154,11 @@ impl Hub {
         let token = root.join("owner-token");
         fs::write(&token, OWNER).unwrap();
         fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
-        let plain = free_port();
-        let tls = free_port();
+        let tmux = format!(
+            "p-real-{}-{}",
+            std::process::id(),
+            root.file_name().unwrap().to_string_lossy()
+        );
         let args = [
             "serve",
             "--home",
@@ -109,61 +166,46 @@ impl Hub {
             "--owner-token-file",
             token.to_str().unwrap(),
             "--listen",
-            &plain,
+            "127.0.0.1:0",
             "--tls-listen",
-            &tls,
+            "127.0.0.1:0",
             "--node-interval",
             "1s",
             "--release-api-url",
             "http://127.0.0.1:1",
             "--tmux-socket",
-            &format!("p-real-{}", std::process::id()),
+            &tmux,
         ]
         .map(str::to_owned)
         .into_iter()
         .chain(extra.iter().map(|arg| (*arg).to_owned()))
         .collect::<Vec<_>>();
-        let client =
-            Client::new(&format!("http://{plain}"), OWNER, Duration::from_secs(5)).unwrap();
-        let mut hub = Self {
-            process: None,
+        let log = root.join("hub.log");
+        let (process, plain, tls, client) = launch(&args, &user_home, &log);
+        Self {
+            process: Some(process),
             client,
             home,
             user_home,
-            plain: format!("http://{plain}"),
-            tls: format!("https://{tls}"),
+            plain,
+            tls,
             args,
-            log: root.join("hub.log"),
-        };
-        hub.restart();
-        hub
-    }
-
-    pub fn args(&self) -> Vec<&str> {
-        self.args.iter().map(String::as_str).collect()
+            log,
+            tmux,
+        }
     }
 
     pub fn stop(&mut self) {
         self.process = None;
     }
 
-    /// Runs the hub server itself, without its update guardian, so that
-    /// stopping the process stops the listeners.
+    /// Starts the hub again on fresh ports; owner calls follow it there.
     pub fn restart(&mut self) {
-        self.process = Some(Process(
-            command(&self.args(), &self.user_home)
-                .env("PROTECTORATE_HUB_GUARD_CHILD", "1")
-                .stdout(Stdio::null())
-                .stderr(Stdio::from(fs::File::create(&self.log).unwrap()))
-                .spawn()
-                .unwrap(),
-        ));
-        let client = self.client.clone();
-        until("hub start", &self.log, || {
-            client
-                .call("/protectorate.v1.HubService/GetStatus", &json!({}))
-                .is_ok()
-        });
+        let (process, plain, tls, client) = launch(&self.args, &self.user_home, &self.log);
+        self.process = Some(process);
+        self.plain = plain;
+        self.tls = tls;
+        self.client = client;
     }
 
     pub fn ca(&self) -> PathBuf {
@@ -220,6 +262,45 @@ impl Hub {
             self.status(name)["freshness"] == "NODE_FRESHNESS_FRESH"
         });
     }
+}
+
+impl Drop for Hub {
+    fn drop(&mut self) {
+        self.process = None;
+        kill_tmux(&self.tmux);
+    }
+}
+
+/// Runs the hub server itself, without its update guardian, so that stopping
+/// the process stops the listeners. Returns it with its plain and TLS URLs
+/// and an owner client, once it answers.
+fn launch(args: &[String], user_home: &Path, log: &Path) -> (Process, String, String, Client) {
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut process = Process(
+        command(&args, user_home)
+            .env("PROTECTORATE_HUB_GUARD_CHILD", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(fs::File::create(log).unwrap()))
+            .spawn()
+            .unwrap(),
+    );
+    until("hub start", log, || {
+        assert!(
+            process.0.try_wait().unwrap().is_none(),
+            "hub exited: {}",
+            fs::read_to_string(log).unwrap_or_default()
+        );
+        bound(log, "serving TLS").is_some()
+    });
+    let plain = format!("http://{}", bound(log, "serving").unwrap());
+    let tls = format!("https://{}", bound(log, "serving TLS").unwrap());
+    let client = Client::new(&plain, OWNER, Duration::from_secs(60)).unwrap();
+    until("hub status", log, || {
+        client
+            .call("/protectorate.v1.HubService/GetStatus", &json!({}))
+            .is_ok()
+    });
+    (process, plain, tls, client)
 }
 
 /// `node serve` for a joined node home, with plain jobs allowed.

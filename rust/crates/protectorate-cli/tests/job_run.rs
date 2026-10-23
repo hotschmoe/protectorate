@@ -146,49 +146,53 @@ async fn job_run_and_logs_stream_through_real_hub_and_node() {
     let final_job: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
     assert_eq!(final_job["state"], "JOB_STATE_FAILED");
     assert_eq!(final_job["exitCode"], 7);
-    #[cfg(unix)]
-    {
-        let url2 = url.clone();
-        let canceled = tokio::task::spawn_blocking(move || {
-            let mut child = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
-                .env("PROTECTORATE_HUB", &url2)
-                .env("PROTECTORATE_TOKEN", "owner-secret")
-                .args([
-                    "job", "run", "--on", "peer", "--", "/bin/sh", "-c", "sleep 10",
-                ])
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            // SAFETY: pid belongs to the child just spawned.
-            unsafe {
-                libc::kill(child.id() as i32, libc::SIGINT);
-            }
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while child.try_wait().unwrap().is_none() {
-                if std::time::Instant::now() >= deadline {
-                    child.kill().unwrap();
-                    panic!("SIGINT did not cancel the job promptly");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            child.wait_with_output().unwrap()
-        })
-        .await
-        .unwrap();
-        assert_eq!(
-            canceled.status.code(),
-            Some(130),
-            "{}",
-            String::from_utf8_lossy(&canceled.stderr)
-        );
-        assert!(
-            String::from_utf8_lossy(&canceled.stderr).contains("canceled"),
-            "{}",
-            String::from_utf8_lossy(&canceled.stderr)
-        );
-    }
+    let canceled = tokio::task::spawn_blocking(move || {
+        use std::io::{BufRead, BufReader, Read};
+        let mut child = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+            .env("PROTECTORATE_HUB", &url)
+            .env("PROTECTORATE_TOKEN", "owner-secret")
+            .args([
+                "job",
+                "run",
+                "--on",
+                "peer",
+                "--",
+                "/bin/sh",
+                "-c",
+                "sleep 600",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        // The CLI names the job once it is submitted, after its interrupt
+        // handler is installed.
+        let mut stderr = BufReader::new(child.stderr.take().unwrap());
+        let mut submitted = String::new();
+        stderr.read_line(&mut submitted).unwrap();
+        assert!(submitted.starts_with("job "), "{submitted}");
+        // SAFETY: pid belongs to the child just spawned.
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGINT);
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut rest = String::new();
+            let _ = stderr.read_to_string(&mut rest);
+            let _ = sender.send(rest);
+        });
+        let rest = receiver
+            .recv_timeout(std::time::Duration::from_secs(120))
+            .unwrap_or_else(|_| {
+                let _ = child.kill();
+                panic!("SIGINT did not cancel the job");
+            });
+        (child.wait().unwrap(), submitted + &rest)
+    })
+    .await
+    .unwrap();
+    assert_eq!(canceled.0.code(), Some(130), "{}", canceled.1);
+    assert!(canceled.1.contains("canceled"), "{}", canceled.1);
     hub_task.abort();
     node_task.abort();
 }

@@ -3,6 +3,8 @@
 #![cfg(target_os = "linux")]
 #[path = "support/capability.rs"]
 mod capability;
+#[path = "support/executable.rs"]
+mod executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_inventory::{Node, SHARED};
 use protectorate_lease::{parse_resource, Chooser, Error};
@@ -12,7 +14,6 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs, io,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
@@ -101,8 +102,7 @@ for line in sys.stdin:
  emit({{'type':'result','session_id':sid,'subtype':'success','is_error':False}})
 "#
     );
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, &script);
 }
 
 struct Setup {

@@ -4,25 +4,15 @@
 //! pane captured from the Claude Code TUI at a permission prompt.
 mod common;
 
-use common::cli;
+use common::{cli, PrivateTmux};
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use protectorate_sleeve_registry::{Harness, Mode, Record};
-use std::{process::Command, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 
 const OWNER: &str = "owner-secret";
 const PANE: &str = include_str!("../../../fuzz/corpus/terminal_pane/claude-permission-prompt");
-
-struct PrivateTmux(String);
-
-impl Drop for PrivateTmux {
-    fn drop(&mut self) {
-        let _ = Command::new("tmux")
-            .args(["-L", &self.0, "kill-server"])
-            .output();
-    }
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sleeve_status_explains_a_blocked_terminal_sleeve() {

@@ -26,18 +26,17 @@ mod linux {
         let node_log = root.path().join("node.stderr");
         let mut node = serve_node(&node_home, &hub.user_home, &node_log);
         hub.wait_fresh("restart-peer", &node_log);
-        let client = hub.client.clone();
         let hub_home = hub.home.clone();
         let hub_log = root.path().join("hub.log");
         let submitted = call(
-            &client,
+            &hub.client,
             "/protectorate.v1.JobService/SubmitJob",
             json!({"requestId":"real-restart-job","target":{"node":"restart-peer"},
                 "command":["/bin/sh","-c","printf start; sleep 4; printf finish"],"timeout":"20s"}),
         );
         let id = submitted["id"].as_str().unwrap();
         let job_log = hub_home.join("jobs").join(format!("{id}.log"));
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             if fs::read(&job_log).is_ok_and(|bytes| bytes == b"start") {
                 break;
@@ -53,7 +52,8 @@ mod linux {
         // The node and its job remain alive while the hub process is absent.
         assert!(node.0.try_wait().unwrap().is_none());
         hub.restart();
-        let deadline = Instant::now() + Duration::from_secs(20);
+        let client = hub.client.clone();
+        let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             let job = call(
                 &client,

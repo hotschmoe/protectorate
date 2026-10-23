@@ -353,8 +353,8 @@ async fn node_jobs_run_replay_cancel_and_authenticate() {
         "RunJob",
         json!({"jobId":"slow", "command":["/bin/sh","-c","sleep 30 & wait"], "mode":"JOB_MODE_PLAIN"}),
     ));
-    let mut seen = false;
-    for _ in 0..100 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    loop {
         let (_, list) = rpc(addr, "ListJobs", "node-secret", json!({})).await;
         if list["jobs"]
             .as_array()
@@ -362,16 +362,15 @@ async fn node_jobs_run_replay_cancel_and_authenticate() {
             .iter()
             .any(|job| job["jobId"] == "slow" && job["started"] == true)
         {
-            seen = true;
             break;
         }
+        assert!(std::time::Instant::now() < deadline, "{list}");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert!(seen);
     let (code, result) = rpc(addr, "CancelJob", "node-secret", json!({"jobId":"slow"})).await;
     assert_eq!(code, 200);
     assert_eq!(result["found"], true);
-    let events = tokio::time::timeout(Duration::from_secs(5), running)
+    let events = tokio::time::timeout(Duration::from_secs(120), running)
         .await
         .unwrap()
         .unwrap();
@@ -729,7 +728,7 @@ async fn node_job_outlives_disconnected_run_stream() {
     );
     drop(stream);
     let replay = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(120),
         stream_rpc(addr, "AttachJob", json!({"jobId":"disconnected"})),
     )
     .await
@@ -797,7 +796,8 @@ async fn node_jobs_classify_how_they_end_and_stop_their_whole_process_tree() {
             .unwrap_or(false)
     };
     let background_pid = |file: std::path::PathBuf| async move {
-        for _ in 0..500 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        while std::time::Instant::now() < deadline {
             if let Some(pid) = std::fs::read_to_string(&file)
                 .ok()
                 .and_then(|text| text.trim().parse::<i32>().ok())
@@ -890,7 +890,8 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
         .router()
         .unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let body = json!({"jobId":"sandbox-live", "command":["sh","-c","printf before; sleep 1; printf after"]}).to_string();
+    // The job stays live until the test releases it from its workspace.
+    let body = json!({"jobId":"sandbox-live", "command":["sh","-c","printf before; while [ ! -e release ]; do sleep 0.05; done; printf after"]}).to_string();
     let mut envelope = vec![0];
     envelope.extend_from_slice(&(body.len() as u32).to_be_bytes());
     envelope.extend_from_slice(body.as_bytes());
@@ -912,8 +913,15 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
     let (_, list) = rpc(addr, "ListJobs", "node-secret", json!({})).await;
     assert!(list["jobs"][0].get("finished").is_none(), "{list}");
     drop(stream);
+    let workspace = fs::read_dir(state.join("workspaces"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::write(workspace.join("release"), "").unwrap();
     let replay = tokio::time::timeout(
-        Duration::from_secs(10),
+        Duration::from_secs(120),
         stream_rpc(
             addr,
             "AttachJob",
@@ -940,8 +948,8 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
         "RunJob",
         json!({"jobId":"sandbox-cancel", "command":["/usr/bin/sh","-c","sleep 30 & wait"]}),
     ));
-    let mut started = false;
-    for _ in 0..100 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    loop {
         let (_, list) = rpc(addr, "ListJobs", "node-secret", json!({})).await;
         if list["jobs"]
             .as_array()
@@ -949,12 +957,11 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
             .iter()
             .any(|job| job["jobId"] == "sandbox-cancel" && job["started"] == true)
         {
-            started = true;
             break;
         }
+        assert!(std::time::Instant::now() < deadline, "{list}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(started);
     let (_, result) = rpc(
         addr,
         "CancelJob",
@@ -963,7 +970,7 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
     )
     .await;
     assert_eq!(result["found"], true);
-    let canceled = tokio::time::timeout(Duration::from_secs(5), slow)
+    let canceled = tokio::time::timeout(Duration::from_secs(120), slow)
         .await
         .unwrap()
         .unwrap();

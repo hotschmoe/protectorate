@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 mod common;
 
-use common::cli;
+use common::{cli, PrivateTmux};
 use protectorate_hub::Hub;
 use protectorate_session::Manager;
 use serde_json::Value;
@@ -25,7 +25,8 @@ fn integer(row: &Value, key: &str) -> i64 {
 /// Waits for the hub to report `name` as exited, and returns the listing that
 /// first said so.
 fn exited_listing(call: &dyn Fn(&[&str]) -> Result<String, String>, name: &str) -> Value {
-    for _ in 0..100 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while std::time::Instant::now() < deadline {
         let listing: Value =
             serde_json::from_str(&call(&["--json", "session", "ls"]).unwrap()).unwrap();
         if session_row(&listing, name).is_some_and(|s| s["state"] == "SESSION_STATE_EXITED") {
@@ -47,6 +48,7 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
         .unwrap()
         .as_nanos();
     let socket = format!("protectorate-cli-sessions-{}-{nonce}", std::process::id());
+    let _tmux = PrivateTmux(socket.clone());
     let manager = Arc::new(Manager::new(&socket));
     let hub = Hub::open(root.path(), "owner-secret", "test")
         .unwrap()
@@ -79,6 +81,9 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
         call(&["session", "capture", "runner", "--lines", "20"]).unwrap();
         assert!(call(&["session", "respawn", "runner"]).is_err());
 
+        // The printer stays alive until its output is on the pane: tmux
+        // drops pty output still in flight when a pane's process exits.
+        let release = format!("{cwd}/release-printer");
         let printed = call(&[
             "session",
             "new",
@@ -88,9 +93,21 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
             "--env",
             "GREETING=hello",
             "--",
-            "env",
+            "/bin/sh",
+            "-c",
+            "env; while [ ! -e release-printer ]; do sleep 0.05; done",
         ]);
         assert_eq!(printed.unwrap(), "created\tprinter\n");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        loop {
+            let pane = call(&["session", "capture", "printer", "--lines", "200"]).unwrap();
+            if pane.contains("GREETING=hello") && pane.contains(&format!("PWD={cwd}")) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{pane}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::fs::write(&release, "").unwrap();
         let printed_listing = exited_listing(&call, "printer");
         assert_eq!(
             integer(
@@ -99,9 +116,6 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
             ),
             0
         );
-        let pane = call(&["session", "capture", "printer", "--lines", "200"]).unwrap();
-        assert!(pane.contains("GREETING=hello"), "{pane}");
-        assert!(pane.contains(cwd.as_str()), "{pane}");
 
         assert_eq!(
             call(&["session", "new", "crash", "--", "/bin/false"]).unwrap(),
@@ -145,12 +159,6 @@ async fn session_commands_drive_a_real_hub_and_a_private_tmux_server() {
         }
     })
     .await;
-    for name in ["runner", "printer", "crash", "ghost"] {
-        let _ = manager.kill(name);
-    }
-    let _ = Command::new("tmux")
-        .args(["-L", &socket, "kill-server"])
-        .output();
     server.abort();
     outcome.unwrap();
 }

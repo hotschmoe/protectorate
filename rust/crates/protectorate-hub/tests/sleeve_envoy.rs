@@ -1,10 +1,11 @@
 #![cfg(target_os = "linux")]
+#[path = "support/executable.rs"]
+mod executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     path::Path,
     time::{Duration, Instant},
 };
@@ -37,7 +38,9 @@ async fn call(addr: std::net::SocketAddr, method: &str, token: &str, body: Value
 }
 
 fn fake_pi(path: &Path) {
-    fs::write(path, r#"#!/usr/bin/python3
+    executable::write_executable(
+        path,
+        r#"#!/usr/bin/python3
 import json,sys,os
 p=os.environ.get('PROTECTORATE_TOKEN_FILE','')
 with open('token-readable','w') as marker:
@@ -61,8 +64,8 @@ for line in sys.stdin:
   print(json.dumps({'type':'agent_settled','aborted':False}),flush=True)
  elif k=='abort':
   print(json.dumps({'type':'agent_settled','aborted':True}),flush=True)
-"#).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+"#,
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

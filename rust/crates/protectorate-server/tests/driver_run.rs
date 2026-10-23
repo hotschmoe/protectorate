@@ -1,9 +1,9 @@
 #![cfg(target_os = "linux")]
+mod support;
 
 use std::{
     fs,
     io::Write,
-    os::unix::fs::PermissionsExt,
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -12,7 +12,9 @@ use std::{
 fn pi_driver_streams_a_prompt_to_an_official_rpc_peer() {
     let root = tempfile::tempdir().unwrap();
     let fake = root.path().join("pi");
-    fs::write(&fake, r#"#!/usr/bin/python3
+    support::write_executable(
+        &fake,
+        r#"#!/usr/bin/python3
 import json,sys
 for line in sys.stdin:
  m=json.loads(line)
@@ -24,8 +26,8 @@ for line in sys.stdin:
   print(json.dumps({'type':'message_update','assistantMessageEvent':{'type':'text_delta','delta':'answer: '+m['message']}}),flush=True)
   print(json.dumps({'type':'message_end','message':{'role':'assistant','model':'test-model','provider':'test-local','usage':{'totalTokens':13,'input':10,'output':3}}}),flush=True)
   print(json.dumps({'type':'agent_settled','aborted':False}),flush=True)
-"#).unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+"#,
+    );
     let path = format!(
         "{}:{}",
         root.path().display(),
@@ -72,7 +74,9 @@ for line in sys.stdin:
 fn claude_driver_prompts_and_sends_native_approval_response() {
     let root = tempfile::tempdir().unwrap();
     let fake = root.path().join("claude");
-    fs::write(&fake,r#"#!/usr/bin/python3
+    support::write_executable(
+        &fake,
+        r#"#!/usr/bin/python3
 import json,sys
 def emit(value): print(json.dumps(value),flush=True)
 for line in sys.stdin:
@@ -82,8 +86,8 @@ for line in sys.stdin:
  elif m.get('type')=='control_response':
   with open('approval-received','w') as f: f.write(m['response']['response']['behavior'])
   emit({'type':'result','stop_reason':'end_turn','is_error':False})
-"#).unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+"#,
+    );
     let path = format!(
         "{}:{}",
         root.path().display(),
@@ -131,12 +135,10 @@ for line in sys.stdin:
 fn harness_exit_before_settlement_is_a_command_failure() {
     let root = tempfile::tempdir().unwrap();
     let fake = root.path().join("claude");
-    fs::write(
+    support::write_executable(
         &fake,
         "#!/usr/bin/python3\nimport sys\nsys.stdin.readline()\nsys.exit(7)\n",
-    )
-    .unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let path = format!(
         "{}:{}",
         root.path().display(),
@@ -163,7 +165,7 @@ fn harness_exit_before_settlement_is_a_command_failure() {
 fn first_sigint_uses_the_harness_interrupt_protocol() {
     let root = tempfile::tempdir().unwrap();
     let fake = root.path().join("claude");
-    fs::write(
+    support::write_executable(
         &fake,
         r#"#!/usr/bin/python3
 import json,sys
@@ -175,9 +177,7 @@ for line in sys.stdin:
   with open('interrupted','w') as f: f.write('yes')
   print(json.dumps({'type':'result','stop_reason':'interrupted','is_error':False}),flush=True)
 "#,
-    )
-    .unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let path = format!(
         "{}:{}",
         root.path().display(),
@@ -198,11 +198,14 @@ for line in sys.stdin:
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !root.path().join("ready").exists() && Instant::now() < deadline {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while !root.path().join("ready").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the harness never got the prompt"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(root.path().join("ready").exists());
     unsafe {
         libc::kill(child.id() as i32, libc::SIGINT);
     }

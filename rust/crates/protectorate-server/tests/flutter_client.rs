@@ -2,58 +2,163 @@
 //! Dart is optional for Rust-only build hosts; CI with Flutter runs this lane.
 
 #[cfg(unix)]
+mod support;
+
+#[cfg(unix)]
 mod unix {
-    use protectorate_connect_client::Client;
-    use serde_json::json;
+    use super::support::{bound, free_port, kill_tmux, until};
     use std::{
         fs,
-        net::TcpListener,
-        os::unix::fs::PermissionsExt,
-        path::PathBuf,
-        process::{Child, Command, Stdio},
+        os::unix::{fs::PermissionsExt, process::CommandExt},
+        path::{Path, PathBuf},
+        process::{Child, Command, ExitStatus},
         thread,
         time::{Duration, Instant},
     };
 
     #[cfg(target_os = "linux")]
-    use std::{
-        os::unix::process::CommandExt,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    struct Hub(Child, String);
+    /// A process group of its own; dropping it stops the whole tree, so a
+    /// guardian's hub child or `flutter`'s tester cannot outlive the test.
+    struct Group(Child);
 
-    impl Drop for Hub {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-            let _ = Command::new("tmux")
-                .args(["-L", &self.1, "kill-server"])
-                .output();
+    impl Group {
+        fn spawn(command: &mut Command) -> Self {
+            Self(command.process_group(0).spawn().unwrap())
         }
-    }
 
-    #[cfg(target_os = "linux")]
-    struct ConfiguredHub(Child, String);
+        fn alive(&mut self) -> bool {
+            self.0.try_wait().unwrap().is_none()
+        }
 
-    #[cfg(target_os = "linux")]
-    impl Drop for ConfiguredHub {
-        fn drop(&mut self) {
-            let group = -(self.0.id() as i32);
-            unsafe { libc::kill(group, libc::SIGTERM) };
-            let deadline = Instant::now() + Duration::from_secs(15);
-            while Instant::now() < deadline {
-                if self.0.try_wait().is_ok_and(|status| status.is_some()) {
-                    break;
+        fn wait(&mut self, limit: Duration) -> Option<ExitStatus> {
+            let deadline = Instant::now() + limit;
+            loop {
+                if let Some(status) = self.0.try_wait().unwrap() {
+                    return Some(status);
+                }
+                if Instant::now() >= deadline {
+                    return None;
                 }
                 thread::sleep(Duration::from_millis(100));
             }
+        }
+    }
+
+    impl Drop for Group {
+        fn drop(&mut self) {
+            let group = -(self.0.id() as i32);
+            unsafe { libc::kill(group, libc::SIGTERM) };
+            if self.wait(Duration::from_secs(15)).is_none() {
+                let _ = self.0.kill();
+            }
             unsafe { libc::kill(group, libc::SIGKILL) };
             let _ = self.0.wait();
-            let _ = Command::new("tmux")
-                .args(["-L", &self.1, "kill-server"])
-                .output();
         }
+    }
+
+    /// A configured hub as a service runs it, under its update guardian.
+    struct Hub {
+        group: Group,
+        tmux: String,
+        log: PathBuf,
+    }
+
+    impl Hub {
+        fn start(root: &Path, token: &str, extra: &[&str]) -> Self {
+            let home = root.join("hub");
+            fs::create_dir(&home).unwrap();
+            let token_file = root.join("owner-token");
+            fs::write(&token_file, token).unwrap();
+            fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
+            let tmux = format!(
+                "p-rust-flutter-{}-{}",
+                std::process::id(),
+                root.file_name().unwrap().to_string_lossy()
+            );
+            let log = root.join("hub.log");
+            let output = fs::File::create(&log).unwrap();
+            let group = Group::spawn(
+                Command::new(env!("CARGO_BIN_EXE_protectorate-rs"))
+                    .arg("serve")
+                    .arg("--home")
+                    .arg(&home)
+                    .arg("--owner-token-file")
+                    .arg(&token_file)
+                    .args(["--listen", "127.0.0.1:0"])
+                    .args(["--release-api-url", "http://127.0.0.1:1"])
+                    .args(["--tmux-socket", &tmux])
+                    .args(extra)
+                    .env("HOME", root)
+                    .env_remove("PROTECTORATE_TOKEN")
+                    .env_remove("PROTECTORATE_TOKEN_FILE")
+                    .env_remove("PROTECTORATE_HUB")
+                    .stdout(output.try_clone().unwrap())
+                    .stderr(output),
+            );
+            let mut hub = Self { group, tmux, log };
+            let ready = if extra.contains(&"--tls-listen") {
+                "serving TLS"
+            } else {
+                "serving"
+            };
+            until("hub start", &hub.log.clone(), || {
+                assert!(hub.group.alive(), "the hub exited: {}", hub.output());
+                bound(&hub.log, ready).is_some()
+            });
+            hub
+        }
+
+        fn url(&self) -> String {
+            format!("http://{}", bound(&self.log, "serving").unwrap())
+        }
+
+        fn tls_url(&self) -> String {
+            format!("https://{}", bound(&self.log, "serving TLS").unwrap())
+        }
+
+        fn output(&self) -> String {
+            fs::read_to_string(&self.log).unwrap_or_default()
+        }
+    }
+
+    impl Drop for Hub {
+        fn drop(&mut self) {
+            kill_tmux(&self.tmux);
+        }
+    }
+
+    /// Runs a Dart or Flutter scenario to completion. Its output goes to files,
+    /// so a chatty run cannot block on a full pipe, and the deadline allows
+    /// for compiling the scenario on a loaded host.
+    fn scenario(hub: &Hub, root: &Path, name: &str, command: &mut Command, limit: Duration) {
+        let stdout = root.join(format!("{name}.stdout"));
+        let stderr = root.join(format!("{name}.stderr"));
+        command
+            .stdout(fs::File::create(&stdout).unwrap())
+            .stderr(fs::File::create(&stderr).unwrap());
+        let mut run = Group::spawn(command);
+        let status = run.wait(limit);
+        let report = || {
+            format!(
+                "stdout={} stderr={} hub={}",
+                fs::read_to_string(&stdout).unwrap_or_default(),
+                fs::read_to_string(&stderr).unwrap_or_default(),
+                hub.output()
+            )
+        };
+        match status {
+            Some(status) => assert!(status.success(), "{name} failed: {}", report()),
+            None => {
+                drop(run);
+                panic!("{name} timed out: {}", report());
+            }
+        }
+    }
+
+    fn app() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../app")
     }
 
     #[cfg(target_os = "linux")]
@@ -68,7 +173,7 @@ mod unix {
             eprintln!("skipping node invitation trial: flutter is unavailable");
             return;
         }
-        let app = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../app");
+        let app = app();
         assert!(
             app.join(".dart_tool/package_config.json").is_file(),
             "Flutter package config is required: run make app-check first"
@@ -84,127 +189,44 @@ mod unix {
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         eprintln!("retained node invitation fixture: {}", root.display());
-        let home = root.join("hub");
-        fs::create_dir(&home).unwrap();
-        let token_file = root.join("owner-token");
         let token = "rust-flutter-node-invite-e2e-token";
-        fs::write(&token_file, token).unwrap();
-        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
-
-        let reservations = (0..3)
-            .map(|_| TcpListener::bind("127.0.0.1:0").unwrap())
-            .collect::<Vec<_>>();
-        let addresses = reservations
-            .iter()
-            .map(|listener| listener.local_addr().unwrap())
-            .collect::<Vec<_>>();
-        let [hub_addr, tls_addr, node_addr] = <[_; 3]>::try_from(addresses).unwrap();
-        drop(reservations);
+        let hub = Hub::start(
+            &root,
+            token,
+            &["--tls-listen", "127.0.0.1:0", "--node-interval", "1s"],
+        );
         let bin = env!("CARGO_BIN_EXE_protectorate-rs");
-        let tmux_socket = format!("p-rust-flutter-invite-{}", std::process::id());
-        let log = fs::File::create(root.join("hub.log")).unwrap();
-        let server = Command::new(bin)
-            .arg("serve")
-            .arg("--home")
-            .arg(&home)
-            .arg("--owner-token-file")
-            .arg(&token_file)
-            .arg("--listen")
-            .arg(hub_addr.to_string())
-            .arg("--tls-listen")
-            .arg(tls_addr.to_string())
-            .arg("--node-interval")
-            .arg("1s")
-            .arg("--release-api-url")
-            .arg("http://127.0.0.1:1")
-            .arg("--tmux-socket")
-            .arg(&tmux_socket)
-            .env("HOME", &root)
-            .env_remove("PROTECTORATE_TOKEN")
-            .env_remove("PROTECTORATE_TOKEN_FILE")
-            .env_remove("PROTECTORATE_HUB")
-            .process_group(0)
-            .stdout(log.try_clone().unwrap())
-            .stderr(log)
-            .spawn()
-            .unwrap();
-        let mut hub = ConfiguredHub(server, tmux_socket);
-        let url = format!("http://{hub_addr}");
-        let client = Client::new(&url, token, Duration::from_millis(300)).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(45);
-        loop {
-            if client
-                .call("/protectorate.v1.HubService/GetStatus", &json!({}))
-                .is_ok()
-            {
-                break;
-            }
-            assert!(
-                hub.0.try_wait().unwrap().is_none(),
-                "configured Rust hub exited before ready; see {}",
-                root.join("hub.log").display()
-            );
-            assert!(
-                Instant::now() < deadline,
-                "configured Rust hub was not ready"
-            );
-            thread::sleep(Duration::from_millis(100));
-        }
-
-        let mut flutter = Command::new("flutter")
-            .args(["test", "--no-pub", "--reporter", "expanded"])
-            .arg(format!("--dart-define=PROTECTORATE_E2E_HUB_URL={url}"))
-            .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
-            .arg(format!("--dart-define=PROTECTORATE_E2E_NODE_BINARY={bin}"))
-            .arg(format!(
-                "--dart-define=PROTECTORATE_E2E_NODE_HOME={}",
-                root.join("node").display()
-            ))
-            .arg(format!(
-                "--dart-define=PROTECTORATE_E2E_TLS_URL=https://{tls_addr}"
-            ))
-            .arg(format!(
-                "--dart-define=PROTECTORATE_E2E_CA_CERT={}",
-                home.join("ca/ca.pem").display()
-            ))
-            .arg(format!(
-                "--dart-define=PROTECTORATE_E2E_NODE_LISTEN={node_addr}"
-            ))
-            .arg("tool/node_invite_ui_e2e.dart")
-            .current_dir(&app)
-            .process_group(0)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let flutter_group = -(flutter.id() as i32);
-        let deadline = Instant::now() + Duration::from_secs(180);
-        loop {
-            if flutter.try_wait().unwrap().is_some() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                unsafe { libc::kill(flutter_group, libc::SIGTERM) };
-                thread::sleep(Duration::from_secs(1));
-                unsafe { libc::kill(flutter_group, libc::SIGKILL) };
-                let output = flutter.wait_with_output().unwrap();
-                panic!(
-                    "node invitation trial timed out; fixture {}: stdout={} stderr={}",
-                    root.display(),
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        let output = flutter.wait_with_output().unwrap();
-        unsafe { libc::kill(flutter_group, libc::SIGTERM) };
-        assert!(
-            output.status.success(),
-            "node invitation trial failed; fixture {}: stdout={} stderr={}",
-            root.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+        scenario(
+            &hub,
+            &root,
+            "node_invite_ui_e2e",
+            Command::new("flutter")
+                .args(["test", "--no-pub", "--reporter", "expanded"])
+                .arg(format!(
+                    "--dart-define=PROTECTORATE_E2E_HUB_URL={}",
+                    hub.url()
+                ))
+                .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
+                .arg(format!("--dart-define=PROTECTORATE_E2E_NODE_BINARY={bin}"))
+                .arg(format!(
+                    "--dart-define=PROTECTORATE_E2E_NODE_HOME={}",
+                    root.join("node").display()
+                ))
+                .arg(format!(
+                    "--dart-define=PROTECTORATE_E2E_TLS_URL={}",
+                    hub.tls_url()
+                ))
+                .arg(format!(
+                    "--dart-define=PROTECTORATE_E2E_CA_CERT={}",
+                    root.join("hub/ca/ca.pem").display()
+                ))
+                .arg(format!(
+                    "--dart-define=PROTECTORATE_E2E_NODE_LISTEN={}",
+                    free_port()
+                ))
+                .arg("tool/node_invite_ui_e2e.dart")
+                .current_dir(&app),
+            Duration::from_secs(600),
         );
     }
 
@@ -220,7 +242,7 @@ mod unix {
             eprintln!("skipping Flutter client trial: dart is unavailable");
             return;
         }
-        let app = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../app");
+        let app = app();
         if !app.join(".dart_tool/package_config.json").is_file() {
             assert!(
                 !require_flutter,
@@ -231,65 +253,40 @@ mod unix {
         }
 
         let root = tempfile::tempdir().unwrap();
-        let home = root.path().join("hub");
-        fs::create_dir(&home).unwrap();
-        let token_file = root.path().join("owner-token");
+        let root = root.path();
         let token = "rust-flutter-real-binary-e2e-token";
-        fs::write(&token_file, token).unwrap();
-        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
-
-        let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
-        let listen = reservation.local_addr().unwrap();
-        drop(reservation);
-        let url = format!("http://{listen}");
-        let tmux_socket = format!("p-rust-flutter-{}", std::process::id());
-        let server = Command::new(env!("CARGO_BIN_EXE_protectorate-rs"))
-            .arg("serve")
-            .arg("--home")
-            .arg(&home)
-            .arg("--owner-token-file")
-            .arg(&token_file)
-            .arg("--listen")
-            .arg(listen.to_string())
-            .arg("--release-api-url")
-            .arg("http://127.0.0.1:1")
-            .arg("--tmux-socket")
-            .arg(&tmux_socket)
-            .env("HOME", root.path())
-            .env_remove("PROTECTORATE_TOKEN")
-            .env_remove("PROTECTORATE_TOKEN_FILE")
-            .env_remove("PROTECTORATE_HUB")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        let mut hub = Hub(server, tmux_socket);
-        let client = Client::new(&url, token, Duration::from_millis(300)).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(15);
-        loop {
-            if client
-                .call("/protectorate.v1.HubService/GetStatus", &json!({}))
-                .is_ok()
-            {
-                break;
-            }
-            assert!(
-                hub.0.try_wait().unwrap().is_none(),
-                "Rust hub exited before ready"
+        let hub = Hub::start(root, token, &[]);
+        let url = hub.url();
+        for name in ["hub_connection_e2e", "backlog_e2e", "session_e2e"] {
+            scenario(
+                &hub,
+                root,
+                name,
+                Command::new("dart")
+                    .arg("--packages=.dart_tool/package_config.json")
+                    .arg(format!("tool/{name}.dart"))
+                    .arg(&url)
+                    .arg(token)
+                    .current_dir(&app),
+                Duration::from_secs(300),
             );
-            assert!(
-                Instant::now() < deadline,
-                "Rust hub was not ready in 15 seconds"
-            );
-            thread::sleep(Duration::from_millis(100));
         }
-
-        run_dart_scenario(&app, "tool/hub_connection_e2e.dart", &url, token);
-        run_dart_scenario(&app, "tool/backlog_e2e.dart", &url, token);
-        run_dart_scenario(&app, "tool/session_e2e.dart", &url, token);
         if Command::new("flutter").arg("--version").output().is_ok() {
-            run_flutter_scenario(&app, "tool/note_draft_e2e.dart", &url, token);
-            run_flutter_scenario(&app, "tool/nodes_ui_e2e.dart", &url, token);
+            for name in ["note_draft_e2e", "nodes_ui_e2e"] {
+                scenario(
+                    &hub,
+                    root,
+                    name,
+                    Command::new("flutter")
+                        .arg("test")
+                        .arg("--no-pub")
+                        .arg(format!("--dart-define=PROTECTORATE_E2E_HUB_URL={url}"))
+                        .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
+                        .arg(format!("tool/{name}.dart"))
+                        .current_dir(&app),
+                    Duration::from_secs(600),
+                );
+            }
         } else {
             assert!(
                 !require_flutter,
@@ -297,78 +294,5 @@ mod unix {
             );
             eprintln!("skipping NoteDraft trial: flutter is unavailable");
         }
-    }
-
-    fn run_dart_scenario(app: &std::path::Path, scenario: &str, url: &str, token: &str) {
-        let mut dart = Command::new("dart")
-            .arg("--packages=.dart_tool/package_config.json")
-            .arg(scenario)
-            .arg(url)
-            .arg(token)
-            .current_dir(app)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(75);
-        loop {
-            if dart.try_wait().unwrap().is_some() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                let _ = dart.kill();
-                let output = dart.wait_with_output().unwrap();
-                panic!(
-                    "Flutter scenario {scenario} timed out: stdout={} stderr={}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        let output = dart.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "Flutter scenario {scenario} failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn run_flutter_scenario(app: &std::path::Path, scenario: &str, url: &str, token: &str) {
-        let mut flutter = Command::new("flutter")
-            .arg("test")
-            .arg("--no-pub")
-            .arg(format!("--dart-define=PROTECTORATE_E2E_HUB_URL={url}"))
-            .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
-            .arg(scenario)
-            .current_dir(app)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(90);
-        loop {
-            if flutter.try_wait().unwrap().is_some() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                let _ = flutter.kill();
-                let output = flutter.wait_with_output().unwrap();
-                panic!(
-                    "Flutter scenario {scenario} timed out: stdout={} stderr={}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-        let output = flutter.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "Flutter scenario {scenario} failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
     }
 }

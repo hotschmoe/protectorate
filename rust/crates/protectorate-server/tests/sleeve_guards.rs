@@ -1,11 +1,12 @@
 //! A real hub process runs a real terminal sleeve: its egress is confined
 //! to the proxy and audited, and its workspace checkpoints round-trip.
 #![cfg(target_os = "linux")]
+mod support;
+
 use protectorate_connect_client::Client;
 use serde_json::{json, Value};
 use std::{
     fs,
-    net::TcpListener,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::Path,
     process::{Child, Command, Stdio},
@@ -21,10 +22,7 @@ impl Drop for Hub {
         // The hub supervises a guard child; stop the whole process group.
         unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
         let _ = self.0.wait();
-        let _ = Command::new("tmux")
-            .args(["-L", &self.1, "kill-server"])
-            .stderr(Stdio::null())
-            .status();
+        support::kill_tmux(&self.1);
     }
 }
 
@@ -50,10 +48,6 @@ fn start(root: &Path, extra: &[&str]) -> (Hub, Client, String) {
     let token = "sleeve-guards-owner-token";
     fs::write(&token_file, token).unwrap();
     fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
-    let listen = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
     let tmux = format!(
         "p-rust-guards-{}-{}",
         std::process::id(),
@@ -66,7 +60,7 @@ fn start(root: &Path, extra: &[&str]) -> (Hub, Client, String) {
         .arg(&home)
         .arg("--owner-token-file")
         .arg(&token_file)
-        .args(["--listen", &listen.to_string()])
+        .args(["--listen", "127.0.0.1:0"])
         .args(["--release-api-url", "http://127.0.0.1:1"])
         .args(["--tmux-socket", &tmux])
         .args(extra)
@@ -80,23 +74,25 @@ fn start(root: &Path, extra: &[&str]) -> (Hub, Client, String) {
         .spawn()
         .unwrap();
     let mut hub = Hub(child, tmux);
+    let log = root.join("hub.stderr");
+    support::until("hub start", &log, || {
+        assert!(
+            hub.0.try_wait().unwrap().is_none(),
+            "hub exited: {}",
+            fs::read_to_string(&log).unwrap_or_default()
+        );
+        support::bound(&log, "serving").is_some()
+    });
+    let listen = support::bound(&log, "serving").unwrap();
     let url = format!("http://{listen}");
     let client = Client::new(&url, token, Duration::from_secs(60)).unwrap();
-    let probe = Client::new(&url, token, Duration::from_millis(500)).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        let error = match probe.call("/protectorate.v1.HubService/GetStatus", &json!({})) {
-            Ok(_) => break,
-            Err(error) => error,
-        };
-        assert!(
-            hub.0.try_wait().unwrap().is_none() && Instant::now() < deadline,
-            "hub did not become ready ({error}): {}",
-            fs::read_to_string(root.join("hub.stderr")).unwrap_or_default()
-        );
-        thread::sleep(Duration::from_millis(100));
-    }
-    (hub, client, listen.port().to_string())
+    support::until("hub status", &log, || {
+        client
+            .call("/protectorate.v1.HubService/GetStatus", &json!({}))
+            .is_ok()
+    });
+    let port = listen.rsplit(':').next().unwrap().to_owned();
+    (hub, client, port)
 }
 
 fn spawn_shell(client: &Client, name: &str, workspace: &Path, script: &str) -> Value {
@@ -114,8 +110,9 @@ fn spawn_shell(client: &Client, name: &str, workspace: &Path, script: &str) -> V
         .unwrap_or_else(|e| panic!("REAL sandbox capability failure (not skipped): {e}"))
 }
 
+/// The contents of `path` once it appears; probes publish it by rename.
 fn wait_for(path: &Path) -> String {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while !path.is_file() {
         assert!(
             Instant::now() < deadline,
@@ -124,7 +121,6 @@ fn wait_for(path: &Path) -> String {
         );
         thread::sleep(Duration::from_millis(50));
     }
-    thread::sleep(Duration::from_millis(100));
     fs::read_to_string(path).unwrap()
 }
 
@@ -299,7 +295,7 @@ fn disk_limit_stops_the_harness() {
         )
         .unwrap_or_else(|e| panic!("REAL sandbox capability failure (not skipped): {e}"));
     wait_for(&workspace.join("filled"));
-    let deadline = Instant::now() + Duration::from_secs(40);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let sleeve = client
             .call(&format!("{SLEEVE}GetSleeve"), &json!({"name": "filler"}))
@@ -319,7 +315,7 @@ fn disk_limit_stops_the_harness() {
         thread::sleep(Duration::from_millis(250));
     }
     // The audit entry is written just after the stop is recorded.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let audit = client
             .call(
@@ -358,7 +354,7 @@ def call(procedure, token):
     return int(head.split(b" ")[1]), body.decode()
 status = "/protectorate.v1.HubService/GetStatus"
 tokens, codes = [], set()
-end = time.time() + 10
+end = time.time() + 20
 while time.time() < end:
     token = open(os.environ["PROTECTORATE_TOKEN_FILE"]).read().strip()
     if not tokens or tokens[-1] != token:
@@ -373,7 +369,7 @@ open("capability.json.tmp", "w").write(json.dumps(result))
 os.rename("capability.json.tmp", "capability.json")
 "#;
 
-/// A sleeve's capability lives an hour in production; here four seconds. The
+/// A sleeve's capability lives an hour in production; here eight seconds. The
 /// hub refreshes the token file while the sleeve runs, the sleeve renews its
 /// token itself through the egress relay, and killing the sleeve revokes both.
 #[test]
@@ -382,7 +378,7 @@ fn sleeve_capability_renews_through_the_relay_and_dies_with_the_sleeve() {
     let workspace = root.path().join("capability-ws");
     fs::create_dir_all(&workspace).unwrap();
     fs::write(workspace.join("probe.py"), CAPABILITY_PROBE).unwrap();
-    let (_hub, client, port) = start(root.path(), &["--capability-ttl", "4s"]);
+    let (_hub, client, port) = start(root.path(), &["--capability-ttl", "8s"]);
     let url = format!("http://127.0.0.1:{port}");
     spawn_shell(
         &client,
@@ -390,7 +386,7 @@ fn sleeve_capability_renews_through_the_relay_and_dies_with_the_sleeve() {
         &workspace,
         &format!("HUB_PORT={port} /usr/bin/python3 probe.py; exec sleep 600"),
     );
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while !workspace.join("capability.json").is_file() {
         assert!(Instant::now() < deadline, "the sleeve probe did not finish");
         thread::sleep(Duration::from_millis(100));

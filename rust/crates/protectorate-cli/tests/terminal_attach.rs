@@ -1,5 +1,8 @@
 #![cfg(unix)]
 #![cfg(target_os = "linux")]
+mod common;
+
+use common::PrivateTmux;
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use protectorate_sleeve_registry::{Harness, Mode, Record};
@@ -24,6 +27,7 @@ async fn cli_attach_sends_terminal_input_and_detaches_from_private_tmux() {
         .unwrap()
         .as_nanos();
     let socket = format!("protectorate-cli-{}-{nonce}", std::process::id());
+    let _tmux = PrivateTmux(socket.clone());
     let manager = Arc::new(Manager::new(&socket));
     manager
         .create(&CreateOptions {
