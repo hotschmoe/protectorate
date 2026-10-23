@@ -1,4 +1,4 @@
-//! Compatible notes.json storage with atomic replacement and OS writer locks.
+//! notes.json storage with atomic replacement and OS writer locks.
 use chrono::{DateTime, Utc};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -39,9 +39,6 @@ impl From<serde_json::Error> for Error {
     }
 }
 type Result<T> = std::result::Result<T, Error>;
-fn zero_time() -> DateTime<Utc> {
-    "0001-01-01T00:00:00Z".parse().expect("valid zero time")
-}
 fn empty(s: &str) -> bool {
     s.is_empty()
 }
@@ -55,9 +52,7 @@ pub struct Note {
     pub title: String,
     #[serde(default, skip_serializing_if = "empty")]
     pub body: String,
-    #[serde(default = "zero_time")]
     pub created_at: DateTime<Utc>,
-    #[serde(default = "zero_time")]
     pub updated_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "no")]
     pub pinned: bool,
@@ -65,7 +60,6 @@ pub struct Note {
     pub project: String,
     #[serde(default, skip_serializing_if = "empty")]
     pub source: String,
-    #[serde(default)]
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub done_at: Option<DateTime<Utc>>,
@@ -98,15 +92,9 @@ pub struct Filter {
     pub query: String,
     pub state: String,
 }
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct Document {
-    #[serde(default, deserialize_with = "nullable_notes")]
     notes: Vec<Note>,
-}
-fn nullable_notes<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> std::result::Result<Vec<Note>, D::Error> {
-    Ok(Option::<Vec<Note>>::deserialize(d)?.unwrap_or_default())
 }
 // Go strings.ToLower maps each Unicode scalar independently (no final-sigma context).
 fn simple_lower(s: &str) -> String {
@@ -232,12 +220,13 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
             Err(e) => return Err(e.into()),
         };
-        let mut d: Document =
-            serde_json::from_slice::<Option<Document>>(&bytes)?.unwrap_or_default();
-        for n in &mut d.notes {
-            if n.state.is_empty() {
-                n.state = "open".into()
-            }
+        let d: Document = serde_json::from_slice(&bytes)?;
+        if let Some(n) = d
+            .notes
+            .iter()
+            .find(|n| n.state != "open" && n.state != "done")
+        {
+            return invalid(format!("note {:?} has state {:?}", n.id, n.state));
         }
         Ok(d.notes)
     }
