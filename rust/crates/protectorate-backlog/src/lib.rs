@@ -1,6 +1,5 @@
 //! notes.json storage with atomic replacement and OS writer locks.
 use chrono::{DateTime, Utc};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -350,12 +349,9 @@ impl WriterLock {
         let f = options.open(name)?;
         let start = Instant::now();
         loop {
-            match f.try_lock_exclusive() {
+            match f.try_lock() {
                 Ok(()) => return Ok(Self(f)),
-                Err(e)
-                    if e.kind() == io::ErrorKind::WouldBlock
-                        || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
-                {
+                Err(fs::TryLockError::WouldBlock) => {
                     if start.elapsed() >= Duration::from_secs(10) {
                         return Err(io::Error::new(
                             io::ErrorKind::TimedOut,
@@ -365,15 +361,15 @@ impl WriterLock {
                     }
                     std::thread::sleep(Duration::from_millis(2))
                 }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e.into()),
+                Err(fs::TryLockError::Error(e)) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(fs::TryLockError::Error(e)) => return Err(e.into()),
             }
         }
     }
 }
 impl Drop for WriterLock {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.0);
+        let _ = self.0.unlock();
     }
 }
 fn private_dir(path: &Path) -> io::Result<()> {

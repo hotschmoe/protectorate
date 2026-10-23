@@ -1,12 +1,13 @@
 //! Interactive terminal attach over the hub's framed WebSocket protocol.
 use crate::{hub_url, token, Client, Code, Invocation, Result, RpcError};
+use rustls::pki_types::{pem::PemObject, CertificateDer};
 use std::{
-    io::{BufReader, Read, Write},
+    io::{Read, Write},
     net::TcpStream,
     path::Path,
     sync::Arc,
 };
-use tungstenite::{client::IntoClientRequest, http::HeaderValue, stream::MaybeTlsStream, Message};
+use tungstenite::{client::IntoClientRequest, http::HeaderValue, Message};
 
 fn private_ca_pem() -> Result<Option<Vec<u8>>> {
     if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
@@ -38,29 +39,25 @@ fn private_ca_pem() -> Result<Option<Vec<u8>>> {
     Ok(Some(pem))
 }
 
-fn private_ca_config(pem: &[u8]) -> Result<Arc<rustls::ClientConfig>> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    if pem.is_empty() || pem.len() > 1024 * 1024 {
-        return Err(RpcError::invalid("TLS CA bundle must be under 1 MiB"));
-    }
-    let mut reader = BufReader::new(pem);
+fn tls_config(pem: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>> {
     let mut roots = rustls::RootCertStore::empty();
-    while let Some(item) = rustls_pemfile::read_one(&mut reader)
-        .map_err(|e| RpcError::invalid(format!("invalid TLS CA PEM: {e}")))?
-    {
-        match item {
-            rustls_pemfile::Item::X509Certificate(cert) => roots
-                .add(cert)
-                .map_err(|e| RpcError::invalid(format!("invalid TLS CA certificate: {e}")))?,
-            _ => {
-                return Err(RpcError::invalid(
-                    "TLS CA bundle must contain certificates only",
-                ))
+    match pem {
+        None => roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned()),
+        Some(pem) => {
+            if pem.is_empty() || pem.len() > 1024 * 1024 {
+                return Err(RpcError::invalid("TLS CA bundle must be under 1 MiB"));
+            }
+            for cert in CertificateDer::pem_slice_iter(pem) {
+                let cert =
+                    cert.map_err(|e| RpcError::invalid(format!("invalid TLS CA PEM: {e}")))?;
+                roots
+                    .add(cert)
+                    .map_err(|e| RpcError::invalid(format!("invalid TLS CA certificate: {e}")))?;
+            }
+            if roots.is_empty() {
+                return Err(RpcError::invalid("TLS CA bundle has no certificates"));
             }
         }
-    }
-    if roots.is_empty() {
-        return Err(RpcError::invalid("TLS CA bundle has no certificates"));
     }
     Ok(Arc::new(
         rustls::ClientConfig::builder()
@@ -69,7 +66,10 @@ fn private_ca_config(pem: &[u8]) -> Result<Arc<rustls::ClientConfig>> {
     ))
 }
 
-type Socket = tungstenite::WebSocket<MaybeTlsStream<TcpStream>>;
+trait ReadWrite: Read + Write {}
+impl<T: Read + Write> ReadWrite for T {}
+
+type Socket = tungstenite::WebSocket<Box<dyn ReadWrite>>;
 
 /// What can go wrong before a terminal frame is ever exchanged: a bad local
 /// CA bundle, or the hub refusing the upgrade.
@@ -79,59 +79,56 @@ enum ConnectError {
     Socket(tungstenite::Error),
 }
 
+/// Returns the socket plus a handle on the underlying TCP stream for timeouts.
 fn connect_websocket(
     request: tungstenite::http::Request<()>,
     pem: Option<&[u8]>,
-) -> std::result::Result<Socket, ConnectError> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    if let Some(pem) = pem {
-        let config = match private_ca_config(pem) {
-            Ok(config) => config,
-            Err(error) => return Err(ConnectError::Config(error)),
-        };
-        let uri = request.uri();
-        let host = match uri.host() {
-            Some(host) => host,
-            None => {
-                return Err(ConnectError::Config(RpcError::invalid(
-                    "hub URL has no host",
-                )))
-            }
-        };
-        let port = uri
-            .port_u16()
-            .unwrap_or(if uri.scheme_str() == Some("wss") {
-                443
-            } else {
-                80
-            });
-        let stream = match TcpStream::connect((host.trim_matches(['[', ']']), port)) {
-            Ok(stream) => stream,
-            Err(error) => {
-                return Err(ConnectError::Config(RpcError::new(
-                    Code::Unavailable,
-                    format!("connect terminal: {error}"),
-                )))
-            }
-        };
-        tungstenite::client_tls_with_config(
-            request,
-            stream,
-            None,
-            Some(tungstenite::Connector::Rustls(config)),
-        )
-        .map(|(socket, _)| socket)
-        .map_err(|error| match error {
-            tungstenite::HandshakeError::Failure(error) => ConnectError::Socket(error),
-            tungstenite::HandshakeError::Interrupted(_) => ConnectError::Config(RpcError::new(
-                Code::Internal,
-                "attach handshake interrupted",
-            )),
-        })
+) -> std::result::Result<(Socket, TcpStream), ConnectError> {
+    let config_error = |message: String| ConnectError::Config(RpcError::invalid(message));
+    let uri = request.uri().clone();
+    let host = uri
+        .host()
+        .ok_or_else(|| config_error("hub URL has no host".into()))?
+        .trim_matches(['[', ']'])
+        .to_owned();
+    let tls = match uri.scheme_str() {
+        Some("wss") => true,
+        Some("ws") => false,
+        _ => return Err(config_error("hub URL must be ws or wss".into())),
+    };
+    let tls_config = if tls {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        Some(tls_config(pem).map_err(ConnectError::Config)?)
     } else {
-        tungstenite::connect(request)
-            .map(|(socket, _)| socket)
-            .map_err(ConnectError::Socket)
+        None
+    };
+    let unavailable = |what: &str, error: &dyn std::fmt::Display| {
+        ConnectError::Config(RpcError::new(Code::Unavailable, format!("{what}: {error}")))
+    };
+    let tcp = TcpStream::connect((
+        host.as_str(),
+        uri.port_u16().unwrap_or(if tls { 443 } else { 80 }),
+    ))
+    .map_err(|e| unavailable("connect terminal", &e))?;
+    let control = tcp
+        .try_clone()
+        .map_err(|e| unavailable("connect terminal", &e))?;
+    let stream: Box<dyn ReadWrite> = match tls_config {
+        Some(config) => {
+            let name = rustls::pki_types::ServerName::try_from(host)
+                .map_err(|e| config_error(format!("hub URL host: {e}")))?;
+            let conn = rustls::ClientConnection::new(config, name)
+                .map_err(|e| unavailable("connect terminal", &e))?;
+            Box::new(rustls::StreamOwned::new(conn, tcp))
+        }
+        None => Box::new(tcp),
+    };
+    match tungstenite::client(request, stream) {
+        Ok((socket, _)) => Ok((socket, control)),
+        Err(tungstenite::HandshakeError::Failure(error)) => Err(ConnectError::Socket(error)),
+        Err(tungstenite::HandshakeError::Interrupted(_)) => {
+            Err(unavailable("attach", &"handshake interrupted"))
+        }
     }
 }
 
@@ -540,23 +537,11 @@ fn bridge(
         HeaderValue::from_static("protectorate.v1"),
     );
     let ca_pem = private_ca_pem()?;
-    let mut socket =
+    let (mut socket, control) =
         connect_websocket(request, ca_pem.as_deref()).map_err(|error| attach_error(name, error))?;
-    match socket.get_mut() {
-        MaybeTlsStream::Plain(stream) => {
-            stream.set_read_timeout(Some(std::time::Duration::from_millis(50)))
-        }
-        MaybeTlsStream::Rustls(stream) => stream
-            .sock
-            .set_read_timeout(Some(std::time::Duration::from_millis(50))),
-        _ => {
-            return Err(RpcError::new(
-                Code::Unimplemented,
-                "unsupported WebSocket transport",
-            ))
-        }
-    }
-    .map_err(|e| RpcError::new(Code::Internal, format!("attach socket timeout: {e}")))?;
+    control
+        .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+        .map_err(|e| RpcError::new(Code::Internal, format!("attach socket timeout: {e}")))?;
     let raw = RawTerminal::enter()?;
     let escape_byte = if escape == "none" {
         None

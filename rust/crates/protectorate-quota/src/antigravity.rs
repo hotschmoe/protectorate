@@ -32,10 +32,6 @@ impl Antigravity {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn with_bin(mut self, bin: &str) -> Self {
-        self.bin = bin.to_string();
-        self
-    }
 }
 
 impl Reader for Antigravity {

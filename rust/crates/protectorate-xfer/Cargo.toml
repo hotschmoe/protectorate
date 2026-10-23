@@ -7,7 +7,7 @@ description = "Bounded verified file and directory transfers"
 [dependencies]
 sha2 = "0.10"
 tempfile = "3"
-zstd = { version = "0.13", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

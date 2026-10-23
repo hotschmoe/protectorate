@@ -1,11 +1,9 @@
-//! A port of internal/mailbox: the hub's message store, an append-only JSONL
-//! log of everything that happens to a message (sent, addressed, delivered,
-//! read, acked, reminded, escalated), replayed on open.
-//!
-//! The log format is byte-compatible with the Go implementation: the same
-//! record fields in the same order, Go's HTML-escaping string encoder, sorted
-//! delivery keys and Go's RFC 3339 timestamps.
+//! The hub's message store: an append-only JSONL log of everything that
+//! happens to a message (sent, addressed, delivered, read, acked, reminded,
+//! escalated), replayed on open.
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{DirBuilder, File, OpenOptions};
@@ -18,10 +16,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
-mod gotime;
-mod json;
-
-pub use gotime::Time;
+pub type Time = DateTime<Utc>;
 
 pub const CONCISE_GUIDANCE: &str = "Mail: aim for 150 words; lead with the result or blocker. Include only actionable findings and essential evidence; reference a file, commit or note for details. Do not restate the request or prior context. No acknowledgements unless asked or ack-required; use msg ack when only confirmation is needed. Finish every brief with protectorate report --status complete|partial|blocked --summary-file F; use partial honestly when work remains.";
 
@@ -108,7 +103,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Message kinds. Free-form like the Go Kind string, with the three known
 /// values as constants.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Kind(Cow<'static, str>);
 
 impl Kind {
@@ -134,7 +130,8 @@ impl Default for Kind {
 /// One recipient's view of a message. Since starts the ack timer: it is set
 /// when the message is injected into the recipient's chat or, for a recipient
 /// that cannot be injected, when it was addressed to them.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Delivery {
     pub since: Option<Time>,
     pub delivered: Option<Time>,
@@ -143,49 +140,9 @@ pub struct Delivery {
     pub reminders: i64,
 }
 
-impl Delivery {
-    fn json(&self) -> String {
-        let mut parts = vec![raw_pair(
-            "since",
-            quoted(&self.since.unwrap_or(Time::GO_ZERO).format()),
-        )];
-        for (name, t) in [
-            ("delivered", self.delivered),
-            ("read", self.read),
-            ("acked", self.acked),
-        ] {
-            if let Some(t) = t {
-                parts.push(raw_pair(name, quoted(&t.format())));
-            }
-        }
-        if self.reminders != 0 {
-            parts.push(raw_pair("reminders", self.reminders.to_string()));
-        }
-        format!("{{{}}}", parts.join(","))
-    }
-
-    fn from_value(v: &json::Value) -> Result<Delivery> {
-        let mut d = Delivery::default();
-        for (k, val) in object(v)? {
-            match k.as_str() {
-                "since" => d.since = read_time(val)?,
-                "delivered" => d.delivered = read_time(val)?,
-                "read" => d.read = read_time(val)?,
-                "acked" => d.acked = read_time(val)?,
-                "reminders" if !val.is_null() => {
-                    d.reminders = val
-                        .as_int()
-                        .ok_or_else(|| Error::corrupt("reminders must be an integer"))?;
-                }
-                _ => {}
-            }
-        }
-        Ok(d)
-    }
-}
-
 /// One message with its delivery state.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Message {
     pub id: String,
     pub thread: String,
@@ -219,94 +176,11 @@ impl Message {
             None => false,
         }
     }
-
-    fn json(&self) -> String {
-        let mut parts = vec![
-            pair("id", &self.id),
-            pair("thread", &self.thread),
-            pair("from", &self.from),
-            pair("to", &self.to),
-            pair("kind", self.kind.as_str()),
-        ];
-        if self.ack_required {
-            parts.push(raw_pair("ack_required", "true".to_string()));
-        }
-        parts.push(pair("body", &self.body));
-        for (name, s) in [
-            ("request_id", &self.request_id),
-            ("reply_to", &self.reply_to),
-            ("from_project", &self.from_project),
-            ("project", &self.project),
-        ] {
-            if !s.is_empty() {
-                parts.push(pair(name, s));
-            }
-        }
-        parts.push(raw_pair("created", quoted(&self.created.format())));
-        if !self.recipients.is_empty() {
-            parts.push(raw_pair("recipients", json::quoted_array(&self.recipients)));
-        }
-        if !self.deliveries.is_empty() {
-            let inner = self
-                .deliveries
-                .iter()
-                .map(|(k, d)| format!("{}:{}", quoted(k), d.json()))
-                .collect::<Vec<_>>()
-                .join(",");
-            parts.push(raw_pair("deliveries", format!("{{{}}}", inner)));
-        }
-        if let Some(t) = self.escalated {
-            parts.push(raw_pair("escalated", quoted(&t.format())));
-        }
-        if !self.note_id.is_empty() {
-            parts.push(pair("note_id", &self.note_id));
-        }
-        format!("{{{}}}", parts.join(","))
-    }
-
-    fn from_value(v: &json::Value) -> Result<Message> {
-        let mut m = Message {
-            created: Time::GO_ZERO,
-            ..Default::default()
-        };
-        for (k, val) in object(v)? {
-            match k.as_str() {
-                "id" => m.id = read_string(val)?,
-                "thread" => m.thread = read_string(val)?,
-                "from" => m.from = read_string(val)?,
-                "to" => m.to = read_string(val)?,
-                "kind" => m.kind = Kind::new(read_string(val)?),
-                "ack_required" => {
-                    if let json::Value::Bool(b) = val {
-                        m.ack_required = *b;
-                    }
-                }
-                "body" => m.body = read_string(val)?,
-                "request_id" => m.request_id = read_string(val)?,
-                "reply_to" => m.reply_to = read_string(val)?,
-                "from_project" => m.from_project = read_string(val)?,
-                "project" => m.project = read_string(val)?,
-                "created" => m.created = read_time(val)?.unwrap_or(Time::GO_ZERO),
-                "recipients" => m.recipients = read_strings(val)?,
-                "deliveries" => {
-                    let mut map = BTreeMap::new();
-                    if !val.is_null() {
-                        for (rk, rv) in object(val)? {
-                            map.insert(rk.clone(), Delivery::from_value(rv)?);
-                        }
-                    }
-                    m.deliveries = map;
-                }
-                "escalated" => m.escalated = read_time(val)?,
-                "note_id" => m.note_id = read_string(val)?,
-                _ => {}
-            }
-        }
-        Ok(m)
-    }
 }
 
 /// One log line.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
 struct Record {
     op: String,
     at: Time,
@@ -315,113 +189,6 @@ struct Record {
     to: Vec<String>,
     item: String,
     msg: Option<Message>,
-}
-
-impl Record {
-    fn json(&self) -> String {
-        let mut parts = vec![
-            pair("op", &self.op),
-            raw_pair("at", quoted(&self.at.format())),
-        ];
-        for (name, s) in [("id", &self.id), ("rcpt", &self.rcpt)] {
-            if !s.is_empty() {
-                parts.push(pair(name, s));
-            }
-        }
-        if !self.to.is_empty() {
-            parts.push(raw_pair("to", json::quoted_array(&self.to)));
-        }
-        if !self.item.is_empty() {
-            parts.push(pair("item", &self.item));
-        }
-        if let Some(m) = &self.msg {
-            parts.push(raw_pair("msg", m.json()));
-        }
-        format!("{{{}}}", parts.join(","))
-    }
-
-    fn from_line(line: &[u8]) -> Result<Record> {
-        let v = json::parse(line).map_err(Error::corrupt)?;
-        let mut r = Record {
-            op: String::new(),
-            at: Time::GO_ZERO,
-            id: String::new(),
-            rcpt: String::new(),
-            to: Vec::new(),
-            item: String::new(),
-            msg: None,
-        };
-        for (k, val) in object(&v)? {
-            match k.as_str() {
-                "op" => r.op = read_string(val)?,
-                "at" => r.at = read_time(val)?.unwrap_or(Time::GO_ZERO),
-                "id" => r.id = read_string(val)?,
-                "rcpt" => r.rcpt = read_string(val)?,
-                "to" => r.to = read_strings(val)?,
-                "item" => r.item = read_string(val)?,
-                "msg" if !val.is_null() => r.msg = Some(Message::from_value(val)?),
-                _ => {}
-            }
-        }
-        Ok(r)
-    }
-}
-
-fn object(v: &json::Value) -> Result<&[(String, json::Value)]> {
-    v.as_obj()
-        .ok_or_else(|| Error::corrupt("expected an object"))
-}
-
-fn quoted(s: &str) -> String {
-    let mut out = String::new();
-    json::encode_string(&mut out, s);
-    out
-}
-
-fn pair(name: &str, value: &str) -> String {
-    format!("{}:{}", quoted(name), quoted(value))
-}
-
-fn raw_pair(name: &str, value: String) -> String {
-    format!("{}:{}", quoted(name), value)
-}
-
-fn read_string(v: &json::Value) -> Result<String> {
-    if v.is_null() {
-        return Ok(String::new());
-    }
-    v.as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| Error::corrupt("expected a string"))
-}
-
-fn read_strings(v: &json::Value) -> Result<Vec<String>> {
-    if v.is_null() {
-        return Ok(Vec::new());
-    }
-    let mut out = Vec::new();
-    for x in v
-        .as_arr()
-        .ok_or_else(|| Error::corrupt("expected an array"))?
-    {
-        out.push(read_string(x)?);
-    }
-    Ok(out)
-}
-
-/// A timestamp field; Go's zero time reads back as absent.
-fn read_time(v: &json::Value) -> Result<Option<Time>> {
-    if v.is_null() {
-        return Ok(None);
-    }
-    let s = v
-        .as_str()
-        .ok_or_else(|| Error::corrupt("expected a timestamp string"))?;
-    match Time::parse(s) {
-        Some(t) if t != Time::GO_ZERO => Ok(Some(t)),
-        Some(_) => Ok(None),
-        None => Err(Error::corrupt(format!("invalid timestamp {:?}", s))),
-    }
 }
 
 /// A message to send. Recipients may be left empty for an address that
@@ -513,7 +280,6 @@ pub struct ThreadInfo {
 }
 
 struct Inner {
-    now: Box<dyn Fn() -> Time + Send + Sync>,
     path: PathBuf,
     file: Option<File>,
     msgs: HashMap<String, Message>,
@@ -560,13 +326,6 @@ impl Store {
     /// Opens or creates the log at path and replays it. A partial last line,
     /// left by a crash mid-write, is cut off.
     pub fn open(path: impl AsRef<Path>) -> Result<Store> {
-        Store::open_with_clock(path, Time::now)
-    }
-
-    pub fn open_with_clock(
-        path: impl AsRef<Path>,
-        now: impl Fn() -> Time + Send + Sync + 'static,
-    ) -> Result<Store> {
         let path = path.as_ref();
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
@@ -590,7 +349,6 @@ impl Store {
         }
         let file = opts.open(path).map_err(|e| Error::io("open mailbox", e))?;
         let mut inner = Inner {
-            now: Box::new(now),
             path: path.to_path_buf(),
             file: Some(file),
             msgs: HashMap::new(),
@@ -652,7 +410,7 @@ impl Store {
             reply_to: n.reply_to,
             from_project: n.from_project,
             project: n.project,
-            created: (s.now)(),
+            created: Utc::now(),
             recipients: n.recipients.clone(),
             ..Default::default()
         };
@@ -669,11 +427,8 @@ impl Store {
             Record {
                 op: "send".to_string(),
                 at: msg.created,
-                id: String::new(),
-                rcpt: String::new(),
-                to: Vec::new(),
-                item: String::new(),
                 msg: Some(msg),
+                ..Default::default()
             },
         )?;
         Ok(SendOutcome {
@@ -948,7 +703,7 @@ impl Store {
     /// message).
     pub fn overdue(&self, timeout: Duration) -> Vec<Due> {
         let s = self.lock();
-        let now = (s.now)();
+        let now = Utc::now();
         let mut out = Vec::new();
         for id in &s.order {
             let m = match s.msgs.get(id) {
@@ -967,9 +722,12 @@ impl Store {
                 if d.acked.is_some() {
                     continue;
                 }
-                match now.checked_duration_since(since) {
-                    Some(elapsed) if elapsed >= timeout => {}
-                    _ => continue,
+                if !now
+                    .signed_duration_since(since)
+                    .to_std()
+                    .is_ok_and(|elapsed| elapsed >= timeout)
+                {
+                    continue;
                 }
                 if d.reminders == 0 {
                     out.push(Due {
@@ -1120,12 +878,10 @@ fn op(
     }
     let mut rec = Record {
         op: op.to_string(),
-        at: (s.now)(),
+        at: Utc::now(),
         id: id.to_string(),
         rcpt: rcpt.to_string(),
-        to: Vec::new(),
-        item: String::new(),
-        msg: None,
+        ..Default::default()
     };
     extra(&mut rec);
     commit(s, changed, rec)
@@ -1134,13 +890,13 @@ fn op(
 /// Appends rec durably and applies it. The state changes only if the write
 /// succeeded.
 fn commit(s: &mut Inner, changed: &ChangeSignal, rec: Record) -> Result<()> {
-    let mut line = rec.json();
-    line.push('\n');
+    let mut line = serde_json::to_vec(&rec).map_err(|e| Error::corrupt(e.to_string()))?;
+    line.push(b'\n');
     let file = match s.file.as_mut() {
         Some(f) => f,
         None => return Err(Error::Closed),
     };
-    file.write_all(line.as_bytes())
+    file.write_all(&line)
         .map_err(|e| Error::io("write mailbox", e))?;
     file.sync_all().map_err(|e| Error::io("sync mailbox", e))?;
     apply(s, rec).map_err(|message| Error::Corrupt {
@@ -1271,13 +1027,10 @@ fn replay_file(s: &mut Inner, file: &mut File) -> Result<()> {
             }
             off += line.len() as i64;
             line_no += 1;
-            let rec = Record::from_line(&line).map_err(|e| match e {
-                Error::Corrupt { message, .. } => Error::Corrupt {
-                    path: s.path.display().to_string(),
-                    line: line_no,
-                    message,
-                },
-                other => other,
+            let rec: Record = serde_json::from_slice(&line).map_err(|e| Error::Corrupt {
+                path: s.path.display().to_string(),
+                line: line_no,
+                message: e.to_string(),
             })?;
             apply(s, rec).map_err(|message| Error::Corrupt {
                 path: s.path.display().to_string(),

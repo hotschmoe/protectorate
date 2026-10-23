@@ -18,9 +18,9 @@ base64 = "0.22"
 protectorate-xfer = { path = "../protectorate-xfer" }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 getrandom = "0.2"
-tungstenite = { version = "0.29", default-features = false, features = ["handshake", "rustls-tls-native-roots"] }
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+webpki-roots = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pemfile = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

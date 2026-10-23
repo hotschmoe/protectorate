@@ -35,18 +35,6 @@ impl Grok {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn with_home(mut self, home: PathBuf) -> Self {
-        self.home = Some(home);
-        self
-    }
-    pub fn with_base_url(mut self, base: &str) -> Self {
-        self.base_url = base.trim_end_matches('/').to_string();
-        self
-    }
-    pub fn with_web_url(mut self, web: &str) -> Self {
-        self.web_url = web.trim_end_matches('/').to_string();
-        self
-    }
     fn proxy(&self) -> String {
         trim(&self.base_url, DEFAULT_PROXY)
     }

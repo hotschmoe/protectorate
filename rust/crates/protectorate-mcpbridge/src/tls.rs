@@ -17,7 +17,14 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, OwnedSemaphorePermit, Semaphore},
 };
-use tokio_rustls::{rustls, server::TlsStream, TlsAcceptor};
+use tokio_rustls::{
+    rustls::{
+        self,
+        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+    },
+    server::TlsStream,
+    TlsAcceptor,
+};
 
 const MAX_HANDSHAKES: usize = 32;
 const MAX_CONNECTIONS: usize = 256;
@@ -32,15 +39,14 @@ pub fn tls_config(cert: &Path, key: &Path) -> Result<Arc<rustls::ServerConfig>> 
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cert = private_file(cert, false).map_err(|error| tls_file_error("certificate", error))?;
     let key = private_file(key, true).map_err(|error| tls_file_error("key", error))?;
-    let certs = rustls_pemfile::certs(&mut BufReader::new(cert))
-        .collect::<io::Result<Vec<_>>>()
-        .map_err(|error| tls_file_error("certificate", error))?;
+    let certs = CertificateDer::pem_reader_iter(&mut BufReader::new(cert))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| tls_file_error("certificate", io::Error::other(error)))?;
     if certs.is_empty() {
         return Err(RpcError::invalid("TLS certificate file is empty"));
     }
-    let key = rustls_pemfile::private_key(&mut BufReader::new(key))
-        .map_err(|error| tls_file_error("key", error))?
-        .ok_or_else(|| RpcError::invalid("TLS private key is missing"))?;
+    let key = PrivateKeyDer::from_pem_reader(&mut BufReader::new(key))
+        .map_err(|error| tls_file_error("key", io::Error::other(error)))?;
     let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)

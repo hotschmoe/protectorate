@@ -39,7 +39,7 @@ or state compatibility. Flutter clients (desktop, Android, web) remain in use.
 | Nodes (P2, P3, P9) | `node ls/show/add/rm/serve/metrics` | CPU, discrete and integrated GPUs, NPUs, memory, every filesystem, Docker disk, per-container and per-sleeve usage |
 | Network (`docs/install.md`) | `serve --tls-listen`, `node invite/join`, `pair` | private addresses only; the routers' WireGuard carries traffic between sites; the hub CA issues the hub's HTTPS certificate and each node's certificate at join; hub-to-node calls are mutual TLS |
 | Jobs (P3) | `job run/ls/show/logs/cancel/test-cross`, `lease acquire/ls/renew/release` | run commands on idle nodes with warm git worktrees; idempotent submit; renewed short leases; Windows process-tree kill |
-| Files (P11) | `node put/get` | zstd-adaptive, sha256-verified, atomic file copies confined to a node file root. Windows desktop control is shelved; see tag `shelf/windows-desk` |
+| Files (P11) | `node put/get` | deflate-adaptive, sha256-verified, atomic file copies confined to a node file root. Windows desktop control is shelved; see tag `shelf/windows-desk` |
 | Orchestrator | `orchestrator spawn/status` | an agent in a sleeve ("envoy") with a scoped token, driving the hub through the CLI |
 | Notes (backlog) | `backlog add/ls/show/edit/rm/pin` | the owner's notes, kept on the hub, editable in the app and by the orchestrator |
 | Auth | `token create/ls/revoke`, `audit tail` | scoped, expiring tokens at every entry point; unsandboxed shells (raw sessions, host terminals) are owner-only unless granted `terminal:host`; append-only audit log |

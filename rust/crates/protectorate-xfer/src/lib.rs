@@ -6,6 +6,7 @@
 mod archive;
 pub use archive::validate_entry_name;
 
+use flate2::{read::DeflateDecoder, write::DeflateEncoder, Compression};
 use sha2::{Digest, Sha256};
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
@@ -190,7 +191,12 @@ impl Source {
             raw_size: len as u32,
         };
         if self.try_compress {
-            let packed = zstd::bulk::compress(&chunk.data, 3)
+            let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());
+            encoder
+                .write_all(&chunk.data)
+                .map_err(|err| Error::Compression(format!("compress chunk: {err}")))?;
+            let packed = encoder
+                .finish()
                 .map_err(|err| Error::Compression(format!("compress chunk: {err}")))?;
             if packed.len() < len - len / 16 {
                 chunk.data = packed;
@@ -386,8 +392,12 @@ impl Sink {
             return Err(invalid("chunk exceeds 4 MiB raw or packed bound"));
         }
         let raw = if chunk.compressed {
-            zstd::bulk::decompress(&chunk.data, chunk.raw_size as usize)
-                .map_err(|err| Error::Compression(format!("decompress chunk: {err}")))?
+            let mut raw = Vec::with_capacity(chunk.raw_size as usize);
+            DeflateDecoder::new(&chunk.data[..])
+                .take(u64::from(chunk.raw_size) + 1)
+                .read_to_end(&mut raw)
+                .map_err(|err| Error::Compression(format!("decompress chunk: {err}")))?;
+            raw
         } else {
             chunk.data
         };
