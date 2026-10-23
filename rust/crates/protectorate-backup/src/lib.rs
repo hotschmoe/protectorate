@@ -428,7 +428,16 @@ fn verify_sidecar(archive: &Path, file: &mut File, cancel: &Cancellation) -> Res
     file.rewind()?;
     Ok(())
 }
+/// Reads the archive, reporting a short read anywhere as truncation.
 fn scan(file: &mut File, stage: Option<&Dir>, cancel: &Cancellation) -> Result<Manifest> {
+    scan_entries(file, stage, cancel).map_err(|error| match error {
+        Error::Io(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+            Error::Invalid("archive is truncated or has no manifest".into())
+        }
+        other => other,
+    })
+}
+fn scan_entries(file: &mut File, stage: Option<&Dir>, cancel: &Cancellation) -> Result<Manifest> {
     file.rewind()?;
     let mut magic = vec![0; MAGIC.len()];
     file.read_exact(&mut magic)?;
@@ -439,13 +448,7 @@ fn scan(file: &mut File, stage: Option<&Dir>, cancel: &Cancellation) -> Result<M
     loop {
         cancel.check()?;
         let mut length = [0u8; 4];
-        file.read_exact(&mut length).map_err(|e| {
-            if e.kind() == io::ErrorKind::UnexpectedEof {
-                Error::Invalid("archive is truncated or has no manifest".into())
-            } else {
-                e.into()
-            }
-        })?;
+        file.read_exact(&mut length)?;
         let length = u32::from_le_bytes(length);
         if length == 0 || length > MAX_HEADER {
             return invalid("archive header is too large");
