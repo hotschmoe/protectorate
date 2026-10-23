@@ -1,4 +1,0 @@
-version: 1
-master_path: agent-doctor/master
-workspaces:
-  - protectorate
