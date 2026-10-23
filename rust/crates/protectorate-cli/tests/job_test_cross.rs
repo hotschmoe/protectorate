@@ -77,7 +77,7 @@ async fn cross_test_compiles_and_executes_a_real_rust_test_on_a_node() {
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     let results = tokio::task::spawn_blocking(move || {
         let call = |source: &str| {
-            Process::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+            Process::new(env!("CARGO_BIN_EXE_protectorate"))
                 .env("PROTECTORATE_HUB", &url)
                 .env("PROTECTORATE_TOKEN", "owner-secret")
                 .args([

@@ -45,7 +45,7 @@ printf '%s\n' v9.8.7 > "$temp/bundle/VERSION"
 mkdir -p "$temp/web"
 printf '%s\n' '<html>Rust bundle</html>' > "$temp/web/index.html"
 tar -czf "$temp/bundle/protectorate-web-v9.8.7.tar.gz" -C "$temp/web" .
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
   name="$component-linux-$arch"
   if [[ "$component" == protectorate-rs ]]; then
     printf '#!/usr/bin/env bash\nprintf '\''{"version":"v9.8.7"}\\n'\''\n' > "$temp/bundle/$name"
@@ -233,7 +233,7 @@ fi
 grep -Fq 'existing unmanaged service unit' "$temp/unmanaged.log"
 grep -Fq 'ExecStart=/bin/true' "$HOME/.config/systemd/user/protectorate-hub.service"
 
-printf '%s\n' altered > "$temp/bundle/protectorate-cli-linux-$arch"
+printf '%s\n' altered > "$temp/bundle/protectorate-linux-$arch"
 if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/fail" --release-dir "$HOME/fail-releases" --dry-run > "$temp/fail.log" 2>&1; then
   echo 'tampered bundle was accepted' >&2
   exit 1

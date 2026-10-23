@@ -73,7 +73,7 @@ async fn edit_pin_and_remove_notes_over_real_hub_http() {
         )
         .unwrap();
         std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let edit = std::process::Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+        let edit = std::process::Command::new(env!("CARGO_BIN_EXE_protectorate"))
             .env("PROTECTORATE_HUB", &url)
             .env("PROTECTORATE_TOKEN", "owner-secret")
             .env("EDITOR", &editor)

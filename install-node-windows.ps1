@@ -79,7 +79,7 @@ if ($Architecture) {
 } else {
     $Architecture = $nativeArchitecture
 }
-$assets = @("protectorate-rs-windows-$Architecture.exe", "protectorate-cli-windows-$Architecture.exe", "protectorate-mcpbridge-windows-$Architecture.exe")
+$assets = @("protectorate-rs-windows-$Architecture.exe", "protectorate-windows-$Architecture.exe", "protectorate-mcpbridge-windows-$Architecture.exe")
 $taskName = "Protectorate-Node"
 $stateHome = Join-Path $env:LOCALAPPDATA "Protectorate-Node"
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\Protectorate-Node"
@@ -147,7 +147,7 @@ try {
     Restrict-Directory $installDir
     Copy-Item -LiteralPath $server -Destination (Join-Path $installDir "protectorate-rs.exe")
     Copy-Item -LiteralPath $server -Destination (Join-Path $installDir "protectorate-rs-guardian.exe")
-    Copy-Item -LiteralPath (Join-Path $stage $assets[1]) -Destination (Join-Path $installDir "protectorate-cli.exe")
+    Copy-Item -LiteralPath (Join-Path $stage $assets[1]) -Destination (Join-Path $installDir "protectorate.exe")
     Copy-Item -LiteralPath (Join-Path $stage $assets[2]) -Destination (Join-Path $installDir "protectorate-mcpbridge.exe")
 
     $installedServer = Join-Path $installDir "protectorate-rs.exe"

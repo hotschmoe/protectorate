@@ -28,7 +28,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 New-Item -ItemType Directory -Force -Path dist | Out-Null
 $release = Join-Path (Join-Path "target" $target) "release"
 Copy-Item -LiteralPath (Join-Path $release "protectorate-rs-windows.exe") -Destination "dist/protectorate-rs-windows-$Architecture.exe"
-Copy-Item -LiteralPath (Join-Path $release "protectorate-cli.exe") -Destination "dist/protectorate-cli-windows-$Architecture.exe"
+Copy-Item -LiteralPath (Join-Path $release "protectorate.exe") -Destination "dist/protectorate-windows-$Architecture.exe"
 Copy-Item -LiteralPath (Join-Path $release "protectorate-mcpbridge.exe") -Destination "dist/protectorate-mcpbridge-windows-$Architecture.exe"
 
 $reported = & "dist/protectorate-rs-windows-$Architecture.exe" version --json | ConvertFrom-Json

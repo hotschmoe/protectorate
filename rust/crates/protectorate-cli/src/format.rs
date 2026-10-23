@@ -449,9 +449,9 @@ pub(crate) fn grant_admin_text(
         local_stamp(text(token, "expiresAt"))
     };
     let use_command = match out {
-        Some(path) => format!("protectorate-cli --token-file {}", path.display()),
+        Some(path) => format!("protectorate --token-file {}", path.display()),
         None => format!(
-            "PROTECTORATE_TOKEN={} protectorate-cli",
+            "PROTECTORATE_TOKEN={} protectorate",
             text(response, "secret")
         ),
     };

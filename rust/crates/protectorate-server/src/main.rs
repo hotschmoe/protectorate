@@ -1007,7 +1007,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     };
     let runner = companion("protectorate-sleeve-runner");
     let helper = companion("protectorate-sleeve-sandbox-helper");
-    let cli = companion("protectorate-cli");
+    let cli = companion("protectorate");
     let cli = cli.is_file().then(|| fs::canonicalize(cli)).transpose()?;
     if !runner.is_file() || !helper.is_file() {
         return Err(format!("terminal sleeve companions are missing; install protectorate-sleeve-runner and protectorate-sleeve-sandbox-helper beside protectorate-rs in {}", executable_dir.display()).into());

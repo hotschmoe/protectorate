@@ -333,7 +333,7 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
         json!({"sdk":sdk,"sha256":"test"}).to_string(),
     )
     .unwrap();
-    let fake_cli = root.path().join("protectorate-cli");
+    let fake_cli = root.path().join("protectorate");
     executable::write_executable(
         &fake_cli,
         "#!/usr/bin/sh\nif [ \"$1\" = mcp ]; then shift; exec /opt/protectorate/bin/protectorate-mcpbridge \"$@\"; fi\nprintf 'cli-ok:%s' \"$PROTECTORATE_SLEEVE\"\n",
@@ -352,10 +352,10 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
             .parent()
             .unwrap()
             .to_path_buf();
-        let cli = build_dir.join("protectorate-cli");
+        let cli = build_dir.join("protectorate");
         assert!(
             cli.is_file(),
-            "build protectorate-cli before the live MCP trial"
+            "build protectorate before the live MCP trial"
         );
         assert!(
             build_dir.join("protectorate-mcpbridge").is_file(),
@@ -521,7 +521,7 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
     );
     let cli_proof = fs::read_to_string(workspace.join("cli-proof")).unwrap();
     if real_mcp {
-        assert!(cli_proof.starts_with("protectorate-cli "), "{cli_proof}");
+        assert!(cli_proof.starts_with("protectorate "), "{cli_proof}");
         let catalog: Value =
             serde_json::from_str(&fs::read_to_string(workspace.join("mcp-proof")).unwrap())
                 .unwrap();

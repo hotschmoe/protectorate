@@ -11,7 +11,7 @@ pub fn cli<S: AsRef<OsStr>>(
     token: &str,
     args: impl IntoIterator<Item = S>,
 ) -> Result<String, String> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
     command
         .env("PROTECTORATE_HUB", url)
         .env("PROTECTORATE_TOKEN", token);
@@ -24,7 +24,7 @@ pub fn cli_device<S: AsRef<OsStr>>(
     home: &Path,
     args: impl IntoIterator<Item = S>,
 ) -> Result<String, String> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
     command
         .env("PROTECTORATE_HUB", url)
         .env("HOME", home)
@@ -72,9 +72,9 @@ pub fn write_executable(path: &Path, body: &str) {
 /// by a child process for the reason `write_executable` gives.
 #[cfg(unix)]
 pub fn installed_cli(root: &Path) -> PathBuf {
-    let cli = root.join("protectorate-cli");
+    let cli = root.join("protectorate");
     let status = Command::new("cp")
-        .arg(env!("CARGO_BIN_EXE_protectorate-cli"))
+        .arg(env!("CARGO_BIN_EXE_protectorate"))
         .arg(&cli)
         .status()
         .unwrap();

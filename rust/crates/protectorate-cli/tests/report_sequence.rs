@@ -77,7 +77,7 @@ async fn late_and_repeated_reports_are_dropped() {
     });
     let outputs = tokio::task::spawn_blocking(move || {
         let run = |args: &[&str]| {
-            let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+            let output = Command::new(env!("CARGO_BIN_EXE_protectorate"))
                 .env("PROTECTORATE_HUB", &url)
                 .env("PROTECTORATE_TOKEN", &token)
                 .env("PROTECTORATE_TOKEN_FILE", &token_file)

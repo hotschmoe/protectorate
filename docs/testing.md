@@ -15,7 +15,7 @@ scenarios live in `rust/crates/*/tests/`:
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
   node job replay after a hub SIGKILL).
-- `protectorate-cli`: the real `protectorate-cli` binary against a real hub,
+- `protectorate-cli`: the real `protectorate` binary against a real hub,
   node and private tmux server, plus the installed-companion forwarding.
 - `protectorate-hub`: the hub's HTTP API with real sandboxed sleeves, sleeve
   runner, tmux, git, protocol peers for each harness and an in-process node

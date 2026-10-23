@@ -4,7 +4,7 @@ use std::process::Command;
 fn global_home_before_login_status_uses_harness_login_path() {
     let home =
         std::env::temp_dir().join(format!("protectorate-login-prefix-{}", std::process::id()));
-    let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_protectorate"))
         .args(["--home", home.to_str().unwrap(), "login", "--status"])
         .output()
         .unwrap();

@@ -57,7 +57,7 @@ pub const RUST_BUNDLE: [&str; 6] = [
     "protectorate-sleeve-runner",
     "protectorate-sleeve-sandbox-helper",
     "protectorate-node-sandbox-helper",
-    "protectorate-cli",
+    "protectorate",
     "protectorate-mcpbridge",
 ];
 

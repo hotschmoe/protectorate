@@ -24,7 +24,7 @@ async fn serve(router: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
     (url, task)
 }
 fn cli(url: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+    Command::new(env!("CARGO_BIN_EXE_protectorate"))
         .env("PROTECTORATE_HUB", url)
         .env("PROTECTORATE_TOKEN", "owner-secret")
         .args(args)
@@ -148,7 +148,7 @@ async fn job_run_and_logs_stream_through_real_hub_and_node() {
     assert_eq!(final_job["exitCode"], 7);
     let canceled = tokio::task::spawn_blocking(move || {
         use std::io::{BufRead, BufReader, Read};
-        let mut child = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_protectorate"))
             .env("PROTECTORATE_HUB", &url)
             .env("PROTECTORATE_TOKEN", "owner-secret")
             .args([

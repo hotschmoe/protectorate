@@ -93,8 +93,8 @@ def main():
         binary = ROOT / "target/debug" / filename
         assert binary.is_file(), f"build {filename} first"
         shutil.copy2(binary, fixture / "node-bin" / filename)
-    cli_exe = ROOT / "target/debug/protectorate-cli"
-    assert cli_exe.is_file(), "build protectorate-cli first"
+    cli_exe = ROOT / "target/debug/protectorate"
+    assert cli_exe.is_file(), "build protectorate first"
 
     owner_token = fixture / "owner-token"
     node_port = free_port()

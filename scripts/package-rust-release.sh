@@ -18,7 +18,7 @@ web_dir=${PROTECTORATE_RELEASE_WEB_DIR:-app/build/web}
   exit 1
 }
 
-components=(protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge)
+components=(protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge)
 expected_assets=(VERSION)
 for arch in amd64 arm64; do
   for component in "${components[@]}"; do
@@ -34,7 +34,7 @@ for arch in amd64 arm64; do
   done
 done
 for arch in amd64 arm64; do
-  for component in protectorate-rs protectorate-cli protectorate-mcpbridge; do
+  for component in protectorate-rs protectorate protectorate-mcpbridge; do
     name="$component-windows-$arch.exe"
     expected_assets+=("$name")
     [[ -s "$dist/$name" && ! -L "$dist/$name" ]] || { echo "missing artifact: $dist/$name" >&2; exit 1; }
@@ -47,7 +47,7 @@ import sys
 
 dist = Path(sys.argv[1])
 for arch, machine in (("amd64", 0x8664), ("arm64", 0xAA64)):
-    for component in ("protectorate-rs", "protectorate-cli", "protectorate-mcpbridge"):
+    for component in ("protectorate-rs", "protectorate", "protectorate-mcpbridge"):
         path = dist / f"{component}-windows-{arch}.exe"
         with path.open("rb") as binary:
             header = binary.read(64)

@@ -897,7 +897,7 @@ pub enum Command {
 /// argv plus the global options, ready to run.
 fn usage() -> &'static str {
     "Usage:\n  \
-     protectorate-cli [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
+     protectorate [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
      Commands:\n  \
      status                      hub version, host and uptime\n  \
      hub serve                   run the local Rust hub (--home, --listen, --tls-listen, --tls-name, and serve flags)\n  \
@@ -2924,7 +2924,7 @@ fn client_platform() -> String {
     format!("{}/{}", std::env::consts::OS, host_arch())
 }
 
-/// What `version` prints: `protectorate-cli 0.1.0 linux/amd64`, or one JSON
+/// What `version` prints: `protectorate 0.1.0 linux/amd64`, or one JSON
 /// object holding the same three fields.
 fn version_text(json: bool) -> String {
     let version = client_version();
@@ -2934,7 +2934,7 @@ fn version_text(json: bool) -> String {
             json!({"version": version, "os": std::env::consts::OS, "arch": host_arch()})
         );
     }
-    format!("protectorate-cli {version} {}\n", client_platform())
+    format!("protectorate {version} {}\n", client_platform())
 }
 
 pub(crate) fn hub_url(invocation: &Invocation) -> String {

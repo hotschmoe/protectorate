@@ -80,7 +80,7 @@ async fn cli_attach_sends_terminal_input_and_detaches_from_private_tmux() {
         );
         let master = unsafe { OwnedFd::from_raw_fd(master) };
         let slave = unsafe { OwnedFd::from_raw_fd(slave) };
-        let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
         command
             .args(["sleeve", "attach", "worker"])
             .env("PROTECTORATE_HUB", url)

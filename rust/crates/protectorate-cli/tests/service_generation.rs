@@ -50,7 +50,7 @@ fn systemd_generation_uses_sibling_rust_server_and_keeps_serve_flags() {
         unit.contains("Environment=\"PROTECTORATE_HOME=/tmp/hub state\""),
         "{unit}"
     );
-    assert!(!unit.contains("protectorate-cli hub serve"), "{unit}");
+    assert!(!unit.contains("protectorate hub serve"), "{unit}");
 }
 
 #[test]
