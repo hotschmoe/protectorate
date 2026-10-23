@@ -144,7 +144,11 @@ fn children(path: &str) -> &'static [Candidate] {
     match path {
         "" => ROOT,
         "api" => &[("call", "Call a unary RPC")],
-        "audit" => &[("ls", "List entries"), ("tail", "Follow entries")],
+        "audit" => &[
+            ("ls", "List entries"),
+            ("tail", "Follow entries"),
+            ("verify", "Check the hash chain"),
+        ],
         "backlog" => &[
             ("ls", "List notes"),
             ("show", "Show a note"),
@@ -540,6 +544,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--procedure", "Procedure"),
             ("--subject", "Subject"),
             ("--outcome", "Outcome"),
+            ("--run", "Run id"),
             ("--page-token", "Page token"),
         ],
         "grant admin" => &[

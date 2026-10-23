@@ -487,6 +487,10 @@ pub(crate) fn audit_entries_text(response: &Value, chronological: bool) -> Strin
         if !task.is_empty() {
             output.push_str(&format!("  [task: {task}]"));
         }
+        let run = text(entry, "runId");
+        if !run.is_empty() {
+            output.push_str(&format!("  [run: {run}]"));
+        }
         output.push('\n');
     }
     if !chronological {
@@ -496,6 +500,22 @@ pub(crate) fn audit_entries_text(response: &Value, chronological: bool) -> Strin
         }
     }
     output
+}
+
+pub(crate) fn audit_verify_text(report: &Value) -> String {
+    let mut out = format!(
+        "audit chain ok: {} entries, head {} {}\n",
+        text(report, "entries"),
+        text(&report["head"], "seq"),
+        text(&report["head"], "hash")
+    );
+    let beyond = text(report, "beyondHead");
+    if !beyond.is_empty() && beyond != "0" {
+        out.push_str(&format!(
+            "{beyond} entries after the recorded head; the next write records them\n"
+        ));
+    }
+    out
 }
 
 /// How many output lines `sleeve show` keeps from an exited session, like

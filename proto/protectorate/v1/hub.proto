@@ -3,6 +3,7 @@ syntax = "proto3";
 package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
+import "protectorate/v1/audit.proto";
 
 // HubService reports on the hub process itself.
 service HubService {
@@ -32,6 +33,8 @@ message GetStatusResponse {
   string release_notes_url = 9;
   // True when the running release is the guardian-confirmed active release.
   bool release_confirmed = 10;
+  // audit_head is the newest audit entry; see AuditService.VerifyAudit.
+  AuditHead audit_head = 11;
 }
 
 message GetSleeveRuntimeRequest {}

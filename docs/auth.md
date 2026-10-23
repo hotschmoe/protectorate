@@ -211,24 +211,38 @@ terminal attach. Not logged: reads and event streams. Fields: `time`, `actor`
 `procedure`, `subject` (the request's `name` or `id`, nothing else from the
 body, or what the handler names, such as a new job's id), `outcome` (`ok`,
 `denied`, `error`), `code` (Connect code), `task` (the admin grant's task)
-and `detail` (what the handler adds: a job's node and mode, and for admin
-jobs and jobs under a grant the command, cut at 512 bytes). Secrets, env
-values and other request bodies are never written. Calls made with an admin
+`detail` (what the handler adds: a job's node and mode, and for admin
+jobs and jobs under a grant the command, cut at 512 bytes), `run_id` (the run
+of the sleeve that made the call or that it concerns), `seq`, `prev` and
+`hash`. Secrets, env values and other request bodies are never written.
+
+The log is a hash chain. `seq` numbers entries from 1 across every monthly
+file, `prev` is the previous entry's hash, and `hash` is SHA-256 over the
+line's exact bytes with an empty `hash` value. After each append the writer
+records the newest `seq` and `hash` in `audit/head.json`; writers in every
+process (the hub and terminal sleeve runners) serialize on `audit/.lock` and
+continue from the last line on disk. `protectorate audit verify`
+(`AuditService.VerifyAudit`) walks the chain from entry 1 and fails, naming
+the file and line, when an entry was edited, removed or reordered, when the
+log ends before the recorded head (truncation), or when the head is missing.
+`GetStatus` and `ListAuditEntries` report the head, so a client can remember
+it. A writer that dies between appending and recording the head leaves the
+log one entry ahead; verify reports this, and the next write records it. Calls made with an admin
 grant are logged whether or not they mutate. `protectorate audit tail [-n 50]`
 reads it on the hub machine. `AuditService.ListAuditEntries` (owner only,
 like `TokenService`) serves it to the app's AUDIT view: newest first, pages of
 at most 500 with a cursor to older entries, filtered by actor, procedure and
-subject (substring, any case) and outcome. One page reads at most about
+subject (substring, any case), outcome and run id (exact). One page reads at most about
 200,000 lines, so a rare filter can return a short page and a cursor.
 
 Limits to keep in mind:
 
-- Append-only is a convention of the hub process, not enforced. Anything
-  running as the same OS user can edit or truncate the file. True tamper
-  resistance needs the log shipped off-host or to a root-owned append-only
-  location (for example `chattr +a` on the directory, or forwarding to a
-  separate machine). Sleeves only see their workspace mounts, so an agent in a
-  sleeve cannot reach `$PROTECTORATE_HOME`.
+- The chain makes tampering evident, not impossible. Anything running as the
+  same OS user can rewrite the whole log and recompute every hash and the
+  head; only a head remembered elsewhere (the app, another machine) or a
+  root-owned append-only location (for example `chattr +a`) catches that.
+  Sleeves only see their workspace mounts, so an agent in a sleeve cannot
+  reach `$PROTECTORATE_HOME`.
 - Entries are written after the call returns, so a hub crash mid-call can lose
   the line. A failed write is reported on the hub's stderr and does not undo
   the call.
@@ -243,6 +257,8 @@ protectorate token ls
 protectorate token revoke <id>
 protectorate token scopes <id|name> --add sleeve_spawn_sleeve --remove events
 protectorate audit tail -n 50
+protectorate audit ls --run RUN_ID
+protectorate audit verify
 protectorate login --hub https://hub.example --name officepc --platform linux-cli
 protectorate devices ls
 protectorate devices approve KJ7-4QX

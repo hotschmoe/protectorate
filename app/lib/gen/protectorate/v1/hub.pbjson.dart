@@ -18,6 +18,8 @@ import 'dart:typed_data' as $typed_data;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
+import 'audit.pbjson.dart' as $1;
+
 @$core.Deprecated('Use getStatusRequestDescriptor instead')
 const GetStatusRequest$json = {
   '1': 'GetStatusRequest',
@@ -60,6 +62,14 @@ const GetStatusResponse$json = {
       '5': 8,
       '10': 'releaseConfirmed'
     },
+    {
+      '1': 'audit_head',
+      '3': 11,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.AuditHead',
+      '10': 'auditHead'
+    },
   ],
 };
 
@@ -71,7 +81,8 @@ final $typed_data.Uint8List getStatusResponseDescriptor = $convert.base64Decode(
     'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJc3RhcnRlZEF0EisKEWF2YWlsYWJsZV92'
     'ZXJzaW9uGAcgASgJUhBhdmFpbGFibGVWZXJzaW9uEiUKDnVwZGF0ZV9jaGFubmVsGAggASgJUg'
     '11cGRhdGVDaGFubmVsEioKEXJlbGVhc2Vfbm90ZXNfdXJsGAkgASgJUg9yZWxlYXNlTm90ZXNV'
-    'cmwSKwoRcmVsZWFzZV9jb25maXJtZWQYCiABKAhSEHJlbGVhc2VDb25maXJtZWQ=');
+    'cmwSKwoRcmVsZWFzZV9jb25maXJtZWQYCiABKAhSEHJlbGVhc2VDb25maXJtZWQSOQoKYXVkaX'
+    'RfaGVhZBgLIAEoCzIaLnByb3RlY3RvcmF0ZS52MS5BdWRpdEhlYWRSCWF1ZGl0SGVhZA==');
 
 @$core.Deprecated('Use getSleeveRuntimeRequestDescriptor instead')
 const GetSleeveRuntimeRequest$json = {
@@ -158,6 +169,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.GetStatusRequest': GetStatusRequest$json,
   '.protectorate.v1.GetStatusResponse': GetStatusResponse$json,
   '.google.protobuf.Timestamp': $0.Timestamp$json,
+  '.protectorate.v1.AuditHead': $1.AuditHead$json,
   '.protectorate.v1.GetSleeveRuntimeRequest': GetSleeveRuntimeRequest$json,
   '.protectorate.v1.GetSleeveRuntimeResponse': GetSleeveRuntimeResponse$json,
 };

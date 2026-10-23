@@ -6,8 +6,10 @@ import "google/protobuf/timestamp.proto";
 import "protectorate/v1/options.proto";
 
 // AuditService reads the hub's audit log (docs/auth.md): every mutating call
-// and terminal attach, with who made it and how it ended. Only the owner
-// token may call it.
+// and terminal attach, with who made it and how it ended. Each entry carries
+// the hash of the one before it, and the hub records the newest hash outside
+// the log, so an edited, removed or truncated entry breaks the chain. Only
+// the owner token may call it.
 service AuditService {
   option (protectorate.v1.owner_only) = true;
 
@@ -15,6 +17,12 @@ service AuditService {
   // reads a bounded part of the log, so a filter that matches rarely can come
   // back short, or empty, with a next_page_token to continue.
   rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // VerifyAudit walks the whole chain from the first entry and checks it
+  // against the recorded head. A break is reported, not raised.
+  rpc VerifyAudit(VerifyAuditRequest) returns (VerifyAuditResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }
@@ -32,6 +40,8 @@ message ListAuditEntriesRequest {
   string subject = 5;
   // outcome keeps entries with this outcome: "ok", "denied" or "error".
   string outcome = 6;
+  // run_id keeps entries of exactly this run.
+  string run_id = 7;
 }
 
 message ListAuditEntriesResponse {
@@ -40,6 +50,26 @@ message ListAuditEntriesResponse {
   // next_page_token continues with older entries; empty at the start of the
   // log.
   string next_page_token = 2;
+  // head is the newest entry as the hub recorded it outside the log.
+  AuditHead head = 3;
+}
+
+message AuditHead {
+  uint64 seq = 1;
+  string hash = 2;
+}
+
+message VerifyAuditRequest {}
+
+message VerifyAuditResponse {
+  // ok is false when the chain is broken; error names the file and line.
+  bool ok = 1;
+  string error = 2;
+  uint64 entries = 3;
+  AuditHead head = 4;
+  // beyond_head counts entries after the recorded head, left by a writer
+  // that died between appending and recording; the next write records them.
+  uint64 beyond_head = 5;
 }
 
 // AuditEntry is one audit line. Secrets and request bodies are never logged.
@@ -60,4 +90,11 @@ message AuditEntry {
   string task = 9;
   // detail is what the handler added, such as a job's node and mode.
   string detail = 10;
+  // run_id is the run of the sleeve that made the call or that it concerns.
+  string run_id = 11;
+  // seq numbers entries from 1 across every file; prev_hash is the hash of
+  // entry seq-1 and hash is SHA-256 over this line with an empty hash.
+  uint64 seq = 12;
+  string prev_hash = 13;
+  string hash = 14;
 }

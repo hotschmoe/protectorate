@@ -58,6 +58,7 @@ const REVOKE_TOKEN: &str = "/protectorate.v1.TokenService/RevokeToken";
 const UPDATE_TOKEN_SCOPES: &str = "/protectorate.v1.TokenService/UpdateTokenScopes";
 const GRANT_ADMIN: &str = "/protectorate.v1.GrantService/Admin";
 const LIST_AUDIT: &str = "/protectorate.v1.AuditService/ListAuditEntries";
+const VERIFY_AUDIT: &str = "/protectorate.v1.AuditService/VerifyAudit";
 const LIST_DEVICES: &str = "/protectorate.v1.DeviceService/ListDevices";
 const LIST_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ListDeviceAuth";
 const APPROVE_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ApproveDeviceAuth";
@@ -191,6 +192,7 @@ pub struct AuditQuery {
     pub procedure: String,
     pub subject: String,
     pub outcome: String,
+    pub run_id: String,
     pub chronological: bool,
 }
 
@@ -627,6 +629,7 @@ pub enum Command {
         out: Option<PathBuf>,
     },
     AuditList(AuditQuery),
+    AuditVerify,
     DeviceList,
     DevicePendingList,
     DeviceApprove {
@@ -905,7 +908,8 @@ fn usage() -> &'static str {
      login [--name NAME] [--platform OS/ARCH] [--home DIR]  pair this machine with --hub through device approval\n  \
      pair [--url URL] [--app]  print a public pairing link and terminal QR; it carries the CA in PROTECTORATE_TLS_CA_CERT\n  \
      grant admin               mint a task grant (--node NAME|GLOB, --task TEXT, --ttl 4h, --out FILE)\n  \
-     audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --page-token)\n  \
+     audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --run, --page-token)\n  \
+     audit verify               check the audit hash chain against the hub's recorded head\n  \
      who [project|sleeve]       show projects, owning sleeves and dependency edges\n  \
      events                     stream hub events until interrupted\n  \
      node ls | node list        every node with its latest metrics summary\n  \
@@ -1644,7 +1648,7 @@ fn execute_commands(
             }
         }
         Command::AuditList(query) => {
-            let page = client.call(LIST_AUDIT, &json!({"limit":query.limit,"pageToken":query.page_token,"actor":query.actor,"procedure":query.procedure,"subject":query.subject,"outcome":query.outcome}))?;
+            let page = client.call(LIST_AUDIT, &json!({"limit":query.limit,"pageToken":query.page_token,"actor":query.actor,"procedure":query.procedure,"subject":query.subject,"outcome":query.outcome,"runId":query.run_id}))?;
             if json {
                 if query.chronological {
                     Ok(format::items(&page, "entries")
@@ -1658,6 +1662,23 @@ fn execute_commands(
                 }
             } else {
                 Ok(format::audit_entries_text(&page, query.chronological))
+            }
+        }
+        Command::AuditVerify => {
+            let report = client.call_with_timeout(VERIFY_AUDIT, &json!({}), MAX_WAIT)?;
+            if report["ok"] != true {
+                return Err(RpcError::new(
+                    Code::DataLoss,
+                    format!(
+                        "audit chain broken: {}",
+                        report["error"].as_str().unwrap_or_default()
+                    ),
+                ));
+            }
+            if json {
+                json_line(&report)
+            } else {
+                Ok(format::audit_verify_text(&report))
             }
         }
         Command::DeviceList => {

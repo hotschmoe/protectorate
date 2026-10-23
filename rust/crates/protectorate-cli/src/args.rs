@@ -504,11 +504,15 @@ fn grant(args: &[String], index: &mut usize) -> Result<Command> {
 }
 
 fn audit(args: &[String], index: &mut usize) -> Result<Command> {
-    let action = next(args, *index + 1).ok_or_else(|| bad_argument("audit needs ls or tail"))?;
-    if !matches!(action, "ls" | "tail") {
-        return Err(bad_argument("audit needs ls or tail"));
+    let action =
+        next(args, *index + 1).ok_or_else(|| bad_argument("audit needs ls, tail or verify"))?;
+    if !matches!(action, "ls" | "tail" | "verify") {
+        return Err(bad_argument("audit needs ls, tail or verify"));
     }
     *index += 1;
+    if action == "verify" {
+        return Ok(Command::AuditVerify);
+    }
     let mut query = AuditQuery {
         limit: 50,
         page_token: String::new(),
@@ -516,6 +520,7 @@ fn audit(args: &[String], index: &mut usize) -> Result<Command> {
         procedure: String::new(),
         subject: String::new(),
         outcome: String::new(),
+        run_id: String::new(),
         chronological: action == "tail",
     };
     while let Some(item) = next(args, *index + 1) {
@@ -546,6 +551,10 @@ fn audit(args: &[String], index: &mut usize) -> Result<Command> {
             "--outcome" => {
                 *index += 1;
                 query.outcome = value(args, index, flag, inline)?;
+            }
+            "--run" => {
+                *index += 1;
+                query.run_id = value(args, index, flag, inline)?;
             }
             _ => break,
         }

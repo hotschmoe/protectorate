@@ -741,6 +741,7 @@ impl Hub {
                         "availableVersion": available.version,
                         "updateChannel": channel,
                         "releaseNotesUrl": available.notes_url,
+                        "auditHead": audit::head_json(hub.audit.head().ok().flatten().unwrap_or_default()),
                     }),
                 )
             }

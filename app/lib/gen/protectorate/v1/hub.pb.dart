@@ -18,6 +18,8 @@ import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pb.dart'
     as $0;
 
+import 'audit.pb.dart' as $1;
+
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 class GetStatusRequest extends $pb.GeneratedMessage {
@@ -74,6 +76,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     $core.String? updateChannel,
     $core.String? releaseNotesUrl,
     $core.bool? releaseConfirmed,
+    $1.AuditHead? auditHead,
   }) {
     final result = GetStatusResponse._();
     if (version != null) result.version = version;
@@ -86,6 +89,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     if (updateChannel != null) result.updateChannel = updateChannel;
     if (releaseNotesUrl != null) result.releaseNotesUrl = releaseNotesUrl;
     if (releaseConfirmed != null) result.releaseConfirmed = releaseConfirmed;
+    if (auditHead != null) result.auditHead = auditHead;
     return result;
   }
 
@@ -114,6 +118,8 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     ..aOS(8, _omitFieldNames ? '' : 'updateChannel')
     ..aOS(9, _omitFieldNames ? '' : 'releaseNotesUrl')
     ..aOB(10, _omitFieldNames ? '' : 'releaseConfirmed')
+    ..aOM<$1.AuditHead>(11, _omitFieldNames ? '' : 'auditHead',
+        subBuilder: $1.AuditHead.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -232,6 +238,18 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   $core.bool hasReleaseConfirmed() => $_has(9);
   @$pb.TagNumber(10)
   void clearReleaseConfirmed() => $_clearField(10);
+
+  /// audit_head is the newest audit entry; see AuditService.VerifyAudit.
+  @$pb.TagNumber(11)
+  $1.AuditHead get auditHead => $_getN(10);
+  @$pb.TagNumber(11)
+  set auditHead($1.AuditHead value) => $_setField(11, value);
+  @$pb.TagNumber(11)
+  $core.bool hasAuditHead() => $_has(10);
+  @$pb.TagNumber(11)
+  void clearAuditHead() => $_clearField(11);
+  @$pb.TagNumber(11)
+  $1.AuditHead ensureAuditHead() => $_ensure(10);
 }
 
 class GetSleeveRuntimeRequest extends $pb.GeneratedMessage {
