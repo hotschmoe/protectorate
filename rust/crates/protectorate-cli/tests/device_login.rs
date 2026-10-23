@@ -80,17 +80,18 @@ fn spawn_login(home: &Path, args: &[&str]) -> Child {
 }
 
 /// Read both streams off the child so a waiting login cannot fill a pipe, and
-/// never wait past the hub's own pairing window.
+/// never wait past the hub's own ten-minute pairing window.
 fn finish(mut child: Child) -> (bool, String, String) {
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
     let (sender, receiver) = mpsc::channel::<(&'static str, String)>();
     let out = spawn_reader(stdout, "out", sender.clone());
     let err = spawn_reader(stderr, "err", sender.clone());
-    let deadline = Instant::now() + Duration::from_secs(90);
+    let deadline = Instant::now() + Duration::from_secs(300);
     while child.try_wait().unwrap().is_none() {
         if Instant::now() > deadline {
             let _ = child.kill();
+            let _ = child.wait();
             panic!("login did not finish");
         }
         thread::sleep(Duration::from_millis(50));
@@ -125,7 +126,8 @@ fn spawn_reader<S: Read + Send + 'static>(
 
 /// The user code the hub is holding for `name`, once the CLI has started it.
 fn wait_for_code(hub: &str, name: &str) -> String {
-    for _ in 0..200 {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while Instant::now() < deadline {
         let raw: Value =
             serde_json::from_str(&owner_cli(hub, OWNER, ["--json", "devices", "pending"]).unwrap())
                 .unwrap();

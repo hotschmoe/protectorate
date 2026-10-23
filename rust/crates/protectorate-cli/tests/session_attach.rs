@@ -1,5 +1,8 @@
 #![cfg(unix)]
 #![cfg(target_os = "linux")]
+mod common;
+
+use common::PrivateTmux;
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use std::io::Read;
@@ -15,7 +18,7 @@ use tokio::net::TcpListener;
 /// the same RPCs and WebSocket a terminal user would.
 struct Fixture {
     root: tempfile::TempDir,
-    socket: String,
+    _tmux: PrivateTmux,
     manager: Arc<Manager>,
     url: String,
     server: tokio::task::JoinHandle<()>,
@@ -39,7 +42,7 @@ async fn fixture() -> Fixture {
     });
     Fixture {
         root,
-        socket,
+        _tmux: PrivateTmux(socket),
         manager,
         url,
         server,
@@ -193,9 +196,6 @@ fn teardown(fix: &Fixture, names: &[&str]) {
     for name in names {
         let _ = fix.manager.kill(name);
     }
-    let _ = Command::new("tmux")
-        .args(["-L", fix.socket.as_str(), "kill-server"])
-        .output();
     fix.server.abort();
 }
 

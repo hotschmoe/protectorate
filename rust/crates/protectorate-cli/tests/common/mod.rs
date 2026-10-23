@@ -91,6 +91,24 @@ pub fn echo_companion(root: &Path) {
     );
 }
 
+/// A private tmux server for one test. Dropping it stops the server and
+/// removes the socket, which tmux itself leaves behind.
+#[cfg(unix)]
+pub struct PrivateTmux(pub String);
+
+#[cfg(unix)]
+impl Drop for PrivateTmux {
+    fn drop(&mut self) {
+        let _ = Command::new("tmux")
+            .args(["-L", &self.0, "kill-server"])
+            .output();
+        let dir =
+            std::env::var_os("TMUX_TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+        let uid = unsafe { libc::getuid() };
+        let _ = std::fs::remove_file(dir.join(format!("tmux-{uid}")).join(&self.0));
+    }
+}
+
 /// A HOME holding a device key for `url` where `login` would save it; the
 /// key's public half is what the device registers with the hub.
 #[cfg(unix)]

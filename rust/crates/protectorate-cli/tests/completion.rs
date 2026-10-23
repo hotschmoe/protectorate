@@ -192,21 +192,30 @@ async fn resource_completion_uses_authenticated_live_names() {
         String::from_utf8(output.stdout).unwrap()
     };
     let checks = tokio::task::spawn_blocking(move || {
-        assert_eq!(
-            complete("owner-secret", &["sleeve", "show", "al"]),
-            "alpha\tSleeve\nalpine\tSleeve\n:4\n"
+        // Live names are best effort within a short deadline, so a loaded
+        // host may need another try; an empty answer each time is the failure.
+        let live = |words: &[&str], expected: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                let names = complete("owner-secret", words);
+                if names == expected {
+                    return;
+                }
+                assert!(
+                    names == ":4\n" && std::time::Instant::now() < deadline,
+                    "{words:?}: {names}"
+                );
+            }
+        };
+        live(
+            &["sleeve", "show", "al"],
+            "alpha\tSleeve\nalpine\tSleeve\n:4\n",
         );
-        assert_eq!(
-            complete("owner-secret", &["chat", "wait", "be"]),
-            "beta\tSleeve\n:4\n"
-        );
-        assert_eq!(
-            complete("owner-secret", &["node", "show", "com"]),
-            "compute\tNode\n:4\n"
-        );
-        assert_eq!(
-            complete("owner-secret", &["job", "test-cross", "--on=co"]),
-            "--on=compute\tNode\n:4\n"
+        live(&["chat", "wait", "be"], "beta\tSleeve\n:4\n");
+        live(&["node", "show", "com"], "compute\tNode\n:4\n");
+        live(
+            &["job", "test-cross", "--on=co"],
+            "--on=compute\tNode\n:4\n",
         );
         assert_eq!(
             complete("owner-secret", &["node", "show", "--timeout", ""]),
