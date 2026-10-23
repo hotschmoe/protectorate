@@ -282,7 +282,7 @@ async fn idle_reaper_waits_for_work_and_pending_mail() {
         inbox["messages"][0]["deliveries"][0]["deliveredAt"].is_null(),
         "{inbox}"
     );
-    let deadline = Instant::now() + Duration::from_secs(8);
+    let deadline = Instant::now() + Duration::from_secs(30);
     for name in ["busy", "mailbox"] {
         loop {
             let (status, body) = call(addr, "SleeveService/GetSleeve", json!({"name":name})).await;

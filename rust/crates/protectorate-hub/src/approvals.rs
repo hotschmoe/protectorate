@@ -22,6 +22,7 @@ use std::{
 
 pub(crate) const HEADER: &str = "protectorate-approval";
 pub(crate) const DEFAULT_TTL: Duration = Duration::from_secs(10 * 60);
+const MAX_PENDING_PER_ACTOR: usize = 20;
 const DECIDE: &str = "/protectorate.v1.ApprovalService/DecideApproval";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,6 +117,19 @@ impl Approvals {
         let request = match found {
             Some(id) => requests.get_mut(&id).unwrap(),
             None => {
+                let open = requests
+                    .values()
+                    .filter(|r| r.state == State::Pending && r.ask.actor == ask.actor)
+                    .count();
+                if open >= MAX_PENDING_PER_ACTOR {
+                    return Err(RpcError::new(
+                        Code::ResourceExhausted,
+                        format!(
+                            "{} already has {open} calls waiting for approval",
+                            ask.actor
+                        ),
+                    ));
+                }
                 let id = new_id()?;
                 let request = Request {
                     ask,
