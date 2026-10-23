@@ -100,6 +100,8 @@ async fn node_lease_and_audit_commands_print_what_the_hub_did() {
             format!("added peer ({address}, tier shared)\n")
         );
         assert!(ok(&["node", "show", "peer"]).contains("gpu box"));
+        let pool = fails(&["node", "invite", "spare", "--pool", "gpu"]);
+        assert!(pool.contains("--pool"), "{pool}");
         // AddNode polls in the background; poll here so admission is settled.
         monitor.poll_node("peer");
 

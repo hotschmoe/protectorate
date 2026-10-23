@@ -396,7 +396,6 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
     if ttl.is_zero() || ttl > Duration::from_secs(24 * 3600) {
         return Err(RpcError::invalid("ttl must be positive and at most 24h"));
     }
-    let pools = super::strings(&body, "pools");
     let base = install_base(
         &hub,
         body.get("installUrl").and_then(Value::as_str).unwrap_or(""),
@@ -415,7 +414,6 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
     let node = Node {
         name: name.clone(),
         tier,
-        tags: pools.iter().map(|pool| format!("pool-{pool}")).collect(),
         invited: true,
         code_sha256: hex(&Sha256::digest(code.as_bytes())),
         code_expires: expires,

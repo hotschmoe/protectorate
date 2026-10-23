@@ -889,7 +889,6 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
                 ));
             }
             let mut tier = "shared".to_owned();
-            let mut pools = Vec::new();
             let mut ttl = Duration::from_secs(3600);
             let mut install_url = String::new();
             while let Some(token) = next(args, *index + 1) {
@@ -901,10 +900,6 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
                     "--tier" => {
                         *index += 1;
                         tier = value(args, index, flag, inline)?;
-                    }
-                    "--pool" => {
-                        *index += 1;
-                        pools.extend(csv_flag_values(flag, &value(args, index, flag, inline)?)?);
                     }
                     "--expires" => {
                         *index += 1;
@@ -926,7 +921,6 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
             Ok(Command::NodeInvite {
                 name,
                 tier,
-                pools,
                 ttl,
                 install_url,
             })

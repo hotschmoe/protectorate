@@ -668,8 +668,7 @@ message InviteNodeRequest {
   string name = 1;
   // tier is "shared" (default) or "care".
   string tier = 2;
-  // pools become pool-<name> tags on the node.
-  repeated string pools = 3;
+  reserved 3;
   // ttl is how long the code can be redeemed; unset means 1h, at most 24h.
   google.protobuf.Duration ttl = 4;
   // install_url is the hub's HTTPS URL the new machine downloads from and

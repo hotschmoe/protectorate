@@ -375,7 +375,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
         ],
         "node invite" => &[
             ("--tier", "Node tier"),
-            ("--pool", "Network pool"),
             ("--expires", "Code lifetime"),
             ("--url", "Install URL"),
         ],

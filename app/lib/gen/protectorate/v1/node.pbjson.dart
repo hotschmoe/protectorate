@@ -1253,7 +1253,6 @@ const InviteNodeRequest$json = {
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
     {'1': 'tier', '3': 2, '4': 1, '5': 9, '10': 'tier'},
-    {'1': 'pools', '3': 3, '4': 3, '5': 9, '10': 'pools'},
     {
       '1': 'ttl',
       '3': 4,
@@ -1264,13 +1263,16 @@ const InviteNodeRequest$json = {
     },
     {'1': 'install_url', '3': 5, '4': 1, '5': 9, '10': 'installUrl'},
   ],
+  '9': [
+    {'1': 3, '2': 4},
+  ],
 };
 
 /// Descriptor for `InviteNodeRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List inviteNodeRequestDescriptor = $convert.base64Decode(
     'ChFJbnZpdGVOb2RlUmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1lEhIKBHRpZXIYAiABKAlSBH'
-    'RpZXISFAoFcG9vbHMYAyADKAlSBXBvb2xzEisKA3R0bBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1'
-    'Zi5EdXJhdGlvblIDdHRsEh8KC2luc3RhbGxfdXJsGAUgASgJUgppbnN0YWxsVXJs');
+    'RpZXISKwoDdHRsGAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uUgN0dGwSHwoLaW5z'
+    'dGFsbF91cmwYBSABKAlSCmluc3RhbGxVcmxKBAgDEAQ=');
 
 @$core.Deprecated('Use installCommandDescriptor instead')
 const InstallCommand$json = {

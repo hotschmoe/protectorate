@@ -711,7 +711,6 @@ pub enum Command {
     NodeInvite {
         name: String,
         tier: String,
-        pools: Vec<String>,
         ttl: Duration,
         install_url: String,
     },
@@ -946,7 +945,7 @@ fn usage() -> &'static str {
      node serve                run this machine's Rust node agent over mutual TLS (--home DIR, --listen IP:PORT, --file-root DIR, --file-unconfined, --job-concurrency N, --sandbox-helper FILE, --allow-plain-jobs, --watch-dir DIR, --docker-host URL)\n  \
      node doctor               inspect this machine's Rust node install (--home DIR, --json)\n  \
      node join                 join a hub with an invite code (--hub URL, --ca-cert FILE, --code CODE or PROTECTORATE_JOIN_CODE, --name, --listen IP:PORT, --home DIR)\n  \
-     node invite <name>         issue a single-use join code (--tier, --pool, --expires, --url)\n  \
+     node invite <name>         issue a single-use join code (--tier, --expires, --url)\n  \
      node put <node> <local> <remote>  copy file or directory to a node (-f, --no-compress)\n  \
      node get <node> <remote> <local>  copy file or directory from a node (-f, --no-compress)\n  \
      backlog ls | backlog list  notes, pinned first (--project, --query, --state open|done|all, --all)\n  \
@@ -1845,7 +1844,6 @@ fn execute_commands(
         Command::NodeInvite {
             name,
             tier,
-            pools,
             ttl,
             install_url,
         } => {
@@ -1854,7 +1852,6 @@ fn execute_commands(
                 &json!({
                     "name": name,
                     "tier": tier,
-                    "pools": pools,
                     "ttl": format_duration(*ttl),
                     "installUrl": install_url,
                 }),
