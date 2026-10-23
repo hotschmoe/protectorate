@@ -1144,7 +1144,7 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
             super::now_unix(),
             &scope_methods,
         )
-        .map_err(super::token_create_error)?;
+        .map_err(super::token_error)?;
     let token_path = workspace.join(".protectorate-token");
     let launch = || -> Result<Record> {
         envoy_write_if_changed(

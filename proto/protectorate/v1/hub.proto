@@ -40,18 +40,9 @@ message GetStatusResponse {
 message GetSleeveRuntimeRequest {}
 
 message GetSleeveRuntimeResponse {
-  // Legacy fields retained while the Flutter client moves to runtime/helper_path.
-  string bwrap_path = 1;
-  string bwrap_version = 2;
+  reserved 1, 2, 4 to 11;
+  // overlays is true when the kernel offers overlayfs for sleeve caches.
   bool overlays = 3;
-  string go_build_cache = 4;
-  string go_build_lower = 5;
-  uint64 snapshot_bytes = 6;
-  uint64 snapshot_entries = 7;
-  google.protobuf.Timestamp snapshot_prepared_at = 8;
-  bool snapshot_preparing = 9;
-  string snapshot_error = 10;
-  uint64 snapshot_limit_bytes = 11;
   // runtime identifies the active sleeve launcher, for example
   // "rust-namespaces". Empty means no launcher is configured.
   string runtime = 12;

@@ -1,7 +1,6 @@
 //! Task-scoped admin grants. GrantService is explicit about who may mint them.
 use super::{
-    input, now_unix, parse_duration, respond, scope_methods, string, token_create_error,
-    token_json, Hub,
+    input, now_unix, parse_duration, respond, scope_methods, string, token_error, token_json, Hub,
 };
 use protectorate_inventory::SHARED;
 use protectorate_wire::{Code, Method, Result, RpcError, UnaryServer};
@@ -74,7 +73,7 @@ pub(super) fn register(
             let issued = hub
                 .identity
                 .create_grant(&node, &task, minted_by, ttl, now_unix(), &methods)
-                .map_err(token_create_error)?;
+                .map_err(token_error)?;
             hub.emit("grant.minted", &issued.token.id, json!({"node": node}));
             respond(
                 &request,

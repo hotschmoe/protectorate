@@ -120,9 +120,8 @@ pub(super) fn record_completion(
     {
         return;
     }
-    // A node file download is sensitive even though it does not mutate state.
-    // The Go hub records this stream explicitly because generic read-only
-    // calls are normally omitted from the audit log.
+    // A node file download is sensitive even though it does not mutate
+    // state, so it is recorded though reads normally are not.
     if !audited_method(method, auth) {
         return;
     }
@@ -158,8 +157,7 @@ pub(super) fn record_completion(
         subject,
         detail,
         // Admission failures are recorded by record_denied. Once a handler
-        // runs, even a permission_denied response is a failed operation; Go's
-        // audit log also distinguishes this from a rejected credential/scope.
+        // runs, even a permission_denied response is a failed operation.
         outcome: if error.is_some() { "error" } else { "ok" }.into(),
         code: error.map(|error| code(error.code)).unwrap_or_default(),
         ..Entry::default()
@@ -251,8 +249,8 @@ pub(super) fn record_denied(
             String::new()
         },
         // Public pairing admission can reject a LAN peer or throttle a busy
-        // source without authenticating a credential. Go records these as
-        // operation errors; only credential and scope failures are denials.
+        // source without authenticating a credential: an operation error.
+        // Only credential and scope failures are denials.
         outcome: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
             "error"
         } else {
@@ -304,8 +302,8 @@ fn pairing_detail(auth: &AuthContext) -> String {
 
 fn audited_method(method: &Method, auth: &AuthContext) -> bool {
     // The public poll request contains a bearer-like device code and may be
-    // repeated frequently while the user approves pairing. Go only records
-    // StartDeviceAuth on this public path.
+    // repeated frequently while the user approves pairing; only
+    // StartDeviceAuth is recorded on this public path.
     if method.procedure == "/protectorate.v1.DeviceService/PollDeviceAuth" {
         return false;
     }

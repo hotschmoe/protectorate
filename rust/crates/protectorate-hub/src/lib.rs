@@ -1,4 +1,4 @@
-//! Initial Rust hub service wiring for the existing Connect API.
+//! The hub: its Connect services over the state under PROTECTORATE_HOME.
 mod approvals;
 mod audit;
 mod chat;
@@ -91,8 +91,6 @@ impl EventBus {
     }
 }
 
-/// The first service slice: hub status and persistent backlog notes. The
-/// remaining services can register on the same descriptor-backed server.
 pub struct Hub {
     pub version: String,
     pub hostname: String,
@@ -822,7 +820,7 @@ impl Hub {
                     ttl,
                     now_unix(),
                     &methods,
-                ).map_err(token_create_error)?;
+                ).map_err(token_error)?;
                 respond(&request, json!({"token": token_json(&issued.token), "secret": issued.secret.expose()}))
             }
         })?;
@@ -1451,9 +1449,6 @@ fn token_error(error: identity::Error) -> RpcError {
         _ => Code::Internal,
     };
     RpcError::new(code, error.to_string())
-}
-fn token_create_error(error: identity::Error) -> RpcError {
-    token_error(error)
 }
 fn optional_string(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)

@@ -298,34 +298,12 @@ class GetSleeveRuntimeRequest extends $pb.GeneratedMessage {
 
 class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
   factory GetSleeveRuntimeResponse({
-    $core.String? bwrapPath,
-    $core.String? bwrapVersion,
     $core.bool? overlays,
-    $core.String? goBuildCache,
-    $core.String? goBuildLower,
-    $fixnum.Int64? snapshotBytes,
-    $fixnum.Int64? snapshotEntries,
-    $0.Timestamp? snapshotPreparedAt,
-    $core.bool? snapshotPreparing,
-    $core.String? snapshotError,
-    $fixnum.Int64? snapshotLimitBytes,
     $core.String? runtime,
     $core.String? helperPath,
   }) {
     final result = GetSleeveRuntimeResponse._();
-    if (bwrapPath != null) result.bwrapPath = bwrapPath;
-    if (bwrapVersion != null) result.bwrapVersion = bwrapVersion;
     if (overlays != null) result.overlays = overlays;
-    if (goBuildCache != null) result.goBuildCache = goBuildCache;
-    if (goBuildLower != null) result.goBuildLower = goBuildLower;
-    if (snapshotBytes != null) result.snapshotBytes = snapshotBytes;
-    if (snapshotEntries != null) result.snapshotEntries = snapshotEntries;
-    if (snapshotPreparedAt != null)
-      result.snapshotPreparedAt = snapshotPreparedAt;
-    if (snapshotPreparing != null) result.snapshotPreparing = snapshotPreparing;
-    if (snapshotError != null) result.snapshotError = snapshotError;
-    if (snapshotLimitBytes != null)
-      result.snapshotLimitBytes = snapshotLimitBytes;
     if (runtime != null) result.runtime = runtime;
     if (helperPath != null) result.helperPath = helperPath;
     return result;
@@ -345,24 +323,7 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: GetSleeveRuntimeResponse.$_createMessage)
-    ..aOS(1, _omitFieldNames ? '' : 'bwrapPath')
-    ..aOS(2, _omitFieldNames ? '' : 'bwrapVersion')
     ..aOB(3, _omitFieldNames ? '' : 'overlays')
-    ..aOS(4, _omitFieldNames ? '' : 'goBuildCache')
-    ..aOS(5, _omitFieldNames ? '' : 'goBuildLower')
-    ..a<$fixnum.Int64>(
-        6, _omitFieldNames ? '' : 'snapshotBytes', $pb.PbFieldType.OU6,
-        defaultOrMaker: $fixnum.Int64.ZERO)
-    ..a<$fixnum.Int64>(
-        7, _omitFieldNames ? '' : 'snapshotEntries', $pb.PbFieldType.OU6,
-        defaultOrMaker: $fixnum.Int64.ZERO)
-    ..aOM<$0.Timestamp>(8, _omitFieldNames ? '' : 'snapshotPreparedAt',
-        subBuilder: $0.Timestamp.$_createMessage)
-    ..aOB(9, _omitFieldNames ? '' : 'snapshotPreparing')
-    ..aOS(10, _omitFieldNames ? '' : 'snapshotError')
-    ..a<$fixnum.Int64>(
-        11, _omitFieldNames ? '' : 'snapshotLimitBytes', $pb.PbFieldType.OU6,
-        defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOS(12, _omitFieldNames ? '' : 'runtime')
     ..aOS(13, _omitFieldNames ? '' : 'helperPath')
     ..hasRequiredFields = false;
@@ -392,126 +353,34 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
           GetSleeveRuntimeResponse.$_createMessage);
   static GetSleeveRuntimeResponse? _defaultInstance;
 
-  /// Legacy fields retained while the Flutter client moves to runtime/helper_path.
-  @$pb.TagNumber(1)
-  $core.String get bwrapPath => $_getSZ(0);
-  @$pb.TagNumber(1)
-  set bwrapPath($core.String value) => $_setString(0, value);
-  @$pb.TagNumber(1)
-  $core.bool hasBwrapPath() => $_has(0);
-  @$pb.TagNumber(1)
-  void clearBwrapPath() => $_clearField(1);
-
-  @$pb.TagNumber(2)
-  $core.String get bwrapVersion => $_getSZ(1);
-  @$pb.TagNumber(2)
-  set bwrapVersion($core.String value) => $_setString(1, value);
-  @$pb.TagNumber(2)
-  $core.bool hasBwrapVersion() => $_has(1);
-  @$pb.TagNumber(2)
-  void clearBwrapVersion() => $_clearField(2);
-
+  /// overlays is true when the kernel offers overlayfs for sleeve caches.
   @$pb.TagNumber(3)
-  $core.bool get overlays => $_getBF(2);
+  $core.bool get overlays => $_getBF(0);
   @$pb.TagNumber(3)
-  set overlays($core.bool value) => $_setBool(2, value);
+  set overlays($core.bool value) => $_setBool(0, value);
   @$pb.TagNumber(3)
-  $core.bool hasOverlays() => $_has(2);
+  $core.bool hasOverlays() => $_has(0);
   @$pb.TagNumber(3)
   void clearOverlays() => $_clearField(3);
-
-  @$pb.TagNumber(4)
-  $core.String get goBuildCache => $_getSZ(3);
-  @$pb.TagNumber(4)
-  set goBuildCache($core.String value) => $_setString(3, value);
-  @$pb.TagNumber(4)
-  $core.bool hasGoBuildCache() => $_has(3);
-  @$pb.TagNumber(4)
-  void clearGoBuildCache() => $_clearField(4);
-
-  @$pb.TagNumber(5)
-  $core.String get goBuildLower => $_getSZ(4);
-  @$pb.TagNumber(5)
-  set goBuildLower($core.String value) => $_setString(4, value);
-  @$pb.TagNumber(5)
-  $core.bool hasGoBuildLower() => $_has(4);
-  @$pb.TagNumber(5)
-  void clearGoBuildLower() => $_clearField(5);
-
-  @$pb.TagNumber(6)
-  $fixnum.Int64 get snapshotBytes => $_getI64(5);
-  @$pb.TagNumber(6)
-  set snapshotBytes($fixnum.Int64 value) => $_setInt64(5, value);
-  @$pb.TagNumber(6)
-  $core.bool hasSnapshotBytes() => $_has(5);
-  @$pb.TagNumber(6)
-  void clearSnapshotBytes() => $_clearField(6);
-
-  @$pb.TagNumber(7)
-  $fixnum.Int64 get snapshotEntries => $_getI64(6);
-  @$pb.TagNumber(7)
-  set snapshotEntries($fixnum.Int64 value) => $_setInt64(6, value);
-  @$pb.TagNumber(7)
-  $core.bool hasSnapshotEntries() => $_has(6);
-  @$pb.TagNumber(7)
-  void clearSnapshotEntries() => $_clearField(7);
-
-  @$pb.TagNumber(8)
-  $0.Timestamp get snapshotPreparedAt => $_getN(7);
-  @$pb.TagNumber(8)
-  set snapshotPreparedAt($0.Timestamp value) => $_setField(8, value);
-  @$pb.TagNumber(8)
-  $core.bool hasSnapshotPreparedAt() => $_has(7);
-  @$pb.TagNumber(8)
-  void clearSnapshotPreparedAt() => $_clearField(8);
-  @$pb.TagNumber(8)
-  $0.Timestamp ensureSnapshotPreparedAt() => $_ensure(7);
-
-  @$pb.TagNumber(9)
-  $core.bool get snapshotPreparing => $_getBF(8);
-  @$pb.TagNumber(9)
-  set snapshotPreparing($core.bool value) => $_setBool(8, value);
-  @$pb.TagNumber(9)
-  $core.bool hasSnapshotPreparing() => $_has(8);
-  @$pb.TagNumber(9)
-  void clearSnapshotPreparing() => $_clearField(9);
-
-  @$pb.TagNumber(10)
-  $core.String get snapshotError => $_getSZ(9);
-  @$pb.TagNumber(10)
-  set snapshotError($core.String value) => $_setString(9, value);
-  @$pb.TagNumber(10)
-  $core.bool hasSnapshotError() => $_has(9);
-  @$pb.TagNumber(10)
-  void clearSnapshotError() => $_clearField(10);
-
-  @$pb.TagNumber(11)
-  $fixnum.Int64 get snapshotLimitBytes => $_getI64(10);
-  @$pb.TagNumber(11)
-  set snapshotLimitBytes($fixnum.Int64 value) => $_setInt64(10, value);
-  @$pb.TagNumber(11)
-  $core.bool hasSnapshotLimitBytes() => $_has(10);
-  @$pb.TagNumber(11)
-  void clearSnapshotLimitBytes() => $_clearField(11);
 
   /// runtime identifies the active sleeve launcher, for example
   /// "rust-namespaces". Empty means no launcher is configured.
   @$pb.TagNumber(12)
-  $core.String get runtime => $_getSZ(11);
+  $core.String get runtime => $_getSZ(1);
   @$pb.TagNumber(12)
-  set runtime($core.String value) => $_setString(11, value);
+  set runtime($core.String value) => $_setString(1, value);
   @$pb.TagNumber(12)
-  $core.bool hasRuntime() => $_has(11);
+  $core.bool hasRuntime() => $_has(1);
   @$pb.TagNumber(12)
   void clearRuntime() => $_clearField(12);
 
   /// helper_path is the Linux namespace helper executable used by the runtime.
   @$pb.TagNumber(13)
-  $core.String get helperPath => $_getSZ(12);
+  $core.String get helperPath => $_getSZ(2);
   @$pb.TagNumber(13)
-  set helperPath($core.String value) => $_setString(12, value);
+  set helperPath($core.String value) => $_setString(2, value);
   @$pb.TagNumber(13)
-  $core.bool hasHelperPath() => $_has(12);
+  $core.bool hasHelperPath() => $_has(2);
   @$pb.TagNumber(13)
   void clearHelperPath() => $_clearField(13);
 }
