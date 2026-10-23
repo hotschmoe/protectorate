@@ -1,7 +1,10 @@
 //! Session monitor: publishes tmux session changes on the hub event bus.
 use super::Hub;
 use chrono::{DateTime, Utc};
-use protectorate_session::{Error as SessionError, Session as TmuxSession, State as SessionState};
+use protectorate_session::{
+    classify, Activity, Error as SessionError, Session as TmuxSession, State as SessionState,
+};
+use protectorate_sleeve_registry::{Mode, State};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -13,6 +16,15 @@ const POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub const EVENT_CREATED: &str = "session.created";
 pub const EVENT_EXITED: &str = "session.exited";
 pub const EVENT_REMOVED: &str = "session.removed";
+
+type Verdict = Option<(Activity, &'static str)>;
+
+/// A screen verdict is announced once two scans in a row agree on it.
+#[derive(Default)]
+struct Seen {
+    shown: Option<Verdict>,
+    pending: Option<Verdict>,
+}
 
 #[derive(Default)]
 struct Known {
@@ -29,6 +41,7 @@ pub struct Monitor {
     dead_retention: Duration,
     known: Arc<Mutex<Known>>,
     scan_lock: Arc<Mutex<()>>,
+    activity: Arc<Mutex<BTreeMap<String, Seen>>>,
 }
 
 impl Monitor {
@@ -37,6 +50,55 @@ impl Monitor {
             dead_retention,
             known: Arc::new(Mutex::new(Known::default())),
             scan_lock: Arc::new(Mutex::new(())),
+            activity: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    /// What the screen of a terminal sleeve showed at the last announcement.
+    pub fn activity(&self, sleeve: &str) -> Verdict {
+        let seen = self
+            .activity
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        seen.get(sleeve).and_then(|seen| seen.shown).flatten()
+    }
+
+    fn scan_activity(&self, hub: &Hub) {
+        let rows = hub.sleeves.list();
+        let mut seen = self
+            .activity
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        seen.retain(|name, _| {
+            rows.iter().any(|row| {
+                row.name == *name && row.state == State::Running && row.mode == Mode::Terminal
+            })
+        });
+        for row in rows
+            .iter()
+            .filter(|row| row.state == State::Running && row.mode == Mode::Terminal)
+        {
+            let harness = super::sleeves::harness_name(row.harness);
+            let verdict = hub
+                .sessions
+                .screen(&row.session)
+                .ok()
+                .and_then(|pane| classify(harness, &pane));
+            let entry = seen.entry(row.name.clone()).or_default();
+            if entry.shown == Some(verdict) || entry.pending != Some(verdict) {
+                entry.pending = Some(verdict);
+                continue;
+            }
+            entry.shown = Some(verdict);
+            hub.emit(
+                "sleeve.activity",
+                &row.name,
+                json!({
+                    "harness": harness,
+                    "activity": verdict.map_or("unknown", |(activity, _)| activity.as_str()),
+                    "rule": verdict.map_or("", |(_, rule)| rule),
+                }),
+            );
         }
     }
 
@@ -95,6 +157,7 @@ impl Monitor {
         for (kind, subject, payload) in events {
             hub.emit(kind, &subject, payload);
         }
+        self.scan_activity(hub);
     }
 
     /// Scans immediately and then every second until the hub is dropped.

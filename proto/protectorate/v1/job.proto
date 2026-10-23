@@ -83,6 +83,10 @@ enum JobState {
   JOB_STATE_FAILED = 4;
   JOB_STATE_CANCELED = 5;
   JOB_STATE_TIMED_OUT = 6;
+  // JOB_STATE_KILLED: the command was ended by a signal the node did not send,
+  // which is how a resource limit or the kernel's OOM killer stops it. The
+  // error names the signal.
+  JOB_STATE_KILLED = 7;
 }
 
 // JobTarget says where a job runs. Nodes of tier "care" are never picked
@@ -354,6 +358,8 @@ enum JobEnd {
   JOB_END_CANCELED = 3;
   // JOB_END_ERROR: the job could not be set up or started.
   JOB_END_ERROR = 4;
+  // JOB_END_KILLED: see JOB_STATE_KILLED.
+  JOB_END_KILLED = 5;
 }
 
 message JobFinished {

@@ -90,13 +90,7 @@ impl Session {
         thread::spawn(move || {
             let result = child.wait();
             let _gate = waiter.event_gate.lock().unwrap();
-            let message = match result {
-                Ok(status) => format!("pi exited: {status}"),
-                Err(error) => format!("pi wait failed: {error}"),
-            };
-            let _ = waiter
-                .log
-                .append(Event::new(json!({"error":{"text":message}})));
+            let _ = waiter.log.append_exit("pi", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
@@ -152,6 +146,7 @@ impl Session {
             "contextWindow": state.context_window.to_string(),
             "contextTokens": state.context_tokens.to_string(),
             "lastSeq": self.log.last().to_string(),
+            "cache": self.log.cache(),
             "settings": {
                 "requested":{"model":state.requested_model,"effort":state.requested_effort},
                 "effective":{"model":format_model(&state.provider,&state.model),"effort":state.effort},
@@ -369,28 +364,6 @@ impl Session {
         compaction
     }
 
-    /// Preserve the returned chat sequence in the same serialized event.
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let time = chrono_time();
-        let result = json!({"status":status,"summary":summary,"time":time,
-            "chatSeq":seq.to_string(),"briefSeq":brief_seq.to_string()});
-        let stored = self
-            .log
-            .append(Event::new(json!({"report":result})))
-            .map_err(|e| e.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
-    }
-
     /// Pi accepts `steer` during a running turn. A write failure never
     /// records a user message as delivered.
     pub fn send(&self, text: &str, from: &str, request_id: &str) -> Result<u64, String> {
@@ -425,10 +398,12 @@ impl Session {
         if state.exited || !state.busy {
             return Ok(());
         }
+        self.log.note_interrupt();
         self.write(&json!({"type":"abort"}))
     }
 
     pub fn stop(&self) {
+        self.log.note_stop();
         self.kill.kill();
     }
 
@@ -658,9 +633,6 @@ fn format_model(provider: &str, id: &str) -> String {
     } else {
         format!("{provider}/{id}")
     }
-}
-fn chrono_time() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
 }
 
 fn drain_stderr(stderr: impl Read) {

@@ -190,6 +190,10 @@ pub struct Record {
     pub nested: bool,
     #[serde(default)]
     pub helper: bool,
+    /// Screen-derived activity, attached to a copy when a sleeve is read;
+    /// never stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<serde_json::Value>,
 }
 
 impl Record {
@@ -232,6 +236,7 @@ impl Record {
             killed: false,
             nested: false,
             helper: false,
+            terminal: None,
         };
         row.validate()?;
         Ok(row)

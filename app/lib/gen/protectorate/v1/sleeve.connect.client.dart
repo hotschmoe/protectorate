@@ -15,7 +15,9 @@ import "sleeve.connect.spec.dart" as specs;
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
 /// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
-/// "sleeve.restored" (subject = sleeve name).
+/// "sleeve.restored" (subject = sleeve name). A terminal sleeve whose harness
+/// screen is recognized also announces "sleeve.activity" with its working,
+/// blocked or idle state whenever that changes.
 extension type SleeveServiceClient (connect.Transport _transport) {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
@@ -114,6 +116,25 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.SleeveService.getSleeve,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// GetTerminalStatus reads the bottom of a running terminal sleeve's screen
+  /// now and returns what the harness is doing and which screen rules matched.
+  Future<protectoratev1sleeve.GetTerminalStatusResponse> getTerminalStatus(
+    protectoratev1sleeve.GetTerminalStatusRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.getTerminalStatus,
       input,
       signal: signal,
       headers: headers,

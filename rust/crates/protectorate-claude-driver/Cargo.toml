@@ -8,5 +8,4 @@ protectorate-chatlog = { path = "../protectorate-chatlog" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
 serde_json = "1"
 getrandom = "0.2"
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 

@@ -113,11 +113,7 @@ impl Session {
         });
         let waiter = Arc::clone(&session);
         thread::spawn(move || {
-            let message = match child.wait() {
-                Ok(status) => format!("grok exited: {status}"),
-                Err(error) => format!("grok wait failed: {error}"),
-            };
-            waiter.note_exit(message);
+            waiter.note_exit(&child.wait());
         });
         drive(session, stdout, stderr, cwd, resume, autonomous)
     }
@@ -157,11 +153,7 @@ impl Session {
         });
         let waiter = Arc::clone(&session);
         thread::spawn(move || {
-            let message = match child.wait() {
-                Ok(status) => format!("grok exited: {status}"),
-                Err(error) => format!("grok wait failed: {error}"),
-            };
-            waiter.note_exit(message);
+            waiter.note_exit(&child.wait());
         });
         drive(session, stdout, stderr, cwd.to_owned(), resume, autonomous)
     }
@@ -186,6 +178,7 @@ impl Session {
             "contextTokens": state.context_tokens.to_string(),
             "contextWindow": state.context_window.to_string(),
             "lastSeq": self.log.last().to_string(),
+            "cache": self.log.cache(),
             "settings": {
                 "requested": {"model": "", "effort": ""},
                 "effective": {"model": "", "effort": ""},
@@ -204,6 +197,7 @@ impl Session {
     }
 
     pub fn stop(&self) {
+        self.log.note_stop();
         self.stop.stop();
     }
 
@@ -276,6 +270,7 @@ impl Session {
                 std::mem::take(&mut state.approvals),
             )
         };
+        self.log.note_interrupt();
         for pending in pending.values() {
             let _ = self.write_json(&json!({
                 "jsonrpc": "2.0",
@@ -336,31 +331,6 @@ impl Session {
             return Err("precondition: compaction requires an idle chat".into());
         }
         Err("unimplemented: Grok ACP compaction is not verified".into())
-    }
-
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let result = json!({
-            "status": status,
-            "summary": summary,
-            "time": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            "chatSeq": seq.to_string(),
-            "briefSeq": brief_seq.to_string()
-        });
-        let stored = self
-            .log
-            .append(Event::new(json!({"report": result})))
-            .map_err(|error| error.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
     }
 
     fn handshake(&self, cwd: &str, resume: Option<&str>, autonomous: bool) -> Result<(), String> {
@@ -466,11 +436,9 @@ impl Session {
         stdin.flush().map_err(|error| error.to_string())
     }
 
-    fn note_exit(&self, message: String) {
+    fn note_exit<E: std::fmt::Display>(&self, result: &Result<std::process::ExitStatus, E>) {
         let _gate = self.event_gate.lock().unwrap();
-        let _ = self
-            .log
-            .append(Event::new(json!({"error":{"text":message}})));
+        let _ = self.log.append_exit("grok", result);
         let _ = self
             .log
             .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));

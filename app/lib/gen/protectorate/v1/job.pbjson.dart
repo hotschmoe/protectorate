@@ -49,6 +49,7 @@ const JobState$json = {
     {'1': 'JOB_STATE_FAILED', '2': 4},
     {'1': 'JOB_STATE_CANCELED', '2': 5},
     {'1': 'JOB_STATE_TIMED_OUT', '2': 6},
+    {'1': 'JOB_STATE_KILLED', '2': 7},
   ],
 };
 
@@ -57,7 +58,7 @@ final $typed_data.Uint8List jobStateDescriptor = $convert.base64Decode(
     'CghKb2JTdGF0ZRIZChVKT0JfU1RBVEVfVU5TUEVDSUZJRUQQABIXChNKT0JfU1RBVEVfUFJFUE'
     'FSSU5HEAESFQoRSk9CX1NUQVRFX1JVTk5JTkcQAhIXChNKT0JfU1RBVEVfU1VDQ0VFREVEEAMS'
     'FAoQSk9CX1NUQVRFX0ZBSUxFRBAEEhYKEkpPQl9TVEFURV9DQU5DRUxFRBAFEhcKE0pPQl9TVE'
-    'FURV9USU1FRF9PVVQQBg==');
+    'FURV9USU1FRF9PVVQQBhIUChBKT0JfU1RBVEVfS0lMTEVEEAc=');
 
 @$core.Deprecated('Use jobEndDescriptor instead')
 const JobEnd$json = {
@@ -68,6 +69,7 @@ const JobEnd$json = {
     {'1': 'JOB_END_TIMED_OUT', '2': 2},
     {'1': 'JOB_END_CANCELED', '2': 3},
     {'1': 'JOB_END_ERROR', '2': 4},
+    {'1': 'JOB_END_KILLED', '2': 5},
   ],
 };
 
@@ -75,7 +77,7 @@ const JobEnd$json = {
 final $typed_data.Uint8List jobEndDescriptor = $convert.base64Decode(
     'CgZKb2JFbmQSFwoTSk9CX0VORF9VTlNQRUNJRklFRBAAEhIKDkpPQl9FTkRfRVhJVEVEEAESFQ'
     'oRSk9CX0VORF9USU1FRF9PVVQQAhIUChBKT0JfRU5EX0NBTkNFTEVEEAMSEQoNSk9CX0VORF9F'
-    'UlJPUhAE');
+    'UlJPUhAEEhIKDkpPQl9FTkRfS0lMTEVEEAU=');
 
 @$core.Deprecated('Use jobIsolationDescriptor instead')
 const JobIsolation$json = {

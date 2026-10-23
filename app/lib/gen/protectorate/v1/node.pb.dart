@@ -1360,6 +1360,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
     $core.Iterable<AcceleratorMetrics>? npus,
     $2.JobIsolation? jobs,
     NodeUpdateState? update,
+    $core.String? instance,
+    $fixnum.Int64? seq,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -1380,6 +1382,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
     if (npus != null) result.npus.addAll(npus);
     if (jobs != null) result.jobs = jobs;
     if (update != null) result.update = update;
+    if (instance != null) result.instance = instance;
+    if (seq != null) result.seq = seq;
     return result;
   }
 
@@ -1426,6 +1430,9 @@ class NodeMetrics extends $pb.GeneratedMessage {
         subBuilder: $2.JobIsolation.$_createMessage)
     ..aOM<NodeUpdateState>(18, _omitFieldNames ? '' : 'update',
         subBuilder: NodeUpdateState.$_createMessage)
+    ..aOS(19, _omitFieldNames ? '' : 'instance')
+    ..a<$fixnum.Int64>(20, _omitFieldNames ? '' : 'seq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1598,6 +1605,28 @@ class NodeMetrics extends $pb.GeneratedMessage {
   void clearUpdate() => $_clearField(18);
   @$pb.TagNumber(18)
   NodeUpdateState ensureUpdate() => $_ensure(17);
+
+  /// instance names the agent process that sent this sample and seq counts its
+  /// samples from 1. The hub drops a sample whose seq is not above the last one
+  /// it accepted from the same instance, and accepts the first sample of a new
+  /// instance. Both are unset for the hub's own metrics.
+  @$pb.TagNumber(19)
+  $core.String get instance => $_getSZ(18);
+  @$pb.TagNumber(19)
+  set instance($core.String value) => $_setString(18, value);
+  @$pb.TagNumber(19)
+  $core.bool hasInstance() => $_has(18);
+  @$pb.TagNumber(19)
+  void clearInstance() => $_clearField(19);
+
+  @$pb.TagNumber(20)
+  $fixnum.Int64 get seq => $_getI64(19);
+  @$pb.TagNumber(20)
+  set seq($fixnum.Int64 value) => $_setInt64(19, value);
+  @$pb.TagNumber(20)
+  $core.bool hasSeq() => $_has(19);
+  @$pb.TagNumber(20)
+  void clearSeq() => $_clearField(20);
 }
 
 class NodeUpdateState extends $pb.GeneratedMessage {

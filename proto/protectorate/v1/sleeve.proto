@@ -16,7 +16,9 @@ import "protectorate/v1/token.proto";
 // WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 // Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
 // "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
-// "sleeve.restored" (subject = sleeve name).
+// "sleeve.restored" (subject = sleeve name). A terminal sleeve whose harness
+// screen is recognized also announces "sleeve.activity" with its working,
+// blocked or idle state whenever that changes.
 service SleeveService {
   // SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   // workspace is an existing directory (bound read-write at the same path) or
@@ -53,6 +55,12 @@ service SleeveService {
 
   // GetSleeve returns one sleeve with its latest resource usage.
   rpc GetSleeve(GetSleeveRequest) returns (GetSleeveResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetTerminalStatus reads the bottom of a running terminal sleeve's screen
+  // now and returns what the harness is doing and which screen rules matched.
+  rpc GetTerminalStatus(GetTerminalStatusRequest) returns (GetTerminalStatusResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -280,6 +288,24 @@ message Sleeve {
   bool killed = 28;
   // Allows sandboxed child sleeves within this sleeve's resource limits.
   bool nested = 30;
+  // terminal is the screen-derived activity of a running terminal sleeve
+  // whose harness has screen rules; unset otherwise.
+  TerminalStatus terminal = 31;
+}
+
+enum TerminalActivity {
+  TERMINAL_ACTIVITY_UNSPECIFIED = 0;
+  TERMINAL_ACTIVITY_WORKING = 1;
+  // BLOCKED: the harness shows a dialog that waits for the owner.
+  TERMINAL_ACTIVITY_BLOCKED = 2;
+  TERMINAL_ACTIVITY_IDLE = 3;
+}
+
+message TerminalStatus {
+  // activity is unspecified when no rule matches the screen.
+  TerminalActivity activity = 1;
+  // rule is the id of the rule that decided it.
+  string rule = 2;
 }
 
 message BrowseWorkspacesRequest {
@@ -386,6 +412,25 @@ message GetSleeveRequest {
 
 message GetSleeveResponse {
   Sleeve sleeve = 1;
+}
+
+message GetTerminalStatusRequest {
+  string name = 1;
+}
+
+message GetTerminalStatusResponse {
+  TerminalStatus status = 1;
+  // rules lists every rule of the harness in priority order; the first
+  // matched one decides the status.
+  repeated ScreenRule rules = 2;
+  // lines are the bottom non-empty screen lines the rules read, lowercased.
+  repeated string lines = 3;
+}
+
+message ScreenRule {
+  string id = 1;
+  TerminalActivity activity = 2;
+  bool matched = 3;
 }
 
 message KillSleeveRequest {

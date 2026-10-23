@@ -87,7 +87,11 @@ class ChatTranscript {
   ChatState reported = ChatState.CHAT_STATE_UNSPECIFIED;
   int contextTokens = 0;
   int contextWindow = 0;
-  DateTime? cacheExpires;
+  int cacheRead = 0;
+  int cachePrompt = 0;
+  bool cacheCold = false;
+  bool _cacheResumed = false;
+  bool _cacheFirstSeen = false;
   ModelSettings? settings;
 
   Iterable<ApprovalItem> get pendingApprovals =>
@@ -102,6 +106,9 @@ class ChatTranscript {
       ? (contextTokens / contextWindow).clamp(0.0, 1.0)
       : null;
 
+  double? get cacheRatio =>
+      cachePrompt > 0 ? cacheRead / cachePrompt : null;
+
   void seed(ChatStatus s) {
     if (lastSeq > 0) return;
     reported = s.state;
@@ -115,7 +122,15 @@ class ChatTranscript {
           );
     contextTokens = s.contextTokens.toInt();
     contextWindow = s.contextWindow.toInt();
-    cacheExpires = s.hasCacheExpiresAt() ? s.cacheExpiresAt.toDateTime() : null;
+    final c = s.cache;
+    cacheRead = c.total.cacheReadTokens.toInt();
+    cachePrompt =
+        cacheRead +
+        c.total.inputTokens.toInt() +
+        c.total.cacheWriteTokens.toInt();
+    _cacheResumed = c.resumed;
+    _cacheFirstSeen = c.hasFirstCall();
+    cacheCold = c.coldResume;
   }
 
   // The after_seq for the next Watch. Text deltas share their message's seq,
@@ -175,9 +190,15 @@ class ChatTranscript {
       case ChatEvent_Body.usage:
         contextTokens = e.usage.contextTokens.toInt();
         contextWindow = e.usage.contextWindow.toInt();
-        cacheExpires = e.usage.hasCacheExpiresAt()
-            ? e.usage.cacheExpiresAt.toDateTime()
-            : null;
+        final u = e.usage;
+        final read = u.cacheReadTokens.toInt();
+        final fresh = u.inputTokens.toInt() + u.cacheWriteTokens.toInt();
+        cacheRead += read;
+        cachePrompt += read + fresh;
+        if (!_cacheFirstSeen) {
+          _cacheFirstSeen = true;
+          cacheCold = _cacheResumed && read == 0 && fresh > 0;
+        }
       case ChatEvent_Body.settled:
         break;
       case ChatEvent_Body.compaction:

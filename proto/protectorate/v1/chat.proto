@@ -143,6 +143,32 @@ message ChatStatus {
   bool local_model = 10;
   string reasoning_effort = 11;
   ModelSettings settings = 12;
+  // cache is the prompt-cache telemetry over the chat log.
+  CacheTelemetry cache = 13;
+}
+
+// TokenCounts sums the model calls of a span. input_tokens excludes the
+// cached parts: a prompt is input + cache_read + cache_write tokens, and
+// read_ratio is cache_read over that prompt (0 with no prompt).
+message TokenCounts {
+  uint64 calls = 1;
+  uint64 input_tokens = 2;
+  uint64 output_tokens = 3;
+  uint64 cache_read_tokens = 4;
+  uint64 cache_write_tokens = 5;
+  double read_ratio = 6;
+}
+
+// CacheTelemetry tells whether the harness's native prompt cache is being
+// used. first_call is the first model call since the harness (re)started and
+// is absent before it. resumed is true when the run started on a log that
+// already held model calls; cold_resume then flags a first call that read
+// nothing from the cache although it was expected to.
+message CacheTelemetry {
+  TokenCounts total = 1;
+  TokenCounts first_call = 2;
+  bool resumed = 3;
+  bool cold_resume = 4;
 }
 
 message ChatEvent {
@@ -227,6 +253,18 @@ message UsageUpdate {
 
 message TurnSettled {
   string stop_reason = 1;
+  // usage sums the turn's model calls; absent when the harness reported none.
+  TokenCounts usage = 2;
+  TurnEnd end = 3;
+}
+
+enum TurnEnd {
+  TURN_END_UNSPECIFIED = 0;
+  TURN_END_COMPLETED = 1;
+  // CANCELED: an interrupt was requested during the turn.
+  TURN_END_CANCELED = 2;
+  // ERROR: the harness or its provider reported a failure during the turn.
+  TURN_END_ERROR = 3;
 }
 
 message Compaction {
@@ -238,6 +276,18 @@ message Compaction {
 
 message ChatError {
   string text = 1;
+  ChatErrorKind kind = 2;
+}
+
+enum ChatErrorKind {
+  // UNSPECIFIED: the harness or its provider reported the error.
+  CHAT_ERROR_KIND_UNSPECIFIED = 0;
+  // EXITED: the harness process ended without a signal, or because the hub
+  // stopped it.
+  CHAT_ERROR_KIND_EXITED = 1;
+  // KILLED: a signal nobody on the hub asked for ended the harness process,
+  // which is how a resource limit or the kernel's OOM killer stops it.
+  CHAT_ERROR_KIND_KILLED = 2;
 }
 
 message StateChange {
@@ -323,6 +373,8 @@ message SleeveResult {
   uint64 chat_seq = 4;
   // The latest non-mail user message; zero for the initial spawn brief.
   uint64 brief_seq = 5;
+  // source_seq is the sequence the sleeve gave the report; zero if unsequenced.
+  uint64 source_seq = 6;
 }
 
 message ReportRequest {
@@ -330,10 +382,19 @@ message ReportRequest {
   string sleeve = 1;
   ReportStatus status = 2;
   string summary = 3;
+  // source_seq orders the sleeve's reports: it must grow with each report the
+  // sleeve sends, and a report whose source_seq is not above the last
+  // sequenced one the hub recorded for that sleeve is dropped, so a late or
+  // repeated report cannot replace a newer one. Zero is unsequenced and always
+  // recorded, in arrival order.
+  uint64 source_seq = 4;
 }
 
 message ReportResponse {
+  // result is the recorded result: the new report, or for a dropped one the
+  // result the sleeve already has.
   SleeveResult result = 1;
+  bool dropped = 2;
 }
 
 enum WaitUntil {

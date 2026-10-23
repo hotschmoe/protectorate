@@ -1015,6 +1015,7 @@ class Sleeve extends $pb.GeneratedMessage {
     $1.SleeveResult? result,
     $core.bool? killed,
     $core.bool? nested,
+    TerminalStatus? terminal,
   }) {
     final result$ = Sleeve._();
     if (name != null) result$.name = name;
@@ -1044,6 +1045,7 @@ class Sleeve extends $pb.GeneratedMessage {
     if (result != null) result$.result = result;
     if (killed != null) result$.killed = killed;
     if (nested != null) result$.nested = nested;
+    if (terminal != null) result$.terminal = terminal;
     return result$;
   }
 
@@ -1100,6 +1102,8 @@ class Sleeve extends $pb.GeneratedMessage {
         subBuilder: $1.SleeveResult.$_createMessage)
     ..aOB(28, _omitFieldNames ? '' : 'killed')
     ..aOB(30, _omitFieldNames ? '' : 'nested')
+    ..aOM<TerminalStatus>(31, _omitFieldNames ? '' : 'terminal',
+        subBuilder: TerminalStatus.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1388,6 +1392,92 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasNested() => $_has(26);
   @$pb.TagNumber(30)
   void clearNested() => $_clearField(30);
+
+  /// terminal is the screen-derived activity of a running terminal sleeve
+  /// whose harness has screen rules; unset otherwise.
+  @$pb.TagNumber(31)
+  TerminalStatus get terminal => $_getN(27);
+  @$pb.TagNumber(31)
+  set terminal(TerminalStatus value) => $_setField(31, value);
+  @$pb.TagNumber(31)
+  $core.bool hasTerminal() => $_has(27);
+  @$pb.TagNumber(31)
+  void clearTerminal() => $_clearField(31);
+  @$pb.TagNumber(31)
+  TerminalStatus ensureTerminal() => $_ensure(27);
+}
+
+class TerminalStatus extends $pb.GeneratedMessage {
+  factory TerminalStatus({
+    TerminalActivity? activity,
+    $core.String? rule,
+  }) {
+    final result = TerminalStatus._();
+    if (activity != null) result.activity = activity;
+    if (rule != null) result.rule = rule;
+    return result;
+  }
+
+  TerminalStatus._();
+
+  factory TerminalStatus.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TerminalStatus()..mergeFromBuffer(data, registry);
+  factory TerminalStatus.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TerminalStatus()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'TerminalStatus',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: TerminalStatus.$_createMessage)
+    ..aE<TerminalActivity>(1, _omitFieldNames ? '' : 'activity',
+        enumValues: TerminalActivity.values)
+    ..aOS(2, _omitFieldNames ? '' : 'rule')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TerminalStatus clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TerminalStatus copyWith(void Function(TerminalStatus) updates) =>
+      super.copyWith((message) => updates(message as TerminalStatus))
+          as TerminalStatus;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use TerminalStatus() / TerminalStatus.new instead')
+  static TerminalStatus create() => TerminalStatus._();
+  static $pb.GeneratedMessage $_createMessage() => TerminalStatus._();
+  @$core.override
+  TerminalStatus createEmptyInstance() => TerminalStatus._();
+  @$core.pragma('dart2js:noInline')
+  static TerminalStatus getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<TerminalStatus>(
+          TerminalStatus.$_createMessage);
+  static TerminalStatus? _defaultInstance;
+
+  /// activity is unspecified when no rule matches the screen.
+  @$pb.TagNumber(1)
+  TerminalActivity get activity => $_getN(0);
+  @$pb.TagNumber(1)
+  set activity(TerminalActivity value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasActivity() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearActivity() => $_clearField(1);
+
+  /// rule is the id of the rule that decided it.
+  @$pb.TagNumber(2)
+  $core.String get rule => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set rule($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasRule() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearRule() => $_clearField(2);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {
@@ -2520,6 +2610,229 @@ class GetSleeveResponse extends $pb.GeneratedMessage {
   Sleeve ensureSleeve() => $_ensure(0);
 }
 
+class GetTerminalStatusRequest extends $pb.GeneratedMessage {
+  factory GetTerminalStatusRequest({
+    $core.String? name,
+  }) {
+    final result = GetTerminalStatusRequest._();
+    if (name != null) result.name = name;
+    return result;
+  }
+
+  GetTerminalStatusRequest._();
+
+  factory GetTerminalStatusRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetTerminalStatusRequest()..mergeFromBuffer(data, registry);
+  factory GetTerminalStatusRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetTerminalStatusRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetTerminalStatusRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetTerminalStatusRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'name')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetTerminalStatusRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetTerminalStatusRequest copyWith(
+          void Function(GetTerminalStatusRequest) updates) =>
+      super.copyWith((message) => updates(message as GetTerminalStatusRequest))
+          as GetTerminalStatusRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetTerminalStatusRequest() / GetTerminalStatusRequest.new instead')
+  static GetTerminalStatusRequest create() => GetTerminalStatusRequest._();
+  static $pb.GeneratedMessage $_createMessage() => GetTerminalStatusRequest._();
+  @$core.override
+  GetTerminalStatusRequest createEmptyInstance() =>
+      GetTerminalStatusRequest._();
+  @$core.pragma('dart2js:noInline')
+  static GetTerminalStatusRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetTerminalStatusRequest>(
+          GetTerminalStatusRequest.$_createMessage);
+  static GetTerminalStatusRequest? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get name => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set name($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasName() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearName() => $_clearField(1);
+}
+
+class GetTerminalStatusResponse extends $pb.GeneratedMessage {
+  factory GetTerminalStatusResponse({
+    TerminalStatus? status,
+    $core.Iterable<ScreenRule>? rules,
+    $core.Iterable<$core.String>? lines,
+  }) {
+    final result = GetTerminalStatusResponse._();
+    if (status != null) result.status = status;
+    if (rules != null) result.rules.addAll(rules);
+    if (lines != null) result.lines.addAll(lines);
+    return result;
+  }
+
+  GetTerminalStatusResponse._();
+
+  factory GetTerminalStatusResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetTerminalStatusResponse()..mergeFromBuffer(data, registry);
+  factory GetTerminalStatusResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      GetTerminalStatusResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'GetTerminalStatusResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: GetTerminalStatusResponse.$_createMessage)
+    ..aOM<TerminalStatus>(1, _omitFieldNames ? '' : 'status',
+        subBuilder: TerminalStatus.$_createMessage)
+    ..pPM<ScreenRule>(2, _omitFieldNames ? '' : 'rules',
+        subBuilder: ScreenRule.$_createMessage)
+    ..pPS(3, _omitFieldNames ? '' : 'lines')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetTerminalStatusResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  GetTerminalStatusResponse copyWith(
+          void Function(GetTerminalStatusResponse) updates) =>
+      super.copyWith((message) => updates(message as GetTerminalStatusResponse))
+          as GetTerminalStatusResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use GetTerminalStatusResponse() / GetTerminalStatusResponse.new instead')
+  static GetTerminalStatusResponse create() => GetTerminalStatusResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      GetTerminalStatusResponse._();
+  @$core.override
+  GetTerminalStatusResponse createEmptyInstance() =>
+      GetTerminalStatusResponse._();
+  @$core.pragma('dart2js:noInline')
+  static GetTerminalStatusResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<GetTerminalStatusResponse>(
+          GetTerminalStatusResponse.$_createMessage);
+  static GetTerminalStatusResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  TerminalStatus get status => $_getN(0);
+  @$pb.TagNumber(1)
+  set status(TerminalStatus value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasStatus() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearStatus() => $_clearField(1);
+  @$pb.TagNumber(1)
+  TerminalStatus ensureStatus() => $_ensure(0);
+
+  /// rules lists every rule of the harness in priority order; the first
+  /// matched one decides the status.
+  @$pb.TagNumber(2)
+  $pb.PbList<ScreenRule> get rules => $_getList(1);
+
+  /// lines are the bottom non-empty screen lines the rules read, lowercased.
+  @$pb.TagNumber(3)
+  $pb.PbList<$core.String> get lines => $_getList(2);
+}
+
+class ScreenRule extends $pb.GeneratedMessage {
+  factory ScreenRule({
+    $core.String? id,
+    TerminalActivity? activity,
+    $core.bool? matched,
+  }) {
+    final result = ScreenRule._();
+    if (id != null) result.id = id;
+    if (activity != null) result.activity = activity;
+    if (matched != null) result.matched = matched;
+    return result;
+  }
+
+  ScreenRule._();
+
+  factory ScreenRule.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ScreenRule()..mergeFromBuffer(data, registry);
+  factory ScreenRule.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ScreenRule()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ScreenRule',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ScreenRule.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'id')
+    ..aE<TerminalActivity>(2, _omitFieldNames ? '' : 'activity',
+        enumValues: TerminalActivity.values)
+    ..aOB(3, _omitFieldNames ? '' : 'matched')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ScreenRule clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ScreenRule copyWith(void Function(ScreenRule) updates) =>
+      super.copyWith((message) => updates(message as ScreenRule)) as ScreenRule;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use ScreenRule() / ScreenRule.new instead')
+  static ScreenRule create() => ScreenRule._();
+  static $pb.GeneratedMessage $_createMessage() => ScreenRule._();
+  @$core.override
+  ScreenRule createEmptyInstance() => ScreenRule._();
+  @$core.pragma('dart2js:noInline')
+  static ScreenRule getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ScreenRule>(ScreenRule.$_createMessage);
+  static ScreenRule? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get id => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set id($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearId() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  TerminalActivity get activity => $_getN(1);
+  @$pb.TagNumber(2)
+  set activity(TerminalActivity value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasActivity() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearActivity() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get matched => $_getBF(2);
+  @$pb.TagNumber(3)
+  set matched($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasMatched() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearMatched() => $_clearField(3);
+}
+
 class KillSleeveRequest extends $pb.GeneratedMessage {
   factory KillSleeveRequest({
     $core.String? name,
@@ -3370,7 +3683,9 @@ class SleeveDiskEntry extends $pb.GeneratedMessage {
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
 /// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
-/// "sleeve.restored" (subject = sleeve name).
+/// "sleeve.restored" (subject = sleeve name). A terminal sleeve whose harness
+/// screen is recognized also announces "sleeve.activity" with its working,
+/// blocked or idle state whenever that changes.
 class SleeveServiceApi {
   final $pb.RpcClient _client;
 
@@ -3420,6 +3735,13 @@ class SleeveServiceApi {
           $pb.ClientContext? ctx, GetSleeveRequest request) =>
       _client.invoke<GetSleeveResponse>(
           ctx, 'SleeveService', 'GetSleeve', request, GetSleeveResponse());
+
+  /// GetTerminalStatus reads the bottom of a running terminal sleeve's screen
+  /// now and returns what the harness is doing and which screen rules matched.
+  $async.Future<GetTerminalStatusResponse> getTerminalStatus(
+          $pb.ClientContext? ctx, GetTerminalStatusRequest request) =>
+      _client.invoke<GetTerminalStatusResponse>(ctx, 'SleeveService',
+          'GetTerminalStatus', request, GetTerminalStatusResponse());
 
   /// KillSleeve stops a sleeve's harness and every process in its sandbox and
   /// retains its exited record. The workspace and the sleeve's home directory

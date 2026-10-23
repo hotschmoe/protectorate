@@ -14,7 +14,9 @@ import "sleeve.pb.dart" as protectoratev1sleeve;
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
 /// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
-/// "sleeve.restored" (subject = sleeve name).
+/// "sleeve.restored" (subject = sleeve name). A terminal sleeve whose harness
+/// screen is recognized also announces "sleeve.activity" with its working,
+/// blocked or idle state whenever that changes.
 abstract final class SleeveService {
   /// Fully-qualified name of the SleeveService service.
   static const name = 'protectorate.v1.SleeveService';
@@ -75,6 +77,16 @@ abstract final class SleeveService {
     connect.StreamType.unary,
     protectoratev1sleeve.GetSleeveRequest.new,
     protectoratev1sleeve.GetSleeveResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
+  /// GetTerminalStatus reads the bottom of a running terminal sleeve's screen
+  /// now and returns what the harness is doing and which screen rules matched.
+  static const getTerminalStatus = connect.Spec(
+    '/$name/GetTerminalStatus',
+    connect.StreamType.unary,
+    protectoratev1sleeve.GetTerminalStatusRequest.new,
+    protectoratev1sleeve.GetTerminalStatusResponse.new,
     idempotency: connect.Idempotency.noSideEffects,
   );
 

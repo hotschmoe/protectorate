@@ -1,0 +1,41 @@
+grok
+                                                                                                                        
+  rust-yolo ~/github/protectorate                                                             20K / 256K │ [Dashboard]  
+                                                                                                                        
+                                                                                                                        
+     ❯ Use your shell tool to run: curl -s https://example.com -o /dev/null                                  4:12 AM    
+                                                                                                                        
+                                                                                                                        
+     I'll run that curl against example.com and discard the body.                                            4:12 AM    
+                                                                                                                        
+     ◆ Ran fetch example.com and discard the body                                                                       
+                                                                                                                        
+     The command finished with exit code 0. curl reached https://example.com and discarded the response      4:12 AM    
+     body.                                                                                                              
+                                                                                                                        
+     Worked for 6.3s                                                                                                    
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                       █
+                                                                                                                        
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮  
+  │ ❯                                                                                                                │  
+  ╰─────────────────────────────────────────────────────────────────────────────── Grok 4.7 (high) · always-approve ─╯  
+                                                                                                                        
+  Shift+Tab:mode  │  Ctrl+x:shortcuts                                                                                   
+                                                                                                                        

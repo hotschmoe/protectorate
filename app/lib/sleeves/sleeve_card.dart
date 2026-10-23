@@ -14,7 +14,14 @@ ChatState sleeveState(Sleeve s) {
   if (s.state == SleeveState.SLEEVE_STATE_EXITED) {
     return ChatState.CHAT_STATE_EXITED;
   }
-  return s.hasChat() ? s.chat.state : ChatState.CHAT_STATE_UNSPECIFIED;
+  if (s.hasChat()) return s.chat.state;
+  return switch (s.terminal.activity) {
+    TerminalActivity.TERMINAL_ACTIVITY_WORKING => ChatState.CHAT_STATE_WORKING,
+    TerminalActivity.TERMINAL_ACTIVITY_BLOCKED =>
+      ChatState.CHAT_STATE_AWAITING_APPROVAL,
+    TerminalActivity.TERMINAL_ACTIVITY_IDLE => ChatState.CHAT_STATE_IDLE,
+    _ => ChatState.CHAT_STATE_UNSPECIFIED,
+  };
 }
 
 class SleeveStateLamp extends StatelessWidget {
@@ -27,7 +34,11 @@ class SleeveStateLamp extends StatelessWidget {
   Widget build(BuildContext context) {
     final st = sleeveState(sleeve);
     if (st != ChatState.CHAT_STATE_UNSPECIFIED) {
-      return StateLamp(state: st, big: big);
+      final blocked =
+          !sleeve.hasChat() &&
+          sleeve.terminal.activity ==
+              TerminalActivity.TERMINAL_ACTIVITY_BLOCKED;
+      return StateLamp(state: st, label: blocked ? 'Blocked' : null, big: big);
     }
     if (sleeve.state == SleeveState.SLEEVE_STATE_RUNNING) {
       return StateLamp(

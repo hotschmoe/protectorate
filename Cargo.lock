@@ -930,7 +930,6 @@ dependencies = [
 name = "protectorate-claude-driver"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "getrandom 0.2.17",
  "protectorate-chatlog",
  "protectorate-sandbox",
@@ -976,7 +975,6 @@ dependencies = [
 name = "protectorate-codex-driver"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "protectorate-chatlog",
  "protectorate-sandbox",
  "serde_json",
@@ -1026,6 +1024,7 @@ dependencies = [
  "protectorate-quota",
  "protectorate-release",
  "protectorate-sandbox",
+ "protectorate-session",
  "protectorate-wire",
  "protectorate-xfer",
  "serde_json",
@@ -1037,7 +1036,6 @@ dependencies = [
 name = "protectorate-grok-driver"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "protectorate-chatlog",
  "protectorate-sandbox",
  "serde_json",
@@ -1286,7 +1284,6 @@ dependencies = [
 name = "protectorate-pi-driver"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "protectorate-chatlog",
  "protectorate-sandbox",
  "serde_json",

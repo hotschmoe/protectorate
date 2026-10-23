@@ -374,6 +374,12 @@ message NodeMetrics {
   JobIsolation jobs = 17;
   // update is the persisted trial outcome for the last binary replacement.
   NodeUpdateState update = 18;
+  // instance names the agent process that sent this sample and seq counts its
+  // samples from 1. The hub drops a sample whose seq is not above the last one
+  // it accepted from the same instance, and accepts the first sample of a new
+  // instance. Both are unset for the hub's own metrics.
+  string instance = 19;
+  uint64 seq = 20;
 }
 
 message NodeUpdateState {

@@ -572,6 +572,8 @@ const NodeMetrics$json = {
       '6': '.protectorate.v1.NodeUpdateState',
       '10': 'update'
     },
+    {'1': 'instance', '3': 19, '4': 1, '5': 9, '10': 'instance'},
+    {'1': 'seq', '3': 20, '4': 1, '5': 4, '10': 'seq'},
   ],
 };
 
@@ -591,7 +593,8 @@ final $typed_data.Uint8List nodeMetricsDescriptor = $convert.base64Decode(
     'EKB3NsZWV2ZXMYDyADKAsyFy5wcm90ZWN0b3JhdGUudjEuU2xlZXZlUgdzbGVldmVzEjcKBG5w'
     'dXMYECADKAsyIy5wcm90ZWN0b3JhdGUudjEuQWNjZWxlcmF0b3JNZXRyaWNzUgRucHVzEjEKBG'
     'pvYnMYESABKAsyHS5wcm90ZWN0b3JhdGUudjEuSm9iSXNvbGF0aW9uUgRqb2JzEjgKBnVwZGF0'
-    'ZRgSIAEoCzIgLnByb3RlY3RvcmF0ZS52MS5Ob2RlVXBkYXRlU3RhdGVSBnVwZGF0ZQ==');
+    'ZRgSIAEoCzIgLnByb3RlY3RvcmF0ZS52MS5Ob2RlVXBkYXRlU3RhdGVSBnVwZGF0ZRIaCghpbn'
+    'N0YW5jZRgTIAEoCVIIaW5zdGFuY2USEAoDc2VxGBQgASgEUgNzZXE=');
 
 @$core.Deprecated('Use nodeUpdateStateDescriptor instead')
 const NodeUpdateState$json = {
@@ -1539,9 +1542,12 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
   '.protectorate.v1.ModelSettings': $4.ModelSettings$json,
   '.protectorate.v1.ModelSelection': $4.ModelSelection$json,
+  '.protectorate.v1.CacheTelemetry': $4.CacheTelemetry$json,
+  '.protectorate.v1.TokenCounts': $4.TokenCounts$json,
   '.protectorate.v1.Handoff': $4.Handoff$json,
   '.protectorate.v1.ReadOnlyMount': $1.ReadOnlyMount$json,
   '.protectorate.v1.SleeveResult': $4.SleeveResult$json,
+  '.protectorate.v1.TerminalStatus': $1.TerminalStatus$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
   '.protectorate.v1.JobIsolation': $2.JobIsolation$json,
   '.protectorate.v1.NodeUpdateState': NodeUpdateState$json,
@@ -1712,9 +1718,12 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ChatStatus': $4.ChatStatus$json,
   '.protectorate.v1.ModelSettings': $4.ModelSettings$json,
   '.protectorate.v1.ModelSelection': $4.ModelSelection$json,
+  '.protectorate.v1.CacheTelemetry': $4.CacheTelemetry$json,
+  '.protectorate.v1.TokenCounts': $4.TokenCounts$json,
   '.protectorate.v1.Handoff': $4.Handoff$json,
   '.protectorate.v1.ReadOnlyMount': $1.ReadOnlyMount$json,
   '.protectorate.v1.SleeveResult': $4.SleeveResult$json,
+  '.protectorate.v1.TerminalStatus': $1.TerminalStatus$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
   '.protectorate.v1.JobIsolation': $2.JobIsolation$json,
   '.protectorate.v1.NodeUpdateState': NodeUpdateState$json,
