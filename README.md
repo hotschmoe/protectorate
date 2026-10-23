@@ -3,8 +3,9 @@
 # Protectorate
 
 One pane of glass over your coding-agent subscriptions, machines, sessions and
-work. A single Go binary is the hub, the node agent and the CLI. Flutter
-clients (desktop, Android, web) talk to the same API.
+work. The current Go release runs the hub, node agent and CLI. A Rust rewrite
+is in progress; it targets the same user features without requiring Go binary
+or state compatibility. Flutter clients (desktop, Android, web) remain in use.
 
 ## Start here
 
@@ -26,7 +27,7 @@ clients (desktop, Android, web) talk to the same API.
 - **Everything is drivable from the CLI** (`--json` everywhere), so MCP bridges
   and an orchestrator agent can drive it too.
 
-## What works
+## What works in the Go release
 
 | Area | Commands | Notes |
 |------|----------|-------|
@@ -49,13 +50,11 @@ clients (desktop, Android, web) talk to the same API.
 
 ## Install
 
-Hub, on Linux (x86_64 or aarch64), per user, no sudo; re-run to upgrade:
-
-```
-curl -fsSL https://raw.githubusercontent.com/hotschmoe/protectorate/v0.4.2/install-hub.sh | bash
-```
-
-It verifies the release against `SHA256SUMS`, lists missing prerequisites (bwrap, tmux, git, systemd user manager) instead of installing them, and enables a `protectorate-hub` user unit. Nodes join from the web app (NODES, ADD NODE). Details in [docs/install.md](docs/install.md); branch and release rules in [DEV.md](DEV.md).
+The [Linux installer guide](docs/install.md) covers verified Rust hub and node
+bundles, their current requirements, and the remaining node connectivity gap.
+The Rust installer does not require bwrap. The [migration status](docs/rust-migration.md)
+tracks feature parity; use the Go release for features still listed there as
+incomplete. Branch and release rules are in [DEV.md](DEV.md).
 
 ## Build
 
@@ -69,6 +68,7 @@ make build      # bin/protectorate
 make test       # tagged vet, fuzz seeds and real-binary e2e
 make cross      # linux/windows amd64+arm64, android/arm64 into bin/
 make app-check  # flutter analyze + test
+make rust-check # format, lint and test the Rust migration workspace
 ```
 
 ## Run

@@ -199,6 +199,10 @@ is calling, not that its owner meant this request, and a compromised phone or
 laptop on the tailnet would otherwise have full access. The tailnet identity is
 recorded in the audit log next to the token.
 
+Terminal attach audits use `terminal.attach` for interactive requests and
+`terminal.attach.readonly` when `?readonly=1` is requested, including denied
+attempts.
+
 ## Audit log
 
 `$PROTECTORATE_HOME/audit/audit-YYYY-MM.jsonl`, JSON lines opened `O_APPEND`

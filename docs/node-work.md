@@ -212,39 +212,19 @@ would decide for the person.
   low-privilege local account, `protectorate-runner`, that has no access to
   the user's profile, inside a **Windows Job Object** (CPU and memory caps,
   kill the whole tree on cancel: the Windows equivalent of a cgroup, so P8
-  holds). Creating the account is one elevated step at install
-  (`node install --runner`).
-- **Windows (built, not yet run on a real machine):** every job runs in a
-  Job Object with kill-on-close and the job's caps: `--cpu` becomes a hard
-  CPU rate (`JOBOBJECT_CPU_RATE_CONTROL_INFORMATION`, percent of one core
-  divided by the logical cores), `--mem` the job's committed-memory limit
-  (`JobMemoryLimit`; committed, not resident, memory). `node install
-  --runner`, run once from an elevated prompt as the user the agent runs as,
-  prints each step and then: makes a random 32-character password; creates
-  the local standard user `protectorate-runner` (Users only, password never
-  expires and cannot be changed) or resets its password; hides it from the
-  sign-in screen (`Winlogon\SpecialAccounts\UserList`); creates
-  `%ProgramData%\protectorate\runner` with a protected ACL (SYSTEM,
-  Administrators and the agent's user full control, the runner modify,
-  inherited); signs in as the runner once to check; seals the password with
-  DPAPI for the agent's user (`CryptProtectData`, user scope, with entropy)
-  into `$PROTECTORATE_HOME/runner.json`. DPAPI and not LSA secrets because
-  the agent runs unelevated and LSA private data needs an administrator to
-  read. `--dry-run` only prints the steps. The agent then uses that
-  directory as its job dir, and runs a sandboxed job with
-  `CreateProcessWithLogonW(protectorate-runner, LOGON_WITH_PROFILE,
-  CREATE_SUSPENDED|CREATE_NEW_CONSOLE, hidden window)`: the documented call
-  for a process without SeAssignPrimaryTokenPrivilege, which rules out
-  `LogonUser` + `CreateProcessAsUser` for an agent that is not a service.
-  The process gets the runner's own environment (`LogonUser` +
-  `CreateEnvironmentBlock`) plus the job's variables, never the agent's;
-  output comes back through an inheritable pipe; it is assigned to the job
-  object (nested inside the secondary logon service's) and only then
-  resumed. Until a node has a runner, jobs run as the agent's account in the
-  job object and the node reports `sandbox job-object` with "unisolated" in
-  its metrics. Tested here: the argv and command-line quoting, environment
-  block, CPU rate, password, ACL and the printed plan; the Windows calls
-  compile for amd64 and arm64 and wait for a real Windows node.
+  holds). Provision it once from the agent user's elevated interactive
+  session with `node install-runner --home DIR --job-root ABSOLUTE_DIR`.
+- **Windows Rust runner:** provisioning creates a random password and a new
+  standard local account, then protects a separate shared job root with an
+  ACL for SYSTEM, Administrators, the agent user and the runner. It seals the
+  password with user-scoped DPAPI in `runner-rust.json` under the agent home.
+  The node reports `sandbox: none` and rejects sandboxed jobs until this is
+  configured. For a shared job, it creates a suspended runner process with
+  `CreateProcessWithLogonW`, assigns it to a Job Object with CPU and memory
+  limits, then resumes it. The process receives the runner's own environment
+  plus the job variables. An isolated officewin trial verified the account,
+  working directory, token-file denial and descendant cancellation. The
+  native Windows Job Object tests verify CPU and memory settings.
 - **Not Docker on Windows.** Docker Desktop runs Linux containers in a WSL2
   VM: a large resident daemon, Docker Desktop licensing for larger
   companies, and it only gives us Linux, which a Linux node already provides.

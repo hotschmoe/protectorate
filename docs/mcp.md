@@ -93,9 +93,27 @@ it can use it; this reuses the existing token machinery instead of adding a
 second secret. Requiring the bearer was chosen over only refusing non-loopback
 binds because a loopback bind still lets any local process or user, and any
 web page that can reach localhost, drive the bridge. Because the bearer is sent
-in cleartext over plain HTTP, `--http` accepts only loopback and tailnet IPs
-(100.64.0.0/10, fd7a:115c:a1e0::/48), where WireGuard encrypts it; any other
-address, including an empty host, is refused.
+in cleartext over plain HTTP, `--http` accepts only loopback. An IP in a
+tailnet range alone does not prove the listener is on a WireGuard interface;
+any non-loopback address, including an empty host, is refused.
+
+For a remote MCP client, serve HTTPS with a certificate the client trusts:
+
+```
+protectorate mcp --https 0.0.0.0:7471 \
+  --tls-cert /path/to/mcp-cert.pem --tls-key /path/to/mcp-key.pem \
+  --token-file /path/to/scoped-bridge.token
+```
+
+The HTTPS endpoint still requires `Authorization: Bearer <token>` on every
+request. Use `https://HOST:7471` in the MCP client and configure it to trust
+the certificate or its issuing CA. Keep the key file private (`chmod 600` on
+Unix). On Windows, the key must be owned by the current user, SYSTEM, or
+Administrators, and its ACL may grant access only to those principals. The
+bridge rejects reparse paths and PEM files larger than 1 MiB. TLS handshakes
+and live connections are bounded. `--http` and `--https` are mutually
+exclusive. Windows Administrators and SYSTEM retain access to a private key;
+the bridge cannot exclude them from a user-owned file.
 
 HTTP bridges retain at most 128 sessions. Clients should close their session
 with `DELETE` when finished; a full bridge returns HTTP 503 for a new session
