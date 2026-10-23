@@ -57,6 +57,23 @@ final $typed_data.Uint8List sleeveStateDescriptor = $convert.base64Decode(
     'CgtTbGVldmVTdGF0ZRIcChhTTEVFVkVfU1RBVEVfVU5TUEVDSUZJRUQQABIYChRTTEVFVkVfU1'
     'RBVEVfUlVOTklORxABEhcKE1NMRUVWRV9TVEFURV9FWElURUQQAg==');
 
+@$core.Deprecated('Use terminalActivityDescriptor instead')
+const TerminalActivity$json = {
+  '1': 'TerminalActivity',
+  '2': [
+    {'1': 'TERMINAL_ACTIVITY_UNSPECIFIED', '2': 0},
+    {'1': 'TERMINAL_ACTIVITY_WORKING', '2': 1},
+    {'1': 'TERMINAL_ACTIVITY_BLOCKED', '2': 2},
+    {'1': 'TERMINAL_ACTIVITY_IDLE', '2': 3},
+  ],
+};
+
+/// Descriptor for `TerminalActivity`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List terminalActivityDescriptor = $convert.base64Decode(
+    'ChBUZXJtaW5hbEFjdGl2aXR5EiEKHVRFUk1JTkFMX0FDVElWSVRZX1VOU1BFQ0lGSUVEEAASHQ'
+    'oZVEVSTUlOQUxfQUNUSVZJVFlfV09SS0lORxABEh0KGVRFUk1JTkFMX0FDVElWSVRZX0JMT0NL'
+    'RUQQAhIaChZURVJNSU5BTF9BQ1RJVklUWV9JRExFEAM=');
+
 @$core.Deprecated('Use checkpointDescriptor instead')
 const Checkpoint$json = {
   '1': 'Checkpoint',
@@ -419,6 +436,14 @@ const Sleeve$json = {
     },
     {'1': 'killed', '3': 28, '4': 1, '5': 8, '10': 'killed'},
     {'1': 'nested', '3': 30, '4': 1, '5': 8, '10': 'nested'},
+    {
+      '1': 'terminal',
+      '3': 31,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TerminalStatus',
+      '10': 'terminal'
+    },
   ],
   '8': [
     {'1': '_exit_code'},
@@ -446,7 +471,29 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
     'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXASNQoGcmVzdWx0GBkgASgL'
     'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0EhYKBmtpbGxlZBgcIAEoCF'
-    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkQgwKCl9leGl0X2NvZGU=');
+    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkEjsKCHRlcm1pbmFsGB8gASgLMh8ucHJv'
+    'dGVjdG9yYXRlLnYxLlRlcm1pbmFsU3RhdHVzUgh0ZXJtaW5hbEIMCgpfZXhpdF9jb2Rl');
+
+@$core.Deprecated('Use terminalStatusDescriptor instead')
+const TerminalStatus$json = {
+  '1': 'TerminalStatus',
+  '2': [
+    {
+      '1': 'activity',
+      '3': 1,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.TerminalActivity',
+      '10': 'activity'
+    },
+    {'1': 'rule', '3': 2, '4': 1, '5': 9, '10': 'rule'},
+  ],
+};
+
+/// Descriptor for `TerminalStatus`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List terminalStatusDescriptor = $convert.base64Decode(
+    'Cg5UZXJtaW5hbFN0YXR1cxI9CghhY3Rpdml0eRgBIAEoDjIhLnByb3RlY3RvcmF0ZS52MS5UZX'
+    'JtaW5hbEFjdGl2aXR5UghhY3Rpdml0eRISCgRydWxlGAIgASgJUgRydWxl');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {
@@ -755,6 +802,72 @@ final $typed_data.Uint8List getSleeveResponseDescriptor = $convert.base64Decode(
     'ChFHZXRTbGVldmVSZXNwb25zZRIvCgZzbGVldmUYASABKAsyFy5wcm90ZWN0b3JhdGUudjEuU2'
     'xlZXZlUgZzbGVldmU=');
 
+@$core.Deprecated('Use getTerminalStatusRequestDescriptor instead')
+const GetTerminalStatusRequest$json = {
+  '1': 'GetTerminalStatusRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+  ],
+};
+
+/// Descriptor for `GetTerminalStatusRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List getTerminalStatusRequestDescriptor =
+    $convert.base64Decode(
+        'ChhHZXRUZXJtaW5hbFN0YXR1c1JlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZQ==');
+
+@$core.Deprecated('Use getTerminalStatusResponseDescriptor instead')
+const GetTerminalStatusResponse$json = {
+  '1': 'GetTerminalStatusResponse',
+  '2': [
+    {
+      '1': 'status',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TerminalStatus',
+      '10': 'status'
+    },
+    {
+      '1': 'rules',
+      '3': 2,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.ScreenRule',
+      '10': 'rules'
+    },
+    {'1': 'lines', '3': 3, '4': 3, '5': 9, '10': 'lines'},
+  ],
+};
+
+/// Descriptor for `GetTerminalStatusResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List getTerminalStatusResponseDescriptor = $convert.base64Decode(
+    'ChlHZXRUZXJtaW5hbFN0YXR1c1Jlc3BvbnNlEjcKBnN0YXR1cxgBIAEoCzIfLnByb3RlY3Rvcm'
+    'F0ZS52MS5UZXJtaW5hbFN0YXR1c1IGc3RhdHVzEjEKBXJ1bGVzGAIgAygLMhsucHJvdGVjdG9y'
+    'YXRlLnYxLlNjcmVlblJ1bGVSBXJ1bGVzEhQKBWxpbmVzGAMgAygJUgVsaW5lcw==');
+
+@$core.Deprecated('Use screenRuleDescriptor instead')
+const ScreenRule$json = {
+  '1': 'ScreenRule',
+  '2': [
+    {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
+    {
+      '1': 'activity',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.TerminalActivity',
+      '10': 'activity'
+    },
+    {'1': 'matched', '3': 3, '4': 1, '5': 8, '10': 'matched'},
+  ],
+};
+
+/// Descriptor for `ScreenRule`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List screenRuleDescriptor = $convert.base64Decode(
+    'CgpTY3JlZW5SdWxlEg4KAmlkGAEgASgJUgJpZBI9CghhY3Rpdml0eRgCIAEoDjIhLnByb3RlY3'
+    'RvcmF0ZS52MS5UZXJtaW5hbEFjdGl2aXR5UghhY3Rpdml0eRIYCgdtYXRjaGVkGAMgASgIUgdt'
+    'YXRjaGVk');
+
 @$core.Deprecated('Use killSleeveRequestDescriptor instead')
 const KillSleeveRequest$json = {
   '1': 'KillSleeveRequest',
@@ -1000,6 +1113,12 @@ const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
       '4': {'34': 1},
     },
     {
+      '1': 'GetTerminalStatus',
+      '2': '.protectorate.v1.GetTerminalStatusRequest',
+      '3': '.protectorate.v1.GetTerminalStatusResponse',
+      '4': {'34': 1},
+    },
+    {
       '1': 'KillSleeve',
       '2': '.protectorate.v1.KillSleeveRequest',
       '3': '.protectorate.v1.KillSleeveResponse',
@@ -1064,8 +1183,11 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveUsage': SleeveUsage$json,
   '.protectorate.v1.ChatStatus': $1.ChatStatus$json,
   '.protectorate.v1.ModelSettings': $1.ModelSettings$json,
+  '.protectorate.v1.CacheTelemetry': $1.CacheTelemetry$json,
+  '.protectorate.v1.TokenCounts': $1.TokenCounts$json,
   '.protectorate.v1.Handoff': $1.Handoff$json,
   '.protectorate.v1.SleeveResult': $1.SleeveResult$json,
+  '.protectorate.v1.TerminalStatus': TerminalStatus$json,
   '.protectorate.v1.ListSleevesRequest': ListSleevesRequest$json,
   '.protectorate.v1.ListSleevesResponse': ListSleevesResponse$json,
   '.protectorate.v1.ListWorkspacesRequest': ListWorkspacesRequest$json,
@@ -1076,6 +1198,9 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.WorkspaceDirectory': WorkspaceDirectory$json,
   '.protectorate.v1.GetSleeveRequest': GetSleeveRequest$json,
   '.protectorate.v1.GetSleeveResponse': GetSleeveResponse$json,
+  '.protectorate.v1.GetTerminalStatusRequest': GetTerminalStatusRequest$json,
+  '.protectorate.v1.GetTerminalStatusResponse': GetTerminalStatusResponse$json,
+  '.protectorate.v1.ScreenRule': ScreenRule$json,
   '.protectorate.v1.KillSleeveRequest': KillSleeveRequest$json,
   '.protectorate.v1.KillSleeveResponse': KillSleeveResponse$json,
   '.protectorate.v1.ResleeveSleeveRequest': ResleeveSleeveRequest$json,
@@ -1108,18 +1233,20 @@ final $typed_data.Uint8List sleeveServiceDescriptor = $convert.base64Decode(
     'dG9yYXRlLnYxLkJyb3dzZVdvcmtzcGFjZXNSZXF1ZXN0GikucHJvdGVjdG9yYXRlLnYxLkJyb3'
     'dzZVdvcmtzcGFjZXNSZXNwb25zZSIDkAIBElcKCUdldFNsZWV2ZRIhLnByb3RlY3RvcmF0ZS52'
     'MS5HZXRTbGVldmVSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkdldFNsZWV2ZVJlc3BvbnNlIg'
-    'OQAgESWwoKS2lsbFNsZWV2ZRIiLnByb3RlY3RvcmF0ZS52MS5LaWxsU2xlZXZlUmVxdWVzdBoj'
-    'LnByb3RlY3RvcmF0ZS52MS5LaWxsU2xlZXZlUmVzcG9uc2UiBIi1GAESYQoOUmVzbGVldmVTbG'
-    'VldmUSJi5wcm90ZWN0b3JhdGUudjEuUmVzbGVldmVTbGVldmVSZXF1ZXN0GicucHJvdGVjdG9y'
-    'YXRlLnYxLlJlc2xlZXZlU2xlZXZlUmVzcG9uc2USWwoKU3Bhd25FbnZveRIiLnByb3RlY3Rvcm'
-    'F0ZS52MS5TcGF3bkVudm95UmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5TcGF3bkVudm95UmVz'
-    'cG9uc2UiBKC1GAESZQoMUHJ1bmVTbGVldmVzEiQucHJvdGVjdG9yYXRlLnYxLlBydW5lU2xlZX'
-    'Zlc1JlcXVlc3QaJS5wcm90ZWN0b3JhdGUudjEuUHJ1bmVTbGVldmVzUmVzcG9uc2UiCIi1GAGg'
-    'tRgBEmcKEENyZWF0ZUNoZWNrcG9pbnQSKC5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlQ2hlY2twb2'
-    'ludFJlcXVlc3QaKS5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlQ2hlY2twb2ludFJlc3BvbnNlEmkK'
-    'D0xpc3RDaGVja3BvaW50cxInLnByb3RlY3RvcmF0ZS52MS5MaXN0Q2hlY2twb2ludHNSZXF1ZX'
-    'N0GigucHJvdGVjdG9yYXRlLnYxLkxpc3RDaGVja3BvaW50c1Jlc3BvbnNlIgOQAgESZgoORGlm'
-    'ZkNoZWNrcG9pbnQSJi5wcm90ZWN0b3JhdGUudjEuRGlmZkNoZWNrcG9pbnRSZXF1ZXN0GicucH'
-    'JvdGVjdG9yYXRlLnYxLkRpZmZDaGVja3BvaW50UmVzcG9uc2UiA5ACARJwChFSZXN0b3JlQ2hl'
-    'Y2twb2ludBIpLnByb3RlY3RvcmF0ZS52MS5SZXN0b3JlQ2hlY2twb2ludFJlcXVlc3QaKi5wcm'
-    '90ZWN0b3JhdGUudjEuUmVzdG9yZUNoZWNrcG9pbnRSZXNwb25zZSIEiLUYAQ==');
+    'OQAgESbwoRR2V0VGVybWluYWxTdGF0dXMSKS5wcm90ZWN0b3JhdGUudjEuR2V0VGVybWluYWxT'
+    'dGF0dXNSZXF1ZXN0GioucHJvdGVjdG9yYXRlLnYxLkdldFRlcm1pbmFsU3RhdHVzUmVzcG9uc2'
+    'UiA5ACARJbCgpLaWxsU2xlZXZlEiIucHJvdGVjdG9yYXRlLnYxLktpbGxTbGVldmVSZXF1ZXN0'
+    'GiMucHJvdGVjdG9yYXRlLnYxLktpbGxTbGVldmVSZXNwb25zZSIEiLUYARJhCg5SZXNsZWV2ZV'
+    'NsZWV2ZRImLnByb3RlY3RvcmF0ZS52MS5SZXNsZWV2ZVNsZWV2ZVJlcXVlc3QaJy5wcm90ZWN0'
+    'b3JhdGUudjEuUmVzbGVldmVTbGVldmVSZXNwb25zZRJbCgpTcGF3bkVudm95EiIucHJvdGVjdG'
+    '9yYXRlLnYxLlNwYXduRW52b3lSZXF1ZXN0GiMucHJvdGVjdG9yYXRlLnYxLlNwYXduRW52b3lS'
+    'ZXNwb25zZSIEoLUYARJlCgxQcnVuZVNsZWV2ZXMSJC5wcm90ZWN0b3JhdGUudjEuUHJ1bmVTbG'
+    'VldmVzUmVxdWVzdBolLnByb3RlY3RvcmF0ZS52MS5QcnVuZVNsZWV2ZXNSZXNwb25zZSIIiLUY'
+    'AaC1GAESZwoQQ3JlYXRlQ2hlY2twb2ludBIoLnByb3RlY3RvcmF0ZS52MS5DcmVhdGVDaGVja3'
+    'BvaW50UmVxdWVzdBopLnByb3RlY3RvcmF0ZS52MS5DcmVhdGVDaGVja3BvaW50UmVzcG9uc2US'
+    'aQoPTGlzdENoZWNrcG9pbnRzEicucHJvdGVjdG9yYXRlLnYxLkxpc3RDaGVja3BvaW50c1JlcX'
+    'Vlc3QaKC5wcm90ZWN0b3JhdGUudjEuTGlzdENoZWNrcG9pbnRzUmVzcG9uc2UiA5ACARJmCg5E'
+    'aWZmQ2hlY2twb2ludBImLnByb3RlY3RvcmF0ZS52MS5EaWZmQ2hlY2twb2ludFJlcXVlc3QaJy'
+    '5wcm90ZWN0b3JhdGUudjEuRGlmZkNoZWNrcG9pbnRSZXNwb25zZSIDkAIBEnAKEVJlc3RvcmVD'
+    'aGVja3BvaW50EikucHJvdGVjdG9yYXRlLnYxLlJlc3RvcmVDaGVja3BvaW50UmVxdWVzdBoqLn'
+    'Byb3RlY3RvcmF0ZS52MS5SZXN0b3JlQ2hlY2twb2ludFJlc3BvbnNlIgSItRgB');

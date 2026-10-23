@@ -1,11 +1,9 @@
 use protectorate_node::{Agent, MetricsCollector};
 use protectorate_node_metrics::{CpuMetrics, FilesystemMetrics, NodeMetrics};
 use serde_json::{json, Value};
-use std::{
-    io,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+#[cfg(unix)]
+use std::time::Duration;
+use std::{io, sync::Arc, time::SystemTime};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -752,6 +750,7 @@ async fn node_job_outlives_disconnected_run_stream() {
     server.abort();
 }
 
+#[cfg(unix)]
 async fn stream_error(addr: std::net::SocketAddr, method: &str, body: Value) -> (u16, String) {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let body = body.to_string();
@@ -768,6 +767,87 @@ async fn stream_error(addr: std::net::SocketAddr, method: &str, body: Value) -> 
         response.split_whitespace().nth(1).unwrap().parse().unwrap(),
         response,
     )
+}
+
+/// A job ends in exactly one of exited, killed, timed out or canceled, and a
+/// timeout or cancel leaves none of the command's background processes alive.
+#[cfg(unix)]
+#[tokio::test]
+async fn node_jobs_classify_how_they_end_and_stop_their_whole_process_tree() {
+    use protectorate_node::Jobs;
+    let tmp = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let jobs = Jobs::new(tmp.path().join("jobs"), 4)
+        .unwrap()
+        .with_plain_mode();
+    let router = Agent::new(Arc::new(Fixed))
+        .with_jobs(jobs)
+        .router()
+        .unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let finished = |events: &[Value]| events.last().unwrap()["finished"].clone();
+    let run = |id: &str, script: String, timeout: &str| {
+        let body = json!({"jobId":id, "command":["/bin/sh","-c",script], "mode":"JOB_MODE_PLAIN", "timeout":timeout});
+        tokio::spawn(stream_rpc(addr, "RunJob", body))
+    };
+    let alive = |pid: i32| {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .map(|stat| !stat.contains(") Z"))
+            .unwrap_or(false)
+    };
+    let background_pid = |file: std::path::PathBuf| async move {
+        for _ in 0..500 {
+            if let Some(pid) = std::fs::read_to_string(&file)
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok())
+            {
+                return pid;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("background process never started")
+    };
+    let limit = Duration::from_secs(60);
+
+    let ended = tokio::time::timeout(limit, run("exit3", "exit 3".into(), "30s"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(finished(&ended)["end"], "JOB_END_EXITED");
+    assert_eq!(finished(&ended)["exitCode"], 3);
+
+    let ended = tokio::time::timeout(limit, run("kill9", "kill -9 $$".into(), "30s"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(finished(&ended)["end"], "JOB_END_KILLED");
+    assert_eq!(finished(&ended)["error"], "killed by signal 9");
+
+    for (id, timeout, how) in [
+        ("times-out", "2s", "JOB_END_TIMED_OUT"),
+        ("canceled", "300s", "JOB_END_CANCELED"),
+    ] {
+        let pidfile = tmp.path().join(format!("{id}.pid"));
+        let script = format!("sleep 300 & echo $! > {}; wait", pidfile.display());
+        let job = run(id, script, timeout);
+        let pid = background_pid(pidfile).await;
+        assert!(alive(pid));
+        if id == "canceled" {
+            let (code, result) = rpc(addr, "CancelJob", "node-secret", json!({"jobId":id})).await;
+            assert_eq!(code, 200, "{result}");
+        }
+        let ended = tokio::time::timeout(limit, job).await.unwrap().unwrap();
+        assert_eq!(finished(&ended)["end"], how);
+        for _ in 0..250 {
+            if !alive(pid) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!alive(pid), "{id} left its background process running");
+    }
+    server.abort();
 }
 
 #[cfg(target_os = "linux")]

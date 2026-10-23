@@ -76,6 +76,64 @@ class ChatState extends $pb.ProtobufEnum {
   const ChatState._(super.value, super.name);
 }
 
+class TurnEnd extends $pb.ProtobufEnum {
+  static const TurnEnd TURN_END_UNSPECIFIED =
+      TurnEnd._(0, _omitEnumNames ? '' : 'TURN_END_UNSPECIFIED');
+  static const TurnEnd TURN_END_COMPLETED =
+      TurnEnd._(1, _omitEnumNames ? '' : 'TURN_END_COMPLETED');
+
+  /// CANCELED: an interrupt was requested during the turn.
+  static const TurnEnd TURN_END_CANCELED =
+      TurnEnd._(2, _omitEnumNames ? '' : 'TURN_END_CANCELED');
+
+  /// ERROR: the harness or its provider reported a failure during the turn.
+  static const TurnEnd TURN_END_ERROR =
+      TurnEnd._(3, _omitEnumNames ? '' : 'TURN_END_ERROR');
+
+  static const $core.List<TurnEnd> values = <TurnEnd>[
+    TURN_END_UNSPECIFIED,
+    TURN_END_COMPLETED,
+    TURN_END_CANCELED,
+    TURN_END_ERROR,
+  ];
+
+  static final $core.List<TurnEnd?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
+  static TurnEnd? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const TurnEnd._(super.value, super.name);
+}
+
+class ChatErrorKind extends $pb.ProtobufEnum {
+  /// UNSPECIFIED: the harness or its provider reported the error.
+  static const ChatErrorKind CHAT_ERROR_KIND_UNSPECIFIED =
+      ChatErrorKind._(0, _omitEnumNames ? '' : 'CHAT_ERROR_KIND_UNSPECIFIED');
+
+  /// EXITED: the harness process ended without a signal, or because the hub
+  /// stopped it.
+  static const ChatErrorKind CHAT_ERROR_KIND_EXITED =
+      ChatErrorKind._(1, _omitEnumNames ? '' : 'CHAT_ERROR_KIND_EXITED');
+
+  /// KILLED: a signal nobody on the hub asked for ended the harness process,
+  /// which is how a resource limit or the kernel's OOM killer stops it.
+  static const ChatErrorKind CHAT_ERROR_KIND_KILLED =
+      ChatErrorKind._(2, _omitEnumNames ? '' : 'CHAT_ERROR_KIND_KILLED');
+
+  static const $core.List<ChatErrorKind> values = <ChatErrorKind>[
+    CHAT_ERROR_KIND_UNSPECIFIED,
+    CHAT_ERROR_KIND_EXITED,
+    CHAT_ERROR_KIND_KILLED,
+  ];
+
+  static final $core.List<ChatErrorKind?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 2);
+  static ChatErrorKind? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const ChatErrorKind._(super.value, super.name);
+}
+
 class ReportStatus extends $pb.ProtobufEnum {
   static const ReportStatus REPORT_STATUS_UNSPECIFIED =
       ReportStatus._(0, _omitEnumNames ? '' : 'REPORT_STATUS_UNSPECIFIED');

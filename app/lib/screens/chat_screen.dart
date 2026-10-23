@@ -214,7 +214,8 @@ class _ChatViewState extends State<ChatView> {
                 state: _chat.state,
                 tokens: tr.contextTokens,
                 window: tr.contextWindow,
-                cacheExpires: tr.cacheExpires,
+                cacheRatio: tr.cacheRatio,
+                cacheCold: tr.cacheCold,
                 menu: PopupMenuButton<Object>(
                   key: const ValueKey('chat-menu'),
                   tooltip: 'Chat actions',
@@ -420,7 +421,8 @@ class _Header extends StatelessWidget {
     required this.state,
     required this.tokens,
     required this.window,
-    required this.cacheExpires,
+    required this.cacheRatio,
+    required this.cacheCold,
     required this.menu,
   });
 
@@ -429,7 +431,8 @@ class _Header extends StatelessWidget {
   final ChatState state;
   final int tokens;
   final int window;
-  final DateTime? cacheExpires;
+  final double? cacheRatio;
+  final bool cacheCold;
   final Widget menu;
 
   @override
@@ -490,9 +493,9 @@ class _Header extends StatelessWidget {
                         width: null,
                       ),
                     ),
-                    if (sleeve.harness == Harness.HARNESS_CLAUDE) ...[
+                    if (cacheRatio != null) ...[
                       const SizedBox(width: Tokens.gapL),
-                      CacheLamp(expires: cacheExpires),
+                      CacheLamp(ratio: cacheRatio!, cold: cacheCold),
                     ],
                   ],
                 ),

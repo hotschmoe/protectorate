@@ -48,6 +48,13 @@ for line in sys.stdin:
  if m.get('type')=='user':
   txt=m['message']['content']
   emit({'type':'system','subtype':'init','session_id':sid})
+  if txt=='fail':
+   emit({'type':'result','session_id':sid,'subtype':'error_during_execution','is_error':True,'result':'provider failed'})
+   continue
+  if txt=='hang': continue
+  if txt=='die':
+   open('die-ready','w').write(str(os.getpid()))
+   import time; time.sleep(60)
   if txt=='/compact':
    emit({'type':'system','subtype':'compact_boundary','compact_metadata':{'pre_tokens':120,'post_tokens':30,'trigger':'manual'}})
    emit({'type':'result','session_id':sid,'subtype':'success','is_error':False})
@@ -63,7 +70,7 @@ for line in sys.stdin:
    assert response['type']=='control_response' and response['response']['request_id']=='perm-1'
    assert response['response']['response']['behavior']==('allow' if txt=='approve' else 'deny')
    if txt=='deny': assert response['response']['response']['message']=='nope'
-  emit({'type':'assistant','message':{'id':'msg-'+txt,'model':'claude-test','content':[{'type':'text','text':'answer: '+txt},{'type':'tool_use','id':'tool-1','name':'Bash','input':{'command':'printf ok'}}], 'usage':{'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':4}}})
+  emit({'type':'assistant','message':{'id':'msg-'+txt,'model':'claude-test','content':[{'type':'text','text':'answer: '+txt},{'type':'tool_use','id':'tool-1','name':'Bash','input':{'command':'printf ok'}}], 'usage':{'input_tokens':2,'output_tokens':3,'cache_creation_input_tokens':9} if txt=='cold' else {'input_tokens':2,'output_tokens':3,'cache_read_input_tokens':4}}})
   emit({'type':'user','message':{'content':[{'type':'tool_result','tool_use_id':'tool-1','content':'ok','is_error':False}]}})
   emit({'type':'result','session_id':sid,'subtype':'success','is_error':False,'modelUsage':{'claude-test':{'contextWindow':200000}}})
  elif m.get('type')=='control_request' and m['request']['subtype']=='interrupt':
@@ -97,6 +104,7 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     )
     .unwrap();
     let executable = tools.join("claude");
+    let tools_dir = tools.clone();
     fake(&executable);
     let hub = Hub::open(&state, "owner-secret", "test")
         .unwrap()
@@ -248,7 +256,7 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
         addr,
         "SleeveService/SpawnSleeve",
         json!({
-            "name":"claude-one","harness":"HARNESS_CLAUDE","workspace":work,"brief":"restarted"
+            "name":"claude-one","harness":"HARNESS_CLAUDE","workspace":work,"brief":"cold"
         }),
     )
     .await;
@@ -264,6 +272,27 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     )
     .await;
     assert_eq!(status, 200, "{idle}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cold = loop {
+        let (_, got) = call(
+            addr,
+            "SleeveService/GetSleeve",
+            json!({"name":"claude-one"}),
+        )
+        .await;
+        if got["sleeve"]["chat"]["cache"].get("firstCall").is_some() {
+            break got;
+        }
+        assert!(Instant::now() < deadline, "no first call: {got}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let cache = &cold["sleeve"]["chat"]["cache"];
+    assert_eq!(cache["resumed"], true, "{cold}");
+    assert_eq!(cache["coldResume"], true, "{cold}");
+    assert_eq!(cache["firstCall"]["cacheWriteTokens"], "9", "{cold}");
+    assert!(cache["firstCall"].get("readRatio").is_none(), "{cold}");
+    assert_eq!(cache["total"]["calls"], "4", "{cold}");
+    assert_eq!(cache["total"]["cacheReadTokens"], "12", "{cold}");
     let (status, sent) = call(
         addr,
         "ChatService/Send",
@@ -310,10 +339,114 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     .await;
     assert_eq!(status, 200, "{idle}");
     let events = protectorate_chatlog::read_all(&path).unwrap();
+    let turn = events
+        .iter()
+        .rev()
+        .find_map(|event| event.payload["settled"].get("usage"))
+        .expect("settled turn carries usage");
+    assert_eq!(turn["cacheReadTokens"], "4", "{turn}");
+    assert!((turn["readRatio"].as_f64().unwrap() - 4.0 / 6.0).abs() < 1e-9);
+    let (_, warm) = call(
+        addr,
+        "SleeveService/GetSleeve",
+        json!({"name":"claude-one"}),
+    )
+    .await;
+    assert_eq!(
+        warm["sleeve"]["chat"]["cache"]["coldResume"], true,
+        "{warm}"
+    );
     assert!(events.iter().any(|event| {
         event.payload["approvalResolved"]["by"] == "autonomous"
             && event.payload["approvalResolved"]["allow"] == true
     }));
+    let settled_end = |events: &[protectorate_chatlog::Event]| {
+        events
+            .iter()
+            .rev()
+            .find_map(|e| e.payload["settled"]["end"].as_str().map(str::to_owned))
+            .unwrap()
+    };
+    assert_eq!(settled_end(&events), "TURN_END_COMPLETED");
+    for (text, end) in [("fail", "TURN_END_ERROR"), ("hang", "TURN_END_CANCELED")] {
+        let (status, sent) = call(
+            addr,
+            "ChatService/Send",
+            json!({"sleeve":"claude-one","text":text}),
+        )
+        .await;
+        assert_eq!(status, 200, "{sent}");
+        if text == "hang" {
+            let (status, interrupted) = call(
+                addr,
+                "ChatService/Interrupt",
+                json!({"sleeve":"claude-one"}),
+            )
+            .await;
+            assert_eq!(status, 200, "{interrupted}");
+        }
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let events = protectorate_chatlog::read_all(&path).unwrap();
+            let last = events
+                .iter()
+                .rev()
+                .find(|e| e.payload.get("settled").is_some());
+            if last.is_some_and(|e| e.seq > sent["seq"].as_str().unwrap().parse::<u64>().unwrap()) {
+                assert_eq!(settled_end(&events), end, "{text}");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{text} never settled: {events:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    let (status, sent) = call(
+        addr,
+        "ChatService/Send",
+        json!({"sleeve":"claude-one","text":"die"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{sent}");
+    // The namespace init cannot signal itself, so the host kills the harness
+    // the way a resource limit or the OOM killer would.
+    let ready = work.join("die-ready");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "harness never reached die");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let harness = tools_dir.join("claude");
+    for entry in fs::read_dir("/proc").unwrap().flatten() {
+        let cmdline = fs::read(entry.path().join("cmdline")).unwrap_or_default();
+        let comm = fs::read_to_string(entry.path().join("comm")).unwrap_or_default();
+        if comm.trim() == "claude"
+            && String::from_utf8_lossy(&cmdline).contains(harness.to_str().unwrap())
+        {
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(entry.file_name())
+                .status();
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let events = protectorate_chatlog::read_all(&path).unwrap();
+        if let Some(error) = events.iter().find_map(|e| {
+            let error = &e.payload["error"];
+            (error["kind"] == "CHAT_ERROR_KIND_KILLED").then(|| error.clone())
+        }) {
+            assert!(
+                error["text"].as_str().unwrap().contains("signal 9"),
+                "{error}"
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "no kill recorded: {events:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let (status, killed) = call(
         addr,
         "SleeveService/KillSleeve",

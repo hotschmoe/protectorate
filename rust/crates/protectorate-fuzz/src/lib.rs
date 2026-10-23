@@ -10,6 +10,7 @@ mod harness;
 mod quota;
 mod sandbox;
 mod stores;
+mod terminal;
 mod wire;
 
 pub use archives::{release_manifest, release_web_archive, xfer_archive};
@@ -19,6 +20,7 @@ pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
 pub use quota::quota_responses;
 pub use sandbox::sandbox_plan;
 pub use stores::{backlog_notes, chatlog, directory_state, identity_store, mailbox_log};
+pub use terminal::terminal_pane;
 pub use wire::wire_json;
 
 pub type Target = fn(&[u8]);
@@ -42,6 +44,7 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("release_manifest", release_manifest),
     ("release_web_archive", release_web_archive),
     ("sandbox_plan", sandbox_plan),
+    ("terminal_pane", terminal_pane),
     ("wire_json", wire_json),
     ("xfer_archive", xfer_archive),
 ];

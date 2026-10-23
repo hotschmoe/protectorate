@@ -133,6 +133,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "terminal_pane"
+path = "fuzz_targets/terminal_pane.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "wire_json"
 path = "fuzz_targets/wire_json.rs"
 test = false

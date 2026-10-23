@@ -340,6 +340,30 @@ replayed; the next Send opens the harness again and resumes the same native
 session (`--resume`, `thread/resume`, `session/load`, `--session`). An idle
 sleeve comes back IDLE.
 
+## How turns end, and what they cost
+
+Each model call's `usage` event carries input (uncached), output, cache-read
+and cache-write tokens. A `settled` event sums its turn's calls as `usage` and
+says how the turn `end`ed: completed, canceled (an interrupt was requested) or
+error (the harness or its provider reported a failure during the turn). An
+`error` event has a `kind`: unset when the harness or provider reported it,
+`EXITED` when the harness process ended, `KILLED` when a signal nobody on the
+hub asked for ended it, which is how a resource limit or the OOM killer stops a
+process (the sandbox helper reports it as status 137). Chat turns have no
+timeout; `chat wait --timeout` bounds a wait, not a turn.
+
+`chat status <sleeve>` and `sleeve show` also report the log's cache use: totals,
+the first model call since the harness started, and `cold_resume` when a
+resumed session's first call read nothing from the cache although it should
+have. The chat header shows the same as `CACHE n%` and `CACHE MISS n%`.
+
+`protectorate report` numbers each report with a sequence kept above the last
+one sent from that sleeve (a counter beside the token file, never below the
+clock). The hub drops a report at or below the last sequenced report in the
+log and returns the result it already holds, so a late or repeated report
+cannot replace a newer one. A report without a sequence is recorded in arrival
+order.
+
 ## Per harness
 
 | | Claude | Codex | Grok | pi |

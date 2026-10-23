@@ -383,12 +383,6 @@ trait ChatSession: Send + Sync {
     fn list_models(&self) -> std::result::Result<Value, String>;
     fn set_selection(&self, model: &str, effort: &str) -> std::result::Result<Value, String>;
     fn compact(&self) -> std::result::Result<Value, String>;
-    fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> std::result::Result<Value, String>;
 }
 macro_rules! impl_session {
     ($driver:ty, $respond:expr, $base_url:expr) => {
@@ -443,14 +437,6 @@ macro_rules! impl_session {
             }
             fn compact(&self) -> std::result::Result<Value, String> {
                 self.compact()
-            }
-            fn append_report(
-                &self,
-                status: &str,
-                summary: &str,
-                brief_seq: u64,
-            ) -> std::result::Result<Value, String> {
-                self.append_report(status, summary, brief_seq)
             }
         }
     };
@@ -848,10 +834,11 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         async move {
             let value = input(&request)?;
             let actor = request.auth.actor.clone();
-            let result = tokio::task::spawn_blocking(move || report(&hub, &actor, &value))
-                .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, json!({"result":result}))
+            let (result, dropped) =
+                tokio::task::spawn_blocking(move || report(&hub, &actor, &value))
+                    .await
+                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
+            respond(&request, json!({"result":result,"dropped":dropped}))
         }
     })?;
     let wait_hub = Arc::clone(&hub);
@@ -2253,7 +2240,8 @@ fn compact(hub: &Hub, name: &str) -> Result<Value> {
     hub.emit("sleeve.compacted", name, compaction.clone());
     Ok(compaction)
 }
-fn report(hub: &Hub, actor: &str, value: &Value) -> Result<Value> {
+/// Records a sleeve report; the flag is true for a report dropped as stale.
+fn report(hub: &Hub, actor: &str, value: &Value) -> Result<(Value, bool)> {
     let self_name = if actor == "token:orchestrator-envoy" {
         "envoy"
     } else {
@@ -2302,6 +2290,16 @@ fn report(hub: &Hub, actor: &str, value: &Value) -> Result<Value> {
         Err(LogError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(error) => return Err(log_error(error)),
     };
+    let source_seq = number(value, "sourceSeq")?;
+    let reported = |event: &Event| {
+        event.payload["report"]["sourceSeq"]
+            .as_str()?
+            .parse::<u64>()
+            .ok()
+    };
+    if source_seq > 0 && events.iter().filter_map(reported).max() >= Some(source_seq) {
+        return Ok((row.result.unwrap_or_else(|| json!({})), true));
+    }
     let brief_seq = events
         .into_iter()
         .rev()
@@ -2309,20 +2307,22 @@ fn report(hub: &Hub, actor: &str, value: &Value) -> Result<Value> {
             event.payload["user"]["text"].is_string() && event.payload["user"]["from"] != "hub"
         })
         .map_or(0, |event| event.seq);
-    let result = if row.state == State::Running && row.mode == Mode::Chat {
-        let session = live_session(hub, self_name)?;
-        session
-            .append_report(&status, &summary, brief_seq)
-            .map_err(driver_error)?
+    let live = row.state == State::Running && row.mode == Mode::Chat;
+    if live {
+        live_session(hub, self_name)?;
+    }
+    let log = if live {
+        runtime.log(self_name)?
     } else {
-        let log = protectorate_chatlog::Log::open(&path).map_err(log_error)?;
-        let result = json!({"status":status,"summary":summary,
-            "time":Utc::now().to_rfc3339_opts(SecondsFormat::Millis,true),
-            "chatSeq":(log.last()+1).to_string(),"briefSeq":brief_seq.to_string()});
-        log.append(Event::new(json!({"report":result})))
-            .map_err(log_error)?;
-        result
+        Arc::new(protectorate_chatlog::Log::open(&path).map_err(log_error)?)
     };
+    let time = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let result = log
+        .append_report(|seq| {
+            json!({"status":status,"summary":summary,"time":time,"chatSeq":seq.to_string(),
+                "briefSeq":brief_seq.to_string(),"sourceSeq":source_seq.to_string()})
+        })
+        .map_err(log_error)?;
     hub.sleeves
         .set_result(self_name, result.clone())
         .map_err(registry_error)?;
@@ -2341,7 +2341,7 @@ fn report(hub: &Hub, actor: &str, value: &Value) -> Result<Value> {
             "summary":summary,"time":result["time"],"chat_seq":result["chatSeq"],
             "brief_seq":result["briefSeq"]}),
     );
-    Ok(result)
+    Ok((result, false))
 }
 async fn wait(hub: &Hub, name: &str, value: &Value) -> Result<Value> {
     if name.is_empty() {

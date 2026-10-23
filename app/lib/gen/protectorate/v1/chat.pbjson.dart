@@ -56,6 +56,37 @@ final $typed_data.Uint8List chatStateDescriptor = $convert.base64Decode(
     'X0NPTVBBQ1RJTkcQAxITCg9DSEFUX1NUQVRFX0lETEUQBBIVChFDSEFUX1NUQVRFX0ZBSUxFRB'
     'AFEhUKEUNIQVRfU1RBVEVfRVhJVEVEEAY=');
 
+@$core.Deprecated('Use turnEndDescriptor instead')
+const TurnEnd$json = {
+  '1': 'TurnEnd',
+  '2': [
+    {'1': 'TURN_END_UNSPECIFIED', '2': 0},
+    {'1': 'TURN_END_COMPLETED', '2': 1},
+    {'1': 'TURN_END_CANCELED', '2': 2},
+    {'1': 'TURN_END_ERROR', '2': 3},
+  ],
+};
+
+/// Descriptor for `TurnEnd`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List turnEndDescriptor = $convert.base64Decode(
+    'CgdUdXJuRW5kEhgKFFRVUk5fRU5EX1VOU1BFQ0lGSUVEEAASFgoSVFVSTl9FTkRfQ09NUExFVE'
+    'VEEAESFQoRVFVSTl9FTkRfQ0FOQ0VMRUQQAhISCg5UVVJOX0VORF9FUlJPUhAD');
+
+@$core.Deprecated('Use chatErrorKindDescriptor instead')
+const ChatErrorKind$json = {
+  '1': 'ChatErrorKind',
+  '2': [
+    {'1': 'CHAT_ERROR_KIND_UNSPECIFIED', '2': 0},
+    {'1': 'CHAT_ERROR_KIND_EXITED', '2': 1},
+    {'1': 'CHAT_ERROR_KIND_KILLED', '2': 2},
+  ],
+};
+
+/// Descriptor for `ChatErrorKind`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List chatErrorKindDescriptor = $convert.base64Decode(
+    'Cg1DaGF0RXJyb3JLaW5kEh8KG0NIQVRfRVJST1JfS0lORF9VTlNQRUNJRklFRBAAEhoKFkNIQV'
+    'RfRVJST1JfS0lORF9FWElURUQQARIaChZDSEFUX0VSUk9SX0tJTkRfS0lMTEVEEAI=');
+
 @$core.Deprecated('Use reportStatusDescriptor instead')
 const ReportStatus$json = {
   '1': 'ReportStatus',
@@ -287,6 +318,14 @@ const ChatStatus$json = {
       '6': '.protectorate.v1.ModelSettings',
       '10': 'settings'
     },
+    {
+      '1': 'cache',
+      '3': 13,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.CacheTelemetry',
+      '10': 'cache'
+    },
   ],
 };
 
@@ -301,7 +340,67 @@ final $typed_data.Uint8List chatStatusDescriptor = $convert.base64Decode(
     'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSDmxhc3RBY3Rpdml0eUF0EhoKCHByb3ZpZGVyGA'
     'kgASgJUghwcm92aWRlchIfCgtsb2NhbF9tb2RlbBgKIAEoCFIKbG9jYWxNb2RlbBIpChByZWFz'
     'b25pbmdfZWZmb3J0GAsgASgJUg9yZWFzb25pbmdFZmZvcnQSOgoIc2V0dGluZ3MYDCABKAsyHi'
-    '5wcm90ZWN0b3JhdGUudjEuTW9kZWxTZXR0aW5nc1IIc2V0dGluZ3M=');
+    '5wcm90ZWN0b3JhdGUudjEuTW9kZWxTZXR0aW5nc1IIc2V0dGluZ3MSNQoFY2FjaGUYDSABKAsy'
+    'Hy5wcm90ZWN0b3JhdGUudjEuQ2FjaGVUZWxlbWV0cnlSBWNhY2hl');
+
+@$core.Deprecated('Use tokenCountsDescriptor instead')
+const TokenCounts$json = {
+  '1': 'TokenCounts',
+  '2': [
+    {'1': 'calls', '3': 1, '4': 1, '5': 4, '10': 'calls'},
+    {'1': 'input_tokens', '3': 2, '4': 1, '5': 4, '10': 'inputTokens'},
+    {'1': 'output_tokens', '3': 3, '4': 1, '5': 4, '10': 'outputTokens'},
+    {'1': 'cache_read_tokens', '3': 4, '4': 1, '5': 4, '10': 'cacheReadTokens'},
+    {
+      '1': 'cache_write_tokens',
+      '3': 5,
+      '4': 1,
+      '5': 4,
+      '10': 'cacheWriteTokens'
+    },
+    {'1': 'read_ratio', '3': 6, '4': 1, '5': 1, '10': 'readRatio'},
+  ],
+};
+
+/// Descriptor for `TokenCounts`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List tokenCountsDescriptor = $convert.base64Decode(
+    'CgtUb2tlbkNvdW50cxIUCgVjYWxscxgBIAEoBFIFY2FsbHMSIQoMaW5wdXRfdG9rZW5zGAIgAS'
+    'gEUgtpbnB1dFRva2VucxIjCg1vdXRwdXRfdG9rZW5zGAMgASgEUgxvdXRwdXRUb2tlbnMSKgoR'
+    'Y2FjaGVfcmVhZF90b2tlbnMYBCABKARSD2NhY2hlUmVhZFRva2VucxIsChJjYWNoZV93cml0ZV'
+    '90b2tlbnMYBSABKARSEGNhY2hlV3JpdGVUb2tlbnMSHQoKcmVhZF9yYXRpbxgGIAEoAVIJcmVh'
+    'ZFJhdGlv');
+
+@$core.Deprecated('Use cacheTelemetryDescriptor instead')
+const CacheTelemetry$json = {
+  '1': 'CacheTelemetry',
+  '2': [
+    {
+      '1': 'total',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenCounts',
+      '10': 'total'
+    },
+    {
+      '1': 'first_call',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenCounts',
+      '10': 'firstCall'
+    },
+    {'1': 'resumed', '3': 3, '4': 1, '5': 8, '10': 'resumed'},
+    {'1': 'cold_resume', '3': 4, '4': 1, '5': 8, '10': 'coldResume'},
+  ],
+};
+
+/// Descriptor for `CacheTelemetry`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List cacheTelemetryDescriptor = $convert.base64Decode(
+    'Cg5DYWNoZVRlbGVtZXRyeRIyCgV0b3RhbBgBIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tlbk'
+    'NvdW50c1IFdG90YWwSOwoKZmlyc3RfY2FsbBgCIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tl'
+    'bkNvdW50c1IJZmlyc3RDYWxsEhgKB3Jlc3VtZWQYAyABKAhSB3Jlc3VtZWQSHwoLY29sZF9yZX'
+    'N1bWUYBCABKAhSCmNvbGRSZXN1bWU=');
 
 @$core.Deprecated('Use chatEventDescriptor instead')
 const ChatEvent$json = {
@@ -599,12 +698,30 @@ const TurnSettled$json = {
   '1': 'TurnSettled',
   '2': [
     {'1': 'stop_reason', '3': 1, '4': 1, '5': 9, '10': 'stopReason'},
+    {
+      '1': 'usage',
+      '3': 2,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.TokenCounts',
+      '10': 'usage'
+    },
+    {
+      '1': 'end',
+      '3': 3,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.TurnEnd',
+      '10': 'end'
+    },
   ],
 };
 
 /// Descriptor for `TurnSettled`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List turnSettledDescriptor = $convert.base64Decode(
-    'CgtUdXJuU2V0dGxlZBIfCgtzdG9wX3JlYXNvbhgBIAEoCVIKc3RvcFJlYXNvbg==');
+    'CgtUdXJuU2V0dGxlZBIfCgtzdG9wX3JlYXNvbhgBIAEoCVIKc3RvcFJlYXNvbhIyCgV1c2FnZR'
+    'gCIAEoCzIcLnByb3RlY3RvcmF0ZS52MS5Ub2tlbkNvdW50c1IFdXNhZ2USKgoDZW5kGAMgASgO'
+    'MhgucHJvdGVjdG9yYXRlLnYxLlR1cm5FbmRSA2VuZA==');
 
 @$core.Deprecated('Use compactionDescriptor instead')
 const Compaction$json = {
@@ -626,12 +743,21 @@ const ChatError$json = {
   '1': 'ChatError',
   '2': [
     {'1': 'text', '3': 1, '4': 1, '5': 9, '10': 'text'},
+    {
+      '1': 'kind',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.protectorate.v1.ChatErrorKind',
+      '10': 'kind'
+    },
   ],
 };
 
 /// Descriptor for `ChatError`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List chatErrorDescriptor =
-    $convert.base64Decode('CglDaGF0RXJyb3ISEgoEdGV4dBgBIAEoCVIEdGV4dA==');
+final $typed_data.Uint8List chatErrorDescriptor = $convert.base64Decode(
+    'CglDaGF0RXJyb3ISEgoEdGV4dBgBIAEoCVIEdGV4dBIyCgRraW5kGAIgASgOMh4ucHJvdGVjdG'
+    '9yYXRlLnYxLkNoYXRFcnJvcktpbmRSBGtpbmQ=');
 
 @$core.Deprecated('Use stateChangeDescriptor instead')
 const StateChange$json = {
@@ -844,6 +970,7 @@ const SleeveResult$json = {
     },
     {'1': 'chat_seq', '3': 4, '4': 1, '5': 4, '10': 'chatSeq'},
     {'1': 'brief_seq', '3': 5, '4': 1, '5': 4, '10': 'briefSeq'},
+    {'1': 'source_seq', '3': 6, '4': 1, '5': 4, '10': 'sourceSeq'},
   ],
 };
 
@@ -852,7 +979,8 @@ final $typed_data.Uint8List sleeveResultDescriptor = $convert.base64Decode(
     'CgxTbGVldmVSZXN1bHQSNQoGc3RhdHVzGAEgASgOMh0ucHJvdGVjdG9yYXRlLnYxLlJlcG9ydF'
     'N0YXR1c1IGc3RhdHVzEhgKB3N1bW1hcnkYAiABKAlSB3N1bW1hcnkSLgoEdGltZRgDIAEoCzIa'
     'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSBHRpbWUSGQoIY2hhdF9zZXEYBCABKARSB2NoYX'
-    'RTZXESGwoJYnJpZWZfc2VxGAUgASgEUghicmllZlNlcQ==');
+    'RTZXESGwoJYnJpZWZfc2VxGAUgASgEUghicmllZlNlcRIdCgpzb3VyY2Vfc2VxGAYgASgEUglz'
+    'b3VyY2VTZXE=');
 
 @$core.Deprecated('Use reportRequestDescriptor instead')
 const ReportRequest$json = {
@@ -868,6 +996,7 @@ const ReportRequest$json = {
       '10': 'status'
     },
     {'1': 'summary', '3': 3, '4': 1, '5': 9, '10': 'summary'},
+    {'1': 'source_seq', '3': 4, '4': 1, '5': 4, '10': 'sourceSeq'},
   ],
 };
 
@@ -875,7 +1004,7 @@ const ReportRequest$json = {
 final $typed_data.Uint8List reportRequestDescriptor = $convert.base64Decode(
     'Cg1SZXBvcnRSZXF1ZXN0EhYKBnNsZWV2ZRgBIAEoCVIGc2xlZXZlEjUKBnN0YXR1cxgCIAEoDj'
     'IdLnByb3RlY3RvcmF0ZS52MS5SZXBvcnRTdGF0dXNSBnN0YXR1cxIYCgdzdW1tYXJ5GAMgASgJ'
-    'UgdzdW1tYXJ5');
+    'UgdzdW1tYXJ5Eh0KCnNvdXJjZV9zZXEYBCABKARSCXNvdXJjZVNlcQ==');
 
 @$core.Deprecated('Use reportResponseDescriptor instead')
 const ReportResponse$json = {
@@ -889,13 +1018,14 @@ const ReportResponse$json = {
       '6': '.protectorate.v1.SleeveResult',
       '10': 'result'
     },
+    {'1': 'dropped', '3': 2, '4': 1, '5': 8, '10': 'dropped'},
   ],
 };
 
 /// Descriptor for `ReportResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List reportResponseDescriptor = $convert.base64Decode(
     'Cg5SZXBvcnRSZXNwb25zZRI1CgZyZXN1bHQYASABKAsyHS5wcm90ZWN0b3JhdGUudjEuU2xlZX'
-    'ZlUmVzdWx0UgZyZXN1bHQ=');
+    'ZlUmVzdWx0UgZyZXN1bHQSGAoHZHJvcHBlZBgCIAEoCFIHZHJvcHBlZA==');
 
 @$core.Deprecated('Use waitRequestDescriptor instead')
 const WaitRequest$json = {
@@ -1017,6 +1147,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.ApprovalResolved': ApprovalResolved$json,
   '.protectorate.v1.UsageUpdate': UsageUpdate$json,
   '.protectorate.v1.TurnSettled': TurnSettled$json,
+  '.protectorate.v1.TokenCounts': TokenCounts$json,
   '.protectorate.v1.Compaction': Compaction$json,
   '.protectorate.v1.ChatError': ChatError$json,
   '.protectorate.v1.StateChange': StateChange$json,
@@ -1038,6 +1169,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SetSelectionRequest': SetSelectionRequest$json,
   '.protectorate.v1.SetSelectionResponse': SetSelectionResponse$json,
   '.protectorate.v1.ChatStatus': ChatStatus$json,
+  '.protectorate.v1.CacheTelemetry': CacheTelemetry$json,
   '.protectorate.v1.ReportRequest': ReportRequest$json,
   '.protectorate.v1.ReportResponse': ReportResponse$json,
   '.protectorate.v1.WaitRequest': WaitRequest$json,

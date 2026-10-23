@@ -20,6 +20,7 @@ protectorate-pi-driver = { path = "../protectorate-pi-driver" }
 protectorate-quota = { path = "../protectorate-quota", default-features = false }
 protectorate-release = { path = "../protectorate-release" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
+protectorate-session = { path = "../protectorate-session" }
 protectorate-wire = { path = "../protectorate-wire" }
 protectorate-xfer = { path = "../protectorate-xfer" }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

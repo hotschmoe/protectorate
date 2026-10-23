@@ -85,9 +85,7 @@ impl Session {
         thread::spawn(move || {
             let result = child.wait();
             let _gate = waiter.event_gate.lock().unwrap();
-            let _ = waiter.log.append(Event::new(
-                json!({"error":{"text":format!("claude exited: {result:?}")}}),
-            ));
+            let _ = waiter.log.append_exit("claude", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
@@ -110,7 +108,7 @@ impl Session {
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.session_id,"model":s.model,"provider":"anthropic",
             "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),
-            "lastSeq":self.log.last().to_string()})
+            "lastSeq":self.log.last().to_string(),"cache":self.log.cache()})
     }
     pub fn is_exited(&self) -> bool {
         self.state.lock().unwrap().exited
@@ -120,6 +118,7 @@ impl Session {
         !s.exited && !s.busy && !s.compacting && s.approvals.is_empty()
     }
     pub fn stop(&self) {
+        self.log.note_stop();
         self.kill.kill();
     }
     pub fn wait_exited(&self, timeout: Duration) -> bool {
@@ -169,6 +168,7 @@ impl Session {
         if s.exited || !s.busy {
             return Ok(());
         }
+        self.log.note_interrupt();
         s.next_control += 1;
         self.write(
             &json!({"type":"control_request","request_id":format!("int-{}",s.next_control),
@@ -248,26 +248,6 @@ impl Session {
     }
     pub fn set_selection(&self, _model: &str, _effort: &str) -> Result<Value, String> {
         Err("precondition: Claude Code stream JSON does not support live model selection".into())
-    }
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let result = json!({"status":status,"summary":summary,
-            "time":chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos,true),
-            "chatSeq":seq.to_string(),"briefSeq":brief_seq.to_string()});
-        let stored = self
-            .log
-            .append(Event::new(json!({"report":result})))
-            .map_err(|e| e.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
     }
     fn read_stdout(&self, output: impl Read) {
         let mut reader = BufReader::new(output);

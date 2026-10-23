@@ -104,6 +104,7 @@ const LIST_SLEEVES: &str = "/protectorate.v1.SleeveService/ListSleeves";
 const LIST_WORKSPACES: &str = "/protectorate.v1.SleeveService/ListWorkspaces";
 const BROWSE_WORKSPACES: &str = "/protectorate.v1.SleeveService/BrowseWorkspaces";
 const GET_SLEEVE: &str = "/protectorate.v1.SleeveService/GetSleeve";
+const GET_TERMINAL_STATUS: &str = "/protectorate.v1.SleeveService/GetTerminalStatus";
 const KILL_SLEEVE: &str = "/protectorate.v1.SleeveService/KillSleeve";
 const SLEEVE_SERVICE: &str = "/protectorate.v1.SleeveService/";
 const SPAWN_SLEEVE: &str = "/protectorate.v1.SleeveService/SpawnSleeve";
@@ -227,6 +228,7 @@ pub enum JobState {
     Failed,
     Canceled,
     TimedOut,
+    Killed,
 }
 
 impl JobState {
@@ -239,6 +241,7 @@ impl JobState {
             Self::Failed => "failed",
             Self::Canceled => "canceled",
             Self::TimedOut => "timed-out",
+            Self::Killed => "killed",
         }
     }
 
@@ -251,6 +254,7 @@ impl JobState {
             Self::Failed => "JOB_STATE_FAILED",
             Self::Canceled => "JOB_STATE_CANCELED",
             Self::TimedOut => "JOB_STATE_TIMED_OUT",
+            Self::Killed => "JOB_STATE_KILLED",
         }
     }
 
@@ -262,6 +266,7 @@ impl JobState {
             "failed" => Some(Self::Failed),
             "canceled" => Some(Self::Canceled),
             "timed-out" => Some(Self::TimedOut),
+            "killed" => Some(Self::Killed),
             _ => None,
         }
     }
@@ -274,6 +279,7 @@ impl JobState {
             Self::Failed,
             Self::Canceled,
             Self::TimedOut,
+            Self::Killed,
         ]
         .map(|state| state.as_str())
         .join("|")
@@ -774,6 +780,9 @@ pub enum Command {
     ChatCompact {
         sleeve: String,
     },
+    ChatStatus {
+        sleeve: String,
+    },
     ChatModels {
         sleeve: Option<String>,
         harness: String,
@@ -790,6 +799,10 @@ pub enum Command {
     },
     SleeveShow {
         name: String,
+    },
+    SleeveStatus {
+        name: String,
+        explain: bool,
     },
     SleeveKill {
         name: String,
@@ -929,7 +942,7 @@ fn usage() -> &'static str {
      lease acquire             reserve a node or matching selector (--node, --os, --arch, --min-free-mem, --gpu-vram, --gpu, --npu, --holder, --ttl, --wait, --priority)\n  \
      lease renew <id>           claim or extend a lease (--ttl DURATION)\n  \
      lease release <id>...      free leases or withdraw queued tickets\n  \
-     job ls | job list          jobs, newest first (--state preparing|running|succeeded|failed|canceled|timed-out, --limit N)\n  \
+     job ls | job list          jobs, newest first (--state preparing|running|succeeded|failed|canceled|timed-out|killed, --limit N)\n  \
      job show <id>              one job record\n  \
      job cancel <id>            stop a job and its process tree\n  \
      job run --on <target> -- <cmd...>\n                             \
@@ -944,6 +957,7 @@ fn usage() -> &'static str {
      chat wait <sleeve> [sleeve...]  block until every sleeve is idle or reports (--until idle|report, --timeout DURATION)\n  \
      chat interrupt <sleeve>    cancel the running turn\n  \
      chat compact <sleeve>      compact chat history while idle\n  \
+     chat status <sleeve>       chat state, context and prompt-cache telemetry\n  \
      chat models [sleeve]       list native models and efforts (--harness, default codex)\n  \
      chat settings <sleeve>     show model and effort, or change them (--model, --effort, --native-defaults)\n  \
      report --status complete|partial|blocked  report this sleeve's result (--summary-file FILE|-; 32 KiB limit)\n  \
@@ -951,6 +965,7 @@ fn usage() -> &'static str {
      sleeve workspaces | ws     workspaces and read-only references on the hub\n  \
      sleeve browse [path]      browse configured workspace roots or a directory on the hub\n  \
      sleeve show <name>         one sleeve, its usage and the tail of an exited run\n  \
+     sleeve status <name>       what a terminal sleeve is doing: working, blocked or idle (--explain lists the screen rules)\n  \
      sleeve kill <name>         stop a sleeve and its processes (--drop-caches)\n  \
      sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
@@ -1434,6 +1449,27 @@ fn update_line(name: &str, progress: &Value) -> String {
     } else {
         format!("{name}\t{detail}\n")
     }
+}
+
+/// The next report sequence: the clock in microseconds, kept above the last
+/// one sent from this sleeve so a clock step back cannot reorder reports.
+fn next_report_seq() -> u64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_micros() as u64);
+    let state = std::env::var_os("PROTECTORATE_TOKEN_FILE")
+        .map(PathBuf::from)
+        .and_then(|token| Some(token.parent()?.join(".protectorate-report-seq")));
+    let last = state
+        .as_ref()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let seq = now.max(last + 1);
+    if let Some(path) = state {
+        let _ = fs::write(path, seq.to_string());
+    }
+    seq
 }
 
 fn read_report_summary(path: Option<&str>) -> Result<String> {
@@ -2141,6 +2177,19 @@ fn execute_commands(
                 ))
             }
         }
+        Command::ChatStatus { sleeve } => {
+            let response = client.call(GET_SLEEVE, &json!({"name": sleeve}))?;
+            let chat = response
+                .get("sleeve")
+                .and_then(|sleeve| sleeve.get("chat"))
+                .filter(|chat| !chat.is_null())
+                .ok_or_else(|| RpcError::new(Code::FailedPrecondition, "sleeve has no chat"))?;
+            if json {
+                json_line(chat)
+            } else {
+                Ok(format::chat_status_text(chat))
+            }
+        }
         Command::ChatModels { sleeve, harness } => {
             let response =
                 client.call(CHAT_MODELS, &json!({"sleeve": sleeve, "harness": harness}))?;
@@ -2180,10 +2229,13 @@ fn execute_commands(
             let summary = read_report_summary(summary_file.as_deref())?;
             let response = client.call(
                 CHAT_REPORT,
-                &json!({"status": format!("REPORT_STATUS_{}", status.to_ascii_uppercase()), "summary": summary}),
+                &json!({"status": format!("REPORT_STATUS_{}", status.to_ascii_uppercase()),
+                    "summary": summary, "sourceSeq": next_report_seq().to_string()}),
             )?;
             if json {
                 json_line(&response)
+            } else if response["dropped"].as_bool() == Some(true) {
+                Ok("dropped: a newer report is already recorded\n".into())
             } else {
                 let seq = response["result"]["chatSeq"]
                     .as_str()
@@ -2244,6 +2296,14 @@ fn execute_commands(
                 json_line(&response)
             } else {
                 Ok(format::sleeve_text(sleeve, tail.as_deref()))
+            }
+        }
+        Command::SleeveStatus { name, explain } => {
+            let response = client.call(GET_TERMINAL_STATUS, &json!({"name": name}))?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format::terminal_status_text(&response, *explain))
             }
         }
         Command::SleeveKill { name, drop_caches } => {

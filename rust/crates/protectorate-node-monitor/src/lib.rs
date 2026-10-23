@@ -125,6 +125,26 @@ struct State {
     good: Option<Good>,
     gpus: Vec<GpuSample>,
     down_emitted: bool,
+    /// The agent instance and sequence of the last accepted sample.
+    stamp: Option<(String, u64)>,
+}
+
+fn stamp_of(metrics: &Value) -> Option<(String, u64)> {
+    let seq = uint(metrics, "seq").filter(|seq| *seq > 0)?;
+    Some((metrics.get("instance")?.as_str()?.to_owned(), seq))
+}
+
+impl State {
+    /// A sample no newer than the last accepted one from the same agent
+    /// instance arrived late or twice. A new instance starts a fresh count.
+    fn is_stale(&self, metrics: &Value) -> bool {
+        match (&self.stamp, stamp_of(metrics)) {
+            (Some((last, last_seq)), Some((instance, seq))) => {
+                *last == instance && seq <= *last_seq
+            }
+            _ => false,
+        }
+    }
 }
 
 pub struct Monitor {
@@ -282,7 +302,11 @@ impl Monitor {
         }
         state.attempted = true;
         let event = match result {
+            Ok(metrics) if state.is_stale(&metrics) => None,
             Ok(metrics) => {
+                if let Some(stamp) = stamp_of(&metrics) {
+                    state.stamp = Some(stamp);
+                }
                 let wall_at = SystemTime::now();
                 state.gpus = add_gpu_sample(std::mem::take(&mut state.gpus), wall_at, &metrics);
                 state.good = Some(Good {

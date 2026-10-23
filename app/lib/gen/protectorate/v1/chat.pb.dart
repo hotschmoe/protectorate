@@ -600,6 +600,7 @@ class ChatStatus extends $pb.GeneratedMessage {
     $core.bool? localModel,
     $core.String? reasoningEffort,
     ModelSettings? settings,
+    CacheTelemetry? cache,
   }) {
     final result = ChatStatus._();
     if (state != null) result.state = state;
@@ -614,6 +615,7 @@ class ChatStatus extends $pb.GeneratedMessage {
     if (localModel != null) result.localModel = localModel;
     if (reasoningEffort != null) result.reasoningEffort = reasoningEffort;
     if (settings != null) result.settings = settings;
+    if (cache != null) result.cache = cache;
     return result;
   }
 
@@ -652,6 +654,8 @@ class ChatStatus extends $pb.GeneratedMessage {
     ..aOS(11, _omitFieldNames ? '' : 'reasoningEffort')
     ..aOM<ModelSettings>(12, _omitFieldNames ? '' : 'settings',
         subBuilder: ModelSettings.$_createMessage)
+    ..aOM<CacheTelemetry>(13, _omitFieldNames ? '' : 'cache',
+        subBuilder: CacheTelemetry.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -798,6 +802,253 @@ class ChatStatus extends $pb.GeneratedMessage {
   void clearSettings() => $_clearField(12);
   @$pb.TagNumber(12)
   ModelSettings ensureSettings() => $_ensure(11);
+
+  /// cache is the prompt-cache telemetry over the chat log.
+  @$pb.TagNumber(13)
+  CacheTelemetry get cache => $_getN(12);
+  @$pb.TagNumber(13)
+  set cache(CacheTelemetry value) => $_setField(13, value);
+  @$pb.TagNumber(13)
+  $core.bool hasCache() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearCache() => $_clearField(13);
+  @$pb.TagNumber(13)
+  CacheTelemetry ensureCache() => $_ensure(12);
+}
+
+/// TokenCounts sums the model calls of a span. input_tokens excludes the
+/// cached parts: a prompt is input + cache_read + cache_write tokens, and
+/// read_ratio is cache_read over that prompt (0 with no prompt).
+class TokenCounts extends $pb.GeneratedMessage {
+  factory TokenCounts({
+    $fixnum.Int64? calls,
+    $fixnum.Int64? inputTokens,
+    $fixnum.Int64? outputTokens,
+    $fixnum.Int64? cacheReadTokens,
+    $fixnum.Int64? cacheWriteTokens,
+    $core.double? readRatio,
+  }) {
+    final result = TokenCounts._();
+    if (calls != null) result.calls = calls;
+    if (inputTokens != null) result.inputTokens = inputTokens;
+    if (outputTokens != null) result.outputTokens = outputTokens;
+    if (cacheReadTokens != null) result.cacheReadTokens = cacheReadTokens;
+    if (cacheWriteTokens != null) result.cacheWriteTokens = cacheWriteTokens;
+    if (readRatio != null) result.readRatio = readRatio;
+    return result;
+  }
+
+  TokenCounts._();
+
+  factory TokenCounts.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TokenCounts()..mergeFromBuffer(data, registry);
+  factory TokenCounts.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      TokenCounts()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'TokenCounts',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: TokenCounts.$_createMessage)
+    ..a<$fixnum.Int64>(1, _omitFieldNames ? '' : 'calls', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        2, _omitFieldNames ? '' : 'inputTokens', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        3, _omitFieldNames ? '' : 'outputTokens', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        4, _omitFieldNames ? '' : 'cacheReadTokens', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        5, _omitFieldNames ? '' : 'cacheWriteTokens', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aD(6, _omitFieldNames ? '' : 'readRatio')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TokenCounts clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  TokenCounts copyWith(void Function(TokenCounts) updates) =>
+      super.copyWith((message) => updates(message as TokenCounts))
+          as TokenCounts;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use TokenCounts() / TokenCounts.new instead')
+  static TokenCounts create() => TokenCounts._();
+  static $pb.GeneratedMessage $_createMessage() => TokenCounts._();
+  @$core.override
+  TokenCounts createEmptyInstance() => TokenCounts._();
+  @$core.pragma('dart2js:noInline')
+  static TokenCounts getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<TokenCounts>(
+          TokenCounts.$_createMessage);
+  static TokenCounts? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $fixnum.Int64 get calls => $_getI64(0);
+  @$pb.TagNumber(1)
+  set calls($fixnum.Int64 value) => $_setInt64(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasCalls() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCalls() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $fixnum.Int64 get inputTokens => $_getI64(1);
+  @$pb.TagNumber(2)
+  set inputTokens($fixnum.Int64 value) => $_setInt64(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasInputTokens() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearInputTokens() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get outputTokens => $_getI64(2);
+  @$pb.TagNumber(3)
+  set outputTokens($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasOutputTokens() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearOutputTokens() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get cacheReadTokens => $_getI64(3);
+  @$pb.TagNumber(4)
+  set cacheReadTokens($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasCacheReadTokens() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearCacheReadTokens() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $fixnum.Int64 get cacheWriteTokens => $_getI64(4);
+  @$pb.TagNumber(5)
+  set cacheWriteTokens($fixnum.Int64 value) => $_setInt64(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasCacheWriteTokens() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearCacheWriteTokens() => $_clearField(5);
+
+  @$pb.TagNumber(6)
+  $core.double get readRatio => $_getN(5);
+  @$pb.TagNumber(6)
+  set readRatio($core.double value) => $_setDouble(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasReadRatio() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearReadRatio() => $_clearField(6);
+}
+
+/// CacheTelemetry tells whether the harness's native prompt cache is being
+/// used. first_call is the first model call since the harness (re)started and
+/// is absent before it. resumed is true when the run started on a log that
+/// already held model calls; cold_resume then flags a first call that read
+/// nothing from the cache although it was expected to.
+class CacheTelemetry extends $pb.GeneratedMessage {
+  factory CacheTelemetry({
+    TokenCounts? total,
+    TokenCounts? firstCall,
+    $core.bool? resumed,
+    $core.bool? coldResume,
+  }) {
+    final result = CacheTelemetry._();
+    if (total != null) result.total = total;
+    if (firstCall != null) result.firstCall = firstCall;
+    if (resumed != null) result.resumed = resumed;
+    if (coldResume != null) result.coldResume = coldResume;
+    return result;
+  }
+
+  CacheTelemetry._();
+
+  factory CacheTelemetry.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      CacheTelemetry()..mergeFromBuffer(data, registry);
+  factory CacheTelemetry.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      CacheTelemetry()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'CacheTelemetry',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: CacheTelemetry.$_createMessage)
+    ..aOM<TokenCounts>(1, _omitFieldNames ? '' : 'total',
+        subBuilder: TokenCounts.$_createMessage)
+    ..aOM<TokenCounts>(2, _omitFieldNames ? '' : 'firstCall',
+        subBuilder: TokenCounts.$_createMessage)
+    ..aOB(3, _omitFieldNames ? '' : 'resumed')
+    ..aOB(4, _omitFieldNames ? '' : 'coldResume')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  CacheTelemetry clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  CacheTelemetry copyWith(void Function(CacheTelemetry) updates) =>
+      super.copyWith((message) => updates(message as CacheTelemetry))
+          as CacheTelemetry;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use CacheTelemetry() / CacheTelemetry.new instead')
+  static CacheTelemetry create() => CacheTelemetry._();
+  static $pb.GeneratedMessage $_createMessage() => CacheTelemetry._();
+  @$core.override
+  CacheTelemetry createEmptyInstance() => CacheTelemetry._();
+  @$core.pragma('dart2js:noInline')
+  static CacheTelemetry getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<CacheTelemetry>(
+          CacheTelemetry.$_createMessage);
+  static CacheTelemetry? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  TokenCounts get total => $_getN(0);
+  @$pb.TagNumber(1)
+  set total(TokenCounts value) => $_setField(1, value);
+  @$pb.TagNumber(1)
+  $core.bool hasTotal() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearTotal() => $_clearField(1);
+  @$pb.TagNumber(1)
+  TokenCounts ensureTotal() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  TokenCounts get firstCall => $_getN(1);
+  @$pb.TagNumber(2)
+  set firstCall(TokenCounts value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasFirstCall() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearFirstCall() => $_clearField(2);
+  @$pb.TagNumber(2)
+  TokenCounts ensureFirstCall() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  $core.bool get resumed => $_getBF(2);
+  @$pb.TagNumber(3)
+  set resumed($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasResumed() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearResumed() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.bool get coldResume => $_getBF(3);
+  @$pb.TagNumber(4)
+  set coldResume($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasColdResume() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearColdResume() => $_clearField(4);
 }
 
 enum ChatEvent_Body {
@@ -1798,9 +2049,13 @@ class UsageUpdate extends $pb.GeneratedMessage {
 class TurnSettled extends $pb.GeneratedMessage {
   factory TurnSettled({
     $core.String? stopReason,
+    TokenCounts? usage,
+    TurnEnd? end,
   }) {
     final result = TurnSettled._();
     if (stopReason != null) result.stopReason = stopReason;
+    if (usage != null) result.usage = usage;
+    if (end != null) result.end = end;
     return result;
   }
 
@@ -1819,6 +2074,9 @@ class TurnSettled extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: TurnSettled.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'stopReason')
+    ..aOM<TokenCounts>(2, _omitFieldNames ? '' : 'usage',
+        subBuilder: TokenCounts.$_createMessage)
+    ..aE<TurnEnd>(3, _omitFieldNames ? '' : 'end', enumValues: TurnEnd.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1851,6 +2109,27 @@ class TurnSettled extends $pb.GeneratedMessage {
   $core.bool hasStopReason() => $_has(0);
   @$pb.TagNumber(1)
   void clearStopReason() => $_clearField(1);
+
+  /// usage sums the turn's model calls; absent when the harness reported none.
+  @$pb.TagNumber(2)
+  TokenCounts get usage => $_getN(1);
+  @$pb.TagNumber(2)
+  set usage(TokenCounts value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasUsage() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearUsage() => $_clearField(2);
+  @$pb.TagNumber(2)
+  TokenCounts ensureUsage() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  TurnEnd get end => $_getN(2);
+  @$pb.TagNumber(3)
+  set end(TurnEnd value) => $_setField(3, value);
+  @$pb.TagNumber(3)
+  $core.bool hasEnd() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearEnd() => $_clearField(3);
 }
 
 class Compaction extends $pb.GeneratedMessage {
@@ -1941,9 +2220,11 @@ class Compaction extends $pb.GeneratedMessage {
 class ChatError extends $pb.GeneratedMessage {
   factory ChatError({
     $core.String? text,
+    ChatErrorKind? kind,
   }) {
     final result = ChatError._();
     if (text != null) result.text = text;
+    if (kind != null) result.kind = kind;
     return result;
   }
 
@@ -1962,6 +2243,8 @@ class ChatError extends $pb.GeneratedMessage {
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: ChatError.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'text')
+    ..aE<ChatErrorKind>(2, _omitFieldNames ? '' : 'kind',
+        enumValues: ChatErrorKind.values)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1992,6 +2275,15 @@ class ChatError extends $pb.GeneratedMessage {
   $core.bool hasText() => $_has(0);
   @$pb.TagNumber(1)
   void clearText() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  ChatErrorKind get kind => $_getN(1);
+  @$pb.TagNumber(2)
+  set kind(ChatErrorKind value) => $_setField(2, value);
+  @$pb.TagNumber(2)
+  $core.bool hasKind() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearKind() => $_clearField(2);
 }
 
 class StateChange extends $pb.GeneratedMessage {
@@ -2820,6 +3112,7 @@ class SleeveResult extends $pb.GeneratedMessage {
     $0.Timestamp? time,
     $fixnum.Int64? chatSeq,
     $fixnum.Int64? briefSeq,
+    $fixnum.Int64? sourceSeq,
   }) {
     final result = SleeveResult._();
     if (status != null) result.status = status;
@@ -2827,6 +3120,7 @@ class SleeveResult extends $pb.GeneratedMessage {
     if (time != null) result.time = time;
     if (chatSeq != null) result.chatSeq = chatSeq;
     if (briefSeq != null) result.briefSeq = briefSeq;
+    if (sourceSeq != null) result.sourceSeq = sourceSeq;
     return result;
   }
 
@@ -2853,6 +3147,9 @@ class SleeveResult extends $pb.GeneratedMessage {
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..a<$fixnum.Int64>(
         5, _omitFieldNames ? '' : 'briefSeq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'sourceSeq', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
@@ -2926,6 +3223,16 @@ class SleeveResult extends $pb.GeneratedMessage {
   $core.bool hasBriefSeq() => $_has(4);
   @$pb.TagNumber(5)
   void clearBriefSeq() => $_clearField(5);
+
+  /// source_seq is the sequence the sleeve gave the report; zero if unsequenced.
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get sourceSeq => $_getI64(5);
+  @$pb.TagNumber(6)
+  set sourceSeq($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasSourceSeq() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearSourceSeq() => $_clearField(6);
 }
 
 class ReportRequest extends $pb.GeneratedMessage {
@@ -2933,11 +3240,13 @@ class ReportRequest extends $pb.GeneratedMessage {
     $core.String? sleeve,
     ReportStatus? status,
     $core.String? summary,
+    $fixnum.Int64? sourceSeq,
   }) {
     final result = ReportRequest._();
     if (sleeve != null) result.sleeve = sleeve;
     if (status != null) result.status = status;
     if (summary != null) result.summary = summary;
+    if (sourceSeq != null) result.sourceSeq = sourceSeq;
     return result;
   }
 
@@ -2959,6 +3268,9 @@ class ReportRequest extends $pb.GeneratedMessage {
     ..aE<ReportStatus>(2, _omitFieldNames ? '' : 'status',
         enumValues: ReportStatus.values)
     ..aOS(3, _omitFieldNames ? '' : 'summary')
+    ..a<$fixnum.Int64>(
+        4, _omitFieldNames ? '' : 'sourceSeq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3010,14 +3322,30 @@ class ReportRequest extends $pb.GeneratedMessage {
   $core.bool hasSummary() => $_has(2);
   @$pb.TagNumber(3)
   void clearSummary() => $_clearField(3);
+
+  /// source_seq orders the sleeve's reports: it must grow with each report the
+  /// sleeve sends, and a report whose source_seq is not above the last
+  /// sequenced one the hub recorded for that sleeve is dropped, so a late or
+  /// repeated report cannot replace a newer one. Zero is unsequenced and always
+  /// recorded, in arrival order.
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get sourceSeq => $_getI64(3);
+  @$pb.TagNumber(4)
+  set sourceSeq($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasSourceSeq() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearSourceSeq() => $_clearField(4);
 }
 
 class ReportResponse extends $pb.GeneratedMessage {
   factory ReportResponse({
     SleeveResult? result,
+    $core.bool? dropped,
   }) {
     final result$ = ReportResponse._();
     if (result != null) result$.result = result;
+    if (dropped != null) result$.dropped = dropped;
     return result$;
   }
 
@@ -3037,6 +3365,7 @@ class ReportResponse extends $pb.GeneratedMessage {
       createEmptyInstance: ReportResponse.$_createMessage)
     ..aOM<SleeveResult>(1, _omitFieldNames ? '' : 'result',
         subBuilder: SleeveResult.$_createMessage)
+    ..aOB(2, _omitFieldNames ? '' : 'dropped')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3061,6 +3390,8 @@ class ReportResponse extends $pb.GeneratedMessage {
           ReportResponse.$_createMessage);
   static ReportResponse? _defaultInstance;
 
+  /// result is the recorded result: the new report, or for a dropped one the
+  /// result the sleeve already has.
   @$pb.TagNumber(1)
   SleeveResult get result => $_getN(0);
   @$pb.TagNumber(1)
@@ -3071,6 +3402,15 @@ class ReportResponse extends $pb.GeneratedMessage {
   void clearResult() => $_clearField(1);
   @$pb.TagNumber(1)
   SleeveResult ensureResult() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  $core.bool get dropped => $_getBF(1);
+  @$pb.TagNumber(2)
+  set dropped($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasDropped() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearDropped() => $_clearField(2);
 }
 
 class WaitRequest extends $pb.GeneratedMessage {

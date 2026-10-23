@@ -1,4 +1,6 @@
 //! Per-sleeve append-only chat events, with replay and gap-free live watches.
+mod telemetry;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -9,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use telemetry::Telemetry;
 
 const MAX_QUEUE: usize = 4096;
 
@@ -86,6 +89,15 @@ impl OpenText {
 fn text_payload(id: &str, thinking: bool, delta: &str) -> Value {
     json!({"text":{"messageId":id,"delta":delta,"thinking":thinking}})
 }
+/// The signal that ended a process. The sandbox helper reports a signal that
+/// ends its workload as exit status 137, which stands for SIGKILL.
+fn signal(status: &std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        return Some(signal);
+    }
+    (status.code() == Some(137)).then_some(9)
+}
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -135,11 +147,13 @@ struct Inner {
     watchers: HashMap<u64, Arc<Watcher>>,
     next_watcher: u64,
     closed: bool,
+    cache: Telemetry,
 }
 
 pub struct Log {
     path: PathBuf,
     inner: Mutex<Inner>,
+    stopping: AtomicBool,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -171,6 +185,7 @@ impl Log {
             watchers: HashMap::new(),
             next_watcher: 0,
             closed: false,
+            cache: Telemetry::default(),
         };
         let mut reader = BufReader::new(inner.file.try_clone()?);
         let mut line = Vec::new();
@@ -184,7 +199,7 @@ impl Log {
                 inner.file.set_len(inner.size)?;
                 break;
             }
-            let event: Event = serde_json::from_slice(&line).map_err(|e| {
+            let mut event: Event = serde_json::from_slice(&line).map_err(|e| {
                 Error::InvalidLog(format!(
                     "{} line {}: {e}",
                     path.display(),
@@ -199,14 +214,17 @@ impl Log {
                     event.seq
                 )));
             }
+            inner.cache.observe(&mut event.payload);
             inner.offsets.push(inner.size);
             inner.size += count as u64;
             inner.last = event.seq;
         }
+        inner.cache.begin_run();
         inner.file.seek(SeekFrom::Start(inner.size))?;
         Ok(Self {
             path,
             inner: Mutex::new(inner),
+            stopping: AtomicBool::new(false),
         })
     }
 
@@ -214,21 +232,75 @@ impl Log {
         lock(&self.inner).last
     }
 
+    /// Records that the running turn was asked to stop, so it settles as
+    /// canceled.
+    pub fn note_interrupt(&self) {
+        lock(&self.inner).cache.interrupt();
+    }
+
+    /// Records that the harness is being stopped on purpose, so its exit is
+    /// not reported as a kill.
+    pub fn note_stop(&self) {
+        self.stopping.store(true, Ordering::Relaxed);
+    }
+
+    /// Appends the error event for a harness process that ended. A signal the
+    /// owner did not ask for is a kill, which is how a resource limit or the
+    /// kernel's OOM killer ends a process; any other exit is a plain exit.
+    pub fn append_exit<E: fmt::Display>(
+        &self,
+        harness: &str,
+        result: &Result<std::process::ExitStatus, E>,
+    ) -> Result<u64, Error> {
+        let error = match result {
+            Err(error) => json!({"text": format!("{harness} wait failed: {error}")}),
+            Ok(status) => match signal(status).filter(|_| !self.stopping.load(Ordering::Relaxed)) {
+                Some(signal) => json!({
+                    "text": format!("{harness} killed by signal {signal}"),
+                    "kind": "CHAT_ERROR_KIND_KILLED",
+                }),
+                None => json!({
+                    "text": format!("{harness} exited: {status}"),
+                    "kind": "CHAT_ERROR_KIND_EXITED",
+                }),
+            },
+        };
+        self.append(Event::new(json!({ "error": error })))
+    }
+
+    /// Prompt-cache telemetry in the ChatStatus `cache` JSON shape.
+    pub fn cache(&self) -> Value {
+        lock(&self.inner).cache.json()
+    }
+
     /// Appends a non-text event, flushing an open assistant message first.
-    pub fn append(&self, mut event: Event) -> Result<u64, Error> {
+    pub fn append(&self, event: Event) -> Result<u64, Error> {
+        self.append_with(|_| event).map(|event| event.seq)
+    }
+
+    /// Appends the report `build` makes from the event's own sequence number
+    /// and returns it.
+    pub fn append_report(&self, build: impl FnOnce(u64) -> Value) -> Result<Value, Error> {
+        let event = self.append_with(|seq| Event::new(json!({"report": build(seq)})))?;
+        Ok(event.payload["report"].clone())
+    }
+
+    fn append_with(&self, build: impl FnOnce(u64) -> Event) -> Result<Event, Error> {
         let mut inner = lock(&self.inner);
         if inner.closed {
             return Err(Error::Closed);
         }
         inner.flush()?;
+        let mut event = build(inner.last + 1);
         event.seq = inner.last + 1;
         if event.time_ms == 0 {
             event.time_ms = now_ms();
         }
+        inner.cache.observe(&mut event.payload);
         inner.persist(&event)?;
         inner.last = event.seq;
         inner.fanout(event.clone());
-        Ok(event.seq)
+        Ok(event)
     }
 
     /// Streams a delta now and stores one complete message when it closes.

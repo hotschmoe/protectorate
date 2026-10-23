@@ -74,5 +74,33 @@ class SleeveState extends $pb.ProtobufEnum {
   const SleeveState._(super.value, super.name);
 }
 
+class TerminalActivity extends $pb.ProtobufEnum {
+  static const TerminalActivity TERMINAL_ACTIVITY_UNSPECIFIED =
+      TerminalActivity._(
+          0, _omitEnumNames ? '' : 'TERMINAL_ACTIVITY_UNSPECIFIED');
+  static const TerminalActivity TERMINAL_ACTIVITY_WORKING =
+      TerminalActivity._(1, _omitEnumNames ? '' : 'TERMINAL_ACTIVITY_WORKING');
+
+  /// BLOCKED: the harness shows a dialog that waits for the owner.
+  static const TerminalActivity TERMINAL_ACTIVITY_BLOCKED =
+      TerminalActivity._(2, _omitEnumNames ? '' : 'TERMINAL_ACTIVITY_BLOCKED');
+  static const TerminalActivity TERMINAL_ACTIVITY_IDLE =
+      TerminalActivity._(3, _omitEnumNames ? '' : 'TERMINAL_ACTIVITY_IDLE');
+
+  static const $core.List<TerminalActivity> values = <TerminalActivity>[
+    TERMINAL_ACTIVITY_UNSPECIFIED,
+    TERMINAL_ACTIVITY_WORKING,
+    TERMINAL_ACTIVITY_BLOCKED,
+    TERMINAL_ACTIVITY_IDLE,
+  ];
+
+  static final $core.List<TerminalActivity?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 3);
+  static TerminalActivity? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const TerminalActivity._(super.value, super.name);
+}
+
 const $core.bool _omitEnumNames =
     $core.bool.fromEnvironment('protobuf.omit_enum_names');

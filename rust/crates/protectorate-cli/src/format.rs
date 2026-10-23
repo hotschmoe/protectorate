@@ -1641,6 +1641,79 @@ pub(crate) fn chat_settings_text(chat: &Value) -> String {
     out
 }
 
+fn token_counts_text(counts: &Value) -> String {
+    format!(
+        "{} calls, in {} out {} read {} write {}, {} read",
+        fmt_int(number(counts, "calls")),
+        fmt_int(number(counts, "inputTokens")),
+        fmt_int(number(counts, "outputTokens")),
+        fmt_int(number(counts, "cacheReadTokens")),
+        fmt_int(number(counts, "cacheWriteTokens")),
+        percent(number(counts, "readRatio").unwrap_or_default() * 100.0),
+    )
+}
+
+/// Sequence, cache expiry, activity and prompt-cache rows of a chat status.
+fn chat_tail_text(chat: &Value) -> String {
+    let mut out = String::new();
+    row(&mut out, "last sequence", fmt_int(number(chat, "lastSeq")));
+    if !text(chat, "cacheExpiresAt").is_empty() {
+        row(
+            &mut out,
+            "cache expires",
+            local_stamp(text(chat, "cacheExpiresAt")),
+        );
+    }
+    if !text(chat, "lastActivityAt").is_empty() {
+        row(
+            &mut out,
+            "last activity",
+            local_stamp(text(chat, "lastActivityAt")),
+        );
+    }
+    let cache = at(chat, "cache").filter(|cache| !cache.is_null());
+    if let Some(total) = cache.and_then(|cache| at(cache, "total")) {
+        if number(total, "calls").unwrap_or_default() > 0.0 {
+            row(&mut out, "cache total", token_counts_text(total));
+        }
+    }
+    if let Some(cache) = cache {
+        if let Some(first) = at(cache, "firstCall") {
+            let verdict = if boolean(cache, "coldResume") {
+                "resumed but nothing was read from the cache"
+            } else if boolean(cache, "resumed") {
+                "resumed"
+            } else {
+                "fresh"
+            };
+            row(
+                &mut out,
+                "cache first call",
+                format!("{}, {verdict}", token_counts_text(first)),
+            );
+        }
+    }
+    out
+}
+
+/// What `chat status` prints: state, context size and cache telemetry.
+pub(crate) fn chat_status_text(chat: &Value) -> String {
+    let mut out = String::new();
+    row(&mut out, "chat state", text(chat, "state"));
+    row(&mut out, "model", text(chat, "model"));
+    row(
+        &mut out,
+        "context tokens",
+        format!(
+            "{}/{}",
+            fmt_int(number(chat, "contextTokens")),
+            fmt_int(number(chat, "contextWindow"))
+        ),
+    );
+    out.push_str(&chat_tail_text(chat));
+    align(&out)
+}
+
 pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
     let mut out = String::new();
     row(&mut out, "name", text(sleeve, "name"));
@@ -1730,21 +1803,7 @@ pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
                 fmt_int(number(chat, "contextWindow"))
             ),
         );
-        row(&mut out, "last sequence", fmt_int(number(chat, "lastSeq")));
-        if !text(chat, "cacheExpiresAt").is_empty() {
-            row(
-                &mut out,
-                "cache expires",
-                local_stamp(text(chat, "cacheExpiresAt")),
-            );
-        }
-        if !text(chat, "lastActivityAt").is_empty() {
-            row(
-                &mut out,
-                "last activity",
-                local_stamp(text(chat, "lastActivityAt")),
-            );
-        }
+        out.push_str(&chat_tail_text(chat));
     }
     if let Some(handoff) = at(sleeve, "handoff").filter(|value| !value.is_null()) {
         append_handoff(&mut out, handoff);
@@ -1981,13 +2040,69 @@ fn harness_label(sleeve: &Value) -> String {
 
 /// The STATE column: "killed", "running", "exited", "exited(3)" or
 /// "exited(137,oom)", the way the Go CLI labels a sleeve record.
+fn terminal_activity(status: &Value) -> String {
+    text(status, "activity")
+        .strip_prefix("TERMINAL_ACTIVITY_")
+        .unwrap_or_default()
+        .to_lowercase()
+}
+
+/// What `sleeve status` prints: the activity and deciding rule, and with
+/// `explain` every rule of the harness and the screen lines they read.
+pub(crate) fn terminal_status_text(response: &Value, explain: bool) -> String {
+    let status = at(response, "status").cloned().unwrap_or(Value::Null);
+    let activity = terminal_activity(&status);
+    let mut out = String::new();
+    row(
+        &mut out,
+        "activity",
+        if activity.is_empty() {
+            "unknown".to_owned()
+        } else {
+            activity
+        },
+    );
+    optional_row(&mut out, "rule", text(&status, "rule"));
+    let mut out = align(&out);
+    if explain {
+        out.push_str("\nrules, first match decides\n");
+        for rule in items(response, "rules") {
+            out.push_str(&format!(
+                "  {}\t{}\t{}\n",
+                if boolean(&rule, "matched") {
+                    "match"
+                } else {
+                    "-"
+                },
+                terminal_activity(&rule),
+                text(&rule, "id"),
+            ));
+        }
+        out.push_str("\nscreen lines read\n");
+        for line in items(response, "lines") {
+            out.push_str(&format!("  {}\n", line.as_str().unwrap_or_default()));
+        }
+    }
+    out
+}
+
 fn sleeve_row_state(sleeve: &Value) -> String {
     if boolean(sleeve, "killed") {
         return "killed".to_owned();
     }
     let running = text(sleeve, "state") == "SLEEVE_STATE_RUNNING";
-    if running || at(sleeve, "exitCode").is_none() {
-        return if running { "running" } else { "exited" }.to_owned();
+    if running {
+        let activity = at(sleeve, "terminal")
+            .map(terminal_activity)
+            .unwrap_or_default();
+        return if activity.is_empty() {
+            "running".to_owned()
+        } else {
+            format!("running ({activity})")
+        };
+    }
+    if at(sleeve, "exitCode").is_none() {
+        return "exited".to_owned();
     }
     let code = text(sleeve, "exitCode");
     if boolean(sleeve, "oomKilled") {

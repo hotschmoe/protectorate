@@ -263,6 +263,45 @@ the updated hub and respawn existing sleeves to opt into mounts or idle removal.
 systemctl --user restart protectorate-hub
 ```
 
+## What the hub puts in front of a harness
+
+Native prompt caches match on a prefix, so anything volatile near the start of
+a conversation makes every session pay a cache write. The hub injects only:
+
+- The brief, sent as the first user message exactly as the caller wrote it.
+- The resleeve prompt, a fixed sentence naming `.protectorate/HANDOFF.md`. The
+  timestamped, per-run handoff is read by the harness as a tool result, after
+  the prefix.
+- Mail turns: the message text with its ids and thread first, then fixed
+  guidance. They are appended mid-conversation and never rewrite earlier turns.
+- Envoy's `AGENTS.md` (`CLAUDE.md` links to it): built from the hub URL, the
+  granted scopes and the method table, so it is byte-identical across
+  respawns and new tokens. `hosts.md`, which does change, is only named there
+  and read on demand.
+- Seeded harness config (`.claude.json`, `config.toml`) and environment
+  variables; no system prompt is added or appended, and no timestamps, node
+  names, lease ids or random ids are placed in any of them.
+
+Values that must change per run (the token, the sleeve name, the date) live in
+files or environment variables a harness reads on demand, never in the
+injected text. Keep it that way: put anything new that varies last, or in a
+file. `chat status` and `sleeve show` report each session's cache use; a
+resumed session whose first call read nothing from the cache is flagged.
+
+## Terminal sleeve status
+
+The hub reads the bottom non-empty lines of each running terminal sleeve's
+screen once a second and classifies it as working, blocked (a dialog waits for
+the owner) or idle, with a small per-harness rule table in
+`protectorate-session/src/activity.rs` for claude, codex, grok and pi. The first
+matching rule wins and a blocking dialog outranks the working indicator. A
+change, once two scans agree, is announced as `sleeve.activity` and appears as
+`terminal` on the sleeve, in the fleet cards and in the `sleeve ls` state.
+`protectorate sleeve status <name> --explain` reads the screen now and lists
+every rule, which one decided, and the lines examined. A screen no rule
+recognizes reads as unknown. When a harness changes its TUI, add the new pane
+to `rust/fuzz/corpus/terminal_pane/` and adjust the rule.
+
 ## Disk
 
 `sleeve ls` includes HOME; `sleeve show` and sleeve cards report total home

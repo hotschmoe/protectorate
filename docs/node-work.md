@@ -69,6 +69,15 @@ Now a job on a `shared` node runs sandboxed where the node can (bwrap on
 Linux, the runner account on Windows), a `care` node takes jobs only under an
 owner's grant for it, and elevation exists only as `--admin` under a grant.
 
+A job ends as exited (success or the command's own status), killed, timed
+out or canceled. Killed means a signal the node did not send ended the command,
+which is how a resource limit or the OOM killer stops it (the sandbox helper
+reports it as status 137); the error names the signal. `job run` exits 124 for
+a timeout, 130 for a cancel and 137 for a kill, so a script can tell a timeout
+from a failure and not rerun it under the same limit. Nothing retries a job on
+its own. A timeout or cancel kills the command's whole process group (plain
+jobs), process tree (Windows) or sandbox.
+
 ## Admin grants
 
 - `job run --admin` runs elevated (sudo on Linux, an elevated token on

@@ -69,6 +69,7 @@ async fn wait_for_job(addr: std::net::SocketAddr, id: &str) -> Value {
                     | "JOB_STATE_FAILED"
                     | "JOB_STATE_TIMED_OUT"
                     | "JOB_STATE_CANCELED"
+                    | "JOB_STATE_KILLED"
             )
         ) {
             return job;

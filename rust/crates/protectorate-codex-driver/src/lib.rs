@@ -104,9 +104,7 @@ impl Session {
             state.busy = false;
             waiter.changed.notify_all();
             drop(state);
-            let _ = waiter.log.append(Event::new(
-                json!({"error":{"text":format!("codex exited: {result:?}")}}),
-            ));
+            let _ = waiter.log.append_exit("codex", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
@@ -177,7 +175,7 @@ impl Session {
         json!({"state":if s.exited {"CHAT_STATE_EXITED"} else if !s.approvals.is_empty() {"CHAT_STATE_AWAITING_APPROVAL"}
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.thread_id,"model":s.model,"provider":"openai","reasoningEffort":s.effort,
-            "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),"lastSeq":self.log.last().to_string(),
+            "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),"lastSeq":self.log.last().to_string(),"cache":self.log.cache(),
             "settings":{"requested":{"model":s.requested_model,"effort":s.requested_effort},
                 "effective":{"model":s.model,"effort":s.effort},
                 "nativeDefaults":{"model":s.default_model,"effort":s.default_effort}}})
@@ -190,6 +188,7 @@ impl Session {
         !s.exited && !s.busy && !s.compacting && !s.selecting && s.approvals.is_empty()
     }
     pub fn stop(&self) {
+        self.log.note_stop();
         self.kill.kill();
     }
     pub fn wait_exited(&self, timeout: Duration) -> bool {
@@ -330,6 +329,7 @@ impl Session {
             }
             (s.thread_id.clone(), s.turn_id.clone())
         };
+        self.log.note_interrupt();
         self.rpc(
             "turn/interrupt",
             json!({"threadId":thread,"turnId":turn}),
@@ -515,25 +515,6 @@ impl Session {
             }
             (s, _) = self.changed.wait_timeout(s, remain).unwrap();
         }
-    }
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let result = json!({"status":status,"summary":summary,"time":chrono::Utc::now().to_rfc3339(),
-            "chatSeq":seq.to_string(),"briefSeq":brief_seq.to_string()});
-        let stored = self
-            .log
-            .append(Event::new(json!({"report":result})))
-            .map_err(|e| e.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
     }
     fn read_stdout(&self, output: impl Read) {
         let mut reader = BufReader::new(output);

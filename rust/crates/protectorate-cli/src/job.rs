@@ -124,6 +124,13 @@ pub(crate) fn run_job(
                 stdout.write_all(rendered.as_bytes()).map_err(io_error)?;
             }
             let code = as_i32(&final_job["exitCode"]).unwrap_or(1);
+            // Scripts tell a timeout from a failure by status, as with timeout(1).
+            let code = match final_job["state"].as_str() {
+                Some("JOB_STATE_TIMED_OUT") => 124,
+                Some("JOB_STATE_CANCELED") => 130,
+                Some("JOB_STATE_KILLED") => 137,
+                _ => code,
+            };
             Err(RunError::Status {
                 code: if (1..=255).contains(&code) { code } else { 1 },
                 message: summary,
@@ -346,6 +353,7 @@ fn terminal(job: &Value) -> bool {
                 | "JOB_STATE_FAILED"
                 | "JOB_STATE_CANCELED"
                 | "JOB_STATE_TIMED_OUT"
+                | "JOB_STATE_KILLED"
         )
     )
 }

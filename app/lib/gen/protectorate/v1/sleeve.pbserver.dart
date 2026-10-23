@@ -31,6 +31,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $4.BrowseWorkspacesRequest request);
   $async.Future<$4.GetSleeveResponse> getSleeve(
       $pb.ServerContext ctx, $4.GetSleeveRequest request);
+  $async.Future<$4.GetTerminalStatusResponse> getTerminalStatus(
+      $pb.ServerContext ctx, $4.GetTerminalStatusRequest request);
   $async.Future<$4.KillSleeveResponse> killSleeve(
       $pb.ServerContext ctx, $4.KillSleeveRequest request);
   $async.Future<$4.ResleeveSleeveResponse> resleeveSleeve(
@@ -60,6 +62,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return $4.BrowseWorkspacesRequest();
       case 'GetSleeve':
         return $4.GetSleeveRequest();
+      case 'GetTerminalStatus':
+        return $4.GetTerminalStatusRequest();
       case 'KillSleeve':
         return $4.KillSleeveRequest();
       case 'ResleeveSleeve':
@@ -94,6 +98,8 @@ abstract class SleeveServiceBase extends $pb.GeneratedService {
         return browseWorkspaces(ctx, request as $4.BrowseWorkspacesRequest);
       case 'GetSleeve':
         return getSleeve(ctx, request as $4.GetSleeveRequest);
+      case 'GetTerminalStatus':
+        return getTerminalStatus(ctx, request as $4.GetTerminalStatusRequest);
       case 'KillSleeve':
         return killSleeve(ctx, request as $4.KillSleeveRequest);
       case 'ResleeveSleeve':
