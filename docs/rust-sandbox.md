@@ -191,6 +191,19 @@ to the checkpoint, removing files it lacks; ignored files and the
 workspace's `.git` and index are untouched. A busy chat sleeve refuses a
 restore. The Flutter client has no checkpoint view yet.
 
+## Disk limits
+
+`SleeveLimits.disk_bytes` (`sleeve spawn --disk SIZE`) bounds a sleeve's
+workspace, private home, cache overlay uppers and checkpoint store. There is
+no unprivileged hard quota for an arbitrary directory, so the hub enforces
+it from its disk sampler: running sleeves with a limit are measured every 10
+seconds (every sleeve still every 5 minutes for status). At 90% the hub
+emits `sleeve.disk_warning` once per crossing. At 100% it stops the harness
+as Kill would, writes the reason into the chat log of a chat sleeve, emits
+`sleeve.disk_limit` and audits procedure `disk-limit`. Writes between
+samples are not blocked, so a fast writer can overshoot by what it writes in
+about 10 seconds; `/tmp` stays bounded by its tmpfs ceiling.
+
 ## Current launcher and limits
 
 `protectorate-sandbox` now has a dedicated helper and direct Linux launcher.

@@ -45,6 +45,7 @@ async fn sleeve_reads_preserve_user_visible_metadata_and_reconcile_restart() {
     chat.limits = Limits {
         cpu_percent: 200,
         memory_bytes: 4_294_967_296,
+        disk_bytes: 0,
     };
     chat.nested = true;
     chat.supervised = true;

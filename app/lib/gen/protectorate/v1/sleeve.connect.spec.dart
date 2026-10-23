@@ -13,7 +13,8 @@ import "sleeve.pb.dart" as protectoratev1sleeve;
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
-/// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
+/// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
+/// "sleeve.restored" (subject = sleeve name).
 abstract final class SleeveService {
   /// Fully-qualified name of the SleeveService service.
   static const name = 'protectorate.v1.SleeveService';

@@ -534,6 +534,7 @@ pub struct SleeveSpawn {
     pub args: Vec<String>,
     pub cpu_percent: u32,
     pub memory_bytes: u64,
+    pub disk_bytes: u64,
     pub env: Vec<(String, String)>,
     pub mode: SleeveModeName,
     pub supervised: bool,
@@ -983,8 +984,9 @@ pub fn usage() -> &'static str {
      sleeve browse [path]      browse configured workspace roots or a directory on the hub\n  \
      sleeve show <name>         one sleeve, its usage and the tail of an exited run\n  \
      sleeve kill <name>         stop a sleeve and its processes (--drop-caches)\n  \
+     sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
-     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, -- args)\n  \
+     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, -- args)\n  \
      sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --ttl, --model, --effort)\n  \
      orchestrator spawn         create or respawn Envoy (same options as sleeve envoy)\n  \
      orchestrator status        show Envoy sleeve and latest token\n  \
@@ -3265,6 +3267,9 @@ fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
     }
     if spawn.memory_bytes > 0 {
         limits.insert("memoryBytes".into(), json!(spawn.memory_bytes.to_string()));
+    }
+    if spawn.disk_bytes > 0 {
+        limits.insert("diskBytes".into(), json!(spawn.disk_bytes.to_string()));
     }
     if !limits.is_empty() {
         request["limits"] = Value::Object(limits);

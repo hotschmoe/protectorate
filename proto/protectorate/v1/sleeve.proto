@@ -15,7 +15,8 @@ import "protectorate/v1/token.proto";
 // terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 // WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 // Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
-// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
+// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
+// "sleeve.restored" (subject = sleeve name).
 service SleeveService {
   // SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   // workspace is an existing directory (bound read-write at the same path) or
@@ -203,6 +204,12 @@ message SleeveLimits {
   // memory_bytes caps memory including page cache and tmpfs; swap is disabled
   // when set. 0 means unlimited.
   uint64 memory_bytes = 2;
+  // disk_bytes bounds the sleeve's workspace, home, cache overlays and
+  // checkpoint store, as the hub samples them every 10 seconds while it runs.
+  // At 90% the hub emits "sleeve.disk_warning"; at 100% it stops the harness,
+  // emits "sleeve.disk_limit", notes it in the chat and audits it. Writes
+  // between samples are not blocked. 0 means unlimited.
+  uint64 disk_bytes = 3;
 }
 
 // SleeveUsage is read from the sleeve's cgroup.

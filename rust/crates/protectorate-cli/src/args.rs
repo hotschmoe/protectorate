@@ -2004,6 +2004,7 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
     let mut extra = Vec::new();
     let mut cpu_percent = 0_u32;
     let mut memory_bytes = 0_u64;
+    let mut disk_bytes = 0_u64;
     let mut env = Vec::new();
     let mut mode = SleeveModeName::Default;
     let mut supervised = false;
@@ -2078,6 +2079,10 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
                     *index += 1;
                     memory_bytes = parse_size(&value(args, index, "--mem", inline)?)?;
                 }
+                "--disk" => {
+                    *index += 1;
+                    disk_bytes = parse_size(&value(args, index, "--disk", inline)?)?;
+                }
                 "--env" => {
                     *index += 1;
                     env.push(env_pair(&value(args, index, "--env", inline)?)?);
@@ -2121,6 +2126,7 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
         args: extra,
         cpu_percent,
         memory_bytes,
+        disk_bytes,
         env,
         mode,
         supervised,

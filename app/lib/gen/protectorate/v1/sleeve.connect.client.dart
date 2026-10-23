@@ -14,7 +14,8 @@ import "sleeve.connect.spec.dart" as specs;
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
-/// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
+/// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
+/// "sleeve.restored" (subject = sleeve name).
 extension type SleeveServiceClient (connect.Transport _transport) {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or

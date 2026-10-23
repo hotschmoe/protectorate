@@ -678,10 +678,12 @@ class SleeveLimits extends $pb.GeneratedMessage {
   factory SleeveLimits({
     $core.int? cpuPercent,
     $fixnum.Int64? memoryBytes,
+    $fixnum.Int64? diskBytes,
   }) {
     final result = SleeveLimits._();
     if (cpuPercent != null) result.cpuPercent = cpuPercent;
     if (memoryBytes != null) result.memoryBytes = memoryBytes;
+    if (diskBytes != null) result.diskBytes = diskBytes;
     return result;
   }
 
@@ -702,6 +704,9 @@ class SleeveLimits extends $pb.GeneratedMessage {
     ..aI(1, _omitFieldNames ? '' : 'cpuPercent', fieldType: $pb.PbFieldType.OU3)
     ..a<$fixnum.Int64>(
         2, _omitFieldNames ? '' : 'memoryBytes', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        3, _omitFieldNames ? '' : 'diskBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
@@ -747,6 +752,20 @@ class SleeveLimits extends $pb.GeneratedMessage {
   $core.bool hasMemoryBytes() => $_has(1);
   @$pb.TagNumber(2)
   void clearMemoryBytes() => $_clearField(2);
+
+  /// disk_bytes bounds the sleeve's workspace, home, cache overlays and
+  /// checkpoint store, as the hub samples them every 10 seconds while it runs.
+  /// At 90% the hub emits "sleeve.disk_warning"; at 100% it stops the harness,
+  /// emits "sleeve.disk_limit", notes it in the chat and audits it. Writes
+  /// between samples are not blocked. 0 means unlimited.
+  @$pb.TagNumber(3)
+  $fixnum.Int64 get diskBytes => $_getI64(2);
+  @$pb.TagNumber(3)
+  set diskBytes($fixnum.Int64 value) => $_setInt64(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasDiskBytes() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearDiskBytes() => $_clearField(3);
 }
 
 /// SleeveUsage is read from the sleeve's cgroup.
@@ -3349,7 +3368,8 @@ class SleeveDiskEntry extends $pb.GeneratedMessage {
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
 /// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
-/// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
+/// "sleeve.oom", "sleeve.disk_warning", "sleeve.disk_limit" and
+/// "sleeve.restored" (subject = sleeve name).
 class SleeveServiceApi {
   final $pb.RpcClient _client;
 

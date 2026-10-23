@@ -1648,6 +1648,10 @@
               "description": "cpu_percent caps CPU time; 100 is one core, 200 two cores. 0 means unlimited.",
               "type": "integer"
             },
+            "diskBytes": {
+              "description": "disk_bytes bounds the sleeve's workspace, home, cache overlays and checkpoint store, as the hub samples them every 10 seconds while it runs. At 90% the hub emits \"sleeve.disk_warning\"; at 100% it stops the harness, emits \"sleeve.disk_limit\", notes it in the chat and audits it. Writes between samples are not blocked. 0 means unlimited.",
+              "type": "integer"
+            },
             "memoryBytes": {
               "description": "memory_bytes caps memory including page cache and tmpfs; swap is disabled when set. 0 means unlimited.",
               "type": "integer"

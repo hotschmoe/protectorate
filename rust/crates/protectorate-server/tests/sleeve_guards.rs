@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
     path::Path,
     process::{Child, Command, Stdio},
     thread,
@@ -18,7 +18,8 @@ const SLEEVE: &str = "/protectorate.v1.SleeveService/";
 struct Hub(Child, String);
 impl Drop for Hub {
     fn drop(&mut self) {
-        let _ = self.0.kill();
+        // The hub supervises a guard child; stop the whole process group.
+        unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
         let _ = self.0.wait();
         let _ = Command::new("tmux")
             .args(["-L", &self.1, "kill-server"])
@@ -53,7 +54,11 @@ fn start(root: &Path, extra: &[&str]) -> (Hub, Client, String) {
         .unwrap()
         .local_addr()
         .unwrap();
-    let tmux = format!("p-rust-guards-{}", std::process::id());
+    let tmux = format!(
+        "p-rust-guards-{}-{}",
+        std::process::id(),
+        root.file_name().unwrap().to_string_lossy()
+    );
     let log = fs::File::create(root.join("hub.stderr")).unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_protectorate-rs"))
         .arg("serve")
@@ -71,19 +76,22 @@ fn start(root: &Path, extra: &[&str]) -> (Hub, Client, String) {
         .env_remove("PROTECTORATE_HUB")
         .stdout(Stdio::null())
         .stderr(log)
+        .process_group(0)
         .spawn()
         .unwrap();
     let mut hub = Hub(child, tmux);
     let url = format!("http://{listen}");
     let client = Client::new(&url, token, Duration::from_secs(60)).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while client
-        .call("/protectorate.v1.HubService/GetStatus", &json!({}))
-        .is_err()
-    {
+    let probe = Client::new(&url, token, Duration::from_millis(500)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let error = match probe.call("/protectorate.v1.HubService/GetStatus", &json!({})) {
+            Ok(_) => break,
+            Err(error) => error,
+        };
         assert!(
             hub.0.try_wait().unwrap().is_none() && Instant::now() < deadline,
-            "hub did not become ready: {}",
+            "hub did not become ready ({error}): {}",
             fs::read_to_string(root.join("hub.stderr")).unwrap_or_default()
         );
         thread::sleep(Duration::from_millis(100));
@@ -267,4 +275,71 @@ fn checkpoints_round_trip_on_a_real_workspace() {
         &json!({"name": "ckpt", "id": "99"}),
     );
     assert!(missing.is_err());
+}
+
+#[test]
+fn disk_limit_stops_the_harness() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("disk-ws");
+    fs::create_dir_all(&workspace).unwrap();
+    let (_hub, client, _) = start(root.path(), &[]);
+    let limit: u64 = 32 << 20;
+    client
+        .call(
+            &format!("{SLEEVE}SpawnSleeve"),
+            &json!({
+                "name": "filler",
+                "harness": "HARNESS_SHELL",
+                "mode": "SLEEVE_MODE_TERMINAL",
+                "workspace": workspace,
+                "limits": {"diskBytes": limit.to_string()},
+                "args": ["/usr/bin/sh", "-c",
+                    "head -c 41943040 /dev/zero > fill.bin && touch filled; exec sleep 600"],
+            }),
+        )
+        .unwrap_or_else(|e| panic!("REAL sandbox capability failure (not skipped): {e}"));
+    wait_for(&workspace.join("filled"));
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        let sleeve = client
+            .call(&format!("{SLEEVE}GetSleeve"), &json!({"name": "filler"}))
+            .unwrap();
+        if sleeve["sleeve"]["state"] == "SLEEVE_STATE_EXITED" {
+            assert_eq!(
+                sleeve["sleeve"]["limits"]["diskBytes"],
+                limit.to_string(),
+                "{sleeve}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "disk limit did not stop the sleeve: {sleeve}"
+        );
+        thread::sleep(Duration::from_millis(250));
+    }
+    // The audit entry is written just after the stop is recorded.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let audit = client
+            .call(
+                "/protectorate.v1.AuditService/ListAuditEntries",
+                &json!({"procedure": "disk-limit", "limit": 10}),
+            )
+            .unwrap();
+        let found = audit["entries"].as_array().is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|e| e["subject"] == "filler" && e["outcome"] == "denied")
+        });
+        if found {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no disk-limit audit entry: {audit} {}",
+            fs::read_to_string(root.path().join("hub.stderr")).unwrap_or_default()
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
 }

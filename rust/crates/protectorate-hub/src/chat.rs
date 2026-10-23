@@ -1231,6 +1231,7 @@ fn spawn_chat(
     let cpu_percent = u32::try_from(number(limits, "cpuPercent")?)
         .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU limit exceeds u32"))?;
     let memory_bytes = number(limits, "memoryBytes")?;
+    let disk_bytes = number(limits, "diskBytes")?;
     let nested = value.get("nested").and_then(Value::as_bool) == Some(true);
     let mut command = if harness == Harness::Pi {
         vec![
@@ -1609,6 +1610,7 @@ fn spawn_chat(
     }
     row.limits.cpu_percent = cpu_percent;
     row.limits.memory_bytes = memory_bytes;
+    row.limits.disk_bytes = disk_bytes;
     row.nested = nested;
     row.read_only = readonly
         .iter()
@@ -1910,6 +1912,15 @@ pub(super) fn append_handoff(hub: &Hub, name: &str, handoff: &Value) -> Result<(
     runtime
         .log(name)?
         .append(Event::new(json!({"handoff":handoff})))
+        .map_err(log_error)?;
+    Ok(())
+}
+
+pub(super) fn append_error(hub: &Hub, name: &str, text: &str) -> Result<()> {
+    let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
+    runtime
+        .log(name)?
+        .append(Event::new(json!({"error":{"text":text}})))
         .map_err(log_error)?;
     Ok(())
 }

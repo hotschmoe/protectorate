@@ -424,6 +424,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--harness", "Harness"),
             ("--cpu", "CPU limit"),
             ("--mem", "Memory limit"),
+            ("--disk", "Disk limit"),
             ("--mode", "Chat or terminal"),
             ("--supervised", "Supervise"),
             ("--nested", "Nested sleeve"),

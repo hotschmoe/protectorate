@@ -222,13 +222,15 @@ const SleeveLimits$json = {
   '2': [
     {'1': 'cpu_percent', '3': 1, '4': 1, '5': 13, '10': 'cpuPercent'},
     {'1': 'memory_bytes', '3': 2, '4': 1, '5': 4, '10': 'memoryBytes'},
+    {'1': 'disk_bytes', '3': 3, '4': 1, '5': 4, '10': 'diskBytes'},
   ],
 };
 
 /// Descriptor for `SleeveLimits`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List sleeveLimitsDescriptor = $convert.base64Decode(
     'CgxTbGVldmVMaW1pdHMSHwoLY3B1X3BlcmNlbnQYASABKA1SCmNwdVBlcmNlbnQSIQoMbWVtb3'
-    'J5X2J5dGVzGAIgASgEUgttZW1vcnlCeXRlcw==');
+    'J5X2J5dGVzGAIgASgEUgttZW1vcnlCeXRlcxIdCgpkaXNrX2J5dGVzGAMgASgEUglkaXNrQnl0'
+    'ZXM=');
 
 @$core.Deprecated('Use sleeveUsageDescriptor instead')
 const SleeveUsage$json = {

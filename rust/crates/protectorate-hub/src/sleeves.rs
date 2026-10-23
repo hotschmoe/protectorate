@@ -677,17 +677,23 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             }
         });
         let weak = Arc::downgrade(&hub);
+        // Running sleeves with a disk limit are sampled every tick; every
+        // sleeve is sampled for status every 30th tick.
         runtime.spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
+            let mut warned = BTreeSet::new();
+            for tick in 0_u64.. {
                 interval.tick().await;
                 let Some(hub) = weak.upgrade() else { break };
-                if tokio::task::spawn_blocking(move || sample_sleeve_disks(&hub))
-                    .await
-                    .is_err()
+                match tokio::task::spawn_blocking(move || {
+                    sample_sleeve_disks(&hub, tick % 30 == 0, &mut warned);
+                    warned
+                })
+                .await
                 {
-                    break;
+                    Ok(kept) => warned = kept,
+                    Err(_) => break,
                 }
             }
         });
@@ -1532,6 +1538,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     let cpu_percent = u32::try_from(number(&limits, "cpuPercent")?)
         .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU percent exceeds u32"))?;
     let memory_bytes = number(&limits, "memoryBytes")?;
+    let disk_bytes = number(&limits, "diskBytes")?;
     let nested = value
         .get("nested")
         .and_then(Value::as_bool)
@@ -1725,6 +1732,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     row.limits = Limits {
         cpu_percent,
         memory_bytes,
+        disk_bytes,
     };
     row.nested = nested;
     row.parent = parent.label.clone();
@@ -2358,8 +2366,12 @@ fn overlay_upper_size(path: &Path) -> io::Result<(u64, u64)> {
     Ok((total, go_build))
 }
 
-fn sample_sleeve_disks(hub: &Hub) {
+fn sample_sleeve_disks(hub: &Hub, all: bool, warned: &mut BTreeSet<String>) {
     for row in hub.sleeves.list() {
+        let limited = row.state == State::Running && row.limits.disk_bytes > 0;
+        if !all && !limited {
+            continue;
+        }
         let mut sample = DiskUsage::default();
         let workspace = Path::new(&row.workspace);
         match disk_size_path(workspace) {
@@ -2410,13 +2422,91 @@ fn sample_sleeve_disks(hub: &Hub) {
                 eprintln!("sleeve {}: measure Go cache disk: {error}", row.name)
             }
         }
+        let used = match (sample.workspace_bytes, sample.home_bytes, &overlays) {
+            (Some(workspace), Some(home), Ok((overlay, _))) => Some(
+                workspace
+                    .saturating_add(home)
+                    .saturating_add(*overlay)
+                    .saturating_add(
+                        disk_size_path(
+                            &hub.workspaces
+                                .state_root()
+                                .join("helpers")
+                                .join(format!("checkpoint-{}", row.name)),
+                        )
+                        .unwrap_or(0),
+                    ),
+            ),
+            _ => None,
+        };
         if let Err(error) = hub
             .sleeves
             .set_disk_usage(&row.name, &row.created_at, sample, now())
         {
             eprintln!("sleeve {}: save disk usage: {error}", row.name);
         }
+        if let (true, Some(used)) = (limited, used) {
+            enforce_disk_limit(hub, &row, used, warned);
+        }
     }
+}
+
+/// Warn once at 90% of a sleeve's disk limit and stop its harness at 100%.
+fn enforce_disk_limit(hub: &Hub, row: &Record, used: u64, warned: &mut BTreeSet<String>) {
+    let limit = row.limits.disk_bytes;
+    let name = row.name.as_str();
+    if used < limit {
+        if used.saturating_mul(10) >= limit.saturating_mul(9) {
+            if warned.insert(name.to_owned()) {
+                hub.emit(
+                    "sleeve.disk_warning",
+                    name,
+                    json!({"usedBytes": used, "limitBytes": limit}),
+                );
+            }
+        } else {
+            warned.remove(name);
+        }
+        return;
+    }
+    warned.remove(name);
+    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+    let current = hub.sleeves.get(name).ok();
+    if hub.resleeving.lock().unwrap().contains(name)
+        || current.is_none_or(|current| {
+            current.created_at != row.created_at || current.state != State::Running
+        })
+    {
+        return;
+    }
+    let text = format!("disk limit reached: {used} of {limit} bytes used; the harness was stopped");
+    let stopped = if row.mode == Mode::Chat {
+        let _ = crate::chat::append_error(hub, name, &text);
+        crate::chat::kill_pi(hub, name)
+    } else {
+        kill_shell(hub, name)
+    };
+    hub.emit(
+        "sleeve.disk_limit",
+        name,
+        json!({"usedBytes": used, "limitBytes": limit, "stopped": stopped.is_ok()}),
+    );
+    hub.audit.write(AuditEntry {
+        actor: "hub".into(),
+        procedure: "disk-limit".into(),
+        subject: name.into(),
+        outcome: if stopped.is_ok() {
+            protectorate_audit::OUTCOME_DENIED
+        } else {
+            protectorate_audit::OUTCOME_ERROR
+        }
+        .into(),
+        detail: match stopped {
+            Ok(()) => text,
+            Err(error) => format!("{text}; stop failed: {}", error.message),
+        },
+        ..AuditEntry::default()
+    });
 }
 
 fn cache_error(error: io::Error) -> RpcError {
