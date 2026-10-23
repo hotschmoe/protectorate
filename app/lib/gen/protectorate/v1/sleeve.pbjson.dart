@@ -72,6 +72,7 @@ const Checkpoint$json = {
       '10': 'createdAt'
     },
     {'1': 'reason', '3': 4, '4': 1, '5': 9, '10': 'reason'},
+    {'1': 'run_id', '3': 5, '4': 1, '5': 9, '10': 'runId'},
   ],
 };
 
@@ -79,7 +80,7 @@ const Checkpoint$json = {
 final $typed_data.Uint8List checkpointDescriptor = $convert.base64Decode(
     'CgpDaGVja3BvaW50Eg4KAmlkGAEgASgEUgJpZBIWCgZjb21taXQYAiABKAlSBmNvbW1pdBI5Cg'
     'pjcmVhdGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJY3JlYXRlZEF0'
-    'EhYKBnJlYXNvbhgEIAEoCVIGcmVhc29u');
+    'EhYKBnJlYXNvbhgEIAEoCVIGcmVhc29uEhUKBnJ1bl9pZBgFIAEoCVIFcnVuSWQ=');
 
 @$core.Deprecated('Use createCheckpointRequestDescriptor instead')
 const CreateCheckpointRequest$json = {
@@ -419,6 +420,7 @@ const Sleeve$json = {
     },
     {'1': 'killed', '3': 28, '4': 1, '5': 8, '10': 'killed'},
     {'1': 'nested', '3': 30, '4': 1, '5': 8, '10': 'nested'},
+    {'1': 'run_id', '3': 31, '4': 1, '5': 9, '10': 'runId'},
   ],
   '8': [
     {'1': '_exit_code'},
@@ -446,7 +448,8 @@ final $typed_data.Uint8List sleeveDescriptor = $convert.base64Decode(
     'QnJhbmNoEhsKCWJhc2VfcmVwbxgWIAEoCVIIYmFzZVJlcG8SHwoLYmFzZV9icmFuY2gYFyABKA'
     'lSCmJhc2VCcmFuY2gSGQoIYmFzZV90aXAYGCABKAlSB2Jhc2VUaXASNQoGcmVzdWx0GBkgASgL'
     'Mh0ucHJvdGVjdG9yYXRlLnYxLlNsZWV2ZVJlc3VsdFIGcmVzdWx0EhYKBmtpbGxlZBgcIAEoCF'
-    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkQgwKCl9leGl0X2NvZGU=');
+    'IGa2lsbGVkEhYKBm5lc3RlZBgeIAEoCFIGbmVzdGVkEhUKBnJ1bl9pZBgfIAEoCVIFcnVuSWRC'
+    'DAoKX2V4aXRfY29kZQ==');
 
 @$core.Deprecated('Use browseWorkspacesRequestDescriptor instead')
 const BrowseWorkspacesRequest$json = {

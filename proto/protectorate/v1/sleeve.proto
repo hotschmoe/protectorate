@@ -139,6 +139,8 @@ message Checkpoint {
   google.protobuf.Timestamp created_at = 3;
   // reason is "turn", "resleeve", "manual" or "before restore of N".
   string reason = 4;
+  // run_id is the sleeve's run when the checkpoint was taken.
+  string run_id = 5;
 }
 
 message CreateCheckpointRequest {
@@ -280,6 +282,10 @@ message Sleeve {
   bool killed = 28;
   // Allows sandboxed child sleeves within this sleeve's resource limits.
   bool nested = 30;
+  // run_id is minted at spawn and kept across resleeves and hub restarts. It
+  // marks the sleeve's audit entries, jobs, mail, leases, checkpoints and
+  // egress decisions; filter with ListAuditEntries.run_id.
+  string run_id = 31;
 }
 
 message BrowseWorkspacesRequest {

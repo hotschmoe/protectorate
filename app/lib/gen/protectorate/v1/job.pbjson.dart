@@ -538,6 +538,7 @@ const Job$json = {
       '6': '.protectorate.v1.JobLimits',
       '10': 'limits'
     },
+    {'1': 'run_id', '3': 27, '4': 1, '5': 9, '10': 'runId'},
   ],
   '8': [
     {'1': '_gpu_index'},
@@ -565,7 +566,8 @@ final $typed_data.Uint8List jobDescriptor = $convert.base64Decode(
     'DWFydGlmYWN0Qnl0ZXMSGwoJbG9nX2J5dGVzGBYgASgEUghsb2dCeXRlcxIsCgRtb2RlGBcgAS'
     'gOMhgucHJvdGVjdG9yYXRlLnYxLkpvYk1vZGVSBG1vZGUSHAoJaXNvbGF0aW9uGBggASgJUglp'
     'c29sYXRpb24SEgoEdGFzaxgZIAEoCVIEdGFzaxIyCgZsaW1pdHMYGiABKAsyGi5wcm90ZWN0b3'
-    'JhdGUudjEuSm9iTGltaXRzUgZsaW1pdHNCDAoKX2dwdV9pbmRleA==');
+    'JhdGUudjEuSm9iTGltaXRzUgZsaW1pdHMSFQoGcnVuX2lkGBsgASgJUgVydW5JZEIMCgpfZ3B1'
+    'X2luZGV4');
 
 @$core.Deprecated('Use prepareJobRequestDescriptor instead')
 const PrepareJobRequest$json = {

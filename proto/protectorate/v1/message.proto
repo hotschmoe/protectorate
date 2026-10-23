@@ -191,6 +191,8 @@ message MailMessage {
   repeated MailDelivery deliveries = 10;
   google.protobuf.Timestamp escalated_at = 11;
   string note_id = 12;
+  // run_id is the sending sleeve's run.
+  string run_id = 13;
 }
 
 // MailDelivery is one recipient's state for a message.

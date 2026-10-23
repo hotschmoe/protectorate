@@ -200,7 +200,7 @@ fn entry_json(entry: &Entry) -> Value {
         Entry::Active(lease) => {
             let mut value = json!({
                 "id": lease.id, "resource": lease.resource.to_string(),
-                "node": lease.resource.node, "holder": lease.holder,
+                "node": lease.resource.node, "holder": lease.holder, "runId": lease.run_id,
                 "ttl": duration(lease.ttl), "acquiredAt": at(lease.acquired_at),
                 "expiresAt": at(lease.expires_at),
             });
@@ -210,7 +210,7 @@ fn entry_json(entry: &Entry) -> Value {
             value
         }
         Entry::Queued { ticket, position } => json!({
-            "id": ticket.id, "resource": ticket.resource, "holder": ticket.holder,
+            "id": ticket.id, "resource": ticket.resource, "holder": ticket.holder, "runId": ticket.run_id,
             "ttl": duration(ticket.ttl), "acquiredAt": at(ticket.enqueued_at),
             "expiresAt": at(ticket.enqueued_at.saturating_add(leases::MAX_QUEUE_WAIT.as_millis() as i64)),
             "state": "LEASE_STATE_QUEUED", "queuePosition": position,
@@ -277,12 +277,14 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     .map(str::to_owned)
                     .unwrap_or_default();
                 let table = Arc::clone(&hub.leases);
+                let run_id = super::actor_run(&hub, &request.auth.actor);
                 let entry = tokio::task::spawn_blocking(move || {
                     let now = now_millis();
                     if wait {
                         table.acquire_wait(
                             Wait {
                                 holder,
+                                run_id,
                                 notify,
                                 resource,
                                 request: key,
@@ -292,7 +294,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             now,
                         )
                     } else {
-                        table.acquire(&holder, ttl, &key, now).map(Entry::Active)
+                        table
+                            .acquire(&holder, &run_id, ttl, &key, now)
+                            .map(Entry::Active)
                     }
                 })
                 .await

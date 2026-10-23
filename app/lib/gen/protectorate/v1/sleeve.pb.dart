@@ -34,12 +34,14 @@ class Checkpoint extends $pb.GeneratedMessage {
     $core.String? commit,
     $0.Timestamp? createdAt,
     $core.String? reason,
+    $core.String? runId,
   }) {
     final result = Checkpoint._();
     if (id != null) result.id = id;
     if (commit != null) result.commit = commit;
     if (createdAt != null) result.createdAt = createdAt;
     if (reason != null) result.reason = reason;
+    if (runId != null) result.runId = runId;
     return result;
   }
 
@@ -63,6 +65,7 @@ class Checkpoint extends $pb.GeneratedMessage {
     ..aOM<$0.Timestamp>(3, _omitFieldNames ? '' : 'createdAt',
         subBuilder: $0.Timestamp.$_createMessage)
     ..aOS(4, _omitFieldNames ? '' : 'reason')
+    ..aOS(5, _omitFieldNames ? '' : 'runId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -124,6 +127,16 @@ class Checkpoint extends $pb.GeneratedMessage {
   $core.bool hasReason() => $_has(3);
   @$pb.TagNumber(4)
   void clearReason() => $_clearField(4);
+
+  /// run_id is the sleeve's run when the checkpoint was taken.
+  @$pb.TagNumber(5)
+  $core.String get runId => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set runId($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasRunId() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearRunId() => $_clearField(5);
 }
 
 class CreateCheckpointRequest extends $pb.GeneratedMessage {
@@ -1015,6 +1028,7 @@ class Sleeve extends $pb.GeneratedMessage {
     $1.SleeveResult? result,
     $core.bool? killed,
     $core.bool? nested,
+    $core.String? runId,
   }) {
     final result$ = Sleeve._();
     if (name != null) result$.name = name;
@@ -1044,6 +1058,7 @@ class Sleeve extends $pb.GeneratedMessage {
     if (result != null) result$.result = result;
     if (killed != null) result$.killed = killed;
     if (nested != null) result$.nested = nested;
+    if (runId != null) result$.runId = runId;
     return result$;
   }
 
@@ -1100,6 +1115,7 @@ class Sleeve extends $pb.GeneratedMessage {
         subBuilder: $1.SleeveResult.$_createMessage)
     ..aOB(28, _omitFieldNames ? '' : 'killed')
     ..aOB(30, _omitFieldNames ? '' : 'nested')
+    ..aOS(31, _omitFieldNames ? '' : 'runId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1388,6 +1404,18 @@ class Sleeve extends $pb.GeneratedMessage {
   $core.bool hasNested() => $_has(26);
   @$pb.TagNumber(30)
   void clearNested() => $_clearField(30);
+
+  /// run_id is minted at spawn and kept across resleeves and hub restarts. It
+  /// marks the sleeve's audit entries, jobs, mail, leases, checkpoints and
+  /// egress decisions; filter with ListAuditEntries.run_id.
+  @$pb.TagNumber(31)
+  $core.String get runId => $_getSZ(27);
+  @$pb.TagNumber(31)
+  set runId($core.String value) => $_setString(27, value);
+  @$pb.TagNumber(31)
+  $core.bool hasRunId() => $_has(27);
+  @$pb.TagNumber(31)
+  void clearRunId() => $_clearField(31);
 }
 
 class BrowseWorkspacesRequest extends $pb.GeneratedMessage {

@@ -190,6 +190,10 @@ pub struct Record {
     pub nested: bool,
     #[serde(default)]
     pub helper: bool,
+    /// Minted at spawn, kept across resleeves and restarts; correlates the
+    /// sleeve's audit entries, jobs, mail, leases, checkpoints and egress.
+    #[serde(default)]
+    pub run_id: String,
 }
 
 impl Record {
@@ -232,6 +236,7 @@ impl Record {
             killed: false,
             nested: false,
             helper: false,
+            run_id: String::new(),
         };
         row.validate()?;
         Ok(row)

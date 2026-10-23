@@ -347,6 +347,7 @@ const MailMessage$json = {
       '10': 'escalatedAt'
     },
     {'1': 'note_id', '3': 12, '4': 1, '5': 9, '10': 'noteId'},
+    {'1': 'run_id', '3': 13, '4': 1, '5': 9, '10': 'runId'},
   ],
 };
 
@@ -359,7 +360,8 @@ final $typed_data.Uint8List mailMessageDescriptor = $convert.base64Decode(
     'bHlUbxI5CgpjcmVhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJY3'
     'JlYXRlZEF0Ej0KCmRlbGl2ZXJpZXMYCiADKAsyHS5wcm90ZWN0b3JhdGUudjEuTWFpbERlbGl2'
     'ZXJ5UgpkZWxpdmVyaWVzEj0KDGVzY2FsYXRlZF9hdBgLIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi'
-    '5UaW1lc3RhbXBSC2VzY2FsYXRlZEF0EhcKB25vdGVfaWQYDCABKAlSBm5vdGVJZA==');
+    '5UaW1lc3RhbXBSC2VzY2FsYXRlZEF0EhcKB25vdGVfaWQYDCABKAlSBm5vdGVJZBIVCgZydW5f'
+    'aWQYDSABKAlSBXJ1bklk');
 
 @$core.Deprecated('Use mailDeliveryDescriptor instead')
 const MailDelivery$json = {

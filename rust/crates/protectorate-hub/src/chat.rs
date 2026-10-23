@@ -11,7 +11,9 @@ use protectorate_pi_driver::Session as PiSession;
 use protectorate_sandbox::{
     runtime::LaunchOptions, Access, BindGrant, Limits, Policy, Provider, Request, Workload,
 };
-use protectorate_sleeve_registry::{Harness, Mode, ReadOnlyMount, Record, State};
+use protectorate_sleeve_registry::{
+    Harness, Mode, ReadOnlyMount, Record, Registry as SleeveRegistry, State,
+};
 use protectorate_wire::{self as wire, Code, Result, RpcError, UnaryServer};
 use serde_json::{json, Value};
 use std::{
@@ -135,7 +137,12 @@ fn run_handoff_summary(
             &workspace,
         );
         options.environment = launcher.environment.clone();
-        options.egress_log = Some(crate::sleeves::egress_log(hub, owner));
+        let run_id = hub
+            .sleeves
+            .get(owner)
+            .map(|row| row.run_id)
+            .unwrap_or_default();
+        options.egress_log = Some(crate::sleeves::egress_log(hub, owner, &run_id));
         options.environment.extend(cache_environment);
         options.environment.remove("PROTECTORATE_HUB");
         options.environment.remove("PROTECTORATE_TOKEN_FILE");
@@ -556,7 +563,7 @@ struct ChatStateWatcher {
     hosts: Vec<String>,
     name: String,
     checkpoints: crate::checkpoints::Store,
-    workspace: PathBuf,
+    sleeves: Arc<SleeveRegistry>,
 }
 
 impl ChatStateWatcher {
@@ -575,7 +582,7 @@ impl ChatStateWatcher {
             hosts,
             name,
             checkpoints,
-            workspace,
+            sleeves,
         } = self;
         let mut previous = Value::Null;
         let mut last_publish = Instant::now();
@@ -612,11 +619,9 @@ impl ChatStateWatcher {
                 return Ok(());
             }
             if event.payload.get("settled").is_some() {
-                crate::checkpoints::after_turn(
-                    checkpoints.clone(),
-                    name.clone(),
-                    workspace.clone(),
-                );
+                if let Ok(row) = sleeves.get(&name) {
+                    crate::checkpoints::after_turn(checkpoints.clone(), row);
+                }
             }
             let mut status = chat_status_with(session.as_ref(), &hosts, &inventory);
             if let Some(state) = state {
@@ -1363,6 +1368,10 @@ fn spawn_chat(
             },
         })
         .map_err(|e| RpcError::new(Code::InvalidArgument, e.to_string()))?;
+    let run_id = match previous.as_ref() {
+        Some(old) if resleeve && !old.run_id.is_empty() => old.run_id.clone(),
+        _ => crate::sleeves::new_run_id()?,
+    };
     let mut options = LaunchOptions::new(
         &launcher.helper,
         &launcher.runtime_dir,
@@ -1370,7 +1379,7 @@ fn spawn_chat(
         &workspace,
     );
     options.environment = launcher.environment.clone();
-    options.egress_log = Some(crate::sleeves::egress_log(hub, &name));
+    options.egress_log = Some(crate::sleeves::egress_log(hub, &name, &run_id));
     options.environment.extend(cache_environment);
     options.environment.extend(caller_env.clone());
     if launcher.pub_cache_lower.is_some() {
@@ -1590,6 +1599,7 @@ fn spawn_chat(
     }
     row.chat = Some(chat_status(hub, session.as_ref()));
     row.env = caller_env;
+    row.run_id = run_id;
     let state_event_cursor = log.last();
     row.supervised = value["supervised"] == true;
     if !resleeve && !exit_after_idle.is_zero() {
@@ -1646,7 +1656,7 @@ fn spawn_chat(
         hosts: hub.local_model_hosts.clone(),
         name,
         checkpoints: crate::checkpoints::Store::for_chat(launcher),
-        workspace,
+        sleeves: Arc::clone(&hub.sleeves),
     }
     .start();
     Ok(row)
@@ -2169,7 +2179,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
     );
     options.stdio = protectorate_sandbox::runtime::StdioMode::Duplex;
     options.environment = launcher.environment.clone();
-    options.egress_log = Some(crate::sleeves::egress_log(hub, "codex-catalog"));
+    options.egress_log = Some(crate::sleeves::egress_log(hub, "codex-catalog", ""));
     options.environment.extend(
         protectorate_sleeve_runner::prepare_private_caches(
             scratch.path().join("home").as_path(),

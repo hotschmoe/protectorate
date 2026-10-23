@@ -1339,6 +1339,7 @@ class Job extends $pb.GeneratedMessage {
     $core.String? isolation,
     $core.String? task,
     JobLimits? limits,
+    $core.String? runId,
   }) {
     final result = Job._();
     if (id != null) result.id = id;
@@ -1367,6 +1368,7 @@ class Job extends $pb.GeneratedMessage {
     if (isolation != null) result.isolation = isolation;
     if (task != null) result.task = task;
     if (limits != null) result.limits = limits;
+    if (runId != null) result.runId = runId;
     return result;
   }
 
@@ -1427,6 +1429,7 @@ class Job extends $pb.GeneratedMessage {
     ..aOS(25, _omitFieldNames ? '' : 'task')
     ..aOM<JobLimits>(26, _omitFieldNames ? '' : 'limits',
         subBuilder: JobLimits.$_createMessage)
+    ..aOS(27, _omitFieldNames ? '' : 'runId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1691,6 +1694,16 @@ class Job extends $pb.GeneratedMessage {
   void clearLimits() => $_clearField(26);
   @$pb.TagNumber(26)
   JobLimits ensureLimits() => $_ensure(25);
+
+  /// run_id is the submitting sleeve's run.
+  @$pb.TagNumber(27)
+  $core.String get runId => $_getSZ(26);
+  @$pb.TagNumber(27)
+  set runId($core.String value) => $_setString(26, value);
+  @$pb.TagNumber(27)
+  $core.bool hasRunId() => $_has(26);
+  @$pb.TagNumber(27)
+  void clearRunId() => $_clearField(27);
 }
 
 class PrepareJobRequest extends $pb.GeneratedMessage {

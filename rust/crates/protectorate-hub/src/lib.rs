@@ -278,14 +278,26 @@ impl Hub {
             quotas::QuotaOptions::default(),
         ));
         quota::publish_updates(&quota, Arc::clone(&events));
+        let run_sleeves = Arc::clone(&sleeves);
+        let audit = Audit::new(home.join("audit"))
+            .with_on_error(|error| eprintln!("hub audit write failed: {error}"))
+            .with_run_ids(move |entry| {
+                let concerns_sleeve = ["SleeveService", "ChatService"].iter().any(|service| {
+                    entry
+                        .procedure
+                        .starts_with(&format!("/protectorate.v1.{service}/"))
+                });
+                actor_sleeve(&entry.actor)
+                    .or_else(|| concerns_sleeve.then_some(entry.subject.as_str()))
+                    .map(|name| run_of(&run_sleeves, name))
+                    .unwrap_or_default()
+            });
         Ok(Self {
             version: version.into(),
             hostname,
             owner_token: Arc::new(Zeroizing::new(owner_token.into())),
             identity,
-            audit: Arc::new(Audit::new(home.join("audit")).with_on_error(|error| {
-                eprintln!("hub audit write failed: {error}");
-            })),
+            audit: Arc::new(audit),
             backlog: Arc::new(BacklogStore::new(home.clone())),
             sessions: Arc::new(SessionManager::new("")),
             session_monitor: Arc::new(session_monitor::Monitor::new(
@@ -1438,16 +1450,24 @@ fn boolean(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 fn sender(actor: &str) -> String {
-    if actor == "owner" {
-        return "owner".into();
-    }
+    actor_sleeve(actor).unwrap_or(actor).into()
+}
+/// The sleeve an actor authenticates as: a sleeve token or Envoy's.
+fn actor_sleeve(actor: &str) -> Option<&str> {
     if actor == "token:orchestrator-envoy" {
-        return "envoy".into();
+        Some("envoy")
+    } else {
+        actor.strip_prefix("token:sleeve:")
     }
-    if let Some(sleeve) = actor.strip_prefix("token:sleeve:") {
-        return sleeve.into();
-    }
-    actor.into()
+}
+fn run_of(sleeves: &SleeveRegistry, name: &str) -> String {
+    sleeves.get(name).map(|row| row.run_id).unwrap_or_default()
+}
+/// The run of the sleeve an actor authenticates as, empty for anyone else.
+fn actor_run(hub: &Hub, actor: &str) -> String {
+    actor_sleeve(actor)
+        .map(|name| run_of(&hub.sleeves, name))
+        .unwrap_or_default()
 }
 fn sleeve_session(actor: &str) -> Option<String> {
     actor

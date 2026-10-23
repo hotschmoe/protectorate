@@ -1630,6 +1630,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         .unwrap_or_default()
         .as_nanos();
     let ready = root.join(format!("ready-{}-{nonce}", std::process::id()));
+    let run_id = new_run_id()?;
     let config_path = root.join(format!("launch-{}-{nonce}.json", std::process::id()));
     let config = Config {
         name: name.clone(),
@@ -1660,6 +1661,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         nested,
         ready_file: ready.clone(),
         egress: Some(sleeve_egress(hub, harness == Harness::Pi)),
+        run_id: run_id.clone(),
     };
     protectorate_sleeve_runner::plan(&config)
         .map_err(|e| RpcError::new(Code::InvalidArgument, e.to_string()))?;
@@ -1730,6 +1732,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         disk_bytes,
     };
     row.nested = nested;
+    row.run_id = run_id;
     row.parent = parent.label.clone();
     row.parent_token_id = parent.token_id.clone();
     row.read_only = read_only
@@ -2767,6 +2770,12 @@ fn resolve_executable(executable: &str, tool_roots: &[PathBuf]) -> Result<PathBu
     Ok(found)
 }
 
+pub(super) fn new_run_id() -> Result<String> {
+    let mut bytes = [0u8; 8];
+    getrandom::getrandom(&mut bytes).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 fn internal(error: std::io::Error) -> RpcError {
     RpcError::new(Code::Internal, error.to_string())
 }
@@ -2812,8 +2821,12 @@ pub(super) fn sleeve_egress(hub: &Hub, pi: bool) -> protectorate_sandbox::Egress
     }
 }
 
-pub(super) fn egress_log(hub: &Hub, name: &str) -> protectorate_sandbox::egress::Log {
-    protectorate_sleeve_runner::egress_audit(Arc::clone(&hub.audit), format!("sleeve:{name}"))
+pub(super) fn egress_log(hub: &Hub, name: &str, run_id: &str) -> protectorate_sandbox::egress::Log {
+    protectorate_sleeve_runner::egress_audit(
+        Arc::clone(&hub.audit),
+        format!("sleeve:{name}"),
+        run_id.to_owned(),
+    )
 }
 
 pub(super) fn sleeve_json(sleeve: &Record) -> Value {

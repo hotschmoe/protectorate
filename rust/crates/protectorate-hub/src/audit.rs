@@ -208,12 +208,7 @@ fn subject(method: &Method, auth: &AuthContext, request: &DynamicMessage, succes
     } else if method.procedure == "/protectorate.v1.GrantService/Admin" && success {
         field_string(request, "node").trim().to_ascii_lowercase()
     } else if method.procedure == "/protectorate.v1.ChatService/Report" {
-        let self_name = if auth.actor == "token:orchestrator-envoy" {
-            Some("envoy")
-        } else {
-            auth.actor.strip_prefix("token:sleeve:")
-        };
-        self_name
+        super::actor_sleeve(&auth.actor)
             .filter(|self_name| {
                 let target = field_string(request, "sleeve");
                 target.is_empty() || target == *self_name

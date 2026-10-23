@@ -77,6 +77,7 @@ fn message_json(message: &Message) -> Value {
         "to": message.to, "kind": kind, "ackRequired": message.ack_required,
         "body": message.body, "replyTo": message.reply_to,
         "createdAt": rfc3339(message.created), "noteId": message.note_id,
+        "runId": message.run_id,
         "deliveries": message.recipients.iter().map(|recipient| {
             let delivery = &message.deliveries[recipient];
             let mut value = json!({"recipient": recipient, "reminders": delivery.reminders.max(0)});
@@ -253,6 +254,7 @@ fn send(hub: &Hub, from: &str, args: Send) -> Result<(Message, bool)> {
             project: project.clone(),
             recipients,
             footer: args.footer,
+            run_id: super::run_of(&hub.sleeves, from),
         })
         .map_err(error)?;
     let mut message = outcome.message;
