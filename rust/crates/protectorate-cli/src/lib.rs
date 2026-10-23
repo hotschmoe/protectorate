@@ -101,6 +101,7 @@ const LIST_SLEEVES: &str = "/protectorate.v1.SleeveService/ListSleeves";
 const LIST_WORKSPACES: &str = "/protectorate.v1.SleeveService/ListWorkspaces";
 const BROWSE_WORKSPACES: &str = "/protectorate.v1.SleeveService/BrowseWorkspaces";
 const GET_SLEEVE: &str = "/protectorate.v1.SleeveService/GetSleeve";
+const GET_TERMINAL_STATUS: &str = "/protectorate.v1.SleeveService/GetTerminalStatus";
 const KILL_SLEEVE: &str = "/protectorate.v1.SleeveService/KillSleeve";
 const SLEEVE_SERVICE: &str = "/protectorate.v1.SleeveService/";
 const SPAWN_SLEEVE: &str = "/protectorate.v1.SleeveService/SpawnSleeve";
@@ -799,6 +800,10 @@ pub enum Command {
     SleeveShow {
         name: String,
     },
+    SleeveStatus {
+        name: String,
+        explain: bool,
+    },
     SleeveKill {
         name: String,
         drop_caches: bool,
@@ -959,6 +964,7 @@ fn usage() -> &'static str {
      sleeve workspaces | ws     workspaces and read-only references on the hub\n  \
      sleeve browse [path]      browse configured workspace roots or a directory on the hub\n  \
      sleeve show <name>         one sleeve, its usage and the tail of an exited run\n  \
+     sleeve status <name>       what a terminal sleeve is doing: working, blocked or idle (--explain lists the screen rules)\n  \
      sleeve kill <name>         stop a sleeve and its processes (--drop-caches)\n  \
      sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
@@ -2267,6 +2273,14 @@ fn execute_commands(
                 json_line(&response)
             } else {
                 Ok(format::sleeve_text(sleeve, tail.as_deref()))
+            }
+        }
+        Command::SleeveStatus { name, explain } => {
+            let response = client.call(GET_TERMINAL_STATUS, &json!({"name": name}))?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format::terminal_status_text(&response, *explain))
             }
         }
         Command::SleeveKill { name, drop_caches } => {

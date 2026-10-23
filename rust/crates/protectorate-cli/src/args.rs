@@ -1922,6 +1922,26 @@ fn sleeve(args: &[String], index: &mut usize) -> Result<Command> {
                 name: names.remove(0),
             })
         }
+        "status" => {
+            let mut name = None;
+            let mut explain = false;
+            while let Some(token) = next(args, *index + 1) {
+                let (flag, inline) = option(token);
+                match flag {
+                    "--explain" => {
+                        *index += 1;
+                        explain = bool_flag(flag, inline)?;
+                    }
+                    _ if !token.starts_with('-') && name.is_none() => {
+                        *index += 1;
+                        name = Some(token.to_owned());
+                    }
+                    _ => break,
+                }
+            }
+            let name = name.ok_or_else(|| bad_argument("sleeve status <name> [--explain]"))?;
+            Ok(Command::SleeveStatus { name, explain })
+        }
         "kill" => sleeve_kill(args, index),
         "checkpoint" => sleeve_checkpoint(args, index),
         "attach" => {

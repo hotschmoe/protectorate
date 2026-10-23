@@ -2066,13 +2066,69 @@ fn harness_label(sleeve: &Value) -> String {
 
 /// The STATE column: "killed", "running", "exited", "exited(3)" or
 /// "exited(137,oom)", the way the Go CLI labels a sleeve record.
+fn terminal_activity(status: &Value) -> String {
+    text(status, "activity")
+        .strip_prefix("TERMINAL_ACTIVITY_")
+        .unwrap_or_default()
+        .to_lowercase()
+}
+
+/// What `sleeve status` prints: the activity and deciding rule, and with
+/// `explain` every rule of the harness and the screen lines they read.
+pub(crate) fn terminal_status_text(response: &Value, explain: bool) -> String {
+    let status = at(response, "status").cloned().unwrap_or(Value::Null);
+    let activity = terminal_activity(&status);
+    let mut out = String::new();
+    row(
+        &mut out,
+        "activity",
+        if activity.is_empty() {
+            "unknown".to_owned()
+        } else {
+            activity
+        },
+    );
+    optional_row(&mut out, "rule", text(&status, "rule"));
+    let mut out = align(&out);
+    if explain {
+        out.push_str("\nrules, first match decides\n");
+        for rule in items(response, "rules") {
+            out.push_str(&format!(
+                "  {}\t{}\t{}\n",
+                if boolean(&rule, "matched") {
+                    "match"
+                } else {
+                    "-"
+                },
+                terminal_activity(&rule),
+                text(&rule, "id"),
+            ));
+        }
+        out.push_str("\nscreen lines read\n");
+        for line in items(response, "lines") {
+            out.push_str(&format!("  {}\n", line.as_str().unwrap_or_default()));
+        }
+    }
+    out
+}
+
 fn sleeve_row_state(sleeve: &Value) -> String {
     if boolean(sleeve, "killed") {
         return "killed".to_owned();
     }
     let running = text(sleeve, "state") == "SLEEVE_STATE_RUNNING";
-    if running || at(sleeve, "exitCode").is_none() {
-        return if running { "running" } else { "exited" }.to_owned();
+    if running {
+        let activity = at(sleeve, "terminal")
+            .map(terminal_activity)
+            .unwrap_or_default();
+        return if activity.is_empty() {
+            "running".to_owned()
+        } else {
+            format!("running ({activity})")
+        };
+    }
+    if at(sleeve, "exitCode").is_none() {
+        return "exited".to_owned();
     }
     let code = text(sleeve, "exitCode");
     if boolean(sleeve, "oomKilled") {

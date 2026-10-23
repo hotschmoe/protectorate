@@ -256,6 +256,7 @@ fn children(path: &str) -> &'static [Candidate] {
             ("workspaces", "List workspaces"),
             ("browse", "Browse workspaces"),
             ("show", "Show a sleeve"),
+            ("status", "Show terminal activity"),
             ("kill", "Kill a sleeve"),
             ("checkpoint", "List, diff or restore workspace checkpoints"),
             ("attach", "Attach terminal"),
@@ -745,7 +746,9 @@ fn resource_kind(path: &str, positionals: usize) -> Option<ResourceKind> {
         {
             Some(ResourceKind::Node)
         }
-        "sleeve show" | "sleeve kill" | "sleeve attach" | "sleeve resleeve" if positionals == 0 => {
+        "sleeve show" | "sleeve status" | "sleeve kill" | "sleeve attach" | "sleeve resleeve"
+            if positionals == 0 =>
+        {
             Some(ResourceKind::Sleeve)
         }
         "chat send" | "chat watch" | "chat respond" | "chat interrupt" | "chat compact"

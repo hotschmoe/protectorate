@@ -8,7 +8,9 @@ use protectorate_audit::Entry as AuditEntry;
 use protectorate_sandbox::{
     runtime::LaunchOptions, Helper, Limits as SandboxLimits, Policy, Request, Workload,
 };
-use protectorate_session::{CreateOptions, Error as SessionError, State as SessionState};
+use protectorate_session::{
+    explain, Activity, CreateOptions, Error as SessionError, State as SessionState,
+};
 use protectorate_sleeve_registry::{
     DiskUsage, Error, Harness, Limits, Mode, ReadOnlyMount, Record, State,
 };
@@ -264,7 +266,7 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
     Ok(row)
 }
 
-fn harness_name(harness: Harness) -> &'static str {
+pub(super) fn harness_name(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => "claude",
         Harness::Codex => "codex",
@@ -732,6 +734,22 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             )
         }
     })?;
+    let status = Arc::clone(&hub);
+    server.register(
+        "/protectorate.v1.SleeveService/GetTerminalStatus",
+        move |request| {
+            let hub = Arc::clone(&status);
+            async move {
+                let name = string(&input(&request)?, "name");
+                let response = tokio::task::spawn_blocking(move || terminal_status(&hub, &name))
+                    .await
+                    .map_err(|error| {
+                        RpcError::new(Code::Internal, format!("terminal status: {error}"))
+                    })??;
+                respond(&request, response)
+            }
+        },
+    )?;
     let spawn = Arc::clone(&hub);
     server.register(
         "/protectorate.v1.SleeveService/SpawnSleeve",
@@ -1373,8 +1391,60 @@ pub(super) fn refresh_record(hub: &Hub, row: &Record) -> Record {
                     .unwrap_or_else(|_| row.clone()),
             )
         }
-        _ => row.clone(),
+        _ => {
+            let mut row = row.clone();
+            row.terminal = hub
+                .session_monitor
+                .activity(&row.name)
+                .map(|(activity, rule)| terminal_json(Some(activity), rule));
+            row
+        }
     }
+}
+
+fn terminal_json(activity: Option<Activity>, rule: &str) -> Value {
+    let activity = match activity {
+        Some(Activity::Working) => "TERMINAL_ACTIVITY_WORKING",
+        Some(Activity::Blocked) => "TERMINAL_ACTIVITY_BLOCKED",
+        Some(Activity::Idle) => "TERMINAL_ACTIVITY_IDLE",
+        None => "TERMINAL_ACTIVITY_UNSPECIFIED",
+    };
+    json!({"activity": activity, "rule": rule})
+}
+
+fn terminal_status(hub: &Hub, name: &str) -> Result<Value> {
+    let row = hub.sleeves.get(name).map_err(registry_error)?;
+    let row = refresh_record(hub, &row);
+    if row.helper || row.mode != Mode::Terminal || row.state != State::Running {
+        return Err(RpcError::new(
+            Code::FailedPrecondition,
+            format!("sleeve {name} is not a running terminal sleeve"),
+        ));
+    }
+    let harness = harness_name(row.harness);
+    let pane = hub
+        .sessions
+        .screen(&row.session)
+        .map_err(|error| RpcError::new(Code::Unavailable, format!("read screen: {error}")))?;
+    let Some(explanation) = explain(harness, &pane) else {
+        return Err(RpcError::new(
+            Code::FailedPrecondition,
+            format!("{harness} has no screen rules"),
+        ));
+    };
+    let decided = explanation.rules.iter().find(|(_, _, matched)| *matched);
+    let rules = explanation
+        .rules
+        .iter()
+        .map(|(id, activity, matched)| {
+            json!({"id": id, "activity": terminal_json(Some(*activity), "")["activity"], "matched": matched})
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "status": terminal_json(decided.map(|(_, activity, _)| *activity), decided.map_or("", |(id, _, _)| id)),
+        "rules": rules,
+        "lines": explanation.region,
+    }))
 }
 
 fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Record> {

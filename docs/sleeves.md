@@ -288,6 +288,20 @@ injected text. Keep it that way: put anything new that varies last, or in a
 file. `chat status` and `sleeve show` report each session's cache use; a
 resumed session whose first call read nothing from the cache is flagged.
 
+## Terminal sleeve status
+
+The hub reads the bottom non-empty lines of each running terminal sleeve's
+screen once a second and classifies it as working, blocked (a dialog waits for
+the owner) or idle, with a small per-harness rule table in
+`protectorate-session/src/activity.rs` for claude, codex, grok and pi. The first
+matching rule wins and a blocking dialog outranks the working indicator. A
+change, once two scans agree, is announced as `sleeve.activity` and appears as
+`terminal` on the sleeve, in the fleet cards and in the `sleeve ls` state.
+`protectorate sleeve status <name> --explain` reads the screen now and lists
+every rule, which one decided, and the lines examined. A screen no rule
+recognizes reads as unknown. When a harness changes its TUI, add the new pane
+to `rust/fuzz/corpus/terminal_pane/` and adjust the rule.
+
 ## Disk
 
 `sleeve ls` includes HOME; `sleeve show` and sleeve cards report total home
