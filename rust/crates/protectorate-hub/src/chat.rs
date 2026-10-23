@@ -120,6 +120,7 @@ fn run_handoff_summary(
                 credential: Some(Provider::Pi),
                 overlays: Vec::new(),
                 masks: Vec::new(),
+                egress: Some(crate::sleeves::sleeve_egress(hub, true)),
                 limits: Limits {
                     cpu_percent: 0,
                     memory_bytes: 0,
@@ -134,6 +135,7 @@ fn run_handoff_summary(
             &workspace,
         );
         options.environment = launcher.environment.clone();
+        options.egress_log = Some(crate::sleeves::egress_log(hub, owner));
         options.environment.extend(cache_environment);
         options.environment.remove("PROTECTORATE_HUB");
         options.environment.remove("PROTECTORATE_TOKEN_FILE");
@@ -553,6 +555,8 @@ struct ChatStateWatcher {
     inventory: Arc<Inventory>,
     hosts: Vec<String>,
     name: String,
+    checkpoints: crate::checkpoints::Store,
+    workspace: PathBuf,
 }
 
 impl ChatStateWatcher {
@@ -570,6 +574,8 @@ impl ChatStateWatcher {
             inventory,
             hosts,
             name,
+            checkpoints,
+            workspace,
         } = self;
         let mut previous = Value::Null;
         let mut last_publish = Instant::now();
@@ -604,6 +610,13 @@ impl ChatStateWatcher {
                     .any(|key| event.payload.get(*key).is_some())
             {
                 return Ok(());
+            }
+            if event.payload.get("settled").is_some() {
+                crate::checkpoints::after_turn(
+                    checkpoints.clone(),
+                    name.clone(),
+                    workspace.clone(),
+                );
             }
             let mut status = chat_status_with(session.as_ref(), &hosts, &inventory);
             if let Some(state) = state {
@@ -1209,6 +1222,7 @@ fn spawn_chat(
     let cpu_percent = u32::try_from(number(limits, "cpuPercent")?)
         .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU limit exceeds u32"))?;
     let memory_bytes = number(limits, "memoryBytes")?;
+    let disk_bytes = number(limits, "diskBytes")?;
     let nested = value.get("nested").and_then(Value::as_bool) == Some(true);
     let mut command = if harness == Harness::Pi {
         vec![
@@ -1341,6 +1355,7 @@ fn spawn_chat(
             )
             .collect(),
             masks: Vec::new(),
+            egress: Some(crate::sleeves::sleeve_egress(hub, harness == Harness::Pi)),
             limits: Limits {
                 cpu_percent,
                 memory_bytes,
@@ -1355,6 +1370,7 @@ fn spawn_chat(
         &workspace,
     );
     options.environment = launcher.environment.clone();
+    options.egress_log = Some(crate::sleeves::egress_log(hub, &name));
     options.environment.extend(cache_environment);
     options.environment.extend(caller_env.clone());
     if launcher.pub_cache_lower.is_some() {
@@ -1585,6 +1601,7 @@ fn spawn_chat(
     }
     row.limits.cpu_percent = cpu_percent;
     row.limits.memory_bytes = memory_bytes;
+    row.limits.disk_bytes = disk_bytes;
     row.nested = nested;
     row.read_only = readonly
         .iter()
@@ -1628,6 +1645,8 @@ fn spawn_chat(
         inventory: Arc::clone(&hub.inventory),
         hosts: hub.local_model_hosts.clone(),
         name,
+        checkpoints: crate::checkpoints::Store::for_chat(launcher),
+        workspace,
     }
     .start();
     Ok(row)
@@ -1888,6 +1907,15 @@ pub(super) fn append_handoff(hub: &Hub, name: &str, handoff: &Value) -> Result<(
     Ok(())
 }
 
+pub(super) fn append_error(hub: &Hub, name: &str, text: &str) -> Result<()> {
+    let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
+    runtime
+        .log(name)?
+        .append(Event::new(json!({"error":{"text":text}})))
+        .map_err(log_error)?;
+    Ok(())
+}
+
 pub(super) fn send_resleeve_prompt(hub: &Hub, name: &str, text: &str) -> Result<()> {
     let session = live_session(hub, name)?;
     session
@@ -2125,6 +2153,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
             credential: Some(Provider::Codex),
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: Some(crate::sleeves::sleeve_egress(hub, false)),
             limits: Limits {
                 cpu_percent: 0,
                 memory_bytes: 0,
@@ -2140,6 +2169,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
     );
     options.stdio = protectorate_sandbox::runtime::StdioMode::Duplex;
     options.environment = launcher.environment.clone();
+    options.egress_log = Some(crate::sleeves::egress_log(hub, "codex-catalog"));
     options.environment.extend(
         protectorate_sleeve_runner::prepare_private_caches(
             scratch.path().join("home").as_path(),

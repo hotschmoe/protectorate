@@ -794,7 +794,11 @@ async fn sandboxed_node_job_streams_before_exit_and_reattaches() {
     );
     let jobs = Jobs::new(temp.path().join("nodejobs"), 1)
         .unwrap()
-        .with_sandbox(SandboxConfig { policy, options });
+        .with_sandbox(SandboxConfig {
+            policy,
+            options,
+            egress: None,
+        });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let router = Agent::new(Arc::new(Fixed), "node-secret")
@@ -916,7 +920,11 @@ async fn sandboxed_git_job_can_read_its_own_metadata() {
     );
     let jobs = Jobs::new(temp.path().join("nodejobs"), 1)
         .unwrap()
-        .with_sandbox(SandboxConfig { policy, options })
+        .with_sandbox(SandboxConfig {
+            policy,
+            options,
+            egress: None,
+        })
         .with_plain_mode();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

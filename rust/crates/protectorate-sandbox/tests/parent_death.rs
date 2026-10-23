@@ -64,6 +64,7 @@ fn run_fixture(root: PathBuf) {
             credential: None,
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: None,
             limits: Limits {
                 cpu_percent: 100,
                 memory_bytes: 256 << 20,

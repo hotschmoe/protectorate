@@ -75,6 +75,7 @@ fn sleeve_build(remap: bool) {
         credential: None,
         overlays: Vec::new(),
         masks: Vec::new(),
+        egress: None,
         limits: Limits {
             cpu_percent: 100,
             memory_bytes: 512 << 20,

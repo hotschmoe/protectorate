@@ -62,6 +62,8 @@ pub struct Jobs {
 pub struct SandboxConfig {
     pub policy: protectorate_sandbox::Policy,
     pub options: protectorate_sandbox::runtime::LaunchOptions,
+    /// `None` gives jobs loopback only.
+    pub egress: Option<protectorate_sandbox::Egress>,
 }
 struct Run {
     state: Mutex<State>,
@@ -1080,6 +1082,7 @@ impl Jobs {
             credential: None,
             overlays: vec![],
             masks: vec![],
+            egress: config.egress.clone(),
             limits: Limits {
                 cpu_percent: spec.cpu_percent,
                 memory_bytes: spec.memory_bytes,
@@ -1535,6 +1538,7 @@ async fn run_linux_git_stage(
             credential: None,
             overlays: vec![],
             masks: vec![],
+            egress: None,
             limits: Limits {
                 cpu_percent: 0,
                 memory_bytes: 0,

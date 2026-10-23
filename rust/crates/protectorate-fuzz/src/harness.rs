@@ -73,6 +73,7 @@ fn peer(steps: &[(usize, &[u8])]) -> Peer {
                 memory_bytes: 0,
                 tasks_max: 0,
             },
+            egress: None,
         })
         .expect("direct harness plan");
     let options = LaunchOptions::new(

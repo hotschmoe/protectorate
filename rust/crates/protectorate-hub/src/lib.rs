@@ -1,6 +1,7 @@
 //! Initial Rust hub service wiring for the existing Connect API.
 mod audit;
 mod chat;
+mod checkpoints;
 mod device;
 mod diagnostics;
 mod directory;
@@ -131,6 +132,7 @@ pub struct Hub {
     chat_recovery: Vec<SleeveRecord>,
     sleeve_effort: String,
     local_model_hosts: Vec<String>,
+    egress_allow: Vec<String>,
     sleeve_launch_lock: std::sync::Mutex<()>,
     resleeving: std::sync::Mutex<std::collections::BTreeSet<String>>,
     envoy_spawn_lock: std::sync::Mutex<()>,
@@ -348,6 +350,7 @@ impl Hub {
             chat_recovery,
             sleeve_effort: "high".into(),
             local_model_hosts: Vec::new(),
+            egress_allow: Vec::new(),
             sleeve_launch_lock: std::sync::Mutex::new(()),
             resleeving: std::sync::Mutex::new(std::collections::BTreeSet::new()),
             envoy_spawn_lock: std::sync::Mutex::new(()),
@@ -449,6 +452,12 @@ impl Hub {
     }
     pub fn with_local_model_hosts(mut self, hosts: Vec<String>) -> Self {
         self.local_model_hosts = hosts;
+        self
+    }
+    /// Operator-approved destinations, such as package registries and Git
+    /// hosts, that every sleeve may reach besides its provider and the hub.
+    pub fn with_egress_allow(mut self, hosts: Vec<String>) -> Self {
+        self.egress_allow = hosts;
         self
     }
     pub fn with_directory(mut self, directory: Arc<Directory>) -> Self {
@@ -704,6 +713,7 @@ impl Hub {
         node_update::register(&mut server, Arc::clone(&hub))?;
         jobs::register(&mut server, Arc::clone(&hub))?;
         sleeves::register(&mut server, Arc::clone(&hub))?;
+        checkpoints::register(&mut server, Arc::clone(&hub))?;
         workspaces::register(&mut server, Arc::clone(&hub))?;
         chat::register(&mut server, Arc::clone(&hub))?;
         let subscribe = Arc::clone(&hub);

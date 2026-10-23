@@ -42,6 +42,7 @@ fn installed_dart_resolves_a_cached_package_inside_a_private_pub_overlay() {
         cli_executable: None, mcpbridge_executable: None, environment: BTreeMap::new(),
         cpu_percent: 0, memory_bytes: 0, tasks_max: 64, nested: false,
         ready_file: sleeve.join("ready"),
+        egress: None,
     };
     assert_eq!(protectorate_sleeve_runner::run(&config).unwrap(), 0);
     assert!(!fs::read(workspace.join("plugin-response.bin"))

@@ -230,6 +230,7 @@ fn request(input: &mut Input) -> Request {
         overlays,
         masks,
         limits,
+        egress: None,
     }
 }
 

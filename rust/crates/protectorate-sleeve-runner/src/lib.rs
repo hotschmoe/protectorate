@@ -2,9 +2,12 @@
 //! session; it owns and waits for the sandbox handle for the same duration.
 //! A hub RPC never drops a live `ChildHandle`.
 
+use protectorate_audit::{Audit, Entry};
 use protectorate_sandbox::{
+    egress::{self, Decision, Verdict},
     runtime::{self, LaunchOptions, StdioMode},
-    Access, BindGrant, CacheOverlay, Limits, Policy, Provider, Request, ValidatedPlan, Workload,
+    Access, BindGrant, CacheOverlay, Egress, Limits, Policy, Provider, Request, ValidatedPlan,
+    Workload,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,6 +20,7 @@ use std::{
         unix::{ffi::OsStrExt, fs::OpenOptionsExt},
     },
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,6 +60,7 @@ pub struct Config {
     pub tasks_max: u32,
     pub nested: bool,
     pub ready_file: PathBuf,
+    pub egress: Option<Egress>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -159,6 +164,10 @@ pub fn run(config: &Config) -> Result<i32, Box<dyn std::error::Error>> {
         .environment
         .insert("PROTECTORATE_SLEEVE".into(), config.name.clone());
     options.stdio = StdioMode::Inherit;
+    options.egress_log = Some(egress_audit(
+        Arc::new(Audit::new(config.state_root.join("audit"))),
+        format!("sleeve:{}", config.name),
+    ));
     let child = runtime::spawn(&plan, &options)?;
     // The ready file is created only after the sandbox reports successful setup.
     fs::write(&config.ready_file, b"ready\n")?;
@@ -281,8 +290,28 @@ pub fn plan(config: &Config) -> Result<ValidatedPlan, Box<dyn std::error::Error>
             memory_bytes: config.memory_bytes,
             tasks_max: config.tasks_max,
         },
+        egress: config.egress.clone(),
     })?;
     Ok(plan)
+}
+
+/// Record each egress decision of one sandbox in the hub audit log.
+pub fn egress_audit(audit: Arc<Audit>, actor: String) -> egress::Log {
+    Arc::new(move |decision: &Decision| {
+        audit.write(Entry {
+            actor: actor.clone(),
+            procedure: "egress".into(),
+            subject: format!("{}:{}", decision.host, decision.port),
+            outcome: match decision.verdict {
+                Verdict::Allow => "ok",
+                Verdict::Deny => "denied",
+                Verdict::Error => "error",
+            }
+            .into(),
+            detail: decision.reason.clone(),
+            ..Entry::default()
+        })
+    })
 }
 
 /// A published SDK cache is mounted over only `bin/cache`; the remaining SDK

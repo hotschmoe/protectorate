@@ -101,6 +101,7 @@ const LIST_WORKSPACES: &str = "/protectorate.v1.SleeveService/ListWorkspaces";
 const BROWSE_WORKSPACES: &str = "/protectorate.v1.SleeveService/BrowseWorkspaces";
 const GET_SLEEVE: &str = "/protectorate.v1.SleeveService/GetSleeve";
 const KILL_SLEEVE: &str = "/protectorate.v1.SleeveService/KillSleeve";
+const SLEEVE_SERVICE: &str = "/protectorate.v1.SleeveService/";
 const SPAWN_SLEEVE: &str = "/protectorate.v1.SleeveService/SpawnSleeve";
 const RESLEEVE_SLEEVE: &str = "/protectorate.v1.SleeveService/ResleeveSleeve";
 const SPAWN_ENVOY: &str = "/protectorate.v1.SleeveService/SpawnEnvoy";
@@ -511,6 +512,7 @@ pub struct SleeveSpawn {
     pub args: Vec<String>,
     pub cpu_percent: u32,
     pub memory_bytes: u64,
+    pub disk_bytes: u64,
     pub env: Vec<(String, String)>,
     pub mode: SleeveModeName,
     pub supervised: bool,
@@ -797,6 +799,12 @@ pub enum Command {
         name: String,
         drop_caches: bool,
     },
+    /// `method` is a SleeveService checkpoint RPC; `ids` are its id arguments.
+    SleeveCheckpoint {
+        name: String,
+        method: &'static str,
+        ids: Vec<u64>,
+    },
     SleeveAttach {
         name: String,
         read_only: bool,
@@ -954,8 +962,9 @@ fn usage() -> &'static str {
      sleeve browse [path]      browse configured workspace roots or a directory on the hub\n  \
      sleeve show <name>         one sleeve, its usage and the tail of an exited run\n  \
      sleeve kill <name>         stop a sleeve and its processes (--drop-caches)\n  \
+     sleeve checkpoint <name>   list, create, diff <from> [to] or restore <id> workspace checkpoints\n  \
      sleeve attach <name>       attach a terminal (--readonly, --escape ^X|none; detach with Ctrl-])\n  \
-     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, -- args)\n  \
+     sleeve spawn <name>        start a harness (--workspace, --harness claude|codex|grok|pi|shell, --cpu, --mem, --disk, --mode chat|terminal, --supervised, --nested, --env K=V, --ro, --brief FILE, --branch, --new-branch, --exit-after-idle, --model, --effort, -- args)\n  \
      sleeve envoy               create or respawn Envoy (--harness auto|claude|codex|grok|pi, --scopes, --add-scopes, --ttl, --model, --effort)\n  \
      orchestrator spawn         create or respawn Envoy (same options as sleeve envoy)\n  \
      orchestrator status        show Envoy sleeve and latest token\n  \
@@ -2267,6 +2276,42 @@ fn execute_commands(
                 Ok(format!("killed\t{name}\n"))
             }
         }
+        Command::SleeveCheckpoint { name, method, ids } => {
+            let method: &str = method;
+            let mut request = json!({"name": name});
+            let keys: &[&str] = if method == "DiffCheckpoint" {
+                &["fromId", "toId"]
+            } else {
+                &["id"]
+            };
+            for (key, id) in keys.iter().zip(ids) {
+                request[*key] = json!(id.to_string());
+            }
+            let response = client.call(&format!("{SLEEVE_SERVICE}{method}"), &request)?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(match method {
+                "DiffCheckpoint" => {
+                    let mut diff = response["diff"].as_str().unwrap_or_default().to_owned();
+                    if response["truncated"] == true {
+                        diff.push_str("\n(diff truncated)\n");
+                    }
+                    diff
+                }
+                "ListCheckpoints" => response["checkpoints"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(format::checkpoint_line)
+                    .collect(),
+                "CreateCheckpoint" => format::checkpoint_line(&response["checkpoint"]),
+                _ => format!(
+                    "restored\t{name}\tbefore\t{}",
+                    format::checkpoint_line(&response["before"])
+                ),
+            })
+        }
         Command::SleeveSpawn(spawn) => spawn_sleeve(client, spawn, json),
         Command::SleeveEnvoy(envoy) => spawn_envoy(client, envoy, json),
         Command::SleeveResleeve(resleeve) => resleeve_sleeve(client, resleeve, json),
@@ -3161,6 +3206,9 @@ fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
     }
     if spawn.memory_bytes > 0 {
         limits.insert("memoryBytes".into(), json!(spawn.memory_bytes.to_string()));
+    }
+    if spawn.disk_bytes > 0 {
+        limits.insert("diskBytes".into(), json!(spawn.disk_bytes.to_string()));
     }
     if !limits.is_empty() {
         request["limits"] = Value::Object(limits);

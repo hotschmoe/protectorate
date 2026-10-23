@@ -84,7 +84,9 @@ An existing directory, including its `.git`, is mounted read-write at its
 resolved host path. Edits change the original checkout directly; no copy or
 worktree is created. Selecting it does not expose its parents or siblings.
 System/tool mounts are read-only, HOME is the sleeve's own writable home, and
-that harness's shared auth directory is writable. The host network is shared.
+that harness's shared auth directory is writable. The sleeve has its own
+network namespace; outbound connections go only through the hub's
+allowlisting egress proxy ([sandbox egress](rust-sandbox.md#egress)).
 Outward symlinks do not grant access to otherwise unmounted host paths. A linked
 git worktree may need a common git directory outside the workspace that is not
 mounted.

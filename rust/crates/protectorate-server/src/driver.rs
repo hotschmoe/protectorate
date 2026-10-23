@@ -268,6 +268,7 @@ pub async fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         credential: None,
         overlays: vec![],
         masks: vec![],
+        egress: None,
         limits: Limits {
             cpu_percent: 0,
             memory_bytes: 0,

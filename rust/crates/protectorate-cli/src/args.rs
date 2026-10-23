@@ -1923,6 +1923,7 @@ fn sleeve(args: &[String], index: &mut usize) -> Result<Command> {
             })
         }
         "kill" => sleeve_kill(args, index),
+        "checkpoint" => sleeve_checkpoint(args, index),
         "attach" => {
             let name = argument(args, index, "sleeve attach <name>")?;
             let mut read_only = false;
@@ -1945,9 +1946,39 @@ fn sleeve(args: &[String], index: &mut usize) -> Result<Command> {
         "resleeve" => sleeve_resleeve(args, index),
         "prune" => sleeve_prune(args, index),
         other => Err(bad_argument(format!(
-            "unknown sleeve subcommand {other:?}; use ls, workspaces, browse [path], show <name>, kill <name>, spawn <name>, envoy, resleeve <name> or prune"
+            "unknown sleeve subcommand {other:?}; use ls, workspaces, browse [path], show <name>, kill <name>, checkpoint <name>, spawn <name>, envoy, resleeve <name> or prune"
         ))),
     }
+}
+
+fn sleeve_checkpoint(args: &[String], index: &mut usize) -> Result<Command> {
+    const USAGE: &str =
+        "sleeve checkpoint <name> [list | create | diff <from> [to] | restore <id>]";
+    let name = argument(args, index, USAGE)?;
+    let mut words = Vec::new();
+    while let Some(token) = next(args, *index + 1) {
+        if token.starts_with('-') {
+            break;
+        }
+        *index += 1;
+        words.push(token.to_owned());
+    }
+    let ids = words
+        .iter()
+        .skip(1)
+        .map(|word| word.parse::<u64>().map_err(|_| bad_argument(USAGE)))
+        .collect::<Result<Vec<_>>>()?;
+    let method = match (
+        words.first().map(String::as_str).unwrap_or("list"),
+        ids.len(),
+    ) {
+        ("list", 0) => "ListCheckpoints",
+        ("create", 0) => "CreateCheckpoint",
+        ("diff", 1 | 2) => "DiffCheckpoint",
+        ("restore", 1) => "RestoreCheckpoint",
+        _ => return Err(bad_argument(USAGE)),
+    };
+    Ok(Command::SleeveCheckpoint { name, method, ids })
 }
 
 fn sleeve_kill(args: &[String], index: &mut usize) -> Result<Command> {
@@ -1973,6 +2004,7 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
     let mut extra = Vec::new();
     let mut cpu_percent = 0_u32;
     let mut memory_bytes = 0_u64;
+    let mut disk_bytes = 0_u64;
     let mut env = Vec::new();
     let mut mode = SleeveModeName::Default;
     let mut supervised = false;
@@ -2047,6 +2079,10 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
                     *index += 1;
                     memory_bytes = parse_size(&value(args, index, "--mem", inline)?)?;
                 }
+                "--disk" => {
+                    *index += 1;
+                    disk_bytes = parse_size(&value(args, index, "--disk", inline)?)?;
+                }
                 "--env" => {
                     *index += 1;
                     env.push(env_pair(&value(args, index, "--env", inline)?)?);
@@ -2090,6 +2126,7 @@ fn sleeve_spawn(args: &[String], index: &mut usize) -> Result<Command> {
         args: extra,
         cpu_percent,
         memory_bytes,
+        disk_bytes,
         env,
         mode,
         supervised,

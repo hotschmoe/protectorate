@@ -38,6 +38,7 @@ fn main() {
         credential: None,
         overlays: Vec::new(),
         masks: Vec::new(),
+        egress: None,
         limits: Limits {
             cpu_percent: 50,
             memory_bytes: 128 << 20,

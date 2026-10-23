@@ -98,6 +98,7 @@ impl State {
 pub struct Limits {
     pub cpu_percent: u32,
     pub memory_bytes: u64,
+    pub disk_bytes: u64,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]

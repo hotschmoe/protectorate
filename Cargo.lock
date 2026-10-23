@@ -1701,6 +1701,7 @@ name = "protectorate-sleeve-runner"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "protectorate-audit",
  "protectorate-sandbox",
  "serde",
  "serde_json",

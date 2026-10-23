@@ -2575,3 +2575,15 @@ fn flush(block: &mut Vec<Vec<String>>, out: &mut String) {
         out.push('\n');
     }
 }
+
+pub(crate) fn checkpoint_line(checkpoint: &Value) -> String {
+    let field = |key: &str| checkpoint[key].as_str().unwrap_or_default();
+    let commit = field("commit");
+    format!(
+        "{}\t{}\t{}\t{}\n",
+        field("id"),
+        field("createdAt"),
+        &commit[..commit.len().min(12)],
+        field("reason")
+    )
+}
