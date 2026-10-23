@@ -216,13 +216,13 @@ fn version(server: &str, minimum: &str) -> String {
 pub fn parse_disk(value: &Value) -> (EngineDiskUsage, Vec<(String, i64, i64)>) {
     let mut out = EngineDiskUsage::default();
     let mut sizes = Vec::new();
-    let mut image_sum = 0;
+    let mut image_sum: i64 = 0;
     for image in array(value, "Images") {
         out.images.count += 1;
         let size = int(image, "Size").max(0);
-        image_sum += size;
+        image_sum = image_sum.saturating_add(size);
         if int(image, "Containers") == 0 {
-            out.images.reclaimable_bytes += size;
+            out.images.reclaimable_bytes = out.images.reclaimable_bytes.saturating_add(size);
         }
     }
     out.images.size_bytes = int(value, "LayersSize").max(0);
@@ -234,9 +234,9 @@ pub fn parse_disk(value: &Value) -> (EngineDiskUsage, Vec<(String, i64, i64)>) {
         let rw = int(container, "SizeRw").max(0);
         let rootfs = int(container, "SizeRootFs").max(0);
         out.containers.count += 1;
-        out.containers.size_bytes += rw;
+        out.containers.size_bytes = out.containers.size_bytes.saturating_add(rw);
         if string(container, "State") != "running" {
-            out.containers.reclaimable_bytes += rw;
+            out.containers.reclaimable_bytes = out.containers.reclaimable_bytes.saturating_add(rw);
         }
         sizes.push((string(container, "Id").into(), rw, rootfs));
     }
@@ -244,18 +244,19 @@ pub fn parse_disk(value: &Value) -> (EngineDiskUsage, Vec<(String, i64, i64)>) {
         out.volumes.count += 1;
         if let Some(usage) = volume.get("UsageData") {
             let size = int(usage, "Size").max(0);
-            out.volumes.size_bytes += size;
+            out.volumes.size_bytes = out.volumes.size_bytes.saturating_add(size);
             if int(usage, "RefCount") == 0 {
-                out.volumes.reclaimable_bytes += size;
+                out.volumes.reclaimable_bytes = out.volumes.reclaimable_bytes.saturating_add(size);
             }
         }
     }
     for cache in array(value, "BuildCache") {
         let size = int(cache, "Size").max(0);
         out.build_cache.count += 1;
-        out.build_cache.size_bytes += size;
+        out.build_cache.size_bytes = out.build_cache.size_bytes.saturating_add(size);
         if !cache.get("InUse").and_then(Value::as_bool).unwrap_or(false) {
-            out.build_cache.reclaimable_bytes += size;
+            out.build_cache.reclaimable_bytes =
+                out.build_cache.reclaimable_bytes.saturating_add(size);
         }
     }
     (out, sizes)
