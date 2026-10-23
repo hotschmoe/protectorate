@@ -374,7 +374,7 @@ async fn default_chooser_rejects_busy_explicit_and_discrete_gpus() {
 }
 
 #[tokio::test]
-async fn busy_integrated_gpu_does_not_block_whole_node_or_desk() {
+async fn busy_integrated_gpu_does_not_block_whole_node() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
     add_shared(&hub, "gpu-box", "gpu-box.example:7475");
@@ -419,16 +419,6 @@ async fn busy_integrated_gpu_does_not_block_whole_node_or_desk() {
             .contains("gpu 1 is busy"),
         "{explicit}"
     );
-
-    let (status, desk) = call(
-        addr,
-        ACQUIRE,
-        "owner-secret",
-        json!({"resource":"desk:gpu-box", "holder":"desk-user", "ttl":"20s"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{desk}");
-    assert_eq!(desk["resource"], "desk:gpu-box");
     server.abort();
 }
 

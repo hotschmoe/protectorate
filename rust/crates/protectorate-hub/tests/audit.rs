@@ -102,47 +102,6 @@ async fn call(addr: std::net::SocketAddr, token: &str, body: Value) -> (u16, Val
 }
 
 #[tokio::test]
-async fn desktop_attempt_audits_target_node_without_input_text() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-
-    let procedure = "/protectorate.v1.DeskService/Type";
-    let (status, response) = call_path(
-        addr,
-        procedure,
-        "owner-secret",
-        json!({"target":{"name":"desk-peer"},"text":"SECRET-DESK-INPUT"}),
-    )
-    .await;
-    assert_ne!(status, 200, "unknown desk node must fail: {response}");
-    let (status, denied) = call_path(
-        addr,
-        procedure,
-        "wrong",
-        json!({"target":{"name":"desk-peer"},"text":"SECRET-DENIED-INPUT"}),
-    )
-    .await;
-    assert_eq!(status, 401, "{denied}");
-
-    let (status, audit) = call(addr, "owner-secret", json!({})).await;
-    assert_eq!(status, 200, "{audit}");
-    let entries = audit["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 2, "{audit}");
-    assert_eq!(entries[0]["procedure"], procedure);
-    assert_eq!(entries[0]["subject"], "desk-peer");
-    assert_eq!(entries[0]["outcome"], "denied");
-    assert_eq!(entries[1]["subject"], "desk-peer");
-    assert_eq!(entries[1]["outcome"], "error");
-    assert!(!audit.to_string().contains("SECRET-DESK-INPUT"));
-    assert!(!audit.to_string().contains("SECRET-DENIED-INPUT"));
-    server.abort();
-}
-
-#[tokio::test]
 async fn denied_mutation_with_invalid_body_is_audited_once() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();

@@ -50,7 +50,6 @@ protectorate-grok-driver = { path = "../protectorate-grok-driver" }
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
-protectorate-desk-node = { path = "../protectorate-desk-node" }
 
 [dev-dependencies]
 tempfile = "3"

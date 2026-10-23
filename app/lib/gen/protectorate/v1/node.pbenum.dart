@@ -271,10 +271,6 @@ class NodeSetupStage extends $pb.ProtobufEnum {
   static const NodeSetupStage NODE_SETUP_STAGE_JOINED =
       NodeSetupStage._(2, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_JOINED');
 
-  /// NODE_SETUP_STAGE_METRICS: the agent answered the hub; checks are pending.
-  static const NodeSetupStage NODE_SETUP_STAGE_METRICS =
-      NodeSetupStage._(3, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_METRICS');
-
   /// NODE_SETUP_STAGE_READY: the node is in service. Final.
   static const NodeSetupStage NODE_SETUP_STAGE_READY =
       NodeSetupStage._(4, _omitEnumNames ? '' : 'NODE_SETUP_STAGE_READY');
@@ -288,7 +284,6 @@ class NodeSetupStage extends $pb.ProtobufEnum {
     NODE_SETUP_STAGE_UNSPECIFIED,
     NODE_SETUP_STAGE_INVITED,
     NODE_SETUP_STAGE_JOINED,
-    NODE_SETUP_STAGE_METRICS,
     NODE_SETUP_STAGE_READY,
     NODE_SETUP_STAGE_ATTENTION,
   ];

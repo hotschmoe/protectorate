@@ -268,7 +268,7 @@ pub fn task_xml(spec: &Spec, trigger: &str) -> Result<String, Error> {
 pub fn task_notes(spec: &Spec, trigger: &str, xml_path: &str) -> String {
     let mut out = format!("Register (not run for you; boot triggers and --elevated need an elevated prompt):\n  schtasks /Create /TN {} /XML {} /F\n  schtasks /Run /TN {}\n", win_quote(&spec.name()), win_quote(xml_path), win_quote(&spec.name()));
     if trigger == TRIGGER_LOGON {
-        out.push_str("A logon task runs in the interactive session, which desk commands need; the agent runs under conhost.exe --headless, so it has no console window.\n");
+        out.push_str("The agent runs under conhost.exe --headless, so it has no console window.\n");
     }
     out
 }

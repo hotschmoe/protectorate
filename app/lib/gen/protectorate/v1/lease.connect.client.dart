@@ -17,8 +17,7 @@ extension type LeaseServiceClient (connect.Transport _transport) {
   /// AcquireLease reserves one resource exclusively: a node name ("win1"), one
   /// GPU ("gpu-box:gpu1") or whatever a selector picks. A selector chooses the
   /// least-loaded fresh matching node of tier "shared" that is not already
-  /// leased; nodes of tier "care" are never leased, except their desktop
-  /// ("desk:<node>") under the owner token or a node_admin grant. When the
+  /// leased; nodes of tier "care" are never leased. When the
   /// resource is held, the call fails with failed_precondition, unless the
   /// request sets wait: then the caller is queued first in first out (highest
   /// priority first) and gets a ticket, a Lease in state QUEUED. When the hub

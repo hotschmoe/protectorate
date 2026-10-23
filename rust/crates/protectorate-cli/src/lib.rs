@@ -39,7 +39,6 @@
 //! ```
 mod args;
 mod attach;
-pub mod desk;
 mod format;
 mod hub_update;
 mod job;
@@ -676,15 +675,6 @@ pub enum Command {
         url: Option<String>,
         app: bool,
     },
-    DeskAction {
-        node: String,
-        lease: String,
-        action: desk::Action,
-    },
-    DeskPolicy {
-        node: String,
-        action: desk::PolicyAction,
-    },
     Who {
         target: Option<String>,
     },
@@ -932,8 +922,6 @@ pub fn usage() -> &'static str {
      devices rename <id> <name> rename a trusted device\n  \
      login [--name NAME] [--platform OS/ARCH] [--home DIR]  pair this machine with --hub through device approval\n  \
      pair [--url URL] [--app]  print a public pairing link and terminal QR\n  \
-     desk <node> screenshot|windows|foreground|click|move|type|key|run  drive a Windows desktop\n  \
-     desk policy <node>        show or set a desktop access policy (--window, --idle, --tz, --lock-after, --off)\n  \
      grant admin               mint a task grant (--node NAME|GLOB, --task TEXT, --ttl 4h, --out FILE)\n  \
      audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --page-token)\n  \
      who [project|sleeve]       show projects, owning sleeves and dependency edges\n  \
@@ -1215,39 +1203,6 @@ fn render(
         }
         Command::Pair { url, app } => {
             pair::run(invocation, url.as_deref(), *app).map_err(RunError::from)
-        }
-        Command::DeskAction {
-            node,
-            lease,
-            action,
-        } => {
-            let lease = if lease.is_empty() {
-                std::env::var("PROTECTORATE_DESK_LEASE").unwrap_or_default()
-            } else {
-                lease.clone()
-            };
-            let (output, notice) = desk::run_action_with(
-                node,
-                &lease,
-                action,
-                invocation.json,
-                |procedure, request| {
-                    let (message, metadata) = client.call_with_metadata(procedure, request)?;
-                    let notice = metadata.desk_lease_id.map(|id| {
-                        format!(
-                            "desk lease {id} (auto, renewed by each desk command, expires {})\n",
-                            metadata.desk_lease_expires.unwrap_or_default()
-                        )
-                    });
-                    Ok((message, notice))
-                },
-            )?;
-            if let Some(notice) = notice {
-                stderr.write_all(notice.as_bytes()).map_err(|error| {
-                    RpcError::new(Code::Internal, format!("write desk lease notice: {error}"))
-                })?;
-            }
-            Ok(output)
         }
         Command::ChatWait {
             sleeves,
@@ -1563,19 +1518,6 @@ fn execute_commands(
         Command::Version => Ok(version_text(json)),
         Command::NodeMetricsLocal { watch } => local_metrics(watch, json),
         Command::ApiCall { procedure, body } => api_call(client, procedure, body, json),
-        Command::DeskPolicy { node, action } => desk::run_policy(client, node, action, json),
-        Command::DeskAction {
-            node,
-            lease,
-            action,
-        } => {
-            let lease = if lease.is_empty() {
-                std::env::var("PROTECTORATE_DESK_LEASE").unwrap_or_default()
-            } else {
-                lease.clone()
-            };
-            desk::run_action(client, node, &lease, action, json)
-        }
         Command::Help => Ok(usage().to_string()),
         Command::HelpPath(path) => command_usage(path),
         Command::Who { target } => {
@@ -2849,7 +2791,6 @@ fn streams(command: &Command) -> bool {
                 | Command::Events
                 | Command::SleeveAttach { .. }
                 | Command::SessionAttach { .. }
-                | Command::DeskAction { .. }
                 | Command::NodeUpdate { .. }
                 | Command::HubUpdate { .. }
         )

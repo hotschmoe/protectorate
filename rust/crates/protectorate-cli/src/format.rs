@@ -221,8 +221,7 @@ pub(crate) fn event_text(event: &Value) -> String {
     )
 }
 
-const NODE_COLUMNS: &str =
-    "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tDESK\tFRESHNESS\tALERTS";
+const NODE_COLUMNS: &str = "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tFRESHNESS\tALERTS";
 
 fn token_scopes(token: &Value) -> String {
     format!(
@@ -737,7 +736,6 @@ pub(crate) fn node_list_text(response: &Value) -> String {
                     None => "-".to_owned(),
                 })
                 .unwrap_or_else(|| "-".to_owned()),
-            desk_label(status),
             freshness_label(status),
             alert_label(status),
         ]
@@ -781,17 +779,6 @@ pub(crate) fn node_show_text(status: &Value) -> String {
     );
     row(&mut out, "notes", text(node, "notes"));
     row(&mut out, "freshness", freshness_label(status));
-    let desk = desk_label(status);
-    if desk != "-" || !text(status, "deskHolder").is_empty() {
-        row(&mut out, "desk", desk);
-    }
-    let inputs = items(status, "deskInputs")
-        .iter()
-        .filter_map(|entry| number(entry, "count"))
-        .sum::<f64>();
-    if inputs > 0.0 {
-        row(&mut out, "desk inputs today", format!("{inputs:.0}"));
-    }
     optional_row(&mut out, "last error", text(status, "error"));
     for alert in items(status, "alerts") {
         row(&mut out, "ALERT", text(&alert, "message"));
@@ -2432,30 +2419,6 @@ fn alert_label(status: &Value) -> String {
         .filter(|part| !part.is_empty())
         .collect();
     or_dash(parts.join(","))
-}
-
-fn desk_label(status: &Value) -> String {
-    let holder = text(status, "deskHolder");
-    if !holder.is_empty() {
-        return format!(
-            "in use by {}",
-            holder.strip_prefix("auto:").unwrap_or(&holder)
-        );
-    }
-    let Some(desk) = at(status, "desk") else {
-        return "-".to_owned();
-    };
-    let policy = at(desk, "policy").is_some();
-    match text(desk, "reason").as_str() {
-        "DESK_REASON_AVAILABLE" if policy => "away".to_owned(),
-        "DESK_REASON_AVAILABLE" => "available".to_owned(),
-        "DESK_REASON_OUTSIDE_WINDOW" => "outside window".to_owned(),
-        "DESK_REASON_USER_ACTIVE" => "user active".to_owned(),
-        "DESK_REASON_NOT_INTERACTIVE" => "unavailable: not an interactive session".to_owned(),
-        "DESK_REASON_LOCKED" => "unavailable: screen locked".to_owned(),
-        "DESK_REASON_UNSUPPORTED" => "-".to_owned(),
-        _ => "unknown".to_owned(),
-    }
 }
 
 fn first_line(text: &str, limit: usize) -> String {

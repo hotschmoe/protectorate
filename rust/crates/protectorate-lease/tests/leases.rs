@@ -40,7 +40,6 @@ fn whole_node_gpu_conflicts_and_expiration() {
         Err(Error::Busy(_))
     ));
     assert!(t.node_lease("node", 0).unwrap().is_none());
-    assert!(t.acquire("desktop", ttl(10), "desk:node", 0).is_ok());
     assert!(t.acquire("other", ttl(10), "other", 0).is_ok());
     t.release(&a.id, 100).unwrap();
     assert!(t

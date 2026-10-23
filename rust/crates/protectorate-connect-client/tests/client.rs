@@ -1,6 +1,6 @@
 use protectorate_connect_client::Client;
 use protectorate_wire::{
-    decode_json, AuthContext, Authorizer, Catalog, Code, RpcError, RpcResponse, UnaryServer,
+    decode_json, AuthContext, Authorizer, Catalog, Code, RpcError, UnaryServer,
 };
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
@@ -47,30 +47,7 @@ async fn unary_and_stream_interoperate_with_real_wire_server() {
     server
         .register("/protectorate.v1.HubService/GetStatus", move |_| {
             let output = status_method.output();
-            async move {
-                let mut response: RpcResponse = decode_json(output, br#"{}"#)?.into();
-                response
-                    .headers
-                    .insert("Protectorate-Desk-Lease", "lease-123".parse().unwrap());
-                response.headers.insert(
-                    "Protectorate-Desk-Lease-Expires",
-                    "2026-10-23T00:00:00Z".parse().unwrap(),
-                );
-                Ok(response)
-            }
-        })
-        .unwrap();
-    server
-        .register("/protectorate.v1.NodeAgentService/GetMetrics", |_| async {
-            let mut error = RpcError::new(Code::FailedPrecondition, "desktop is locked");
-            error.headers.insert(
-                "Protectorate-Desk-Unavailable",
-                "DESK_REASON_LOCKED".parse().unwrap(),
-            );
-            error
-                .headers
-                .insert("X-Private-Header", "not-forwarded".parse().unwrap());
-            Err(error)
+            async move { Ok(decode_json(output, br#"{}"#)?.into()) }
         })
         .unwrap();
     server
@@ -99,24 +76,6 @@ async fn unary_and_stream_interoperate_with_real_wire_server() {
                 .unwrap(),
             json!({})
         );
-        let (message, metadata) = client
-            .call_with_metadata("/protectorate.v1.HubService/GetStatus", &json!({}))
-            .unwrap();
-        assert_eq!(message, json!({}));
-        assert_eq!(metadata.desk_lease_id.as_deref(), Some("lease-123"));
-        assert_eq!(
-            metadata.desk_lease_expires.as_deref(),
-            Some("2026-10-23T00:00:00Z")
-        );
-        let desk_refusal = client
-            .call("/protectorate.v1.NodeAgentService/GetMetrics", &json!({}))
-            .unwrap_err();
-        assert_eq!(desk_refusal.code, Code::FailedPrecondition);
-        assert_eq!(
-            desk_refusal.headers["Protectorate-Desk-Unavailable"],
-            "DESK_REASON_LOCKED"
-        );
-        assert!(!desk_refusal.headers.contains_key("X-Private-Header"));
         let mut events = Vec::new();
         let err = client
             .stream(

@@ -1,8 +1,6 @@
 //! Initial Rust hub service wiring for the existing Connect API.
 mod audit;
 mod chat;
-mod desk_policy;
-mod desk_service;
 mod device;
 mod diagnostics;
 mod directory;
@@ -109,8 +107,6 @@ pub struct Hub {
     pub directory: Arc<Directory>,
     directory_kick: Arc<tokio::sync::Notify>,
     pub leases: Arc<LeaseTable>,
-    desk_policies: Arc<desk_policy::Store>,
-    desk_use: Arc<desk_service::UseCounts>,
     pub inventory: Arc<Inventory>,
     pub jobs: Arc<jobs::Jobs>,
     node_admission: Arc<std::sync::RwLock<()>>,
@@ -292,16 +288,11 @@ impl Hub {
             }
         }
         let lease_path = home.join("leases.json");
-        let desk_policies = Arc::new(
-            desk_policy::Store::open(home.join("desk-policies-rust.json"))
-                .map_err(identity::Error::Invalid)?,
-        );
         let leases = Arc::new(
             lease::open_table(
                 &lease_path,
                 Arc::clone(&events),
                 Arc::clone(&mail),
-                lease::DeskNotifications::new(Arc::clone(&desk_policies), Arc::clone(&node_files)),
                 lease::default_chooser(
                     Arc::clone(&inventory),
                     Arc::clone(&node_monitor),
@@ -333,11 +324,6 @@ impl Hub {
             directory: Arc::new(directory),
             directory_kick: Arc::new(tokio::sync::Notify::new()),
             leases,
-            desk_policies,
-            desk_use: Arc::new(
-                desk_service::UseCounts::open(home.join("desk-use-rust.json"))
-                    .map_err(identity::Error::Invalid)?,
-            ),
             inventory,
             jobs,
             node_admission,
@@ -504,10 +490,6 @@ impl Hub {
             &self.lease_path,
             Arc::clone(&self.events),
             Arc::clone(&self.mail),
-            lease::DeskNotifications::new(
-                Arc::clone(&self.desk_policies),
-                Arc::clone(&self.node_files),
-            ),
             lease::default_chooser(
                 Arc::clone(&self.inventory),
                 Arc::clone(&monitor),
@@ -526,10 +508,6 @@ impl Hub {
             &self.lease_path,
             Arc::clone(&self.events),
             Arc::clone(&self.mail),
-            lease::DeskNotifications::new(
-                Arc::clone(&self.desk_policies),
-                Arc::clone(&self.node_files),
-            ),
             chooser,
             Arc::clone(&self.node_admission),
             Arc::clone(&self.node_draining),
@@ -722,8 +700,6 @@ impl Hub {
         mail::register(&mut server, Arc::clone(&hub))?;
         nodes::register(&mut server, Arc::clone(&hub))?;
         tailnet_status::register(&mut server, Arc::clone(&hub))?;
-        desk_policy::register(&mut server, Arc::clone(&hub))?;
-        desk_service::register(&mut server, Arc::clone(&hub))?;
         node_files::register(&mut server, Arc::clone(&hub))?;
         node_update::register(&mut server, Arc::clone(&hub))?;
         jobs::register(&mut server, Arc::clone(&hub))?;

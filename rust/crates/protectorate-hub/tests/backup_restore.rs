@@ -1,6 +1,5 @@
 use protectorate_backup::{create, restore, Cancellation, Options};
 use protectorate_hub::Hub;
-use protectorate_inventory::Node;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
 use serde_json::{json, Value};
 use std::{fs, net::SocketAddr};
@@ -37,7 +36,7 @@ async fn call(address: SocketAddr, procedure: &str, body: Value) -> (u16, Value)
 }
 
 #[tokio::test]
-async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
+async fn restored_rust_state_reopens_sleeve_and_jobs() {
     let source = tempfile::tempdir().unwrap();
     let backups = tempfile::tempdir().unwrap();
     let hub = Hub::open(source.path(), "owner-secret", "test").unwrap();
@@ -55,30 +54,7 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
             .unwrap(),
         )
         .unwrap();
-    hub.inventory
-        .add(
-            Node {
-                name: "desk".into(),
-                address: "127.0.0.1:9".into(),
-                os: "windows".into(),
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
-    let (address, task) = serve(hub).await;
-    let policy =
-        json!({"window":"19:00-07:00","idle":"900s","timezone":"Asia/Shanghai","lockAfter":true});
-    let (status, saved) = call(
-        address,
-        "/protectorate.v1.NodeService/SetDeskPolicy",
-        json!({"name":"desk","policy":policy}),
-    )
-    .await;
-    assert_eq!(status, 200, "{saved}");
-    task.abort();
-    let _ = task.await;
-
+    drop(hub);
     let jobs = source.path().join("jobs-rust");
     fs::write(jobs.join("retained.log"), b"job output\n").unwrap();
     fs::write(
@@ -118,10 +94,6 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
     assert!(manifest
         .files
         .iter()
-        .any(|f| f.path == "desk-policies-rust.json"));
-    assert!(manifest
-        .files
-        .iter()
         .any(|f| f.path == "jobs-rust/retained.artifacts/nested/result.txt"));
 
     let (address, task) = serve(Hub::open(&destination, "owner-secret", "test").unwrap()).await;
@@ -133,14 +105,6 @@ async fn restored_rust_state_reopens_sleeve_and_desk_policy() {
     .await;
     assert_eq!(status, 200, "{sleeve}");
     assert_eq!(sleeve["sleeve"]["state"], "SLEEVE_STATE_EXITED");
-    let (status, desk) = call(
-        address,
-        "/protectorate.v1.NodeService/GetDeskPolicy",
-        json!({"name":"desk"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{desk}");
-    assert_eq!(desk["policy"], policy);
     let (status, job) = call(
         address,
         "/protectorate.v1.JobService/GetJob",

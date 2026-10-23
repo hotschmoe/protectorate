@@ -431,7 +431,7 @@ void main() {
     node.stderr.drain<void>();
     await wait(tester, find.text('IN SERVICE'), tries: 300);
     expect(find.text('DONE'), findsOneWidget);
-    for (final stage in ['INVITED', 'JOINED', 'FIRST METRICS', 'READY']) {
+    for (final stage in ['INVITED', 'JOINED', 'READY']) {
       expect(
         tester.widget<LampLegend>(find.byKey(ValueKey('stage-$stage'))).on,
         isTrue,

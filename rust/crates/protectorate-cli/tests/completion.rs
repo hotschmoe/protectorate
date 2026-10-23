@@ -143,7 +143,7 @@ fn completion_tracks_nested_commands_and_skips_flag_values() {
 }
 
 #[test]
-fn completion_covers_mcp_and_desk_commands() {
+fn completion_covers_mcp_commands() {
     let mcp = String::from_utf8(cli(&["__complete", "mcp", "--"]).stdout).unwrap();
     for flag in [
         "--list",
@@ -161,39 +161,6 @@ fn completion_covers_mcp_and_desk_commands() {
             .unwrap();
     assert!(mcp_after_glob.contains("--tls-cert\t"), "{mcp_after_glob}");
     assert!(mcp_after_glob.contains("--tls-key\t"), "{mcp_after_glob}");
-
-    let desk = String::from_utf8(cli(&["__complete", "desk", "po"]).stdout).unwrap();
-    assert!(desk.contains("policy\tShow or set policy\n"), "{desk}");
-    let actions = String::from_utf8(cli(&["__complete", "desk", "win1", ""]).stdout).unwrap();
-    for action in [
-        "screenshot",
-        "windows",
-        "foreground",
-        "click",
-        "move",
-        "type",
-        "key",
-        "run",
-    ] {
-        assert!(
-            actions.contains(&format!("{action}\t")),
-            "{action}: {actions}"
-        );
-    }
-    let screenshot =
-        String::from_utf8(cli(&["__complete", "desk", "win1", "screenshot", "--"]).stdout).unwrap();
-    for flag in ["--lease", "--output", "--max-width"] {
-        assert!(
-            screenshot.contains(&format!("{flag}\t")),
-            "{flag}: {screenshot}"
-        );
-    }
-    let click =
-        String::from_utf8(cli(&["__complete", "desk", "win1", "click", "--"]).stdout).unwrap();
-    for flag in ["--lease", "--button", "--double"] {
-        assert!(click.contains(&format!("{flag}\t")), "{flag}: {click}");
-    }
-    assert!(!click.contains("--output\t"), "{click}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -282,11 +249,6 @@ async fn resource_completion_uses_authenticated_live_names() {
     assert_eq!(
         run("owner-secret", &["node", "show", "com"]),
         "compute\tNode\n:4\n"
-    );
-    assert_eq!(run("owner-secret", &["desk", "com"]), "compute\tNode\n:4\n");
-    assert_eq!(
-        run("owner-secret", &["desk", "policy", "hu"]),
-        "hub\tNode\n:4\n"
     );
     assert_eq!(
         run("owner-secret", &["node", "show", "--timeout", ""]),

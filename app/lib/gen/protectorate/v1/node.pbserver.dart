@@ -15,73 +15,64 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'desk.pb.dart' as $0;
-import 'job.pb.dart' as $3;
-import 'node.pb.dart' as $6;
+import 'job.pb.dart' as $2;
+import 'node.pb.dart' as $5;
 import 'node.pbjson.dart';
 
 export 'node.pb.dart';
 
 abstract class NodeAgentServiceBase extends $pb.GeneratedService {
-  $async.Future<$6.NodeMetrics> getMetrics(
-      $pb.ServerContext ctx, $6.GetMetricsRequest request);
-  $async.Future<$6.NodeMetrics> watchMetrics(
-      $pb.ServerContext ctx, $6.WatchMetricsRequest request);
-  $async.Future<$3.PrepareJobResponse> prepareJob(
-      $pb.ServerContext ctx, $3.PrepareJobRequest request);
-  $async.Future<$3.UploadJobDataResponse> uploadJobData(
-      $pb.ServerContext ctx, $3.UploadJobDataRequest request);
-  $async.Future<$3.JobEvent> runJob(
-      $pb.ServerContext ctx, $3.RunJobRequest request);
-  $async.Future<$3.JobEvent> attachJob(
-      $pb.ServerContext ctx, $3.AttachJobRequest request);
-  $async.Future<$3.NodeAgentServiceListJobsResponse> listJobs(
-      $pb.ServerContext ctx, $3.NodeAgentServiceListJobsRequest request);
-  $async.Future<$3.NodeAgentServiceCancelJobResponse> cancelJob(
-      $pb.ServerContext ctx, $3.NodeAgentServiceCancelJobRequest request);
-  $async.Future<$6.PutFileResponse> putFile(
-      $pb.ServerContext ctx, $6.PutFileRequest request);
-  $async.Future<$6.GetFileResponse> getFile(
-      $pb.ServerContext ctx, $6.GetFileRequest request);
-  $async.Future<$0.DeskActionResponse> deskAction(
-      $pb.ServerContext ctx, $0.DeskActionRequest request);
-  $async.Future<$6.ApplyUpdateResponse> applyUpdate(
-      $pb.ServerContext ctx, $6.ApplyUpdateRequest request);
-  $async.Future<$0.DeskState> getDeskState(
-      $pb.ServerContext ctx, $6.GetDeskStateRequest request);
-  $async.Future<$6.UninstallResponse> uninstall(
-      $pb.ServerContext ctx, $6.UninstallRequest request);
+  $async.Future<$5.NodeMetrics> getMetrics(
+      $pb.ServerContext ctx, $5.GetMetricsRequest request);
+  $async.Future<$5.NodeMetrics> watchMetrics(
+      $pb.ServerContext ctx, $5.WatchMetricsRequest request);
+  $async.Future<$2.PrepareJobResponse> prepareJob(
+      $pb.ServerContext ctx, $2.PrepareJobRequest request);
+  $async.Future<$2.UploadJobDataResponse> uploadJobData(
+      $pb.ServerContext ctx, $2.UploadJobDataRequest request);
+  $async.Future<$2.JobEvent> runJob(
+      $pb.ServerContext ctx, $2.RunJobRequest request);
+  $async.Future<$2.JobEvent> attachJob(
+      $pb.ServerContext ctx, $2.AttachJobRequest request);
+  $async.Future<$2.NodeAgentServiceListJobsResponse> listJobs(
+      $pb.ServerContext ctx, $2.NodeAgentServiceListJobsRequest request);
+  $async.Future<$2.NodeAgentServiceCancelJobResponse> cancelJob(
+      $pb.ServerContext ctx, $2.NodeAgentServiceCancelJobRequest request);
+  $async.Future<$5.PutFileResponse> putFile(
+      $pb.ServerContext ctx, $5.PutFileRequest request);
+  $async.Future<$5.GetFileResponse> getFile(
+      $pb.ServerContext ctx, $5.GetFileRequest request);
+  $async.Future<$5.ApplyUpdateResponse> applyUpdate(
+      $pb.ServerContext ctx, $5.ApplyUpdateRequest request);
+  $async.Future<$5.UninstallResponse> uninstall(
+      $pb.ServerContext ctx, $5.UninstallRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'GetMetrics':
-        return $6.GetMetricsRequest();
+        return $5.GetMetricsRequest();
       case 'WatchMetrics':
-        return $6.WatchMetricsRequest();
+        return $5.WatchMetricsRequest();
       case 'PrepareJob':
-        return $3.PrepareJobRequest();
+        return $2.PrepareJobRequest();
       case 'UploadJobData':
-        return $3.UploadJobDataRequest();
+        return $2.UploadJobDataRequest();
       case 'RunJob':
-        return $3.RunJobRequest();
+        return $2.RunJobRequest();
       case 'AttachJob':
-        return $3.AttachJobRequest();
+        return $2.AttachJobRequest();
       case 'ListJobs':
-        return $3.NodeAgentServiceListJobsRequest();
+        return $2.NodeAgentServiceListJobsRequest();
       case 'CancelJob':
-        return $3.NodeAgentServiceCancelJobRequest();
+        return $2.NodeAgentServiceCancelJobRequest();
       case 'PutFile':
-        return $6.PutFileRequest();
+        return $5.PutFileRequest();
       case 'GetFile':
-        return $6.GetFileRequest();
-      case 'DeskAction':
-        return $0.DeskActionRequest();
+        return $5.GetFileRequest();
       case 'ApplyUpdate':
-        return $6.ApplyUpdateRequest();
-      case 'GetDeskState':
-        return $6.GetDeskStateRequest();
+        return $5.ApplyUpdateRequest();
       case 'Uninstall':
-        return $6.UninstallRequest();
+        return $5.UninstallRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -91,33 +82,29 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'GetMetrics':
-        return getMetrics(ctx, request as $6.GetMetricsRequest);
+        return getMetrics(ctx, request as $5.GetMetricsRequest);
       case 'WatchMetrics':
-        return watchMetrics(ctx, request as $6.WatchMetricsRequest);
+        return watchMetrics(ctx, request as $5.WatchMetricsRequest);
       case 'PrepareJob':
-        return prepareJob(ctx, request as $3.PrepareJobRequest);
+        return prepareJob(ctx, request as $2.PrepareJobRequest);
       case 'UploadJobData':
-        return uploadJobData(ctx, request as $3.UploadJobDataRequest);
+        return uploadJobData(ctx, request as $2.UploadJobDataRequest);
       case 'RunJob':
-        return runJob(ctx, request as $3.RunJobRequest);
+        return runJob(ctx, request as $2.RunJobRequest);
       case 'AttachJob':
-        return attachJob(ctx, request as $3.AttachJobRequest);
+        return attachJob(ctx, request as $2.AttachJobRequest);
       case 'ListJobs':
-        return listJobs(ctx, request as $3.NodeAgentServiceListJobsRequest);
+        return listJobs(ctx, request as $2.NodeAgentServiceListJobsRequest);
       case 'CancelJob':
-        return cancelJob(ctx, request as $3.NodeAgentServiceCancelJobRequest);
+        return cancelJob(ctx, request as $2.NodeAgentServiceCancelJobRequest);
       case 'PutFile':
-        return putFile(ctx, request as $6.PutFileRequest);
+        return putFile(ctx, request as $5.PutFileRequest);
       case 'GetFile':
-        return getFile(ctx, request as $6.GetFileRequest);
-      case 'DeskAction':
-        return deskAction(ctx, request as $0.DeskActionRequest);
+        return getFile(ctx, request as $5.GetFileRequest);
       case 'ApplyUpdate':
-        return applyUpdate(ctx, request as $6.ApplyUpdateRequest);
-      case 'GetDeskState':
-        return getDeskState(ctx, request as $6.GetDeskStateRequest);
+        return applyUpdate(ctx, request as $5.ApplyUpdateRequest);
       case 'Uninstall':
-        return uninstall(ctx, request as $6.UninstallRequest);
+        return uninstall(ctx, request as $5.UninstallRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -129,61 +116,53 @@ abstract class NodeAgentServiceBase extends $pb.GeneratedService {
 }
 
 abstract class NodeServiceBase extends $pb.GeneratedService {
-  $async.Future<$6.ListNodesResponse> listNodes(
-      $pb.ServerContext ctx, $6.ListNodesRequest request);
-  $async.Future<$6.NodeStatus> getNode(
-      $pb.ServerContext ctx, $6.GetNodeRequest request);
-  $async.Future<$6.NodeInfo> addNode(
-      $pb.ServerContext ctx, $6.AddNodeRequest request);
-  $async.Future<$6.RemoveNodeProgress> removeNode(
-      $pb.ServerContext ctx, $6.RemoveNodeRequest request);
-  $async.Future<$6.InviteNodeResponse> inviteNode(
-      $pb.ServerContext ctx, $6.InviteNodeRequest request);
-  $async.Future<$6.NodeSetupProgress> watchNodeSetup(
-      $pb.ServerContext ctx, $6.WatchNodeSetupRequest request);
-  $async.Future<$6.PutFileResponse> putFile(
-      $pb.ServerContext ctx, $6.PutFileRequest request);
-  $async.Future<$6.GetFileResponse> getFile(
-      $pb.ServerContext ctx, $6.GetFileRequest request);
-  $async.Future<$6.ApplyUpdateResponse> applyUpdate(
-      $pb.ServerContext ctx, $6.ApplyUpdateRequest request);
-  $async.Future<$6.UpdateNodeProgress> updateNode(
-      $pb.ServerContext ctx, $6.UpdateNodeRequest request);
-  $async.Future<$6.DeskPolicyStatus> setDeskPolicy(
-      $pb.ServerContext ctx, $6.SetDeskPolicyRequest request);
-  $async.Future<$6.DeskPolicyStatus> getDeskPolicy(
-      $pb.ServerContext ctx, $6.GetDeskPolicyRequest request);
-  $async.Future<$6.NodeInfo> setNodeTier(
-      $pb.ServerContext ctx, $6.SetNodeTierRequest request);
+  $async.Future<$5.ListNodesResponse> listNodes(
+      $pb.ServerContext ctx, $5.ListNodesRequest request);
+  $async.Future<$5.NodeStatus> getNode(
+      $pb.ServerContext ctx, $5.GetNodeRequest request);
+  $async.Future<$5.NodeInfo> addNode(
+      $pb.ServerContext ctx, $5.AddNodeRequest request);
+  $async.Future<$5.RemoveNodeProgress> removeNode(
+      $pb.ServerContext ctx, $5.RemoveNodeRequest request);
+  $async.Future<$5.InviteNodeResponse> inviteNode(
+      $pb.ServerContext ctx, $5.InviteNodeRequest request);
+  $async.Future<$5.NodeSetupProgress> watchNodeSetup(
+      $pb.ServerContext ctx, $5.WatchNodeSetupRequest request);
+  $async.Future<$5.PutFileResponse> putFile(
+      $pb.ServerContext ctx, $5.PutFileRequest request);
+  $async.Future<$5.GetFileResponse> getFile(
+      $pb.ServerContext ctx, $5.GetFileRequest request);
+  $async.Future<$5.ApplyUpdateResponse> applyUpdate(
+      $pb.ServerContext ctx, $5.ApplyUpdateRequest request);
+  $async.Future<$5.UpdateNodeProgress> updateNode(
+      $pb.ServerContext ctx, $5.UpdateNodeRequest request);
+  $async.Future<$5.NodeInfo> setNodeTier(
+      $pb.ServerContext ctx, $5.SetNodeTierRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'ListNodes':
-        return $6.ListNodesRequest();
+        return $5.ListNodesRequest();
       case 'GetNode':
-        return $6.GetNodeRequest();
+        return $5.GetNodeRequest();
       case 'AddNode':
-        return $6.AddNodeRequest();
+        return $5.AddNodeRequest();
       case 'RemoveNode':
-        return $6.RemoveNodeRequest();
+        return $5.RemoveNodeRequest();
       case 'InviteNode':
-        return $6.InviteNodeRequest();
+        return $5.InviteNodeRequest();
       case 'WatchNodeSetup':
-        return $6.WatchNodeSetupRequest();
+        return $5.WatchNodeSetupRequest();
       case 'PutFile':
-        return $6.PutFileRequest();
+        return $5.PutFileRequest();
       case 'GetFile':
-        return $6.GetFileRequest();
+        return $5.GetFileRequest();
       case 'ApplyUpdate':
-        return $6.ApplyUpdateRequest();
+        return $5.ApplyUpdateRequest();
       case 'UpdateNode':
-        return $6.UpdateNodeRequest();
-      case 'SetDeskPolicy':
-        return $6.SetDeskPolicyRequest();
-      case 'GetDeskPolicy':
-        return $6.GetDeskPolicyRequest();
+        return $5.UpdateNodeRequest();
       case 'SetNodeTier':
-        return $6.SetNodeTierRequest();
+        return $5.SetNodeTierRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -193,31 +172,27 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'ListNodes':
-        return listNodes(ctx, request as $6.ListNodesRequest);
+        return listNodes(ctx, request as $5.ListNodesRequest);
       case 'GetNode':
-        return getNode(ctx, request as $6.GetNodeRequest);
+        return getNode(ctx, request as $5.GetNodeRequest);
       case 'AddNode':
-        return addNode(ctx, request as $6.AddNodeRequest);
+        return addNode(ctx, request as $5.AddNodeRequest);
       case 'RemoveNode':
-        return removeNode(ctx, request as $6.RemoveNodeRequest);
+        return removeNode(ctx, request as $5.RemoveNodeRequest);
       case 'InviteNode':
-        return inviteNode(ctx, request as $6.InviteNodeRequest);
+        return inviteNode(ctx, request as $5.InviteNodeRequest);
       case 'WatchNodeSetup':
-        return watchNodeSetup(ctx, request as $6.WatchNodeSetupRequest);
+        return watchNodeSetup(ctx, request as $5.WatchNodeSetupRequest);
       case 'PutFile':
-        return putFile(ctx, request as $6.PutFileRequest);
+        return putFile(ctx, request as $5.PutFileRequest);
       case 'GetFile':
-        return getFile(ctx, request as $6.GetFileRequest);
+        return getFile(ctx, request as $5.GetFileRequest);
       case 'ApplyUpdate':
-        return applyUpdate(ctx, request as $6.ApplyUpdateRequest);
+        return applyUpdate(ctx, request as $5.ApplyUpdateRequest);
       case 'UpdateNode':
-        return updateNode(ctx, request as $6.UpdateNodeRequest);
-      case 'SetDeskPolicy':
-        return setDeskPolicy(ctx, request as $6.SetDeskPolicyRequest);
-      case 'GetDeskPolicy':
-        return getDeskPolicy(ctx, request as $6.GetDeskPolicyRequest);
+        return updateNode(ctx, request as $5.UpdateNodeRequest);
       case 'SetNodeTier':
-        return setNodeTier(ctx, request as $6.SetNodeTierRequest);
+        return setNodeTier(ctx, request as $5.SetNodeTierRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
