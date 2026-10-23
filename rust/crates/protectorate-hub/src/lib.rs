@@ -1,6 +1,7 @@
 //! Initial Rust hub service wiring for the existing Connect API.
 mod audit;
 mod chat;
+mod checkpoints;
 mod device;
 mod diagnostics;
 mod directory;
@@ -712,6 +713,7 @@ impl Hub {
         node_update::register(&mut server, Arc::clone(&hub))?;
         jobs::register(&mut server, Arc::clone(&hub))?;
         sleeves::register(&mut server, Arc::clone(&hub))?;
+        checkpoints::register(&mut server, Arc::clone(&hub))?;
         workspaces::register(&mut server, Arc::clone(&hub))?;
         chat::register(&mut server, Arc::clone(&hub))?;
         let subscribe = Arc::clone(&hub);

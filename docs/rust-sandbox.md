@@ -163,6 +163,34 @@ connect; nothing leaves the namespace. `tests/egress.rs` in the sandbox crate
 checks the allowed, IP-literal, metadata, non-allowlisted, private-address,
 non-CONNECT, direct-connection and hub-relay cases in a real sandbox.
 
+## Workspace checkpoints
+
+The hub snapshots a sleeve's git workspace when a chat turn settles, before
+a resleeve, and on `CreateCheckpoint` (`protectorate sleeve checkpoint NAME
+create`, MCP `sleeve_create_checkpoint`). A checkpoint is a parentless
+commit of the workspace's tracked and untracked non-ignored files, under
+`refs/protectorate/checkpoints/N` in a private Git directory at
+`STATE/helpers/checkpoint-NAME/home/store`, built with a private index
+beside it. It is never part of the workspace repository, so no push can
+carry it, and hub backups do not include `helpers/`. The newest 20 are kept
+and unreferenced objects are pruned. An unchanged tree reuses the latest
+checkpoint. The workspace's own `.git/info/exclude` is honored and
+`.protectorate-token` is always excluded.
+
+Git never runs on the host for this. Each operation runs in a
+`CheckpointHelper` sandbox that sees only the workspace (writable, for
+restore) and the store in its own private home, with no network and no
+credentials. So the workspace's config, hooks, filters and symlinks cannot
+make the hub execute or read anything, and the sleeve, which cannot see
+`helpers/`, cannot read or rewrite its checkpoints. `ListCheckpoints`,
+`DiffCheckpoint` (between two checkpoints, or to the live workspace, cut at
+1 MiB) and `RestoreCheckpoint` are open to the owner, devices, the sleeve's
+own token and the identity that spawned it. Restore first checkpoints the
+current state and returns it as `before`, then resets the non-ignored files
+to the checkpoint, removing files it lacks; ignored files and the
+workspace's `.git` and index are untouched. A busy chat sleeve refuses a
+restore. The Flutter client has no checkpoint view yet.
+
 ## Current launcher and limits
 
 `protectorate-sandbox` now has a dedicated helper and direct Linux launcher.

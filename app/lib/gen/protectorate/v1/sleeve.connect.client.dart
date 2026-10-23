@@ -13,8 +13,8 @@ import "sleeve.connect.spec.dart" as specs;
 /// runs its official headless protocol and is driven through ChatService. In
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
-/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
-/// and "sleeve.oom" (subject = sleeve name).
+/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
+/// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
 extension type SleeveServiceClient (connect.Transport _transport) {
   /// SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   /// workspace is an existing directory (bound read-write at the same path) or
@@ -212,6 +212,89 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   }) {
     return connect.Client(_transport).unary(
       specs.SleeveService.pruneSleeves,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// CreateCheckpoint snapshots the sleeve's git workspace: tracked files and
+  /// untracked files that are not ignored. The hub also checkpoints a chat
+  /// sleeve when a turn settles and before a resleeve. Checkpoints live in a
+  /// private store under the hub's state, never in the workspace repository,
+  /// so no push can carry them; the newest 20 are kept. If nothing changed
+  /// since the latest checkpoint, that checkpoint is returned with unchanged.
+  Future<protectoratev1sleeve.CreateCheckpointResponse> createCheckpoint(
+    protectoratev1sleeve.CreateCheckpointRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.createCheckpoint,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// ListCheckpoints returns the sleeve's checkpoints, oldest first.
+  Future<protectoratev1sleeve.ListCheckpointsResponse> listCheckpoints(
+    protectoratev1sleeve.ListCheckpointsRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.listCheckpoints,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// DiffCheckpoint returns a unified diff from checkpoint from_id to
+  /// checkpoint to_id, or to the current workspace when to_id is 0. Output
+  /// beyond 1 MiB is cut off and marked truncated.
+  Future<protectoratev1sleeve.DiffCheckpointResponse> diffCheckpoint(
+    protectoratev1sleeve.DiffCheckpointRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.diffCheckpoint,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
+  /// RestoreCheckpoint makes the workspace's non-ignored files match a
+  /// checkpoint, removing files the checkpoint lacks. Ignored files, the
+  /// workspace's .git directory and its index are untouched. It first
+  /// checkpoints the current state, returned as before, so a restore can be
+  /// undone. A chat sleeve must be idle.
+  Future<protectoratev1sleeve.RestoreCheckpointResponse> restoreCheckpoint(
+    protectoratev1sleeve.RestoreCheckpointRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.SleeveService.restoreCheckpoint,
       input,
       signal: signal,
       headers: headers,

@@ -123,6 +123,7 @@ const LIST_WORKSPACES: &str = "/protectorate.v1.SleeveService/ListWorkspaces";
 const BROWSE_WORKSPACES: &str = "/protectorate.v1.SleeveService/BrowseWorkspaces";
 const GET_SLEEVE: &str = "/protectorate.v1.SleeveService/GetSleeve";
 const KILL_SLEEVE: &str = "/protectorate.v1.SleeveService/KillSleeve";
+const SLEEVE_SERVICE: &str = "/protectorate.v1.SleeveService/";
 const SPAWN_SLEEVE: &str = "/protectorate.v1.SleeveService/SpawnSleeve";
 const RESLEEVE_SLEEVE: &str = "/protectorate.v1.SleeveService/ResleeveSleeve";
 const SPAWN_ENVOY: &str = "/protectorate.v1.SleeveService/SpawnEnvoy";
@@ -818,6 +819,12 @@ pub enum Command {
     SleeveKill {
         name: String,
         drop_caches: bool,
+    },
+    /// `method` is a SleeveService checkpoint RPC; `ids` are its id arguments.
+    SleeveCheckpoint {
+        name: String,
+        method: &'static str,
+        ids: Vec<u64>,
     },
     SleeveAttach {
         name: String,
@@ -2288,6 +2295,42 @@ fn execute_commands(
             } else {
                 Ok(format!("killed\t{name}\n"))
             }
+        }
+        Command::SleeveCheckpoint { name, method, ids } => {
+            let method: &str = method;
+            let mut request = json!({"name": name});
+            let keys: &[&str] = if method == "DiffCheckpoint" {
+                &["fromId", "toId"]
+            } else {
+                &["id"]
+            };
+            for (key, id) in keys.iter().zip(ids) {
+                request[*key] = json!(id.to_string());
+            }
+            let response = client.call(&format!("{SLEEVE_SERVICE}{method}"), &request)?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(match method {
+                "DiffCheckpoint" => {
+                    let mut diff = response["diff"].as_str().unwrap_or_default().to_owned();
+                    if response["truncated"] == true {
+                        diff.push_str("\n(diff truncated)\n");
+                    }
+                    diff
+                }
+                "ListCheckpoints" => response["checkpoints"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(format::checkpoint_line)
+                    .collect(),
+                "CreateCheckpoint" => format::checkpoint_line(&response["checkpoint"]),
+                _ => format!(
+                    "restored\t{name}\tbefore\t{}",
+                    format::checkpoint_line(&response["before"])
+                ),
+            })
         }
         Command::SleeveSpawn(spawn) => spawn_sleeve(client, spawn, json),
         Command::SleeveEnvoy(envoy) => spawn_envoy(client, envoy, json),

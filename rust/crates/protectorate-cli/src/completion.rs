@@ -269,6 +269,7 @@ fn children(path: &str) -> &'static [Candidate] {
             ("browse", "Browse workspaces"),
             ("show", "Show a sleeve"),
             ("kill", "Kill a sleeve"),
+            ("checkpoint", "List, diff or restore workspace checkpoints"),
             ("attach", "Attach terminal"),
             ("spawn", "Spawn a sleeve"),
             ("envoy", "Spawn Envoy"),

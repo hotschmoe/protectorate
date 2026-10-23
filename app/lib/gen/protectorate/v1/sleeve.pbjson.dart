@@ -57,6 +57,165 @@ final $typed_data.Uint8List sleeveStateDescriptor = $convert.base64Decode(
     'CgtTbGVldmVTdGF0ZRIcChhTTEVFVkVfU1RBVEVfVU5TUEVDSUZJRUQQABIYChRTTEVFVkVfU1'
     'RBVEVfUlVOTklORxABEhcKE1NMRUVWRV9TVEFURV9FWElURUQQAg==');
 
+@$core.Deprecated('Use checkpointDescriptor instead')
+const Checkpoint$json = {
+  '1': 'Checkpoint',
+  '2': [
+    {'1': 'id', '3': 1, '4': 1, '5': 4, '10': 'id'},
+    {'1': 'commit', '3': 2, '4': 1, '5': 9, '10': 'commit'},
+    {
+      '1': 'created_at',
+      '3': 3,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'createdAt'
+    },
+    {'1': 'reason', '3': 4, '4': 1, '5': 9, '10': 'reason'},
+  ],
+};
+
+/// Descriptor for `Checkpoint`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List checkpointDescriptor = $convert.base64Decode(
+    'CgpDaGVja3BvaW50Eg4KAmlkGAEgASgEUgJpZBIWCgZjb21taXQYAiABKAlSBmNvbW1pdBI5Cg'
+    'pjcmVhdGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJY3JlYXRlZEF0'
+    'EhYKBnJlYXNvbhgEIAEoCVIGcmVhc29u');
+
+@$core.Deprecated('Use createCheckpointRequestDescriptor instead')
+const CreateCheckpointRequest$json = {
+  '1': 'CreateCheckpointRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+  ],
+};
+
+/// Descriptor for `CreateCheckpointRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List createCheckpointRequestDescriptor =
+    $convert.base64Decode(
+        'ChdDcmVhdGVDaGVja3BvaW50UmVxdWVzdBISCgRuYW1lGAEgASgJUgRuYW1l');
+
+@$core.Deprecated('Use createCheckpointResponseDescriptor instead')
+const CreateCheckpointResponse$json = {
+  '1': 'CreateCheckpointResponse',
+  '2': [
+    {
+      '1': 'checkpoint',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Checkpoint',
+      '10': 'checkpoint'
+    },
+    {'1': 'unchanged', '3': 2, '4': 1, '5': 8, '10': 'unchanged'},
+  ],
+};
+
+/// Descriptor for `CreateCheckpointResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List createCheckpointResponseDescriptor = $convert.base64Decode(
+    'ChhDcmVhdGVDaGVja3BvaW50UmVzcG9uc2USOwoKY2hlY2twb2ludBgBIAEoCzIbLnByb3RlY3'
+    'RvcmF0ZS52MS5DaGVja3BvaW50UgpjaGVja3BvaW50EhwKCXVuY2hhbmdlZBgCIAEoCFIJdW5j'
+    'aGFuZ2Vk');
+
+@$core.Deprecated('Use listCheckpointsRequestDescriptor instead')
+const ListCheckpointsRequest$json = {
+  '1': 'ListCheckpointsRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+  ],
+};
+
+/// Descriptor for `ListCheckpointsRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listCheckpointsRequestDescriptor =
+    $convert.base64Decode(
+        'ChZMaXN0Q2hlY2twb2ludHNSZXF1ZXN0EhIKBG5hbWUYASABKAlSBG5hbWU=');
+
+@$core.Deprecated('Use listCheckpointsResponseDescriptor instead')
+const ListCheckpointsResponse$json = {
+  '1': 'ListCheckpointsResponse',
+  '2': [
+    {
+      '1': 'checkpoints',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.protectorate.v1.Checkpoint',
+      '10': 'checkpoints'
+    },
+  ],
+};
+
+/// Descriptor for `ListCheckpointsResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List listCheckpointsResponseDescriptor =
+    $convert.base64Decode(
+        'ChdMaXN0Q2hlY2twb2ludHNSZXNwb25zZRI9CgtjaGVja3BvaW50cxgBIAMoCzIbLnByb3RlY3'
+        'RvcmF0ZS52MS5DaGVja3BvaW50UgtjaGVja3BvaW50cw==');
+
+@$core.Deprecated('Use diffCheckpointRequestDescriptor instead')
+const DiffCheckpointRequest$json = {
+  '1': 'DiffCheckpointRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'from_id', '3': 2, '4': 1, '5': 4, '10': 'fromId'},
+    {'1': 'to_id', '3': 3, '4': 1, '5': 4, '10': 'toId'},
+  ],
+};
+
+/// Descriptor for `DiffCheckpointRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List diffCheckpointRequestDescriptor = $convert.base64Decode(
+    'ChVEaWZmQ2hlY2twb2ludFJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIXCgdmcm9tX2lkGA'
+    'IgASgEUgZmcm9tSWQSEwoFdG9faWQYAyABKARSBHRvSWQ=');
+
+@$core.Deprecated('Use diffCheckpointResponseDescriptor instead')
+const DiffCheckpointResponse$json = {
+  '1': 'DiffCheckpointResponse',
+  '2': [
+    {'1': 'diff', '3': 1, '4': 1, '5': 9, '10': 'diff'},
+    {'1': 'truncated', '3': 2, '4': 1, '5': 8, '10': 'truncated'},
+  ],
+};
+
+/// Descriptor for `DiffCheckpointResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List diffCheckpointResponseDescriptor =
+    $convert.base64Decode(
+        'ChZEaWZmQ2hlY2twb2ludFJlc3BvbnNlEhIKBGRpZmYYASABKAlSBGRpZmYSHAoJdHJ1bmNhdG'
+        'VkGAIgASgIUgl0cnVuY2F0ZWQ=');
+
+@$core.Deprecated('Use restoreCheckpointRequestDescriptor instead')
+const RestoreCheckpointRequest$json = {
+  '1': 'RestoreCheckpointRequest',
+  '2': [
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'id', '3': 2, '4': 1, '5': 4, '10': 'id'},
+  ],
+};
+
+/// Descriptor for `RestoreCheckpointRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List restoreCheckpointRequestDescriptor =
+    $convert.base64Decode(
+        'ChhSZXN0b3JlQ2hlY2twb2ludFJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRIOCgJpZBgCIA'
+        'EoBFICaWQ=');
+
+@$core.Deprecated('Use restoreCheckpointResponseDescriptor instead')
+const RestoreCheckpointResponse$json = {
+  '1': 'RestoreCheckpointResponse',
+  '2': [
+    {
+      '1': 'before',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.Checkpoint',
+      '10': 'before'
+    },
+  ],
+};
+
+/// Descriptor for `RestoreCheckpointResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List restoreCheckpointResponseDescriptor =
+    $convert.base64Decode(
+        'ChlSZXN0b3JlQ2hlY2twb2ludFJlc3BvbnNlEjMKBmJlZm9yZRgBIAEoCzIbLnByb3RlY3Rvcm'
+        'F0ZS52MS5DaGVja3BvaW50UgZiZWZvcmU=');
+
 @$core.Deprecated('Use sleeveLimitsDescriptor instead')
 const SleeveLimits$json = {
   '1': 'SleeveLimits',
@@ -870,6 +1029,29 @@ const $core.Map<$core.String, $core.dynamic> SleeveServiceBase$json = {
       '3': '.protectorate.v1.PruneSleevesResponse',
       '4': {}
     },
+    {
+      '1': 'CreateCheckpoint',
+      '2': '.protectorate.v1.CreateCheckpointRequest',
+      '3': '.protectorate.v1.CreateCheckpointResponse'
+    },
+    {
+      '1': 'ListCheckpoints',
+      '2': '.protectorate.v1.ListCheckpointsRequest',
+      '3': '.protectorate.v1.ListCheckpointsResponse',
+      '4': {'34': 1},
+    },
+    {
+      '1': 'DiffCheckpoint',
+      '2': '.protectorate.v1.DiffCheckpointRequest',
+      '3': '.protectorate.v1.DiffCheckpointResponse',
+      '4': {'34': 1},
+    },
+    {
+      '1': 'RestoreCheckpoint',
+      '2': '.protectorate.v1.RestoreCheckpointRequest',
+      '3': '.protectorate.v1.RestoreCheckpointResponse',
+      '4': {}
+    },
   ],
 };
 
@@ -911,6 +1093,15 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.PruneSleevesRequest': PruneSleevesRequest$json,
   '.protectorate.v1.PruneSleevesResponse': PruneSleevesResponse$json,
   '.protectorate.v1.SleeveDiskEntry': SleeveDiskEntry$json,
+  '.protectorate.v1.CreateCheckpointRequest': CreateCheckpointRequest$json,
+  '.protectorate.v1.CreateCheckpointResponse': CreateCheckpointResponse$json,
+  '.protectorate.v1.Checkpoint': Checkpoint$json,
+  '.protectorate.v1.ListCheckpointsRequest': ListCheckpointsRequest$json,
+  '.protectorate.v1.ListCheckpointsResponse': ListCheckpointsResponse$json,
+  '.protectorate.v1.DiffCheckpointRequest': DiffCheckpointRequest$json,
+  '.protectorate.v1.DiffCheckpointResponse': DiffCheckpointResponse$json,
+  '.protectorate.v1.RestoreCheckpointRequest': RestoreCheckpointRequest$json,
+  '.protectorate.v1.RestoreCheckpointResponse': RestoreCheckpointResponse$json,
 };
 
 /// Descriptor for `SleeveService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
@@ -931,4 +1122,11 @@ final $typed_data.Uint8List sleeveServiceDescriptor = $convert.base64Decode(
     'F0ZS52MS5TcGF3bkVudm95UmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5TcGF3bkVudm95UmVz'
     'cG9uc2UiBKC1GAESZQoMUHJ1bmVTbGVldmVzEiQucHJvdGVjdG9yYXRlLnYxLlBydW5lU2xlZX'
     'Zlc1JlcXVlc3QaJS5wcm90ZWN0b3JhdGUudjEuUHJ1bmVTbGVldmVzUmVzcG9uc2UiCIi1GAGg'
-    'tRgB');
+    'tRgBEmcKEENyZWF0ZUNoZWNrcG9pbnQSKC5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlQ2hlY2twb2'
+    'ludFJlcXVlc3QaKS5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlQ2hlY2twb2ludFJlc3BvbnNlEmkK'
+    'D0xpc3RDaGVja3BvaW50cxInLnByb3RlY3RvcmF0ZS52MS5MaXN0Q2hlY2twb2ludHNSZXF1ZX'
+    'N0GigucHJvdGVjdG9yYXRlLnYxLkxpc3RDaGVja3BvaW50c1Jlc3BvbnNlIgOQAgESZgoORGlm'
+    'ZkNoZWNrcG9pbnQSJi5wcm90ZWN0b3JhdGUudjEuRGlmZkNoZWNrcG9pbnRSZXF1ZXN0GicucH'
+    'JvdGVjdG9yYXRlLnYxLkRpZmZDaGVja3BvaW50UmVzcG9uc2UiA5ACARJwChFSZXN0b3JlQ2hl'
+    'Y2twb2ludBIpLnByb3RlY3RvcmF0ZS52MS5SZXN0b3JlQ2hlY2twb2ludFJlcXVlc3QaKi5wcm'
+    '90ZWN0b3JhdGUudjEuUmVzdG9yZUNoZWNrcG9pbnRSZXNwb25zZSIEiLUYAQ==');

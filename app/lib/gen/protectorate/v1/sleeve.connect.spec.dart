@@ -12,8 +12,8 @@ import "sleeve.pb.dart" as protectoratev1sleeve;
 /// runs its official headless protocol and is driven through ChatService. In
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 /// WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
-/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
-/// and "sleeve.oom" (subject = sleeve name).
+/// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
+/// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
 abstract final class SleeveService {
   /// Fully-qualified name of the SleeveService service.
   static const name = 'protectorate.v1.SleeveService';
@@ -134,5 +134,50 @@ abstract final class SleeveService {
     connect.StreamType.unary,
     protectoratev1sleeve.PruneSleevesRequest.new,
     protectoratev1sleeve.PruneSleevesResponse.new,
+  );
+
+  /// CreateCheckpoint snapshots the sleeve's git workspace: tracked files and
+  /// untracked files that are not ignored. The hub also checkpoints a chat
+  /// sleeve when a turn settles and before a resleeve. Checkpoints live in a
+  /// private store under the hub's state, never in the workspace repository,
+  /// so no push can carry them; the newest 20 are kept. If nothing changed
+  /// since the latest checkpoint, that checkpoint is returned with unchanged.
+  static const createCheckpoint = connect.Spec(
+    '/$name/CreateCheckpoint',
+    connect.StreamType.unary,
+    protectoratev1sleeve.CreateCheckpointRequest.new,
+    protectoratev1sleeve.CreateCheckpointResponse.new,
+  );
+
+  /// ListCheckpoints returns the sleeve's checkpoints, oldest first.
+  static const listCheckpoints = connect.Spec(
+    '/$name/ListCheckpoints',
+    connect.StreamType.unary,
+    protectoratev1sleeve.ListCheckpointsRequest.new,
+    protectoratev1sleeve.ListCheckpointsResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
+  /// DiffCheckpoint returns a unified diff from checkpoint from_id to
+  /// checkpoint to_id, or to the current workspace when to_id is 0. Output
+  /// beyond 1 MiB is cut off and marked truncated.
+  static const diffCheckpoint = connect.Spec(
+    '/$name/DiffCheckpoint',
+    connect.StreamType.unary,
+    protectoratev1sleeve.DiffCheckpointRequest.new,
+    protectoratev1sleeve.DiffCheckpointResponse.new,
+    idempotency: connect.Idempotency.noSideEffects,
+  );
+
+  /// RestoreCheckpoint makes the workspace's non-ignored files match a
+  /// checkpoint, removing files the checkpoint lacks. Ignored files, the
+  /// workspace's .git directory and its index are untouched. It first
+  /// checkpoints the current state, returned as before, so a restore can be
+  /// undone. A chat sleeve must be idle.
+  static const restoreCheckpoint = connect.Spec(
+    '/$name/RestoreCheckpoint',
+    connect.StreamType.unary,
+    protectoratev1sleeve.RestoreCheckpointRequest.new,
+    protectoratev1sleeve.RestoreCheckpointResponse.new,
   );
 }

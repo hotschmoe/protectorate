@@ -564,6 +564,8 @@ struct ChatStateWatcher {
     inventory: Arc<Inventory>,
     hosts: Vec<String>,
     name: String,
+    checkpoints: crate::checkpoints::Store,
+    workspace: PathBuf,
 }
 
 impl ChatStateWatcher {
@@ -581,6 +583,8 @@ impl ChatStateWatcher {
             inventory,
             hosts,
             name,
+            checkpoints,
+            workspace,
         } = self;
         let mut previous = Value::Null;
         let mut last_publish = Instant::now();
@@ -615,6 +619,13 @@ impl ChatStateWatcher {
                     .any(|key| event.payload.get(*key).is_some())
             {
                 return Ok(());
+            }
+            if event.payload.get("settled").is_some() {
+                crate::checkpoints::after_turn(
+                    checkpoints.clone(),
+                    name.clone(),
+                    workspace.clone(),
+                );
             }
             let mut status = chat_status_with(session.as_ref(), &hosts, &inventory);
             if let Some(state) = state {
@@ -1641,6 +1652,8 @@ fn spawn_chat(
         inventory: Arc::clone(&hub.inventory),
         hosts: hub.local_model_hosts.clone(),
         name,
+        checkpoints: crate::checkpoints::Store::for_chat(launcher),
+        workspace,
     }
     .start();
     Ok(row)
@@ -2657,6 +2670,8 @@ mod tests {
             inventory,
             hosts: Vec::new(),
             name: "quiet".into(),
+            checkpoints: crate::checkpoints::Store::for_chat(runtime.launcher()),
+            workspace: root.clone(),
         }
         .start();
         let deadline = Instant::now() + Duration::from_secs(2);

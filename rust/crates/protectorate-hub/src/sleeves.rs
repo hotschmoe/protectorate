@@ -68,6 +68,15 @@ impl SpawnParent {
     }
 }
 
+/// Whether the caller is the identity that spawned this sleeve.
+pub(super) fn spawned_by(auth: &AuthContext, row: &Record) -> bool {
+    let same_token = !row.parent_token_id.is_empty() && row.parent_token_id == auth.token_id;
+    let same_sleeve = auth.actor.starts_with("token:sleeve:")
+        && auth.actor.strip_prefix("token:") == Some(row.parent.as_str());
+    let same_envoy = row.parent == "envoy" && auth.actor == "token:orchestrator-envoy";
+    same_token || same_sleeve || same_envoy
+}
+
 fn has_kill_scope(auth: &AuthContext) -> bool {
     super::auth::scopes_allow(
         &auth.scopes.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -185,6 +194,7 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         document.as_bytes(),
     )
     .ok();
+    crate::checkpoints::before_resleeve(hub, &old);
     let launch_request = resleeve_launch_request(&old, to, &chosen_selection);
     {
         let _guard = hub.sleeve_launch_lock.lock().unwrap();
@@ -815,13 +825,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     let _guard = hub.sleeve_launch_lock.lock().unwrap();
                     if !auth.owner && !auth.device && !has_kill_scope(&auth) {
                         let row = hub.sleeves.get(&name).map_err(registry_error)?;
-                        let same_token =
-                            !row.parent_token_id.is_empty() && row.parent_token_id == auth.token_id;
-                        let same_sleeve = auth.actor.starts_with("token:sleeve:")
-                            && auth.actor.strip_prefix("token:") == Some(row.parent.as_str());
-                        let same_envoy =
-                            row.parent == "envoy" && auth.actor == "token:orchestrator-envoy";
-                        if name == "envoy" || !(same_token || same_sleeve || same_envoy) {
+                        if name == "envoy" || !spawned_by(&auth, &row) {
                             return Err(RpcError::new(
                                 Code::PermissionDenied,
                                 "sleeve is owned by another identity",

@@ -14,8 +14,8 @@ import "protectorate/v1/token.proto";
 // runs its official headless protocol and is driven through ChatService. In
 // terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the
 // WebSocket terminal work on it. The mode is fixed at spawn. Sleeves are Linux-only.
-// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited"
-// and "sleeve.oom" (subject = sleeve name).
+// Changes are announced on EventService as "sleeve.spawned", "sleeve.exited",
+// "sleeve.oom" and "sleeve.restored" (subject = sleeve name).
 service SleeveService {
   // SpawnSleeve starts a harness in a new isolated sleeve on the hub. The
   // workspace is an existing directory (bound read-write at the same path) or
@@ -100,6 +100,81 @@ service SleeveService {
     option (protectorate.v1.destructive) = true;
     option (protectorate.v1.owner_only_rpc) = true;
   }
+
+  // CreateCheckpoint snapshots the sleeve's git workspace: tracked files and
+  // untracked files that are not ignored. The hub also checkpoints a chat
+  // sleeve when a turn settles and before a resleeve. Checkpoints live in a
+  // private store under the hub's state, never in the workspace repository,
+  // so no push can carry them; the newest 20 are kept. If nothing changed
+  // since the latest checkpoint, that checkpoint is returned with unchanged.
+  rpc CreateCheckpoint(CreateCheckpointRequest) returns (CreateCheckpointResponse);
+
+  // ListCheckpoints returns the sleeve's checkpoints, oldest first.
+  rpc ListCheckpoints(ListCheckpointsRequest) returns (ListCheckpointsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // DiffCheckpoint returns a unified diff from checkpoint from_id to
+  // checkpoint to_id, or to the current workspace when to_id is 0. Output
+  // beyond 1 MiB is cut off and marked truncated.
+  rpc DiffCheckpoint(DiffCheckpointRequest) returns (DiffCheckpointResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RestoreCheckpoint makes the workspace's non-ignored files match a
+  // checkpoint, removing files the checkpoint lacks. Ignored files, the
+  // workspace's .git directory and its index are untouched. It first
+  // checkpoints the current state, returned as before, so a restore can be
+  // undone. A chat sleeve must be idle.
+  rpc RestoreCheckpoint(RestoreCheckpointRequest) returns (RestoreCheckpointResponse) {
+    option (protectorate.v1.destructive) = true;
+  }
+}
+
+message Checkpoint {
+  uint64 id = 1;
+  // commit is the checkpoint's commit in the private store.
+  string commit = 2;
+  google.protobuf.Timestamp created_at = 3;
+  // reason is "turn", "resleeve", "manual" or "before restore of N".
+  string reason = 4;
+}
+
+message CreateCheckpointRequest {
+  string name = 1;
+}
+
+message CreateCheckpointResponse {
+  Checkpoint checkpoint = 1;
+  bool unchanged = 2;
+}
+
+message ListCheckpointsRequest {
+  string name = 1;
+}
+
+message ListCheckpointsResponse {
+  repeated Checkpoint checkpoints = 1;
+}
+
+message DiffCheckpointRequest {
+  string name = 1;
+  uint64 from_id = 2;
+  uint64 to_id = 3;
+}
+
+message DiffCheckpointResponse {
+  string diff = 1;
+  bool truncated = 2;
+}
+
+message RestoreCheckpointRequest {
+  string name = 1;
+  uint64 id = 2;
+}
+
+message RestoreCheckpointResponse {
+  Checkpoint before = 1;
 }
 
 enum Harness {

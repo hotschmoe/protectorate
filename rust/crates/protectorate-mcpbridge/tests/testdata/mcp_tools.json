@@ -1385,6 +1385,49 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "CreateCheckpoint snapshots the sleeve's git workspace: tracked files and untracked files that are not ignored. The hub also checkpoints a chat sleeve when a turn settles and before a resleeve. Checkpoints live in a private store under the hub's state, never in the workspace repository, so no push can carry them; the newest 20 are kept. If nothing changed since the latest checkpoint, that checkpoint is returned with unchanged.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_create_checkpoint"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "DiffCheckpoint returns a unified diff from checkpoint from_id to checkpoint to_id, or to the current workspace when to_id is 0. Output beyond 1 MiB is cut off and marked truncated.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fromId": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "toId": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_diff_checkpoint"
+  },
+  {
+    "annotations": {
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true
@@ -1423,6 +1466,24 @@
       "type": "object"
     },
     "name": "sleeve_kill_sleeve"
+  },
+  {
+    "annotations": {
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "ListCheckpoints returns the sleeve's checkpoints, oldest first.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_list_checkpoints"
   },
   {
     "annotations": {
@@ -1508,6 +1569,28 @@
       "type": "object"
     },
     "name": "sleeve_resleeve_sleeve"
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "RestoreCheckpoint makes the workspace's non-ignored files match a checkpoint, removing files the checkpoint lacks. Ignored files, the workspace's .git directory and its index are untouched. It first checkpoints the current state, returned as before, so a restore can be undone. A chat sleeve must be idle.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "sleeve_restore_checkpoint"
   },
   {
     "annotations": {

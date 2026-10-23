@@ -25,6 +25,9 @@ pub enum Workload {
     NestedRuntimeTestSleeve,
     SharedNodeJob,
     ReadOnlyHelper(Helper),
+    /// Snapshots and restores a sleeve workspace into a private store kept in
+    /// its home, so the workspace is writable and nothing else is.
+    CheckpointHelper,
     /// An administrator intentionally requested an unsandboxed job. A plan
     /// carrying this variant never contains sandbox grants or credentials.
     PlainNodeJob,
@@ -719,7 +722,9 @@ impl Policy {
             .map(|provider| {
                 if matches!(
                     request.workload,
-                    Workload::SharedNodeJob | Workload::ReadOnlyHelper(_)
+                    Workload::SharedNodeJob
+                        | Workload::ReadOnlyHelper(_)
+                        | Workload::CheckpointHelper
                 ) {
                     return Err(invalid(
                         "jobs and helpers cannot receive provider credentials",
@@ -1162,7 +1167,7 @@ fn validate_private_home(path: &Path, state: &Path, workload: Workload) -> Resul
             "sleeves"
         }
         Workload::SharedNodeJob => "jobs",
-        Workload::ReadOnlyHelper(_) => "helpers",
+        Workload::ReadOnlyHelper(_) | Workload::CheckpointHelper => "helpers",
         Workload::PlainNodeJob | Workload::DirectHarnessDriver => {
             return Err(invalid("direct host processes have no private home"))
         }
