@@ -762,7 +762,7 @@ impl Jobs {
             spec.memory_bytes,
         );
         #[cfg(not(windows))]
-        let spawned = command.spawn();
+        let spawned = spawn_unless_busy(&mut command).await;
         #[cfg(windows)]
         let (mut child, process_tree) = match spawned {
             Ok(pair) => pair,
@@ -1488,6 +1488,25 @@ fn exit_outcome(
         return ("JOB_END_KILLED", -1, format!("killed by signal {signal}"));
     }
     (end, status.code().unwrap_or(-1), String::new())
+}
+
+/// Spawns `command`, retrying while its executable is busy. A source staged
+/// just before is written in this process, so a child that another job forks
+/// meanwhile holds it open for writing until that child execs (ETXTBSY).
+#[cfg(not(windows))]
+async fn spawn_unless_busy(command: &mut Command) -> io::Result<tokio::process::Child> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match command.spawn() {
+            Err(error)
+                if error.kind() == io::ErrorKind::ExecutableFileBusy
+                    && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            result => return result,
+        }
+    }
 }
 
 fn kill_group(pid: u32) {
