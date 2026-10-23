@@ -22,6 +22,39 @@ import (
 func TestBinaryCLIAndMCP(t *testing.T) {
 	c := newCluster(t)
 	t.Run("help snapshots", func(t *testing.T) {
+		if c.rust {
+			root := exec.CommandContext(c.ctx, c.binary, "--help")
+			root.Env = c.env
+			out, err := c.commandOutput(root)
+			if err != nil || !bytes.Contains(out, []byte("Usage:")) {
+				t.Fatalf("Rust root help: %v\n%s", err, out)
+			}
+			for _, path := range []string{"status", "hub update", "node add", "job run", "sleeve spawn", "msg inbox", "chat wait", "api call", "quota suggest"} {
+				if !bytes.Contains(out, []byte(path)) {
+					t.Errorf("Rust root help does not list %q", path)
+				}
+				words := strings.Fields(path)
+				cmd := exec.CommandContext(c.ctx, c.binary, append(slices.Clone(words), "--help")...)
+				cmd.Env = c.env
+				byFlag, err := c.commandOutput(cmd)
+				if err != nil || !bytes.Contains(byFlag, []byte("Usage:")) || !bytes.Contains(byFlag, []byte(path)) {
+					t.Fatalf("Rust %s --help: %v\n%s", path, err, byFlag)
+				}
+				cmd = exec.CommandContext(c.ctx, c.binary, append([]string{"help"}, words...)...)
+				cmd.Env = c.env
+				byCommand, err := c.commandOutput(cmd)
+				if err != nil || !bytes.Equal(byCommand, byFlag) {
+					t.Errorf("Rust help %s differs from %s --help: %v\n%s", path, path, err, byCommand)
+				}
+			}
+			cmd := exec.CommandContext(c.ctx, c.binary, "mcp", "--help")
+			cmd.Env = c.env
+			mcp, err := c.commandOutput(cmd)
+			if err != nil || !bytes.Contains(mcp, []byte("--allow")) || !bytes.Contains(mcp, []byte("--http")) {
+				t.Fatalf("Rust MCP help: %v\n%s", err, mcp)
+			}
+			return
+		}
 		raw, err := os.ReadFile("testdata/cli_help.json")
 		if err != nil {
 			t.Fatal(err)
@@ -111,7 +144,7 @@ func TestBinaryCLIAndMCP(t *testing.T) {
 			cmd.Env = c.env
 			out, err := c.commandOutput(cmd)
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 || !bytes.Contains(out, []byte("Usage:")) || !bytes.Contains(out, []byte("error:")) {
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 || !bytes.Contains(out, []byte("error:")) || (!c.rust && !bytes.Contains(out, []byte("Usage:"))) {
 				t.Fatalf("invalid invocation %v: %v\n%s", args, err, out)
 			}
 		}

@@ -78,13 +78,34 @@ func (c *cluster) runtimeScenario(t *testing.T) {
 		}
 		return e == nil && string(b) == "isolated"
 	})
-	for _, forbidden := range []string{c.home, filepath.Join(c.home, "workspaces", "other"), filepath.Join(c.root, ".ssh")} {
+	forbiddenPaths := []string{c.home, filepath.Join(c.root, ".ssh")}
+	if !c.rust {
+		forbiddenPaths = append(forbiddenPaths, filepath.Join(c.home, "workspaces", "other"))
+	}
+	for _, forbidden := range forbiddenPaths {
 		if err := os.MkdirAll(forbidden, 0700); err != nil {
 			t.Fatal(err)
 		}
 		if status := c.rpc("SleeveService", "SpawnSleeve", map[string]any{"name": "escape", "harness": "HARNESS_SHELL", "workspace": forbidden}, nil); status != 400 && status != 403 {
 			t.Fatalf("unexpected rejection status=%d for forbidden workspace %s", status, forbidden)
 		}
+	}
+	if c.rust {
+		managed := filepath.Join(c.home, "workspaces", "other")
+		if err := os.MkdirAll(managed, 0700); err != nil {
+			t.Fatal(err)
+		}
+		c.call("SleeveService", "SpawnSleeve", map[string]any{
+			"name": "managed-isolation", "harness": "HARNESS_SHELL", "workspace": managed,
+			"args": []string{"sh", "-c", `test ! -r "$1" && printf safe > proof; sleep 20`, "sh", filepath.Join(c.home, "token")},
+		})
+		t.Cleanup(func() {
+			c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "managed-isolation"}, nil)
+		})
+		c.eventually(func() bool {
+			proof, err := os.ReadFile(filepath.Join(managed, "proof"))
+			return err == nil && string(proof) == "safe"
+		})
 	}
 	c.call("SleeveService", "KillSleeve", map[string]any{"name": "isolation"})
 	t.Run("ownership across restart", c.ownershipScenario)

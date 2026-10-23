@@ -48,6 +48,32 @@ func (c *cluster) updateScenario(t *testing.T) {
 	if res.StatusCode != 503 {
 		t.Fatalf("installer without tailnet: %d", res.StatusCode)
 	}
+	if c.rust {
+		for _, path := range []string{"/install.ps1", "/dl/protectorate-rs-linux-" + runtime.GOARCH} {
+			res, err := c.client.Get(c.url + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			want := 503
+			if strings.HasPrefix(path, "/dl/") {
+				want = 404
+			}
+			if res.StatusCode != want {
+				t.Fatalf("%s without active release: %d want %d", path, res.StatusCode, want)
+			}
+		}
+		staged := filepath.Join(c.root, "staged-update")
+		if err := os.WriteFile(staged, []byte("invalid update"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		c.cli("node", "put", "peer", staged, "candidate")
+		var rejection map[string]any
+		if status := c.rpc("NodeService", "ApplyUpdate", map[string]any{"name": "peer", "path": "candidate", "size": 14, "sha256": strings.Repeat("0", 64)}, &rejection); status != 400 || rejection["code"] != "failed_precondition" {
+			t.Fatalf("bad update digest status=%d response=%v", status, rejection)
+		}
+		return
+	}
 	script, err := hub.InstallScript("sh", c.url, c.url)
 	if err != nil {
 		t.Fatal(err)

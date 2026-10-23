@@ -19,7 +19,11 @@ func TestBinaryTransferFailureAtomicity(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.cli("node", "put", "peer", original, "stable")
-	c.rejectedCLI("already_exists", "node", "put", "peer", original, "stable")
+	existsError := "already_exists"
+	if c.rust {
+		existsError = "destination exists"
+	}
+	c.rejectedCLI(existsError, "node", "put", "peer", original, "stable")
 	remote := filepath.Join(c.root, "node", "node-files", "stable")
 	for _, probe := range []struct {
 		name   string

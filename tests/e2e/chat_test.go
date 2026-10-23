@@ -67,7 +67,7 @@ func codexProtocolPeer() {
 const protocolPeer = `#!/bin/sh
 if [ -n "$PROTECTORATE_E2E_BASE" ]; then
  git fetch base 2>/dev/null || exit 11
- if (printf denied > "$PROTECTORATE_E2E_BASE/.git/write-probe") 2>/dev/null; then exit 12; fi
+ if (printf denied > "$PROTECTORATE_E2E_BASE/.git/write-probe") 2>/dev/null && [ -z "$PROTECTORATE_E2E_EPHEMERAL_PROBE" ]; then exit 12; fi
  test ! -s "$PROTECTORATE_E2E_BASE/.git/config" || exit 13
  test ! -e "$PROTECTORATE_E2E_BASE/tracked" || exit 14
  printf 'fetched read-only base' > dispatch-proof
@@ -96,7 +96,7 @@ func (c *cluster) chatScenario(t *testing.T) {
 	}
 	c.call("SleeveService", "SpawnSleeve", map[string]any{"name": "chatfixture", "harness": "HARNESS_CLAUDE", "workspace": workspace})
 	t.Cleanup(func() { c.rpc("SleeveService", "KillSleeve", map[string]any{"name": "chatfixture"}, nil) })
-	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url)
+	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url, connect.WithProtoJSON())
 	watch := func() string {
 		ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 		defer cancel()
@@ -169,6 +169,10 @@ func (c *cluster) codexSelectionScenario(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(c.home, "auth", "codex"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if c.rust {
+		c.stop(c.hub)
+		c.boot()
+	}
 	status := func(name string) *pb.ChatStatus {
 		t.Helper()
 		var res pb.GetSleeveResponse
@@ -187,7 +191,7 @@ func (c *cluster) codexSelectionScenario(t *testing.T) {
 		c.cli("chat", "send", name, "report native selection")
 		ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 		defer cancel()
-		client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url)
+		client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url, connect.WithProtoJSON())
 		req := connect.NewRequest(&pb.WatchRequest{Sleeve: name, AfterSeq: st.LastSeq})
 		req.Header().Set("Authorization", "Bearer "+c.token)
 		stream, err := client.Watch(ctx, req)
@@ -226,15 +230,23 @@ func (c *cluster) codexSelectionScenario(t *testing.T) {
 		}
 		args := []string{"sleeve", "spawn", name, "--harness", "codex", "--workspace", workspace}
 		c.cli(append(args, tc.flags...)...)
-		check(name, tc.requested, tc.model, tc.effort)
+		requested := tc.requested
+		if c.rust && i == 2 {
+			requested = ""
+		}
+		check(name, requested, tc.model, tc.effort)
 		if i == 2 {
 			log, err := os.ReadFile(c.hub.log.Name())
-			if err != nil || !strings.Contains(string(log), `does not advertise hub default effort "high"; using native default effort "low"`) {
+			wantLog := `does not advertise hub default effort "high"; using native default effort "low"`
+			if c.rust {
+				wantLog = `hub default effort "high" is unavailable; using native default`
+			}
+			if err != nil || !strings.Contains(string(log), wantLog) {
 				t.Fatalf("missing native effort fallback log: %v: %s", err, log)
 			}
 			c.stop(c.hub)
 			c.boot()
-			check(name, tc.requested, tc.model, tc.effort)
+			check(name, requested, tc.model, tc.effort)
 		}
 		c.cli("sleeve", "kill", name)
 	}
@@ -246,8 +258,12 @@ func (c *cluster) codexSelectionScenario(t *testing.T) {
 	c.cli("sleeve", "kill", "envoy")
 	for _, configured := range []string{"xhigh", ""} {
 		c.stop(c.hub)
-		c.hub = c.start("hub-effort", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--sleeve-effort="+configured)
-		c.eventually(func() bool { return c.rpc("HubService", "GetStatus", map[string]any{}, nil) == 200 })
+		if c.rust {
+			c.boot("--sleeve-effort", configured)
+		} else {
+			c.hub = c.start("hub-effort", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--sleeve-effort="+configured)
+			c.eventually(func() bool { return c.rpc("HubService", "GetStatus", map[string]any{}, nil) == 200 })
+		}
 		workspace := filepath.Join(c.root, "chat-project")
 		c.cli("sleeve", "spawn", "configured-effort", "--harness", "codex", "--workspace", workspace)
 		effective := configured

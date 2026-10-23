@@ -49,8 +49,12 @@ func TestBinaryNodeCredentialBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	download := filepath.Join(c.root, "care-download")
-	c.rejectedCLI("tier care", "--token-file", credentials, "node", "get", "peer", "care-private", download)
-	c.rejectedCLI("tier care", "--token-file", credentials, "node", "put", "peer", input, "forbidden-write")
+	careError := "tier care"
+	if c.rust {
+		careError = "care node requires an owner or node admin grant"
+	}
+	c.rejectedCLI(careError, "--token-file", credentials, "node", "get", "peer", "care-private", download)
+	c.rejectedCLI(careError, "--token-file", credentials, "node", "put", "peer", input, "forbidden-write")
 	for _, path := range []string{download, filepath.Join(c.root, "node", "node-files", "forbidden-write")} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("denied care access produced a file: %s: %v", path, err)

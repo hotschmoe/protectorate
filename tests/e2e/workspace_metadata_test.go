@@ -53,13 +53,27 @@ func TestBinaryWorkspaceMetadataIsBounded(t *testing.T) {
 		} else if err := os.WriteFile(filepath.Join(dir, "config"), []byte("[remote \"origin\"]\nurl=https://example.invalid/repo\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		records = append(records, map[string]any{"name": name, "workspace": filepath.Dir(dir), "harness": "shell", "state": "exited", "created": "2026-01-01T00:00:00Z"})
+		row := map[string]any{"name": name, "workspace": filepath.Dir(dir), "harness": "shell", "state": "exited", "created": "2026-01-01T00:00:00Z"}
+		if c.rust {
+			row["mode"] = "terminal"
+			row["session"] = "sleeve-" + name
+			row["createdAt"] = row["created"]
+			row["exitedAt"] = "2026-01-01T00:01:00Z"
+			delete(row, "created")
+		}
+		records = append(records, row)
 	}
-	record, err := json.Marshal(map[string]any{"sleeves": records})
+	registry := map[string]any{"sleeves": records}
+	path := filepath.Join(c.home, "sleeves.json")
+	if c.rust {
+		registry["version"] = 1
+		path = filepath.Join(c.home, "sleeves-rust.json")
+	}
+	record, err := json.Marshal(registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(c.home, "sleeves.json"), record, 0600); err != nil {
+	if err := os.WriteFile(path, record, 0600); err != nil {
 		t.Fatal(err)
 	}
 	c.boot()

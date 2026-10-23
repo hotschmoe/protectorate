@@ -14,6 +14,9 @@ import (
 
 func TestBinarySleeveDiskPrune(t *testing.T) {
 	c := newCluster(t)
+	if c.rust {
+		t.Skip("fixture writes the Go sleeves.json format; Rust-native prune coverage lives in protectorate-hub/tests/sleeve_prune.rs")
+	}
 	c.stop(c.hub)
 	write := func(path, body string) {
 		t.Helper()

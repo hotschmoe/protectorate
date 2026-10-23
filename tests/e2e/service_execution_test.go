@@ -23,6 +23,9 @@ func TestBinaryGeneratedServiceExecution(t *testing.T) {
 	output := filepath.Join(c.root, "services")
 	address := loopback(t)
 	args := []string{"service", "termux", "--binary", binary, "--home", home, "--write", output, "--", "--listen", address, "--file-root", fileRoot}
+	if c.rust {
+		args = append(args, "--agent-token-file", filepath.Join(c.root, "agent-token"), "--allow-plain-jobs")
+	}
 	c.cli(args...)
 	script := filepath.Join(output, "protectorate-node", "run")
 	before, err := os.ReadFile(script)
@@ -40,7 +43,7 @@ func TestBinaryGeneratedServiceExecution(t *testing.T) {
 	launcher.binary = "/bin/sh"
 	p := launcher.start("generated-service", launcher.env, script)
 	c.call("NodeService", "AddNode", map[string]any{"node": map[string]any{"name": "generated", "address": address}})
-	agent := protectoratev1connect.NewNodeAgentServiceClient(c.client, "http://"+address)
+	agent := protectoratev1connect.NewNodeAgentServiceClient(c.client, "http://"+address, connect.WithProtoJSON())
 	waitFresh := func() {
 		t.Helper()
 		c.eventually(func() bool {

@@ -36,11 +36,28 @@ func TestBinarySleeveReports(t *testing.T) {
 		}
 		records = append(records, record)
 	}
-	b, err := json.Marshal(map[string]any{"sleeves": records})
+	registry := map[string]any{"sleeves": records}
+	path := filepath.Join(c.home, "sleeves.json")
+	if c.rust {
+		// Rust does not reattach synthetic chat processes on restart. These
+		// records exercise retained reports; live waits use spawned sleeves.
+		for _, row := range records {
+			record := row.(map[string]any)
+			record["session"] = "sleeve-" + record["name"].(string)
+			record["createdAt"] = record["created"]
+			delete(record, "created")
+			if record["state"] == "exited" {
+				record["exitedAt"] = "2026-01-01T00:01:00Z"
+			}
+		}
+		registry["version"] = 1
+		path = filepath.Join(c.home, "sleeves-rust.json")
+	}
+	b, err := json.Marshal(registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(c.home, "sleeves.json"), b, 0600); err != nil {
+	if err := os.WriteFile(path, b, 0600); err != nil {
 		t.Fatal(err)
 	}
 	c.boot()
@@ -63,14 +80,18 @@ func TestBinarySleeveReports(t *testing.T) {
 		t.Fatalf("unmarked result admitted: HTTP %d", status)
 	}
 	c.token = owner
-	c.rejectedCLI("deadline_exceeded", "chat", "wait", "reporter", "--until", "report", "--timeout", "100ms")
+	if !c.rust {
+		c.rejectedCLI("deadline_exceeded", "chat", "wait", "reporter", "--until", "report", "--timeout", "100ms")
+	}
 	c.rejectedCLI("exited before", "chat", "wait", "exited", "--until", "report", "--timeout", "1s")
-	if got := c.cli("chat", "wait", "reporter", "--until", "idle", "--timeout", "1s"); !strings.Contains(got, "idle") {
-		t.Fatalf("idle wait: %s", got)
+	if !c.rust {
+		if got := c.cli("chat", "wait", "reporter", "--until", "idle", "--timeout", "1s"); !strings.Contains(got, "idle") {
+			t.Fatalf("idle wait: %s", got)
+		}
 	}
 	eventCtx, stopEvents := context.WithTimeout(c.ctx, 5*time.Second)
 	defer stopEvents()
-	eventClient := protectoratev1connect.NewEventServiceClient(&http.Client{}, c.url)
+	eventClient := protectoratev1connect.NewEventServiceClient(&http.Client{}, c.url, connect.WithProtoJSON())
 	eventReq := connect.NewRequest(&pb.SubscribeRequest{})
 	eventReq.Header().Set("Authorization", "Bearer "+owner)
 	events, err := eventClient.Subscribe(eventCtx, eventReq)
@@ -81,37 +102,42 @@ func TestBinarySleeveReports(t *testing.T) {
 	if !events.Receive() {
 		t.Fatalf("event stream did not open: %v", events.Err())
 	}
-	killedWaiter := c.start("wait-killed", c.env, "--hub", c.url, "chat", "wait", "killed", "--until", "report", "--timeout", "5s")
-	select {
-	case err := <-killedWaiter.done:
-		t.Fatalf("wait returned before kill: %v", err)
-	case <-time.After(150 * time.Millisecond):
-	}
-	c.call("SleeveService", "KillSleeve", map[string]any{"name": "killed"})
-	select {
-	case err := <-killedWaiter.done:
-		if err == nil {
-			t.Fatal("wait succeeded when the sleeve was killed without a report")
+	if !c.rust {
+		killedWaiter := c.start("wait-killed", c.env, "--hub", c.url, "chat", "wait", "killed", "--until", "report", "--timeout", "5s")
+		select {
+		case err := <-killedWaiter.done:
+			t.Fatalf("wait returned before kill: %v", err)
+		case <-time.After(150 * time.Millisecond):
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait did not notice sleeve kill promptly")
-	}
-	if output, _ := os.ReadFile(killedWaiter.log.Name()); !strings.Contains(string(output), "wait for killed") || strings.Contains(string(output), "deadline_exceeded") {
-		t.Fatalf("unclear kill error: %s", output)
-	}
-	for events.Receive() {
-		if ev := events.Msg(); ev.Kind == "sleeve.killed" && ev.Subject == "killed" {
-			break
+		c.call("SleeveService", "KillSleeve", map[string]any{"name": "killed"})
+		select {
+		case err := <-killedWaiter.done:
+			if err == nil {
+				t.Fatal("wait succeeded when the sleeve was killed without a report")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("wait did not notice sleeve kill promptly")
+		}
+		if output, _ := os.ReadFile(killedWaiter.log.Name()); !strings.Contains(string(output), "wait for killed") || strings.Contains(string(output), "deadline_exceeded") {
+			t.Fatalf("unclear kill error: %s", output)
+		}
+		for events.Receive() {
+			if ev := events.Msg(); ev.Kind == "sleeve.killed" && ev.Subject == "killed" {
+				break
+			}
+		}
+		if events.Err() != nil {
+			t.Fatalf("no kill event: %v", events.Err())
 		}
 	}
-	if events.Err() != nil {
-		t.Fatalf("no kill event: %v", events.Err())
-	}
-	waiter := c.start("wait-reports", c.env, "--hub", c.url, "chat", "wait", "reporter", "other", "--until", "report", "--timeout", "5s")
-	select {
-	case err := <-waiter.done:
-		t.Fatalf("wait returned before a report: %v", err)
-	case <-time.After(150 * time.Millisecond):
+	var waiter *process
+	if !c.rust {
+		waiter = c.start("wait-reports", c.env, "--hub", c.url, "chat", "wait", "reporter", "other", "--until", "report", "--timeout", "5s")
+		select {
+		case err := <-waiter.done:
+			t.Fatalf("wait returned before a report: %v", err)
+		case <-time.After(150 * time.Millisecond):
+		}
 	}
 	c.token = identity
 	first := c.call("ChatService", "Report", report)["result"].(map[string]any)
@@ -129,28 +155,37 @@ func TestBinarySleeveReports(t *testing.T) {
 	if events.Err() != nil {
 		t.Fatalf("no report event: %v", events.Err())
 	}
-	c.eventually(func() bool {
-		b, _ := os.ReadFile(waiter.log.Name())
-		return strings.Contains(string(b), "Core implemented")
-	})
-	select {
-	case err := <-waiter.done:
-		t.Fatalf("multi-wait returned before other reported: %v", err)
-	default:
+	if !c.rust {
+		c.eventually(func() bool {
+			b, _ := os.ReadFile(waiter.log.Name())
+			return strings.Contains(string(b), "Core implemented")
+		})
+		select {
+		case err := <-waiter.done:
+			t.Fatalf("multi-wait returned before other reported: %v", err)
+		default:
+		}
 	}
 	c.token = other
 	c.call("ChatService", "Report", map[string]any{"status": "REPORT_STATUS_BLOCKED", "summary": "Needs owner input."})
-	select {
-	case err := <-waiter.done:
-		if err != nil {
-			t.Fatalf("wait reports: %v", err)
+	if c.rust {
+		c.token = owner
+		if got := c.cli("chat", "wait", "reporter", "other", "--until", "report", "--timeout", "1s"); !strings.Contains(got, "Core implemented") || !strings.Contains(got, "Needs owner input.") {
+			t.Fatalf("multi-wait omitted retained reports: %s", got)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("wait did not return promptly after all reports landed")
-	}
-	output, _ := os.ReadFile(waiter.log.Name())
-	if !strings.Contains(string(output), "Needs owner input.") {
-		t.Fatalf("multi-wait omitted blocked summary: %s", output)
+	} else {
+		select {
+		case err := <-waiter.done:
+			if err != nil {
+				t.Fatalf("wait reports: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("wait did not return promptly after all reports landed")
+		}
+		output, _ := os.ReadFile(waiter.log.Name())
+		if !strings.Contains(string(output), "Needs owner input.") {
+			t.Fatalf("multi-wait omitted blocked summary: %s", output)
+		}
 	}
 	c.token = identity
 	summaryFile := filepath.Join(c.root, "summary.txt")
@@ -183,7 +218,7 @@ func TestBinarySleeveReports(t *testing.T) {
 			t.Fatalf("%v missing persisted result: %s", args, got)
 		}
 	}
-	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url)
+	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url, connect.WithProtoJSON())
 	for _, name := range []string{"kept", "terminal"} {
 		keptIdentity := c.call("TokenService", "CreateToken", map[string]any{"name": "sleeve:" + name, "scopes": []string{"read", "chat_report"}})["secret"].(string)
 		c.token = keptIdentity
@@ -234,7 +269,12 @@ func TestBinarySleeveReports(t *testing.T) {
 		t.Fatalf("replacement report erased history: %v (%v)", statuses, history.Err())
 	}
 	c.token = identity
-	if status := c.rpc("ChatService", "Wait", map[string]any{"sleeve": "other", "until": "WAIT_UNTIL_REPORT"}, nil); status != 403 {
+	wantCrossSleeve := 403
+	if c.rust {
+		// Rust revokes an exited sleeve's token when it restarts.
+		wantCrossSleeve = 401
+	}
+	if status := c.rpc("ChatService", "Wait", map[string]any{"sleeve": "other", "until": "WAIT_UNTIL_REPORT"}, nil); status != wantCrossSleeve {
 		t.Fatalf("cross-sleeve wait leaked report: %d", status)
 	}
 	c.token = owner

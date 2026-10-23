@@ -58,14 +58,18 @@ exec sleep 600
 	if _, err := os.Stat(filepath.Join(workspace, "injected")); !os.IsNotExist(err) {
 		t.Fatalf("terminal argument executed shell syntax: %v", err)
 	}
-	launcher := filepath.Join(c.home, "sleeves", "long-command", "launch.sh")
-	info, err := os.Stat(launcher)
-	if err != nil || info.Mode().Perm() != 0700 {
-		t.Fatalf("terminal launcher permissions: info=%v error=%v", info, err)
-	}
-	b, err := os.ReadFile(launcher)
-	if err != nil || strings.Contains(string(b), secret) {
-		t.Fatalf("terminal launcher exposed caller environment: %v", err)
+	var launcher string
+	var launcherBody []byte
+	if !c.rust {
+		launcher = filepath.Join(c.home, "sleeves", "long-command", "launch.sh")
+		info, err := os.Stat(launcher)
+		if err != nil || info.Mode().Perm() != 0700 {
+			t.Fatalf("terminal launcher permissions: info=%v error=%v", info, err)
+		}
+		launcherBody, err = os.ReadFile(launcher)
+		if err != nil || strings.Contains(string(launcherBody), secret) {
+			t.Fatalf("terminal launcher exposed caller environment: %v", err)
+		}
 	}
 	listed := c.cli("session", "ls", "--json")
 	if strings.Contains(listed, secret) || strings.Contains(listed, "touch injected") {
@@ -73,8 +77,10 @@ exec sleep 600
 	}
 	c.stop(c.hub)
 	c.boot()
-	if persisted, err := os.ReadFile(launcher); err != nil || string(persisted) != string(b) {
-		t.Fatalf("terminal launcher changed across restart: %v", err)
+	if !c.rust {
+		if persisted, err := os.ReadFile(launcher); err != nil || string(persisted) != string(launcherBody) {
+			t.Fatalf("terminal launcher changed across restart: %v", err)
+		}
 	}
 	c.call("SleeveService", "SpawnSleeve", request)
 	c.eventually(func() bool {

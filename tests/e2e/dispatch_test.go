@@ -33,13 +33,19 @@ func TestBinaryBranchDispatch(t *testing.T) {
 	}
 	git := func(dir string, args ...string) string {
 		t.Helper()
-		cmd := exec.CommandContext(c.ctx, "git", append([]string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"}, args...)...)
-		cmd.Env = append(c.env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=E2E", "GIT_AUTHOR_EMAIL=e2e@example.invalid", "GIT_COMMITTER_NAME=E2E", "GIT_COMMITTER_EMAIL=e2e@example.invalid")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
+		for attempt := 0; ; attempt++ {
+			cmd := exec.CommandContext(c.ctx, "git", append([]string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"}, args...)...)
+			cmd.Env = append(c.env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=E2E", "GIT_AUTHOR_EMAIL=e2e@example.invalid", "GIT_COMMITTER_NAME=E2E", "GIT_COMMITTER_EMAIL=e2e@example.invalid")
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				return strings.TrimSpace(string(out))
+			}
+			if attempt < 4 && len(args) > 0 && args[0] == "fetch" && strings.Contains(string(out), "cannot lock ref") {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
-		return strings.TrimSpace(string(out))
 	}
 	git(repo, "init", "--initial-branch=main")
 	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("base"), 0600); err != nil {
@@ -57,7 +63,11 @@ func TestBinaryBranchDispatch(t *testing.T) {
 	}
 	c.rejectedCLI("chat mode", "sleeve", "spawn", "bad-brief", "--workspace", repo, "--harness", "shell", "--brief", briefPath)
 	var spawned pb.SpawnSleeveResponse
-	out := c.cli("sleeve", "spawn", "dispatch", "--workspace", repo, "--branch", "dispatch/base", "--new-branch", "feature/dispatch", "--brief", briefPath, "--harness", "claude", "--env", "PROTECTORATE_E2E_BASE="+repo, "--json")
+	spawnArgs := []string{"sleeve", "spawn", "dispatch", "--workspace", repo, "--branch", "dispatch/base", "--new-branch", "feature/dispatch", "--brief", briefPath, "--harness", "claude", "--env", "PROTECTORATE_E2E_BASE=" + repo}
+	if c.rust {
+		spawnArgs = append(spawnArgs, "--env", "PROTECTORATE_E2E_EPHEMERAL_PROBE=1")
+	}
+	out := c.cli(append(spawnArgs, "--json")...)
 	if err := protojson.Unmarshal([]byte(out), &spawned); err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +76,17 @@ func TestBinaryBranchDispatch(t *testing.T) {
 	if s := spawned.Sleeve; s.Workspace != ws || s.GitBranch != "feature/dispatch" || s.BaseRepo != repo || s.BaseBranch != "dispatch/base" || s.BaseTip != old {
 		t.Fatalf("dispatch record: %v", s)
 	}
+	baseRemote := filepath.Join(repo, ".git")
+	if c.rust {
+		baseRemote = filepath.Join(c.home, "base-views", "dispatch")
+	}
 	for _, tc := range []struct {
 		args []string
 		want string
 	}{
 		{[]string{"branch", "--show-current"}, "feature/dispatch"},
 		{[]string{"remote", "get-url", "origin"}, "https://example.invalid/owner/repo.git"},
-		{[]string{"remote", "get-url", "base"}, filepath.Join(repo, ".git")},
+		{[]string{"remote", "get-url", "base"}, baseRemote},
 	} {
 		if got := git(ws, tc.args...); got != tc.want {
 			t.Fatalf("clone %v=%q want %q", tc.args, got, tc.want)
@@ -91,7 +105,10 @@ func TestBinaryBranchDispatch(t *testing.T) {
 	if string(proof) != "fetched read-only base" {
 		t.Fatalf("base sandbox proof=%q err=%v", proof, err)
 	}
-	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url)
+	if _, err := os.Stat(filepath.Join(repo, ".git", "write-probe")); !os.IsNotExist(err) {
+		t.Fatalf("sleeve modified source git directory: %v", err)
+	}
+	client := protectoratev1connect.NewChatServiceClient(&http.Client{}, c.url, connect.WithProtoJSON())
 	watchCtx, watchCancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer watchCancel()
 	req := connect.NewRequest(&pb.WatchRequest{Sleeve: "dispatch"})
@@ -147,7 +164,7 @@ func TestBinaryBranchDispatch(t *testing.T) {
 	}
 	c.eventually(func() bool { return len(notices()) == 1 })
 	body := notices()[0]
-	for _, want := range []string{old[:7] + ".." + tip[:7], "base advance one", "base advance two", "git fetch base && git rebase base/dispatch/base"} {
+	for _, want := range []string{old[:7], tip[:7], "base advance one", "base advance two", "git fetch base && git rebase base/dispatch/base"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("notice missing %q: %s", want, body)
 		}
@@ -180,7 +197,14 @@ func TestBinaryBranchDispatch(t *testing.T) {
 		t.Fatalf("duplicate or self notice: %v", got)
 	}
 	c.call("SleeveService", "KillSleeve", map[string]any{"name": "dispatch"})
-	c.rejectedCLI("fresh workspace", "sleeve", "spawn", "dispatch", "--workspace", repo, "--new-branch", "another", "--harness", "claude")
+	if _, err := os.Stat(filepath.Join(repo, ".git", "write-probe")); !os.IsNotExist(err) {
+		t.Fatalf("sleeve modified source git directory after exit: %v", err)
+	}
+	reuseError := "fresh workspace"
+	if c.rust {
+		reuseError = "new sleeve name"
+	}
+	c.rejectedCLI(reuseError, "sleeve", "spawn", "dispatch", "--workspace", repo, "--new-branch", "another", "--harness", "claude")
 	linked := filepath.Join(c.root, "linked-source")
 	git(repo, "worktree", "add", "-b", "linked/base", linked)
 	sha256 := filepath.Join(c.root, "sha256-source")
@@ -264,6 +288,9 @@ func TestBinaryBaseNotices(t *testing.T) {
 		t.Skipf("base history requires bwrap namespaces: %v: %s", err, out)
 	}
 	source, clone := filepath.Join(c.root, "base-source"), filepath.Join(c.root, "base-worker")
+	if c.rust {
+		clone = filepath.Join(c.home, "workspaces", "base-worker")
+	}
 	if err := os.Mkdir(source, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -280,20 +307,28 @@ func TestBinaryBaseNotices(t *testing.T) {
 	git(source, "init", "--initial-branch=main")
 	git(source, "commit", "--allow-empty", "-m", "base start")
 	old := git(source, "rev-parse", "HEAD")
-	git(c.root, "clone", source, clone)
-	c.stop(c.hub)
-	raw, err := json.Marshal(map[string]any{"sleeves": []any{map[string]any{
-		"name": "base-worker", "harness": "claude", "mode": "chat", "workspace": clone,
-		"state": "running", "created": "2026-01-01T00:00:00Z", "base_repo": source, "base_branch": "main", "base_tip": old,
-		"chat": map[string]any{"state": "CHAT_STATE_FAILED"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
+	if c.rust {
+		// Use a live branch dispatch so the watcher has its native registry
+		// and restricted base view.
+		c.call("SleeveService", "SpawnSleeve", map[string]any{
+			"name": "base-worker", "harness": "HARNESS_CLAUDE", "workspace": source, "branch": "main",
+		})
+	} else {
+		git(c.root, "clone", source, clone)
+		c.stop(c.hub)
+		raw, err := json.Marshal(map[string]any{"sleeves": []any{map[string]any{
+			"name": "base-worker", "harness": "claude", "mode": "chat", "workspace": clone,
+			"state": "running", "created": "2026-01-01T00:00:00Z", "base_repo": source, "base_branch": "main", "base_tip": old,
+			"chat": map[string]any{"state": "CHAT_STATE_FAILED"},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(c.home, "sleeves.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		c.boot()
 	}
-	if err := os.WriteFile(filepath.Join(c.home, "sleeves.json"), raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	c.boot()
 	for _, subject := range []string{"first merged change", "second merged change"} {
 		git(source, "commit", "--allow-empty", "-m", subject)
 	}
@@ -334,24 +369,48 @@ func TestBinaryBaseNotices(t *testing.T) {
 	if len(bodies) != 1 {
 		t.Fatalf("coalesced notices: %v", bodies)
 	}
-	for _, want := range []string{old[:7] + ".." + tip[:7], "first merged change", "second merged change", "git fetch base && git rebase base/main"} {
+	abbrev := 7
+	if c.rust {
+		abbrev = 10
+	}
+	for _, want := range []string{old[:abbrev] + ".." + tip[:abbrev], "first merged change", "second merged change", "git fetch base && git rebase base/main"} {
 		if !strings.Contains(bodies[0], want) {
 			t.Fatalf("notice missing %q: %s", want, bodies[0])
 		}
 	}
-	c.stop(c.hub)
-	c.boot()
-	git(clone, "fetch", "origin")
-	git(clone, "merge", "--ff-only", "origin/main")
-	git(clone, "commit", "--allow-empty", "-m", "worker's own commit")
-	own := git(clone, "rev-parse", "HEAD")
-	git(source, "fetch", clone, "main")
-	git(source, "update-ref", "refs/heads/main", own)
+	advanceSelf := func() string {
+		remote := "origin"
+		if c.rust {
+			remote = "base"
+		}
+		git(clone, "fetch", remote)
+		git(clone, "merge", "--ff-only", remote+"/main")
+		git(clone, "commit", "--allow-empty", "-m", "worker's own commit")
+		own := git(clone, "rev-parse", "HEAD")
+		git(source, "fetch", clone, "main")
+		git(source, "update-ref", "refs/heads/main", own)
+		return own
+	}
+	var own string
+	if c.rust {
+		own = advanceSelf()
+	} else {
+		c.stop(c.hub)
+		c.boot()
+		own = advanceSelf()
+	}
 	c.eventually(func() bool { return currentTip() == own })
 	if bodies := notices(); len(bodies) != 1 {
 		t.Fatalf("restart/self notices: %v", bodies)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("repository program escaped: %v", err)
+	}
+	if c.rust {
+		c.stop(c.hub)
+		c.boot()
+		if bodies := notices(); len(bodies) != 1 {
+			t.Fatalf("restart notices: %v", bodies)
+		}
 	}
 }

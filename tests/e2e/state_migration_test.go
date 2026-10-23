@@ -12,6 +12,9 @@ import (
 
 func TestBinaryStateMigrationAndPolicyRestart(t *testing.T) {
 	c := newCluster(t)
+	if c.rust {
+		t.Skip("fixture migrates Go nodes.json state, which is outside Rust user-facing parity")
+	}
 	c.cli("node", "add", "family-box", "--addr", "127.0.0.1:1", "--tag", "keep", "--tier", "care")
 	c.stop(c.hub)
 	path := filepath.Join(c.home, "nodes.json")

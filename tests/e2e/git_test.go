@@ -45,7 +45,11 @@ func (c *cluster) gitScenario(t *testing.T) {
 			}
 			return v["state"] == "JOB_STATE_SUCCEEDED"
 		})
-		log, err := os.ReadFile(filepath.Join(c.home, "jobs", id, "job.log"))
+		logPath := filepath.Join(c.home, "jobs", id, "job.log")
+		if c.rust {
+			logPath = filepath.Join(c.home, "jobs-rust", id+".log")
+		}
+		log, err := os.ReadFile(logPath)
 		want := version
 		if version == "two" {
 			want += "warm"

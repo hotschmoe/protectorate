@@ -47,11 +47,7 @@ func TestBinaryNodeRepositoryProgramsStayIsolated(t *testing.T) {
 			}
 			return job["state"] == "JOB_STATE_SUCCEEDED"
 		})
-		out, err := os.ReadFile(filepath.Join(c.home, "jobs", id, "job.log"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(out)
+		return c.cli("job", "logs", id)
 	}
 	marker := filepath.Join(c.root, "host-hook-marker")
 	run([]string{"sh", "-c", `printf '#!/bin/sh\nprintf escaped > "%s"\n' "$1" > .git/hooks/post-checkout; chmod 700 .git/hooks/post-checkout`, "sh", marker})
@@ -64,8 +60,9 @@ func TestBinaryNodeRepositoryProgramsStayIsolated(t *testing.T) {
 	t.Run("filters have only job authority", func(t *testing.T) {
 		status := c.call("NodeService", "GetNode", map[string]any{"name": "peer"})
 		// The note explains a missing sandbox and may itself mention bwrap.
-		if !strings.Contains(fmt.Sprint(status), "sandbox:bwrap") {
-			t.Skip("filter confinement requires a node with working bwrap and systemd user manager")
+		isolation := fmt.Sprint(status)
+		if !strings.Contains(isolation, "sandbox:bwrap") && !strings.Contains(isolation, "rust-namespaces") {
+			t.Skip("filter confinement requires a node with working sandbox isolation")
 		}
 		secret := filepath.Join(c.root, "host-secret")
 		if err := os.WriteFile(secret, []byte("host credential"), 0600); err != nil {

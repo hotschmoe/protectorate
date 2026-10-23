@@ -20,7 +20,7 @@ func TestBinaryJobArtifactsStayInWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secretDir, "secret"), []byte("node credential"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	client := protectoratev1connect.NewNodeAgentServiceClient(c.client, c.nodeURL)
+	client := protectoratev1connect.NewNodeAgentServiceClient(c.client, c.nodeURL, connect.WithProtoJSON())
 	for i, pattern := range []string{"escape/secret", "escape/*", "escape"} {
 		t.Run(pattern, func(t *testing.T) {
 			req := connect.NewRequest(&pb.RunJobRequest{

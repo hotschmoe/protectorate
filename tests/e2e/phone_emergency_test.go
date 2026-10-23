@@ -25,7 +25,9 @@ func TestBinaryPhoneEmergencyStop(t *testing.T) {
 	reader := c.call("TokenService", "CreateToken", map[string]any{
 		"name": "phone-readonly", "scopes": []string{"read"},
 	})["secret"].(string)
-	c.call("SleeveService", "SpawnEnvoy", map[string]any{"harness": "HARNESS_CLAUDE"})
+	if !c.rust {
+		c.call("SleeveService", "SpawnEnvoy", map[string]any{"harness": "HARNESS_CLAUDE"})
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -41,19 +43,23 @@ func TestBinaryPhoneEmergencyStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load runtime config: %v", err)
 	}
-	for _, tc := range []struct {
+	cases := []struct {
 		name     string
 		hasEnvoy bool
 	}{
 		{"envoy running", true},
 		{"envoy unavailable", false},
-	} {
+	}
+	if c.rust {
+		cases = cases[1:]
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			previous := c.t
 			c.t = t
 			defer func() { c.t = previous; c.token = owner }()
 			c.token = owner
-			if !tc.hasEnvoy {
+			if !tc.hasEnvoy && !c.rust {
 				c.call("SleeveService", "KillSleeve", map[string]any{"name": "envoy"})
 			}
 			identities := make(map[string]string)

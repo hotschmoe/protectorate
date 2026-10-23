@@ -35,7 +35,7 @@ func TestBinaryJobCancellationAndIdempotency(t *testing.T) {
 	// Plain jobs report PIDs in this namespace, including on sandbox-capable hosts.
 	c.call("NodeService", "SetNodeTier", map[string]any{"name": "peer", "tier": "care"})
 
-	client := protectoratev1connect.NewJobServiceClient(c.client, c.url)
+	client := protectoratev1connect.NewJobServiceClient(c.client, c.url, connect.WithProtoJSON())
 	type result struct {
 		id  string
 		err error
@@ -68,7 +68,11 @@ func TestBinaryJobCancellationAndIdempotency(t *testing.T) {
 	}
 	var child int
 	c.eventually(func() bool {
-		b, _ := os.ReadFile(filepath.Join(c.home, "jobs", id, "job.log"))
+		logPath := filepath.Join(c.home, "jobs", id, "job.log")
+		if c.rust {
+			logPath = filepath.Join(c.home, "jobs-rust", id+".log")
+		}
+		b, _ := os.ReadFile(logPath)
 		_, err := fmt.Sscanf(string(b), "child=%d", &child)
 		return err == nil && child > 0
 	})

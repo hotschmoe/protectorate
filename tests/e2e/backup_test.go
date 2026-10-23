@@ -91,3 +91,25 @@ func (c *cluster) rejectTamperedBackups(archive []byte) {
 	}
 	c.rejectedCLI("read archive", "hub", "restore", truncated, "--home", filepath.Join(c.root, "truncated-restore"))
 }
+
+func (c *cluster) rejectNativeTamperedBackups(archive []byte) {
+	c.t.Helper()
+	for _, tc := range []struct {
+		name string
+		want string
+		data []byte
+	}{
+		{"truncated", "UnexpectedEof", archive[:len(archive)/2]},
+		{"trailing-data", "archive contains data after its manifest", append(append([]byte(nil), archive...), 'x')},
+	} {
+		path := filepath.Join(c.root, tc.name+".pbackup")
+		if err := os.WriteFile(path, tc.data, 0600); err != nil {
+			c.t.Fatal(err)
+		}
+		dest := filepath.Join(c.root, tc.name+"-restore")
+		c.rejectedCLI(tc.want, "hub", "restore", path, "--home", dest)
+		if _, err := os.Stat(dest); !os.IsNotExist(err) {
+			c.t.Fatalf("invalid backup created destination: %v", err)
+		}
+	}
+}

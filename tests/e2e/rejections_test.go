@@ -26,7 +26,11 @@ func (c *cluster) rejectFileEscapes(input string) {
 		c.t.Fatalf("create confinement probe symlink: %v", err)
 	}
 	for _, path := range []string{"../outside-transfer/sentinel", filepath.Join(outside, "sentinel"), "escape/sentinel"} {
-		c.rejectedCLI("permission_denied", "node", "put", "peer", input, path)
+		want := "permission_denied"
+		if c.rust {
+			want = "outside the node file root"
+		}
+		c.rejectedCLI(want, "node", "put", "peer", input, path)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "sentinel")); !os.IsNotExist(err) {
 		c.t.Fatalf("rejected transfer wrote outside the node file root: %v", err)

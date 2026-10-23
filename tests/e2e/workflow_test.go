@@ -79,11 +79,17 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 	if dup := c.call("JobService", "SubmitJob", jobRequest); dup["id"] != id {
 		t.Fatalf("restart lost idempotency: %v != %v", dup["id"], id)
 	}
-	log, err := os.ReadFile(filepath.Join(c.home, "jobs", id.(string), "job.log"))
+	logPath := filepath.Join(c.home, "jobs", id.(string), "job.log")
+	artifactPath := filepath.Join(c.home, "jobs", id.(string), "artifacts", "result.txt")
+	if c.rust {
+		logPath = filepath.Join(c.home, "jobs-rust", id.(string)+".log")
+		artifactPath = filepath.Join(c.home, "jobs-rust", id.(string)+".artifacts", "result.txt")
+	}
+	log, err := os.ReadFile(logPath)
 	if err != nil || strings.Count(string(log), "before") != 1 || strings.Count(string(log), "after") != 1 {
 		t.Fatalf("resume output=%q err=%v", log, err)
 	}
-	artifact, err := os.ReadFile(filepath.Join(c.home, "jobs", id.(string), "artifacts", "result.txt"))
+	artifact, err := os.ReadFile(artifactPath)
 	if err != nil || string(artifact) != "artifact" {
 		t.Fatalf("artifact=%q err=%v", artifact, err)
 	}
@@ -109,16 +115,27 @@ func TestBinaryClusterRestartAndRestore(t *testing.T) {
 	backup := c.cli("hub", "backup", "--to", filepath.Join(c.root, "backups"))
 	archive := strings.Split(strings.TrimSpace(backup), "\n")[0]
 	corrupt := filepath.Join(c.root, "corrupt.tar.zst")
+	if c.rust {
+		corrupt = filepath.Join(c.root, "corrupt.pbackup")
+	}
 	archiveBytes, err := os.ReadFile(archive)
 	if err != nil || len(archiveBytes) == 0 {
 		t.Fatalf("read backup for integrity probe: %v", err)
 	}
-	c.rejectTamperedBackups(archiveBytes)
+	if c.rust {
+		c.rejectNativeTamperedBackups(archiveBytes)
+	} else {
+		c.rejectTamperedBackups(archiveBytes)
+	}
 	archiveBytes[0] ^= 0xff
 	if err := os.WriteFile(corrupt, archiveBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
-	c.rejectedCLI("read archive", "hub", "restore", corrupt, "--home", filepath.Join(c.root, "rejected-restore"))
+	corruptError := "read archive"
+	if c.rust {
+		corruptError = "unsupported backup archive format"
+	}
+	c.rejectedCLI(corruptError, "hub", "restore", corrupt, "--home", filepath.Join(c.root, "rejected-restore"))
 	restored := filepath.Join(c.root, "restored")
 	c.cli("hub", "restore", archive, "--home", restored)
 	c.home = restored

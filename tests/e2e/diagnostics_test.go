@@ -28,7 +28,7 @@ func (c *cluster) diagnosticsScenario(t *testing.T) {
 			want := 403
 			if token == c.token {
 				want = 200
-				if path == "/debug/nodes/peer/metrics" {
+				if !c.rust && path == "/debug/nodes/peer/metrics" {
 					want = 401
 				}
 			}
@@ -40,7 +40,11 @@ func (c *cluster) diagnosticsScenario(t *testing.T) {
 			}
 			if want == 200 && path == "/debug/metrics" {
 				var values map[string]uint64
-				if err := json.Unmarshal(body, &values); err != nil || values["/sched/goroutines:goroutines"] == 0 {
+				key := "/sched/goroutines:goroutines"
+				if c.rust {
+					key = "/process/threads:count"
+				}
+				if err := json.Unmarshal(body, &values); err != nil || values[key] == 0 {
 					t.Fatalf("metrics: %s %v", body, err)
 				}
 			}

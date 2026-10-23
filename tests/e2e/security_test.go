@@ -154,7 +154,11 @@ func (c *cluster) securityScenario(t *testing.T) {
 		if status != 200 && status != 400 {
 			t.Fatalf("selector status=%d", status)
 		}
-		if status == 400 && (job["code"] != "failed_precondition" || !strings.Contains(fmt.Sprint(job["message"]), "peer: tier care")) {
+		selectorReason := "peer: tier care"
+		if c.rust {
+			selectorReason = "no fresh shared node matches selector"
+		}
+		if status == 400 && (job["code"] != "failed_precondition" || !strings.Contains(fmt.Sprint(job["message"]), selectorReason)) {
 			t.Fatalf("selector refused for an unrelated reason: %v", job)
 		}
 		if job["node"] == "peer" {

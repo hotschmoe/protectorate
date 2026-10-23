@@ -37,6 +37,7 @@ type cluster struct {
 	hub                                     *process
 	node                                    *process
 	client                                  *http.Client
+	rust                                    bool
 }
 
 func newCluster(t *testing.T) *cluster {
@@ -47,6 +48,7 @@ func newCluster(t *testing.T) *cluster {
 	c := &cluster{t: t, owner: t, ctx: ctx, root: t.TempDir(), client: &http.Client{Timeout: 30 * time.Second}}
 	t.Cleanup(c.checkRaceLogs)
 	c.home = filepath.Join(c.root, "hub")
+	c.rust = os.Getenv("PROT_E2E_COMPANION_BINARY") != ""
 	binDir := filepath.Join(c.root, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0700); err != nil {
 		t.Fatal(err)
@@ -89,10 +91,48 @@ func newCluster(t *testing.T) *cluster {
 		}
 		c.binary = filepath.Join(binDir, "protectorate")
 	}
-	runCtx, runCancel := context.WithTimeout(t.Context(), 75*time.Second)
+	if c.rust {
+		companion := os.Getenv("PROT_E2E_COMPANION_BINARY")
+		if !filepath.IsAbs(companion) {
+			t.Fatal("PROT_E2E_COMPANION_BINARY must be an absolute path")
+		}
+		for _, name := range []string{"protectorate-rs", "protectorate-mcpbridge", "protectorate-node-sandbox-helper", "protectorate-hub-sleeve-runner", "protectorate-hub-sandbox-helper", "protectorate-sleeve-runner", "protectorate-sleeve-sandbox-helper"} {
+			source := filepath.Join(filepath.Dir(companion), name)
+			if name == "protectorate-rs" {
+				source = companion
+			}
+			body, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatalf("read Rust companion %s: %v", source, err)
+			}
+			if err := os.WriteFile(filepath.Join(binDir, name), body, 0700); err != nil {
+				t.Fatalf("copy Rust companion %s: %v", name, err)
+			}
+		}
+		if err := os.MkdirAll(c.home, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(c.home, "auth", "claude"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(c.home, "token"), []byte("e2e-owner-secret\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(c.root, "agent-token"), []byte("e2e-node-secret\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runTimeout := 75 * time.Second
+	if c.rust {
+		runTimeout = 2 * time.Minute
+	}
+	runCtx, runCancel := context.WithTimeout(t.Context(), runTimeout)
 	t.Cleanup(runCancel)
 	c.ctx = runCtx
 	c.env = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"), "HOME=" + c.root, "PROTECTORATE_HOME=" + c.home, "PROTECTORATE_NODE_TOKEN=e2e-node-secret", "GOMAXPROCS=2", "HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=", "NO_PROXY=*", "DOCKER_HOST=unix:///nonexistent-e2e.sock"}
+	if c.rust {
+		c.env = append(c.env, "PROTECTORATE_TOKEN_FILE="+filepath.Join(c.home, "token"))
+	}
 	c.env = append(c.env, c.raceEnv("CLI-helper"))
 	if dir := os.Getenv("GOCOVERDIR"); dir != "" {
 		c.env = append(c.env, "GOCOVERDIR="+dir)
@@ -135,7 +175,11 @@ func newCluster(t *testing.T) *cluster {
 	}
 	nodeCluster := *c
 	nodeCluster.binary = nodeBinary
-	c.node = nodeCluster.start("node", append(c.env, "PROTECTORATE_HOME="+filepath.Join(c.root, "node"), "INVOCATION_ID=e2e"), "node", "serve", "--listen", strings.TrimPrefix(c.nodeURL, "http://"))
+	nodeArgs := []string{"node", "serve", "--listen", strings.TrimPrefix(c.nodeURL, "http://")}
+	if c.rust {
+		nodeArgs = append(nodeArgs, "--agent-token-file", filepath.Join(c.root, "agent-token"), "--file-root", filepath.Join(c.root, "node", "node-files"), "--allow-plain-jobs")
+	}
+	c.node = nodeCluster.start("node", append(c.env, "PROTECTORATE_HOME="+filepath.Join(c.root, "node"), "INVOCATION_ID=e2e"), nodeArgs...)
 	c.boot()
 	c.eventually(func() bool {
 		return c.rpc("NodeService", "AddNode", map[string]any{"node": map[string]any{"name": "peer", "address": strings.TrimPrefix(c.nodeURL, "http://")}}, nil) == 200
@@ -218,6 +262,9 @@ func (c *cluster) stop(p *process) {
 }
 func (c *cluster) boot(extra ...string) {
 	args := []string{"hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--node-interval", "1s", "--tmux-socket", "e2e-" + filepath.Base(c.root), "--release-api-url", "http://127.0.0.1:1", "--binary-dir", filepath.Dir(c.binary)}
+	if c.rust {
+		args = []string{"hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--home", c.home, "--owner-token-file", filepath.Join(c.home, "token"), "--agent-token-file", filepath.Join(c.root, "agent-token"), "--node-interval", "1s", "--release-api-url", "http://127.0.0.1:1", "--node-binary-dir", filepath.Dir(c.binary), "--claude-executable", filepath.Join(filepath.Dir(c.binary), "claude")}
+	}
 	args = append(args, c.hubArgs...)
 	c.hub = c.start("hub", c.env, append(args, extra...)...)
 	c.eventually(func() bool {

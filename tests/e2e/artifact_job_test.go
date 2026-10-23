@@ -40,13 +40,20 @@ func TestBinaryArtifactJobAndReplay(t *testing.T) {
 		t.Fatalf("artifact job did not complete with a source upload: %v", job)
 	}
 	artifact := filepath.Join(c.home, "jobs", id, "artifacts", "out", "result")
+	if c.rust {
+		artifact = filepath.Join(c.home, "jobs-rust", id+".artifacts", "out", "result")
+	}
 	if b, err := os.ReadFile(artifact); err != nil || !bytes.Equal(b, payload) {
-		t.Fatalf("artifact job corrupted its binary output: bytes=%d err=%v", len(b), err)
+		t.Fatalf("artifact job corrupted its binary output: bytes=%d err=%v job=%v", len(b), err, job)
 	}
 	if info, err := os.Stat(artifact); err != nil || info.Mode().Perm() != 0750 {
 		t.Fatalf("artifact return lost executable permissions: %v %v", info, err)
 	}
-	raw, err := os.ReadFile(filepath.Join(c.home, "jobs", id, "job.json"))
+	record := filepath.Join(c.home, "jobs", id, "job.json")
+	if c.rust {
+		record = filepath.Join(c.home, "jobs-rust", id+".json")
+	}
+	raw, err := os.ReadFile(record)
 	if err != nil || bytes.Contains(raw, []byte(secret)) || !bytes.Contains(raw, []byte("SECRET")) {
 		t.Fatalf("job persistence exposed environment values or lost their keys: %s %v", raw, err)
 	}
@@ -72,5 +79,27 @@ func TestBinaryArtifactJobAndReplay(t *testing.T) {
 	})
 	if output := c.cli("job", "run", "--on", "peer", "--artifact", single, "--", "./single-source"); !strings.Contains(output, "single-source-executed") {
 		t.Fatalf("single-file artifact was not made executable: %s", output)
+	}
+	if c.rust {
+		archive := strings.Split(strings.TrimSpace(c.cli("hub", "backup", "--to", filepath.Join(c.root, "backups"))), "\n")[0]
+		c.stop(c.hub)
+		restored := filepath.Join(c.root, "restored-artifact-hub")
+		c.cli("hub", "restore", archive, "--home", restored)
+		c.home = restored
+		c.env = append(c.env, "PROTECTORATE_HOME="+restored)
+		c.boot()
+		if got := c.cli("job", "logs", id); got != "archive-startarchive-end" {
+			t.Fatalf("restored artifact job log changed: %q", got)
+		}
+		if got := c.call("JobService", "GetJob", map[string]any{"id": id}); got["state"] != "JOB_STATE_SUCCEEDED" {
+			t.Fatalf("restored artifact job record changed: %v", got)
+		}
+		restoredArtifact := filepath.Join(restored, "jobs-rust", id+".artifacts", "out", "result")
+		if b, err := os.ReadFile(restoredArtifact); err != nil || !bytes.Equal(b, payload) {
+			t.Fatalf("restored artifact bytes changed: bytes=%d err=%v", len(b), err)
+		}
+		if info, err := os.Stat(restoredArtifact); err != nil || info.Mode().Perm() != 0750 {
+			t.Fatalf("restored artifact permissions changed: %v %v", info, err)
+		}
 	}
 }

@@ -22,7 +22,7 @@ func (c *cluster) outputScenario(t *testing.T) {
 	}
 	req := connect.NewRequest(&pb.RunJobRequest{JobId: "large-output", Mode: pb.JobMode_JOB_MODE_PLAIN, Command: []string{"cat", path}})
 	req.Header().Set("Authorization", "Bearer e2e-node-secret")
-	client := protectoratev1connect.NewNodeAgentServiceClient(c.client, c.nodeURL)
+	client := protectoratev1connect.NewNodeAgentServiceClient(c.client, c.nodeURL, connect.WithProtoJSON())
 	stream, err := client.RunJob(c.ctx, req)
 	if err != nil {
 		t.Fatal(err)

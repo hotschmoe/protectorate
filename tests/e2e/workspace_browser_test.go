@@ -63,7 +63,25 @@ func TestBinaryWorkspaceBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(c.home, "sleeves.json"), string(record))
+	if c.rust {
+		record, err = json.Marshal(map[string]any{"version": 1, "sleeves": []any{map[string]any{
+			"name": "browser", "harness": "codex", "mode": "chat", "workspace": repo,
+			"session": "sleeve-browser", "createdAt": "2026-01-01T00:00:00Z", "state": "exited", "exitedAt": "2026-01-01T00:02:00Z",
+			"readOnly": []any{map[string]any{"source": other, "target": "/reference"}}, "exitAfterIdle": "300s",
+			"chat": map[string]any{
+				"state": "CHAT_STATE_IDLE", "harnessSessionId": "browser-session", "model": "browser-model", "reasoningEffort": "high",
+				"settings": map[string]any{"requested": map[string]any{"effort": "high"}, "nativeDefaults": map[string]any{"model": "browser-native", "effort": "low"}},
+				"provider": "openai", "localModel": true, "contextTokens": "123", "contextWindow": "1000",
+				"lastSeq": "7", "cacheExpiresAt": "2026-01-01T01:00:00Z", "lastActivityAt": "2026-01-01T00:01:00Z",
+			},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(filepath.Join(c.home, "sleeves-rust.json"), string(record))
+	} else {
+		write(filepath.Join(c.home, "sleeves.json"), string(record))
+	}
 	c.boot()
 	show := c.cli("sleeve", "show", "browser")
 	for _, value := range []string{"read-only mount", other + " -> /reference", "exit after idle", "5m0s", "mode", "chat", "CHAT_STATE_IDLE", "browser-session", "browser-model", "high", "browser-native", "low", "openai", "local model", "true", "123/1000", "last sequence", "7", "cache expires", "last activity"} {
@@ -143,7 +161,12 @@ func TestBinaryWorkspaceBrowser(t *testing.T) {
 		t.Fatalf("detached HEAD retained branch: %v", &detached)
 	}
 	c.stop(c.hub)
-	c.hub = c.start("hub-roots", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--workspace-root", root, "--workspace-root", other, "--workspace-root", c.home)
+	if c.rust {
+		c.hubArgs = []string{"--workspace-root", root, "--workspace-root", other, "--workspace-root", c.home}
+		c.boot()
+	} else {
+		c.hub = c.start("hub-roots", c.env, "hub", "serve", "--listen", strings.TrimPrefix(c.url, "http://"), "--workspace-root", root, "--workspace-root", other, "--workspace-root", c.home)
+	}
 	c.eventually(func() bool { return c.rpc("HubService", "GetStatus", map[string]any{}, nil) == 200 })
 	if got := browse(""); len(got.Directories) != 3 {
 		t.Fatalf("explicit roots: %v", got)

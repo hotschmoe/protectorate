@@ -17,7 +17,7 @@ func TestBinaryNodeDrainAndRemoval(t *testing.T) {
 		return c.call("JobService", "GetJob", map[string]any{"id": job["id"]})["state"] == "JOB_STATE_RUNNING"
 	})
 	c.rejectedCLI("job(s) running", "node", "rm", "peer")
-	client := protectoratev1connect.NewNodeServiceClient(c.client, c.url)
+	client := protectoratev1connect.NewNodeServiceClient(c.client, c.url, connect.WithProtoJSON())
 	req := connect.NewRequest(&pb.RemoveNodeRequest{Name: "peer", Jobs: pb.RemoveJobs_REMOVE_JOBS_WAIT})
 	req.Header().Set("Authorization", "Bearer "+c.token)
 	stream, err := client.RemoveNode(c.ctx, req)

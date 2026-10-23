@@ -64,6 +64,8 @@ while :; do sleep 1; done
 		t.Fatalf("invalid quota peer PID: %q: %v", raw, err)
 	}
 	if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
-		t.Fatalf("quota was published with the peer still alive or unreaped: %v", err)
+		status, _ := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+		cmdline, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		t.Fatalf("quota was published with the peer still alive or unreaped: %v\n%s\ncmdline=%q", err, status, cmdline)
 	}
 }

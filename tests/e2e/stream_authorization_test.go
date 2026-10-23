@@ -21,7 +21,7 @@ func TestBinaryStreamAuthorizationAndRevocation(t *testing.T) {
 	id := issued["token"].(map[string]any)["id"]
 	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 	defer cancel()
-	client := protectoratev1connect.NewEventServiceClient(c.client, c.url)
+	client := protectoratev1connect.NewEventServiceClient(c.client, c.url, connect.WithProtoJSON())
 	req := connect.NewRequest(&pb.SubscribeRequest{})
 	req.Header().Set("Authorization", "Bearer "+secret)
 	stream, err := client.Subscribe(ctx, req)

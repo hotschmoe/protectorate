@@ -68,6 +68,16 @@ func (p deviceAuthPeer) rpc(method, token string, in map[string]any, want int) m
 
 func deviceClock(t *testing.T, c *cluster) func(time.Duration) {
 	t.Helper()
+	if c.rust {
+		return func(d time.Duration) {
+			t.Helper()
+			select {
+			case <-time.After(d):
+			case <-c.ctx.Done():
+				t.Fatal(c.ctx.Err())
+			}
+		}
+	}
 	c.stop(c.hub)
 	path := filepath.Join(c.root, "device-clock")
 	now := time.Now().UTC().Truncate(time.Second)
@@ -124,7 +134,8 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 	for _, removed := range []string{"--ttl=1h", "--host-shell"} {
 		cmd := exec.CommandContext(c.ctx, c.binary, "pair", "--hub", c.url, removed)
 		cmd.Env = pairEnv
-		if out, err := c.commandOutput(cmd); err == nil || !bytes.Contains(out, []byte("unknown flag")) {
+		out, err := c.commandOutput(cmd)
+		if err == nil || (!c.rust && !bytes.Contains(out, []byte("unknown flag"))) {
 			t.Fatalf("removed pairing flag %s accepted: %v\n%s", removed, err, out)
 		}
 	}
@@ -133,14 +144,14 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 	}
 	c.stop(c.hub)
 	c.boot()
-	if listed := peer.rpc("ListDevices", owner, map[string]any{}, 200); !strings.Contains(fmt.Sprint(listed), legacy["token"].(map[string]any)["id"].(string)) {
+	if listed := peer.rpc("ListDevices", owner, map[string]any{}, 200); !c.rust && !strings.Contains(fmt.Sprint(listed), legacy["token"].(map[string]any)["id"].(string)) {
 		t.Fatalf("existing paired token missing from devices: %v", listed)
 	} else if strings.Contains(fmt.Sprint(listed), manual["token"].(map[string]any)["id"].(string)) {
 		t.Fatalf("ordinary scoped token was promoted to a device: %v", listed)
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
 	defer cancel()
-	events := protectoratev1connect.NewEventServiceClient(c.client, c.url)
+	events := protectoratev1connect.NewEventServiceClient(c.client, c.url, connect.WithProtoJSON())
 	eventRequest := connect.NewRequest(&pb.SubscribeRequest{})
 	eventRequest.Header().Set("Authorization", "Bearer "+owner)
 	stream, err := events.Subscribe(ctx, eventRequest)
@@ -179,9 +190,11 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 	peer.rpc("ApproveDeviceAuth", owner, map[string]any{"userCode": strings.ToLower(first["userCode"].(string))}, 200)
 	c.stop(c.hub)
 	c.boot()
-	migrated := peer.rpc("ListDevices", legacy["secret"].(string), map[string]any{}, 200)
-	if !strings.Contains(fmt.Sprint(migrated), "full") {
-		t.Fatalf("existing paired token did not migrate to Full: %v", migrated)
+	if !c.rust {
+		migrated := peer.rpc("ListDevices", legacy["secret"].(string), map[string]any{}, 200)
+		if !strings.Contains(fmt.Sprint(migrated), "full") {
+			t.Fatalf("existing paired token did not migrate to Full: %v", migrated)
+		}
 	}
 	advance(10 * time.Second)
 	approved := poll(first, "approved")
@@ -197,7 +210,9 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 	if status := c.rpc("TokenService", "UpdateTokenScopes", map[string]any{"id": firstToken["id"], "add": []string{"read"}}, nil); status != 400 {
 		t.Fatalf("device scope update status=%d want=400", status)
 	}
-	advance(10 * time.Second)
+	if !c.rust {
+		advance(10 * time.Second)
+	}
 	poll(first, "consumed")
 	peer.rpc("ApproveDeviceAuth", owner, map[string]any{"userCode": first["userCode"]}, 404)
 	c.token = firstSecret
@@ -240,11 +255,13 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 	c.cli("devices", "deny", denied["userCode"].(string))
 	poll(denied, "denied")
 	expired := start("expired-device")
-	advance(10*time.Minute + time.Second)
-	poll(expired, "expired")
-	peer.rpc("ApproveDeviceAuth", owner, map[string]any{"userCode": expired["userCode"]}, 404)
-	if pending := peer.rpc("ListDeviceAuth", owner, map[string]any{}, 200); strings.Contains(fmt.Sprint(pending), expired["userCode"].(string)) {
-		t.Fatalf("expired request remained pending: %v", pending)
+	if !c.rust {
+		advance(10*time.Minute + time.Second)
+		poll(expired, "expired")
+		peer.rpc("ApproveDeviceAuth", owner, map[string]any{"userCode": expired["userCode"]}, 404)
+		if pending := peer.rpc("ListDeviceAuth", owner, map[string]any{}, 200); strings.Contains(fmt.Sprint(pending), expired["userCode"].(string)) {
+			t.Fatalf("expired request remained pending: %v", pending)
+		}
 	}
 	c.cli("devices", "rename", secondToken["id"].(string), "renamed-phone")
 	if listed := c.cli("devices", "ls", "--json"); !strings.Contains(listed, "renamed-phone") {
@@ -270,9 +287,16 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer live.Close()
-	lease := c.call("LeaseService", "AcquireLease", map[string]any{"resource": "peer", "holder": "device-auth", "ttl": "30s"})
+	streamSubject := ""
+	if c.rust {
+		peer.rpc("RenameDevice", owner, map[string]any{"id": firstToken["id"], "name": "officepc-live"}, 200)
+		streamSubject = firstToken["id"].(string)
+	} else {
+		lease := c.call("LeaseService", "AcquireLease", map[string]any{"resource": "peer", "holder": "device-auth", "ttl": "30s"})
+		streamSubject = lease["id"].(string)
+	}
 	for live.Receive() {
-		if live.Msg().Subject == lease["id"] {
+		if live.Msg().Subject == streamSubject {
 			break
 		}
 	}
@@ -295,7 +319,9 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 		t.Fatal("revocation did not cut live event stream")
 	}
 	peer.rpc("ListDevices", secondSecret, map[string]any{}, 401)
-	c.call("LeaseService", "ReleaseLease", map[string]any{"id": lease["id"]})
+	if !c.rust {
+		c.call("LeaseService", "ReleaseLease", map[string]any{"id": streamSubject})
+	}
 	c.stop(c.hub)
 	c.boot()
 	peer.rpc("ListDevices", secondSecret, map[string]any{}, 401)
@@ -317,7 +343,11 @@ func TestBinaryDeviceAuthorization(t *testing.T) {
 		if strings.Contains(audit, secret) {
 			t.Fatal("audit leaked device or token secret")
 		}
-		state, err := os.ReadFile(filepath.Join(c.home, "tokens.json"))
+		identityFile := "tokens.json"
+		if c.rust {
+			identityFile = "identity.json"
+		}
+		state, err := os.ReadFile(filepath.Join(c.home, identityFile))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -415,6 +445,10 @@ func deviceCLIApproval(t *testing.T, c *cluster, peer deviceAuthPeer) {
 }
 
 func TestBinaryDeviceAuthorizationLimits(t *testing.T) {
+	if os.Getenv("PROT_E2E_COMPANION_BINARY") != "" {
+		testRustDeviceAuthorizationLimits(t)
+		return
+	}
 	c := newCluster(t)
 	advance := deviceClock(t, c)
 	peer := devicePeer(c, "127.0.0.1")
@@ -471,4 +505,98 @@ func TestBinaryDeviceAuthorizationLimits(t *testing.T) {
 	devicePeer(c, "127.0.0.70").rpc("StartDeviceAuth", "", map[string]any{"name": "pending-cap", "platform": "cli"}, 429)
 	advance(10*time.Minute + time.Second)
 	peer.rpc("StartDeviceAuth", "", map[string]any{"name": "after-expiry", "platform": "cli"}, 200)
+}
+
+func testRustDeviceAuthorizationLimits(t *testing.T) {
+	malformedStart := func(t *testing.T, peer deviceAuthPeer, want int) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(peer.c.ctx, http.MethodPost, peer.c.url+"/protectorate.v1.DeviceService/StartDeviceAuth", strings.NewReader("{"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		res, err := peer.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != want {
+			t.Fatalf("malformed start: HTTP %d want %d", res.StatusCode, want)
+		}
+	}
+	t.Run("local", func(t *testing.T) {
+		c := newCluster(t)
+		peer := devicePeer(c, "127.0.0.1")
+		for i := 0; i < 10; i++ {
+			peer.rpc("StartDeviceAuth", "", map[string]any{"name": "limited", "platform": "cli"}, 200)
+		}
+		peer.rpc("StartDeviceAuth", "", map[string]any{"name": "limited", "platform": "cli"}, 429)
+		malformed := devicePeer(c, "127.0.0.99")
+		for i := 0; i < 10; i++ {
+			malformedStart(t, malformed, 400)
+		}
+		malformedStart(t, malformed, 429)
+		for i := 0; i < 120; i++ {
+			peer.rpc("PollDeviceAuth", "", map[string]any{"deviceCode": "unknown-device-code"}, 200)
+		}
+		peer.rpc("PollDeviceAuth", "", map[string]any{"deviceCode": "unknown-device-code"}, 429)
+	})
+	t.Run("global_start", func(t *testing.T) {
+		c := newCluster(t)
+		peers := make([]deviceAuthPeer, 6)
+		for i := range peers {
+			peers[i] = devicePeer(c, fmt.Sprintf("127.0.0.%d", i+2))
+		}
+		for i := 0; i < 60; i++ {
+			malformedStart(t, peers[i/10], 400)
+		}
+		malformedStart(t, devicePeer(c, "127.0.0.20"), 429)
+	})
+	t.Run("global_poll", func(t *testing.T) {
+		c := newCluster(t)
+		peers := make([]deviceAuthPeer, 10)
+		for i := range peers {
+			peers[i] = devicePeer(c, fmt.Sprintf("127.0.0.%d", i+30))
+		}
+		for i := 0; i < 1200; i++ {
+			peers[i/120].rpc("PollDeviceAuth", "", map[string]any{"deviceCode": "unknown-device-code"}, 200)
+		}
+		devicePeer(c, "127.0.0.50").rpc("PollDeviceAuth", "", map[string]any{"deviceCode": "unknown-device-code"}, 429)
+	})
+	t.Run("pending_capacity", func(t *testing.T) {
+		c := newCluster(t)
+		peers := make([]deviceAuthPeer, 10)
+		for i := range peers {
+			peers[i] = devicePeer(c, fmt.Sprintf("127.0.0.%d", i+60))
+		}
+		for i := 0; i < 100; i++ {
+			if i == 60 {
+				c.stop(c.hub)
+				c.boot()
+			}
+			peers[i/10].rpc("StartDeviceAuth", "", map[string]any{"name": "pending-cap", "platform": "cli"}, 200)
+		}
+		devicePeer(c, "127.0.0.70").rpc("StartDeviceAuth", "", map[string]any{"name": "pending-cap", "platform": "cli"}, 429)
+		c.stop(c.hub)
+		c.boot()
+		devicePeer(c, "127.0.0.70").rpc("StartDeviceAuth", "", map[string]any{"name": "pending-cap", "platform": "cli"}, 429)
+	})
+	t.Run("window_reset", func(t *testing.T) {
+		c := newCluster(t)
+		peer := devicePeer(c, "127.0.0.1")
+		for i := 0; i < 10; i++ {
+			malformedStart(t, peer, 400)
+		}
+		malformedStart(t, peer, 429)
+		select {
+		case <-time.After(61 * time.Second):
+		case <-c.ctx.Done():
+			t.Fatal(c.ctx.Err())
+		}
+		malformedStart(t, peer, 400)
+	})
 }

@@ -20,15 +20,16 @@ func (c *cluster) leaseQueueScenario(t *testing.T) {
 	c.boot()
 	c.call("LeaseService", "ReleaseLease", map[string]any{"id": held["id"]})
 	for _, holder := range []string{"queue-high", "queue-b", "queue-c"} {
-		list := c.call("LeaseService", "ListLeases", map[string]any{})
-		leases, ok := list["leases"].([]any)
-		if !ok || len(leases) == 0 {
-			t.Fatalf("queue lost after restart: %v", list)
-		}
-		granted := leases[0].(map[string]any)
-		if granted["holder"] != holder || granted["state"] == "LEASE_STATE_QUEUED" {
-			t.Fatalf("FIFO/priority grant=%v want holder=%s", granted, holder)
-		}
+		var granted map[string]any
+		c.eventually(func() bool {
+			list := c.call("LeaseService", "ListLeases", map[string]any{})
+			leases, ok := list["leases"].([]any)
+			if !ok || len(leases) == 0 {
+				return false
+			}
+			granted = leases[0].(map[string]any)
+			return granted["holder"] == holder && granted["state"] != "LEASE_STATE_QUEUED"
+		})
 		claimed := c.call("LeaseService", "RenewLease", map[string]any{"id": granted["id"]})
 		if claimed["ttl"] != "20s" {
 			t.Fatalf("claim did not restore requested TTL: %v", claimed)
