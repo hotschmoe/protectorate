@@ -47,3 +47,8 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]
 protectorate-hub = { path = "../protectorate-hub" }
+protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }
+
+[[test]]
+name = "chat_commands"
+harness = false

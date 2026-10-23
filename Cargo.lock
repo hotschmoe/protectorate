@@ -963,6 +963,7 @@ dependencies = [
  "protectorate-pairing",
  "protectorate-session",
  "protectorate-sleeve-registry",
+ "protectorate-sleeve-runner",
  "protectorate-svcgen",
  "protectorate-wire",
  "protectorate-xfer",
