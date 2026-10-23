@@ -1,5 +1,6 @@
 import 'dart:io' as io;
 
+import 'package:connectrpc/connect.dart';
 import 'package:connectrpc/io.dart' as rpcio;
 import 'package:connectrpc/protobuf.dart';
 import 'package:connectrpc/protocol/connect.dart' as protocol;
@@ -37,7 +38,14 @@ void main() {
       baseUrl: baseUrl,
       codec: const JsonCodec(),
       httpClient: hubHttpClient(baseUrl, client: rpcio.createHttpClient(http)),
-      interceptors: [bearerInterceptor(token)],
+      // The owner token, which the hub accepts on its loopback listener.
+      interceptors: [
+        <I extends Object, O extends Object>(AnyFn<I, O> next) =>
+            (Request<I, O> request) {
+              request.headers.set('authorization', ['Bearer $token']);
+              return next(request);
+            },
+      ],
     ),
   );
 
@@ -95,7 +103,6 @@ void main() {
       id: 'rust-invite-e2e',
       name: 'Rust invite fixture',
       baseUrl: baseUrl,
-      token: token,
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -354,7 +361,6 @@ void main() {
               id: 'rust-ready-e2e',
               name: 'Rust ready fixture',
               baseUrl: baseUrl,
-              token: token,
             ),
             client: client,
             feed: feed,

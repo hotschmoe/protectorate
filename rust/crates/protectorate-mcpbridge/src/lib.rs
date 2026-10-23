@@ -46,7 +46,7 @@ pub use http::{
     MAX_HTTP_SESSIONS, SESSION_ID_BYTES,
 };
 pub use jsonrpc::{Failure, Request};
-pub use protectorate_connect_client::Client;
+pub use protectorate_connect_client::{Client, Credential};
 pub use protectorate_wire::{Code, Result, RpcError};
 pub use schema::input_schema;
 pub use session::{Guard, Session, MAX_PENDING_REQUESTS};
@@ -86,21 +86,11 @@ const META_CLIENT_INFO: &str = "io.modelcontextprotocol/clientInfo";
 const META_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
 const META_SERVER_INFO: &str = "io.modelcontextprotocol/serverInfo";
 
-/// Where the bridge sends tool calls.
+/// Where the bridge sends tool calls, and how it authenticates there.
 pub struct Hub {
     pub url: String,
-    pub token: String,
+    pub credential: Credential,
     pub timeout: Duration,
-}
-
-impl Hub {
-    pub fn new(url: impl Into<String>, token: impl Into<String>) -> Self {
-        Self {
-            url: url.into(),
-            token: token.into(),
-            timeout: DEFAULT_TIMEOUT,
-        }
-    }
 }
 
 /// What to serve, and where to call it. A config without a hub still lists
@@ -158,7 +148,9 @@ impl Bridge {
             methods.insert(def.name, def.method);
         }
         let client = match config.hub {
-            Some(hub) => Some(Client::new(&hub.url, hub.token, hub.timeout)?),
+            Some(hub) => {
+                Some(Client::new(&hub.url, "", hub.timeout)?.with_credential(hub.credential))
+            }
             None => None,
         };
         Ok(Bridge {

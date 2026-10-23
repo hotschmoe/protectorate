@@ -98,8 +98,9 @@ class _SleevesScreenState extends State<SleevesScreen> {
       var nodes = const <NodeStatus>[];
       if (widget.embedded) {
         try {
-          nodes = (await widget.client.node.listNodes(ListNodesRequest()))
-              .nodes;
+          nodes = (await widget.client.node.listNodes(
+            ListNodesRequest(),
+          )).nodes;
         } on Object {
           // The hub's own fence still shows.
         }

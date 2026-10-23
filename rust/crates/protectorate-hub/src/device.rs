@@ -1,7 +1,9 @@
-//! Loopback device pairing and trusted-device management.
-use super::{input, now_unix, respond, string, token_json, unix_timestamp, Hub};
+//! Device pairing and trusted-device management. A device registers its
+//! public key when it starts pairing and signs every later request.
+use super::{input, now_unix, respond, string, unix_timestamp, Hub};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use protectorate_audit::Entry as AuditEntry;
-use protectorate_identity::{self as identity, PollStatus};
+use protectorate_identity::{self as identity, Device, PollStatus};
 use protectorate_wire::{Code, Result, RpcError, UnaryServer};
 use serde_json::json;
 use std::{
@@ -34,7 +36,7 @@ pub(super) fn start_expiry_sweep(hub: &Arc<Hub>) {
 }
 
 fn sweep_expired(hub: &Hub, now: i64) {
-    if let Err(error) = hub.identity.sweep_devices(now) {
+    if let Err(error) = hub.identity.sweep(now) {
         hub.audit.write(AuditEntry {
             actor: "hub".into(),
             procedure: "device_auth.sweep".into(),
@@ -127,6 +129,17 @@ pub(super) fn source_ip(
         .unwrap_or(peer)
 }
 
+fn device_json(device: &Device) -> serde_json::Value {
+    let mut out = json!({
+        "id": device.id, "name": device.name, "platform": device.platform,
+        "approvedAt": unix_timestamp(device.approved_at), "approvedBy": device.approved_by,
+    });
+    if let Some(used) = device.last_used {
+        out["lastUsedAt"] = json!(unix_timestamp(used));
+    }
+    out
+}
+
 fn error(error: identity::Error) -> RpcError {
     let code = match error {
         identity::Error::Invalid(_) => Code::InvalidArgument,
@@ -143,11 +156,15 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         let hub = Arc::clone(&start);
         async move {
             let body = input(&request)?;
+            let key = STANDARD
+                .decode(string(&body, "publicKey"))
+                .map_err(|_| RpcError::invalid("publicKey must be base64"))?;
             let started = hub
                 .identity
                 .start_device(
                     string(&body, "name").trim(),
                     string(&body, "platform").trim(),
+                    &key,
                     &request
                         .auth
                         .requesting_ip
@@ -189,10 +206,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 PollStatus::Approved => "approved",
             };
             let mut body = json!({"status": status, "interval": outcome.interval});
-            if let Some(issued) = outcome.issued {
-                hub.emit("devices.changed", &issued.token.id, json!({}));
-                body["secret"] = json!(issued.secret.expose());
-                body["token"] = token_json(&issued.token);
+            if let Some(device) = outcome.device {
+                hub.emit("devices.changed", &device.id, json!({}));
+                body["device"] = device_json(&device);
             }
             respond(&request, body)
         }
@@ -229,7 +245,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 if !request.auth.owner && !request.auth.device {
                     return Err(RpcError::new(
                         Code::PermissionDenied,
-                        "approval requires the owner or a device token",
+                        "approval requires the owner or an approved device",
                     ));
                 }
                 let code = string(&input(&request)?, "userCode");
@@ -260,10 +276,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             async move {
                 let devices = hub
                     .identity
-                    .list()
-                    .into_iter()
-                    .filter(|t| t.device)
-                    .map(|t| token_json(&t))
+                    .devices()
+                    .iter()
+                    .map(device_json)
                     .collect::<Vec<_>>();
                 respond(&request, json!({"devices": devices}))
             }
@@ -276,12 +291,12 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let hub = Arc::clone(&revoke);
             async move {
                 let id = string(&input(&request)?, "id");
-                if !hub.identity.list().iter().any(|t| t.id == id && t.device) {
-                    return Err(RpcError::new(Code::NotFound, "no such device"));
-                }
-                let token = hub.identity.revoke(&id, now_unix()).map_err(error)?;
-                hub.emit("devices.changed", &token.id, json!({}));
-                respond(&request, json!({"token": token_json(&token)}))
+                let device = hub
+                    .identity
+                    .remove_device(&id)
+                    .map_err(|_| RpcError::new(Code::NotFound, "no such device"))?;
+                hub.emit("devices.changed", &device.id, json!({}));
+                respond(&request, json!({"device": device_json(&device)}))
             }
         },
     )?;
@@ -291,12 +306,12 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let hub = Arc::clone(&hub);
             async move {
                 let body = input(&request)?;
-                let token = hub
+                let device = hub
                     .identity
                     .rename_device(&string(&body, "id"), string(&body, "name").trim())
                     .map_err(error)?;
-                hub.emit("devices.changed", &token.id, json!({}));
-                respond(&request, json!({"token": token_json(&token)}))
+                hub.emit("devices.changed", &device.id, json!({}));
+                respond(&request, json!({"device": device_json(&device)}))
             }
         },
     )?;

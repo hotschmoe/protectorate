@@ -6,9 +6,11 @@ const msgResize = 0x31;
 
 const terminalSubprotocol = 'protectorate.v1';
 
-List<String> terminalSubprotocols(String token) => [
+/// A browser cannot set WebSocket headers, so the device proof rides along
+/// as a subprotocol the hub reads and never selects.
+List<String> terminalSubprotocols(String proof) => [
   terminalSubprotocol,
-  if (token.isNotEmpty) 'token.$token',
+  if (proof.isNotEmpty) 'proof.$proof',
 ];
 
 Uint8List encodeData(String text) {

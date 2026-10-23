@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/device.pb.dart';
 import '../gen/protectorate/v1/events.pb.dart';
-import '../gen/protectorate/v1/token.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../theme/tokens.dart';
@@ -30,7 +29,7 @@ class DevicesScreen extends StatefulWidget {
 class _DevicesScreenState extends State<DevicesScreen> {
   final _abort = CancelableSignal();
   StreamSubscription<Event>? _events;
-  List<TokenInfo> _devices = const [];
+  List<DeviceInfo> _devices = const [];
   Object? _error;
   bool _loading = false;
   String? _busy;
@@ -75,7 +74,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  Future<void> _rename(TokenInfo device) async {
+  Future<void> _rename(DeviceInfo device) async {
     final name = TextEditingController(text: device.name);
     final result = await showDialog<String>(
       context: context,
@@ -118,7 +117,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     );
   }
 
-  Future<void> _revoke(TokenInfo device) async {
+  Future<void> _revoke(DeviceInfo device) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -149,7 +148,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
   }
 
   Future<void> _change(
-    TokenInfo device,
+    DeviceInfo device,
     Future<Object> Function() change,
   ) async {
     setState(() {
@@ -236,10 +235,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
           const Divider(height: 24),
           Text(device.name, style: t.title()),
           const SizedBox(height: 4),
-          Text(
-            '${device.platform.isEmpty ? 'Existing paired device' : device.platform} · ${device.hasRevokedAt() ? 'REVOKED' : 'FULL'}',
-            style: t.legend(device.hasRevokedAt() ? t.p.alarm : t.p.ok),
-          ),
+          Text('${device.platform} · FULL', style: t.legend(t.p.ok)),
           const SizedBox(height: 6),
           Text(
             device.hasLastUsedAt()
@@ -256,15 +252,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
             spacing: 8,
             children: [
               TextButton(
-                onPressed: _busy != null || device.hasRevokedAt()
-                    ? null
-                    : () => _rename(device),
+                onPressed: _busy != null ? null : () => _rename(device),
                 child: const Text('RENAME'),
               ),
               TextButton(
-                onPressed: _busy != null || device.hasRevokedAt()
-                    ? null
-                    : () => _revoke(device),
+                onPressed: _busy != null ? null : () => _revoke(device),
                 child: const Text('REVOKE'),
               ),
             ],

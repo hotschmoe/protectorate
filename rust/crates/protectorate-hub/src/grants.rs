@@ -1,30 +1,32 @@
 //! Task-scoped admin grants. GrantService is explicit about who may mint them.
 use super::{
-    input, now_unix, parse_duration, respond, scope_methods, string, token_create_error,
-    token_json, Hub,
+    access::{self, scope_methods, token_json},
+    input, now_unix, respond, string, Hub,
 };
+use protectorate_identity::Mint;
 use protectorate_inventory::SHARED;
-use protectorate_wire::{Code, Method, Result, RpcError, UnaryServer};
+use protectorate_wire::{Code, Result, RpcError, UnaryServer};
 use serde_json::json;
 use std::{sync::Arc, time::Duration};
 
 const DEFAULT_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 
-pub(super) fn register(
-    server: &mut UnaryServer,
-    hub: Arc<Hub>,
-    all_methods: Arc<Vec<Method>>,
-) -> Result<()> {
+pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     server.register("/protectorate.v1.GrantService/Admin", move |request| {
         let hub = Arc::clone(&hub);
-        let methods = Arc::clone(&all_methods);
         async move {
             let body = input(&request)?;
             let node = string(&body, "node").trim().to_ascii_lowercase();
             let task = string(&body, "task");
+            if task.trim().is_empty() || task.len() > 500 {
+                return Err(RpcError::invalid("a grant needs a task of 1-500 bytes"));
+            }
+            let methods = scope_methods(&hub.methods);
+            let mut scopes = protectorate_auth::grant_scopes(&node, &methods)
+                .map_err(|error| RpcError::invalid(error.to_string()))?;
             let minted_by = if request.auth.owner {
                 "owner"
-            } else if request.auth.actor == "token:orchestrator-envoy" {
+            } else if request.auth.actor == format!("token:{}", access::ENVOY) {
                 if !hub.orchestrator_admin_grants {
                     return Err(RpcError::new(
                         Code::PermissionDenied,
@@ -57,27 +59,45 @@ pub(super) fn register(
                         ),
                     ));
                 }
-                "orchestrator-envoy"
+                // The node_admin scope is this rule's to give; the job
+                // scopes must be ones the orchestrator holds itself.
+                let (admin, jobs): (Vec<String>, Vec<String>) =
+                    scopes.into_iter().partition(|scope| {
+                        scope.starts_with(protectorate_auth::SCOPE_NODE_ADMIN_PREFIX)
+                    });
+                let jobs = access::delegate(&hub, &jobs, &request.auth);
+                if jobs.is_empty() {
+                    return Err(RpcError::new(
+                        Code::PermissionDenied,
+                        "the orchestrator holds no job scopes to delegate",
+                    ));
+                }
+                scopes = jobs.into_iter().chain(admin).collect();
+                access::ENVOY
             } else {
                 return Err(RpcError::new(
                     Code::PermissionDenied,
                     "only the owner or enabled orchestrator may mint admin grants",
                 ));
             };
-            let ttl = if body.get("ttl").is_some() {
-                parse_duration(body.get("ttl"))?
-            } else {
-                DEFAULT_TTL
-            };
-            let methods = scope_methods(&methods);
-            let issued = hub
+            let (record, secret) = hub
                 .identity
-                .create_grant(&node, &task, minted_by, ttl, now_unix(), &methods)
-                .map_err(token_create_error)?;
-            hub.emit("grant.minted", &issued.token.id, json!({"node": node}));
+                .mint(
+                    Mint {
+                        principal: &format!("grant:{node}"),
+                        scopes,
+                        task: &task,
+                        minted_by,
+                        ttl: access::ttl(&body, DEFAULT_TTL)?,
+                        file: None,
+                    },
+                    now_unix(),
+                )
+                .map_err(access::token_error)?;
+            hub.emit("grant.minted", &record.id, json!({"node": node}));
             respond(
                 &request,
-                json!({"token": token_json(&issued.token), "secret": issued.secret.expose()}),
+                json!({"token": token_json(&record), "secret": secret.expose()}),
             )
         }
     })

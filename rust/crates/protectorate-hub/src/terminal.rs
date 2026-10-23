@@ -5,7 +5,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path,
     },
-    http::{header, HeaderMap, StatusCode, Uri},
+    http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use std::{
@@ -18,7 +18,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use subtle::ConstantTimeEq;
 use tokio::io::unix::AsyncFd;
 
 const PROTOCOL: &str = "protectorate.v1";
@@ -27,6 +26,7 @@ const MAX_FRAME: usize = 64 << 10;
 pub(super) async fn attach(
     hub: Arc<Hub>,
     Path(name): Path<String>,
+    tls: bool,
     headers: HeaderMap,
     uri: Uri,
     upgrade: WebSocketUpgrade,
@@ -41,32 +41,16 @@ pub(super) async fn attach(
         .and_then(|s| s.parse::<u16>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(24);
-    let credentials = credentials(&headers, query);
-    let Some((secret, owner, allowed, actor, token_id)) = credentials.iter().find_map(|secret| {
-        if !hub.owner_token.is_empty()
-            && bool::from(hub.owner_token.as_bytes().ct_eq(secret.as_bytes()))
-        {
-            return Some((
-                secret.clone(),
-                true,
-                true,
-                "owner".to_owned(),
-                String::new(),
-            ));
-        }
-        let token = hub.identity.lookup(secret, now_unix()).ok()?;
-        let scope = token.scopes.iter().map(String::as_str).collect::<Vec<_>>();
-        let allowed = token.device
-            || (protectorate_auth::scopes_allow_terminal(&scope, read_only)
-                && (read_only || name.starts_with("sleeve-") || scope.contains(&"terminal:host")));
-        Some((
-            secret.clone(),
-            false,
-            allowed,
-            format!("token:{}", token.name),
-            token.id,
-        ))
-    }) else {
+    let caller = crate::access::authenticate(
+        &hub.owner_token,
+        &hub.identity,
+        &hub.methods,
+        &headers,
+        "GET",
+        uri.path(),
+        tls,
+    );
+    let Ok(caller) = caller else {
         audit::record_terminal(
             &hub.audit,
             "unauthenticated",
@@ -81,10 +65,17 @@ pub(super) async fn attach(
         );
         return (
             StatusCode::UNAUTHORIZED,
-            "missing or invalid terminal token",
+            "missing or invalid terminal credential",
         )
             .into_response();
     };
+    let auth = crate::access::context(&caller);
+    let scopes = auth.scopes.iter().map(String::as_str).collect::<Vec<_>>();
+    let allowed = auth.owner
+        || auth.device
+        || (protectorate_auth::scopes_allow_terminal(&scopes, read_only)
+            && (read_only || name.starts_with("sleeve-") || scopes.contains(&"terminal:host")));
+    let (owner, actor, token_id) = (auth.owner, auth.actor, auth.token_id);
     if protectorate_session::valid_name(&name).is_err() {
         audit::record_terminal(
             &hub.audit,
@@ -151,8 +142,7 @@ pub(super) async fn attach(
         .protocols([PROTOCOL])
         .on_upgrade(move |socket| async move {
             let _ = bridge(
-                hub, socket, name, secret, owner, actor, token_id, command, session, read_only,
-                cols, rows,
+                hub, socket, name, owner, actor, token_id, command, session, read_only, cols, rows,
             )
             .await;
         })
@@ -164,35 +154,6 @@ fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
         .split('&')
         .filter_map(|part| part.split_once('='))
         .find_map(|(name, value)| (name == key).then_some(value))
-}
-
-fn credentials(headers: &HeaderMap, query: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    if let Some(header) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-    {
-        if let Some((scheme, secret)) = header.split_once(' ') {
-            if scheme.eq_ignore_ascii_case("bearer") && !secret.is_empty() {
-                result.push(secret.to_owned());
-            }
-        }
-    }
-    for header in headers.get_all(header::SEC_WEBSOCKET_PROTOCOL) {
-        if let Ok(line) = header.to_str() {
-            result.extend(line.split(',').filter_map(|entry| {
-                entry
-                    .trim()
-                    .strip_prefix("token.")
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
-            }));
-        }
-    }
-    if let Some(secret) = query_value(query, "token").filter(|s| !s.is_empty()) {
-        result.push(secret.to_owned());
-    }
-    result
 }
 
 fn open_pty(cols: u16, rows: u16) -> io::Result<(OwnedFd, OwnedFd)> {
@@ -259,7 +220,6 @@ async fn bridge(
     hub: Arc<Hub>,
     mut socket: WebSocket,
     name: String,
-    secret: String,
     owner: bool,
     actor: String,
     token_id: String,
@@ -304,7 +264,8 @@ async fn bridge(
         ("ok", ""),
     );
     let mut tick = tokio::time::interval(Duration::from_secs(1));
-    let mut token_tick = tokio::time::interval(Duration::from_secs(5));
+    let mut token_tick = tokio::time::interval(Duration::from_secs(1));
+    let watch = (!owner).then(|| hub.identity.watch(&token_id, now_unix()));
     let mut shown_exit = session.state == protectorate_session::State::Exited;
     loop {
         tokio::select! {
@@ -365,7 +326,7 @@ async fn bridge(
                 }
             }
             _ = token_tick.tick(), if !owner => {
-                if hub.identity.lookup(&secret, now_unix()).is_err() { break; }
+                if watch.as_ref().is_some_and(|watch| watch.is_cancelled()) { break; }
             }
         }
     }

@@ -856,14 +856,6 @@ const SpawnEnvoyRequest$json = {
     {'1': 'scopes', '3': 2, '4': 3, '5': 9, '10': 'scopes'},
     {'1': 'add_scopes', '3': 3, '4': 3, '5': 9, '10': 'addScopes'},
     {
-      '1': 'ttl',
-      '3': 4,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Duration',
-      '10': 'ttl'
-    },
-    {
       '1': 'selection',
       '3': 5,
       '4': 1,
@@ -878,9 +870,8 @@ const SpawnEnvoyRequest$json = {
 final $typed_data.Uint8List spawnEnvoyRequestDescriptor = $convert.base64Decode(
     'ChFTcGF3bkVudm95UmVxdWVzdBIyCgdoYXJuZXNzGAEgASgOMhgucHJvdGVjdG9yYXRlLnYxLk'
     'hhcm5lc3NSB2hhcm5lc3MSFgoGc2NvcGVzGAIgAygJUgZzY29wZXMSHQoKYWRkX3Njb3BlcxgD'
-    'IAMoCVIJYWRkU2NvcGVzEisKA3R0bBgEIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbl'
-    'IDdHRsEj0KCXNlbGVjdGlvbhgFIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2RlbFNlbGVjdGlv'
-    'blIJc2VsZWN0aW9u');
+    'IAMoCVIJYWRkU2NvcGVzEj0KCXNlbGVjdGlvbhgFIAEoCzIfLnByb3RlY3RvcmF0ZS52MS5Nb2'
+    'RlbFNlbGVjdGlvblIJc2VsZWN0aW9u');
 
 @$core.Deprecated('Use spawnEnvoyResponseDescriptor instead')
 const SpawnEnvoyResponse$json = {

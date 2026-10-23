@@ -1,12 +1,12 @@
-use protectorate_auth::Method as ScopeMethod;
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
-use protectorate_wire::Catalog;
 use serde_json::{json, Value};
 use std::{
     path::Path,
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -45,32 +45,7 @@ async fn call(addr: std::net::SocketAddr, path: &str, token: &str, body: Value) 
 }
 
 fn sleeve_token(hub: &Hub, name: &str, scopes: &[&str]) -> String {
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|method| ScopeMethod {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    hub.identity
-        .create(
-            &format!("sleeve:{name}"),
-            scopes,
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap()
-        .secret
-        .expose()
-        .to_string()
+    capability::mint(hub, &format!("sleeve:{name}"), scopes).1
 }
 
 fn known_sleeve(hub: &Hub, name: &str, workspace: &Path, mode: Mode) {

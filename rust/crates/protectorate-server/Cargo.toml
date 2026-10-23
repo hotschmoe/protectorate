@@ -46,4 +46,6 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 
 [dev-dependencies]
+protectorate-auth = { path = "../protectorate-auth" }
 tempfile = "3"
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }

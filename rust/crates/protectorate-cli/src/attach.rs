@@ -1,5 +1,5 @@
 //! Interactive terminal attach over the hub's framed WebSocket protocol.
-use crate::{hub_url, token, Client, Code, Invocation, Result, RpcError};
+use crate::{client_for, hub_url, Client, Code, Invocation, Result, RpcError};
 use rustls::pki_types::{pem::PemObject, CertificateDer};
 use std::{
     io::{Read, Write},
@@ -527,11 +527,13 @@ fn bridge(
     let mut request = url
         .into_client_request()
         .map_err(|e| RpcError::invalid(e.to_string()))?;
-    request.headers_mut().insert(
-        "Authorization",
-        HeaderValue::from_str(&format!("Bearer {}", token(invocation)?))
-            .map_err(|e| RpcError::invalid(e.to_string()))?,
-    );
+    let path = request.uri().path().to_owned();
+    if let Some(authorization) = client_for(invocation)?.authorization("GET", &path)? {
+        request.headers_mut().insert(
+            "Authorization",
+            HeaderValue::from_str(&authorization).map_err(|e| RpcError::invalid(e.to_string()))?,
+        );
+    }
     request.headers_mut().insert(
         "Sec-WebSocket-Protocol",
         HeaderValue::from_static("protectorate.v1"),

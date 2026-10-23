@@ -18,14 +18,13 @@ import 'dart:typed_data' as $typed_data;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
-import 'token.pbjson.dart' as $1;
-
 @$core.Deprecated('Use startDeviceAuthRequestDescriptor instead')
 const StartDeviceAuthRequest$json = {
   '1': 'StartDeviceAuthRequest',
   '2': [
     {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
     {'1': 'platform', '3': 2, '4': 1, '5': 9, '10': 'platform'},
+    {'1': 'public_key', '3': 3, '4': 1, '5': 12, '10': 'publicKey'},
   ],
 };
 
@@ -33,7 +32,7 @@ const StartDeviceAuthRequest$json = {
 final $typed_data.Uint8List startDeviceAuthRequestDescriptor =
     $convert.base64Decode(
         'ChZTdGFydERldmljZUF1dGhSZXF1ZXN0EhIKBG5hbWUYASABKAlSBG5hbWUSGgoIcGxhdGZvcm'
-        '0YAiABKAlSCHBsYXRmb3Jt');
+        '0YAiABKAlSCHBsYXRmb3JtEh0KCnB1YmxpY19rZXkYAyABKAxSCXB1YmxpY0tleQ==');
 
 @$core.Deprecated('Use startDeviceAuthResponseDescriptor instead')
 const StartDeviceAuthResponse$json = {
@@ -79,14 +78,13 @@ const PollDeviceAuthResponse$json = {
   '2': [
     {'1': 'status', '3': 1, '4': 1, '5': 9, '10': 'status'},
     {'1': 'interval', '3': 2, '4': 1, '5': 5, '10': 'interval'},
-    {'1': 'secret', '3': 3, '4': 1, '5': 9, '10': 'secret'},
     {
-      '1': 'token',
-      '3': 4,
+      '1': 'device',
+      '3': 3,
       '4': 1,
       '5': 11,
-      '6': '.protectorate.v1.TokenInfo',
-      '10': 'token'
+      '6': '.protectorate.v1.DeviceInfo',
+      '10': 'device'
     },
   ],
 };
@@ -94,8 +92,43 @@ const PollDeviceAuthResponse$json = {
 /// Descriptor for `PollDeviceAuthResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List pollDeviceAuthResponseDescriptor = $convert.base64Decode(
     'ChZQb2xsRGV2aWNlQXV0aFJlc3BvbnNlEhYKBnN0YXR1cxgBIAEoCVIGc3RhdHVzEhoKCGludG'
-    'VydmFsGAIgASgFUghpbnRlcnZhbBIWCgZzZWNyZXQYAyABKAlSBnNlY3JldBIwCgV0b2tlbhgE'
-    'IAEoCzIaLnByb3RlY3RvcmF0ZS52MS5Ub2tlbkluZm9SBXRva2Vu');
+    'VydmFsGAIgASgFUghpbnRlcnZhbBIzCgZkZXZpY2UYAyABKAsyGy5wcm90ZWN0b3JhdGUudjEu'
+    'RGV2aWNlSW5mb1IGZGV2aWNl');
+
+@$core.Deprecated('Use deviceInfoDescriptor instead')
+const DeviceInfo$json = {
+  '1': 'DeviceInfo',
+  '2': [
+    {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
+    {'1': 'name', '3': 2, '4': 1, '5': 9, '10': 'name'},
+    {'1': 'platform', '3': 3, '4': 1, '5': 9, '10': 'platform'},
+    {
+      '1': 'approved_at',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'approvedAt'
+    },
+    {'1': 'approved_by', '3': 5, '4': 1, '5': 9, '10': 'approvedBy'},
+    {
+      '1': 'last_used_at',
+      '3': 6,
+      '4': 1,
+      '5': 11,
+      '6': '.google.protobuf.Timestamp',
+      '10': 'lastUsedAt'
+    },
+  ],
+};
+
+/// Descriptor for `DeviceInfo`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List deviceInfoDescriptor = $convert.base64Decode(
+    'CgpEZXZpY2VJbmZvEg4KAmlkGAEgASgJUgJpZBISCgRuYW1lGAIgASgJUgRuYW1lEhoKCHBsYX'
+    'Rmb3JtGAMgASgJUghwbGF0Zm9ybRI7CgthcHByb3ZlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90'
+    'b2J1Zi5UaW1lc3RhbXBSCmFwcHJvdmVkQXQSHwoLYXBwcm92ZWRfYnkYBSABKAlSCmFwcHJvdm'
+    'VkQnkSPAoMbGFzdF91c2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIK'
+    'bGFzdFVzZWRBdA==');
 
 @$core.Deprecated('Use deviceAuthInfoDescriptor instead')
 const DeviceAuthInfo$json = {
@@ -215,7 +248,7 @@ const ListDevicesResponse$json = {
       '3': 1,
       '4': 3,
       '5': 11,
-      '6': '.protectorate.v1.TokenInfo',
+      '6': '.protectorate.v1.DeviceInfo',
       '10': 'devices'
     },
   ],
@@ -223,8 +256,8 @@ const ListDevicesResponse$json = {
 
 /// Descriptor for `ListDevicesResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List listDevicesResponseDescriptor = $convert.base64Decode(
-    'ChNMaXN0RGV2aWNlc1Jlc3BvbnNlEjQKB2RldmljZXMYASADKAsyGi5wcm90ZWN0b3JhdGUudj'
-    'EuVG9rZW5JbmZvUgdkZXZpY2Vz');
+    'ChNMaXN0RGV2aWNlc1Jlc3BvbnNlEjUKB2RldmljZXMYASADKAsyGy5wcm90ZWN0b3JhdGUudj'
+    'EuRGV2aWNlSW5mb1IHZGV2aWNlcw==');
 
 @$core.Deprecated('Use revokeDeviceRequestDescriptor instead')
 const RevokeDeviceRequest$json = {
@@ -243,20 +276,20 @@ const RevokeDeviceResponse$json = {
   '1': 'RevokeDeviceResponse',
   '2': [
     {
-      '1': 'token',
+      '1': 'device',
       '3': 1,
       '4': 1,
       '5': 11,
-      '6': '.protectorate.v1.TokenInfo',
-      '10': 'token'
+      '6': '.protectorate.v1.DeviceInfo',
+      '10': 'device'
     },
   ],
 };
 
 /// Descriptor for `RevokeDeviceResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List revokeDeviceResponseDescriptor = $convert.base64Decode(
-    'ChRSZXZva2VEZXZpY2VSZXNwb25zZRIwCgV0b2tlbhgBIAEoCzIaLnByb3RlY3RvcmF0ZS52MS'
-    '5Ub2tlbkluZm9SBXRva2Vu');
+    'ChRSZXZva2VEZXZpY2VSZXNwb25zZRIzCgZkZXZpY2UYASABKAsyGy5wcm90ZWN0b3JhdGUudj'
+    'EuRGV2aWNlSW5mb1IGZGV2aWNl');
 
 @$core.Deprecated('Use renameDeviceRequestDescriptor instead')
 const RenameDeviceRequest$json = {
@@ -277,20 +310,20 @@ const RenameDeviceResponse$json = {
   '1': 'RenameDeviceResponse',
   '2': [
     {
-      '1': 'token',
+      '1': 'device',
       '3': 1,
       '4': 1,
       '5': 11,
-      '6': '.protectorate.v1.TokenInfo',
-      '10': 'token'
+      '6': '.protectorate.v1.DeviceInfo',
+      '10': 'device'
     },
   ],
 };
 
 /// Descriptor for `RenameDeviceResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List renameDeviceResponseDescriptor = $convert.base64Decode(
-    'ChRSZW5hbWVEZXZpY2VSZXNwb25zZRIwCgV0b2tlbhgBIAEoCzIaLnByb3RlY3RvcmF0ZS52MS'
-    '5Ub2tlbkluZm9SBXRva2Vu');
+    'ChRSZW5hbWVEZXZpY2VSZXNwb25zZRIzCgZkZXZpY2UYASABKAsyGy5wcm90ZWN0b3JhdGUudj'
+    'EuRGV2aWNlSW5mb1IGZGV2aWNl');
 
 const $core.Map<$core.String, $core.dynamic> DeviceServiceBase$json = {
   '1': 'DeviceService',
@@ -348,7 +381,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.PollDeviceAuthRequest': PollDeviceAuthRequest$json,
   '.protectorate.v1.PollDeviceAuthResponse': PollDeviceAuthResponse$json,
-  '.protectorate.v1.TokenInfo': $1.TokenInfo$json,
+  '.protectorate.v1.DeviceInfo': DeviceInfo$json,
   '.protectorate.v1.ListDeviceAuthRequest': ListDeviceAuthRequest$json,
   '.protectorate.v1.ListDeviceAuthResponse': ListDeviceAuthResponse$json,
   '.protectorate.v1.DeviceAuthInfo': DeviceAuthInfo$json,

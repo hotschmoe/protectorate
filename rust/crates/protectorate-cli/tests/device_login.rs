@@ -202,8 +202,9 @@ async fn login_approves_saves_and_ordinary_commands_reuse_the_credential() {
         assert_eq!(saved["name"], "desk");
         assert_eq!(saved["platform"], "linux/amd64");
         assert!(saved["deviceId"].as_str().is_some_and(|id| !id.is_empty()));
-        let secret = saved["secret"].as_str().unwrap();
+        let secret = saved["key"].as_str().unwrap();
         assert!(!secret.is_empty());
+        assert!(saved.get("secret").is_none(), "{saved}");
         assert!(!stdout.contains(secret), "{stdout}");
         assert!(!stderr.contains(secret), "{stderr}");
         #[cfg(unix)]
@@ -223,11 +224,11 @@ async fn login_approves_saves_and_ordinary_commands_reuse_the_credential() {
             );
         }
 
-        // No token flag and no token environment: the saved credential is what
-        // authenticates the CLI, and it is a device credential, not the owner's.
+        // No token flag and no token environment: the saved key signs every
+        // request, as a device, not as the owner.
         let (ok, stdout, stderr) = run_cli(cli_home, &["--hub", &hub, "devices", "ls"]);
         assert!(ok, "{stderr}");
-        assert!(stdout.contains("desk\tlinux/amd64\tactive"), "{stdout}");
+        assert!(stdout.contains("\tdesk\tlinux/amd64\t"), "{stdout}");
         assert!(!stdout.contains(secret) && !stderr.contains(secret));
         let (ok, _, stderr) = run_cli(cli_home, &["--hub", &hub, "status"]);
         assert!(ok, "{stderr}");
@@ -248,7 +249,7 @@ async fn login_approves_saves_and_ordinary_commands_reuse_the_credential() {
             ],
         );
         assert!(!ok, "an explicit token file must win");
-        assert!(stderr.contains("invalid bearer token"), "{stderr}");
+        assert!(stderr.contains("invalid credential"), "{stderr}");
         let output = cli(cli_home, &["--hub", &hub, "status"])
             .env("PROTECTORATE_TOKEN", "not-a-device-credential")
             .output()
@@ -264,7 +265,7 @@ async fn login_approves_saves_and_ordinary_commands_reuse_the_credential() {
         let other = tempfile::tempdir().unwrap();
         let (ok, _, stderr) = run_cli(other.path(), &["--hub", &hub, "status"]);
         assert!(!ok, "{stderr}");
-        assert!(stderr.contains("no bearer token"), "{stderr}");
+        assert!(stderr.contains("no credential"), "{stderr}");
     })
     .await;
     server.abort();
@@ -272,7 +273,7 @@ async fn login_approves_saves_and_ordinary_commands_reuse_the_credential() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn login_json_output_never_carries_the_secret() {
+async fn login_json_output_never_carries_the_key() {
     let (hub, _identity, _hub_home, server) = serve_hub().await;
     let cli_home = tempfile::tempdir().unwrap();
     let result = tokio::task::spawn_blocking(move || {
@@ -292,7 +293,7 @@ async fn login_json_output_never_carries_the_secret() {
         assert!(started["expiresAt"].is_string());
         let done: Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(done["status"], "approved");
-        assert_eq!(done["token"]["name"], "json");
+        assert_eq!(done["device"]["name"], "json");
         let path = only_credential(cli_home);
         assert_eq!(
             done["credentialFile"].as_str().unwrap(),
@@ -301,7 +302,7 @@ async fn login_json_output_never_carries_the_secret() {
         let raw = fs::read_to_string(&path).unwrap();
         let secret = raw
             .split('\"')
-            .skip_while(|part| *part != "secret")
+            .skip_while(|part| *part != "key")
             .nth(2)
             .unwrap_or_default()
             .to_owned();
@@ -350,7 +351,7 @@ async fn login_stops_when_the_hub_lets_the_request_expire() {
         wait_for_code(&hub, "slow");
         // The hub drops a request once its own window has passed. Sweeping with
         // a time past that window is how the request reaches the CLI as expired.
-        identity.sweep_devices(now_unix() + 700).unwrap();
+        identity.sweep(now_unix() + 700).unwrap();
         let (ok, _, stderr) = finish(child);
         assert!(!ok, "{stderr}");
         assert!(
@@ -403,7 +404,7 @@ fn login_without_a_home_or_a_token_names_both_fixes() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("no bearer token"), "{stderr}");
+    assert!(stderr.contains("no credential"), "{stderr}");
     assert!(
         stderr.contains("run login --hub http://127.0.0.1:1"),
         "{stderr}"
@@ -411,7 +412,7 @@ fn login_without_a_home_or_a_token_names_both_fixes() {
 }
 
 #[test]
-fn a_credential_for_another_hub_or_without_a_secret_is_refused() {
+fn a_credential_for_another_hub_or_without_a_key_is_refused() {
     use sha2::{Digest, Sha256};
     let hub = "http://127.0.0.1:1";
     let key: String = Sha256::digest(hub.as_bytes())
@@ -430,12 +431,12 @@ fn a_credential_for_another_hub_or_without_a_secret_is_refused() {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         }
     };
-    write("{\"hub\":\"http://other-hub\",\"secret\":\"abc\"}\n");
+    write("{\"hub\":\"http://other-hub\",\"key\":\"abc\"}\n");
     let (ok, _, stderr) = run_cli(home.path(), &["--hub", hub, "status"]);
     assert!(!ok, "{stderr}");
     assert!(stderr.contains("belongs to another hub"), "{stderr}");
-    write("{\"hub\":\"http://127.0.0.1:1\",\"secret\":\"\"}\n");
+    write("{\"hub\":\"http://127.0.0.1:1\",\"key\":\"\"}\n");
     let (ok, _, stderr) = run_cli(home.path(), &["--hub", hub, "status"]);
     assert!(!ok, "{stderr}");
-    assert!(stderr.contains("has no secret"), "{stderr}");
+    assert!(stderr.contains("has no key"), "{stderr}");
 }

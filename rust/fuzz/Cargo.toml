@@ -21,6 +21,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "capability_tokens"
+path = "fuzz_targets/capability_tokens.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "chatlog"
 path = "fuzz_targets/chatlog.rs"
 test = false
@@ -49,6 +56,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "device_proofs"
+path = "fuzz_targets/device_proofs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "directory_state"
 path = "fuzz_targets/directory_state.rs"
 test = false
@@ -63,8 +77,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "identity_tokens"
-path = "fuzz_targets/identity_tokens.rs"
+name = "identity_store"
+path = "fuzz_targets/identity_store.rs"
 test = false
 doc = false
 bench = false

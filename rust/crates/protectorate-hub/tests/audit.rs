@@ -1,3 +1,5 @@
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_connect_client::Client;
 use protectorate_hub::Hub;
 use protectorate_inventory::Node;
@@ -10,6 +12,10 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+
+/// A well-formed P-256 point; pairing stores it without verifying a proof.
+const DEVICE_KEY: &str =
+    "BAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 
 async fn call_path(
     addr: std::net::SocketAddr,
@@ -134,7 +140,7 @@ async fn public_pairing_audits_start_without_recording_poll_codes() {
         addr,
         start,
         "",
-        json!({"name":"audit-applicant", "platform":"linux"}),
+        json!({"name":"audit-applicant", "platform":"linux", "publicKey":DEVICE_KEY}),
     )
     .await;
     assert_eq!(status, 200, "{started}");
@@ -178,7 +184,7 @@ async fn public_pairing_audits_start_without_recording_poll_codes() {
         addr,
         start,
         "",
-        json!({"name":"denied-applicant", "platform":"linux"}),
+        json!({"name":"denied-applicant", "platform":"linux", "publicKey":DEVICE_KEY}),
     )
     .await;
     assert_eq!(status, 200, "{started}");
@@ -221,7 +227,7 @@ async fn public_pairing_audits_start_without_recording_poll_codes() {
     tokio::time::sleep(Duration::from_secs(5)).await;
     let (status, issued) = call_path(addr, poll, "", json!({"deviceCode":device_code})).await;
     assert_eq!(status, 200, "{issued}");
-    let token_id = issued["token"]["id"].as_str().unwrap();
+    let token_id = issued["device"]["id"].as_str().unwrap();
     let rename = "/protectorate.v1.DeviceService/RenameDevice";
     let (status, renamed) = call_path(
         addr,
@@ -273,7 +279,7 @@ async fn pairing_rate_limit_is_audited_as_an_error_with_source_ip() {
             addr,
             start,
             "",
-            json!({"name": format!("pair-{index}"), "platform": "linux"}),
+            json!({"name": format!("pair-{index}"), "platform": "linux", "publicKey": DEVICE_KEY}),
         )
         .await;
         assert_eq!(status, 200, "{response}");
@@ -282,7 +288,7 @@ async fn pairing_rate_limit_is_audited_as_an_error_with_source_ip() {
         addr,
         start,
         "",
-        json!({"name":"pair-blocked", "platform":"linux"}),
+        json!({"name":"pair-blocked", "platform":"linux", "publicKey":DEVICE_KEY}),
     )
     .await;
     assert_eq!(status, 429, "{blocked}");
@@ -310,21 +316,14 @@ async fn pairing_rate_limit_is_audited_as_an_error_with_source_ip() {
 async fn chat_selection_requires_explicit_write_scope_over_http() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
+    let (_, sleeve_secret) = capability::mint(&hub, "sleeve:worker", &["read", "chat_report"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let create = "/protectorate.v1.TokenService/CreateToken";
     let selection = "/protectorate.v1.ChatService/SetSelection";
-    let (status, sleeve) = call_path(
-        addr,
-        create,
-        "owner-secret",
-        json!({"name":"sleeve:worker", "scopes":["read", "chat_report"], "ttl":"3600s"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{sleeve}");
-    let sleeve_secret = sleeve["secret"].as_str().unwrap();
+    let sleeve_secret = sleeve_secret.as_str();
     let (status, denied) = call_path(
         addr,
         selection,

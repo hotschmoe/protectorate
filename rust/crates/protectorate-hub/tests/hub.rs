@@ -1,19 +1,27 @@
-use protectorate_auth::Method as ScopeMethod;
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::Hub;
 use protectorate_session::Manager as SessionManager;
-use protectorate_wire::Catalog;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
 async fn call(addr: std::net::SocketAddr, path: &str, token: &str, body: Value) -> (u16, Value) {
+    call_as(addr, path, &format!("Bearer {token}"), body).await
+}
+
+async fn call_as(
+    addr: std::net::SocketAddr,
+    path: &str,
+    authorization: &str,
+    body: Value,
+) -> (u16, Value) {
     let body = body.to_string();
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let request = format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let request = format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: {authorization}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes).await.unwrap();
@@ -29,31 +37,7 @@ async fn call(addr: std::net::SocketAddr, path: &str, token: &str, body: Value) 
 async fn status_and_backlog_use_real_identity_and_persistence() {
     let dir = tempfile::tempdir().unwrap();
     let hub = Hub::open(dir.path(), "owner-secret", "v-rust").unwrap();
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|m| ScopeMethod {
-            tool: &m.tool,
-            service: &m.service,
-            read_only: m.read_only,
-            owner_only: m.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let reader = hub
-        .identity
-        .create(
-            "reader",
-            &["read"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap();
-    let reader_secret = reader.secret.expose().to_string();
+    let (_, reader_secret) = capability::mint(&hub, "reader", &["read"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server =
@@ -130,30 +114,7 @@ async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
     let hub = Hub::open(dir.path(), "owner-secret", "v-rust")
         .unwrap()
         .with_sessions(Arc::clone(&sessions));
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|m| ScopeMethod {
-            tool: &m.tool,
-            service: &m.service,
-            read_only: m.read_only,
-            owner_only: m.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let reader = hub
-        .identity
-        .create(
-            "reader",
-            &["read"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap();
+    let (_, reader) = capability::mint(&hub, "reader", &["read"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server =
@@ -164,12 +125,12 @@ async fn session_rpc_uses_isolated_tmux_and_owner_grant() {
     let capture = "/protectorate.v1.SessionService/CapturePane";
     let kill = "/protectorate.v1.SessionService/KillSession";
     let input = json!({"name":"job", "command":["sh", "-c", "printf 'hello\\n'; exit 7"]});
-    let (code, body) = call(addr, create, reader.secret.expose(), input.clone()).await;
+    let (code, body) = call(addr, create, &reader, input.clone()).await;
     assert_eq!((code, &body["code"]), (403, &json!("permission_denied")));
     let (code, body) = call(addr, create, "owner-secret", input).await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["session"]["name"], "job");
-    let (code, body) = call(addr, list, reader.secret.expose(), json!({})).await;
+    let (code, body) = call(addr, list, &reader, json!({})).await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["sessions"][0]["name"], "job");
     let (code, body) = call(
@@ -199,7 +160,7 @@ async fn owner_manages_scoped_tokens_over_http() {
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let create = "/protectorate.v1.TokenService/CreateToken";
     let list = "/protectorate.v1.TokenService/ListTokens";
-    let update = "/protectorate.v1.TokenService/UpdateTokenScopes";
+    let renew = "/protectorate.v1.TokenService/RenewToken";
     let revoke = "/protectorate.v1.TokenService/RevokeToken";
     let status = "/protectorate.v1.HubService/GetStatus";
     let (code, created) = call(
@@ -212,7 +173,7 @@ async fn owner_manages_scoped_tokens_over_http() {
     assert_eq!(code, 200, "{created}");
     let secret = created["secret"].as_str().unwrap();
     let id = created["token"]["id"].as_str().unwrap();
-    assert!(secret.starts_with("ptk_"));
+    assert!(secret.starts_with("pc1."));
     assert!(created["token"]["expiresAt"].is_string());
     let (code, _) = call(addr, list, secret, json!({})).await;
     assert_eq!(code, 403);
@@ -220,23 +181,20 @@ async fn owner_manages_scoped_tokens_over_http() {
     assert_eq!(code, 200, "{body}");
     let (code, body) = call(
         addr,
-        update,
-        "owner-secret",
-        json!({"id":id,"add":["backlog_create_note"],"remove":["read"]}),
-    )
-    .await;
-    assert_eq!(code, 200, "{body}");
-    assert_eq!(body["token"]["scopes"], json!(["backlog_create_note"]));
-    let (code, _) = call(addr, status, secret, json!({})).await;
-    assert_eq!(code, 403);
-    let (code, body) = call(
-        addr,
         "/protectorate.v1.BacklogService/CreateNote",
         secret,
         json!({"title":"token note"}),
     )
     .await;
+    assert_eq!(code, 403, "{body}");
+    let (code, renewed) = call(addr, renew, secret, json!({})).await;
+    assert_eq!(code, 200, "{renewed}");
+    assert_eq!(renewed["token"]["id"], id);
+    let fresh = renewed["secret"].as_str().unwrap();
+    let (code, body) = call(addr, status, fresh, json!({})).await;
     assert_eq!(code, 200, "{body}");
+    let (code, body) = call(addr, renew, "owner-secret", json!({})).await;
+    assert_eq!(code, 403, "{body}");
     let (code, listed) = call(addr, list, "owner-secret", json!({})).await;
     assert_eq!(code, 200);
     assert_eq!(listed["tokens"][0]["id"], id);
@@ -244,14 +202,10 @@ async fn owner_manages_scoped_tokens_over_http() {
     let (code, body) = call(addr, revoke, "owner-secret", json!({"id":id})).await;
     assert_eq!(code, 200, "{body}");
     assert!(body["token"]["revokedAt"].is_string());
-    let (code, _) = call(
-        addr,
-        "/protectorate.v1.BacklogService/CreateNote",
-        secret,
-        json!({"title":"denied"}),
-    )
-    .await;
-    assert_eq!(code, 401);
+    for token in [secret, fresh] {
+        let (code, body) = call(addr, status, token, json!({})).await;
+        assert_eq!(code, 401, "{body}");
+    }
     server.abort();
 }
 
@@ -272,11 +226,21 @@ async fn loopback_device_pairing_approves_once_and_revokes() {
     let devices = "/protectorate.v1.DeviceService/ListDevices";
     let rename = "/protectorate.v1.DeviceService/RenameDevice";
     let revoke = "/protectorate.v1.DeviceService/RevokeDevice";
+    let key = protectorate_auth::proof::DeviceKey::generate().unwrap().0;
+    use base64::Engine;
+    let public_key = base64::engine::general_purpose::STANDARD.encode(key.public_key());
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    };
+    let proof = |path: &str, time: i64| format!("Proof {}", key.prove("POST", path, time).unwrap());
     let (code, started) = call(
         addr,
         start,
         "",
-        json!({"name":"phone", "platform":"android"}),
+        json!({"name":"phone", "platform":"android", "publicKey":public_key}),
     )
     .await;
     assert_eq!(code, 200, "{started}");
@@ -285,20 +249,37 @@ async fn loopback_device_pairing_approves_once_and_revokes() {
     let (code, body) = call(addr, pending, "owner-secret", json!({})).await;
     assert_eq!(code, 200);
     assert_eq!(body["requests"][0]["userCode"], user_code);
+    let (code, body) = call_as(addr, devices, &proof(devices, now()), json!({})).await;
+    assert_eq!(code, 401, "an unapproved key signed a call: {body}");
     let (code, body) = call(addr, approve, "owner-secret", json!({"userCode":user_code})).await;
     assert_eq!(code, 200, "{body}");
     let (code, approved) = call(addr, poll, "", json!({"deviceCode":device_code})).await;
     assert_eq!(code, 200, "{approved}");
     assert_eq!(approved["status"], "approved");
-    let secret = approved["secret"].as_str().unwrap();
-    let id = approved["token"]["id"].as_str().unwrap();
+    let id = approved["device"]["id"].as_str().unwrap();
+    assert_eq!(id, key.id());
     let (code, body) = call(addr, poll, "", json!({"deviceCode":device_code})).await;
     assert_eq!(code, 200);
     assert_eq!(body["status"], "consumed");
-    assert!(body.get("secret").is_none());
-    let (code, body) = call(addr, devices, secret, json!({})).await;
+    assert!(body.get("device").is_none());
+    let signed = proof(devices, now());
+    let (code, body) = call_as(addr, devices, &signed, json!({})).await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["devices"][0]["id"], id);
+    let (code, body) = call_as(addr, devices, &signed, json!({})).await;
+    assert_eq!(code, 401, "{body}");
+    assert!(
+        body["message"].as_str().unwrap().contains("replayed"),
+        "{body}"
+    );
+    let (code, body) = call_as(addr, devices, &proof(devices, now() - 120), json!({})).await;
+    assert_eq!(code, 401, "{body}");
+    assert!(
+        body["message"].as_str().unwrap().contains("clock skew"),
+        "{body}"
+    );
+    let (code, body) = call_as(addr, devices, &proof(pending, now()), json!({})).await;
+    assert_eq!(code, 401, "a proof for another path: {body}");
     let (code, body) = call(
         addr,
         rename,
@@ -307,10 +288,10 @@ async fn loopback_device_pairing_approves_once_and_revokes() {
     )
     .await;
     assert_eq!(code, 200, "{body}");
-    assert_eq!(body["token"]["name"], "new phone");
+    assert_eq!(body["device"]["name"], "new phone");
     let (code, body) = call(addr, revoke, "owner-secret", json!({"id":id})).await;
     assert_eq!(code, 200, "{body}");
-    let (code, _) = call(addr, devices, secret, json!({})).await;
+    let (code, _) = call_as(addr, devices, &proof(devices, now()), json!({})).await;
     assert_eq!(code, 401);
     server.abort();
 }

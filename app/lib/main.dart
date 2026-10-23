@@ -209,7 +209,7 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
     final existing = widget.store.hubs
         .where((h) => h.baseUrl == req.baseUrl)
         .firstOrNull;
-    final profile = existing != null && existing.token.isNotEmpty
+    final profile = existing != null && existing.deviceId.isNotEmpty
         ? existing
         : await connectHub(
             nav.context,

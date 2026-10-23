@@ -83,10 +83,11 @@ service SleeveService {
   rpc ResleeveSleeve(ResleeveSleeveRequest) returns (ResleeveSleeveResponse);
 
   // SpawnEnvoy creates or respawns Envoy, the orchestrator: a chat sleeve
-  // named "envoy" in $PROTECTORATE_HOME/orchestrator with its own scoped
-  // token. It picks the harness (the top of QuotaService.Suggest unless one
-  // is given), stops a running Envoy, revokes every earlier orchestrator
-  // token, mints a new one, writes the token file and the generated context
+  // named "envoy" in $PROTECTORATE_HOME/orchestrator with its own
+  // capability. It picks the harness (the top of QuotaService.Suggest unless
+  // one is given), stops a running Envoy, revokes every earlier orchestrator
+  // capability, mints a new one, writes the token file (which the hub keeps
+  // fresh while Envoy runs) and the generated context
   // files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
   // is byte-identical across respawns unless the CLI, the tool catalog, the
   // hub URL, or the scopes change, so a resumed session keeps its
@@ -426,9 +427,6 @@ message SpawnEnvoyRequest {
   repeated string scopes = 2;
   // add_scopes extends the scopes, defaults or replaced.
   repeated string add_scopes = 3;
-  // ttl is the token lifetime. Unset means 720h; zero never expires. The hub
-  // renews the token before it expires without restarting the harness.
-  google.protobuf.Duration ttl = 4;
   ModelSelection selection = 5;
 }
 

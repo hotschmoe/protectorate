@@ -18,7 +18,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::{BufRead, BufReader, Write},
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -1497,7 +1497,7 @@ fn spawn_chat(
     if envoy {
         revoke_identity(hub, &name)?;
     } else {
-        issue_identity(hub, &name)?;
+        issue_identity(hub, &name, parent)?;
     }
     let session: Arc<dyn ChatSession> = if harness == Harness::Pi {
         PiSession::start(&plan, options, Arc::clone(&log), old_session.as_deref())
@@ -1990,66 +1990,10 @@ fn identity_path(hub: &Hub, name: &str) -> PathBuf {
         .join("home/.protectorate-token")
 }
 pub(super) fn revoke_identity(hub: &Hub, name: &str) -> Result<()> {
-    let now = super::now_unix();
-    for token in hub.identity.list() {
-        if token.name == format!("sleeve:{name}") && token.is_active(now) {
-            hub.identity
-                .revoke(&token.id, now)
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-        }
-    }
-    let path = identity_path(hub, name);
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(internal(error)),
-    }
+    crate::access::revoke_held(hub, &format!("sleeve:{name}"))
 }
-fn issue_identity(hub: &Hub, name: &str) -> Result<()> {
-    revoke_identity(hub, name)?;
-    let catalog = wire::Catalog::embedded()?;
-    let methods = catalog.methods().cloned().collect::<Vec<_>>();
-    let scope_methods = super::scope_methods(&methods);
-    let issued = hub
-        .identity
-        .create(
-            &format!("sleeve:{name}"),
-            &[
-                "read",
-                "backlog_*",
-                "directory_*",
-                "lease_*",
-                "message_*",
-                "chat_report",
-            ],
-            std::time::Duration::ZERO,
-            super::now_unix(),
-            &scope_methods,
-        )
-        .map_err(|e| RpcError::new(Code::Internal, format!("issue sleeve token: {e}")))?;
-    let path = identity_path(hub, name);
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = path.with_extension(format!("token-{}-{nonce}", std::process::id()));
-    let write = || -> std::io::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
-        file.write_all(issued.secret.expose().as_bytes())?;
-        file.write_all(b"\n")?;
-        file.sync_all()?;
-        fs::rename(&temporary, &path)
-    };
-    if let Err(error) = write() {
-        let _ = fs::remove_file(&temporary);
-        let _ = hub.identity.revoke(&issued.token.id, super::now_unix());
-        return Err(internal(error));
-    }
-    Ok(())
+fn issue_identity(hub: &Hub, name: &str, parent: &crate::sleeves::SpawnParent) -> Result<()> {
+    crate::access::issue_sleeve(hub, name, parent, &identity_path(hub, name)).map(|_| ())
 }
 fn list_models(hub: &Hub, name: &str, harness: &str) -> Result<Value> {
     if name.is_empty() {

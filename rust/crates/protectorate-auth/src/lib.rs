@@ -1,6 +1,8 @@
-//! Scope decisions shared by the future Rust hub, CLI and terminal endpoint.
-//! The method catalog is supplied by the wire layer so generated API metadata
-//! remains the single source of truth.
+//! Credentials and scope decisions shared by the hub, CLI and terminal
+//! endpoint. The method catalog is supplied by the wire layer so generated API
+//! metadata remains the single source of truth.
+pub mod capability;
+pub mod proof;
 
 pub const SCOPE_FULL: &str = "full";
 pub const SCOPE_READ: &str = "read";
@@ -242,6 +244,59 @@ pub fn grants(scopes: &[&str], tool: &str, methods: &[Method<'_>]) -> bool {
         .iter()
         .find(|method| method.tool == tool)
         .is_some_and(|method| scopes_allow(scopes, method))
+}
+
+/// The scopes that allow exactly what both `a` and `b` allow, used when the
+/// hub mints for a caller holding `b` and when a holder narrowed a token. A
+/// glob `b` only partly covers becomes the tool names both allow.
+pub fn intersect(a: &[String], b: &[String], methods: &[Method<'_>]) -> Vec<String> {
+    let b_scopes: Vec<&str> = b.iter().map(String::as_str).collect();
+    let terminal = |s: &str| -> usize {
+        match s {
+            SCOPE_TERMINAL_READONLY => 1,
+            SCOPE_TERMINAL => 2,
+            SCOPE_TERMINAL_HOST | SCOPE_FULL => 3,
+            _ => 0,
+        }
+    };
+    let mut out = std::collections::BTreeSet::new();
+    for s in a {
+        match s.as_str() {
+            _ if b_scopes.contains(&SCOPE_FULL) => {
+                out.insert(s.clone());
+            }
+            SCOPE_FULL => out.extend(b.iter().cloned()),
+            SCOPE_TERMINAL_READONLY | SCOPE_TERMINAL | SCOPE_TERMINAL_HOST => {
+                let rank = terminal(s).min(b_scopes.iter().map(|s| terminal(s)).max().unwrap_or(0));
+                if let Some(scope) = [SCOPE_TERMINAL_READONLY, SCOPE_TERMINAL, SCOPE_TERMINAL_HOST]
+                    .get(rank.wrapping_sub(1))
+                {
+                    out.insert((*scope).to_owned());
+                }
+            }
+            _ if node_glob(s).is_some() => {
+                if b_scopes.contains(&s.as_str()) {
+                    out.insert(s.clone());
+                }
+            }
+            _ => {
+                let mine: Vec<&Method<'_>> = methods
+                    .iter()
+                    .filter(|m| scopes_allow(&[s.as_str()], m))
+                    .collect();
+                if mine.iter().all(|m| scopes_allow(&b_scopes, m)) {
+                    out.insert(s.clone());
+                } else {
+                    out.extend(
+                        mine.iter()
+                            .filter(|m| scopes_allow(&b_scopes, m))
+                            .map(|m| m.tool.to_owned()),
+                    );
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 pub fn needed(method: &Method<'_>) -> String {

@@ -1,5 +1,6 @@
 //! Blocking Connect JSON transport for the Rust CLI and hub-to-node calls.
 //! Callers in an async runtime should use `spawn_blocking` for these methods.
+use protectorate_auth::{capability, proof::DeviceKey};
 use protectorate_wire::{
     decode_json, encode_envelope, encode_json, Catalog, Code, Method, Result, RpcError,
     FLAG_END_STREAM,
@@ -8,8 +9,9 @@ use serde_json::Value;
 use std::{
     io::Read,
     net::{SocketAddr, ToSocketAddrs},
-    path::Path,
-    time::Duration,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use ureq::unversioned::{
     resolver::{ResolvedSocketAddrs, Resolver},
@@ -27,6 +29,62 @@ const PUBLIC: [&str; 3] = [
     "/protectorate.v1.DeviceService/PollDeviceAuth",
     "/protectorate.v1.NodeService/JoinNode",
 ];
+
+const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
+
+/// How a client proves who it is on each request.
+#[derive(Clone)]
+pub enum Credential {
+    /// Only the public pairing and join procedures.
+    None,
+    /// The connection authenticates the caller: the hub's client certificate
+    /// toward a node.
+    Transport,
+    /// The owner token (loopback only) or a capability held in memory.
+    Bearer(Zeroizing<String>),
+    /// A capability file, read for every request. Past half its lifetime the
+    /// client renews it through the hub and rewrites the file in place.
+    TokenFile(PathBuf),
+    /// An approved device's key, which signs every request.
+    Device(Arc<DeviceKey>),
+}
+
+/// The key in a device credential record saved by `protectorate login`:
+/// `{"hub", "deviceId", "key": <base64 PKCS#8>, ...}`.
+pub fn device_key(record: &Value) -> Result<Arc<DeviceKey>> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let pkcs8 = record
+        .get("key")
+        .and_then(Value::as_str)
+        .filter(|key| !key.is_empty())
+        .and_then(|key| STANDARD.decode(key).ok())
+        .map(Zeroizing::new)
+        .ok_or_else(|| RpcError::new(Code::DataLoss, "device credential has no key"))?;
+    DeviceKey::from_pkcs8(&pkcs8)
+        .map(Arc::new)
+        .map_err(|error| RpcError::new(Code::DataLoss, error))
+}
+
+/// A device credential file another process chose, such as the CLI handing
+/// one to the MCP bridge.
+pub fn read_device_credential(path: &Path) -> Result<Credential> {
+    let raw = Zeroizing::new(std::fs::read(path).map_err(|error| {
+        RpcError::new(
+            Code::Unauthenticated,
+            format!("read device credential {}: {error}", path.display()),
+        )
+    })?);
+    let record: Value = serde_json::from_slice(&raw)
+        .map_err(|error| RpcError::new(Code::DataLoss, format!("device credential: {error}")))?;
+    device_key(&record).map(Credential::Device)
+}
+
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
 
 /// Parsed private CA bundle for explicit daemon-to-node TLS trust.
 #[derive(Clone)]
@@ -112,8 +170,7 @@ impl Resolver for Fixed {
 #[derive(Clone)]
 pub struct Client {
     base: String,
-    token: Zeroizing<String>,
-    public: bool,
+    credential: Credential,
     dial: Option<SocketAddr>,
     agent: ureq::Agent,
     catalog: Catalog,
@@ -133,8 +190,7 @@ impl Client {
     pub fn isolated(&self) -> Self {
         Self {
             base: self.base.clone(),
-            token: self.token.clone(),
-            public: self.public,
+            credential: self.credential.clone(),
             dial: self.dial,
             agent: agent(self.agent.config().clone(), self.dial),
             catalog: self.catalog.clone(),
@@ -190,8 +246,7 @@ impl Client {
         }
         Ok(Self {
             base,
-            token: Zeroizing::new(String::new()),
-            public: false,
+            credential: Credential::Transport,
             dial,
             agent: agent(config.build(), dial),
             catalog: Catalog::embedded()?,
@@ -290,12 +345,25 @@ impl Client {
         }
         Ok(Self {
             base: base.into(),
-            public: token.is_empty(),
-            token,
+            credential: if token.is_empty() {
+                Credential::None
+            } else {
+                Credential::Bearer(token)
+            },
             dial: None,
             agent: config.build().into(),
             catalog: Catalog::embedded()?,
         })
+    }
+
+    /// The same endpoint and TLS trust with another credential.
+    pub fn with_credential(mut self, credential: Credential) -> Self {
+        self.credential = credential;
+        self
+    }
+
+    fn public(&self) -> bool {
+        matches!(self.credential, Credential::None)
     }
 
     pub fn call(&self, procedure: &str, input: &Value) -> Result<Value> {
@@ -314,7 +382,7 @@ impl Client {
     }
 
     fn unary(&self, procedure: &str, input: &Value, timeout: Option<Duration>) -> Result<Value> {
-        if self.public && !PUBLIC.contains(&procedure) {
+        if self.public() && !PUBLIC.contains(&procedure) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
                 "a client without a token may only pair a device or join a node",
@@ -387,7 +455,7 @@ impl Client {
         timeout: Option<Duration>,
         on_message: &mut impl FnMut(Value) -> Result<()>,
     ) -> Result<()> {
-        if self.public {
+        if self.public() {
             return Err(RpcError::new(
                 Code::PermissionDenied,
                 "a client without a token may only pair a device or join a node",
@@ -507,8 +575,8 @@ impl Client {
             .post(&format!("{}{}", self.base, procedure))
             .header("Content-Type", content_type)
             .header("Connect-Protocol-Version", "1");
-        if !self.token.is_empty() {
-            request = request.header("Authorization", &format!("Bearer {}", self.token.as_str()));
+        if let Some(authorization) = self.authorization("POST", procedure)? {
+            request = request.header("Authorization", authorization.as_str());
         }
         if let Some(timeout) = timeout {
             request = request.config().timeout_global(Some(timeout)).build();
@@ -516,6 +584,74 @@ impl Client {
         request
             .send(body)
             .map_err(|e| RpcError::new(Code::Unavailable, e.to_string()))
+    }
+}
+
+impl Client {
+    /// The Authorization header for one `verb` request to `path`.
+    pub fn authorization(&self, verb: &str, path: &str) -> Result<Option<Zeroizing<String>>> {
+        let bearer = |token: &str| Some(Zeroizing::new(format!("Bearer {token}")));
+        match &self.credential {
+            Credential::None | Credential::Transport => Ok(None),
+            Credential::Bearer(token) => Ok(bearer(token)),
+            Credential::TokenFile(path) => Ok(bearer(&self.held_token(path)?)),
+            Credential::Device(key) => key
+                .prove(verb, path, now_unix())
+                .map(|proof| Some(Zeroizing::new(format!("Proof {proof}"))))
+                .map_err(|error| RpcError::new(Code::Internal, error)),
+        }
+    }
+
+    fn held_token(&self, path: &Path) -> Result<Zeroizing<String>> {
+        let raw = Zeroizing::new(std::fs::read_to_string(path).map_err(|error| {
+            RpcError::new(
+                Code::Unauthenticated,
+                format!("read token file {}: {error}", path.display()),
+            )
+        })?);
+        let token = Zeroizing::new(raw.trim().to_owned());
+        if token.is_empty() || token.contains(['\r', '\n']) {
+            return Err(RpcError::new(
+                Code::Unauthenticated,
+                format!("token file {} holds no token", path.display()),
+            ));
+        }
+        let Ok(claims) = capability::decode(&token) else {
+            return Ok(token);
+        };
+        let now = now_unix();
+        if claims.expires <= now || claims.expires - now > (claims.expires - claims.issued) / 2 {
+            return Ok(token);
+        }
+        // Renewal is best effort: until the old token expires it still works.
+        Ok(self.renew(path, &token).unwrap_or(token))
+    }
+
+    fn renew(&self, path: &Path, token: &str) -> Result<Zeroizing<String>> {
+        let response = self
+            .agent
+            .post(&format!("{}{RENEW_TOKEN}", self.base))
+            .header("Content-Type", "application/json")
+            .header("Connect-Protocol-Version", "1")
+            .header("Authorization", &format!("Bearer {token}"))
+            .send(&b"{}"[..])
+            .map_err(|e| RpcError::new(Code::Unavailable, e.to_string()))?;
+        let status = response.status().as_u16();
+        let bytes = read_bounded(response.into_body().into_reader(), MAX_ERROR_BYTES)?;
+        if status != 200 {
+            return Err(remote_error(status, &bytes));
+        }
+        let reply: Value = serde_json::from_slice(&bytes)
+            .map_err(|e| RpcError::new(Code::DataLoss, e.to_string()))?;
+        let fresh = reply
+            .get("secret")
+            .and_then(Value::as_str)
+            .filter(|secret| capability::decode(secret).is_ok())
+            .map(|secret| Zeroizing::new(secret.to_owned()))
+            .ok_or_else(|| RpcError::new(Code::DataLoss, "hub renewed no capability"))?;
+        protectorate_fsutil::write_file(path, format!("{}\n", fresh.as_str()).as_bytes(), 0o600)
+            .map_err(|e| RpcError::new(Code::Internal, format!("rewrite token file: {e}")))?;
+        Ok(fresh)
     }
 }
 

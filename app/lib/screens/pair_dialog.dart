@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/device.pb.dart';
 import '../hubs/device_auth.dart';
+import '../hubs/device_key.dart';
+import '../hubs/device_keys.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../hubs/pairing.dart';
@@ -73,7 +75,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   StartDeviceAuthResponse? _request;
   bool _working = false;
   String? _error;
-  String? _approvedSecret;
+  DeviceInfo? _approved;
   HubProfile? _connecting;
 
   @override
@@ -114,20 +116,28 @@ class _ConnectDialogState extends State<_ConnectDialog> {
       _error = null;
     });
     try {
-      final secret = _approvedSecret ??= await authorizeDevice(
+      // A fresh key for every pairing: the hub binds the approval to it.
+      final key = _approved == null
+          ? await DeviceKeys.create(profile.id)
+          : (await DeviceKeys.load(profile.id))!;
+      final device = _approved ??= await authorizeDevice(
         widget.clientFactory(profile).devices,
         name: _device.text.trim(),
         platform: _platform(),
+        publicKey: key.publicKey,
         signal: abort,
         onStarted: (request) {
           if (mounted) setState(() => _request = request);
         },
       );
+      if (device.id != deviceId(key.publicKey)) {
+        throw const DeviceAuthException('invalid');
+      }
       final approved = HubProfile(
         id: profile.id,
         name: profile.name,
         baseUrl: profile.baseUrl,
-        token: secret,
+        deviceId: device.id,
         caPem: profile.caPem,
       );
       await widget.save(approved);
@@ -148,7 +158,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
 
   void _retry() {
     _abort?.cancel();
-    if (_approvedSecret == null) {
+    if (_approved == null) {
       _request = null;
       _connecting = null;
     }
@@ -242,7 +252,7 @@ class _ConnectDialogState extends State<_ConnectDialog> {
                     const LinearProgressIndicator(),
                     const SizedBox(height: 8),
                     Text(
-                      _approvedSecret == null
+                      _approved == null
                           ? 'Waiting for approval...'
                           : 'Approved. Saving connection...',
                       style: t.small(),

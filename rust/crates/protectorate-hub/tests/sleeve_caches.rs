@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
 use serde_json::{json, Value};
@@ -71,27 +73,7 @@ async fn owner_drop_caches_stops_sleeve_and_keeps_home_workspace_and_auth() {
     fs::write(overlays.join("artifact"), "discard").unwrap();
     let hub = Hub::open(root.path(), "owner-secret", "test").unwrap();
     register_chat(&hub, &workspace, "chat");
-    let catalog = protectorate_wire::Catalog::embedded().unwrap();
-    let methods = catalog
-        .methods()
-        .map(|method| protectorate_auth::Method {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect::<Vec<_>>();
-    let issued = hub
-        .identity
-        .create(
-            "limited",
-            &["sleeve_*"],
-            std::time::Duration::ZERO,
-            1_000_000_000,
-            &methods,
-        )
-        .unwrap();
-    let limited = issued.secret.expose().to_owned();
+    let (_, limited) = capability::mint(&hub, "limited", &["sleeve_*"]);
     let (addr, server) = serve(hub).await;
     let (status, denied) = call(addr, &limited, json!({"name":"chat","dropCaches":true})).await;
     assert_eq!(status, 403, "{denied}");

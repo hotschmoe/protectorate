@@ -1,4 +1,5 @@
 //! Initial Rust hub service wiring for the existing Connect API.
+mod access;
 mod audit;
 mod chat;
 mod checkpoints;
@@ -21,17 +22,15 @@ mod release;
 mod session_monitor;
 mod sleeves;
 mod workspaces;
-use axum::{
-    http::{header, HeaderMap},
-    Router,
-};
+use access::scope_methods;
+use axum::{http::HeaderMap, Router};
 pub use chat::{ChatLauncher, ChatRuntime};
 use chrono::{DateTime, SecondsFormat, Utc};
 use protectorate_audit::Audit;
 use protectorate_auth::{self as auth, Method as ScopeMethod};
 use protectorate_backlog::{self as backlog, Filter, NewNote, Note, Patch, Store as BacklogStore};
 use protectorate_directory::Directory;
-use protectorate_identity::{self as identity, Store as IdentityStore, Token};
+use protectorate_identity::{self as identity, Store as IdentityStore};
 use protectorate_inventory::Inventory;
 use protectorate_lease::{Chooser as LeaseChooser, LeaseTable};
 use protectorate_mailbox::Store as MailStore;
@@ -59,7 +58,6 @@ use std::{
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 pub type NoteEventSink = Arc<dyn Fn(&str, &Note) + Send + Sync>;
@@ -97,6 +95,8 @@ pub struct Hub {
     pub hostname: String,
     owner_token: Arc<Zeroizing<String>>,
     pub identity: Arc<IdentityStore>,
+    methods: Arc<Vec<Method>>,
+    capability_ttl: std::time::Duration,
     pub audit: Arc<Audit>,
     pub backlog: Arc<BacklogStore>,
     pub sessions: Arc<SessionManager>,
@@ -231,32 +231,33 @@ impl Hub {
             .map_err(|error| identity::Error::Invalid(error.to_string()))?;
         let identity = Arc::new(IdentityStore::open(home.join("identity.json"))?);
         // A restarted hub cannot reattach its chat driver processes. The
-        // registry has marked them exited, so their scoped CLI credentials
-        // must stop working before the listener accepts another request.
+        // registry has marked them exited, so their capabilities must stop
+        // working before the listener accepts another request.
         let now = Utc::now().timestamp();
-        let tokens = identity.list();
         for row in sleeves.list() {
             if row.mode != protectorate_sleeve_registry::Mode::Chat
                 || row.state != protectorate_sleeve_registry::State::Exited
             {
                 continue;
             }
-            let token_name = format!("sleeve:{}", row.name);
-            for token in &tokens {
-                if token.name == token_name && token.is_active(now) {
-                    identity.revoke(&token.id, now)?;
-                }
-            }
-            let token_file = home
-                .join("sleeves")
-                .join(&row.name)
-                .join("home/.protectorate-token");
-            match std::fs::remove_file(token_file) {
+            identity.revoke_principal(&format!("sleeve:{}", row.name), now)?;
+            match std::fs::remove_file(
+                home.join("sleeves")
+                    .join(&row.name)
+                    .join("home/.protectorate-token"),
+            ) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(identity::Error::Io(error)),
             }
         }
+        let methods = Arc::new(
+            Catalog::embedded()
+                .map_err(|error| identity::Error::Invalid(error.message))?
+                .methods()
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         let lease_path = home.join("leases.json");
         let leases = Arc::new(
             lease::open_table(
@@ -283,6 +284,8 @@ impl Hub {
             hostname,
             owner_token: Arc::new(Zeroizing::new(owner_token.into())),
             identity,
+            methods,
+            capability_ttl: std::time::Duration::from_secs(60 * 60),
             audit: Arc::new(Audit::new(home.join("audit")).with_on_error(|error| {
                 eprintln!("hub audit write failed: {error}");
             })),
@@ -366,6 +369,12 @@ impl Hub {
 
     pub fn with_identity(mut self, store: Arc<IdentityStore>) -> Self {
         self.identity = store;
+        self
+    }
+    /// The lifetime of the capabilities the hub holds for sleeves and Envoy,
+    /// which it refreshes at half that age.
+    pub fn with_capability_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.capability_ttl = ttl.clamp(std::time::Duration::from_secs(2), identity::MAX_TTL);
         self
     }
     pub fn with_backlog(mut self, store: Arc<BacklogStore>) -> Self {
@@ -537,56 +546,73 @@ impl Hub {
         let catalog = Catalog::embedded()?;
         let identity = Arc::clone(&self.identity);
         let owner = Arc::clone(&self.owner_token);
+        let methods = Arc::clone(&self.methods);
         let public_device_auth = self.public_device_auth;
         let require_device_peer = self.require_device_peer;
         let trusted_proxies = self.trusted_proxies.clone();
-        let denied_trusted_proxies = trusted_proxies.clone();
         let device_rates = Arc::clone(&self.device_rates);
-        let denied_audit = Arc::clone(&self.audit);
-        let denied_owner = Arc::clone(&owner);
-        let denied_identity_store = Arc::clone(&identity);
         let authorize = Arc::new(
-            move |method: &Method, headers: &HeaderMap, peer: Option<std::net::SocketAddr>| {
-                let pairing_ip = if device::public_procedure(&method.procedure) {
-                    peer.map(|address| device::source_ip(address.ip(), headers, &trusted_proxies))
-                        .or_else(|| {
-                            (!require_device_peer)
-                                .then_some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
-                        })
-                } else {
-                    None
-                };
-                if device::public_procedure(&method.procedure) {
-                    if !public_device_auth {
-                        Err(RpcError::new(
-                            Code::PermissionDenied,
-                            "device pairing is unavailable on this listener",
-                        ))
-                    } else if require_device_peer && peer.is_none() {
-                        Err(RpcError::new(
-                            Code::PermissionDenied,
-                            "device pairing requires a transport peer",
-                        ))
-                    } else {
-                        // A loopback-only listener may omit peer metadata in embedded
-                        // routers. TLS listeners must always provide it.
-                        let ip = pairing_ip
-                            .expect("public pairing has a transport peer or loopback fallback");
-                        device_rates
-                            .admit(&method.procedure, ip)
-                            .map(|_| AuthContext {
+            move |method: &Method, headers: &HeaderMap, peer: Option<wire::Peer>| {
+                if !device::public_procedure(&method.procedure) {
+                    let caller = access::authenticate(
+                        &owner,
+                        &identity,
+                        &methods,
+                        headers,
+                        "POST",
+                        &method.procedure,
+                        peer.is_some_and(|peer| peer.tls),
+                    )
+                    .map_err(|error| {
+                        Box::new(wire::Denied {
+                            error,
+                            auth: AuthContext {
                                 actor: "unauthenticated".into(),
-                                requesting_ip: Some(ip),
                                 ..AuthContext::default()
-                            })
-                    }
-                } else {
-                    authorize(&owner, &identity, method, headers)
+                            },
+                        })
+                    })?;
+                    return access::authorize(&caller, method);
                 }
+                // A loopback-only listener may omit peer metadata in embedded
+                // routers. TLS listeners must always provide it.
+                let ip = peer
+                    .map(|peer| device::source_ip(peer.addr.ip(), headers, &trusted_proxies))
+                    .or_else(|| {
+                        (!require_device_peer)
+                            .then_some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+                    });
+                let auth = AuthContext {
+                    actor: "unauthenticated".into(),
+                    requesting_ip: ip,
+                    ..AuthContext::default()
+                };
+                let refuse = |message: &str| {
+                    Box::new(wire::Denied {
+                        error: RpcError::new(Code::PermissionDenied, message),
+                        auth: auth.clone(),
+                    })
+                };
+                if !public_device_auth {
+                    return Err(refuse("device pairing is unavailable on this listener"));
+                }
+                let Some(ip) = ip else {
+                    return Err(refuse("device pairing requires a transport peer"));
+                };
+                device_rates
+                    .admit(&method.procedure, ip)
+                    .map(|_| auth.clone())
+                    .map_err(|error| {
+                        Box::new(wire::Denied {
+                            error,
+                            auth: auth.clone(),
+                        })
+                    })
             },
         );
         let completion_audit = Arc::clone(&self.audit);
         let rejection_audit = Arc::clone(&self.audit);
+        let denied_audit = Arc::clone(&self.audit);
         let observer = Arc::new(
             move |method: &Method,
                   auth: &AuthContext,
@@ -601,37 +627,13 @@ impl Hub {
         let mut server = UnaryServer::new_with_peer(catalog, authorize)
             .with_max_request_bytes(8 << 20)
             .with_max_stream_message_bytes(8 << 20)
-            .with_admission_denial_observer(Arc::new(
-                move |method, headers, peer, message, error| {
-                    let actor = if device::public_procedure(&method.procedure) {
-                        AuthContext {
-                            actor: "unauthenticated".into(),
-                            requesting_ip: peer
-                                .map(|address| {
-                                    device::source_ip(
-                                        address.ip(),
-                                        headers,
-                                        &denied_trusted_proxies,
-                                    )
-                                })
-                                .or_else(|| {
-                                    (!require_device_peer).then_some(std::net::IpAddr::V4(
-                                        std::net::Ipv4Addr::LOCALHOST,
-                                    ))
-                                }),
-                            ..AuthContext::default()
-                        }
-                    } else {
-                        denied_identity(&denied_owner, &denied_identity_store, headers)
-                    };
-                    audit::record_denied(&denied_audit, method, &actor, message, error);
-                },
-            ))
+            .with_admission_denial_observer(Arc::new(move |method, auth, message, error| {
+                audit::record_denied(&denied_audit, method, auth, message, error);
+            }))
             .with_completion_observer(observer)
             .with_rejection_observer(Arc::new(move |method, auth, error| {
                 audit::record_rejection(&rejection_audit, method, auth, error);
             }));
-        let all_methods = Arc::new(server.catalog().methods().cloned().collect::<Vec<_>>());
         let hub = Arc::new(self);
         let weak = Arc::downgrade(&hub);
         hub.node_monitor.set_event_sink(Arc::new(move |event| {
@@ -645,7 +647,8 @@ impl Hub {
         let downloads = Arc::clone(&hub);
         audit::register(&mut server, Arc::clone(&hub))?;
         device::register(&mut server, Arc::clone(&hub))?;
-        grants::register(&mut server, Arc::clone(&hub), Arc::clone(&all_methods))?;
+        grants::register(&mut server, Arc::clone(&hub))?;
+        access::register(&mut server, Arc::clone(&hub))?;
         directory::register(&mut server, Arc::clone(&hub))?;
         quota::register(&mut server, Arc::clone(&hub))?;
         release::register(&mut server, Arc::clone(&hub))?;
@@ -666,7 +669,7 @@ impl Hub {
                 let mut events = hub.events.sender.subscribe();
                 let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
                 let watch = (!request.auth.token_id.is_empty())
-                    .then(|| hub.identity.watch_token(&request.auth.token_id, now_unix()));
+                    .then(|| hub.identity.watch(&request.auth.token_id, now_unix()));
                 let mut check_revocation = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     let event = tokio::select! {
@@ -778,84 +781,6 @@ impl Hub {
                             "overlays": overlays,
                         }),
                     )
-                }
-            },
-        )?;
-        let create_token = Arc::clone(&hub);
-        let create_methods = Arc::clone(&all_methods);
-        server.register("/protectorate.v1.TokenService/CreateToken", move |request| {
-            let hub = Arc::clone(&create_token);
-            let methods = Arc::clone(&create_methods);
-            async move {
-                let input = input(&request)?;
-                let scopes = strings(&input, "scopes");
-                let ttl = parse_duration(input.get("ttl"))?;
-                let methods = scope_methods(&methods);
-                let issued = hub.identity.create(
-                    &string(&input, "name"),
-                    &scopes.iter().map(String::as_str).collect::<Vec<_>>(),
-                    ttl,
-                    now_unix(),
-                    &methods,
-                ).map_err(token_create_error)?;
-                respond(&request, json!({"token": token_json(&issued.token), "secret": issued.secret.expose()}))
-            }
-        })?;
-        let list_tokens = Arc::clone(&hub);
-        server.register("/protectorate.v1.TokenService/ListTokens", move |request| {
-            let hub = Arc::clone(&list_tokens);
-            async move {
-                respond(&request, json!({"tokens": hub.identity.list().iter().map(token_json).collect::<Vec<_>>() }))
-            }
-        })?;
-        let revoke_token = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.TokenService/RevokeToken",
-            move |request| {
-                let hub = Arc::clone(&revoke_token);
-                async move {
-                    let token = hub
-                        .identity
-                        .revoke(&string(&input(&request)?, "id"), now_unix())
-                        .map_err(token_error)?;
-                    respond(&request, json!({"token": token_json(&token)}))
-                }
-            },
-        )?;
-        let update_token = Arc::clone(&hub);
-        let update_methods = Arc::clone(&all_methods);
-        server.register(
-            "/protectorate.v1.TokenService/UpdateTokenScopes",
-            move |request| {
-                let hub = Arc::clone(&update_token);
-                let all_methods = Arc::clone(&update_methods);
-                async move {
-                    let input = input(&request)?;
-                    let add = strings(&input, "add");
-                    let remove = strings(&input, "remove");
-                    let methods = scope_methods(&all_methods);
-                    let (token, before) = hub
-                        .identity
-                        .update_scopes(
-                            &string(&input, "id"),
-                            &add.iter().map(String::as_str).collect::<Vec<_>>(),
-                            &remove.iter().map(String::as_str).collect::<Vec<_>>(),
-                            now_unix(),
-                            &methods,
-                        )
-                        .map_err(token_error)?;
-                    let response = respond(&request, json!({"token": token_json(&token)}))?;
-                    hub.audit.write(protectorate_audit::Entry {
-                        actor: request.auth.actor.clone(),
-                        token_id: request.auth.token_id.clone(),
-                        task: request.auth.task.clone(),
-                        procedure: request.method.procedure.clone(),
-                        subject: token.id.clone(),
-                        outcome: "ok".into(),
-                        detail: format!("scopes {before:?} -> {:?}", token.scopes),
-                        ..protectorate_audit::Entry::default()
-                    });
-                    Ok(response)
                 }
             },
         )?;
@@ -1130,33 +1055,7 @@ impl Hub {
                 }
             },
         )?;
-        Ok(server
-            .router()
-            .route(
-                "/dl/{file}",
-                axum::routing::get(
-                    move |axum::extract::Path(file): axum::extract::Path<String>| {
-                        let hub = Arc::clone(&downloads);
-                        async move { download::serve(hub, file).await }
-                    },
-                ),
-            )
-            .route(
-                "/ca.pem",
-                axum::routing::get(move || distribution::ca(Arc::clone(&installer_ca))),
-            )
-            .route(
-                "/install.sh",
-                axum::routing::get(move || distribution::linux(Arc::clone(&installer_sh))),
-            )
-            .route(
-                "/install-termux.sh",
-                axum::routing::get(move || distribution::termux(Arc::clone(&installer_termux))),
-            )
-            .route(
-                "/install.ps1",
-                axum::routing::get(move || distribution::windows(Arc::clone(&installer_ps1))),
-            )
+        let debug = Router::new()
             .route(
                 "/debug/metrics",
                 axum::routing::get(move |headers| {
@@ -1193,11 +1092,54 @@ impl Hub {
                     diagnostics::unknown(Arc::clone(&debug_unknown), headers)
                 }),
             )
+            .route_layer(axum::middleware::from_fn(access::loopback_only));
+        Ok(server
+            .router()
+            .merge(debug)
+            .route(
+                "/dl/{file}",
+                axum::routing::get(
+                    move |axum::extract::Path(file): axum::extract::Path<String>| {
+                        let hub = Arc::clone(&downloads);
+                        async move { download::serve(hub, file).await }
+                    },
+                ),
+            )
+            .route(
+                "/ca.pem",
+                axum::routing::get(move || distribution::ca(Arc::clone(&installer_ca))),
+            )
+            .route(
+                "/install.sh",
+                axum::routing::get(move || distribution::linux(Arc::clone(&installer_sh))),
+            )
+            .route(
+                "/install-termux.sh",
+                axum::routing::get(move || distribution::termux(Arc::clone(&installer_termux))),
+            )
+            .route(
+                "/install.ps1",
+                axum::routing::get(move || distribution::windows(Arc::clone(&installer_ps1))),
+            )
             .route(
                 "/ws/terminal/{name}",
-                axum::routing::get(move |path, headers, uri, upgrade| {
-                    terminal::attach(Arc::clone(&terminal_hub), path, headers, uri, upgrade)
-                }),
+                axum::routing::get(
+                    move |path,
+                          peer: Option<axum::Extension<wire::Peer>>,
+                          headers,
+                          uri,
+                          upgrade| {
+                        let tls = peer.is_some_and(|peer| peer.0.tls);
+                        terminal::attach(
+                            Arc::clone(&terminal_hub),
+                            path,
+                            tls,
+                            headers,
+                            uri,
+                            upgrade,
+                        )
+                    },
+                ),
             ))
     }
 }
@@ -1210,116 +1152,6 @@ fn now_unix() -> i64 {
         .try_into()
         .unwrap_or(i64::MAX)
 }
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    let text = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let prefix = text.get(..7)?;
-    if prefix.eq_ignore_ascii_case("Bearer ") && text.len() > 7 {
-        Some(&text[7..])
-    } else {
-        None
-    }
-}
-fn denied_identity(
-    owner: &Zeroizing<String>,
-    store: &IdentityStore,
-    headers: &HeaderMap,
-) -> AuthContext {
-    let Some(secret) = bearer(headers) else {
-        return AuthContext {
-            actor: "unauthenticated".into(),
-            ..AuthContext::default()
-        };
-    };
-    if !owner.is_empty() && owner.as_bytes().ct_eq(secret.as_bytes()).into() {
-        return AuthContext {
-            actor: "owner".into(),
-            owner: true,
-            ..AuthContext::default()
-        };
-    }
-    match store.lookup(secret, now_unix()) {
-        Ok(token) => AuthContext {
-            actor: format!("token:{}", token.name),
-            token_id: token.id,
-            task: token.task,
-            ..AuthContext::default()
-        },
-        Err(_) => AuthContext {
-            actor: "unauthenticated".into(),
-            ..AuthContext::default()
-        },
-    }
-}
-fn authorize(
-    owner: &Zeroizing<String>,
-    store: &IdentityStore,
-    method: &Method,
-    headers: &HeaderMap,
-) -> wire::Result<AuthContext> {
-    let secret = bearer(headers)
-        .ok_or_else(|| RpcError::new(Code::Unauthenticated, "missing or invalid bearer token"))?;
-    if !owner.is_empty() && owner.as_bytes().ct_eq(secret.as_bytes()).into() {
-        return Ok(AuthContext {
-            actor: "owner".into(),
-            owner: true,
-            ..AuthContext::default()
-        });
-    }
-    let token = store
-        .lookup(secret, now_unix())
-        .map_err(|_| RpcError::new(Code::Unauthenticated, "missing or invalid bearer token"))?;
-    let allowed = if method.owner_only {
-        method.device_allowed && token.device
-    } else if method.service == "DeviceService" {
-        token.device
-    } else if token.device
-        || (method.tool == "sleeve_kill_sleeve" && can_kill_owned_sleeve(&token.scopes))
-        || (method.tool == "chat_report" && token.name.starts_with("sleeve:"))
-    {
-        true
-    } else {
-        let scope_method = ScopeMethod {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        };
-        auth::scopes_allow(
-            &token.scopes.iter().map(String::as_str).collect::<Vec<_>>(),
-            &scope_method,
-        )
-    };
-    if !allowed {
-        return Err(RpcError::new(
-            Code::PermissionDenied,
-            format!(
-                "token {:?} lacks the required scope: {}",
-                token.name, method.tool
-            ),
-        ));
-    }
-    Ok(AuthContext {
-        actor: format!("token:{}", token.name),
-        token_id: token.id,
-        task: token.task,
-        scopes: token.scopes,
-        device: token.device,
-        ..AuthContext::default()
-    })
-}
-
-fn can_kill_owned_sleeve(scopes: &[String]) -> bool {
-    auth::scopes_allow(
-        &scopes.iter().map(String::as_str).collect::<Vec<_>>(),
-        &ScopeMethod {
-            tool: "sleeve_spawn_sleeve",
-            service: "SleeveService",
-            read_only: false,
-            owner_only: false,
-        },
-    )
-}
-
 fn input(request: &RpcRequest) -> wire::Result<Value> {
     serde_json::to_value(&request.message)
         .map_err(|_| RpcError::new(Code::Internal, "failed to read request"))
@@ -1380,55 +1212,10 @@ fn parse_duration(value: Option<&Value>) -> wire::Result<std::time::Duration> {
     };
     Ok(std::time::Duration::new(seconds, nanos))
 }
-fn scope_methods(methods: &[Method]) -> Vec<ScopeMethod<'_>> {
-    methods
-        .iter()
-        .map(|method| ScopeMethod {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect()
-}
-fn token_json(token: &Token) -> Value {
-    let mut out = json!({
-        "id": token.id, "name": token.name, "scopes": token.scopes,
-        "createdAt": unix_timestamp(token.created),
-        "task": token.task, "mintedBy": token.minted_by,
-        "platform": token.platform, "approvedBy": token.approved_by,
-    });
-    for (key, value) in [
-        ("expiresAt", token.expires),
-        ("lastUsedAt", token.last_used),
-        ("revokedAt", token.revoked_at),
-        ("approvedAt", token.approved_at),
-    ] {
-        if let Some(value) = value {
-            out[key] = json!(unix_timestamp(value));
-        }
-    }
-    out
-}
 fn unix_timestamp(seconds: i64) -> String {
     DateTime::<Utc>::from_timestamp(seconds, 0)
         .map(timestamp)
         .unwrap_or_default()
-}
-fn token_error(error: identity::Error) -> RpcError {
-    let code = match error {
-        identity::Error::UnknownToken => Code::NotFound,
-        identity::Error::Invalid(_)
-        | identity::Error::Scopes(_)
-        | identity::Error::Ambiguous(_)
-        | identity::Error::Expired
-        | identity::Error::Revoked => Code::InvalidArgument,
-        _ => Code::Internal,
-    };
-    RpcError::new(code, error.to_string())
-}
-fn token_create_error(error: identity::Error) -> RpcError {
-    token_error(error)
 }
 fn optional_string(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)

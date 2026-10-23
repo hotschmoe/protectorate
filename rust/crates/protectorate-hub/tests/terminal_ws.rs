@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use std::{
@@ -36,20 +38,7 @@ async fn terminal_websocket_auth_readonly_and_input_use_private_tmux() {
     let hub = Hub::open(root.path(), "owner-secret", "test")
         .unwrap()
         .with_sessions(Arc::clone(&manager));
-    let issued = hub
-        .identity
-        .create(
-            "readonly",
-            &["terminal:readonly"],
-            Duration::from_secs(60),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
-            &[],
-        )
-        .unwrap();
-    let readonly_token = issued.secret.expose().to_owned();
+    let (readonly_id, readonly_token) = capability::mint(&hub, "readonly", &["terminal:readonly"]);
     let audit = Arc::clone(&hub.audit);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!(
@@ -167,7 +156,7 @@ async fn terminal_websocket_auth_readonly_and_input_use_private_tmux() {
     assert!(terminal.iter().any(|entry| entry.actor == "token:readonly"
         && entry.outcome == "denied"
         && entry.procedure == "terminal.attach"
-        && entry.token_id == issued.token.id));
+        && entry.token_id == readonly_id));
     assert!(terminal.iter().any(|entry| entry.actor == "token:readonly"
         && entry.outcome == "ok"
         && entry.procedure == "terminal.attach.readonly"

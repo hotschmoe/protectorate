@@ -7,48 +7,18 @@
 mod common;
 
 use common::cli;
-use protectorate_auth::Method as ScopeMethod;
 use protectorate_directory::{Scan, Workspace};
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
-use protectorate_wire::Catalog;
 use serde_json::Value;
-use std::{
-    path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::path::Path;
 use tokio::net::TcpListener;
 
 const OWNER: &str = "owner-secret";
 
 /// A token that names a sleeve, the way the hub issues one to a sleeve.
 fn sleeve_token(hub: &Hub, name: &str) -> String {
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|method| ScopeMethod {
-            tool: &method.tool,
-            service: &method.service,
-            read_only: method.read_only,
-            owner_only: method.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    hub.identity
-        .create(
-            &format!("sleeve:{name}"),
-            &["message_*"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap()
-        .secret
-        .expose()
-        .to_string()
+    common::mint(hub, &format!("sleeve:{name}"), &["message_*"])
 }
 
 /// A sleeve the hub knows about. The fake chat sleeve has no runtime process,

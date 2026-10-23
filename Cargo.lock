@@ -894,6 +894,10 @@ dependencies = [
 [[package]]
 name = "protectorate-auth"
 version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ring",
+]
 
 [[package]]
 name = "protectorate-backlog"
@@ -970,6 +974,7 @@ dependencies = [
  "tungstenite",
  "webpki-roots",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -986,6 +991,9 @@ dependencies = [
 name = "protectorate-connect-client"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "protectorate-auth",
+ "protectorate-fsutil",
  "protectorate-wire",
  "rustls",
  "serde_json",
@@ -1012,6 +1020,7 @@ name = "protectorate-fuzz"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "protectorate-auth",
  "protectorate-backlog",
  "protectorate-chatlog",
  "protectorate-claude-driver",
@@ -1106,6 +1115,7 @@ dependencies = [
 name = "protectorate-identity"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "getrandom 0.2.17",
  "protectorate-auth",
  "protectorate-fsutil",
@@ -1336,6 +1346,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "libc",
+ "protectorate-auth",
  "protectorate-backup",
  "protectorate-chatlog",
  "protectorate-claude-driver",
@@ -1362,6 +1373,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tungstenite",
  "ureq",
 ]
 

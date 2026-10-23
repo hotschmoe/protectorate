@@ -88,33 +88,15 @@ const TokenInfo$json = {
       '10': 'expiresAt'
     },
     {
-      '1': 'last_used_at',
-      '3': 6,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'lastUsedAt'
-    },
-    {
       '1': 'revoked_at',
-      '3': 7,
+      '3': 6,
       '4': 1,
       '5': 11,
       '6': '.google.protobuf.Timestamp',
       '10': 'revokedAt'
     },
-    {'1': 'task', '3': 8, '4': 1, '5': 9, '10': 'task'},
-    {'1': 'minted_by', '3': 9, '4': 1, '5': 9, '10': 'mintedBy'},
-    {'1': 'platform', '3': 10, '4': 1, '5': 9, '10': 'platform'},
-    {
-      '1': 'approved_at',
-      '3': 11,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'approvedAt'
-    },
-    {'1': 'approved_by', '3': 12, '4': 1, '5': 9, '10': 'approvedBy'},
+    {'1': 'task', '3': 7, '4': 1, '5': 9, '10': 'task'},
+    {'1': 'minted_by', '3': 8, '4': 1, '5': 9, '10': 'mintedBy'},
   ],
 };
 
@@ -123,12 +105,9 @@ final $typed_data.Uint8List tokenInfoDescriptor = $convert.base64Decode(
     'CglUb2tlbkluZm8SDgoCaWQYASABKAlSAmlkEhIKBG5hbWUYAiABKAlSBG5hbWUSFgoGc2NvcG'
     'VzGAMgAygJUgZzY29wZXMSOQoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5U'
     'aW1lc3RhbXBSCWNyZWF0ZWRBdBI5CgpleHBpcmVzX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYn'
-    'VmLlRpbWVzdGFtcFIJZXhwaXJlc0F0EjwKDGxhc3RfdXNlZF9hdBgGIAEoCzIaLmdvb2dsZS5w'
-    'cm90b2J1Zi5UaW1lc3RhbXBSCmxhc3RVc2VkQXQSOQoKcmV2b2tlZF9hdBgHIAEoCzIaLmdvb2'
-    'dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSCXJldm9rZWRBdBISCgR0YXNrGAggASgJUgR0YXNrEhsK'
-    'CW1pbnRlZF9ieRgJIAEoCVIIbWludGVkQnkSGgoIcGxhdGZvcm0YCiABKAlSCHBsYXRmb3JtEj'
-    'sKC2FwcHJvdmVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIKYXBwcm92'
-    'ZWRBdBIfCgthcHByb3ZlZF9ieRgMIAEoCVIKYXBwcm92ZWRCeQ==');
+    'VmLlRpbWVzdGFtcFIJZXhwaXJlc0F0EjkKCnJldm9rZWRfYXQYBiABKAsyGi5nb29nbGUucHJv'
+    'dG9idWYuVGltZXN0YW1wUglyZXZva2VkQXQSEgoEdGFzaxgHIAEoCVIEdGFzaxIbCgltaW50ZW'
+    'RfYnkYCCABKAlSCG1pbnRlZEJ5');
 
 @$core.Deprecated('Use createTokenRequestDescriptor instead')
 const CreateTokenRequest$json = {
@@ -234,25 +213,18 @@ final $typed_data.Uint8List revokeTokenResponseDescriptor = $convert.base64Decod
     'ChNSZXZva2VUb2tlblJlc3BvbnNlEjAKBXRva2VuGAEgASgLMhoucHJvdGVjdG9yYXRlLnYxLl'
     'Rva2VuSW5mb1IFdG9rZW4=');
 
-@$core.Deprecated('Use updateTokenScopesRequestDescriptor instead')
-const UpdateTokenScopesRequest$json = {
-  '1': 'UpdateTokenScopesRequest',
-  '2': [
-    {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
-    {'1': 'add', '3': 2, '4': 3, '5': 9, '10': 'add'},
-    {'1': 'remove', '3': 3, '4': 3, '5': 9, '10': 'remove'},
-  ],
+@$core.Deprecated('Use renewTokenRequestDescriptor instead')
+const RenewTokenRequest$json = {
+  '1': 'RenewTokenRequest',
 };
 
-/// Descriptor for `UpdateTokenScopesRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List updateTokenScopesRequestDescriptor =
-    $convert.base64Decode(
-        'ChhVcGRhdGVUb2tlblNjb3Blc1JlcXVlc3QSDgoCaWQYASABKAlSAmlkEhAKA2FkZBgCIAMoCV'
-        'IDYWRkEhYKBnJlbW92ZRgDIAMoCVIGcmVtb3Zl');
+/// Descriptor for `RenewTokenRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List renewTokenRequestDescriptor =
+    $convert.base64Decode('ChFSZW5ld1Rva2VuUmVxdWVzdA==');
 
-@$core.Deprecated('Use updateTokenScopesResponseDescriptor instead')
-const UpdateTokenScopesResponse$json = {
-  '1': 'UpdateTokenScopesResponse',
+@$core.Deprecated('Use renewTokenResponseDescriptor instead')
+const RenewTokenResponse$json = {
+  '1': 'RenewTokenResponse',
   '2': [
     {
       '1': 'token',
@@ -262,14 +234,14 @@ const UpdateTokenScopesResponse$json = {
       '6': '.protectorate.v1.TokenInfo',
       '10': 'token'
     },
+    {'1': 'secret', '3': 2, '4': 1, '5': 9, '10': 'secret'},
   ],
 };
 
-/// Descriptor for `UpdateTokenScopesResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List updateTokenScopesResponseDescriptor =
-    $convert.base64Decode(
-        'ChlVcGRhdGVUb2tlblNjb3Blc1Jlc3BvbnNlEjAKBXRva2VuGAEgASgLMhoucHJvdGVjdG9yYX'
-        'RlLnYxLlRva2VuSW5mb1IFdG9rZW4=');
+/// Descriptor for `RenewTokenResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List renewTokenResponseDescriptor = $convert.base64Decode(
+    'ChJSZW5ld1Rva2VuUmVzcG9uc2USMAoFdG9rZW4YASABKAsyGi5wcm90ZWN0b3JhdGUudjEuVG'
+    '9rZW5JbmZvUgV0b2tlbhIWCgZzZWNyZXQYAiABKAlSBnNlY3JldA==');
 
 const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
   '1': 'TokenService',
@@ -277,12 +249,8 @@ const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
     {
       '1': 'CreateToken',
       '2': '.protectorate.v1.CreateTokenRequest',
-      '3': '.protectorate.v1.CreateTokenResponse'
-    },
-    {
-      '1': 'UpdateTokenScopes',
-      '2': '.protectorate.v1.UpdateTokenScopesRequest',
-      '3': '.protectorate.v1.UpdateTokenScopesResponse'
+      '3': '.protectorate.v1.CreateTokenResponse',
+      '4': {}
     },
     {
       '1': 'ListTokens',
@@ -296,8 +264,12 @@ const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
       '3': '.protectorate.v1.RevokeTokenResponse',
       '4': {}
     },
+    {
+      '1': 'RenewToken',
+      '2': '.protectorate.v1.RenewTokenRequest',
+      '3': '.protectorate.v1.RenewTokenResponse'
+    },
   ],
-  '3': {},
 };
 
 @$core.Deprecated('Use tokenServiceDescriptor instead')
@@ -308,24 +280,24 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.CreateTokenResponse': CreateTokenResponse$json,
   '.protectorate.v1.TokenInfo': TokenInfo$json,
   '.google.protobuf.Timestamp': $1.Timestamp$json,
-  '.protectorate.v1.UpdateTokenScopesRequest': UpdateTokenScopesRequest$json,
-  '.protectorate.v1.UpdateTokenScopesResponse': UpdateTokenScopesResponse$json,
   '.protectorate.v1.ListTokensRequest': ListTokensRequest$json,
   '.protectorate.v1.ListTokensResponse': ListTokensResponse$json,
   '.protectorate.v1.RevokeTokenRequest': RevokeTokenRequest$json,
   '.protectorate.v1.RevokeTokenResponse': RevokeTokenResponse$json,
+  '.protectorate.v1.RenewTokenRequest': RenewTokenRequest$json,
+  '.protectorate.v1.RenewTokenResponse': RenewTokenResponse$json,
 };
 
 /// Descriptor for `TokenService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List tokenServiceDescriptor = $convert.base64Decode(
-    'CgxUb2tlblNlcnZpY2USWAoLQ3JlYXRlVG9rZW4SIy5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlVG'
-    '9rZW5SZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkNyZWF0ZVRva2VuUmVzcG9uc2USagoRVXBk'
-    'YXRlVG9rZW5TY29wZXMSKS5wcm90ZWN0b3JhdGUudjEuVXBkYXRlVG9rZW5TY29wZXNSZXF1ZX'
-    'N0GioucHJvdGVjdG9yYXRlLnYxLlVwZGF0ZVRva2VuU2NvcGVzUmVzcG9uc2USWgoKTGlzdFRv'
-    'a2VucxIiLnByb3RlY3RvcmF0ZS52MS5MaXN0VG9rZW5zUmVxdWVzdBojLnByb3RlY3RvcmF0ZS'
-    '52MS5MaXN0VG9rZW5zUmVzcG9uc2UiA5ACARJeCgtSZXZva2VUb2tlbhIjLnByb3RlY3RvcmF0'
-    'ZS52MS5SZXZva2VUb2tlblJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuUmV2b2tlVG9rZW5SZX'
-    'Nwb25zZSIEiLUYARoEmLUYAQ==');
+    'CgxUb2tlblNlcnZpY2USXgoLQ3JlYXRlVG9rZW4SIy5wcm90ZWN0b3JhdGUudjEuQ3JlYXRlVG'
+    '9rZW5SZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkNyZWF0ZVRva2VuUmVzcG9uc2UiBKC1GAES'
+    'XgoKTGlzdFRva2VucxIiLnByb3RlY3RvcmF0ZS52MS5MaXN0VG9rZW5zUmVxdWVzdBojLnByb3'
+    'RlY3RvcmF0ZS52MS5MaXN0VG9rZW5zUmVzcG9uc2UiB5ACAaC1GAESYgoLUmV2b2tlVG9rZW4S'
+    'Iy5wcm90ZWN0b3JhdGUudjEuUmV2b2tlVG9rZW5SZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLl'
+    'Jldm9rZVRva2VuUmVzcG9uc2UiCIi1GAGgtRgBElUKClJlbmV3VG9rZW4SIi5wcm90ZWN0b3Jh'
+    'dGUudjEuUmVuZXdUb2tlblJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuUmVuZXdUb2tlblJlc3'
+    'BvbnNl');
 
 const $core.Map<$core.String, $core.dynamic> GrantServiceBase$json = {
   '1': 'GrantService',

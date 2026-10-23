@@ -5,6 +5,7 @@ edition.workspace = true
 description = "Reusable dispatcher for the basic owner CLI commands over Connect JSON"
 
 [dependencies]
+protectorate-auth = { path = "../protectorate-auth" }
 protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-pairing = { path = "../protectorate-pairing" }
 protectorate-wire = { path = "../protectorate-wire" }
@@ -21,6 +22,7 @@ getrandom = "0.2"
 tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
 webpki-roots = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -34,7 +36,6 @@ path = "src/main.rs"
 
 [dev-dependencies]
 protectorate-directory = { path = "../protectorate-directory" }
-protectorate-auth = { path = "../protectorate-auth" }
 protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-identity = { path = "../protectorate-identity" }
 protectorate-node = { path = "../protectorate-node" }

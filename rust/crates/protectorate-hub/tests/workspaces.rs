@@ -1,12 +1,8 @@
-use protectorate_auth::Method as ScopeMethod;
+#[path = "support/capability.rs"]
+mod capability;
 use protectorate_hub::Hub;
-use protectorate_wire::Catalog;
 use serde_json::{json, Value};
-use std::{
-    fs,
-    os::unix::fs::symlink,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{fs, os::unix::fs::symlink};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -45,45 +41,13 @@ async fn browse_is_confined_hides_dot_entries_and_denies_sleeve_identity() {
         .unwrap()
         .with_workspace_roots(vec![root.clone()])
         .unwrap();
-    let catalog = Catalog::embedded().unwrap();
-    let methods: Vec<_> = catalog
-        .methods()
-        .map(|m| ScopeMethod {
-            tool: &m.tool,
-            service: &m.service,
-            read_only: m.read_only,
-            owner_only: m.owner_only,
-        })
-        .collect();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let reader = hub
-        .identity
-        .create(
-            "reader",
-            &["read"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap();
-    let sleeve = hub
-        .identity
-        .create(
-            "sleeve:worker",
-            &["read"],
-            Duration::from_secs(3600),
-            now,
-            &methods,
-        )
-        .unwrap();
+    let (_, reader) = capability::mint(&hub, "reader", &["read"]);
+    let (_, sleeve) = capability::mint(&hub, "sleeve:worker", &["read"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let task =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let (status, top) = call(addr, "BrowseWorkspaces", reader.secret.expose(), json!({})).await;
+    let (status, top) = call(addr, "BrowseWorkspaces", &reader, json!({})).await;
     assert_eq!(status, 200, "{top}");
     assert_eq!(
         top["directories"][0]["path"],
@@ -111,7 +75,7 @@ async fn browse_is_confined_hides_dot_entries_and_denies_sleeve_identity() {
     )
     .await;
     assert_eq!(status, 400, "{body}");
-    let (status, body) = call(addr, "BrowseWorkspaces", sleeve.secret.expose(), json!({})).await;
+    let (status, body) = call(addr, "BrowseWorkspaces", &sleeve, json!({})).await;
     assert_eq!(status, 403, "{body}");
     task.abort();
 }
