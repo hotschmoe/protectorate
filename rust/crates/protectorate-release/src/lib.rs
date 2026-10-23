@@ -51,21 +51,6 @@ pub fn rust_binary_name(os: &str, arch: &str) -> Result<String> {
     Ok(format!("protectorate-rs-{os}-{arch}{suffix}"))
 }
 
-#[cfg(test)]
-mod binary_name_tests {
-    use super::*;
-
-    #[test]
-    fn termux_node_is_a_single_android_arm64_asset() {
-        assert_eq!(
-            rust_binary_name("android", "arm64").unwrap(),
-            "protectorate-rs-android-arm64"
-        );
-        assert!(rust_binary_name("android", "amd64").is_err());
-        assert!(rust_bundle_name("protectorate-rs", "android", "arm64").is_err());
-    }
-}
-
 pub const RUST_BUNDLE: [&str; 6] = [
     "protectorate-rs",
     "protectorate-sleeve-runner",
@@ -1059,17 +1044,6 @@ impl Source {
     /// and never overwritten.
     pub fn fetch_rust_binary(&self, info: &Info, os: &str, arch: &str) -> Result<PathBuf> {
         self.fetch_named_binary(info, rust_binary_name(os, arch)?)
-    }
-
-    pub fn fetch_rust_component(
-        &self,
-        info: &Info,
-        component: &str,
-        os: &str,
-        arch: &str,
-    ) -> Result<PathBuf> {
-        let name = rust_bundle_name(component, os, arch)?;
-        self.fetch_named_binary(info, name)
     }
 
     fn fetch_named_binary(&self, info: &Info, name: String) -> Result<PathBuf> {

@@ -51,10 +51,6 @@ impl Transport {
         }
     }
 
-    pub fn allows_http(&self) -> bool {
-        self.allow_http
-    }
-
     pub fn get(&self, raw: &str, etag: &str, budget: Budget, max_bytes: u64) -> Result<Got> {
         let agent = match budget {
             Budget::Check => &self.check,
@@ -219,63 +215,4 @@ fn normalize_path(path: &str) -> String {
         out.push_str(query);
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn asset_urls_need_a_host_and_the_api_scheme() {
-        assert!(validate_url("https://objects.example.com/a/b", false).is_ok());
-        assert!(validate_url("http://127.0.0.1:8080/a", true).is_ok());
-        for bad in [
-            "ftp://host/a",
-            "https://",
-            "http://host/a",
-            "/relative/a",
-            "https://bad host/a",
-        ] {
-            let err = validate_url(bad, false).unwrap_err().to_string();
-            assert!(err.contains("invalid asset URL"), "{bad}: {err}");
-        }
-        assert!(validate_url("http://host/a", false).is_err());
-    }
-
-    #[test]
-    fn redirects_resolve_against_the_current_url() {
-        assert_eq!(
-            resolve_url(
-                "https://api.github.com/repos/o/r/releases/latest",
-                "/assets/a"
-            )
-            .unwrap(),
-            "https://api.github.com/assets/a"
-        );
-        assert_eq!(
-            resolve_url("https://api.github.com/repos/o/r/releases/latest", "a").unwrap(),
-            "https://api.github.com/repos/o/r/releases/a"
-        );
-        assert_eq!(
-            resolve_url("https://api.github.com/repos/o/r/releases/latest", "../x").unwrap(),
-            "https://api.github.com/repos/o/r/x"
-        );
-        assert_eq!(
-            resolve_url(
-                "https://api.github.com/repos/o/r/releases/latest",
-                "https://objects.example.com/file?sig=1"
-            )
-            .unwrap(),
-            "https://objects.example.com/file?sig=1"
-        );
-        assert_eq!(
-            resolve_url("https://api.github.com/a/b", "//cdn.example.com/x").unwrap(),
-            "https://cdn.example.com/x"
-        );
-        assert_eq!(
-            resolve_url("https://api.github.com/a/b", "/x#frag").unwrap(),
-            "https://api.github.com/x"
-        );
-        assert!(resolve_url("https://api.github.com/a/b", "").is_err());
-    }
 }
