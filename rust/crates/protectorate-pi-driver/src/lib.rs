@@ -370,28 +370,6 @@ impl Session {
         compaction
     }
 
-    /// Preserve the returned chat sequence in the same serialized event.
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let time = chrono_time();
-        let result = json!({"status":status,"summary":summary,"time":time,
-            "chatSeq":seq.to_string(),"briefSeq":brief_seq.to_string()});
-        let stored = self
-            .log
-            .append(Event::new(json!({"report":result})))
-            .map_err(|e| e.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
-    }
-
     /// Pi accepts `steer` during a running turn. A write failure never
     /// records a user message as delivered.
     pub fn send(&self, text: &str, from: &str, request_id: &str) -> Result<u64, String> {
@@ -659,9 +637,6 @@ fn format_model(provider: &str, id: &str) -> String {
     } else {
         format!("{provider}/{id}")
     }
-}
-fn chrono_time() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
 }
 
 fn drain_stderr(stderr: impl Read) {

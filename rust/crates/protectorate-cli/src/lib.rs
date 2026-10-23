@@ -1449,6 +1449,27 @@ fn update_line(name: &str, progress: &Value) -> String {
     }
 }
 
+/// The next report sequence: the clock in microseconds, kept above the last
+/// one sent from this sleeve so a clock step back cannot reorder reports.
+fn next_report_seq() -> u64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_micros() as u64);
+    let state = std::env::var_os("PROTECTORATE_TOKEN_FILE")
+        .map(PathBuf::from)
+        .and_then(|token| Some(token.parent()?.join(".protectorate-report-seq")));
+    let last = state
+        .as_ref()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let seq = now.max(last + 1);
+    if let Some(path) = state {
+        let _ = fs::write(path, seq.to_string());
+    }
+    seq
+}
+
 fn read_report_summary(path: Option<&str>) -> Result<String> {
     use std::io::Read;
     let Some(path) = path else {
@@ -2209,10 +2230,13 @@ fn execute_commands(
             let summary = read_report_summary(summary_file.as_deref())?;
             let response = client.call(
                 CHAT_REPORT,
-                &json!({"status": format!("REPORT_STATUS_{}", status.to_ascii_uppercase()), "summary": summary}),
+                &json!({"status": format!("REPORT_STATUS_{}", status.to_ascii_uppercase()),
+                    "summary": summary, "sourceSeq": next_report_seq().to_string()}),
             )?;
             if json {
                 json_line(&response)
+            } else if response["dropped"].as_bool() == Some(true) {
+                Ok("dropped: a newer report is already recorded\n".into())
             } else {
                 let seq = response["result"]["chatSeq"]
                     .as_str()

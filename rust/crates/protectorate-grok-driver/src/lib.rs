@@ -339,31 +339,6 @@ impl Session {
         Err("unimplemented: Grok ACP compaction is not verified".into())
     }
 
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let result = json!({
-            "status": status,
-            "summary": summary,
-            "time": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-            "chatSeq": seq.to_string(),
-            "briefSeq": brief_seq.to_string()
-        });
-        let stored = self
-            .log
-            .append(Event::new(json!({"report": result})))
-            .map_err(|error| error.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
-    }
-
     fn handshake(&self, cwd: &str, resume: Option<&str>, autonomous: bool) -> Result<(), String> {
         let initialized = self.rpc(
             "initialize",

@@ -921,6 +921,7 @@ const SleeveResult$json = {
     },
     {'1': 'chat_seq', '3': 4, '4': 1, '5': 4, '10': 'chatSeq'},
     {'1': 'brief_seq', '3': 5, '4': 1, '5': 4, '10': 'briefSeq'},
+    {'1': 'source_seq', '3': 6, '4': 1, '5': 4, '10': 'sourceSeq'},
   ],
 };
 
@@ -929,7 +930,8 @@ final $typed_data.Uint8List sleeveResultDescriptor = $convert.base64Decode(
     'CgxTbGVldmVSZXN1bHQSNQoGc3RhdHVzGAEgASgOMh0ucHJvdGVjdG9yYXRlLnYxLlJlcG9ydF'
     'N0YXR1c1IGc3RhdHVzEhgKB3N1bW1hcnkYAiABKAlSB3N1bW1hcnkSLgoEdGltZRgDIAEoCzIa'
     'Lmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBSBHRpbWUSGQoIY2hhdF9zZXEYBCABKARSB2NoYX'
-    'RTZXESGwoJYnJpZWZfc2VxGAUgASgEUghicmllZlNlcQ==');
+    'RTZXESGwoJYnJpZWZfc2VxGAUgASgEUghicmllZlNlcRIdCgpzb3VyY2Vfc2VxGAYgASgEUglz'
+    'b3VyY2VTZXE=');
 
 @$core.Deprecated('Use reportRequestDescriptor instead')
 const ReportRequest$json = {
@@ -945,6 +947,7 @@ const ReportRequest$json = {
       '10': 'status'
     },
     {'1': 'summary', '3': 3, '4': 1, '5': 9, '10': 'summary'},
+    {'1': 'source_seq', '3': 4, '4': 1, '5': 4, '10': 'sourceSeq'},
   ],
 };
 
@@ -952,7 +955,7 @@ const ReportRequest$json = {
 final $typed_data.Uint8List reportRequestDescriptor = $convert.base64Decode(
     'Cg1SZXBvcnRSZXF1ZXN0EhYKBnNsZWV2ZRgBIAEoCVIGc2xlZXZlEjUKBnN0YXR1cxgCIAEoDj'
     'IdLnByb3RlY3RvcmF0ZS52MS5SZXBvcnRTdGF0dXNSBnN0YXR1cxIYCgdzdW1tYXJ5GAMgASgJ'
-    'UgdzdW1tYXJ5');
+    'UgdzdW1tYXJ5Eh0KCnNvdXJjZV9zZXEYBCABKARSCXNvdXJjZVNlcQ==');
 
 @$core.Deprecated('Use reportResponseDescriptor instead')
 const ReportResponse$json = {
@@ -966,13 +969,14 @@ const ReportResponse$json = {
       '6': '.protectorate.v1.SleeveResult',
       '10': 'result'
     },
+    {'1': 'dropped', '3': 2, '4': 1, '5': 8, '10': 'dropped'},
   ],
 };
 
 /// Descriptor for `ReportResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List reportResponseDescriptor = $convert.base64Decode(
     'Cg5SZXBvcnRSZXNwb25zZRI1CgZyZXN1bHQYASABKAsyHS5wcm90ZWN0b3JhdGUudjEuU2xlZX'
-    'ZlUmVzdWx0UgZyZXN1bHQ=');
+    'ZlUmVzdWx0UgZyZXN1bHQSGAoHZHJvcHBlZBgCIAEoCFIHZHJvcHBlZA==');
 
 @$core.Deprecated('Use waitRequestDescriptor instead')
 const WaitRequest$json = {

@@ -351,6 +351,8 @@ message SleeveResult {
   uint64 chat_seq = 4;
   // The latest non-mail user message; zero for the initial spawn brief.
   uint64 brief_seq = 5;
+  // source_seq is the sequence the sleeve gave the report; zero if unsequenced.
+  uint64 source_seq = 6;
 }
 
 message ReportRequest {
@@ -358,10 +360,19 @@ message ReportRequest {
   string sleeve = 1;
   ReportStatus status = 2;
   string summary = 3;
+  // source_seq orders the sleeve's reports: it must grow with each report the
+  // sleeve sends, and a report whose source_seq is not above the last
+  // sequenced one the hub recorded for that sleeve is dropped, so a late or
+  // repeated report cannot replace a newer one. Zero is unsequenced and always
+  // recorded, in arrival order.
+  uint64 source_seq = 4;
 }
 
 message ReportResponse {
+  // result is the recorded result: the new report, or for a dropped one the
+  // result the sleeve already has.
   SleeveResult result = 1;
+  bool dropped = 2;
 }
 
 enum WaitUntil {

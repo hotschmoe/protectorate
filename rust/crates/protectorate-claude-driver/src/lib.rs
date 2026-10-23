@@ -249,26 +249,6 @@ impl Session {
     pub fn set_selection(&self, _model: &str, _effort: &str) -> Result<Value, String> {
         Err("precondition: Claude Code stream JSON does not support live model selection".into())
     }
-    pub fn append_report(
-        &self,
-        status: &str,
-        summary: &str,
-        brief_seq: u64,
-    ) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let seq = self.log.last() + 1;
-        let result = json!({"status":status,"summary":summary,
-            "time":chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos,true),
-            "chatSeq":seq.to_string(),"briefSeq":brief_seq.to_string()});
-        let stored = self
-            .log
-            .append(Event::new(json!({"report":result})))
-            .map_err(|e| e.to_string())?;
-        if stored != seq {
-            return Err("chat log sequence changed while reporting".into());
-        }
-        Ok(result)
-    }
     fn read_stdout(&self, output: impl Read) {
         let mut reader = BufReader::new(output);
         loop {

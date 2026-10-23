@@ -227,12 +227,24 @@ impl Log {
     }
 
     /// Appends a non-text event, flushing an open assistant message first.
-    pub fn append(&self, mut event: Event) -> Result<u64, Error> {
+    pub fn append(&self, event: Event) -> Result<u64, Error> {
+        self.append_with(|_| event).map(|event| event.seq)
+    }
+
+    /// Appends the report `build` makes from the event's own sequence number
+    /// and returns it.
+    pub fn append_report(&self, build: impl FnOnce(u64) -> Value) -> Result<Value, Error> {
+        let event = self.append_with(|seq| Event::new(json!({"report": build(seq)})))?;
+        Ok(event.payload["report"].clone())
+    }
+
+    fn append_with(&self, build: impl FnOnce(u64) -> Event) -> Result<Event, Error> {
         let mut inner = lock(&self.inner);
         if inner.closed {
             return Err(Error::Closed);
         }
         inner.flush()?;
+        let mut event = build(inner.last + 1);
         event.seq = inner.last + 1;
         if event.time_ms == 0 {
             event.time_ms = now_ms();
@@ -241,7 +253,7 @@ impl Log {
         inner.persist(&event)?;
         inner.last = event.seq;
         inner.fanout(event.clone());
-        Ok(event.seq)
+        Ok(event)
     }
 
     /// Streams a delta now and stores one complete message when it closes.

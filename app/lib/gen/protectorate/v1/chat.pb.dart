@@ -3087,6 +3087,7 @@ class SleeveResult extends $pb.GeneratedMessage {
     $0.Timestamp? time,
     $fixnum.Int64? chatSeq,
     $fixnum.Int64? briefSeq,
+    $fixnum.Int64? sourceSeq,
   }) {
     final result = SleeveResult._();
     if (status != null) result.status = status;
@@ -3094,6 +3095,7 @@ class SleeveResult extends $pb.GeneratedMessage {
     if (time != null) result.time = time;
     if (chatSeq != null) result.chatSeq = chatSeq;
     if (briefSeq != null) result.briefSeq = briefSeq;
+    if (sourceSeq != null) result.sourceSeq = sourceSeq;
     return result;
   }
 
@@ -3120,6 +3122,9 @@ class SleeveResult extends $pb.GeneratedMessage {
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..a<$fixnum.Int64>(
         5, _omitFieldNames ? '' : 'briefSeq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
+    ..a<$fixnum.Int64>(
+        6, _omitFieldNames ? '' : 'sourceSeq', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
@@ -3193,6 +3198,16 @@ class SleeveResult extends $pb.GeneratedMessage {
   $core.bool hasBriefSeq() => $_has(4);
   @$pb.TagNumber(5)
   void clearBriefSeq() => $_clearField(5);
+
+  /// source_seq is the sequence the sleeve gave the report; zero if unsequenced.
+  @$pb.TagNumber(6)
+  $fixnum.Int64 get sourceSeq => $_getI64(5);
+  @$pb.TagNumber(6)
+  set sourceSeq($fixnum.Int64 value) => $_setInt64(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasSourceSeq() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearSourceSeq() => $_clearField(6);
 }
 
 class ReportRequest extends $pb.GeneratedMessage {
@@ -3200,11 +3215,13 @@ class ReportRequest extends $pb.GeneratedMessage {
     $core.String? sleeve,
     ReportStatus? status,
     $core.String? summary,
+    $fixnum.Int64? sourceSeq,
   }) {
     final result = ReportRequest._();
     if (sleeve != null) result.sleeve = sleeve;
     if (status != null) result.status = status;
     if (summary != null) result.summary = summary;
+    if (sourceSeq != null) result.sourceSeq = sourceSeq;
     return result;
   }
 
@@ -3226,6 +3243,9 @@ class ReportRequest extends $pb.GeneratedMessage {
     ..aE<ReportStatus>(2, _omitFieldNames ? '' : 'status',
         enumValues: ReportStatus.values)
     ..aOS(3, _omitFieldNames ? '' : 'summary')
+    ..a<$fixnum.Int64>(
+        4, _omitFieldNames ? '' : 'sourceSeq', $pb.PbFieldType.OU6,
+        defaultOrMaker: $fixnum.Int64.ZERO)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3277,14 +3297,30 @@ class ReportRequest extends $pb.GeneratedMessage {
   $core.bool hasSummary() => $_has(2);
   @$pb.TagNumber(3)
   void clearSummary() => $_clearField(3);
+
+  /// source_seq orders the sleeve's reports: it must grow with each report the
+  /// sleeve sends, and a report whose source_seq is not above the last
+  /// sequenced one the hub recorded for that sleeve is dropped, so a late or
+  /// repeated report cannot replace a newer one. Zero is unsequenced and always
+  /// recorded, in arrival order.
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get sourceSeq => $_getI64(3);
+  @$pb.TagNumber(4)
+  set sourceSeq($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasSourceSeq() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearSourceSeq() => $_clearField(4);
 }
 
 class ReportResponse extends $pb.GeneratedMessage {
   factory ReportResponse({
     SleeveResult? result,
+    $core.bool? dropped,
   }) {
     final result$ = ReportResponse._();
     if (result != null) result$.result = result;
+    if (dropped != null) result$.dropped = dropped;
     return result$;
   }
 
@@ -3304,6 +3340,7 @@ class ReportResponse extends $pb.GeneratedMessage {
       createEmptyInstance: ReportResponse.$_createMessage)
     ..aOM<SleeveResult>(1, _omitFieldNames ? '' : 'result',
         subBuilder: SleeveResult.$_createMessage)
+    ..aOB(2, _omitFieldNames ? '' : 'dropped')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -3328,6 +3365,8 @@ class ReportResponse extends $pb.GeneratedMessage {
           ReportResponse.$_createMessage);
   static ReportResponse? _defaultInstance;
 
+  /// result is the recorded result: the new report, or for a dropped one the
+  /// result the sleeve already has.
   @$pb.TagNumber(1)
   SleeveResult get result => $_getN(0);
   @$pb.TagNumber(1)
@@ -3338,6 +3377,15 @@ class ReportResponse extends $pb.GeneratedMessage {
   void clearResult() => $_clearField(1);
   @$pb.TagNumber(1)
   SleeveResult ensureResult() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  $core.bool get dropped => $_getBF(1);
+  @$pb.TagNumber(2)
+  set dropped($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasDropped() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearDropped() => $_clearField(2);
 }
 
 class WaitRequest extends $pb.GeneratedMessage {

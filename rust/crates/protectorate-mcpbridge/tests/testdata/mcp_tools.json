@@ -213,6 +213,10 @@
           "description": "Empty selects the authenticated sleeve. An explicit name must be its own.",
           "type": "string"
         },
+        "sourceSeq": {
+          "description": "source_seq orders the sleeve's reports: it must grow with each report the sleeve sends, and a report whose source_seq is not above the last sequenced one the hub recorded for that sleeve is dropped, so a late or repeated report cannot replace a newer one. Zero is unsequenced and always recorded, in arrival order.",
+          "type": "integer"
+        },
         "status": {
           "enum": [
             "REPORT_STATUS_UNSPECIFIED",

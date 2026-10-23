@@ -27,7 +27,15 @@ use protectorate_wire::{
 use protectorate_xfer::Kind;
 pub use retention::DiskLimits;
 use serde_json::{json, Value};
-use std::{io, path::Path, sync::Arc, time::Duration};
+use std::{
+    io,
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 pub use uninstall::{Plan as UninstallPlan, Stop as UninstallStop};
 pub use update::Restart as UpdateRestart;
 pub use update::{
@@ -49,8 +57,23 @@ impl<P: Probe> MetricsCollector for Collector<P> {
     }
 }
 
+/// Numbers the metrics this agent process sends: `instance` names the
+/// process and `seq` counts within it, so a receiver can drop a late sample
+/// and still accept the first one after a restart.
+struct Beat {
+    instance: String,
+    seq: AtomicU64,
+}
+impl Beat {
+    fn stamp(&self, metrics: &mut Value) {
+        metrics["instance"] = json!(self.instance);
+        metrics["seq"] = json!((self.seq.fetch_add(1, Ordering::SeqCst) + 1).to_string());
+    }
+}
+
 #[derive(Clone)]
 pub struct Agent {
+    beat: Arc<Beat>,
     collector: Arc<dyn MetricsCollector>,
     renew: Option<CertRenewal>,
     files: Option<Arc<Files>>,
@@ -60,7 +83,14 @@ pub struct Agent {
 }
 impl Agent {
     pub fn new(collector: Arc<dyn MetricsCollector>) -> Self {
+        let started = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
         Self {
+            beat: Arc::new(Beat {
+                instance: format!("{started:x}"),
+                seq: AtomicU64::new(0),
+            }),
             collector,
             renew: None,
             files: None,
@@ -233,6 +263,7 @@ impl Agent {
             "/protectorate.v1.NodeAgentService/GetMetrics",
             move |request| {
                 let collector = Arc::clone(&get.collector);
+                let beat = Arc::clone(&get.beat);
                 let updater = get.updater.clone();
                 let jobs = get.jobs.clone();
                 async move {
@@ -246,6 +277,7 @@ impl Agent {
                         metrics.jobs = Some(jobs.isolation());
                     }
                     let mut response = metrics_json(&metrics);
+                    beat.stamp(&mut response);
                     if let Some(updater) = updater {
                         let reported = metrics.agent_version.clone();
                         let touch = Arc::clone(&updater);
@@ -375,6 +407,7 @@ impl Agent {
         })?;
         server.register_streaming("/protectorate.v1.NodeAgentService/WatchMetrics", move |request, sender| {
             let collector = Arc::clone(&agent.collector);
+            let beat = Arc::clone(&agent.beat);
             async move {
                 let input = serde_json::to_value(&request.message).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
                 let seconds = input.get("intervalSeconds").and_then(Value::as_i64).unwrap_or_default();
@@ -388,7 +421,9 @@ impl Agent {
                             let metrics = tokio::task::spawn_blocking(move || collector.collect()).await
                                 .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
                                 .map_err(|e| RpcError::new(Code::Unavailable, format!("collect metrics: {e}")))?;
-                            let message = decode(&request, metrics_json(&metrics))?;
+                            let mut value = metrics_json(&metrics);
+                            beat.stamp(&mut value);
+                            let message = decode(&request, value)?;
                             sender.send(message).await?;
                         }
                     }
