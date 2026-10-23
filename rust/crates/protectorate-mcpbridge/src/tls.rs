@@ -92,8 +92,15 @@ fn private_file(path: &Path, key: bool) -> io::Result<File> {
     Ok(file)
 }
 
+/// HTTPS binds only an explicit private address, the rule every listener obeys.
 pub async fn bind_tls(listen: &str, config: Arc<rustls::ServerConfig>) -> Result<TlsListener> {
-    let listener = TcpListener::bind(listen)
+    let addr: SocketAddr = listen.parse().map_err(|_| {
+        RpcError::invalid(format!(
+            "--https {listen:?}: an IP address and a port are needed"
+        ))
+    })?;
+    protectorate_tls::check_listen(addr).map_err(|error| RpcError::invalid(error.to_string()))?;
+    let listener = TcpListener::bind(addr)
         .await
         .map_err(|error| RpcError::new(Code::Unavailable, format!("bind {listen}: {error}")))?;
     TlsListener::new(listener, config)

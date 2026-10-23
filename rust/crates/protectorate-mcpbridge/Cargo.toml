@@ -7,6 +7,7 @@ description = "MCP bridge that serves the unary hub RPCs as tools over stdio or 
 [dependencies]
 protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-wire = { path = "../protectorate-wire" }
+protectorate-tls = { path = "../protectorate-tls" }
 prost-reflect = { version = "0.16", features = ["serde"] }
 serde_json = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
@@ -26,3 +27,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [[bin]]
 name = "protectorate-mcpbridge"
 path = "src/main.rs"
+
+[dev-dependencies]
+protectorate-fsutil = { path = "../protectorate-fsutil" }
+tempfile = "3"
