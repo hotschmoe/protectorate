@@ -16,13 +16,13 @@ if (-not $Architecture) {
     }
 }
 $target = if ($Architecture -eq "arm64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
-if ($LASTEXITCODE -ne 0 -or $hostTriple -cne $target) {
+if ($hostTriple -cne $target) {
     throw "Native Windows $Architecture runner required (Rust host: $hostTriple)"
 }
 
 cargo build --locked --release --target $target -p protectorate-node-windows -p protectorate-cli -p protectorate-mcpbridge --bins
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-cargo test --locked --target $target -p protectorate-node-windows --bin protectorate-rs-windows
+cargo test --locked --target $target -p protectorate-node-windows -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 New-Item -ItemType Directory -Force -Path dist | Out-Null

@@ -1,11 +1,9 @@
 use protectorate_node::{Agent, MetricsCollector};
 use protectorate_node_metrics::{CpuMetrics, FilesystemMetrics, NodeMetrics};
 use serde_json::{json, Value};
-use std::{
-    io,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+#[cfg(unix)]
+use std::time::Duration;
+use std::{io, sync::Arc, time::SystemTime};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -752,6 +750,7 @@ async fn node_job_outlives_disconnected_run_stream() {
     server.abort();
 }
 
+#[cfg(unix)]
 async fn stream_error(addr: std::net::SocketAddr, method: &str, body: Value) -> (u16, String) {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let body = body.to_string();
