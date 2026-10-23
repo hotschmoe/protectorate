@@ -23,6 +23,9 @@ mod job;
 mod login;
 mod pair;
 mod transfer;
+#[cfg(windows)]
+#[path = "login_windows.rs"]
+pub mod windows_private;
 
 pub use args::{parse, Invocation};
 pub use job::RunError;
@@ -30,8 +33,7 @@ pub use protectorate_connect_client::Client;
 pub use protectorate_wire::{Code, Result, RpcError};
 use serde_json::{json, Value};
 use std::{
-    env, fs,
-    io::{self, Read},
+    env, fs, io,
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -2910,6 +2912,7 @@ pub fn mcp_token(
 fn private_owner_token(path: &Path) -> Result<Option<String>> {
     #[cfg(unix)]
     let raw = {
+        use std::io::Read;
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         let mut options = fs::OpenOptions::new();
         let file = match options

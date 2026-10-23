@@ -304,6 +304,7 @@ async fn unconfined_file_rpc_accepts_absolute_destination() {
     server.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn node_jobs_run_replay_cancel_and_authenticate() {
     use protectorate_node::Jobs;
@@ -383,6 +384,7 @@ async fn node_jobs_run_replay_cancel_and_authenticate() {
     server.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn node_job_defaults_to_sandbox_and_fails_closed_without_configuration() {
     use protectorate_node::Jobs;
@@ -429,6 +431,7 @@ async fn node_job_defaults_to_sandbox_and_fails_closed_without_configuration() {
     server.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn node_job_upload_file_and_replay_artifact() {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -502,6 +505,7 @@ async fn node_job_upload_file_and_replay_artifact() {
     restarted.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn node_job_artifact_disk_limit_is_reported() {
     use protectorate_node::{DiskLimits, Jobs};
@@ -538,6 +542,7 @@ async fn node_job_artifact_disk_limit_is_reported() {
     server.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn node_job_archive_workdir_and_git_cache() {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -695,6 +700,7 @@ async fn node_job_archive_workdir_and_git_cache() {
     server.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn node_job_outlives_disconnected_run_stream() {
     use protectorate_node::Jobs;

@@ -186,6 +186,7 @@ fn installed_layout(exe: &Path) -> io::Result<Option<Installed>> {
     }
     Ok(Some(Installed {
         root: root.into(),
+        #[cfg(target_os = "linux")]
         native,
     }))
 }
@@ -198,6 +199,7 @@ fn installed_layout(_exe: &Path) -> io::Result<Option<Installed>> {
 #[derive(Clone)]
 struct Installed {
     root: PathBuf,
+    #[cfg(target_os = "linux")]
     native: bool,
 }
 
@@ -479,10 +481,10 @@ impl Updater {
         #[cfg(not(target_os = "linux"))]
         {
             let _ = (installed, staged, body);
-            return Err(RpcError::new(
+            Err(RpcError::new(
                 Code::FailedPrecondition,
                 "installed node updates require Linux",
-            ));
+            ))
         }
         #[cfg(target_os = "linux")]
         {
@@ -784,6 +786,8 @@ pub fn recover_failed_trial(exe: &Path, reason: &str) -> io::Result<bool> {
         if current_pointer(&installed.root)? == marker.candidate_release {
             switch_pointer(&installed.root, &marker.previous_release)?;
         }
+        #[cfg(not(target_os = "linux"))]
+        let _ = installed;
     } else {
         let previous = PathBuf::from(format!("{}.old", exe.display()));
         if !previous.is_file() {
@@ -867,7 +871,7 @@ pub fn guardian_confirm_ready(exe: &Path) -> io::Result<bool> {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = exe;
-        return Ok(false);
+        Ok(false)
     }
     #[cfg(target_os = "linux")]
     {

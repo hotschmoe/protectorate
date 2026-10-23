@@ -7,9 +7,7 @@ use std::{
 };
 
 #[cfg(windows)]
-#[allow(dead_code)] // shared with device login; the binary only needs harness paths
-#[path = "login_windows.rs"]
-mod windows;
+use protectorate_cli::windows_private as windows;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Harness {

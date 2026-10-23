@@ -18,8 +18,7 @@ use std::{
 };
 
 #[cfg(windows)]
-#[path = "login_windows.rs"]
-mod windows;
+use crate::windows_private as windows;
 
 #[cfg(windows)]
 pub(crate) fn read_private_token_file(path: &Path) -> std::io::Result<String> {

@@ -281,7 +281,7 @@ pub(super) fn ensure_private_directory(dir: &Path) -> Result<()> {
 /// Harness auth trees have variable depth (`auth/<provider>` and
 /// `login/claude`). Create each missing component with a protected DACL, then
 /// verify the requested directory's owner, DACL, and real file type.
-pub(super) fn ensure_private_path(path: &Path) -> Result<()> {
+pub fn ensure_private_path(path: &Path) -> Result<()> {
     check_ancestors(path)?;
     let mut missing = Vec::new();
     for ancestor in path.ancestors() {
@@ -314,12 +314,12 @@ pub(super) fn ensure_private_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn check_private_file(path: &Path) -> Result<()> {
+pub fn check_private_file(path: &Path) -> Result<()> {
     inspect_private(path, false)?;
     Ok(())
 }
 
-pub(super) fn check_private_path(path: &Path) -> Result<()> {
+pub fn check_private_path(path: &Path) -> Result<()> {
     inspect_private(path, true)?;
     Ok(())
 }
