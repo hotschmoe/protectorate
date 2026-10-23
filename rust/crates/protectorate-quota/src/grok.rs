@@ -19,8 +19,6 @@ pub struct Grok {
     pub home: Option<PathBuf>,
     pub base_url: String,
     pub web_url: String,
-    /// Skips the remaining-resets call when true.
-    pub no_resets: bool,
 }
 
 impl Default for Grok {
@@ -29,7 +27,6 @@ impl Default for Grok {
             home: None,
             base_url: DEFAULT_PROXY.to_string(),
             web_url: DEFAULT_WEB.to_string(),
-            no_resets: false,
         }
     }
 }
@@ -48,10 +45,6 @@ impl Grok {
     }
     pub fn with_web_url(mut self, web: &str) -> Self {
         self.web_url = web.trim_end_matches('/').to_string();
-        self
-    }
-    pub fn with_no_resets(mut self) -> Self {
-        self.no_resets = true;
         self
     }
     fn proxy(&self) -> String {
@@ -225,9 +218,7 @@ impl Reader for Grok {
                 snap.plan = s.tier;
             }
         }
-        if !self.no_resets {
-            snap.resets = self.remaining_resets(http, ctx, &entry.key);
-        }
+        snap.resets = self.remaining_resets(http, ctx, &entry.key);
         Ok(snap)
     }
 }

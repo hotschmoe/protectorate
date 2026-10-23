@@ -8,19 +8,13 @@ use std::time::Instant;
 #[derive(Clone, Debug)]
 pub struct Local {
     pub base_url: String,
-    pub api_key: String,
 }
 
 impl Local {
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.to_string(),
-            api_key: String::new(),
         }
-    }
-    pub fn with_api_key(mut self, key: &str) -> Self {
-        self.api_key = key.to_string();
-        self
     }
 
     pub fn models_url(&self) -> String {
@@ -47,13 +41,7 @@ impl Reader for Local {
         if self.base_url.is_empty() {
             return Err(Error::unavailable("no local endpoint configured"));
         }
-        let mut headers = vec![("Accept".to_string(), "application/json".to_string())];
-        if !self.api_key.is_empty() {
-            headers.push((
-                "Authorization".to_string(),
-                format!("Bearer {}", self.api_key),
-            ));
-        }
+        let headers = vec![("Accept".to_string(), "application/json".to_string())];
         #[derive(Deserialize)]
         struct Models {
             #[serde(default)]
