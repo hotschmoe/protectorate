@@ -20,6 +20,8 @@ use zeroize::Zeroizing;
 const MAX_UNARY_BYTES: u64 = 16 << 20;
 const MAX_STREAM_MESSAGE_BYTES: usize = 8 << 20;
 const MAX_ERROR_BYTES: u64 = 64 << 10;
+/// How often a call the hub holds for owner approval is repeated.
+const APPROVAL_POLL: Duration = Duration::from_secs(2);
 /// Procedures a client without a token may call: device pairing and a new
 /// node redeeming its join code.
 const PUBLIC: [&str; 3] = [
@@ -325,7 +327,31 @@ impl Client {
             return Err(RpcError::invalid("procedure is streaming"));
         }
         let body = self.input(method, input)?;
-        let response = self.post_with_timeout(procedure, "application/json", &body, timeout)?;
+        let mut approval = String::new();
+        loop {
+            let response =
+                self.post_with_timeout(procedure, "application/json", &body, timeout, &approval)?;
+            match self.unary_response(method, response) {
+                Err(error) => match pending_approval(&error) {
+                    Some(id) => {
+                        if approval.is_empty() {
+                            eprintln!("waiting for owner approval {id} of {procedure}");
+                        }
+                        approval = id;
+                        std::thread::sleep(APPROVAL_POLL);
+                    }
+                    None => return Err(error),
+                },
+                result => return result,
+            }
+        }
+    }
+
+    fn unary_response(
+        &self,
+        method: &Method,
+        response: ureq::http::Response<ureq::Body>,
+    ) -> Result<Value> {
         let status = response.status().as_u16();
         let content_type = response
             .headers()
@@ -400,7 +426,7 @@ impl Client {
         let payload = self.input(method, input)?;
         let frame = encode_envelope(0, &payload)?;
         let response =
-            self.post_with_timeout(procedure, "application/connect+json", &frame, timeout)?;
+            self.post_with_timeout(procedure, "application/connect+json", &frame, timeout, "")?;
         let status = response.status().as_u16();
         let content_type = response
             .headers()
@@ -501,12 +527,16 @@ impl Client {
         content_type: &str,
         body: &[u8],
         timeout: Option<Duration>,
+        approval: &str,
     ) -> Result<ureq::http::Response<ureq::Body>> {
         let mut request = self
             .agent
             .post(&format!("{}{}", self.base, procedure))
             .header("Content-Type", content_type)
             .header("Connect-Protocol-Version", "1");
+        if !approval.is_empty() {
+            request = request.header("Protectorate-Approval", approval);
+        }
         if !self.token.is_empty() {
             request = request.header("Authorization", &format!("Bearer {}", self.token.as_str()));
         }
@@ -562,6 +592,21 @@ fn read_bounded(reader: impl Read, limit: u64) -> Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+/// The request id of a call the hub holds until the owner decides.
+fn pending_approval(error: &RpcError) -> Option<String> {
+    (error.code == Code::Aborted)
+        .then(|| {
+            error
+                .details
+                .iter()
+                .find(|detail| detail["type"] == "protectorate.v1.Approval")
+        })
+        .flatten()
+        .and_then(|detail| detail["debug"]["id"].as_str())
+        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(str::to_owned)
 }
 
 fn remote_error(status: u16, bytes: &[u8]) -> RpcError {

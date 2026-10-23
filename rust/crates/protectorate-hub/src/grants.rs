@@ -57,6 +57,7 @@ pub(super) fn register(
                         ),
                     ));
                 }
+                crate::approvals::require(&hub, &request, "admin grant")?;
                 "orchestrator-envoy"
             } else {
                 return Err(RpcError::new(

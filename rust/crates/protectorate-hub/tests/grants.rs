@@ -10,10 +10,20 @@ use tokio::{
 };
 
 async fn call(addr: std::net::SocketAddr, path: &str, token: &str, body: Value) -> (u16, Value) {
+    call_approved(addr, path, token, body, "").await
+}
+
+async fn call_approved(
+    addr: std::net::SocketAddr,
+    path: &str,
+    token: &str,
+    body: Value,
+    approval: &str,
+) -> (u16, Value) {
     let body = body.to_string();
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let request = format!(
-        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {token}\r\nProtectorate-Approval: {approval}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(request.as_bytes()).await.unwrap();
@@ -186,11 +196,30 @@ async fn orchestrator_can_grant_only_named_shared_nodes_when_enabled() {
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
     let admin = "/protectorate.v1.GrantService/Admin";
-    let (status, allowed) = call(
+    let (status, pending) = call(
         addr,
         admin,
         &secret,
         json!({"node":"peer", "task":"fix peer"}),
+    )
+    .await;
+    assert_eq!(status, 409, "{pending}");
+    let id = pending["details"][0]["debug"]["id"].as_str().unwrap();
+    let (status, decided) = call(
+        addr,
+        "/protectorate.v1.ApprovalService/DecideApproval",
+        "owner-secret",
+        json!({"id":id, "approve":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    assert_eq!(decided["approval"]["reason"], "admin grant");
+    let (status, allowed) = call_approved(
+        addr,
+        admin,
+        &secret,
+        json!({"node":"peer", "task":"fix peer"}),
+        id,
     )
     .await;
     assert_eq!(status, 200, "{allowed}");
@@ -205,6 +234,14 @@ async fn orchestrator_can_grant_only_named_shared_nodes_when_enabled() {
         .await;
         assert!(status == 400 || status == 403, "{denied}");
     }
+    let (_, listed) = call(
+        addr,
+        "/protectorate.v1.ApprovalService/ListApprovals",
+        "owner-secret",
+        json!({"all":true}),
+    )
+    .await;
+    assert_eq!(listed["approvals"].as_array().unwrap().len(), 1, "{listed}");
     server.abort();
     let hub = Hub::open(dir.path(), "owner-secret", "test").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

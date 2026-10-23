@@ -7,6 +7,7 @@ type Candidate = (&'static str, &'static str);
 
 const ROOT: &[Candidate] = &[
     ("api", "Raw API access"),
+    ("approvals", "Decide gated agent calls"),
     ("audit", "Inspect the audit log"),
     ("backlog", "Manage notes"),
     ("chat", "Talk to a sleeve"),
@@ -174,6 +175,11 @@ fn children(path: &str) -> &'static [Candidate] {
             ("fish", "Fish script"),
             ("zsh", "Zsh script"),
             ("powershell", "PowerShell script"),
+        ],
+        "approvals" => &[
+            ("ls", "List pending calls"),
+            ("approve", "Approve a call"),
+            ("deny", "Deny a call"),
         ],
         "devices" => &[
             ("ls", "List devices"),
@@ -538,6 +544,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
         "token scopes" | "orchestrator scopes" => {
             &[("--add", "Add scope"), ("--remove", "Remove scope")]
         }
+        "approvals ls" => &[("--all", "Include decided calls")],
         "audit ls" | "audit tail" => &[
             ("--lines", "Line count"),
             ("--actor", "Actor"),

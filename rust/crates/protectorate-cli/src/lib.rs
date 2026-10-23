@@ -60,6 +60,8 @@ const GRANT_ADMIN: &str = "/protectorate.v1.GrantService/Admin";
 const LIST_AUDIT: &str = "/protectorate.v1.AuditService/ListAuditEntries";
 const VERIFY_AUDIT: &str = "/protectorate.v1.AuditService/VerifyAudit";
 const LIST_DEVICES: &str = "/protectorate.v1.DeviceService/ListDevices";
+const LIST_APPROVALS: &str = "/protectorate.v1.ApprovalService/ListApprovals";
+const DECIDE_APPROVAL: &str = "/protectorate.v1.ApprovalService/DecideApproval";
 const LIST_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ListDeviceAuth";
 const APPROVE_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ApproveDeviceAuth";
 const DENY_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/DenyDeviceAuth";
@@ -630,6 +632,13 @@ pub enum Command {
     },
     AuditList(AuditQuery),
     AuditVerify,
+    ApprovalList {
+        all: bool,
+    },
+    ApprovalDecide {
+        id: String,
+        approve: bool,
+    },
     DeviceList,
     DevicePendingList,
     DeviceApprove {
@@ -899,6 +908,9 @@ fn usage() -> &'static str {
      token ls | token list      issued tokens and their status, without secrets\n  \
      token revoke <id>          revoke a token immediately\n  \
      token scopes <id|name>     change grants (--add SCOPE, --remove SCOPE)\n  \
+     approvals ls [--all]       agent calls waiting for the owner: id, actor, call, reason, expiry\n  \
+     approvals approve <id>     run a gated agent call once\n  \
+     approvals deny <id>        refuse a gated agent call\n  \
      devices ls | devices list  trusted devices: name, platform, state, last use and approver\n  \
      devices pending            pairing requests awaiting approval\n  \
      devices approve <code>     approve a request after matching its code on the new device\n  \
@@ -1679,6 +1691,25 @@ fn execute_commands(
                 json_line(&report)
             } else {
                 Ok(format::audit_verify_text(&report))
+            }
+        }
+        Command::ApprovalList { all } => {
+            let approvals = client.call(LIST_APPROVALS, &json!({"all": all}))?;
+            if json {
+                json_line(&approvals)
+            } else {
+                Ok(format::approvals_text(&approvals))
+            }
+        }
+        Command::ApprovalDecide { id, approve } => {
+            let response = client.call(DECIDE_APPROVAL, &json!({"id": id, "approve": approve}))?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format!(
+                    "{} {id}\n",
+                    if *approve { "approved" } else { "denied" }
+                ))
             }
         }
         Command::DeviceList => {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../approvals/action_approval_banner.dart';
 import '../devices/device_approval_banner.dart';
 import '../gen/protectorate/v1/events.pb.dart';
 import '../hubs/event_feed.dart';
@@ -275,7 +276,13 @@ class _HubShellState extends State<HubShell> {
               maxHeight: available.clamp(0, double.infinity) * 0.28,
             ),
             child: SingleChildScrollView(
-              child: DeviceApprovalBanner(client: _client, feed: _feed),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ActionApprovalBanner(client: _client, feed: _feed),
+                  DeviceApprovalBanner(client: _client, feed: _feed),
+                ],
+              ),
             ),
           ),
         ],

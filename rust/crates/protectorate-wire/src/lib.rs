@@ -421,6 +421,10 @@ enum Admission {
 /// request and final handler error, but never raw headers or bearer tokens.
 pub type CompletionObserver =
     Arc<dyn Fn(&Method, &AuthContext, &DynamicMessage, Option<&RpcError>) + Send + Sync>;
+/// Runs on every decoded request just before its handler. An error is the
+/// call's result, with no completion or rejection observer: the gate records
+/// its own decisions.
+pub type Gate = Arc<dyn Fn(&RpcRequest) -> Result<()> + Send + Sync>;
 /// Called when a known procedure fails validation before its handler starts.
 /// No request body or credential headers are exposed to this hook.
 pub type RejectionObserver = Arc<dyn Fn(&Method, Option<&AuthContext>, &RpcError) + Send + Sync>;
@@ -531,6 +535,7 @@ pub struct UnaryServer {
     completion_observer: Option<CompletionObserver>,
     rejection_observer: Option<RejectionObserver>,
     admission_denial_observer: Option<AdmissionDenialObserver>,
+    gate: Option<Gate>,
     max_request_bytes: usize,
 }
 impl UnaryServer {
@@ -551,6 +556,7 @@ impl UnaryServer {
             completion_observer: None,
             rejection_observer: None,
             admission_denial_observer: None,
+            gate: None,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
         }
     }
@@ -571,6 +577,10 @@ impl UnaryServer {
     }
     pub fn with_admission_denial_observer(mut self, observer: AdmissionDenialObserver) -> Self {
         self.admission_denial_observer = Some(observer);
+        self
+    }
+    pub fn with_gate(mut self, gate: Gate) -> Self {
+        self.gate = Some(gate);
         self
     }
     fn reject(&self, method: &Method, auth: Option<&AuthContext>, error: RpcError) -> RpcError {
@@ -946,6 +956,9 @@ async fn dispatch_inner(
             auth,
             peer_addr,
         };
+        if let Some(gate) = &server.gate {
+            gate(&req)?;
+        }
         return Ok(streaming::stream_response(
             output,
             DEFAULT_STREAM_CAPACITY,
@@ -965,14 +978,17 @@ async fn dispatch_inner(
             )
         })?
         .clone();
-    let response = handler(RpcRequest {
+    let request = RpcRequest {
         method: method.clone(),
         headers,
         message,
         auth,
         peer_addr,
-    })
-    .await?;
+    };
+    if let Some(gate) = &server.gate {
+        gate(&request)?;
+    }
+    let response = handler(request).await?;
     if response.message.descriptor() != method.output() {
         return Err(RpcError::new(
             Code::Internal,

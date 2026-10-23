@@ -115,6 +115,7 @@ pub(super) fn record_completion(
                 | "/protectorate.v1.TokenService/UpdateTokenScopes"
                 | "/protectorate.v1.ReleaseService/UpdateHub"
                 | "/protectorate.v1.SleeveService/SpawnEnvoy"
+                | "/protectorate.v1.ApprovalService/DecideApproval"
         )
     {
         return;
@@ -172,7 +173,12 @@ fn field_string(message: &DynamicMessage, key: &str) -> String {
     }
 }
 
-fn subject(method: &Method, auth: &AuthContext, request: &DynamicMessage, success: bool) -> String {
+pub(super) fn subject(
+    method: &Method,
+    auth: &AuthContext,
+    request: &DynamicMessage,
+    success: bool,
+) -> String {
     let subject = [
         "name",
         "sleeve",

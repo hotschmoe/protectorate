@@ -98,6 +98,7 @@ fn parse_tokens(args: &[String]) -> Result<Invocation> {
             "grant" => set(&mut command, grant(args, &mut index)?)?,
             "audit" => set(&mut command, audit(args, &mut index)?)?,
             "devices" => set(&mut command, devices(args, &mut index)?)?,
+            "approvals" => set(&mut command, approvals(args, &mut index)?)?,
             "login" => set(&mut command, login(args, &mut index)?)?,
             "pair" => set(&mut command, pair(args, &mut index)?)?,
             "who" => {
@@ -566,6 +567,30 @@ fn audit(args: &[String], index: &mut usize) -> Result<Command> {
         return Err(bad_argument("--outcome must be ok, denied or error"));
     }
     Ok(Command::AuditList(query))
+}
+
+/// Owner approval of gated agent calls: `approvals ls [--all]`,
+/// `approve <id>` and `deny <id>`.
+fn approvals(args: &[String], index: &mut usize) -> Result<Command> {
+    let usage = "approvals needs ls [--all], approve <id> or deny <id>";
+    let action = next(args, *index + 1).ok_or_else(|| bad_argument(usage))?;
+    *index += 1;
+    match action {
+        "ls" | "list" => {
+            let all = next(args, *index + 1) == Some("--all");
+            if all {
+                *index += 1;
+            }
+            Ok(Command::ApprovalList { all })
+        }
+        "approve" | "deny" => Ok(Command::ApprovalDecide {
+            id: argument(args, index, usage)?,
+            approve: action == "approve",
+        }),
+        other => Err(bad_argument(format!(
+            "unknown approvals subcommand {other:?}; {usage}"
+        ))),
+    }
 }
 
 /// Trusted-device management: `devices ls`, `pending`, `approve <code>`,

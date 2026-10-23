@@ -1,4 +1,5 @@
 //! Initial Rust hub service wiring for the existing Connect API.
+mod approvals;
 mod audit;
 mod chat;
 mod checkpoints;
@@ -98,6 +99,7 @@ pub struct Hub {
     owner_token: Arc<Zeroizing<String>>,
     pub identity: Arc<IdentityStore>,
     pub audit: Arc<Audit>,
+    approvals: approvals::Approvals,
     pub backlog: Arc<BacklogStore>,
     pub sessions: Arc<SessionManager>,
     session_monitor: Arc<session_monitor::Monitor>,
@@ -298,6 +300,7 @@ impl Hub {
             owner_token: Arc::new(Zeroizing::new(owner_token.into())),
             identity,
             audit: Arc::new(audit),
+            approvals: approvals::Approvals::new(approvals::DEFAULT_TTL),
             backlog: Arc::new(BacklogStore::new(home.clone())),
             sessions: Arc::new(SessionManager::new("")),
             session_monitor: Arc::new(session_monitor::Monitor::new(
@@ -535,6 +538,11 @@ impl Hub {
         self.public_url = Some(nodes::validate_install_base(&url)?);
         Ok(self)
     }
+    /// How long an approval request waits for the owner.
+    pub fn with_approval_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.approvals = approvals::Approvals::new(ttl);
+        self
+    }
     /// Allows the orchestrator token to mint task grants for one shared node.
     pub fn with_orchestrator_admin_grants(mut self) -> Self {
         self.orchestrator_admin_grants = true;
@@ -610,7 +618,7 @@ impl Hub {
         // A 4 MiB file chunk expands to about 5.6 MiB in Connect JSON's
         // base64 field. Keep the hub relay's request bound above that while
         // preserving a fixed ceiling for every request.
-        let mut server = UnaryServer::new_with_peer(catalog, authorize)
+        let server = UnaryServer::new_with_peer(catalog, authorize)
             .with_max_request_bytes(8 << 20)
             .with_max_stream_message_bytes(8 << 20)
             .with_admission_denial_observer(Arc::new(
@@ -645,6 +653,9 @@ impl Hub {
             }));
         let all_methods = Arc::new(server.catalog().methods().cloned().collect::<Vec<_>>());
         let hub = Arc::new(self);
+        let gate_hub = Arc::clone(&hub);
+        let mut server =
+            server.with_gate(Arc::new(move |request| approvals::gate(&gate_hub, request)));
         let weak = Arc::downgrade(&hub);
         hub.node_monitor.set_event_sink(Arc::new(move |event| {
             if let Some(hub) = weak.upgrade() {
@@ -656,6 +667,7 @@ impl Hub {
         hub.jobs.resume();
         let downloads = Arc::clone(&hub);
         audit::register(&mut server, Arc::clone(&hub))?;
+        approvals::register(&mut server, Arc::clone(&hub))?;
         device::register(&mut server, Arc::clone(&hub))?;
         grants::register(&mut server, Arc::clone(&hub), Arc::clone(&all_methods))?;
         directory::register(&mut server, Arc::clone(&hub))?;

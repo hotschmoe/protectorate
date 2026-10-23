@@ -412,6 +412,36 @@ pub(crate) fn device_list_text(response: &Value) -> String {
     out
 }
 
+/// `approvals ls`: one row per gated agent call.
+pub(crate) fn approvals_text(response: &Value) -> String {
+    let mut out = "ID\tSTATE\tACTOR\tCALL\tREASON\tEXPIRES\n".to_owned();
+    for approval in items(response, "approvals") {
+        let mut call = text(&approval, "procedure")
+            .trim_start_matches("/protectorate.v1.")
+            .to_owned();
+        let subject = text(&approval, "subject");
+        if !subject.is_empty() {
+            call.push(' ');
+            call.push_str(&subject);
+        }
+        let mut reason = text(&approval, "reason");
+        let detail = text(&approval, "detail");
+        if !detail.is_empty() {
+            reason = format!("{reason}: {detail}");
+        }
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{call}\t{reason}\t{}\n",
+            text(&approval, "id"),
+            text(&approval, "state")
+                .trim_start_matches("APPROVAL_STATE_")
+                .to_ascii_lowercase(),
+            text(&approval, "actor"),
+            local_stamp(text(&approval, "expiresAt"))
+        ));
+    }
+    out
+}
+
 /// `devices pending`: one row per pairing request still awaiting a decision.
 pub(crate) fn device_pending_text(response: &Value) -> String {
     let mut out = "CODE\tNAME\tPLATFORM\tREQUESTING IP\tEXPIRES\n".to_owned();
