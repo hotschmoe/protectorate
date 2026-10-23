@@ -362,7 +362,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--env", "Environment entry"),
             ("--cpu", "CPU limit"),
             ("--mem", "Memory limit"),
-            ("--admin", "Run with admin grant"),
+            ("--admin", "Run elevated (Linux nodes)"),
         ],
         "job test-cross" => &[
             ("--os", "Target OS"),

@@ -966,7 +966,7 @@ fn usage() -> &'static str {
      job run --on <target> -- <cmd...>\n                             \
        run a command on a node, lease or selector and stream its output\n                             \
        (--git repo[@commit] | --artifact file|dir, --workdir, --artifact-glob,\n                             \
-       --env K=V, --timeout, --cpu, --mem, --admin)\n  \
+       --env K=V, --timeout, --cpu, --mem, --admin on Linux nodes)\n  \
      job test-cross              run cargo test on a matching node (--os, --arch, --on, --git, --artifact, --artifact-glob, --package, --timeout; cargo args after --)\n  \
      job logs <id>              print a job's output (--follow, -f)\n  \
      chat send <sleeve> <text>  send a message (- reads stdin; --request-id makes a retry safe; -- before leading-dash text)\n  \

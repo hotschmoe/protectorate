@@ -210,8 +210,8 @@ machine: never scheduled or leased; work only under an owner-minted
   matching node.
 - **Job isolation:** Linux nodes run sandboxed jobs in the same namespace
   sandbox; Windows nodes as a separate runner account in a Job Object; plain
-  jobs (care nodes) need `--allow-plain-jobs`; `--admin` runs elevated only
-  under a grant. Every job records how it ran.
+  jobs (care nodes) need `--allow-plain-jobs`; `--admin` runs elevated
+  (sudo or root, Linux nodes only) under a grant. Every job records how it ran.
 - **Files:** `node put/get`, sha256-verified, atomic, confined to the node's
   file root (P11). Windows desktop control is shelved (tag `shelf/windows-desk`).
 

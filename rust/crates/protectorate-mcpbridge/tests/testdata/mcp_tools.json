@@ -684,7 +684,7 @@
       "additionalProperties": false,
       "properties": {
         "admin": {
-          "description": "admin runs the command elevated (sudo -n on Linux, the agent's own elevated token on Windows). It needs a named node or a lease (not a selector), a node that reports it can elevate, and the owner token or a node_admin grant for the node. Admin jobs are never sandboxed.",
+          "description": "admin runs the command elevated with sudo -n, or directly when the agent is root; only Linux nodes run admin jobs. It needs a named node or a lease (not a selector), a node that reports it can elevate, and the owner token or a node_admin grant for the node. Admin jobs are never sandboxed.",
           "type": "boolean"
         },
         "artifactGlobs": {

@@ -255,7 +255,7 @@ impl Jobs {
         if matches!(spec.mode, Mode::Admin) && self.admin.is_none() {
             return Err(RpcError::new(
                 Code::FailedPrecondition,
-                format!("this node cannot run admin jobs: {}", self.admin_note),
+                self.admin_note.clone(),
             ));
         }
         if matches!(spec.mode, Mode::Sandboxed) {

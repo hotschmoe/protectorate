@@ -83,10 +83,8 @@ class JobIsolation extends $pb.GeneratedMessage {
   static JobIsolation? _defaultInstance;
 
   /// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "rust-namespaces"
-  /// (Linux: a direct namespace launcher in a systemd user scope),
-  /// "runner" (Windows: the
-  /// protectorate-runner account in a job object), "job-object" (Windows:
-  /// the agent's own account in a job object, unisolated) or "none".
+  /// (Linux: a direct namespace launcher in a systemd user scope), "runner"
+  /// (Windows: the protectorate-runner account in a job object) or "none".
   @$pb.TagNumber(1)
   $core.String get sandbox => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -106,8 +104,8 @@ class JobIsolation extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearNote() => $_clearField(2);
 
-  /// admin is how admin jobs elevate: "sudo", "root" or "elevated"; empty
-  /// when this node cannot run them.
+  /// admin is how admin jobs elevate on a Linux node: "sudo" or "root"; empty
+  /// when this node cannot run them, always on Windows and Termux.
   @$pb.TagNumber(3)
   $core.String get admin => $_getSZ(2);
   @$pb.TagNumber(3)
@@ -612,10 +610,10 @@ class SubmitJobRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   void clearRequestId() => $_clearField(7);
 
-  /// admin runs the command elevated (sudo -n on Linux, the agent's own
-  /// elevated token on Windows). It needs a named node or a lease (not a
-  /// selector), a node that reports it can elevate, and the owner token or a
-  /// node_admin grant for the node. Admin jobs are never sandboxed.
+  /// admin runs the command elevated with sudo -n, or directly when the agent
+  /// is root; only Linux nodes run admin jobs. It needs a named node or a
+  /// lease (not a selector), a node that reports it can elevate, and the owner
+  /// token or a node_admin grant for the node. Admin jobs are never sandboxed.
   @$pb.TagNumber(8)
   $core.bool get admin => $_getBF(7);
   @$pb.TagNumber(8)

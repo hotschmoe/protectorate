@@ -749,7 +749,6 @@ async fn node_job_outlives_disconnected_run_stream() {
     server.abort();
 }
 
-#[cfg(unix)]
 async fn stream_error(addr: std::net::SocketAddr, method: &str, body: Value) -> (u16, String) {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let body = body.to_string();
@@ -766,6 +765,38 @@ async fn stream_error(addr: std::net::SocketAddr, method: &str, body: Value) -> 
         response.split_whitespace().nth(1).unwrap().parse().unwrap(),
         response,
     )
+}
+
+/// Admin jobs are Linux-only: any other node reports no elevation and
+/// refuses them.
+#[cfg(not(target_os = "linux"))]
+#[tokio::test]
+async fn non_linux_node_reports_and_refuses_admin_jobs() {
+    use protectorate_node::Jobs;
+    let tmp = tempfile::tempdir().unwrap();
+    let jobs = Jobs::new(tmp.path(), 1).unwrap().with_plain_mode();
+    let isolation = jobs.isolation();
+    assert_eq!(isolation.admin, "");
+    assert!(
+        isolation.note.contains("no admin jobs: Linux-only"),
+        "{}",
+        isolation.note
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = Agent::new(Arc::new(Fixed))
+        .with_jobs(jobs)
+        .router()
+        .unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let admin = json!({"jobId":"admin", "command":["whoami"], "mode":"JOB_MODE_ADMIN"});
+    let (code, body) = stream_error(addr, "RunJob", admin).await;
+    assert_eq!(code, 200);
+    assert!(
+        body.contains("failed_precondition") && body.contains("Linux-only"),
+        "{body}"
+    );
+    server.abort();
 }
 
 /// A job ends in exactly one of exited, killed, timed out or canceled, and a

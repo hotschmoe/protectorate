@@ -13,7 +13,7 @@ Built unless marked **(design)**.
 
 ## Two tiers
 
-| Tier | Meaning | Jobs and leases | Admin (sudo) | Examples |
+| Tier | Meaning | Jobs and leases | Admin (sudo, Linux only) | Examples |
 |---|---|---|---|---|
 | `shared` | part of the shared compute pool | yes, sandboxed | only with a grant | agentworld, officepc, build boxes |
 | `care` | a machine we maintain for a family member | never scheduled, never leased | only for a task the owner started | kidsbox |
@@ -40,7 +40,7 @@ warm git worktree; `--git repo@commit` ships only the missing objects,
 `--artifact` ships files. Selection prefers fresh, less loaded nodes and warm
 worktrees. A job on a `shared` node runs sandboxed, a `care` node takes jobs
 only under an owner's grant, and elevation exists only as `--admin` under a
-grant.
+grant, on Linux nodes.
 
 A job ends as exited (success or the command's own status), killed, timed
 out or canceled. Killed means a signal the node did not send ended the command,
@@ -67,8 +67,8 @@ sandbox.
   a grant matching the node, and a node that reports it can elevate: `sudo`
   when `sudo -n true` succeeds (probed once per agent start) or `root` when the
   agent is root. It runs `sudo -n --preserve-env=<the job's variable names> --
-  <cmd>`, so values never reach the process list. Windows and Termux nodes
-  report no admin jobs.
+  <cmd>`, so values never reach the process list. Admin jobs are Linux-only:
+  Windows and Termux nodes report no admin jobs and refuse them.
 - Jobs record `mode` (sandboxed, plain, admin), the isolation the node
   reported and the grant's `task` (`job show`). A non-admin job on a `care`
   node runs plain, as the agent's user, because maintaining that machine
