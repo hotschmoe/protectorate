@@ -1,0 +1,27 @@
+[package]
+name = "protectorate-tailnet-runtime"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+protectorate-tailnet-poll = { path = "../protectorate-tailnet-poll" }
+protectorate-tailnet-route = { path = "../protectorate-tailnet-route" }
+protectorate-tailnet-map = { path = "../protectorate-tailnet-map" }
+protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
+protectorate-tailnet-packets = { path = "../protectorate-tailnet-packets" }
+protectorate-tailnet-stream = { path = "../protectorate-tailnet-stream" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+tempfile = "3"
+protectorate-tailnet = { path = "../protectorate-tailnet" }
+protectorate-tailnet-admin = { path = "../protectorate-tailnet-admin" }
+protectorate-tailnet-discovery = { path = "../protectorate-tailnet-discovery" }
+protectorate-derp = { path = "../protectorate-derp" }
+protectorate-xfer = { path = "../protectorate-xfer" }
+protectorate-node = { path = "../protectorate-node" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+base64 = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }

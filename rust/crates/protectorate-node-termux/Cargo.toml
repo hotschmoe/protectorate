@@ -1,0 +1,32 @@
+[package]
+name = "protectorate-node-termux"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "protectorate-rs-termux"
+path = "src/main.rs"
+
+[dependencies]
+protectorate-svcgen = { path = "../protectorate-svcgen" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+protectorate-node = { path = "../protectorate-node" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+protectorate-tailnet = { path = "../protectorate-tailnet" }
+protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
+protectorate-tailnet-stream = { path = "../protectorate-tailnet-stream" }
+protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
+protectorate-tailnet-discovery = { path = "../protectorate-tailnet-discovery" }
+protectorate-wire = { path = "../protectorate-wire" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "io-util", "sync", "time"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+serde_json = "1"
+ureq = "3"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

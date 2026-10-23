@@ -1,0 +1,35 @@
+[package]
+name = "protectorate-node"
+version = "0.1.0"
+edition.workspace = true
+description = "Rust node agent RPC entry point"
+
+[dependencies]
+protectorate-wire = { path = "../protectorate-wire" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
+protectorate-xfer = { path = "../protectorate-xfer" }
+protectorate-sandbox = { path = "../protectorate-sandbox" }
+protectorate-desk-node = { path = "../protectorate-desk-node" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
+subtle = "2"
+zeroize = "1"
+tokio = { version = "1", features = ["rt", "time", "sync", "process", "io-util", "fs"] }
+libc = "0.2"
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+glob = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Environment", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_NetworkManagement_NetManagement"] }
+getrandom = "0.2"
+
+[dev-dependencies]
+protectorate-desk-policy = { path = "../protectorate-desk-policy" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+tempfile = "3"
+protectorate-connect-client = { path = "../protectorate-connect-client" }

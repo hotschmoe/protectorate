@@ -1,0 +1,39 @@
+[package]
+name = "protectorate-node-windows"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "protectorate-rs-windows"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+protectorate-node = { path = "../protectorate-node" }
+protectorate-wire = { path = "../protectorate-wire" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+protectorate-tailnet = { path = "../protectorate-tailnet" }
+protectorate-tailnet-runtime = { path = "../protectorate-tailnet-runtime" }
+protectorate-tailnet-stream = { path = "../protectorate-tailnet-stream" }
+protectorate-tailnet-member = { path = "../protectorate-tailnet-member" }
+protectorate-tailnet-discovery = { path = "../protectorate-tailnet-discovery" }
+protectorate-desk-node = { path = "../protectorate-desk-node" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
+protectorate-sandbox = { path = "../protectorate-sandbox" }
+protectorate-chatlog = { path = "../protectorate-chatlog" }
+protectorate-pi-driver = { path = "../protectorate-pi-driver" }
+protectorate-claude-driver = { path = "../protectorate-claude-driver" }
+protectorate-codex-driver = { path = "../protectorate-codex-driver" }
+protectorate-grok-driver = { path = "../protectorate-grok-driver" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "io-util", "sync", "time"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+serde_json = "1"
+ureq = "3"
+getrandom = "0.2"
+tempfile = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+tempfile = "3"
+sha2 = "0.10"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }

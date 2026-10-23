@@ -1,0 +1,9 @@
+[package]
+name = "protectorate-desk-policy"
+version = "0.1.0"
+edition.workspace = true
+description = "Desktop availability policy and Windows key chord parsing"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"

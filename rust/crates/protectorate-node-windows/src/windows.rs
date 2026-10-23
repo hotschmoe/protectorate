@@ -1,0 +1,540 @@
+#[path = "../../protectorate-server/src/node_doctor.rs"]
+mod node_doctor;
+#[path = "../../protectorate-server/src/driver.rs"]
+mod driver;
+mod node_install;
+#[path = "../../protectorate-server/src/node_join.rs"]
+mod node_join;
+#[allow(dead_code)] // The shared transport also contains hub-side helpers.
+#[path = "../../protectorate-server/src/transport.rs"]
+mod transport;
+
+use std::{
+    env,
+    error::Error,
+    fs, io,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+const GUARD_CHILD: &str = "PROTECTORATE_NODE_GUARD_CHILD";
+
+fn build_version() -> &'static str {
+    option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+fn default_home() -> Result<PathBuf, String> {
+    if let Some(home) = env::var_os("PROTECTORATE_HOME") {
+        return Ok(PathBuf::from(home));
+    }
+    env::var_os("LOCALAPPDATA")
+        .map(|local| PathBuf::from(local).join("Protectorate-Rust-Node"))
+        .or_else(|| {
+            env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join(".protectorate-rust"))
+        })
+        .ok_or_else(|| "LOCALAPPDATA is unset; pass --home".into())
+}
+
+struct Serve {
+    home: PathBuf,
+    token_file: PathBuf,
+    listen: SocketAddr,
+    tls_cert: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
+    file_root: Option<PathBuf>,
+    file_unconfined: bool,
+    job_concurrency: usize,
+    allow_plain_jobs: bool,
+    watch_paths: Vec<PathBuf>,
+    docker_host: Option<String>,
+}
+
+struct InstallRunner {
+    home: PathBuf,
+    job_root: PathBuf,
+}
+
+enum Command {
+    Version,
+    Join(node_join::Command),
+    Install(node_install::Command),
+    Uninstall(node_install::Uninstall),
+    Doctor(node_doctor::Command),
+    Driver(driver::Command),
+    InstallRunner(InstallRunner),
+    Serve(Serve),
+}
+
+fn usage() -> &'static str {
+    "Usage:\n  protectorate-rs version --json\n  protectorate-rs driver run --harness claude|codex|grok|pi --cwd DIR [--session ID] PROMPT\n  protectorate-rs node join --control URL [--name NAME] [--key KEY | --key-file FILE] [--ca-cert FILE] [--home DIR]\n  protectorate-rs node install --control URL [--name NAME] [--key KEY | --key-file FILE] [--ca-cert FILE] [--home DIR] [--dry-run] [--elevated] [-- serve-flags]\n  protectorate-rs node uninstall [--home DIR] [--dry-run]\n  protectorate-rs node doctor [--home DIR] [--hub URL] [--ca-cert FILE] [--json]\n  protectorate-rs node install-runner --home DIR --job-root ABSOLUTE_DIR\n  protectorate-rs node serve --agent-token-file FILE [--home DIR] [--file-root DIR] [--file-unconfined] [--job-concurrency 2] [--allow-plain-jobs] [--watch-dir DIR] [--docker-host URL] [--listen 127.0.0.1:7475] [--tls-cert FILE --tls-key FILE]\n"
+}
+
+fn parse_install_runner(mut args: impl Iterator<Item = String>) -> Result<InstallRunner, String> {
+    let mut home = None;
+    let mut job_root = None;
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--home" if home.is_none() => {
+                home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?));
+            }
+            "--job-root" if job_root.is_none() => {
+                job_root = Some(PathBuf::from(
+                    args.next().ok_or("--job-root requires ABSOLUTE_DIR")?,
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "unknown or duplicate node install-runner argument {flag:?}"
+                ));
+            }
+        }
+    }
+    let home = home.ok_or("--home is required")?;
+    let job_root = job_root.ok_or("--job-root is required")?;
+    if !job_root.is_absolute() {
+        return Err("--job-root must be an absolute directory".into());
+    }
+    Ok(InstallRunner { home, job_root })
+}
+
+fn parse_serve(mut args: impl Iterator<Item = String>) -> Result<Serve, String> {
+    let mut home = None;
+    let mut token_file = None;
+    let mut listen = "127.0.0.1:7475".parse::<SocketAddr>().unwrap();
+    let mut tls_cert = None;
+    let mut tls_key = None;
+    let mut file_root = None;
+    let mut file_unconfined = false;
+    let mut job_concurrency = 2;
+    let mut allow_plain_jobs = false;
+    let mut watch_paths = Vec::new();
+    let mut docker_host = None;
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--home" => home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?)),
+            "--agent-token-file" => {
+                token_file = Some(PathBuf::from(
+                    args.next().ok_or("--agent-token-file requires FILE")?,
+                ))
+            }
+            "--listen" => {
+                listen = args
+                    .next()
+                    .ok_or("--listen requires IP:PORT")?
+                    .parse()
+                    .map_err(|_| "--listen requires IP:PORT")?
+            }
+            "--tls-cert" => {
+                tls_cert = Some(PathBuf::from(
+                    args.next().ok_or("--tls-cert requires FILE")?,
+                ))
+            }
+            "--tls-key" => {
+                tls_key = Some(PathBuf::from(args.next().ok_or("--tls-key requires FILE")?))
+            }
+            "--file-root" => {
+                file_root = Some(PathBuf::from(
+                    args.next().ok_or("--file-root requires DIR")?,
+                ))
+            }
+            "--file-unconfined" => file_unconfined = true,
+            "--job-concurrency" => {
+                job_concurrency = args
+                    .next()
+                    .ok_or("--job-concurrency requires a number")?
+                    .parse()
+                    .map_err(|_| "--job-concurrency requires a number")?;
+                if !(1..=32).contains(&job_concurrency) {
+                    return Err("--job-concurrency must be between 1 and 32".into());
+                }
+            }
+            "--allow-plain-jobs" => allow_plain_jobs = true,
+            "--watch-dir" => watch_paths.push(PathBuf::from(
+                args.next().ok_or("--watch-dir requires DIR")?,
+            )),
+            "--docker-host" => docker_host = Some(args.next().ok_or("--docker-host requires URL")?),
+            "--sandbox-helper" => {
+                let _ = args.next().ok_or("--sandbox-helper requires FILE")?;
+                return Err("--sandbox-helper is unavailable on Windows".into());
+            }
+            "--help" | "-h" => return Err(usage().into()),
+            _ => return Err(format!("unknown node serve argument {flag:?}")),
+        }
+    }
+    if tls_cert.is_some() != tls_key.is_some() {
+        return Err("--tls-cert and --tls-key must be supplied together".into());
+    }
+    if !listen.ip().is_loopback() && tls_cert.is_none() {
+        return Err("non-loopback --listen requires --tls-cert and --tls-key".into());
+    }
+    Ok(Serve {
+        home: home.map_or_else(default_home, Ok)?,
+        token_file: token_file.ok_or("--agent-token-file is required")?,
+        listen,
+        tls_cert,
+        tls_key,
+        file_root,
+        file_unconfined,
+        job_concurrency,
+        allow_plain_jobs,
+        watch_paths,
+        docker_host,
+    })
+}
+
+fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Command>, String> {
+    match args.next().as_deref() {
+        None | Some("--help" | "-h") => Ok(None),
+        Some("version") if args.next().as_deref() == Some("--json") && args.next().is_none() => {
+            Ok(Some(Command::Version))
+        }
+        Some("driver") => driver::parse(args).map(Command::Driver).map(Some),
+        Some("node") => match args.next().as_deref() {
+            Some("join") => node_join::parse(args).map(Command::Join).map(Some),
+            Some("install") => node_install::parse(args).map(Command::Install).map(Some),
+            Some("uninstall") => node_install::parse_uninstall(args)
+                .map(Command::Uninstall)
+                .map(Some),
+            Some("doctor") => node_doctor::parse(args).map(Command::Doctor).map(Some),
+            Some("install-runner") => parse_install_runner(args)
+                .map(Command::InstallRunner)
+                .map(Some),
+            Some("serve") => parse_serve(args).map(Command::Serve).map(Some),
+            _ => Err(usage().into()),
+        },
+        _ => Err(usage().into()),
+    }
+}
+
+fn read_token(path: &Path) -> io::Result<String> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > 4096 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent token must be a bounded regular file",
+        ));
+    }
+    let token = fs::read_to_string(path)?;
+    let token = token.trim_end_matches(['\r', '\n']);
+    if token.is_empty() || token.contains(['\r', '\n']) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent token is empty or contains a newline",
+        ));
+    }
+    Ok(token.to_owned())
+}
+
+async fn serve_node(options: Serve) -> Result<bool, Box<dyn Error>> {
+    let token = read_token(&options.token_file)?;
+    let tls = match (&options.tls_cert, &options.tls_key) {
+        (Some(cert), Some(key)) => Some(transport::tls_config(cert, key)?),
+        _ => None,
+    };
+    fs::create_dir_all(&options.home)?;
+    let home = fs::canonicalize(&options.home)?;
+    let collector: Arc<dyn protectorate_node::MetricsCollector> = Arc::new(
+        protectorate_node_metrics::Collector::windows(protectorate_node_metrics::Options {
+            version: build_version().to_owned(),
+            home: home.clone(),
+            watch_paths: options.watch_paths,
+            docker_host: options.docker_host,
+            ..Default::default()
+        }),
+    );
+    let file_root = options.file_root.unwrap_or_else(|| home.join("node-files"));
+    let mut jobs = protectorate_node::Jobs::open_windows(&home, options.job_concurrency)?;
+    if options.allow_plain_jobs {
+        jobs = jobs.with_plain_mode();
+    }
+    let restart_requested = Arc::new(AtomicBool::new(false));
+    let restart_notify = Arc::new(tokio::sync::Notify::new());
+    let restart_flag = Arc::clone(&restart_requested);
+    let restart_wake = Arc::clone(&restart_notify);
+    let restart: protectorate_node::UpdateRestart = Arc::new(move || {
+        restart_flag.store(true, Ordering::SeqCst);
+        restart_wake.notify_one();
+    });
+    let agent = protectorate_node::Agent::new(collector, token)
+        .with_desk_home(&home)?
+        .with_files_durable(file_root, options.file_unconfined, &home)?
+        .with_jobs(jobs)
+        .with_update(env::current_exe()?, build_version(), restart)?;
+    if agent.start_update_trial()? {
+        return Ok(true);
+    }
+    let listener = tokio::net::TcpListener::bind(options.listen).await?;
+    eprintln!("protectorate-rs node serving on {}", listener.local_addr()?);
+    let trusted_router = if home.join("tsnet/join.json").try_exists()? {
+        Some(transport::peer_router(
+            agent.clone().router_trusted_tailnet()?,
+        ))
+    } else {
+        None
+    };
+    let router = transport::peer_router(agent.router()?);
+    let tailnet_http = if let Some(trusted_router) = trusted_router {
+        Some(transport::TailnetHttp::start_node(
+            &home.join("tsnet"),
+            protectorate_tailnet::NODE_PORT,
+            trusted_router,
+        )?)
+    } else {
+        None
+    };
+    if let Some(tls) = tls {
+        let listener = transport::TlsListener::new(listener, tls)?;
+        let restart = Arc::clone(&restart_requested);
+        let wake = Arc::clone(&restart_notify);
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<transport::Peer>(),
+        )
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = async {
+                    while !restart.load(Ordering::SeqCst) {
+                        wake.notified().await;
+                    }
+                } => {},
+            }
+        })
+        .await?;
+    } else {
+        let restart = Arc::clone(&restart_requested);
+        let wake = Arc::clone(&restart_notify);
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = async {
+                    while !restart.load(Ordering::SeqCst) {
+                        wake.notified().await;
+                    }
+                } => {},
+            }
+        })
+        .await?;
+    }
+    if let Some(http) = tailnet_http {
+        match tokio::time::timeout(Duration::from_secs(8), http.stop()).await {
+            Ok(result) => result?,
+            Err(_) => eprintln!("node tailnet shutdown exceeded 8 seconds; exiting"),
+        }
+    }
+    Ok(restart_requested.load(Ordering::SeqCst))
+}
+
+fn update_marker(exe: &Path) -> io::Result<(String, u64)> {
+    let path = PathBuf::from(format!("{}.update", exe.display()));
+    let body = fs::read(path)?;
+    let marker: serde_json::Value = serde_json::from_slice(&body)?;
+    Ok((
+        marker["phase"].as_str().unwrap_or_default().to_owned(),
+        marker["deadline_ms"].as_u64().unwrap_or_default(),
+    ))
+}
+
+fn spawn_guard_child(exe: &Path, args: &[std::ffi::OsString]) -> io::Result<tokio::process::Child> {
+    tokio::process::Command::new(exe)
+        .args(args)
+        .env(GUARD_CHILD, "1")
+        .spawn()
+}
+
+fn guarded_binary(guardian: &Path) -> PathBuf {
+    if guardian
+        .file_name()
+        .is_some_and(|name| name == "protectorate-rs-guardian.exe")
+    {
+        guardian.with_file_name("protectorate-rs.exe")
+    } else {
+        guardian.to_path_buf()
+    }
+}
+
+async fn supervise_node_restart(exe: &Path) -> Result<(), Box<dyn Error>> {
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    let mut child = spawn_guard_child(exe, &args)?;
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                let _ = child.kill().await;
+                return Ok(());
+            }
+            status = child.wait() => {
+                let status = status?;
+                let phase = match update_marker(exe) {
+                    Ok((phase, _)) => phase,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound && status.success() => return Ok(()),
+                    Err(error) => return Err(error.into()),
+                };
+                if status.code() == Some(75) {
+                    child = spawn_guard_child(exe, &args)?;
+                    continue;
+                }
+                if phase == "trial" {
+                    protectorate_node::recover_failed_trial(exe, &format!("new node binary exited {status} before confirmation"))?;
+                    child = spawn_guard_child(exe, &args)?;
+                    continue;
+                }
+                if status.success() {
+                    return Ok(());
+                }
+                if phase == "confirmed" || phase == "rolledback" {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    child = spawn_guard_child(exe, &args)?;
+                    continue;
+                }
+                return Err(format!("node child exited {status} with unknown update state").into());
+            }
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {
+                let (phase, deadline_ms) = match update_marker(exe) {
+                    Ok(marker) => marker,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+                if phase == "trial" && now_ms >= deadline_ms.saturating_add(15_000) {
+                    let _ = child.kill().await;
+                    protectorate_node::recover_failed_trial(exe, "new node binary did not confirm before deadline")?;
+                    child = spawn_guard_child(exe, &args)?;
+                }
+            }
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    match parse(env::args().skip(1)).map_err(io::Error::other)? {
+        None => print!("{}", usage()),
+        Some(Command::Version) => println!(
+            "{}",
+            serde_json::json!({
+                "version": build_version(), "os": "windows",
+                "arch": match std::env::consts::ARCH {
+                    "x86_64" => "amd64",
+                    "aarch64" => "arm64",
+                    other => other,
+                }
+            })
+        ),
+        Some(Command::Join(command)) => node_join::run(command).await?,
+        Some(Command::Install(command)) => node_install::run(command).await?,
+        Some(Command::Uninstall(command)) => node_install::run_uninstall(command)?,
+        Some(Command::Doctor(command)) => node_doctor::run(command).await?,
+        Some(Command::Driver(command)) => driver::run(command).await?,
+        Some(Command::InstallRunner(command)) => {
+            protectorate_node::install_windows_runner(&command.home, &command.job_root)?;
+            println!("Windows job runner configured. Restart the node service to use it.");
+        }
+        Some(Command::Serve(options)) => {
+            if env::var_os(GUARD_CHILD).is_some() {
+                if serve_node(options).await? {
+                    std::process::exit(75);
+                }
+            } else {
+                supervise_node_restart(&guarded_binary(&env::current_exe()?)).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn installer_node_commands_and_listen_boundary_parse() {
+        let command = parse(
+            [
+                "node",
+                "serve",
+                "--home",
+                "C:\\state",
+                "--agent-token-file",
+                "C:\\state\\agent-token",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .unwrap();
+        let Some(Command::Serve(options)) = command else {
+            panic!("expected node serve");
+        };
+        assert_eq!(options.home, Path::new("C:\\state"));
+        assert_eq!(options.listen, "127.0.0.1:7475".parse().unwrap());
+        assert!(matches!(
+            parse(["version", "--json"].into_iter().map(str::to_owned)).unwrap(),
+            Some(Command::Version)
+        ));
+        assert!(parse_serve(
+            ["--agent-token-file", "token", "--listen", "0.0.0.0:7475"]
+                .into_iter()
+                .map(str::to_owned)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn installed_guardian_runs_the_replaceable_node_binary() {
+        assert_eq!(
+            guarded_binary(Path::new("C:\\Node\\protectorate-rs-guardian.exe")),
+            Path::new("C:\\Node\\protectorate-rs.exe")
+        );
+    }
+
+    #[test]
+    fn install_runner_requires_home_and_absolute_job_root() {
+        let parse_args = |args: &[&str]| parse(args.iter().map(|arg| (*arg).to_owned()));
+        let Some(Command::InstallRunner(command)) = parse_args(&[
+            "node",
+            "install-runner",
+            "--home",
+            "C:\\state",
+            "--job-root",
+            "D:\\jobs",
+        ])
+        .unwrap() else {
+            panic!("expected node install-runner");
+        };
+        assert_eq!(command.home, Path::new("C:\\state"));
+        assert_eq!(command.job_root, Path::new("D:\\jobs"));
+        assert!(usage().contains("node install-runner --home DIR --job-root ABSOLUTE_DIR"));
+        for args in [
+            vec!["node", "install-runner", "--job-root", "D:\\jobs"],
+            vec!["node", "install-runner", "--home", "C:\\state"],
+            vec![
+                "node",
+                "install-runner",
+                "--home",
+                "C:\\state",
+                "--job-root",
+                "relative",
+            ],
+            vec![
+                "node",
+                "install-runner",
+                "--home",
+                "C:\\state",
+                "--job-root",
+                "D:\\jobs",
+                "--home",
+                "C:\\other",
+            ],
+        ] {
+            assert!(parse_args(&args).is_err(), "accepted {args:?}");
+        }
+    }
+}

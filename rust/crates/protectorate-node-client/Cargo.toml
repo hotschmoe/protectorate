@@ -1,0 +1,20 @@
+[package]
+name = "protectorate-node-client"
+version = "0.1.0"
+edition.workspace = true
+description = "Verified file push and pull over Protectorate Connect JSON"
+
+[dependencies]
+protectorate-connect-client = { path = "../protectorate-connect-client" }
+protectorate-wire = { path = "../protectorate-wire" }
+protectorate-xfer = { path = "../protectorate-xfer" }
+base64 = "0.22"
+getrandom = "0.2"
+serde_json = "1"
+
+[dev-dependencies]
+protectorate-node = { path = "../protectorate-node" }
+protectorate-node-metrics = { path = "../protectorate-node-metrics" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tempfile = "3"
