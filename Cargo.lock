@@ -1031,6 +1031,7 @@ dependencies = [
  "protectorate-identity",
  "protectorate-mailbox",
  "protectorate-mcpbridge",
+ "protectorate-node-metrics",
  "protectorate-pi-driver",
  "protectorate-quota",
  "protectorate-release",

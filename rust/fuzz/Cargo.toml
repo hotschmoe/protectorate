@@ -77,6 +77,20 @@ doc = false
 bench = false
 
 [[bin]]
+name = "docker_engine"
+path = "fuzz_targets/docker_engine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gpu_tools"
+path = "fuzz_targets/gpu_tools.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "grok_acp"
 path = "fuzz_targets/grok_acp.rs"
 test = false

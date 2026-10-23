@@ -7,6 +7,7 @@ mod archives;
 mod auth;
 mod cli;
 mod harness;
+mod metrics;
 mod quota;
 mod sandbox;
 mod stores;
@@ -17,6 +18,7 @@ pub use archives::{release_manifest, release_web_archive, xfer_archive};
 pub use auth::{capability_tokens, device_proofs};
 pub use cli::{cli_args, mcp_stdio};
 pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
+pub use metrics::{docker_engine, gpu_tools};
 pub use quota::quota_responses;
 pub use sandbox::sandbox_plan;
 pub use stores::{audit_log, backlog_notes, chatlog, directory_state, identity_store, mailbox_log};
@@ -36,6 +38,8 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("codex_rpc", codex_rpc),
     ("device_proofs", device_proofs),
     ("directory_state", directory_state),
+    ("docker_engine", docker_engine),
+    ("gpu_tools", gpu_tools),
     ("grok_acp", grok_acp),
     ("identity_store", identity_store),
     ("mailbox_log", mailbox_log),
