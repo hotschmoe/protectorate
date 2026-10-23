@@ -282,6 +282,8 @@ message ApplyUpdateRequest {
   // size and sha256 (hex) are what the node must find at path.
   uint64 size = 4;
   string sha256 = 5;
+  // When set, the candidate must report this version before any binary swap.
+  string expected_version = 6;
 }
 
 message ApplyUpdateResponse {
@@ -298,8 +300,9 @@ message ApplyUpdateResponse {
 enum FileKind {
   FILE_KIND_UNSPECIFIED = 0;
   FILE_KIND_FILE = 1;
-  // FILE_KIND_DIRECTORY travels as a tar stream of regular files and
-  // directories; symlinks and special files are skipped.
+  // FILE_KIND_DIRECTORY travels as a verified archive stream of regular
+  // files and directories; symlinks and special files are skipped. The
+  // archive encoding is an implementation detail of the transfer peers.
   FILE_KIND_DIRECTORY = 2;
 }
 
@@ -410,6 +413,15 @@ message NodeMetrics {
   // jobs is how this node isolates and elevates jobs; unset when it runs
   // none.
   JobIsolation jobs = 17;
+  // update is the persisted trial outcome for the last binary replacement.
+  NodeUpdateState update = 18;
+}
+
+message NodeUpdateState {
+  string phase = 1; // trial, confirmed, or rolledback.
+  string previous_version = 2;
+  string version = 3;
+  uint32 attempts = 4;
 }
 
 message CpuMetrics {

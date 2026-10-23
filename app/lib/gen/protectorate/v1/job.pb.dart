@@ -82,8 +82,9 @@ class JobIsolation extends $pb.GeneratedMessage {
           JobIsolation.$_createMessage);
   static JobIsolation? _defaultInstance;
 
-  /// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "bwrap" (Linux:
-  /// bwrap in a systemd user scope), "runner" (Windows: the
+  /// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "rust-namespaces"
+  /// (Linux: a direct namespace launcher in a systemd user scope),
+  /// "runner" (Windows: the
   /// protectorate-runner account in a job object), "job-object" (Windows:
   /// the agent's own account in a job object, unisolated) or "none".
   @$pb.TagNumber(1)

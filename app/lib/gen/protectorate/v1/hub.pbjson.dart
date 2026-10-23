@@ -53,6 +53,13 @@ const GetStatusResponse$json = {
     },
     {'1': 'update_channel', '3': 8, '4': 1, '5': 9, '10': 'updateChannel'},
     {'1': 'release_notes_url', '3': 9, '4': 1, '5': 9, '10': 'releaseNotesUrl'},
+    {
+      '1': 'release_confirmed',
+      '3': 10,
+      '4': 1,
+      '5': 8,
+      '10': 'releaseConfirmed'
+    },
   ],
 };
 
@@ -64,7 +71,7 @@ final $typed_data.Uint8List getStatusResponseDescriptor = $convert.base64Decode(
     'gLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIJc3RhcnRlZEF0EisKEWF2YWlsYWJsZV92'
     'ZXJzaW9uGAcgASgJUhBhdmFpbGFibGVWZXJzaW9uEiUKDnVwZGF0ZV9jaGFubmVsGAggASgJUg'
     '11cGRhdGVDaGFubmVsEioKEXJlbGVhc2Vfbm90ZXNfdXJsGAkgASgJUg9yZWxlYXNlTm90ZXNV'
-    'cmw=');
+    'cmwSKwoRcmVsZWFzZV9jb25maXJtZWQYCiABKAhSEHJlbGVhc2VDb25maXJtZWQ=');
 
 @$core.Deprecated('Use getSleeveRuntimeRequestDescriptor instead')
 const GetSleeveRuntimeRequest$json = {
@@ -109,6 +116,8 @@ const GetSleeveRuntimeResponse$json = {
       '5': 4,
       '10': 'snapshotLimitBytes'
     },
+    {'1': 'runtime', '3': 12, '4': 1, '5': 9, '10': 'runtime'},
+    {'1': 'helper_path', '3': 13, '4': 1, '5': 9, '10': 'helperPath'},
   ],
 };
 
@@ -122,7 +131,8 @@ final $typed_data.Uint8List getSleeveRuntimeResponseDescriptor = $convert.base64
     'llcxJMChRzbmFwc2hvdF9wcmVwYXJlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1l'
     'c3RhbXBSEnNuYXBzaG90UHJlcGFyZWRBdBItChJzbmFwc2hvdF9wcmVwYXJpbmcYCSABKAhSEX'
     'NuYXBzaG90UHJlcGFyaW5nEiUKDnNuYXBzaG90X2Vycm9yGAogASgJUg1zbmFwc2hvdEVycm9y'
-    'EjAKFHNuYXBzaG90X2xpbWl0X2J5dGVzGAsgASgEUhJzbmFwc2hvdExpbWl0Qnl0ZXM=');
+    'EjAKFHNuYXBzaG90X2xpbWl0X2J5dGVzGAsgASgEUhJzbmFwc2hvdExpbWl0Qnl0ZXMSGAoHcn'
+    'VudGltZRgMIAEoCVIHcnVudGltZRIfCgtoZWxwZXJfcGF0aBgNIAEoCVIKaGVscGVyUGF0aA==');
 
 const $core.Map<$core.String, $core.dynamic> HubServiceBase$json = {
   '1': 'HubService',

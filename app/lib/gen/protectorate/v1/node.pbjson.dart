@@ -337,6 +337,7 @@ const ApplyUpdateRequest$json = {
     {'1': 'path', '3': 3, '4': 1, '5': 9, '10': 'path'},
     {'1': 'size', '3': 4, '4': 1, '5': 4, '10': 'size'},
     {'1': 'sha256', '3': 5, '4': 1, '5': 9, '10': 'sha256'},
+    {'1': 'expected_version', '3': 6, '4': 1, '5': 9, '10': 'expectedVersion'},
   ],
   '9': [
     {'1': 2, '2': 3},
@@ -346,7 +347,8 @@ const ApplyUpdateRequest$json = {
 /// Descriptor for `ApplyUpdateRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List applyUpdateRequestDescriptor = $convert.base64Decode(
     'ChJBcHBseVVwZGF0ZVJlcXVlc3QSEgoEbmFtZRgBIAEoCVIEbmFtZRISCgRwYXRoGAMgASgJUg'
-    'RwYXRoEhIKBHNpemUYBCABKARSBHNpemUSFgoGc2hhMjU2GAUgASgJUgZzaGEyNTZKBAgCEAM=');
+    'RwYXRoEhIKBHNpemUYBCABKARSBHNpemUSFgoGc2hhMjU2GAUgASgJUgZzaGEyNTYSKQoQZXhw'
+    'ZWN0ZWRfdmVyc2lvbhgGIAEoCVIPZXhwZWN0ZWRWZXJzaW9uSgQIAhAD');
 
 @$core.Deprecated('Use applyUpdateResponseDescriptor instead')
 const ApplyUpdateResponse$json = {
@@ -659,6 +661,14 @@ const NodeMetrics$json = {
       '6': '.protectorate.v1.JobIsolation',
       '10': 'jobs'
     },
+    {
+      '1': 'update',
+      '3': 18,
+      '4': 1,
+      '5': 11,
+      '6': '.protectorate.v1.NodeUpdateState',
+      '10': 'update'
+    },
   ],
 };
 
@@ -677,7 +687,25 @@ final $typed_data.Uint8List nodeMetricsDescriptor = $convert.base64Decode(
     'cmF0ZS52MS5EaXJTaXplUgl3YXRjaERpcnMSGgoId2FybmluZ3MYDiADKAlSCHdhcm5pbmdzEj'
     'EKB3NsZWV2ZXMYDyADKAsyFy5wcm90ZWN0b3JhdGUudjEuU2xlZXZlUgdzbGVldmVzEjcKBG5w'
     'dXMYECADKAsyIy5wcm90ZWN0b3JhdGUudjEuQWNjZWxlcmF0b3JNZXRyaWNzUgRucHVzEjEKBG'
-    'pvYnMYESABKAsyHS5wcm90ZWN0b3JhdGUudjEuSm9iSXNvbGF0aW9uUgRqb2Jz');
+    'pvYnMYESABKAsyHS5wcm90ZWN0b3JhdGUudjEuSm9iSXNvbGF0aW9uUgRqb2JzEjgKBnVwZGF0'
+    'ZRgSIAEoCzIgLnByb3RlY3RvcmF0ZS52MS5Ob2RlVXBkYXRlU3RhdGVSBnVwZGF0ZQ==');
+
+@$core.Deprecated('Use nodeUpdateStateDescriptor instead')
+const NodeUpdateState$json = {
+  '1': 'NodeUpdateState',
+  '2': [
+    {'1': 'phase', '3': 1, '4': 1, '5': 9, '10': 'phase'},
+    {'1': 'previous_version', '3': 2, '4': 1, '5': 9, '10': 'previousVersion'},
+    {'1': 'version', '3': 3, '4': 1, '5': 9, '10': 'version'},
+    {'1': 'attempts', '3': 4, '4': 1, '5': 13, '10': 'attempts'},
+  ],
+};
+
+/// Descriptor for `NodeUpdateState`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List nodeUpdateStateDescriptor = $convert.base64Decode(
+    'Cg9Ob2RlVXBkYXRlU3RhdGUSFAoFcGhhc2UYASABKAlSBXBoYXNlEikKEHByZXZpb3VzX3Zlcn'
+    'Npb24YAiABKAlSD3ByZXZpb3VzVmVyc2lvbhIYCgd2ZXJzaW9uGAMgASgJUgd2ZXJzaW9uEhoK'
+    'CGF0dGVtcHRzGAQgASgNUghhdHRlbXB0cw==');
 
 @$core.Deprecated('Use cpuMetricsDescriptor instead')
 const CpuMetrics$json = {
@@ -1573,6 +1601,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveResult': $5.SleeveResult$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
   '.protectorate.v1.JobIsolation': $3.JobIsolation$json,
+  '.protectorate.v1.NodeUpdateState': NodeUpdateState$json,
   '.protectorate.v1.WatchMetricsRequest': WatchMetricsRequest$json,
   '.protectorate.v1.PrepareJobRequest': $3.PrepareJobRequest$json,
   '.protectorate.v1.PrepareJobResponse': $3.PrepareJobResponse$json,
@@ -1770,6 +1799,7 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.SleeveResult': $5.SleeveResult$json,
   '.protectorate.v1.AcceleratorMetrics': AcceleratorMetrics$json,
   '.protectorate.v1.JobIsolation': $3.JobIsolation$json,
+  '.protectorate.v1.NodeUpdateState': NodeUpdateState$json,
   '.protectorate.v1.NodeAlert': NodeAlert$json,
   '.protectorate.v1.DeskState': $0.DeskState$json,
   '.protectorate.v1.DeskPolicy': $0.DeskPolicy$json,

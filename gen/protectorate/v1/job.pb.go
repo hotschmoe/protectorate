@@ -205,8 +205,9 @@ func (JobEnd) EnumDescriptor() ([]byte, []int) {
 // JobIsolation is what a node can do for jobs, reported in its metrics.
 type JobIsolation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "bwrap" (Linux:
-	// bwrap in a systemd user scope), "runner" (Windows: the
+	// sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "rust-namespaces"
+	// (Linux: a direct namespace launcher in a systemd user scope),
+	// "runner" (Windows: the
 	// protectorate-runner account in a job object), "job-object" (Windows:
 	// the agent's own account in a job object, unisolated) or "none".
 	Sandbox string `protobuf:"bytes,1,opt,name=sandbox,proto3" json:"sandbox,omitempty"`

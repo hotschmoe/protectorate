@@ -73,8 +73,9 @@ class FileKind extends $pb.ProtobufEnum {
   static const FileKind FILE_KIND_FILE =
       FileKind._(1, _omitEnumNames ? '' : 'FILE_KIND_FILE');
 
-  /// FILE_KIND_DIRECTORY travels as a tar stream of regular files and
-  /// directories; symlinks and special files are skipped.
+  /// FILE_KIND_DIRECTORY travels as a verified archive stream of regular
+  /// files and directories; symlinks and special files are skipped. The
+  /// archive encoding is an implementation detail of the transfer peers.
   static const FileKind FILE_KIND_DIRECTORY =
       FileKind._(2, _omitEnumNames ? '' : 'FILE_KIND_DIRECTORY');
 

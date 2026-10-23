@@ -2697,7 +2697,7 @@ class SleeveDiskEntry extends $pb.GeneratedMessage {
 }
 
 /// SleeveService manages sleeves on the hub machine: one workspace plus one
-/// harness, run inside a bubblewrap sandbox in a systemd scope with CPU and
+/// harness, run inside a Linux namespace sandbox in a systemd scope with CPU and
 /// memory limits. In chat mode (the default for agent harnesses) the harness
 /// runs its official headless protocol and is driven through ChatService. In
 /// terminal mode it is a tmux session ("sleeve-<name>"), so CapturePane and the

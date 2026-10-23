@@ -629,12 +629,14 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
     $core.String? path,
     $fixnum.Int64? size,
     $core.String? sha256,
+    $core.String? expectedVersion,
   }) {
     final result = ApplyUpdateRequest._();
     if (name != null) result.name = name;
     if (path != null) result.path = path;
     if (size != null) result.size = size;
     if (sha256 != null) result.sha256 = sha256;
+    if (expectedVersion != null) result.expectedVersion = expectedVersion;
     return result;
   }
 
@@ -657,6 +659,7 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(4, _omitFieldNames ? '' : 'size', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
     ..aOS(5, _omitFieldNames ? '' : 'sha256')
+    ..aOS(6, _omitFieldNames ? '' : 'expectedVersion')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -719,6 +722,16 @@ class ApplyUpdateRequest extends $pb.GeneratedMessage {
   $core.bool hasSha256() => $_has(3);
   @$pb.TagNumber(5)
   void clearSha256() => $_clearField(5);
+
+  /// When set, the candidate must report this version before any binary swap.
+  @$pb.TagNumber(6)
+  $core.String get expectedVersion => $_getSZ(4);
+  @$pb.TagNumber(6)
+  set expectedVersion($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(6)
+  $core.bool hasExpectedVersion() => $_has(4);
+  @$pb.TagNumber(6)
+  void clearExpectedVersion() => $_clearField(6);
 }
 
 class ApplyUpdateResponse extends $pb.GeneratedMessage {
@@ -1657,6 +1670,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     $core.Iterable<$2.Sleeve>? sleeves,
     $core.Iterable<AcceleratorMetrics>? npus,
     $3.JobIsolation? jobs,
+    NodeUpdateState? update,
   }) {
     final result = NodeMetrics._();
     if (hostname != null) result.hostname = hostname;
@@ -1676,6 +1690,7 @@ class NodeMetrics extends $pb.GeneratedMessage {
     if (sleeves != null) result.sleeves.addAll(sleeves);
     if (npus != null) result.npus.addAll(npus);
     if (jobs != null) result.jobs = jobs;
+    if (update != null) result.update = update;
     return result;
   }
 
@@ -1720,6 +1735,8 @@ class NodeMetrics extends $pb.GeneratedMessage {
         subBuilder: AcceleratorMetrics.$_createMessage)
     ..aOM<$3.JobIsolation>(17, _omitFieldNames ? '' : 'jobs',
         subBuilder: $3.JobIsolation.$_createMessage)
+    ..aOM<NodeUpdateState>(18, _omitFieldNames ? '' : 'update',
+        subBuilder: NodeUpdateState.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -1880,6 +1897,112 @@ class NodeMetrics extends $pb.GeneratedMessage {
   void clearJobs() => $_clearField(17);
   @$pb.TagNumber(17)
   $3.JobIsolation ensureJobs() => $_ensure(16);
+
+  /// update is the persisted trial outcome for the last binary replacement.
+  @$pb.TagNumber(18)
+  NodeUpdateState get update => $_getN(17);
+  @$pb.TagNumber(18)
+  set update(NodeUpdateState value) => $_setField(18, value);
+  @$pb.TagNumber(18)
+  $core.bool hasUpdate() => $_has(17);
+  @$pb.TagNumber(18)
+  void clearUpdate() => $_clearField(18);
+  @$pb.TagNumber(18)
+  NodeUpdateState ensureUpdate() => $_ensure(17);
+}
+
+class NodeUpdateState extends $pb.GeneratedMessage {
+  factory NodeUpdateState({
+    $core.String? phase,
+    $core.String? previousVersion,
+    $core.String? version,
+    $core.int? attempts,
+  }) {
+    final result = NodeUpdateState._();
+    if (phase != null) result.phase = phase;
+    if (previousVersion != null) result.previousVersion = previousVersion;
+    if (version != null) result.version = version;
+    if (attempts != null) result.attempts = attempts;
+    return result;
+  }
+
+  NodeUpdateState._();
+
+  factory NodeUpdateState.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeUpdateState()..mergeFromBuffer(data, registry);
+  factory NodeUpdateState.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      NodeUpdateState()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'NodeUpdateState',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: NodeUpdateState.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'phase')
+    ..aOS(2, _omitFieldNames ? '' : 'previousVersion')
+    ..aOS(3, _omitFieldNames ? '' : 'version')
+    ..aI(4, _omitFieldNames ? '' : 'attempts', fieldType: $pb.PbFieldType.OU3)
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeUpdateState clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  NodeUpdateState copyWith(void Function(NodeUpdateState) updates) =>
+      super.copyWith((message) => updates(message as NodeUpdateState))
+          as NodeUpdateState;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use NodeUpdateState() / NodeUpdateState.new instead')
+  static NodeUpdateState create() => NodeUpdateState._();
+  static $pb.GeneratedMessage $_createMessage() => NodeUpdateState._();
+  @$core.override
+  NodeUpdateState createEmptyInstance() => NodeUpdateState._();
+  @$core.pragma('dart2js:noInline')
+  static NodeUpdateState getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<NodeUpdateState>(
+          NodeUpdateState.$_createMessage);
+  static NodeUpdateState? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get phase => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set phase($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPhase() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPhase() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get previousVersion => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set previousVersion($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasPreviousVersion() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearPreviousVersion() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get version => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set version($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasVersion() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearVersion() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.int get attempts => $_getIZ(3);
+  @$pb.TagNumber(4)
+  set attempts($core.int value) => $_setUnsignedInt32(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasAttempts() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearAttempts() => $_clearField(4);
 }
 
 class CpuMetrics extends $pb.GeneratedMessage {

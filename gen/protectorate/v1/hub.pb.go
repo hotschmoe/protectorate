@@ -71,6 +71,8 @@ type GetStatusResponse struct {
 	AvailableVersion string                 `protobuf:"bytes,7,opt,name=available_version,json=availableVersion,proto3" json:"available_version,omitempty"`
 	UpdateChannel    string                 `protobuf:"bytes,8,opt,name=update_channel,json=updateChannel,proto3" json:"update_channel,omitempty"`
 	ReleaseNotesUrl  string                 `protobuf:"bytes,9,opt,name=release_notes_url,json=releaseNotesUrl,proto3" json:"release_notes_url,omitempty"`
+	// True when the running release is the guardian-confirmed active release.
+	ReleaseConfirmed bool `protobuf:"varint,10,opt,name=release_confirmed,json=releaseConfirmed,proto3" json:"release_confirmed,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -168,6 +170,13 @@ func (x *GetStatusResponse) GetReleaseNotesUrl() string {
 	return ""
 }
 
+func (x *GetStatusResponse) GetReleaseConfirmed() bool {
+	if x != nil {
+		return x.ReleaseConfirmed
+	}
+	return false
+}
+
 type GetSleeveRuntimeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -205,7 +214,8 @@ func (*GetSleeveRuntimeRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetSleeveRuntimeResponse struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Legacy fields retained while the Flutter client moves to runtime/helper_path.
 	BwrapPath          string                 `protobuf:"bytes,1,opt,name=bwrap_path,json=bwrapPath,proto3" json:"bwrap_path,omitempty"`
 	BwrapVersion       string                 `protobuf:"bytes,2,opt,name=bwrap_version,json=bwrapVersion,proto3" json:"bwrap_version,omitempty"`
 	Overlays           bool                   `protobuf:"varint,3,opt,name=overlays,proto3" json:"overlays,omitempty"`
@@ -217,8 +227,13 @@ type GetSleeveRuntimeResponse struct {
 	SnapshotPreparing  bool                   `protobuf:"varint,9,opt,name=snapshot_preparing,json=snapshotPreparing,proto3" json:"snapshot_preparing,omitempty"`
 	SnapshotError      string                 `protobuf:"bytes,10,opt,name=snapshot_error,json=snapshotError,proto3" json:"snapshot_error,omitempty"`
 	SnapshotLimitBytes uint64                 `protobuf:"varint,11,opt,name=snapshot_limit_bytes,json=snapshotLimitBytes,proto3" json:"snapshot_limit_bytes,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// runtime identifies the active sleeve launcher, for example
+	// "rust-namespaces". Empty means no launcher is configured.
+	Runtime string `protobuf:"bytes,12,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	// helper_path is the Linux namespace helper executable used by the runtime.
+	HelperPath    string `protobuf:"bytes,13,opt,name=helper_path,json=helperPath,proto3" json:"helper_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetSleeveRuntimeResponse) Reset() {
@@ -328,12 +343,26 @@ func (x *GetSleeveRuntimeResponse) GetSnapshotLimitBytes() uint64 {
 	return 0
 }
 
+func (x *GetSleeveRuntimeResponse) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
+}
+
+func (x *GetSleeveRuntimeResponse) GetHelperPath() string {
+	if x != nil {
+		return x.HelperPath
+	}
+	return ""
+}
+
 var File_protectorate_v1_hub_proto protoreflect.FileDescriptor
 
 const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"\n" +
 	"\x19protectorate/v1/hub.proto\x12\x0fprotectorate.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x12\n" +
-	"\x10GetStatusRequest\"\xcf\x02\n" +
+	"\x10GetStatusRequest\"\xfc\x02\n" +
 	"\x11GetStatusResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x0e\n" +
@@ -344,8 +373,10 @@ const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"started_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12+\n" +
 	"\x11available_version\x18\a \x01(\tR\x10availableVersion\x12%\n" +
 	"\x0eupdate_channel\x18\b \x01(\tR\rupdateChannel\x12*\n" +
-	"\x11release_notes_url\x18\t \x01(\tR\x0freleaseNotesUrl\"\x19\n" +
-	"\x17GetSleeveRuntimeRequest\"\xee\x03\n" +
+	"\x11release_notes_url\x18\t \x01(\tR\x0freleaseNotesUrl\x12+\n" +
+	"\x11release_confirmed\x18\n" +
+	" \x01(\bR\x10releaseConfirmed\"\x19\n" +
+	"\x17GetSleeveRuntimeRequest\"\xa9\x04\n" +
 	"\x18GetSleeveRuntimeResponse\x12\x1d\n" +
 	"\n" +
 	"bwrap_path\x18\x01 \x01(\tR\tbwrapPath\x12#\n" +
@@ -359,7 +390,10 @@ const file_protectorate_v1_hub_proto_rawDesc = "" +
 	"\x12snapshot_preparing\x18\t \x01(\bR\x11snapshotPreparing\x12%\n" +
 	"\x0esnapshot_error\x18\n" +
 	" \x01(\tR\rsnapshotError\x120\n" +
-	"\x14snapshot_limit_bytes\x18\v \x01(\x04R\x12snapshotLimitBytes2\xd3\x01\n" +
+	"\x14snapshot_limit_bytes\x18\v \x01(\x04R\x12snapshotLimitBytes\x12\x18\n" +
+	"\aruntime\x18\f \x01(\tR\aruntime\x12\x1f\n" +
+	"\vhelper_path\x18\r \x01(\tR\n" +
+	"helperPath2\xd3\x01\n" +
 	"\n" +
 	"HubService\x12W\n" +
 	"\tGetStatus\x12!.protectorate.v1.GetStatusRequest\x1a\".protectorate.v1.GetStatusResponse\"\x03\x90\x02\x01\x12l\n" +

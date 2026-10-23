@@ -73,6 +73,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     $core.String? availableVersion,
     $core.String? updateChannel,
     $core.String? releaseNotesUrl,
+    $core.bool? releaseConfirmed,
   }) {
     final result = GetStatusResponse._();
     if (version != null) result.version = version;
@@ -84,6 +85,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     if (availableVersion != null) result.availableVersion = availableVersion;
     if (updateChannel != null) result.updateChannel = updateChannel;
     if (releaseNotesUrl != null) result.releaseNotesUrl = releaseNotesUrl;
+    if (releaseConfirmed != null) result.releaseConfirmed = releaseConfirmed;
     return result;
   }
 
@@ -111,6 +113,7 @@ class GetStatusResponse extends $pb.GeneratedMessage {
     ..aOS(7, _omitFieldNames ? '' : 'availableVersion')
     ..aOS(8, _omitFieldNames ? '' : 'updateChannel')
     ..aOS(9, _omitFieldNames ? '' : 'releaseNotesUrl')
+    ..aOB(10, _omitFieldNames ? '' : 'releaseConfirmed')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -219,6 +222,16 @@ class GetStatusResponse extends $pb.GeneratedMessage {
   $core.bool hasReleaseNotesUrl() => $_has(8);
   @$pb.TagNumber(9)
   void clearReleaseNotesUrl() => $_clearField(9);
+
+  /// True when the running release is the guardian-confirmed active release.
+  @$pb.TagNumber(10)
+  $core.bool get releaseConfirmed => $_getBF(9);
+  @$pb.TagNumber(10)
+  set releaseConfirmed($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasReleaseConfirmed() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearReleaseConfirmed() => $_clearField(10);
 }
 
 class GetSleeveRuntimeRequest extends $pb.GeneratedMessage {
@@ -278,6 +291,8 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
     $core.bool? snapshotPreparing,
     $core.String? snapshotError,
     $fixnum.Int64? snapshotLimitBytes,
+    $core.String? runtime,
+    $core.String? helperPath,
   }) {
     final result = GetSleeveRuntimeResponse._();
     if (bwrapPath != null) result.bwrapPath = bwrapPath;
@@ -293,6 +308,8 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
     if (snapshotError != null) result.snapshotError = snapshotError;
     if (snapshotLimitBytes != null)
       result.snapshotLimitBytes = snapshotLimitBytes;
+    if (runtime != null) result.runtime = runtime;
+    if (helperPath != null) result.helperPath = helperPath;
     return result;
   }
 
@@ -328,6 +345,8 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
     ..a<$fixnum.Int64>(
         11, _omitFieldNames ? '' : 'snapshotLimitBytes', $pb.PbFieldType.OU6,
         defaultOrMaker: $fixnum.Int64.ZERO)
+    ..aOS(12, _omitFieldNames ? '' : 'runtime')
+    ..aOS(13, _omitFieldNames ? '' : 'helperPath')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -355,6 +374,7 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
           GetSleeveRuntimeResponse.$_createMessage);
   static GetSleeveRuntimeResponse? _defaultInstance;
 
+  /// Legacy fields retained while the Flutter client moves to runtime/helper_path.
   @$pb.TagNumber(1)
   $core.String get bwrapPath => $_getSZ(0);
   @$pb.TagNumber(1)
@@ -455,6 +475,27 @@ class GetSleeveRuntimeResponse extends $pb.GeneratedMessage {
   $core.bool hasSnapshotLimitBytes() => $_has(10);
   @$pb.TagNumber(11)
   void clearSnapshotLimitBytes() => $_clearField(11);
+
+  /// runtime identifies the active sleeve launcher, for example
+  /// "rust-namespaces". Empty means no launcher is configured.
+  @$pb.TagNumber(12)
+  $core.String get runtime => $_getSZ(11);
+  @$pb.TagNumber(12)
+  set runtime($core.String value) => $_setString(11, value);
+  @$pb.TagNumber(12)
+  $core.bool hasRuntime() => $_has(11);
+  @$pb.TagNumber(12)
+  void clearRuntime() => $_clearField(12);
+
+  /// helper_path is the Linux namespace helper executable used by the runtime.
+  @$pb.TagNumber(13)
+  $core.String get helperPath => $_getSZ(12);
+  @$pb.TagNumber(13)
+  set helperPath($core.String value) => $_setString(12, value);
+  @$pb.TagNumber(13)
+  $core.bool hasHelperPath() => $_has(12);
+  @$pb.TagNumber(13)
+  void clearHelperPath() => $_clearField(13);
 }
 
 /// HubService reports on the hub process itself.
