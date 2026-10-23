@@ -2,7 +2,7 @@
 //! single-threaded helper; this module never unshares the calling hub process.
 //! Requires Linux openat2/open_tree/mount_setattr/move_mount, unprivileged user
 //! namespaces and a functioning systemd user manager for ordinary cgroup limits.
-use crate::{Access, Cgroup, PlanKind, ValidatedPlan, Workload};
+use crate::{egress, Access, Cgroup, Network, PlanKind, ValidatedPlan, Workload};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -82,7 +82,7 @@ fn absolute(path: &Path) -> bool {
             .components()
             .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
 }
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct LaunchOptions {
     pub helper: PathBuf,
     /// Runtime-owned directory outside every mounted source.
@@ -95,6 +95,8 @@ pub struct LaunchOptions {
     pub setup_timeout: Duration,
     /// A terminal sleeve needs the tmux pane's pty; jobs capture output.
     pub stdio: StdioMode,
+    /// Receives every egress proxy decision for a proxied plan.
+    pub egress_log: Option<egress::Log>,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum StdioMode {
@@ -119,8 +121,18 @@ impl LaunchOptions {
             environment: BTreeMap::new(),
             setup_timeout: Duration::from_secs(15),
             stdio: StdioMode::Capture,
+            egress_log: None,
         }
     }
+}
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum Kind {
+    Plain,
+    Device,
+    /// Attached after overlays so it can cover a file inside one.
+    Mask,
+    /// An egress proxy socket owned by the launcher.
+    Socket,
 }
 #[derive(Serialize, Deserialize)]
 struct PinnedMount {
@@ -128,10 +140,9 @@ struct PinnedMount {
     target: PathBuf,
     read_only: bool,
     directory: bool,
-    device: bool,
+    kind: Kind,
     device_id: u64,
     inode: u64,
-    mask: bool,
 }
 /// Overlay layers are pinned like every other mount source: the lower is
 /// attached read-only at a private staging path. Upper/work are mounted from
@@ -163,6 +174,8 @@ struct HelperPlan {
     nested_unit: Option<String>,
     direct_scope: Option<PathBuf>,
     tmp_bytes: u64,
+    /// Namespace loopback ports and the in-sandbox sockets they relay to.
+    relays: Vec<(u16, PathBuf)>,
 }
 struct NestedCgroup {
     path: PathBuf,
@@ -264,8 +277,7 @@ fn pin(
     source: &Path,
     target: &Path,
     read_only: bool,
-    device: bool,
-    mask: bool,
+    kind: Kind,
     files: &mut Vec<File>,
     mounts: &mut Vec<PinnedMount>,
 ) -> Result<()> {
@@ -274,19 +286,22 @@ fn pin(
     }
     let file = open_pinned(source)?;
     let metadata = file.metadata().map_err(ioerr("stat pinned source"))?;
-    let kind = metadata.mode() & libc::S_IFMT;
-    if !(metadata.is_dir() || metadata.is_file() || device && kind == libc::S_IFCHR) {
-        return invalid("mount source is not an expected plain file or directory");
+    let expected = match kind {
+        Kind::Plain | Kind::Mask => metadata.is_dir() || metadata.is_file(),
+        Kind::Device => metadata.mode() & libc::S_IFMT == libc::S_IFCHR,
+        Kind::Socket => metadata.mode() & libc::S_IFMT == libc::S_IFSOCK,
+    };
+    if !expected {
+        return invalid("mount source is not the expected file type");
     }
     mounts.push(PinnedMount {
         source: source.into(),
         target: target.into(),
         read_only,
         directory: metadata.is_dir(),
-        device,
+        kind,
         device_id: metadata.dev(),
         inode: metadata.ino(),
-        mask,
     });
     files.push(file);
     Ok(())
@@ -301,6 +316,7 @@ pub struct ChildHandle {
     alive: Arc<AtomicBool>,
     kill_gate: Arc<Mutex<()>>,
     root: Option<tempfile::TempDir>,
+    egress: Option<egress::Proxy>,
     pub init_pid: u32,
 }
 /// A scoped cancellation handle that can be used while another thread waits
@@ -604,6 +620,7 @@ pub fn spawn_direct_harness(plan: &ValidatedPlan, options: &LaunchOptions) -> Re
         alive: Arc::new(AtomicBool::new(true)),
         kill_gate: Arc::new(Mutex::new(())),
         root: None,
+        egress: None,
         init_pid,
     })
 }
@@ -689,7 +706,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
     }
     let root = tempfile::Builder::new()
         .prefix("sandbox-")
-        .tempdir_in(runtime)
+        .tempdir_in(&runtime)
         .map_err(ioerr("create private mount root"))?;
     fs::set_permissions(
         root.path(),
@@ -716,7 +733,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
                 }
                 links.push((path.into(), link));
             }
-            Ok(_) => pin(path, path, true, false, false, &mut files, &mut mounts)?,
+            Ok(_) => pin(path, path, true, Kind::Plain, &mut files, &mut mounts)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(ioerr("inspect system directory")(e)),
         }
@@ -728,8 +745,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             &resolver,
             &resolver,
             true,
-            false,
-            false,
+            Kind::Plain,
             &mut files,
             &mut mounts,
         )?;
@@ -746,8 +762,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             Path::new(device),
             Path::new(device),
             false,
-            true,
-            false,
+            Kind::Device,
             &mut files,
             &mut mounts,
         )?;
@@ -759,8 +774,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         private_home,
         &options.home_target,
         false,
-        false,
-        false,
+        Kind::Plain,
         &mut files,
         &mut mounts,
     )?;
@@ -774,11 +788,23 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             &grant.source,
             &grant.target,
             grant.access == Access::ReadOnly,
-            false,
-            false,
+            Kind::Plain,
             &mut files,
             &mut mounts,
         )?;
+    }
+    // Fail closed: a sandbox that may use the network never starts without
+    // its proxy, and a sandbox without one has no route at all.
+    let proxy = match plan.network() {
+        Network::Proxied(policy) => Some(
+            egress::Proxy::start(policy, &runtime, options.egress_log.clone())
+                .map_err(ioerr("start egress proxy"))?,
+        ),
+        Network::Loopback => None,
+        Network::Host => return invalid("a sandboxed plan cannot use the host network"),
+    };
+    for (source, target) in proxy.iter().flat_map(|proxy| &proxy.sockets) {
+        pin(source, target, true, Kind::Socket, &mut files, &mut mounts)?;
     }
     // Overlay layers are staged after every tool and read-only mount so an
     // overlay can carve a writable cache out of a read-only tool bind. The
@@ -800,8 +826,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             &overlay.lower,
             &lower_stage,
             true,
-            false,
-            false,
+            Kind::Plain,
             &mut files,
             &mut mounts,
         )?;
@@ -839,8 +864,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             layer_parent,
             &layer_stage,
             false,
-            false,
-            false,
+            Kind::Plain,
             &mut files,
             &mut mounts,
         )?;
@@ -868,8 +892,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             &mask.source,
             &mask.target,
             true,
-            false,
-            true,
+            Kind::Mask,
             &mut files,
             &mut mounts,
         )?;
@@ -925,6 +948,26 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         }
     }
     environment.entry("LANG".into()).or_insert("C.UTF-8".into());
+    if let Some(proxy) = &proxy {
+        let port = proxy.relays[0].0;
+        let url = format!("http://127.0.0.1:{port}");
+        for key in [
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ] {
+            environment.insert(key.into(), url.clone());
+        }
+        for key in ["NO_PROXY", "no_proxy"] {
+            environment.insert(key.into(), "localhost,127.0.0.1,::1".into());
+        }
+        // Node's built-in fetch and http clients ignore the variables above
+        // unless this documented switch is set (Node 22.21 and 24.5 onward).
+        environment.insert("NODE_USE_ENV_PROXY".into(), "1".into());
+    }
     let unit = format!(
         "protectorate-rust-{}-{}.scope",
         std::process::id(),
@@ -950,6 +993,10 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         nested_unit: (plan.cgroup() == Some(Cgroup::DelegatedNested)).then(|| unit.clone()),
         direct_scope: direct_scope.0.clone(),
         tmp_bytes,
+        relays: proxy
+            .as_ref()
+            .map(|proxy| proxy.relays.clone())
+            .unwrap_or_default(),
     };
     let raw = serde_json::to_vec(&payload)
         .map_err(|e| LaunchError::Invalid(format!("cannot encode helper plan: {e}")))?;
@@ -1050,6 +1097,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         alive: Arc::new(AtomicBool::new(true)),
         kill_gate: Arc::new(Mutex::new(())),
         root: Some(root),
+        egress: proxy,
         init_pid: 0,
     };
     let mut control = parent_control;
@@ -1080,6 +1128,10 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         {
             let _ = handle.cancel();
             return Err(ioerr("remove host sandbox staging directory")(error));
+        }
+        if let Err(error) = handle.egress.as_ref().map_or(Ok(()), egress::Proxy::unlink) {
+            let _ = handle.cancel();
+            return Err(ioerr("remove host egress socket names")(error));
         }
         return Ok(handle);
     }
@@ -1428,11 +1480,16 @@ fn setup_user_namespace(plan: &HelperPlan) -> Result<Option<NestedCgroup>> {
     syscall_ok(
         unsafe {
             libc::unshare(
-                libc::CLONE_NEWNS | libc::CLONE_NEWPID | libc::CLONE_NEWIPC | libc::CLONE_NEWUTS,
+                libc::CLONE_NEWNS
+                    | libc::CLONE_NEWPID
+                    | libc::CLONE_NEWIPC
+                    | libc::CLONE_NEWUTS
+                    | libc::CLONE_NEWNET,
             )
         } as libc::c_long,
-        "create mount/PID/IPC/UTS namespaces",
+        "create mount/PID/IPC/UTS/network namespaces",
     )?;
+    egress::loopback_up().map_err(ioerr("bring up namespace loopback"))?;
     syscall_ok(
         unsafe {
             libc::mount(
@@ -1446,6 +1503,24 @@ fn setup_user_namespace(plan: &HelperPlan) -> Result<Option<NestedCgroup>> {
         "make mount propagation private",
     )?;
     Ok(nested)
+}
+/// The helper cannot create threads once it has unshared a PID namespace, so
+/// the relay is a second process inside the workload's PID namespace. It has
+/// no capabilities and cannot be ptraced; the namespace ends it with the
+/// workload.
+fn spawn_relay(relays: Vec<(std::net::TcpListener, PathBuf)>) -> Result<()> {
+    let pid = syscall_ok(unsafe { libc::fork() } as libc::c_long, "fork egress relay")?;
+    if pid == 0 {
+        unsafe { libc::close(CONTROL_FD) };
+        let confined = parent_death().is_ok()
+            && drop_privileges(false).is_ok()
+            && unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0;
+        if confined {
+            egress::serve_relays(relays);
+        }
+        unsafe { libc::_exit(125) };
+    }
+    Ok(())
 }
 fn drop_privileges(nested: bool) -> Result<()> {
     // Linux requires CAP_SETFCAP in the parent user namespace to write a
@@ -1566,7 +1641,7 @@ fn setup_and_exec(
     )
     .map_err(|e| LaunchError::Setup(format!("share /tmp with /var/tmp: {e}")))?;
     for (mount, source) in plan.mounts.iter().zip(&sources) {
-        if mount.mask {
+        if mount.kind == Kind::Mask {
             continue;
         }
         let destination = target(&root, &mount.target, mount.directory)?;
@@ -1574,7 +1649,7 @@ fn setup_and_exec(
             source.as_raw_fd(),
             destination.as_raw_fd(),
             mount.read_only,
-            mount.device,
+            mount.kind == Kind::Device,
             mount.directory,
         )
         .map_err(|e| LaunchError::Setup(format!("mount {}: {e}", mount.target.display())))?;
@@ -1600,7 +1675,7 @@ fn setup_and_exec(
     mount_overlays(plan, &root)
         .map_err(|e| LaunchError::Setup(format!("cache overlay setup: {e}")))?;
     for (mount, source) in plan.mounts.iter().zip(&sources) {
-        if !mount.mask {
+        if mount.kind != Kind::Mask {
             continue;
         }
         let destination = target(&root, &mount.target, mount.directory)?;
@@ -1608,7 +1683,7 @@ fn setup_and_exec(
             source.as_raw_fd(),
             destination.as_raw_fd(),
             mount.read_only,
-            mount.device,
+            false,
             mount.directory,
         )
         .map_err(|e| LaunchError::Setup(format!("mount {}: {e}", mount.target.display())))?;
@@ -1787,6 +1862,8 @@ pub fn helper_main() -> Result<i32> {
             )?;
         }
         let nested = setup_user_namespace(&plan)?;
+        let relays =
+            egress::bind_relays(&plan.relays).map_err(ioerr("bind namespace egress relay"))?;
         let parent_pidfd = owned_fd(
             unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0) },
             "pin helper parent lifetime",
@@ -1826,16 +1903,29 @@ pub fn helper_main() -> Result<i32> {
             .read_to_string(&mut message)
             .map_err(ioerr("read workload setup result"))?;
         if message.is_empty() {
+            if !relays.is_empty() {
+                // The workload is already running; without its relay it must
+                // not keep running either.
+                if let Err(error) = spawn_relay(relays) {
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                    return Err(error);
+                }
+            }
             writeln!(control, "READY {pid}").map_err(ioerr("report namespace readiness"))?;
         } else {
             writeln!(control, "ERROR {}", message.replace('\n', " "))
                 .map_err(ioerr("report namespace failure"))?;
         }
         let mut status = 0;
+        // Reap the relay too: the init's PID namespace cannot finish while
+        // the relay is an unreaped zombie of this helper.
         loop {
-            let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
-            if waited >= 0 {
+            let waited = unsafe { libc::waitpid(-1, &mut status, 0) };
+            if waited == pid {
                 break;
+            }
+            if waited > 0 {
+                continue;
             }
             if io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
                 return Err(ioerr("reap namespace init")(io::Error::last_os_error()));

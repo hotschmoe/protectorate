@@ -64,6 +64,7 @@ impl Fixture {
             credential: None,
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: None,
             limits: Limits {
                 cpu_percent: 100,
                 memory_bytes: 1 << 30,
@@ -82,14 +83,14 @@ fn ro(path: &Path) -> BindGrant {
 }
 
 #[test]
-fn chat_and_terminal_plans_have_private_home_selected_credential_and_shared_network() {
+fn chat_and_terminal_plans_have_private_home_selected_credential_and_loopback_network() {
     let f = Fixture::new();
     for workload in [Workload::ChatSleeve, Workload::TerminalSleeve] {
         let mut req = f.request(workload);
         req.credential = Some(Provider::Claude);
         let plan = f.policy.plan(req).unwrap();
         assert_eq!(plan.kind(), PlanKind::Sandboxed);
-        assert_eq!(plan.network(), Network::Shared);
+        assert_eq!(plan.network(), &Network::Loopback);
         assert_eq!(plan.cgroup(), Some(Cgroup::Bounded));
         assert_eq!(plan.private_home(), Some(f.private_home.as_path()));
         assert_eq!(

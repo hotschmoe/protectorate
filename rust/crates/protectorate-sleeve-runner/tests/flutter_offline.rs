@@ -79,6 +79,7 @@ fn installed_flutter_creates_and_builds_an_offline_project_in_a_sleeve() {
         tasks_max: 128,
         nested: false,
         ready_file: sleeve.join("ready"),
+        egress: None,
     };
     assert_eq!(protectorate_sleeve_runner::run(&config).unwrap(), 0);
     assert!(workspace.join("pubspec.lock").is_file());

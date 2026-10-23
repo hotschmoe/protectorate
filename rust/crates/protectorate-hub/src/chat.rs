@@ -120,6 +120,7 @@ fn run_handoff_summary(
                 credential: Some(Provider::Pi),
                 overlays: Vec::new(),
                 masks: Vec::new(),
+                egress: Some(crate::sleeves::sleeve_egress(hub, true)),
                 limits: Limits {
                     cpu_percent: 0,
                     memory_bytes: 0,
@@ -134,6 +135,7 @@ fn run_handoff_summary(
             &workspace,
         );
         options.environment = launcher.environment.clone();
+        options.egress_log = Some(crate::sleeves::egress_log(hub, owner));
         options.environment.extend(cache_environment);
         options.environment.remove("PROTECTORATE_HUB");
         options.environment.remove("PROTECTORATE_TOKEN_FILE");
@@ -1350,6 +1352,7 @@ fn spawn_chat(
             )
             .collect(),
             masks: Vec::new(),
+            egress: Some(crate::sleeves::sleeve_egress(hub, harness == Harness::Pi)),
             limits: Limits {
                 cpu_percent,
                 memory_bytes,
@@ -1364,6 +1367,7 @@ fn spawn_chat(
         &workspace,
     );
     options.environment = launcher.environment.clone();
+    options.egress_log = Some(crate::sleeves::egress_log(hub, &name));
     options.environment.extend(cache_environment);
     options.environment.extend(caller_env.clone());
     if launcher.pub_cache_lower.is_some() {
@@ -2134,6 +2138,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
             credential: Some(Provider::Codex),
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: Some(crate::sleeves::sleeve_egress(hub, false)),
             limits: Limits {
                 cpu_percent: 0,
                 memory_bytes: 0,
@@ -2149,6 +2154,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
     );
     options.stdio = protectorate_sandbox::runtime::StdioMode::Duplex;
     options.environment = launcher.environment.clone();
+    options.egress_log = Some(crate::sleeves::egress_log(hub, "codex-catalog"));
     options.environment.extend(
         protectorate_sleeve_runner::prepare_private_caches(
             scratch.path().join("home").as_path(),

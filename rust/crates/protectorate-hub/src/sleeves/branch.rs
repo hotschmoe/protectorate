@@ -810,6 +810,7 @@ fn sandbox_git_run(
             credential: None,
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: None,
             limits: SandboxLimits {
                 cpu_percent: 100,
                 memory_bytes: 128 << 20,

@@ -464,6 +464,7 @@ fn sandboxed_git_facts(
             credential: None,
             overlays: Vec::new(),
             masks: Vec::new(),
+            egress: None,
             limits: SandboxLimits {
                 cpu_percent: 100,
                 memory_bytes: 128 << 20,
@@ -1652,6 +1653,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         tasks_max: launcher.tasks_max,
         nested,
         ready_file: ready.clone(),
+        egress: Some(sleeve_egress(hub, harness == Harness::Pi)),
     };
     protectorate_sleeve_runner::plan(&config)
         .map_err(|e| RpcError::new(Code::InvalidArgument, e.to_string()))?;
@@ -2668,6 +2670,48 @@ fn internal(error: std::io::Error) -> RpcError {
 }
 fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
+/// The egress a sleeve or harness helper gets: its provider's API hosts
+/// (added by the sandbox policy), the hub, the operator's allowlist and, for
+/// Pi, the configured local model servers.
+pub(super) fn sleeve_egress(hub: &Hub, pi: bool) -> protectorate_sandbox::Egress {
+    let url = hub
+        .terminal_launcher
+        .as_ref()
+        .map(|launcher| launcher.hub_url.clone())
+        .or_else(|| crate::chat::hub_url(hub));
+    let authority = url.and_then(|url| {
+        let (default_port, rest) = if let Some(rest) = url.strip_prefix("https://") {
+            (443, rest.to_owned())
+        } else {
+            (80, url.strip_prefix("http://")?.to_owned())
+        };
+        let authority = rest.split('/').next().unwrap_or_default();
+        let has_port = if authority.starts_with('[') {
+            authority.contains("]:")
+        } else {
+            authority.contains(':')
+        };
+        Some(if has_port {
+            authority.to_owned()
+        } else {
+            format!("{authority}:{default_port}")
+        })
+    });
+    protectorate_sandbox::Egress {
+        hub: authority,
+        allow: hub.egress_allow.clone(),
+        private_hosts: if pi {
+            hub.local_model_hosts.clone()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+pub(super) fn egress_log(hub: &Hub, name: &str) -> protectorate_sandbox::egress::Log {
+    protectorate_sleeve_runner::egress_audit(Arc::clone(&hub.audit), format!("sleeve:{name}"))
 }
 
 pub(super) fn sleeve_json(sleeve: &Record) -> Value {
