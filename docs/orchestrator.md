@@ -2,7 +2,7 @@
 
 Envoy is the orchestrator. It is not engine code, but an ordinary sleeve named `envoy`: a harness (Claude,
 Codex, Grok or pi, whichever has quota to spare) running in chat mode (see
-[chat.md](chat.md)) in the usual bwrap and systemd-scope sandbox. Its workspace is `$PROTECTORATE_HOME/orchestrator/` and
+[chat.md](chat.md)) in the usual namespace sandbox and systemd scope. Its workspace is `$PROTECTORATE_HOME/orchestrator/` and
 its only tool is the `protectorate` CLI, authenticated with a capability. The
 harness is untouched: it only finds normal project context files and a CLI.
 
@@ -62,8 +62,8 @@ token lacks `chat_set_selection`; owner authentication or an explicit grant
 is required. This feature does not require restarting the hub or Envoy.
 
 `AGENTS.md` holds the role, the working loop, the token's name and scopes, a table
-of every hub tool with whether this token may call it, and the CLI reference
-walked from the cobra command tree. It is rebuilt on every spawn; put standing
+of every hub tool with whether this token may call it, and a short reference
+of the CLI commands Envoy uses most. It is rebuilt on every spawn; put standing
 notes in `NOTES.md` next to it. Claude Code reads
 `CLAUDE.md`; Codex, Grok and pi read `AGENTS.md`. `hosts.md` is the hub's node
 inventory.

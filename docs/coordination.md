@@ -41,8 +41,8 @@ branch and HEAD, and manifests in the root and up to two directories down:
 | `Cargo.toml` | `package.name` | `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, target and workspace tables, `package =` renames |
 | `pyproject.toml` | `project.name` or `tool.poetry.name` | `project.dependencies`, optional dependencies, dependency groups, poetry tables |
 
-TOML is read by a small tolerant reader (`internal/directory/toml.go`), since
-no TOML library is in `go.mod`. Names are prefixed with the ecosystem
+TOML is parsed with the `toml` crate; an unparsable manifest is skipped.
+Names are prefixed with the ecosystem
 (`go:`, `npm:`, `cargo:`, `pypi:`) and normalized (case and `-`/`_` for cargo
 and PyPI).
 
