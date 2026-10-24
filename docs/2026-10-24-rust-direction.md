@@ -450,8 +450,8 @@ Sleeve model (owner's direction, to build after polish):
   the latest delta; and an explicit summarizer model setting that can point
   Pi at a local model on a GPU node under a GPU lease (a 9B dense model at
   4-bit is about 6 GB of VRAM). NPU inference for that size is unverified.
-- Open question to the owner: does the one-owner rule cover terminal sleeves
-  too, or chat sleeves only?
+- `[decided]` One sleeve per directory in total: the rule covers terminal and
+  chat sleeves alike.
 
 ## Appendix A: research reports (full text)
 
