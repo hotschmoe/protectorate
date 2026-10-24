@@ -2,8 +2,8 @@
 //! Callers in an async runtime should use `spawn_blocking` for these methods.
 use protectorate_auth::{capability, proof::DeviceKey};
 use protectorate_wire::{
-    decode_json, encode_envelope, encode_json, Catalog, Code, Method, Result, RpcError,
-    FLAG_END_STREAM,
+    decode_json, encode, encode_envelope, encode_json, Catalog, Code, DynamicMessage, Method,
+    ReflectMessage, Result, Rpc, RpcError, FLAG_END_STREAM,
 };
 use serde_json::Value;
 use std::{
@@ -368,8 +368,64 @@ impl Client {
         matches!(self.credential, Credential::None)
     }
 
+    /// Calls a unary RPC with generated request and response types.
+    pub fn unary<Req: ReflectMessage, Resp: ReflectMessage + Default>(
+        &self,
+        rpc: Rpc<Req, Resp>,
+        request: &Req,
+    ) -> Result<Resp> {
+        self.typed(rpc, request, None)
+    }
+
+    pub fn unary_with_timeout<Req: ReflectMessage, Resp: ReflectMessage + Default>(
+        &self,
+        rpc: Rpc<Req, Resp>,
+        request: &Req,
+        timeout: Duration,
+    ) -> Result<Resp> {
+        self.typed(rpc, request, Some(timeout))
+    }
+
+    /// Calls a server-streaming RPC with generated types; see `stream`.
+    pub fn server_stream<Req: ReflectMessage, Resp: ReflectMessage + Default>(
+        &self,
+        rpc: Rpc<Req, Resp>,
+        request: &Req,
+        mut on_message: impl FnMut(Resp) -> Result<()>,
+    ) -> Result<()> {
+        let body = bounded(encode(request)?)?;
+        self.stream_inner(rpc.procedure, &body, None, &mut |message| {
+            on_message(transcode(&message)?)
+        })
+    }
+
+    pub fn server_stream_with_timeout<Req: ReflectMessage, Resp: ReflectMessage + Default>(
+        &self,
+        rpc: Rpc<Req, Resp>,
+        request: &Req,
+        timeout: Duration,
+        mut on_message: impl FnMut(Resp) -> Result<()>,
+    ) -> Result<()> {
+        let body = bounded(encode(request)?)?;
+        self.stream_inner(rpc.procedure, &body, Some(timeout), &mut |message| {
+            on_message(transcode(&message)?)
+        })
+    }
+
+    fn typed<Req: ReflectMessage, Resp: ReflectMessage + Default>(
+        &self,
+        rpc: Rpc<Req, Resp>,
+        request: &Req,
+        timeout: Option<Duration>,
+    ) -> Result<Resp> {
+        let body = bounded(encode(request)?)?;
+        transcode(&self.unary_inner(rpc.procedure, &body, timeout)?)
+    }
+
+    /// Calls a unary RPC with protobuf JSON values, for generic callers such
+    /// as the MCP bridge and black-box tests.
     pub fn call(&self, procedure: &str, input: &Value) -> Result<Value> {
-        self.unary(procedure, input, None)
+        self.call_json(procedure, input, None)
     }
 
     /// Call one unary RPC with a shorter per-request deadline while retaining
@@ -380,10 +436,25 @@ impl Client {
         input: &Value,
         timeout: Duration,
     ) -> Result<Value> {
-        self.unary(procedure, input, Some(timeout))
+        self.call_json(procedure, input, Some(timeout))
     }
 
-    fn unary(&self, procedure: &str, input: &Value, timeout: Option<Duration>) -> Result<Value> {
+    fn call_json(
+        &self,
+        procedure: &str,
+        input: &Value,
+        timeout: Option<Duration>,
+    ) -> Result<Value> {
+        let body = self.input(self.method(procedure)?, input)?;
+        to_value(&self.unary_inner(procedure, &body, timeout)?)
+    }
+
+    fn unary_inner(
+        &self,
+        procedure: &str,
+        body: &[u8],
+        timeout: Option<Duration>,
+    ) -> Result<DynamicMessage> {
         if self.public() && !PUBLIC.contains(&procedure) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
@@ -394,11 +465,10 @@ impl Client {
         if !method.is_unary() {
             return Err(RpcError::invalid("procedure is streaming"));
         }
-        let body = self.input(method, input)?;
         let mut approval = String::new();
         loop {
             let response =
-                self.post_with_timeout(procedure, "application/json", &body, timeout, &approval)?;
+                self.post_with_timeout(procedure, "application/json", body, timeout, &approval)?;
             match self.unary_response(method, response) {
                 Err(error) => match pending_approval(&error) {
                     Some(id) => {
@@ -419,7 +489,7 @@ impl Client {
         &self,
         method: &Method,
         response: ureq::http::Response<ureq::Body>,
-    ) -> Result<Value> {
+    ) -> Result<DynamicMessage> {
         let status = response.status().as_u16();
         let content_type = response
             .headers()
@@ -444,11 +514,7 @@ impl Client {
                 "unexpected unary content type",
             ));
         }
-        let message = decode_json(method.output(), &bytes)
-            .map_err(|e| RpcError::new(Code::DataLoss, e.message))?;
-        let message = serde_json::to_value(message)
-            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-        Ok(message)
+        decode_json(method.output(), &bytes).map_err(|e| RpcError::new(Code::DataLoss, e.message))
     }
 
     /// Calls a server-streaming RPC. The callback runs synchronously for each
@@ -459,7 +525,10 @@ impl Client {
         input: &Value,
         mut on_message: impl FnMut(Value) -> Result<()>,
     ) -> Result<()> {
-        self.stream_with_timeout_inner(procedure, input, None, &mut on_message)
+        let body = self.input(self.method(procedure)?, input)?;
+        self.stream_inner(procedure, &body, None, &mut |message| {
+            on_message(to_value(&message)?)
+        })
     }
 
     /// Stream with a per-request deadline while retaining this client's
@@ -471,15 +540,18 @@ impl Client {
         timeout: Duration,
         mut on_message: impl FnMut(Value) -> Result<()>,
     ) -> Result<()> {
-        self.stream_with_timeout_inner(procedure, input, Some(timeout), &mut on_message)
+        let body = self.input(self.method(procedure)?, input)?;
+        self.stream_inner(procedure, &body, Some(timeout), &mut |message| {
+            on_message(to_value(&message)?)
+        })
     }
 
-    fn stream_with_timeout_inner(
+    fn stream_inner(
         &self,
         procedure: &str,
-        input: &Value,
+        payload: &[u8],
         timeout: Option<Duration>,
-        on_message: &mut impl FnMut(Value) -> Result<()>,
+        on_message: &mut dyn FnMut(DynamicMessage) -> Result<()>,
     ) -> Result<()> {
         if self.public() {
             return Err(RpcError::new(
@@ -491,8 +563,7 @@ impl Client {
         if !method.server_streaming || method.client_streaming {
             return Err(RpcError::invalid("procedure is not server streaming"));
         }
-        let payload = self.input(method, input)?;
-        let frame = encode_envelope(0, &payload)?;
+        let frame = encode_envelope(0, payload)?;
         let response =
             self.post_with_timeout(procedure, "application/connect+json", &frame, timeout, "")?;
         let status = response.status().as_u16();
@@ -533,9 +604,7 @@ impl Client {
                 0 => {
                     let message = decode_json(method.output(), &body)
                         .map_err(|e| RpcError::new(Code::DataLoss, e.message))?;
-                    let value = serde_json::to_value(message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    on_message(value)?;
+                    on_message(message)?;
                 }
                 FLAG_END_STREAM => {
                     let end: Value = serde_json::from_slice(&body).map_err(|e| {
@@ -578,13 +647,8 @@ impl Client {
     }
 
     fn input(&self, method: &Method, input: &Value) -> Result<Vec<u8>> {
-        let bytes = serde_json::to_vec(input).map_err(|e| RpcError::invalid(e.to_string()))?;
-        if bytes.len() as u64 > MAX_UNARY_BYTES {
-            return Err(RpcError::new(
-                Code::ResourceExhausted,
-                "request exceeds 16 MiB",
-            ));
-        }
+        let bytes =
+            bounded(serde_json::to_vec(input).map_err(|e| RpcError::invalid(e.to_string()))?)?;
         let message = decode_json(method.input(), &bytes)?;
         encode_json(&message)
     }
@@ -748,4 +812,24 @@ fn pending_approval(error: &RpcError) -> Option<String> {
 fn remote_error(status: u16, bytes: &[u8]) -> RpcError {
     serde_json::from_slice::<RpcError>(bytes)
         .unwrap_or_else(|_| RpcError::new(Code::Unavailable, format!("remote HTTP {status}")))
+}
+
+fn bounded(bytes: Vec<u8>) -> Result<Vec<u8>> {
+    if bytes.len() as u64 > MAX_UNARY_BYTES {
+        return Err(RpcError::new(
+            Code::ResourceExhausted,
+            "request exceeds 16 MiB",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn transcode<T: ReflectMessage + Default>(message: &DynamicMessage) -> Result<T> {
+    message
+        .transcode_to::<T>()
+        .map_err(|e| RpcError::new(Code::DataLoss, format!("transcode response: {e}")))
+}
+
+fn to_value(message: &DynamicMessage) -> Result<Value> {
+    serde_json::to_value(message).map_err(|e| RpcError::new(Code::Internal, e.to_string()))
 }
