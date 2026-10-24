@@ -3,14 +3,16 @@
 //! workspace's config, hooks and filters never run on the host, and the agent
 //! can neither read nor rewrite its checkpoints. The store is a separate Git
 //! directory, never the workspace repository, so pushes cannot carry it.
-use super::{input, respond, string, Hub};
+use super::Hub;
 use protectorate_sandbox::{
     runtime::{self, LaunchOptions},
     Limits, Policy, Request, Workload,
 };
 use protectorate_sleeve_registry::{Mode, Record, State};
-use protectorate_wire::{AuthContext, Code, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    self as wire, v1, v1::sleeve_service, AuthContext, Call, Code, Result, RpcError, UnaryServer,
+};
+use serde_json::json;
 use std::{
     collections::BTreeMap,
     fs,
@@ -98,16 +100,14 @@ impl Checkpoint {
         })
     }
 
-    fn json(&self) -> Value {
-        json!({
-            "id": self.id.to_string(),
-            "commit": self.commit,
-            "createdAt": chrono::DateTime::from_timestamp(self.created, 0)
-                .unwrap_or_default()
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            "reason": self.reason,
-            "runId": self.run_id,
-        })
+    fn message(&self) -> v1::Checkpoint {
+        v1::Checkpoint {
+            id: self.id,
+            commit: self.commit.clone(),
+            created_at: Some(wire::timestamp_millis(self.created.saturating_mul(1000))),
+            reason: self.reason.clone(),
+            run_id: self.run_id.clone(),
+        }
     }
 }
 
@@ -343,16 +343,6 @@ fn authorize(hub: &Hub, auth: &AuthContext, name: &str) -> Result<(Store, Record
     Ok((store, row))
 }
 
-fn id(value: &Value, key: &str) -> Result<u64> {
-    match value.get(key) {
-        None | Some(Value::Null) => Some(0),
-        Some(Value::String(s)) => s.parse().ok(),
-        Some(Value::Number(n)) => n.as_u64(),
-        _ => None,
-    }
-    .ok_or_else(|| RpcError::invalid(format!("invalid {key}")))
-}
-
 fn failed(error: String) -> RpcError {
     let code = if error.contains("no checkpoint") {
         Code::NotFound
@@ -364,92 +354,125 @@ fn failed(error: String) -> RpcError {
     RpcError::new(code, error)
 }
 
+/// Authorizes the caller for the sleeve, then runs the checkpoint work off
+/// the async runtime.
+async fn with_store<T: Send + 'static>(
+    hub: &Arc<Hub>,
+    auth: AuthContext,
+    name: String,
+    work: impl FnOnce(&Hub, Store, Record) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let hub = Arc::clone(hub);
+    tokio::task::spawn_blocking(move || {
+        let (store, row) = authorize(&hub, &auth, &name)?;
+        work(&hub, store, row)
+    })
+    .await
+    .map_err(super::join_error)?
+}
+
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
-    for procedure in [
-        "/protectorate.v1.SleeveService/CreateCheckpoint",
-        "/protectorate.v1.SleeveService/ListCheckpoints",
-        "/protectorate.v1.SleeveService/DiffCheckpoint",
-        "/protectorate.v1.SleeveService/RestoreCheckpoint",
-    ] {
-        let hub = Arc::clone(&hub);
-        server.register(procedure, move |request| {
-            let hub = Arc::clone(&hub);
+    let create = Arc::clone(&hub);
+    server.unary(
+        sleeve_service::CREATE_CHECKPOINT,
+        move |call: Call<v1::CreateCheckpointRequest>| {
+            let hub = Arc::clone(&create);
             async move {
-                let value = input(&request)?;
-                let auth = request.auth.clone();
-                let method = request
-                    .method
-                    .procedure
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned();
-                let result = tokio::task::spawn_blocking(move || {
-                    let name = string(&value, "name");
-                    let (store, row) = authorize(&hub, &auth, &name)?;
-                    match method.as_str() {
-                        "CreateCheckpoint" => {
-                            let (checkpoint, unchanged) = store
-                                .create(&row, "manual", true)
-                                .map_err(failed)?
-                                .ok_or_else(|| {
-                                    RpcError::new(Code::Internal, "checkpoint lock was not taken")
-                                })?;
-                            Ok(json!({"checkpoint": checkpoint.json(), "unchanged": unchanged}))
-                        }
-                        "ListCheckpoints" => Ok(json!({
-                            "checkpoints": store
-                                .list(&row)
-                                .map_err(failed)?
-                                .iter()
-                                .map(Checkpoint::json)
-                                .collect::<Vec<_>>()
-                        })),
-                        "DiffCheckpoint" => {
-                            let (from, to) = (id(&value, "fromId")?, id(&value, "toId")?);
-                            if from == 0 {
-                                return Err(RpcError::invalid("from_id is required"));
-                            }
-                            let (diff, truncated) = store
-                                .run_bounded(
-                                    &row,
-                                    &["diff", &from.to_string(), &to.to_string()],
-                                    true,
-                                )
-                                .map_err(failed)?
-                                .unwrap_or_default();
-                            Ok(json!({"diff": diff, "truncated": truncated}))
-                        }
-                        _ => {
-                            let target = id(&value, "id")?;
-                            if row.mode == Mode::Chat
-                                && row.state == State::Running
-                                && !crate::chat::chat_idle(&hub, &name)
-                            {
-                                return Err(RpcError::new(
-                                    Code::FailedPrecondition,
-                                    "the chat sleeve is busy; wait for it to be idle",
-                                ));
-                            }
-                            let output = store
-                                .run(&row, &["restore", &target.to_string()], true)
-                                .map_err(failed)?
-                                .unwrap_or_default();
-                            let (before, _) = snapshot_line(&output).map_err(failed)?;
-                            hub.emit(
-                                "sleeve.restored",
-                                &name,
-                                json!({"checkpoint": target, "before": before.id}),
-                            );
-                            Ok(json!({"before": before.json()}))
-                        }
-                    }
+                with_store(&hub, call.auth, call.request.name, |_, store, row| {
+                    let (checkpoint, unchanged) = store
+                        .create(&row, "manual", true)
+                        .map_err(failed)?
+                        .ok_or_else(|| {
+                            RpcError::new(Code::Internal, "checkpoint lock was not taken")
+                        })?;
+                    Ok(v1::CreateCheckpointResponse {
+                        checkpoint: Some(checkpoint.message()),
+                        unchanged,
+                    })
                 })
                 .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-                respond(&request, result)
             }
-        })?;
-    }
+        },
+    )?;
+    let list = Arc::clone(&hub);
+    server.unary(
+        sleeve_service::LIST_CHECKPOINTS,
+        move |call: Call<v1::ListCheckpointsRequest>| {
+            let hub = Arc::clone(&list);
+            async move {
+                with_store(&hub, call.auth, call.request.name, |_, store, row| {
+                    Ok(v1::ListCheckpointsResponse {
+                        checkpoints: store
+                            .list(&row)
+                            .map_err(failed)?
+                            .iter()
+                            .map(Checkpoint::message)
+                            .collect(),
+                    })
+                })
+                .await
+            }
+        },
+    )?;
+    let diff = Arc::clone(&hub);
+    server.unary(
+        sleeve_service::DIFF_CHECKPOINT,
+        move |call: Call<v1::DiffCheckpointRequest>| {
+            let hub = Arc::clone(&diff);
+            async move {
+                let (from, to) = (call.request.from_id, call.request.to_id);
+                with_store(&hub, call.auth, call.request.name, move |_, store, row| {
+                    if from == 0 {
+                        return Err(RpcError::invalid("from_id is required"));
+                    }
+                    let (diff, truncated) = store
+                        .run_bounded(&row, &["diff", &from.to_string(), &to.to_string()], true)
+                        .map_err(failed)?
+                        .unwrap_or_default();
+                    Ok(v1::DiffCheckpointResponse { diff, truncated })
+                })
+                .await
+            }
+        },
+    )?;
+    server.unary(
+        sleeve_service::RESTORE_CHECKPOINT,
+        move |call: Call<v1::RestoreCheckpointRequest>| {
+            let hub = Arc::clone(&hub);
+            async move {
+                let target = call.request.id;
+                with_store(
+                    &hub,
+                    call.auth,
+                    call.request.name,
+                    move |hub, store, row| {
+                        if row.mode == Mode::Chat
+                            && row.state == State::Running
+                            && !crate::chat::chat_idle(hub, &row.name)
+                        {
+                            return Err(RpcError::new(
+                                Code::FailedPrecondition,
+                                "the chat sleeve is busy; wait for it to be idle",
+                            ));
+                        }
+                        let output = store
+                            .run(&row, &["restore", &target.to_string()], true)
+                            .map_err(failed)?
+                            .unwrap_or_default();
+                        let (before, _) = snapshot_line(&output).map_err(failed)?;
+                        hub.emit(
+                            "sleeve.restored",
+                            &row.name,
+                            json!({"checkpoint": target, "before": before.id}),
+                        );
+                        Ok(v1::RestoreCheckpointResponse {
+                            before: Some(before.message()),
+                        })
+                    },
+                )
+                .await
+            }
+        },
+    )?;
     Ok(())
 }

@@ -1,9 +1,8 @@
 //! Bounded workspace discovery for SleeveService. Repository metadata is read
 //! as data; no command from a workspace is ever run by these RPCs.
-use super::{input, respond, string, Hub};
+use super::Hub;
 use protectorate_sleeve_registry::State;
-use protectorate_wire::{Code, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{v1, v1::sleeve_service, Call, Code, Result, RpcError, UnaryServer};
 use std::{
     collections::BTreeMap,
     ffi::CString,
@@ -158,43 +157,39 @@ fn canonical_directories(paths: Vec<PathBuf>) -> io::Result<Vec<PathBuf>> {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let list = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/ListWorkspaces",
-        move |request| {
-            let hub = Arc::clone(&list);
-            async move {
-                let workspaces = tokio::task::spawn_blocking(move || list_workspaces(&hub))
-                    .await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                respond(&request, json!({"workspaces":workspaces}))
-            }
-        },
-    )?;
-    server.register(
-        "/protectorate.v1.SleeveService/BrowseWorkspaces",
-        move |request| {
+    server.unary(sleeve_service::LIST_WORKSPACES, move |_: Call<_>| {
+        let hub = Arc::clone(&list);
+        async move {
+            let workspaces = tokio::task::spawn_blocking(move || list_workspaces(&hub))
+                .await
+                .map_err(super::join_error)?;
+            Ok(v1::ListWorkspacesResponse { workspaces })
+        }
+    })?;
+    server.unary(
+        sleeve_service::BROWSE_WORKSPACES,
+        move |call: Call<v1::BrowseWorkspacesRequest>| {
             let hub = Arc::clone(&hub);
             async move {
-                if request.auth.actor.starts_with("token:sleeve:") {
+                if call.auth.actor.starts_with("token:sleeve:") {
                     return Err(RpcError::new(
                         Code::PermissionDenied,
                         "sleeve identity tokens cannot browse workspace directories",
                     ));
                 }
-                let path = string(&input(&request)?, "path");
-                let result = tokio::task::spawn_blocking(move || browse(&hub.workspaces, &path))
+                let path = call.request.path;
+                tokio::task::spawn_blocking(move || browse(&hub.workspaces, &path))
                     .await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-                respond(&request, result)
+                    .map_err(super::join_error)?
             }
         },
     )?;
     Ok(())
 }
 
-fn list_workspaces(hub: &Hub) -> Vec<Value> {
+fn list_workspaces(hub: &Hub) -> Vec<v1::Workspace> {
     let cfg = &hub.workspaces;
-    let mut by_path = BTreeMap::<PathBuf, Value>::new();
+    let mut by_path = BTreeMap::<PathBuf, v1::Workspace>::new();
     if fs::canonicalize(cfg.managed()).ok().as_deref() == Some(cfg.managed().as_path()) {
         if let Ok(entries) = fs::read_dir(cfg.managed()) {
             for entry in entries.flatten() {
@@ -208,11 +203,10 @@ fn list_workspaces(hub: &Hub) -> Vec<Value> {
         if sleeve.name == "envoy" || sleeve.workspace.is_empty() {
             continue;
         }
-        if let Some(path) = add_workspace(cfg, &mut by_path, Path::new(&sleeve.workspace)) {
-            let row = by_path.get_mut(&path).unwrap();
-            if row["sleeve"].as_str().unwrap_or("").is_empty() || sleeve.state == State::Running {
-                row["sleeve"] = json!(sleeve.name);
-                row["busy"] = json!(sleeve.state == State::Running);
+        if let Some(row) = add_workspace(cfg, &mut by_path, Path::new(&sleeve.workspace)) {
+            if row.sleeve.is_empty() || sleeve.state == State::Running {
+                row.busy = sleeve.state == State::Running;
+                row.sleeve = sleeve.name;
             }
         }
     }
@@ -221,44 +215,45 @@ fn list_workspaces(hub: &Hub) -> Vec<Value> {
     for path in references {
         if let Ok(real) = fs::canonicalize(path) {
             if real.is_dir() && cfg.reason(&real).is_none() {
-                by_path.entry(real.clone()).or_insert_with(|| {
-                    json!({
-                        "name": file_name(&real), "path": real, "readOnly": true,
-                    })
-                });
+                by_path
+                    .entry(real.clone())
+                    .or_insert_with(|| v1::Workspace {
+                        name: file_name(&real),
+                        path: real.to_string_lossy().into_owned(),
+                        read_only: true,
+                        ..Default::default()
+                    });
             }
         }
     }
     let mut result: Vec<_> = by_path.into_values().collect();
-    result.sort_by(|a, b| {
-        a["name"]
-            .as_str()
-            .cmp(&b["name"].as_str())
-            .then_with(|| a["path"].as_str().cmp(&b["path"].as_str()))
-    });
+    result.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
     result
 }
 
-fn add_workspace(
+fn add_workspace<'a>(
     cfg: &Config,
-    by_path: &mut BTreeMap<PathBuf, Value>,
+    by_path: &'a mut BTreeMap<PathBuf, v1::Workspace>,
     path: &Path,
-) -> Option<PathBuf> {
+) -> Option<&'a mut v1::Workspace> {
     let real = fs::canonicalize(path).ok()?;
     if !real.is_dir() || cfg.reason(&real).is_some() {
         return None;
     }
-    by_path.entry(real.clone()).or_insert_with(|| {
-        let (remote, branch, _) = git_details(&real);
-        json!({
-            "name": file_name(&real), "path": real, "gitRemote": remote,
-            "gitBranch": branch, "requiredName": cfg.required_name(&real),
-        })
-    });
-    Some(real)
+    Some(by_path.entry(real.clone()).or_insert_with(|| {
+        let (git_remote, git_branch, _) = git_details(&real);
+        v1::Workspace {
+            name: file_name(&real),
+            path: real.to_string_lossy().into_owned(),
+            git_remote,
+            git_branch,
+            required_name: cfg.required_name(&real),
+            ..Default::default()
+        }
+    }))
 }
 
-fn browse(cfg: &Config, path: &str) -> Result<Value> {
+fn browse(cfg: &Config, path: &str) -> Result<v1::BrowseWorkspacesResponse> {
     if path.is_empty() {
         let mut directories = Vec::new();
         for root in &cfg.roots {
@@ -271,7 +266,11 @@ fn browse(cfg: &Config, path: &str) -> Result<Value> {
             }
             directories.push(directory(cfg, root, file_name(root)));
         }
-        return Ok(json!({"directories":directories, "truncated":cfg.roots.len()>MAX_RESULTS}));
+        return Ok(v1::BrowseWorkspacesResponse {
+            directories,
+            truncated: cfg.roots.len() > MAX_RESULTS,
+            ..Default::default()
+        });
     }
     let requested = Path::new(path);
     if !requested.is_absolute() {
@@ -324,24 +323,30 @@ fn browse(cfg: &Config, path: &str) -> Result<Value> {
         }
         directories.push(directory(cfg, &child, name));
     }
-    directories.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    Ok(
-        json!({"path":real, "parent":parent.unwrap_or(Path::new("")), "directories":directories, "truncated":truncated}),
-    )
+    directories.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(v1::BrowseWorkspacesResponse {
+        path: real.to_string_lossy().into_owned(),
+        parent: parent
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        directories,
+        truncated,
+    })
 }
 
-fn directory(cfg: &Config, path: &Path, name: String) -> Value {
-    let (remote, branch, is_git) = git_details(path);
-    let mut result = json!({
-        "name":name, "path":path, "isGit":is_git,
-        "gitRemote":remote, "gitBranch":branch,
-        "requiredName":cfg.required_name(path),
-        "acceptable":cfg.reason(path).is_none(),
-    });
-    if let Some(reason) = cfg.reason(path) {
-        result["reason"] = json!(reason);
+fn directory(cfg: &Config, path: &Path, name: String) -> v1::WorkspaceDirectory {
+    let (git_remote, git_branch, is_git) = git_details(path);
+    let reason = cfg.reason(path);
+    v1::WorkspaceDirectory {
+        name,
+        path: path.to_string_lossy().into_owned(),
+        is_git,
+        git_branch,
+        git_remote,
+        acceptable: reason.is_none(),
+        reason: reason.unwrap_or_default().into(),
+        required_name: cfg.required_name(path),
     }
-    result
 }
 
 fn file_name(path: &Path) -> String {

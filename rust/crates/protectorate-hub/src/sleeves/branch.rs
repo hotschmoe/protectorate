@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 const GIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub(super) struct Prepared {
-    pub request: Value,
+    pub launch: Launch,
     destination: Option<PathBuf>,
     view: Option<PathBuf>,
 }
@@ -32,15 +32,9 @@ impl Drop for Prepared {
     }
 }
 
-pub(super) fn prepare(hub: &Hub, value: &Value) -> Result<Prepared> {
-    let mut request = value.clone();
-    if let Some(object) = request.as_object_mut() {
-        for field in ["baseRepo", "baseBranch", "baseTip", "managedClone"] {
-            object.remove(field);
-        }
-    }
-    let branch = string(value, "branch");
-    let new_branch = string(value, "newBranch");
+pub(super) fn prepare(hub: &Hub, launch: Launch) -> Result<Prepared> {
+    let branch = launch.request.branch.clone();
+    let new_branch = launch.request.new_branch.clone();
     for name in [&branch, &new_branch] {
         if !name.is_empty() && !valid_branch(name) {
             return Err(RpcError::new(
@@ -49,16 +43,16 @@ pub(super) fn prepare(hub: &Hub, value: &Value) -> Result<Prepared> {
             ));
         }
     }
-    let source = string(value, "workspace");
+    let source = launch.request.workspace.clone();
     let remote = is_git_url(&source);
     if !remote && branch.is_empty() && new_branch.is_empty() {
         return Ok(Prepared {
-            request,
+            launch,
             destination: None,
             view: None,
         });
     }
-    let name = string(value, "name");
+    let name = launch.request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(super::registry_error)?;
     if source.is_empty() || source.starts_with('-') {
         return Err(RpcError::new(Code::InvalidArgument, "invalid Git source"));
@@ -185,7 +179,7 @@ pub(super) fn prepare(hub: &Hub, value: &Value) -> Result<Prepared> {
         )
     })?;
     let mut prepared = Prepared {
-        request,
+        launch,
         destination: Some(destination.clone()),
         view: None,
     };
@@ -264,15 +258,17 @@ pub(super) fn prepare(hub: &Hub, value: &Value) -> Result<Prepared> {
     } else {
         git(&["-C", &destination_text, "checkout", "--quiet"])?;
     }
-    prepared.request["workspace"] = json!(destination_text);
-    prepared.request["baseRepo"] = json!(base_repo);
-    prepared.request["baseBranch"] = json!(if base_repo.is_empty() {
-        ""
-    } else {
-        &base_branch
-    });
-    prepared.request["baseTip"] = json!(base_tip);
-    prepared.request["managedClone"] = json!(true);
+    prepared.launch.request.workspace = destination_text;
+    prepared.launch.base = Base {
+        branch: if base_repo.is_empty() {
+            String::new()
+        } else {
+            base_branch
+        },
+        repo: base_repo,
+        tip: base_tip,
+        managed_clone: true,
+    };
     Ok(prepared)
 }
 

@@ -2,8 +2,9 @@
 //! usage/chat updates are deliberately separate from these read routes.
 pub(super) mod branch;
 mod prune_git;
-use super::{access::token_json, input, respond, string, Hub};
-use chrono::Utc;
+use super::{access::token_json, Hub};
+use chrono::{DateTime, Utc};
+use prost_reflect::prost_types;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_sandbox::{
     runtime::LaunchOptions, Helper, Limits as SandboxLimits, Policy, Request, Workload,
@@ -15,7 +16,10 @@ use protectorate_sleeve_registry::{
     DiskUsage, Error, Harness, Limits, Mode, Pin, ReadOnlyMount, Record, State,
 };
 use protectorate_sleeve_runner::{Config, ReadOnly};
-use protectorate_wire::{AuthContext, Code, Result, RpcError, UnaryServer};
+use protectorate_wire::{
+    self as wire, v1, v1::sleeve_service, AuthContext, Call, Code, DynamicMessage, ReflectMessage,
+    Result, RpcError, RpcRequest, UnaryServer,
+};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -138,6 +142,99 @@ fn has_kill_scope(auth: &AuthContext) -> bool {
     )
 }
 
+/// A sleeve launch: the request as the API defines it plus what the hub adds.
+pub(super) struct Launch {
+    pub request: v1::SpawnSleeveRequest,
+    /// The caller as approvals reads it: actor, tokenId, gated and approval.
+    pub requester: Value,
+    pub base: Base,
+    /// A relaunch after a hub restart, which keeps the native effort default.
+    pub recovery: bool,
+}
+
+/// The source a fresh clone was made from; set only by branch dispatch.
+#[derive(Default)]
+pub(super) struct Base {
+    pub repo: String,
+    pub branch: String,
+    pub tip: String,
+    pub managed_clone: bool,
+}
+
+impl Launch {
+    pub(super) fn new(request: v1::SpawnSleeveRequest, requester: Value) -> Self {
+        Self {
+            request,
+            requester,
+            base: Base::default(),
+            recovery: false,
+        }
+    }
+
+    pub(super) fn limits(&self) -> v1::SleeveLimits {
+        self.request.limits.clone().unwrap_or_default()
+    }
+
+    pub(super) fn selection(&self) -> v1::ModelSelection {
+        self.request.selection.clone().unwrap_or_default()
+    }
+
+    /// The validated caller environment.
+    pub(super) fn env(&self) -> Result<BTreeMap<String, String>> {
+        protectorate_sleeve_registry::validate_env(&self.request.env).map_err(registry_error)?;
+        Ok(self.request.env.clone())
+    }
+
+    pub(super) fn exit_after_idle(&self) -> Result<Duration> {
+        wire::duration(self.request.exit_after_idle.as_ref(), "exit_after_idle")
+            .map_err(|_| RpcError::new(Code::InvalidArgument, "invalid exit-after-idle duration"))
+    }
+
+    /// Compares the launch with the harness's pinned one; see approvals.
+    pub(super) fn check_pin(
+        &self,
+        hub: &Hub,
+        run_id: &str,
+        pin_key: &str,
+        pinned: Option<&Pin>,
+        pin: &Pin,
+    ) -> Result<()> {
+        crate::approvals::check_pin(
+            hub,
+            &json!({ "requester": self.requester }),
+            &self.request.name,
+            run_id,
+            pin_key,
+            pinned,
+            pin,
+        )
+    }
+}
+
+/// approvals::requester reads only the caller's identity and headers.
+fn requester<T>(hub: &Hub, call: &Call<T>) -> Value {
+    crate::approvals::requester(
+        hub,
+        &RpcRequest {
+            method: call.method.clone(),
+            headers: call.headers.clone(),
+            message: DynamicMessage::new(call.method.input()),
+            auth: call.auth.clone(),
+            peer: call.peer,
+        },
+    )
+}
+
+/// The model selection a chat sleeve last asked its harness for.
+pub(super) fn requested_selection(row: &Record) -> Option<v1::ModelSelection> {
+    let chat = stored::<v1::ChatStatus>(row.chat.as_ref()?).ok()?;
+    chat.settings?.requested
+}
+
+fn custom(selection: &v1::ModelSelection) -> bool {
+    !selection.model.is_empty() || !selection.effort.is_empty()
+}
+
 impl Drop for ResleeveReservation<'_> {
     fn drop(&mut self) {
         self.hub.resleeving.lock().unwrap().remove(&self.name);
@@ -158,8 +255,12 @@ fn reserve_resleeve<'a>(hub: &'a Hub, name: &str) -> Result<ResleeveReservation<
     })
 }
 
-fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
-    let name = string(value, "name");
+fn resleeve_sleeve(
+    hub: &Hub,
+    request: &v1::ResleeveSleeveRequest,
+    requester: Value,
+) -> Result<Record> {
+    let name = request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(registry_error)?;
     let _reservation = reserve_resleeve(hub, &name)?;
     let _envoy_guard = (name == "envoy").then(|| hub.envoy_spawn_lock.lock().unwrap());
@@ -170,22 +271,17 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
             "resleeve needs a running chat sleeve",
         ));
     }
-    let to = resleeve_target(hub, old.harness, &string(value, "to"))?;
-    let selection = value.get("selection").filter(|v| v.is_object());
-    let native_defaults = value["nativeDefaults"] == true;
-    if native_defaults && selection.is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty())) {
+    let to = resleeve_target(hub, old.harness, request.to())?;
+    let selection = request.selection.clone();
+    let native_defaults = request.native_defaults;
+    if native_defaults && selection.as_ref().is_some_and(custom) {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "native_defaults cannot be combined with explicit selection",
         ));
     }
-    let previous_selection = old
-        .chat
-        .as_ref()
-        .map(|chat| chat["settings"]["requested"].clone())
-        .unwrap_or(Value::Null);
-    let previous_custom = !string(&previous_selection, "model").is_empty()
-        || !string(&previous_selection, "effort").is_empty();
+    let previous_selection = requested_selection(&old);
+    let previous_custom = previous_selection.as_ref().is_some_and(custom);
     if to != old.harness && previous_custom && selection.is_none() && !native_defaults {
         return Err(RpcError::new(
             Code::FailedPrecondition,
@@ -193,40 +289,22 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         ));
     }
     let chosen_selection = if native_defaults {
-        Value::Null
-    } else if let Some(selection) = selection {
-        selection.clone()
+        None
+    } else if selection.is_some() {
+        selection
     } else if to == old.harness {
         previous_selection.clone()
     } else {
-        Value::Null
+        None
     };
-    let wait = match value.get("wait") {
-        Some(raw) => {
-            let parsed = super::parse_duration(Some(raw))?;
-            if parsed.is_zero() {
-                Duration::from_secs(300)
-            } else {
-                parsed
-            }
-        }
-        None => Duration::from_secs(300),
+    let wait = match wire::duration(request.wait.as_ref(), "wait")? {
+        wait if wait.is_zero() => Duration::from_secs(300),
+        wait => wait,
     };
-    let mut launch_request = resleeve_launch_request(&old, to, &chosen_selection);
-    launch_request["requester"] = value["requester"].clone();
-    if let Some(pin) =
-        crate::chat::chat_pin(hub, &launch_request, to, &SpawnParent::of_record(&old))?
-    {
+    let launch = resleeve_launch(&old, to, chosen_selection, requester.clone());
+    if let Some(pin) = crate::chat::chat_pin(hub, &launch, to, &SpawnParent::of_record(&old))? {
         let pin_key = pin_key(Mode::Chat, to);
-        crate::approvals::check_pin(
-            hub,
-            &launch_request,
-            &name,
-            &old.run_id,
-            &pin_key,
-            old.pins.get(&pin_key),
-            &pin,
-        )?;
+        launch.check_pin(hub, &old.run_id, &pin_key, old.pins.get(&pin_key), &pin)?;
         hub.sleeves
             .set_pin(&name, &pin_key, pin)
             .map_err(registry_error)?;
@@ -236,9 +314,10 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         &name,
         json!({"from":harness_name(old.harness),"to":harness_name(to)}),
     );
-    let status = crate::chat::quiesce_for_resleeve(hub, &name, value["interrupt"] == true, wait)?;
+    let status = crate::chat::quiesce_for_resleeve(hub, &name, request.interrupt, wait)?;
     let mut facts = resleeve_facts(hub, &old, to, &status);
-    facts.at = Some(Utc::now());
+    let at = Utc::now();
+    facts.at = Some(at);
     let summary = crate::chat::summarize_handoff(
         hub,
         &name,
@@ -258,7 +337,7 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         &name,
         harness_name(old.harness),
         harness_name(to),
-        facts.at.unwrap(),
+        at,
         document.as_bytes(),
     )
     .ok();
@@ -267,11 +346,10 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
         let _guard = hub.sleeve_launch_lock.lock().unwrap();
         crate::chat::kill_pi(hub, &name)?;
     }
-    match crate::chat::spawn_resleeve(hub, &launch_request, to) {
+    match crate::chat::spawn_resleeve(hub, &launch, to) {
         Ok(_) => {}
         Err(target_error) => {
-            let mut rollback = resleeve_launch_request(&old, old.harness, &previous_selection);
-            rollback["requester"] = value["requester"].clone();
+            let rollback = resleeve_launch(&old, old.harness, previous_selection, requester);
             match crate::chat::spawn_resleeve(hub, &rollback, old.harness) {
                 Ok(_) => {
                     return Err(RpcError::new(
@@ -299,19 +377,22 @@ fn resleeve_sleeve(hub: &Hub, value: &Value) -> Result<Record> {
             }
         }
     }
-    let handoff = json!({
-        "fromHarness": harness_name(old.harness),
-        "fromSessionId": string(&status, "harnessSessionId"),
-        "toHarness": harness_name(to),
-        "summarizerHarness": summary.harness,
-        "summarizerModel": summary.model,
-        "summarizerProvider": summary.provider,
-        "summarizerLocal": summary.local,
-        "summaryError": summary.err,
-        "path": path,
-        "archivePath": archive.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
-        "at": facts.at.unwrap().to_rfc3339(),
-    });
+    let handoff = to_stored(&v1::Handoff {
+        from_harness: harness_name(old.harness).into(),
+        from_session_id: status.harness_session_id.clone(),
+        to_harness: harness_name(to).into(),
+        summarizer_harness: summary.harness.clone(),
+        summarizer_model: summary.model.clone(),
+        summarizer_provider: summary.provider.clone(),
+        summarizer_local: summary.local,
+        summary_error: summary.err.clone(),
+        path: path.to_string_lossy().into_owned(),
+        archive_path: archive
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        at: Some(timestamp(at)),
+    })?;
     let row = hub
         .sleeves
         .set_handoff(&name, handoff.clone())
@@ -342,22 +423,20 @@ pub(super) fn harness_name(harness: Harness) -> &'static str {
     }
 }
 
-fn resleeve_target(hub: &Hub, from: Harness, requested: &str) -> Result<Harness> {
-    let explicit = match requested {
-        "HARNESS_CLAUDE" => Some(Harness::Claude),
-        "HARNESS_CODEX" => Some(Harness::Codex),
-        "HARNESS_GROK" => Some(Harness::Grok),
-        "HARNESS_PI" => Some(Harness::Pi),
-        "" | "HARNESS_UNSPECIFIED" => None,
-        _ => {
+fn resleeve_target(hub: &Hub, from: Harness, requested: v1::Harness) -> Result<Harness> {
+    match requested {
+        v1::Harness::Unspecified => {}
+        v1::Harness::Shell => {
             return Err(RpcError::new(
                 Code::InvalidArgument,
                 "resleeve onto claude, codex, grok or pi",
             ))
         }
-    };
-    if let Some(harness) = explicit {
-        return Ok(harness);
+        explicit => {
+            if let Some(harness) = registry_harness(explicit) {
+                return Ok(harness);
+            }
+        }
     }
     let suggestions = protectorate_quota::rank_harnesses(
         &hub.quota.snapshot(Utc::now()),
@@ -389,32 +468,43 @@ fn resleeve_target(hub: &Hub, from: Harness, requested: &str) -> Result<Harness>
         })
 }
 
-fn resleeve_launch_request(old: &Record, harness: Harness, selection: &Value) -> Value {
-    let mut request = json!({
-        "name":old.name,"workspace":old.workspace,"harness":harness.proto(),
-        "mode":"SLEEVE_MODE_CHAT","supervised":old.supervised,
-        "limits":old.limits,"readOnly":old.read_only,"nested":old.nested,
-        "env":old.env,
-    });
-    if selection.is_object() {
-        request["selection"] = selection.clone();
-    }
-    request
+fn resleeve_launch(
+    old: &Record,
+    harness: Harness,
+    selection: Option<v1::ModelSelection>,
+    requester: Value,
+) -> Launch {
+    Launch::new(
+        v1::SpawnSleeveRequest {
+            name: old.name.clone(),
+            workspace: old.workspace.clone(),
+            harness: proto_harness(harness) as i32,
+            mode: v1::SleeveMode::Chat as i32,
+            supervised: old.supervised,
+            limits: Some(proto_limits(&old.limits)),
+            read_only: old.read_only.iter().map(proto_mount).collect(),
+            nested: old.nested,
+            env: old.env.clone(),
+            selection,
+            ..Default::default()
+        },
+        requester,
+    )
 }
 
 fn resleeve_facts(
     hub: &Hub,
     old: &Record,
     to: Harness,
-    status: &Value,
+    status: &v1::ChatStatus,
 ) -> protectorate_handoff::Facts {
-    let session_id = string(status, "harnessSessionId");
+    let session_id = status.harness_session_id.clone();
     let mut facts = protectorate_handoff::Facts {
         sleeve: old.name.clone(),
         harness: harness_name(old.harness).into(),
         session_id: session_id.clone(),
-        model: string(status, "model"),
-        provider: string(status, "provider"),
+        model: status.model.clone(),
+        provider: status.provider.clone(),
         workspace: PathBuf::from(&old.workspace),
         to: harness_name(to).into(),
         notes_file: protectorate_handoff::has_notes(&old.workspace),
@@ -444,11 +534,11 @@ fn resleeve_facts(
         );
     }
     if let Some(result) = &old.result {
-        let text = string(result, "summary");
+        let text = result["summary"].as_str().unwrap_or_default();
         if !text.is_empty() {
             facts.hub_notes.push(format!(
                 "Latest result: {}",
-                protectorate_handoff::clip(&text, 1000)
+                protectorate_handoff::clip(text, 1000)
             ));
         }
     }
@@ -766,88 +856,80 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         });
     }
     let list = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/ListSleeves",
-        move |request| {
-            let hub = Arc::clone(&list);
+    server.unary(sleeve_service::LIST_SLEEVES, move |_: Call<_>| {
+        let hub = Arc::clone(&list);
+        async move {
+            let sleeves = hub
+                .sleeves
+                .list()
+                .iter()
+                .map(|row| sleeve(&refresh_record(&hub, row)))
+                .collect::<Result<_>>()?;
+            Ok(v1::ListSleevesResponse { sleeves })
+        }
+    })?;
+    let get = Arc::clone(&hub);
+    server.unary(
+        sleeve_service::GET_SLEEVE,
+        move |call: Call<v1::GetSleeveRequest>| {
+            let hub = Arc::clone(&get);
             async move {
-                let sleeves = hub
-                    .sleeves
-                    .list()
-                    .iter()
-                    .map(|row| refresh_record(&hub, row))
-                    .map(|row| sleeve_json(&row))
-                    .collect::<Vec<_>>();
-                respond(&request, json!({"sleeves": sleeves}))
+                let name = call.request.name;
+                let row = hub.sleeves.get(&name).map_err(registry_error)?;
+                if row.helper {
+                    return Err(RpcError::new(
+                        Code::NotFound,
+                        format!("sleeve not found: {name}"),
+                    ));
+                }
+                Ok(v1::GetSleeveResponse {
+                    sleeve: Some(sleeve(&refresh_record(&hub, &row))?),
+                })
             }
         },
     )?;
-    let get = Arc::clone(&hub);
-    server.register("/protectorate.v1.SleeveService/GetSleeve", move |request| {
-        let hub = Arc::clone(&get);
-        async move {
-            let name = string(&input(&request)?, "name");
-            let sleeve = hub.sleeves.get(&name).map_err(registry_error)?;
-            if sleeve.helper {
-                return Err(RpcError::new(
-                    Code::NotFound,
-                    format!("sleeve not found: {name}"),
-                ));
-            }
-            respond(
-                &request,
-                json!({"sleeve": sleeve_json(&refresh_record(&hub, &sleeve))}),
-            )
-        }
-    })?;
     let status = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/GetTerminalStatus",
-        move |request| {
+    server.unary(
+        sleeve_service::GET_TERMINAL_STATUS,
+        move |call: Call<v1::GetTerminalStatusRequest>| {
             let hub = Arc::clone(&status);
             async move {
-                let name = string(&input(&request)?, "name");
-                let response = tokio::task::spawn_blocking(move || terminal_status(&hub, &name))
+                let name = call.request.name;
+                tokio::task::spawn_blocking(move || terminal_status(&hub, &name))
                     .await
                     .map_err(|error| {
                         RpcError::new(Code::Internal, format!("terminal status: {error}"))
-                    })??;
-                respond(&request, response)
+                    })?
             }
         },
     )?;
     let spawn = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/SpawnSleeve",
-        move |request| {
+    server.unary(
+        sleeve_service::SPAWN_SLEEVE,
+        move |call: Call<v1::SpawnSleeveRequest>| {
             let hub = Arc::clone(&spawn);
             async move {
-                let mut value = input(&request)?;
-                value["requester"] = crate::approvals::requester(&hub, &request);
-                let parent = SpawnParent::from_auth(&request.auth);
-                request_env(&value)?;
-                let exit_after_idle = crate::chat::parse_exit_after_idle(&value)?;
-                if !exit_after_idle.is_zero()
-                    && (string(&value, "mode") == "SLEEVE_MODE_TERMINAL"
-                        || string(&value, "harness") == "HARNESS_SHELL")
+                let parent = SpawnParent::from_auth(&call.auth);
+                let requester = requester(&hub, &call);
+                let launch = Launch::new(call.request, requester);
+                launch.env()?;
+                let request = &launch.request;
+                if !launch.exit_after_idle()?.is_zero()
+                    && (request.mode() == v1::SleeveMode::Terminal
+                        || request.harness() == v1::Harness::Shell)
                 {
                     return Err(RpcError::new(
                         Code::InvalidArgument,
                         "exit-after-idle requires chat mode",
                     ));
                 }
-                if string(&value, "name") == "envoy" {
+                if request.name == "envoy" {
                     return Err(RpcError::new(
                         Code::PermissionDenied,
                         "envoy is a reserved sleeve name",
                     ));
                 }
-                if hub
-                    .resleeving
-                    .lock()
-                    .unwrap()
-                    .contains(&string(&value, "name"))
-                {
+                if hub.resleeving.lock().unwrap().contains(&request.name) {
                     return Err(RpcError::new(
                         Code::FailedPrecondition,
                         "sleeve is being resleeved",
@@ -855,26 +937,21 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 }
                 let directory_kick = Arc::clone(&hub.directory_kick);
                 let row = tokio::task::spawn_blocking(move || {
-                    let mut prepared = branch::prepare(&hub, &value)?;
-                    let mode = string(&prepared.request, "mode");
-                    let harness = string(&prepared.request, "harness");
-                    let result = match (mode.as_str(), harness.as_str()) {
-                        ("SLEEVE_MODE_TERMINAL", _) | (_, "HARNESS_SHELL") => {
-                            spawn_terminal(&hub, &prepared.request, &parent)
+                    let mut prepared = branch::prepare(&hub, launch)?;
+                    let launch = &prepared.launch;
+                    let result = match (launch.request.mode(), launch.request.harness()) {
+                        (v1::SleeveMode::Terminal, _) | (_, v1::Harness::Shell) => {
+                            spawn_terminal(&hub, launch, &parent)
                         }
-                        (_, "HARNESS_PI") => {
-                            crate::chat::spawn_pi(&hub, &prepared.request, &parent)
+                        (_, v1::Harness::Pi) => crate::chat::spawn_pi(&hub, launch, &parent),
+                        (_, v1::Harness::Claude) => {
+                            crate::chat::spawn_claude(&hub, launch, &parent)
                         }
-                        (_, "HARNESS_CLAUDE") => {
-                            crate::chat::spawn_claude(&hub, &prepared.request, &parent)
+                        (_, v1::Harness::Codex) => crate::chat::spawn_codex(&hub, launch, &parent),
+                        (_, v1::Harness::Grok) => crate::chat::spawn_grok(&hub, launch, &parent),
+                        (_, v1::Harness::Unspecified) => {
+                            Err(RpcError::new(Code::InvalidArgument, "invalid harness"))
                         }
-                        (_, "HARNESS_CODEX") => {
-                            crate::chat::spawn_codex(&hub, &prepared.request, &parent)
-                        }
-                        (_, "HARNESS_GROK") => {
-                            crate::chat::spawn_grok(&hub, &prepared.request, &parent)
-                        }
-                        _ => Err(RpcError::new(Code::InvalidArgument, "invalid harness")),
                     };
                     if result.is_ok() {
                         prepared.commit();
@@ -882,21 +959,22 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     result
                 })
                 .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
+                .map_err(super::join_error)??;
                 directory_kick.notify_one();
-                respond(&request, json!({"sleeve": sleeve_json(&row)}))
+                Ok(v1::SpawnSleeveResponse {
+                    sleeve: Some(sleeve(&row)?),
+                })
             }
         },
     )?;
     let kill = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/KillSleeve",
-        move |request| {
+    server.unary(
+        sleeve_service::KILL_SLEEVE,
+        move |call: Call<v1::KillSleeveRequest>| {
             let hub = Arc::clone(&kill);
             async move {
-                let value = input(&request)?;
-                let name = string(&value, "name");
-                let auth = request.auth.clone();
+                let v1::KillSleeveRequest { name, drop_caches } = call.request;
+                let auth = call.auth;
                 if hub.resleeving.lock().unwrap().contains(&name) {
                     return Err(RpcError::new(
                         Code::FailedPrecondition,
@@ -904,8 +982,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     ));
                 }
                 let directory_kick = Arc::clone(&hub.directory_kick);
-                let drop_caches = value.get("dropCaches").and_then(Value::as_bool) == Some(true);
-                if drop_caches && !request.auth.owner {
+                if drop_caches && !auth.owner {
                     return Err(RpcError::new(
                         Code::PermissionDenied,
                         "dropping caches requires the owner token",
@@ -957,66 +1034,67 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     Ok::<(), RpcError>(())
                 })
                 .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
+                .map_err(super::join_error)??;
                 directory_kick.notify_one();
-                respond(&request, json!({}))
+                Ok(v1::KillSleeveResponse {})
             }
         },
     )?;
     let prune = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/PruneSleeves",
-        move |request| {
+    server.unary(
+        sleeve_service::PRUNE_SLEEVES,
+        move |call: Call<v1::PruneSleevesRequest>| {
             let hub = Arc::clone(&prune);
             async move {
-                let value = input(&request)?;
-                let entries = tokio::task::spawn_blocking(move || prune_sleeves(&hub, &value))
-                    .await
-                    .map_err(|error| RpcError::new(Code::Internal, error.to_string()))??;
-                respond(&request, json!({"entries": entries}))
+                let entries =
+                    tokio::task::spawn_blocking(move || prune_sleeves(&hub, &call.request))
+                        .await
+                        .map_err(super::join_error)??;
+                Ok(v1::PruneSleevesResponse { entries })
             }
         },
     )?;
     let resleeve = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.SleeveService/ResleeveSleeve",
-        move |request| {
+    server.unary(
+        sleeve_service::RESLEEVE_SLEEVE,
+        move |call: Call<v1::ResleeveSleeveRequest>| {
             let hub = Arc::clone(&resleeve);
             async move {
-                let mut value = input(&request)?;
-                value["requester"] = crate::approvals::requester(&hub, &request);
-                let row = tokio::task::spawn_blocking(move || resleeve_sleeve(&hub, &value))
-                    .await
-                    .map_err(|error| RpcError::new(Code::Internal, error.to_string()))??;
-                respond(&request, json!({"sleeve":sleeve_json(&row)}))
+                let requester = requester(&hub, &call);
+                let row = tokio::task::spawn_blocking(move || {
+                    resleeve_sleeve(&hub, &call.request, requester)
+                })
+                .await
+                .map_err(super::join_error)??;
+                Ok(v1::ResleeveSleeveResponse {
+                    sleeve: Some(sleeve(&row)?),
+                })
             }
         },
     )?;
-    server.register(
-        "/protectorate.v1.SleeveService/SpawnEnvoy",
-        move |request| {
+    server.unary(
+        sleeve_service::SPAWN_ENVOY,
+        move |call: Call<v1::SpawnEnvoyRequest>| {
             let hub = Arc::clone(&hub);
             async move {
-                let value = input(&request)?;
                 let work = Arc::clone(&hub);
-                let result = tokio::task::spawn_blocking(move || spawn_envoy(&work, &value))
-                    .await
-                    .map_err(|error| RpcError::new(Code::Internal, error.to_string()))??;
-                let harness = result["sleeve"]["harness"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .trim_start_matches("HARNESS_")
-                    .to_ascii_lowercase();
-                let replaced = result["replaced"].as_bool().unwrap_or(false);
-                let response = respond(&request, result)?;
+                let request = call.request;
+                let (row, response) =
+                    tokio::task::spawn_blocking(move || spawn_envoy(&work, &request))
+                        .await
+                        .map_err(super::join_error)??;
                 hub.audit.write(AuditEntry {
-                    actor: request.auth.actor.clone(),
-                    token_id: request.auth.token_id.clone(),
-                    task: request.auth.task.clone(),
-                    procedure: request.method.procedure.clone(),
+                    actor: call.auth.actor,
+                    token_id: call.auth.token_id,
+                    task: call.auth.task,
+                    procedure: call.method.procedure,
                     subject: "envoy".into(),
                     outcome: "ok".into(),
-                    detail: format!("harness={harness} replaced={replaced}"),
+                    detail: format!(
+                        "harness={} replaced={}",
+                        harness_name(row.harness),
+                        response.replaced
+                    ),
                     ..AuditEntry::default()
                 });
                 Ok(response)
@@ -1026,7 +1104,10 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     Ok(())
 }
 
-fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
+fn spawn_envoy(
+    hub: &Hub,
+    request: &v1::SpawnEnvoyRequest,
+) -> Result<(Record, v1::SpawnEnvoyResponse)> {
     let _envoy_guard = hub.envoy_spawn_lock.lock().unwrap();
     if hub.resleeving.lock().unwrap().contains("envoy") {
         return Err(RpcError::new(
@@ -1042,9 +1123,8 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
     }
     let catalog = protectorate_wire::Catalog::embedded()?;
     let methods = catalog.methods().cloned().collect::<Vec<_>>();
-    let harness_name = string(value, "harness");
-    let (harness, reason) = match harness_name.as_str() {
-        "" | "HARNESS_UNSPECIFIED" => {
+    let (harness, reason) = match request.harness() {
+        v1::Harness::Unspecified => {
             let suggestions = protectorate_quota::rank_harnesses(
                 &hub.quota.snapshot(Utc::now()),
                 protectorate_quota::TaskSize::Medium,
@@ -1067,59 +1147,37 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
             };
             (harness, suggestion.reason)
         }
-        "HARNESS_CLAUDE" => (Harness::Claude, "chosen explicitly".into()),
-        "HARNESS_CODEX" => (Harness::Codex, "chosen explicitly".into()),
-        "HARNESS_GROK" => (Harness::Grok, "chosen explicitly".into()),
-        "HARNESS_PI" => (Harness::Pi, "chosen explicitly".into()),
-        "HARNESS_SHELL" => {
+        v1::Harness::Shell => {
             return Err(RpcError::new(
                 Code::InvalidArgument,
                 "shell cannot run Envoy",
             ))
         }
-        _ => {
-            return Err(RpcError::new(
-                Code::InvalidArgument,
-                "invalid Envoy harness",
-            ))
-        }
+        explicit => (
+            registry_harness(explicit).ok_or_else(|| RpcError::invalid("invalid Envoy harness"))?,
+            "chosen explicitly".into(),
+        ),
     };
-    let selection = &value["selection"];
-    if selection.is_object() && selection.as_object().is_some_and(|o| !o.is_empty()) {
-        if harness != Harness::Codex || harness_name != "HARNESS_CODEX" {
+    if let Some(selection) = request.selection.as_ref().filter(|s| custom(s)) {
+        if request.harness() != v1::Harness::Codex {
             return Err(RpcError::new(
                 Code::InvalidArgument,
                 "choose Codex explicitly for model/effort selection",
             ));
         }
-        if string(selection, "model").len() > 256 || string(selection, "effort").len() > 64 {
+        if selection.model.len() > 256 || selection.effort.len() > 64 {
             return Err(RpcError::new(
                 Code::InvalidArgument,
                 "selection is too long",
             ));
         }
     }
-    let mut scopes = value
-        .get("scopes")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .filter(|scopes| !scopes.is_empty())
-        .unwrap_or_else(|| envoy_default_scopes(&methods));
-    scopes.extend(
-        value
-            .get("addScopes")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned),
-    );
+    let mut scopes = if request.scopes.is_empty() {
+        envoy_default_scopes(&methods)
+    } else {
+        request.scopes.clone()
+    };
+    scopes.extend(request.add_scopes.iter().cloned());
     scopes.sort();
     scopes.dedup();
     let scope_methods = super::scope_methods(&methods);
@@ -1183,16 +1241,22 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
         envoy_claude_link(&workspace)?;
         crate::chat::spawn_envoy(
             hub,
-            &json!({
-                "name":"envoy", "workspace":workspace, "harness":harness.proto(),
-                "mode":"SLEEVE_MODE_CHAT", "selection":selection,
-                "requester": {"actor":"owner", "gated":false},
-                "tokenBudget": value["tokenBudget"],
-            }),
+            &Launch::new(
+                v1::SpawnSleeveRequest {
+                    name: "envoy".into(),
+                    workspace: workspace.to_string_lossy().into_owned(),
+                    harness: proto_harness(harness) as i32,
+                    mode: v1::SleeveMode::Chat as i32,
+                    selection: request.selection.clone(),
+                    token_budget: request.token_budget,
+                    ..Default::default()
+                },
+                json!({"actor": "owner", "gated": false}),
+            ),
             harness,
         )
     };
-    let sleeve = match launch() {
+    let row = match launch() {
         Ok(row) => row,
         Err(error) => {
             let _ = crate::access::revoke_held(hub, crate::access::ENVOY);
@@ -1200,9 +1264,14 @@ fn spawn_envoy(hub: &Hub, value: &Value) -> Result<Value> {
         }
     };
     hub.directory_kick.notify_one();
-    Ok(
-        json!({"sleeve":sleeve_json(&sleeve),"token":token_json(&token),"workspace":workspace,"reason":reason,"replaced":replaced}),
-    )
+    let response = v1::SpawnEnvoyResponse {
+        sleeve: Some(sleeve(&row)?),
+        token: Some(stored(&token_json(&token))?),
+        workspace: workspace.to_string_lossy().into_owned(),
+        reason,
+        replaced,
+    };
+    Ok((row, response))
 }
 
 fn envoy_default_scopes(methods: &[protectorate_wire::Method]) -> Vec<String> {
@@ -1450,23 +1519,29 @@ pub(super) fn refresh_record(hub: &Hub, row: &Record) -> Record {
             row.terminal = hub
                 .session_monitor
                 .activity(&row.name)
-                .map(|(activity, rule)| terminal_json(Some(activity), rule));
+                .and_then(|(activity, rule)| to_stored(&terminal(Some(activity), rule)).ok());
             row
         }
     }
 }
 
-fn terminal_json(activity: Option<Activity>, rule: &str) -> Value {
-    let activity = match activity {
-        Some(Activity::Working) => "TERMINAL_ACTIVITY_WORKING",
-        Some(Activity::Blocked) => "TERMINAL_ACTIVITY_BLOCKED",
-        Some(Activity::Idle) => "TERMINAL_ACTIVITY_IDLE",
-        None => "TERMINAL_ACTIVITY_UNSPECIFIED",
-    };
-    json!({"activity": activity, "rule": rule})
+fn terminal_activity(activity: Option<Activity>) -> v1::TerminalActivity {
+    match activity {
+        Some(Activity::Working) => v1::TerminalActivity::Working,
+        Some(Activity::Blocked) => v1::TerminalActivity::Blocked,
+        Some(Activity::Idle) => v1::TerminalActivity::Idle,
+        None => v1::TerminalActivity::Unspecified,
+    }
 }
 
-fn terminal_status(hub: &Hub, name: &str) -> Result<Value> {
+fn terminal(activity: Option<Activity>, rule: &str) -> v1::TerminalStatus {
+    v1::TerminalStatus {
+        activity: terminal_activity(activity) as i32,
+        rule: rule.into(),
+    }
+}
+
+fn terminal_status(hub: &Hub, name: &str) -> Result<v1::GetTerminalStatusResponse> {
     let row = hub.sleeves.get(name).map_err(registry_error)?;
     let row = refresh_record(hub, &row);
     if row.helper || row.mode != Mode::Terminal || row.state != State::Running {
@@ -1487,21 +1562,25 @@ fn terminal_status(hub: &Hub, name: &str) -> Result<Value> {
         ));
     };
     let decided = explanation.rules.iter().find(|(_, _, matched)| *matched);
-    let rules = explanation
-        .rules
-        .iter()
-        .map(|(id, activity, matched)| {
-            json!({"id": id, "activity": terminal_json(Some(*activity), "")["activity"], "matched": matched})
-        })
-        .collect::<Vec<_>>();
-    Ok(json!({
-        "status": terminal_json(decided.map(|(_, activity, _)| *activity), decided.map_or("", |(id, _, _)| id)),
-        "rules": rules,
-        "lines": explanation.region,
-    }))
+    Ok(v1::GetTerminalStatusResponse {
+        status: Some(terminal(
+            decided.map(|(_, activity, _)| *activity),
+            decided.map_or("", |(id, _, _)| id),
+        )),
+        rules: explanation
+            .rules
+            .iter()
+            .map(|(id, activity, matched)| v1::ScreenRule {
+                id: (*id).into(),
+                activity: terminal_activity(Some(*activity)) as i32,
+                matched: *matched,
+            })
+            .collect(),
+        lines: explanation.region,
+    })
 }
 
-fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Record> {
+fn spawn_terminal(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Record> {
     let launcher = hub.terminal_launcher.as_ref().ok_or_else(|| {
         RpcError::new(
             Code::Unavailable,
@@ -1509,50 +1588,36 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         )
     })?;
     let _guard = hub.sleeve_launch_lock.lock().unwrap();
-    let name = string(value, "name");
+    let request = &launch.request;
+    let name = request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(registry_error)?;
-    let harness = match string(value, "harness").as_str() {
-        "HARNESS_SHELL" => Harness::Shell,
-        "HARNESS_PI" => Harness::Pi,
-        "HARNESS_CLAUDE" => Harness::Claude,
-        "HARNESS_CODEX" => Harness::Codex,
-        "HARNESS_GROK" => Harness::Grok,
-        _ => return Err(RpcError::new(Code::InvalidArgument, "invalid harness")),
-    };
-    let mode = string(value, "mode");
-    if !mode.is_empty() && mode != "SLEEVE_MODE_UNSPECIFIED" && mode != "SLEEVE_MODE_TERMINAL" {
+    let harness = registry_harness(request.harness())
+        .ok_or_else(|| RpcError::new(Code::InvalidArgument, "invalid harness"))?;
+    if request.mode() == v1::SleeveMode::Chat {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "terminal sleeves require terminal mode",
         ));
     }
-    if value
-        .get("supervised")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if request.supervised {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "supervised requires chat mode",
         ));
     }
-    if value
-        .get("brief")
-        .and_then(Value::as_str)
-        .is_some_and(|s| !s.is_empty())
-    {
+    if !request.brief.is_empty() {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "brief requires chat mode",
         ));
     }
-    if number(value, "tokenBudget")? > 0 {
+    if request.token_budget > 0 {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "a token budget requires chat mode, where the harness reports usage",
         ));
     }
-    let workspace = PathBuf::from(string(value, "workspace"));
+    let workspace = PathBuf::from(&request.workspace);
     if !workspace.is_absolute() {
         return Err(RpcError::new(
             Code::InvalidArgument,
@@ -1576,16 +1641,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
             Err(e) => return Err(RpcError::new(Code::Internal, e.to_string())),
         }
     }
-    let args = value
-        .get("args")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let args = request.args.clone();
     let mut tool_roots = launcher.tool_roots.clone();
     let (command, provider, selected_executable) = if harness == Harness::Shell {
         let mut command = if args.is_empty() {
@@ -1662,48 +1718,36 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
     };
     tool_roots.sort();
     tool_roots.dedup();
-    let limits = value.get("limits").cloned().unwrap_or_else(|| json!({}));
-    let cpu_percent = u32::try_from(number(&limits, "cpuPercent")?)
-        .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU percent exceeds u32"))?;
-    let memory_bytes = number(&limits, "memoryBytes")?;
-    let disk_bytes = number(&limits, "diskBytes")?;
-    let nested = value
-        .get("nested")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let mut read_only = value
-        .get("readOnly")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|item| {
-                    let source = string(item, "source");
-                    let target = string(item, "target");
-                    if source.is_empty() {
-                        return Err(RpcError::new(
-                            Code::InvalidArgument,
-                            "read-only source is empty",
-                        ));
-                    }
-                    Ok(ReadOnly {
-                        source: PathBuf::from(&source),
-                        target: PathBuf::from(if target.is_empty() { &source } else { &target }),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()
+    let v1::SleeveLimits {
+        cpu_percent,
+        memory_bytes,
+        disk_bytes,
+    } = launch.limits();
+    let nested = request.nested;
+    let mut read_only = request
+        .read_only
+        .iter()
+        .map(|mount| {
+            if mount.source.is_empty() {
+                return Err(RpcError::new(
+                    Code::InvalidArgument,
+                    "read-only source is empty",
+                ));
+            }
+            let (source, target) = mount_paths(mount);
+            Ok(ReadOnly { source, target })
         })
-        .transpose()?
-        .unwrap_or_default();
+        .collect::<Result<Vec<_>>>()?;
     let old_base = hub.sleeves.get(&name).ok();
     let base_repo = old_base
         .as_ref()
-        .map_or_else(|| string(value, "baseRepo"), |row| row.base_repo.clone());
+        .map_or_else(|| launch.base.repo.clone(), |row| row.base_repo.clone());
     let base_grants = branch::base_grants(&launcher.state_root, &name, &base_repo)?;
     read_only.extend(base_grants.into_iter().map(|grant| ReadOnly {
         source: grant.source,
         target: grant.target,
     }));
-    let caller_env = request_env(value)?;
+    let caller_env = launch.env()?;
     let mut env = caller_env.clone();
     env.insert("PROTECTORATE_HUB".into(), launcher.hub_url.clone());
     env.insert(
@@ -1814,10 +1858,8 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
             "scopes": crate::access::sleeve_scopes(hub, parent),
         })),
     };
-    crate::approvals::check_pin(
+    launch.check_pin(
         hub,
-        value,
-        &name,
         &run_id,
         &pin_key,
         old_base.as_ref().and_then(|row| row.pins.get(&pin_key)),
@@ -1878,10 +1920,10 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         row.base_tip = old.base_tip;
         row.managed_clone = old.managed_clone;
     } else {
-        row.base_repo = string(value, "baseRepo");
-        row.base_branch = string(value, "baseBranch");
-        row.base_tip = string(value, "baseTip");
-        row.managed_clone = value["managedClone"] == true;
+        row.base_repo = launch.base.repo.clone();
+        row.base_branch = launch.base.branch.clone();
+        row.base_tip = launch.base.tip.clone();
+        row.managed_clone = launch.base.managed_clone;
     }
     row.args = args;
     row.env = caller_env;
@@ -2131,14 +2173,16 @@ fn drop_home_caches(hub: &Hub, name: &str) -> Result<()> {
 /// Inventory private sleeve data while holding the launch lock. A respawn
 /// cannot race a destructive prune and a newly started sleeve cannot acquire
 /// a path that has already been classified as stopped.
-fn prune_sleeves(hub: &Hub, options: &Value) -> Result<Vec<Value>> {
+fn prune_sleeves(hub: &Hub, options: &v1::PruneSleevesRequest) -> Result<Vec<v1::SleeveDiskEntry>> {
     let _guard = hub.sleeve_launch_lock.lock().unwrap();
-    let yes = options.get("yes").and_then(Value::as_bool) == Some(true);
-    let homes = options.get("homes").and_then(Value::as_bool) == Some(true);
-    let workspaces = options.get("workspaces").and_then(Value::as_bool) == Some(true);
-    let caches =
-        options.get("caches").and_then(Value::as_bool) == Some(true) || (!homes && !workspaces);
-    let show_running = options.get("running").and_then(Value::as_bool) == Some(true);
+    let v1::PruneSleevesRequest {
+        yes,
+        homes,
+        workspaces,
+        running: show_running,
+        ..
+    } = *options;
+    let caches = options.caches || (!homes && !workspaces);
     let registered = hub
         .sleeves
         .list()
@@ -2295,7 +2339,7 @@ fn prune_sleeves(hub: &Hub, options: &Value) -> Result<Vec<Value>> {
             )?;
         }
     }
-    entries.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(entries)
 }
 
@@ -2326,7 +2370,7 @@ fn prune_path_intersects(left: &Path, right: &Path) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn prune_clone(
-    entries: &mut Vec<Value>,
+    entries: &mut Vec<v1::SleeveDiskEntry>,
     name: &str,
     parent: &fs::File,
     basename: &OsStr,
@@ -2341,7 +2385,7 @@ fn prune_clone(
         Ok(Some(directory)) => directory,
         Ok(None) => return Ok(()),
         Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => {
-            entries.push(json!({"sleeve":name,"path":path,"kind":"workspace","bytes":"0","eligible":false,"removed":false,"reason":"keep non-directory or symlink"}));
+            entries.push(kept_link(name, path, "workspace"));
             return Ok(());
         }
         Err(error) => return Err(cache_error(error)),
@@ -2418,7 +2462,15 @@ fn prune_clone(
             }
         }
     }
-    entries.push(json!({"sleeve":name,"path":path,"kind":"workspace","bytes":bytes.to_string(),"eligible":eligible,"removed":removed,"reason":reason}));
+    entries.push(v1::SleeveDiskEntry {
+        sleeve: name.into(),
+        path: path.to_string_lossy().into_owned(),
+        kind: "workspace".into(),
+        bytes,
+        eligible,
+        removed,
+        reason,
+    });
     Ok(())
 }
 
@@ -2505,7 +2557,7 @@ fn open_child_or_skip(parent: &fs::File, name: &OsStr) -> Result<Option<fs::File
 
 #[allow(clippy::too_many_arguments)]
 fn prune_one(
-    entries: &mut Vec<Value>,
+    entries: &mut Vec<v1::SleeveDiskEntry>,
     sleeve: &str,
     parent: &fs::File,
     name: &OsStr,
@@ -2520,7 +2572,7 @@ fn prune_one(
         Ok(Some(directory)) => directory,
         Ok(None) => return Ok(()),
         Err(error) if matches!(error.raw_os_error(), Some(libc::ELOOP | libc::ENOTDIR)) => {
-            entries.push(json!({"sleeve":sleeve,"path":path,"kind":kind,"bytes":"0","eligible":false,"removed":false,"reason":"keep non-directory or symlink"}));
+            entries.push(kept_link(sleeve, path, kind));
             return Ok(());
         }
         Err(error) => return Err(cache_error(error)),
@@ -2544,8 +2596,26 @@ fn prune_one(
     if removed {
         remove_open_tree(parent, name, directory).map_err(cache_error)?;
     }
-    entries.push(json!({"sleeve":sleeve,"path":path,"kind":kind,"bytes":bytes.to_string(),"eligible":eligible,"removed":removed,"reason":reason}));
+    entries.push(v1::SleeveDiskEntry {
+        sleeve: sleeve.into(),
+        path: path.to_string_lossy().into_owned(),
+        kind: kind.into(),
+        bytes,
+        eligible,
+        removed,
+        reason,
+    });
     Ok(())
+}
+
+fn kept_link(sleeve: &str, path: &Path, kind: &str) -> v1::SleeveDiskEntry {
+    v1::SleeveDiskEntry {
+        sleeve: sleeve.into(),
+        path: path.to_string_lossy().into_owned(),
+        kind: kind.into(),
+        reason: "keep non-directory or symlink".into(),
+        ..Default::default()
+    }
 }
 
 fn disk_size_open(directory: &fs::File) -> io::Result<u64> {
@@ -2887,22 +2957,6 @@ fn issue_terminal_identity(hub: &Hub, name: &str, parent: &SpawnParent) -> Resul
     crate::access::issue_sleeve(hub, name, parent, &terminal_token_path(hub, name)?).map(|_| ())
 }
 
-fn number(value: &Value, key: &str) -> Result<u64> {
-    match value.get(key) {
-        None | Some(Value::Null) => Ok(0),
-        Some(Value::String(s)) => s
-            .parse()
-            .map_err(|_| RpcError::new(Code::InvalidArgument, format!("invalid {key}"))),
-        Some(Value::Number(n)) => n
-            .as_u64()
-            .ok_or_else(|| RpcError::new(Code::InvalidArgument, format!("invalid {key}"))),
-        _ => Err(RpcError::new(
-            Code::InvalidArgument,
-            format!("invalid {key}"),
-        )),
-    }
-}
-
 fn resolve_executable(executable: &str, tool_roots: &[PathBuf]) -> Result<PathBuf> {
     let path = Path::new(executable);
     let found = if path.is_absolute() {
@@ -2998,45 +3052,152 @@ pub(super) fn egress_log(hub: &Hub, name: &str, run_id: &str) -> protectorate_sa
     )
 }
 
-pub(super) fn sleeve_json(sleeve: &Record) -> Value {
-    let mut value = serde_json::to_value(sleeve).expect("valid sleeve record serializes");
-    let object = value.as_object_mut().expect("record is object");
-    object.remove("parentTokenId");
-    object.remove("parentScopes");
-    object.remove("helper");
-    object.remove("managedClone");
-    object.remove("env");
-    object.remove("pins");
-    object.remove("parentRunId");
-    if let Some(pin) = sleeve.pins.get(&pin_key(sleeve.mode, sleeve.harness)) {
-        object.insert("harnessSha256".into(), json!(pin.executable_sha256));
-        object.insert("profileSha256".into(), json!(pin.profile_sha256));
-    }
-    object.insert("harness".into(), json!(sleeve.harness.proto()));
-    object.insert("mode".into(), json!(sleeve.mode.proto()));
-    object.insert("state".into(), json!(sleeve.state.proto()));
-    object.insert(
-        "gitBranch".into(),
-        json!(crate::workspaces::git_details(Path::new(&sleeve.workspace)).1),
-    );
-    value
+pub(super) fn sleeve(row: &Record) -> Result<v1::Sleeve> {
+    let pin = row.pins.get(&pin_key(row.mode, row.harness));
+    let usage = &row.usage;
+    Ok(v1::Sleeve {
+        name: row.name.clone(),
+        harness: proto_harness(row.harness) as i32,
+        workspace: row.workspace.clone(),
+        session: row.session.clone(),
+        created_at: Some(stored_time(&row.created_at)?),
+        state: match row.state {
+            State::Running => v1::SleeveState::Running,
+            State::Exited => v1::SleeveState::Exited,
+        } as i32,
+        limits: Some(proto_limits(&row.limits)),
+        usage: Some(v1::SleeveUsage {
+            cpu_percent: usage.cpu_percent,
+            cpu_seconds: usage.cpu_seconds,
+            memory_current_bytes: usage.memory_current_bytes,
+            memory_peak_bytes: usage.memory_peak_bytes,
+            pids: usage.pids,
+            oom_kills: usage.oom_kills,
+            workspace_disk_bytes: usage.workspace_disk_bytes,
+            sampled_at: usage.sampled_at.as_deref().map(stored_time).transpose()?,
+            disk_sampled_at: usage
+                .disk_sampled_at
+                .as_deref()
+                .map(stored_time)
+                .transpose()?,
+            home_disk_bytes: usage.home_disk_bytes,
+            cache_disk_bytes: usage.cache_disk_bytes,
+            go_build_cache_disk_bytes: usage.go_build_cache_disk_bytes,
+        }),
+        args: row.args.clone(),
+        exited_at: row.exited_at.as_deref().map(stored_time).transpose()?,
+        exit_code: row.exit_code,
+        exit_signal: row.exit_signal,
+        oom_killed: row.oom_killed,
+        mode: match row.mode {
+            Mode::Chat => v1::SleeveMode::Chat,
+            Mode::Terminal => v1::SleeveMode::Terminal,
+        } as i32,
+        chat: row.chat.as_ref().map(stored).transpose()?,
+        supervised: row.supervised,
+        handoff: row.handoff.as_ref().map(stored).transpose()?,
+        read_only: row.read_only.iter().map(proto_mount).collect(),
+        exit_after_idle: row
+            .exit_after_idle
+            .as_deref()
+            .map(|text| {
+                text.parse()
+                    .map_err(|_| RpcError::new(Code::Internal, format!("stored duration {text:?}")))
+            })
+            .transpose()?,
+        parent: row.parent.clone(),
+        git_branch: crate::workspaces::git_details(Path::new(&row.workspace)).1,
+        base_repo: row.base_repo.clone(),
+        base_branch: row.base_branch.clone(),
+        base_tip: row.base_tip.clone(),
+        result: row.result.as_ref().map(stored).transpose()?,
+        killed: row.killed,
+        nested: row.nested,
+        terminal: row.terminal.as_ref().map(stored).transpose()?,
+        run_id: row.run_id.clone(),
+        harness_sha256: pin
+            .map(|pin| pin.executable_sha256.clone())
+            .unwrap_or_default(),
+        profile_sha256: pin
+            .map(|pin| pin.profile_sha256.clone())
+            .unwrap_or_default(),
+        token_budget: row.token_budget,
+        tokens_used: row.tokens_used,
+    })
 }
 
-pub(super) fn request_env(value: &Value) -> Result<BTreeMap<String, String>> {
-    let mut env = BTreeMap::new();
-    if let Some(raw) = value.get("env") {
-        let entries = raw
-            .as_object()
-            .ok_or_else(|| RpcError::invalid("env must be a string map"))?;
-        for (key, value) in entries {
-            let value = value
-                .as_str()
-                .ok_or_else(|| RpcError::invalid(format!("env {key} must be a string")))?;
-            env.insert(key.clone(), value.to_owned());
-        }
+/// The protobuf JSON of a sleeve, for node metrics still assembled as JSON.
+pub(super) fn sleeve_json(row: &Record) -> Value {
+    sleeve(row)
+        .and_then(|sleeve| to_stored(&sleeve))
+        .unwrap_or_else(|error| {
+            eprintln!("sleeve {}: {error}", row.name);
+            Value::Null
+        })
+}
+
+fn proto_harness(harness: Harness) -> v1::Harness {
+    match harness {
+        Harness::Claude => v1::Harness::Claude,
+        Harness::Codex => v1::Harness::Codex,
+        Harness::Grok => v1::Harness::Grok,
+        Harness::Pi => v1::Harness::Pi,
+        Harness::Shell => v1::Harness::Shell,
     }
-    protectorate_sleeve_registry::validate_env(&env).map_err(registry_error)?;
-    Ok(env)
+}
+
+fn registry_harness(harness: v1::Harness) -> Option<Harness> {
+    match harness {
+        v1::Harness::Claude => Some(Harness::Claude),
+        v1::Harness::Codex => Some(Harness::Codex),
+        v1::Harness::Grok => Some(Harness::Grok),
+        v1::Harness::Pi => Some(Harness::Pi),
+        v1::Harness::Shell => Some(Harness::Shell),
+        v1::Harness::Unspecified => None,
+    }
+}
+
+pub(super) fn proto_limits(limits: &Limits) -> v1::SleeveLimits {
+    v1::SleeveLimits {
+        cpu_percent: limits.cpu_percent,
+        memory_bytes: limits.memory_bytes,
+        disk_bytes: limits.disk_bytes,
+    }
+}
+
+pub(super) fn proto_mount(mount: &ReadOnlyMount) -> v1::ReadOnlyMount {
+    v1::ReadOnlyMount {
+        source: mount.source.clone(),
+        target: mount.target.clone(),
+    }
+}
+
+/// A read-only mount's paths; the target defaults to the source.
+pub(super) fn mount_paths(mount: &v1::ReadOnlyMount) -> (PathBuf, PathBuf) {
+    let target = if mount.target.is_empty() {
+        &mount.source
+    } else {
+        &mount.target
+    };
+    (PathBuf::from(&mount.source), PathBuf::from(target))
+}
+
+fn stored_time(text: &str) -> Result<prost_types::Timestamp> {
+    text.parse()
+        .map_err(|_| RpcError::new(Code::Internal, format!("stored time {text:?}")))
+}
+
+fn timestamp(time: DateTime<Utc>) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: time.timestamp(),
+        nanos: time.timestamp_subsec_nanos() as i32,
+    }
+}
+
+/// Encodes a message as the protobuf JSON the registry and chat log keep.
+fn to_stored<T: ReflectMessage>(message: &T) -> Result<Value> {
+    serde_json::from_slice(&wire::encode(message)?)
+        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))
 }
 
 fn registry_error(error: Error) -> RpcError {
@@ -3048,4 +3209,21 @@ fn registry_error(error: Error) -> RpcError {
         Error::Io(_) | Error::Json(_) => Code::Internal,
     };
     RpcError::new(code, error.to_string())
+}
+
+/// Decodes protobuf JSON the hub keeps outside the API (registry records,
+/// chat logs, driver status) into its generated message.
+pub(super) fn stored<T: ReflectMessage + Default>(value: &Value) -> Result<T> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    wire::decode(&bytes).map_err(|error| {
+        RpcError::new(
+            Code::Internal,
+            format!(
+                "stored {}: {}",
+                T::default().descriptor().name(),
+                error.message
+            ),
+        )
+    })
 }
