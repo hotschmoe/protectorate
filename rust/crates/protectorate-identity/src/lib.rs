@@ -19,6 +19,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, Weak,
     },
+    thread,
     time::Duration,
 };
 use subtle::ConstantTimeEq;
@@ -189,14 +190,53 @@ struct Disk {
 }
 struct Inner {
     disk: Disk,
-    key: Zeroizing<Vec<u8>>,
     last_flush: Option<i64>,
     watches: BTreeMap<String, Vec<Weak<Signal>>>,
     nonces: HashMap<String, i64>,
 }
+/// Readers take only `inner`, briefly, and never wait on the disk. Writers
+/// take `writer` first, so they run one at a time and in order: each builds
+/// its next state from a snapshot, writes it durably without holding `inner`,
+/// and only then swaps it in. A failed write leaves memory and disk unchanged.
+/// Until the swap readers still see the old state, so a change takes effect
+/// for them when its caller is told it succeeded.
 pub struct Store {
+    key: Zeroizing<Vec<u8>>,
+    inner: Arc<Mutex<Inner>>,
+    disk: Arc<DiskFile>,
+}
+struct DiskFile {
     path: Option<PathBuf>,
-    inner: Mutex<Inner>,
+    writer: Mutex<()>,
+    flushing: AtomicBool,
+}
+impl DiskFile {
+    fn persist(&self, disk: &Disk) -> Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let mut b = fs::DirBuilder::new();
+        b.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            b.mode(0o700);
+        }
+        b.create(parent)?;
+        protectorate_fsutil::write_file(path, &serde_json::to_vec_pretty(disk)?, 0o600)?;
+        Ok(())
+    }
+    /// Writes the newest committed state; the snapshot is taken after the
+    /// writer lock, so an older state never lands over a newer one.
+    fn flush(&self, inner: &Mutex<Inner>) -> Result<()> {
+        let _writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let disk = inner.lock().unwrap_or_else(|e| e.into_inner()).disk.clone();
+        self.persist(&disk)
+    }
 }
 fn invalid<T>(s: &str) -> Result<T> {
     Err(Error::Invalid(s.into()))
@@ -249,14 +289,18 @@ impl Store {
             }
         };
         Ok(Self {
-            path,
-            inner: Mutex::new(Inner {
+            key,
+            disk: Arc::new(DiskFile {
+                path,
+                writer: Mutex::new(()),
+                flushing: AtomicBool::new(false),
+            }),
+            inner: Arc::new(Mutex::new(Inner {
                 disk,
-                key,
                 last_flush: None,
                 watches: BTreeMap::new(),
                 nonces: HashMap::new(),
-            }),
+            })),
         })
     }
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
@@ -273,40 +317,42 @@ impl Store {
         }
         Ok(store)
     }
-    fn persist(&self, disk: &Disk) -> Result<()> {
-        let Some(path) = &self.path else {
-            return Ok(());
-        };
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let mut b = fs::DirBuilder::new();
-        b.recursive(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            b.mode(0o700);
-        }
-        b.create(parent)?;
-        protectorate_fsutil::write_file(path, &serde_json::to_vec_pretty(disk)?, 0o600)?;
-        Ok(())
-    }
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
     fn change<T>(&self, change: impl FnOnce(&mut Disk, &[u8]) -> Result<T>) -> Result<T> {
+        self.apply(change, |_| {})
+    }
+    /// `after` runs under the state lock at the moment the change becomes visible.
+    fn apply<T>(
+        &self,
+        change: impl FnOnce(&mut Disk, &[u8]) -> Result<T>,
+        after: impl FnOnce(&mut Inner),
+    ) -> Result<T> {
+        let _writer = self.disk.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let current = self.lock().disk.clone();
+        let mut next = current.clone();
+        let out = change(&mut next, &self.key)?;
+        if next == current {
+            return Ok(out);
+        }
+        self.disk.persist(&next)?;
         let mut inner = self.lock();
-        let mut next = inner.disk.clone();
-        let out = change(&mut next, &inner.key)?;
-        if next != inner.disk {
-            self.persist(&next)?;
+        for device in &mut next.devices {
+            let used = inner
+                .disk
+                .devices
+                .iter()
+                .find(|d| d.id == device.id)
+                .and_then(|d| d.last_used);
+            device.last_used = device.last_used.max(used);
         }
         inner.disk = next;
+        after(&mut inner);
         Ok(out)
     }
     pub fn flush(&self) -> Result<()> {
-        self.persist(&self.lock().disk)
+        self.disk.flush(&self.inner)
     }
 
     /// Mints the first token of a new lineage.
@@ -345,7 +391,7 @@ impl Store {
     }
 
     fn check(&self, inner: &Inner, token: &str, now: i64) -> Result<(Capability, Claims)> {
-        let claims = capability::verify(&inner.key, token).map_err(|_| Error::UnknownToken)?;
+        let claims = capability::verify(&self.key, token).map_err(|_| Error::UnknownToken)?;
         let record = inner
             .disk
             .capabilities
@@ -415,23 +461,20 @@ impl Store {
     }
 
     pub fn revoke(&self, id: &str, now: i64) -> Result<Capability> {
-        let mut inner = self.lock();
-        let mut next = inner.disk.clone();
-        let record = next
-            .capabilities
-            .iter_mut()
-            .find(|c| c.id == id)
-            .ok_or(Error::UnknownToken)?;
-        if record.revoked_at.is_none() {
-            record.revoked_at = Some(now)
-        }
-        let out = record.clone();
-        if next != inner.disk {
-            self.persist(&next)?;
-        }
-        inner.disk = next;
-        signal(&mut inner, id);
-        Ok(out)
+        self.apply(
+            |d, _| {
+                let record = d
+                    .capabilities
+                    .iter_mut()
+                    .find(|c| c.id == id)
+                    .ok_or(Error::UnknownToken)?;
+                if record.revoked_at.is_none() {
+                    record.revoked_at = Some(now)
+                }
+                Ok(record.clone())
+            },
+            |inner| signal(inner, id),
+        )
     }
 
     /// Revokes every active lineage of one principal, such as a killed sleeve.
@@ -649,27 +692,36 @@ impl Store {
         }
         inner.nonces.insert(seen, proof.time + proof::MAX_SKEW);
         inner.disk.devices[index].last_used = Some(now);
-        if inner.last_flush.is_none_or(|t| now.saturating_sub(t) >= 60)
-            && self.persist(&inner.disk).is_ok()
+        if self.disk.path.is_some()
+            && inner.last_flush.is_none_or(|t| now.saturating_sub(t) >= 60)
+            && !self.disk.flushing.swap(true, Ordering::AcqRel)
         {
-            inner.last_flush = Some(now)
+            inner.last_flush = Some(now);
+            self.flush_in_background();
         }
         Ok(inner.disk.devices[index].clone())
     }
+    /// The last-used stamp is advisory, so its write runs off the request.
+    fn flush_in_background(&self) {
+        let (disk, inner) = (self.disk.clone(), self.inner.clone());
+        thread::spawn(move || {
+            let _ = disk.flush(&inner);
+            disk.flushing.store(false, Ordering::Release);
+        });
+    }
     /// Forgets a device: its next request fails and its streams close.
     pub fn remove_device(&self, id: &str) -> Result<Device> {
-        let mut inner = self.lock();
-        let mut next = inner.disk.clone();
-        let index = next
-            .devices
-            .iter()
-            .position(|d| d.id == id)
-            .ok_or(Error::UnknownToken)?;
-        let device = next.devices.remove(index);
-        self.persist(&next)?;
-        inner.disk = next;
-        signal(&mut inner, id);
-        Ok(device)
+        self.apply(
+            |d, _| {
+                let index = d
+                    .devices
+                    .iter()
+                    .position(|d| d.id == id)
+                    .ok_or(Error::UnknownToken)?;
+                Ok(d.devices.remove(index))
+            },
+            |inner| signal(inner, id),
+        )
     }
     pub fn rename_device(&self, id: &str, name: &str) -> Result<Device> {
         if !valid_device_name(name) {

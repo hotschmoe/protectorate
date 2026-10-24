@@ -397,6 +397,7 @@ struct File {
 pub struct Registry {
     path: PathBuf,
     records: Mutex<BTreeMap<String, Record>>,
+    writer: Mutex<()>,
 }
 impl Registry {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
@@ -425,6 +426,7 @@ impl Registry {
         Ok(Self {
             path,
             records: Mutex::new(records),
+            writer: Mutex::new(()),
         })
     }
     pub fn list(&self) -> Vec<Record> {
@@ -662,10 +664,11 @@ impl Registry {
         &self,
         apply: impl FnOnce(&mut BTreeMap<String, Record>) -> Result<T>,
     ) -> Result<T> {
-        let mut guard = self.records.lock().unwrap();
-        let mut next = guard.clone();
+        let _writer = self.writer.lock().unwrap();
+        let current = self.records.lock().unwrap().clone();
+        let mut next = current.clone();
         let value = apply(&mut next)?;
-        if next != *guard {
+        if next != current {
             if let Some(parent) = self.path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -674,7 +677,7 @@ impl Registry {
                 sleeves: next.values().cloned().collect(),
             })?;
             protectorate_fsutil::write_file(&self.path, &data, 0o600)?;
-            *guard = next;
+            *self.records.lock().unwrap() = next;
         }
         Ok(value)
     }
