@@ -291,8 +291,10 @@ repositories with object alternates are kept. A selected clone must have no
 staged, unstaged, untracked or ignored files; assume-unchanged/skip-worktree
 flags cannot conceal edits. `--ignored` excuses files the clone's tracked
 `.gitignore` rules ignore, such as build output; other untracked files still
-keep it, and so does any untracked `.gitignore`, which could otherwise hide
-real work as ignored. Every local branch tip, local tag and HEAD must
+keep it. The rules are the `.gitignore` files committed at HEAD, evaluated
+with no `.git/info/exclude` or global excludes, so a sleeve cannot hide work
+with local rules. Any untracked `.gitignore` and any nested repository keeps
+the clone, and a modified tracked `.gitignore` is an uncommitted change. Every local branch tip, local tag and HEAD must
 be reachable from origin refs fetched by the hub with a 30-second timeout.
 Local origins must resolve outside the hub clone namespace. Unavailable or
 unverifiable origins mean keep. Private HTTPS origins requiring credential

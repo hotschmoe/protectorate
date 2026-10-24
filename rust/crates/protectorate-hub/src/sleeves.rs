@@ -2192,6 +2192,7 @@ fn prune_sleeves(hub: &Hub, options: &v1::PruneSleevesRequest) -> Result<Vec<v1:
         homes,
         workspaces,
         running: show_running,
+        ignored,
         ..
     } = *options;
     let caches = options.caches || (!homes && !workspaces);
@@ -2347,6 +2348,7 @@ fn prune_sleeves(hub: &Hub, options: &v1::PruneSleevesRequest) -> Result<Vec<v1:
                 owner.as_ref(),
                 workspaces,
                 yes,
+                ignored,
                 busy.as_deref(),
             )?;
         }
@@ -2391,6 +2393,7 @@ fn prune_clone(
     owner: Option<&Record>,
     selected: bool,
     yes: bool,
+    ignored: bool,
     busy: Option<&str>,
 ) -> Result<()> {
     let directory = match open_child_directory(parent, basename) {
@@ -2453,7 +2456,8 @@ fn prune_clone(
                     &hidden_path,
                     "clone changed while entering prune quarantine",
                 );
-            } else if let Err(error) = prune_git::verify(&hidden_path, origin, &workspaces) {
+            } else if let Err(error) = prune_git::verify(&hidden_path, origin, &workspaces, ignored)
+            {
                 reason =
                     restore_quarantine(parent, OsStr::new(&hidden), basename, &hidden_path, &error);
             } else {
@@ -2464,7 +2468,7 @@ fn prune_clone(
                 reason = "clean clone; all refs recoverable from origin".into();
             }
         } else {
-            match prune_git::verify(path, origin, &workspaces) {
+            match prune_git::verify(path, origin, &workspaces, ignored) {
                 Ok(()) => {
                     eligible = true;
                     reason = "clean clone; all refs recoverable from origin".into();
