@@ -481,22 +481,13 @@ impl AppServer {
         if let Some(mut stdin) = self.stdin.take() {
             let _ = stdin.flush();
         }
-        let mut exited = false;
-        let deadline = std::time::Instant::now() + RPC_CLOSE_WAIT;
-        while std::time::Instant::now() < deadline {
-            match self.child.as_mut().expect("app-server child").try_wait() {
-                Ok(Some(_)) | Err(_) => {
-                    exited = true;
-                    break;
-                }
-                Ok(None) => std::thread::sleep(RPC_POLL),
-            }
-        }
         if let Some(c) = self.child.as_mut() {
-            kill_group(c);
-            if !exited {
-                let _ = c.wait();
+            let deadline = std::time::Instant::now() + RPC_CLOSE_WAIT;
+            while !c.exited() && std::time::Instant::now() < deadline {
+                std::thread::sleep(RPC_POLL);
             }
+            kill_group(c);
+            let _ = c.wait();
         }
         if let Some(h) = self.reader.take() {
             let _ = h.join();

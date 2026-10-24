@@ -112,7 +112,7 @@ fn run_agy(path: &Path, ctx: &Ctx) -> Result<Vec<u8>> {
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
-        if child.try_wait().ok().flatten().is_some() {
+        if child.exited() {
             break;
         }
         if start.elapsed() > limit {
@@ -125,9 +125,8 @@ fn run_agy(path: &Path, ctx: &Ctx) -> Result<Vec<u8>> {
         }
     }
     let status = child
-        .wait()
+        .reap_group()
         .map_err(|e| Error::Other(format!("agy usage report failed: {e}")))?;
-    kill_group(&mut child);
     let _ = reader.join();
     if !status.success() {
         let code = status.code().unwrap_or(-1);
