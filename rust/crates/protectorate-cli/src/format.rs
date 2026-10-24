@@ -24,73 +24,41 @@ impl ChatRenderer {
         Ok(())
     }
 
-    pub(crate) fn render(&mut self, output: &mut dyn Write, event: &Value) -> Result<()> {
-        let stamp = local_stamp(text(event, "time"));
-        let time = stamp
-            .rsplit_once(' ')
-            .map_or(stamp.as_str(), |(_, part)| part);
-        if let Some(part) = event.get("text") {
-            let id = text(part, "messageId");
-            let thinking = boolean(part, "thinking");
-            if !self.open_text || self.open_id != id || self.open_thinking != thinking {
-                self.flush(output)?;
-                let label = if thinking { "thinking" } else { "assistant" };
-                write!(output, "{time} {label:<9} ").map_err(write_error)?;
-                self.open_text = true;
-                self.open_id = id;
-                self.open_thinking = thinking;
-            }
-            output
-                .write_all(text(part, "delta").as_bytes())
-                .map_err(write_error)?;
+    pub(crate) fn render(&mut self, output: &mut dyn Write, event: &v1::ChatEvent) -> Result<()> {
+        use v1::chat_event::Body;
+        let time = stamp(event.time.as_ref());
+        let Some(body) = &event.body else {
             return Ok(());
-        }
+        };
+        let (kind, detail) = match body {
+            Body::Text(part) => return self.text(output, &time, part),
+            Body::User(user) => ("user", format!("{}: {}", user.from, user.text)),
+            Body::ToolCall(call) => ("toolCall", format!("{} {}", call.name, call.input_json)),
+            Body::ToolResult(result) => ("toolResult", result.output.clone()),
+            Body::Approval(approval) => (
+                "approval",
+                format!("{} [{}] {}", approval.id, approval.kind, approval.summary),
+            ),
+            Body::ApprovalResolved(resolved) => (
+                "approvalResolved",
+                format!(
+                    "{} allow={} by {}",
+                    resolved.id, resolved.allow, resolved.by
+                ),
+            ),
+            Body::Usage(usage) => ("usage", compact_json(usage)?),
+            Body::Settled(settled) => ("settled", settled.stop_reason.clone()),
+            Body::Compaction(compaction) => ("compaction", compact_json(compaction)?),
+            Body::Error(error) => ("error", error.text.clone()),
+            Body::State(change) => ("state", chat_state_label(change.state()).to_owned()),
+            Body::Settings(settings) => ("settings", compact_json(settings)?),
+            Body::Report(report) => (
+                "report",
+                format!("{}: {}", result_status(report), report.summary),
+            ),
+            Body::Handoff(handoff) => ("handoff", compact_json(handoff)?),
+        };
         self.flush(output)?;
-        let fields = [
-            "user",
-            "toolCall",
-            "toolResult",
-            "approval",
-            "approvalResolved",
-            "usage",
-            "settled",
-            "compaction",
-            "error",
-            "state",
-            "settings",
-            "report",
-            "handoff",
-        ];
-        let Some((kind, body)) = fields
-            .iter()
-            .find_map(|key| event.get(*key).map(|value| (*key, value)))
-        else {
-            return Ok(());
-        };
-        let detail = match kind {
-            "user" => format!("{}: {}", text(body, "from"), text(body, "text")),
-            "toolCall" => format!("{} {}", text(body, "name"), text(body, "inputJson")),
-            "toolResult" => text(body, "output"),
-            "approval" => format!(
-                "{} [{}] {}",
-                text(body, "id"),
-                text(body, "kind"),
-                text(body, "summary")
-            ),
-            "approvalResolved" => format!(
-                "{} allow={} by {}",
-                text(body, "id"),
-                boolean(body, "allow"),
-                text(body, "by")
-            ),
-            "settled" => text(body, "stopReason"),
-            "error" => text(body, "text"),
-            "state" => text(body, "state")
-                .trim_start_matches("CHAT_STATE_")
-                .to_ascii_lowercase(),
-            "report" => format!("{}: {}", text(body, "status"), text(body, "summary")),
-            _ => body.to_string(),
-        };
         writeln!(
             output,
             "{time} {kind:<9} {}",
@@ -98,10 +66,34 @@ impl ChatRenderer {
         )
         .map_err(write_error)
     }
+
+    /// Assistant text streams onto one line per message and channel.
+    fn text(&mut self, output: &mut dyn Write, time: &str, part: &v1::AssistantText) -> Result<()> {
+        if !self.open_text || self.open_id != part.message_id || self.open_thinking != part.thinking
+        {
+            self.flush(output)?;
+            let label = if part.thinking {
+                "thinking"
+            } else {
+                "assistant"
+            };
+            write!(output, "{time} {label:<9} ").map_err(write_error)?;
+            self.open_text = true;
+            self.open_id.clone_from(&part.message_id);
+            self.open_thinking = part.thinking;
+        }
+        output.write_all(part.delta.as_bytes()).map_err(write_error)
+    }
 }
 
 fn write_error(error: std::io::Error) -> RpcError {
     RpcError::new(Code::Internal, format!("write chat event: {error}"))
+}
+
+/// A message as compact protobuf JSON text.
+fn compact_json<T: protectorate_wire::ReflectMessage>(message: &T) -> Result<String> {
+    String::from_utf8(protectorate_wire::encode(message)?)
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
 }
 
 fn project_owners(project: &v1::DirectoryProject) -> String {
@@ -1172,29 +1164,22 @@ fn go_millis(millis: i64) -> String {
     text
 }
 
-pub(crate) fn chat_send_text(response: &Value) -> String {
-    let mut out = String::new();
-    row(&mut out, "seq", text(response, "seq"));
-    out
+pub(crate) fn chat_send_text(response: &v1::SendResponse) -> String {
+    format!("seq\t{}\n", response.seq)
 }
 
 /// `chat wait` rows: the sleeve and its state, then the summary
 /// when the wait ended on a report.
-pub(crate) fn chat_wait_text(response: &Value) -> String {
-    let sleeve = text(response, "sleeve");
-    let Some(result) = at(response, "result").filter(|value| !value.is_null()) else {
-        return format!("{sleeve}\tidle\n");
-    };
-    let summary = text(result, "summary");
-    format!("{sleeve}\t{}\n{summary}\n", report_status(result))
-}
-
-fn report_status(result: &Value) -> String {
-    let status = text(result, "status");
-    status
-        .strip_prefix("REPORT_STATUS_")
-        .unwrap_or(&status)
-        .to_lowercase()
+pub(crate) fn chat_wait_text(response: &v1::WaitResponse) -> String {
+    match &response.result {
+        None => format!("{}\tidle\n", response.sleeve),
+        Some(result) => format!(
+            "{}\t{}\n{}\n",
+            response.sleeve,
+            result_status(result),
+            result.summary
+        ),
+    }
 }
 
 /// What `msg send` prints: the message the hub created, then what the hub did

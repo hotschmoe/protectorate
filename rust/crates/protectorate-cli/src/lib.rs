@@ -52,14 +52,6 @@ pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 /// The state home holding this machine's saved device credential.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
-const CHAT_SEND: &str = "/protectorate.v1.ChatService/Send";
-const CHAT_WATCH: &str = "/protectorate.v1.ChatService/Watch";
-const CHAT_RESPOND: &str = "/protectorate.v1.ChatService/Respond";
-const CHAT_WAIT: &str = "/protectorate.v1.ChatService/Wait";
-const CHAT_INTERRUPT: &str = "/protectorate.v1.ChatService/Interrupt";
-const CHAT_COMPACT: &str = "/protectorate.v1.ChatService/Compact";
-const CHAT_MODELS: &str = "/protectorate.v1.ChatService/ListModels";
-const CHAT_REPORT: &str = "/protectorate.v1.ChatService/Report";
 const LIST_SESSIONS: &str = "/protectorate.v1.SessionService/ListSessions";
 const CREATE_SESSION: &str = "/protectorate.v1.SessionService/CreateSession";
 const KILL_SESSION: &str = "/protectorate.v1.SessionService/KillSession";
@@ -294,11 +286,10 @@ impl WaitUntil {
         }
     }
 
-    /// The enum name WaitRequest takes.
-    pub fn as_proto(&self) -> &'static str {
+    pub fn as_proto(&self) -> v1::WaitUntil {
         match self {
-            Self::Idle => "WAIT_UNTIL_IDLE",
-            Self::Report => "WAIT_UNTIL_REPORT",
+            Self::Idle => v1::WaitUntil::Idle,
+            Self::Report => v1::WaitUntil::Report,
         }
     }
 
@@ -1046,25 +1037,25 @@ fn render(
         Command::JobLogs(spec) => job::logs(client, spec, signals, stdout, stderr),
         Command::ChatWatch { sleeve, after } => {
             let mut renderer = format::ChatRenderer::default();
-            client.stream(
-                CHAT_WATCH,
-                &json!({"sleeve": sleeve, "afterSeq": after.to_string()}),
-                |event| {
-                    if invocation.json {
-                        stdout
-                            .write_all(value_line(&event)?.as_bytes())
-                            .map_err(|error| {
-                                RpcError::new(Code::Internal, format!("write chat event: {error}"))
-                            })?;
-                    } else {
-                        renderer.render(stdout, &event)?;
-                    }
-                    stdout.flush().map_err(|error| {
-                        RpcError::new(Code::Internal, format!("flush chat event: {error}"))
-                    })?;
-                    Ok(())
-                },
-            )?;
+            let request = v1::WatchRequest {
+                sleeve: sleeve.clone(),
+                after_seq: *after,
+            };
+            client.server_stream(v1::chat_service::WATCH, &request, |event| {
+                if invocation.json {
+                    stdout
+                        .write_all(json_line(&event)?.as_bytes())
+                        .map_err(|error| {
+                            RpcError::new(Code::Internal, format!("write chat event: {error}"))
+                        })?;
+                } else {
+                    renderer.render(stdout, &event)?;
+                }
+                stdout.flush().map_err(|error| {
+                    RpcError::new(Code::Internal, format!("flush chat event: {error}"))
+                })?;
+                Ok(())
+            })?;
             if !invocation.json {
                 renderer.flush(stdout)?;
             }
@@ -1190,15 +1181,11 @@ fn chat_wait_multi(
     for sleeve in sleeves {
         let client = client.clone();
         let sender = sender.clone();
-        let request = json!({
-            "sleeve": sleeve,
-            "until": until.as_proto(),
-            "timeout": format_duration(timeout),
-        });
+        let request = wait_request(sleeve, until, timeout);
         std::thread::Builder::new()
             .name("protectorate-chat-wait".into())
             .spawn(move || {
-                let _ = sender.send(client.call(CHAT_WAIT, &request));
+                let _ = sender.send(client.unary(v1::chat_service::WAIT, &request));
             })
             .map_err(|error| {
                 RpcError::new(Code::ResourceExhausted, format!("start chat wait: {error}"))
@@ -1210,7 +1197,7 @@ fn chat_wait_multi(
             .recv()
             .map_err(|_| RpcError::new(Code::Internal, "chat wait ended early"))??;
         let line = if json {
-            value_line(&response)?
+            json_line(&response)?
         } else {
             format::chat_wait_text(&response)
         };
@@ -1222,6 +1209,14 @@ fn chat_wait_multi(
             .map_err(|error| RpcError::new(Code::Internal, format!("flush chat wait: {error}")))?;
     }
     Ok(())
+}
+
+fn wait_request(sleeve: &str, until: WaitUntil, timeout: Duration) -> v1::WaitRequest {
+    v1::WaitRequest {
+        sleeve: sleeve.to_owned(),
+        until: until.as_proto() as i32,
+        timeout: Some(proto_duration(timeout)),
+    }
 }
 
 fn reserve_grant_file(path: &std::path::Path) -> Result<std::fs::File> {
@@ -2179,16 +2174,16 @@ fn execute_commands(
                 "-" => read_stdin()?,
                 _ => text.clone(),
             };
-            let response = client.call(
-                CHAT_SEND,
-                &json!({
-                    "sleeve": sleeve,
-                    "text": text,
-                    "requestId": request_id,
-                }),
+            let response = client.unary(
+                v1::chat_service::SEND,
+                &v1::SendRequest {
+                    sleeve: sleeve.clone(),
+                    text,
+                    request_id: request_id.clone(),
+                },
             )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::chat_send_text(&response))
             }
@@ -2201,16 +2196,12 @@ fn execute_commands(
             let sleeve = sleeves.first().ok_or_else(|| {
                 RpcError::new(Code::InvalidArgument, "chat wait requires a sleeve")
             })?;
-            let response = client.call(
-                CHAT_WAIT,
-                &json!({
-                    "sleeve": sleeve,
-                    "until": until.as_proto(),
-                    "timeout": format_duration(*timeout),
-                }),
+            let response = client.unary(
+                v1::chat_service::WAIT,
+                &wait_request(sleeve, *until, *timeout),
             )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::chat_wait_text(&response))
             }
@@ -2221,41 +2212,48 @@ fn execute_commands(
             allow,
             note,
         } => {
-            let response = client.call(
-                CHAT_RESPOND,
-                &json!({"sleeve": sleeve, "approvalId": approval_id, "allow": allow, "note": note}),
+            let response = client.unary(
+                v1::chat_service::RESPOND,
+                &v1::RespondRequest {
+                    sleeve: sleeve.clone(),
+                    approval_id: approval_id.clone(),
+                    allow: *allow,
+                    note: note.clone(),
+                },
             )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok("answered\n".into())
             }
         }
         Command::ChatInterrupt { sleeve } => {
-            let response = client.call(CHAT_INTERRUPT, &json!({"sleeve": sleeve}))?;
+            let response = client.unary(
+                v1::chat_service::INTERRUPT,
+                &v1::InterruptRequest {
+                    sleeve: sleeve.clone(),
+                },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok("interrupted\n".into())
             }
         }
         Command::ChatCompact { sleeve } => {
-            let response = client.call(CHAT_COMPACT, &json!({"sleeve": sleeve}))?;
+            let response = client.unary(
+                v1::chat_service::COMPACT,
+                &v1::CompactRequest {
+                    sleeve: sleeve.clone(),
+                },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
-                let compaction = &response["compaction"];
-                let tokens = |field: &str| {
-                    compaction[field]
-                        .as_str()
-                        .map(str::to_owned)
-                        .or_else(|| compaction[field].as_u64().map(|n| n.to_string()))
-                        .unwrap_or_else(|| "0".into())
-                };
+                let compaction = response.compaction.unwrap_or_default();
                 Ok(format!(
                     "compacted\t{} -> {} tokens\n",
-                    tokens("tokensBefore"),
-                    tokens("tokensAfter")
+                    compaction.tokens_before, compaction.tokens_after
                 ))
             }
         }
@@ -2271,34 +2269,25 @@ fn execute_commands(
             }
         }
         Command::ChatModels { sleeve, harness } => {
-            let response =
-                client.call(CHAT_MODELS, &json!({"sleeve": sleeve, "harness": harness}))?;
+            let models = chat_models(client, sleeve.as_deref(), harness)?;
             if json {
-                value_line(&response)
-            } else if response["supported"].as_bool() != Some(true) {
-                Ok(format!(
-                    "{}\n",
-                    response["reason"]
-                        .as_str()
-                        .unwrap_or("model controls are unavailable")
-                ))
+                json_line(&models)
+            } else if !models.supported {
+                Ok(format!("{}\n", models.reason))
             } else {
-                let mut out = String::new();
-                for model in format::items(&response, "models") {
-                    let efforts = format::items(&model, "efforts")
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    out.push_str(&format!(
-                        "{}\t{}\tefforts=[{}]\tdefault effort={}\n",
-                        model["model"].as_str().unwrap_or_default(),
-                        model["name"].as_str().unwrap_or_default(),
-                        efforts,
-                        model["defaultEffort"].as_str().unwrap_or_default()
-                    ));
-                }
-                Ok(out)
+                Ok(models
+                    .models
+                    .iter()
+                    .map(|model| {
+                        format!(
+                            "{}\t{}\tefforts=[{}]\tdefault effort={}\n",
+                            model.model,
+                            model.name,
+                            model.efforts.join(" "),
+                            model.default_effort
+                        )
+                    })
+                    .collect())
             }
         }
         Command::ChatSettings(settings) => chat_settings(client, settings, json),
@@ -2307,26 +2296,29 @@ fn execute_commands(
             summary_file,
         } => {
             let summary = read_report_summary(summary_file.as_deref())?;
-            let response = client.call(
-                CHAT_REPORT,
-                &json!({"status": format!("REPORT_STATUS_{}", status.to_ascii_uppercase()),
-                    "summary": summary, "sourceSeq": next_report_seq().to_string()}),
+            let report_status = v1::ReportStatus::from_str_name(&format!(
+                "REPORT_STATUS_{}",
+                status.to_ascii_uppercase()
+            ))
+            .ok_or_else(|| RpcError::invalid("--status must be complete, partial or blocked"))?;
+            let response = client.unary(
+                v1::chat_service::REPORT,
+                &v1::ReportRequest {
+                    status: report_status as i32,
+                    summary,
+                    source_seq: next_report_seq(),
+                    ..Default::default()
+                },
             )?;
             if json {
-                value_line(&response)
-            } else if response["dropped"].as_bool() == Some(true) {
+                json_line(&response)
+            } else if response.dropped {
                 Ok("dropped: a newer report is already recorded\n".into())
             } else {
-                let seq = response["result"]["chatSeq"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| {
-                        response["result"]["chatSeq"]
-                            .as_u64()
-                            .map(|n| n.to_string())
-                    })
-                    .unwrap_or_else(|| "0".into());
-                Ok(format!("reported {status} at chat seq {seq}\n"))
+                Ok(format!(
+                    "reported {status} at chat seq {}\n",
+                    response.result.map_or(0, |result| result.chat_seq)
+                ))
             }
         }
         Command::JobCancel { id } => {
@@ -3277,6 +3269,39 @@ fn spawn_envoy(client: &Client, envoy: &SleeveEnvoy, json: bool) -> Result<Strin
     } else {
         require_sleeve(&response.sleeve)?;
         Ok(format::sleeve_envoy_text(&response))
+    }
+}
+
+/// `chat models`. A harness without model listing is an answer, not a
+/// failure: the hub says so with `supported` false, and a hub that does not
+/// list models for a harness this CLI knows gets the same answer.
+fn chat_models(
+    client: &Client,
+    sleeve: Option<&str>,
+    harness: &str,
+) -> Result<v1::ListModelsResponse> {
+    let request = v1::ListModelsRequest {
+        sleeve: sleeve.unwrap_or_default().to_owned(),
+        harness: harness.to_owned(),
+    };
+    let unsupported = || v1::ListModelsResponse {
+        reason: format!("model listing is not supported for {harness}"),
+        ..Default::default()
+    };
+    match client.unary(v1::chat_service::LIST_MODELS, &request) {
+        Ok(models) if !models.supported && models.reason.is_empty() => Ok(v1::ListModelsResponse {
+            reason: unsupported().reason,
+            ..models
+        }),
+        Ok(models) => Ok(models),
+        Err(error)
+            if sleeve.is_none()
+                && HarnessName::parse(harness).is_some()
+                && matches!(error.code, Code::Unimplemented | Code::InvalidArgument) =>
+        {
+            Ok(unsupported())
+        }
+        Err(error) => Err(error),
     }
 }
 
