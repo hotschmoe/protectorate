@@ -37,7 +37,7 @@ use serde_json::{json, Value};
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 /// The hub URL used when neither `--hub` nor `PROTECTORATE_HUB` is set.
@@ -2053,7 +2053,7 @@ fn execute_commands(
             if json {
                 json_line(&leases)
             } else {
-                Ok(format::lease_list_text(&leases, now_millis()))
+                Ok(format::lease_list_text(&leases, format::now_millis()))
             }
         }
         Command::LeaseAcquire(spec) => {
@@ -2137,7 +2137,7 @@ fn execute_commands(
             if json {
                 json_lines(&jobs.jobs)
             } else {
-                Ok(format::job_list_text(&jobs, now_millis()))
+                Ok(format::job_list_text(&jobs, format::now_millis()))
             }
         }
         Command::JobShow { id } => {
@@ -3242,7 +3242,7 @@ fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
         return Ok(format::orchestrator_status_text(
             sleeve.as_ref(),
             token.as_ref(),
-            now_millis(),
+            format::now_millis(),
         ));
     }
     let mut status = serde_json::Map::new();
@@ -3538,13 +3538,4 @@ fn or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
     } else {
         value
     }
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
 }

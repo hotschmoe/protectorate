@@ -3,7 +3,7 @@
 //! per hub under the state home. Ordinary commands sign with that key when no
 //! `--token-file` and no token environment variable is set.
 use crate::{
-    format::{minute, unix_millis},
+    format::{minute, now_millis, unix_millis},
     hub_url, json_line, message_value, value_line, Invocation,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -500,15 +500,6 @@ pub(crate) fn saved_device(invocation: &Invocation) -> Result<Option<Arc<DeviceK
                 ),
             )
         })
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
 }
 
 fn write_stdout(stdout: &mut dyn Write, text: &str) -> Result<()> {

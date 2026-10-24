@@ -1,6 +1,6 @@
 //! Human output: tab-aligned columns, `-` for empty values and timestamps in
 //! local time.
-use chrono::{Local, LocalResult, TimeZone};
+use chrono::{DateTime, Local, LocalResult, TimeZone};
 use protectorate_wire::{v1, Code, Result, RpcError};
 use std::{
     io::Write,
@@ -1392,19 +1392,6 @@ fn session_state_label(session: &v1::Session) -> String {
     }
 }
 
-/// A hub timestamp as this machine's local clock, HH:MM:SS.
-fn local_clock<T: Copy>(at: Option<&T>) -> String
-where
-    SystemTime: TryFrom<T>,
-{
-    unix_millis(at)
-        .and_then(|millis| match Local.timestamp_millis_opt(millis) {
-            LocalResult::Single(time) => Some(time.format("%H:%M:%S").to_string()),
-            _ => None,
-        })
-        .unwrap_or_else(|| "-".to_owned())
-}
-
 pub(crate) fn session_list_text(response: &v1::ListSessionsResponse) -> String {
     let mut out = String::from("NAME\tSTATE\tCLIENTS\tSIZE\tACTIVE\tCWD\tCOMMAND\n");
     for session in &response.sessions {
@@ -2144,7 +2131,7 @@ fn first_line(text: &str, limit: usize) -> String {
     }
 }
 
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -2176,18 +2163,40 @@ where
     })
 }
 
-/// A protobuf timestamp in this machine's local time to the minute, `-`
-/// when absent.
-pub(crate) fn minute<T: Copy>(at: Option<&T>) -> String
+/// A protobuf timestamp rendered in this machine's local time, `-` when
+/// absent.
+fn local_time<T: Copy>(at: Option<&T>, render: impl Fn(DateTime<Local>) -> String) -> String
 where
     SystemTime: TryFrom<T>,
 {
     unix_millis(at)
         .and_then(|millis| match Local.timestamp_millis_opt(millis) {
-            LocalResult::Single(time) => Some(time.format("%Y-%m-%d %H:%M").to_string()),
+            LocalResult::Single(time) => Some(render(time)),
             _ => None,
         })
         .unwrap_or_else(|| "-".to_owned())
+}
+
+fn stamp<T: Copy>(at: Option<&T>) -> String
+where
+    SystemTime: TryFrom<T>,
+{
+    local_time(at, |time| time.to_rfc3339())
+}
+
+pub(crate) fn minute<T: Copy>(at: Option<&T>) -> String
+where
+    SystemTime: TryFrom<T>,
+{
+    local_time(at, |time| time.format("%Y-%m-%d %H:%M").to_string())
+}
+
+/// HH:MM:SS.
+fn local_clock<T: Copy>(at: Option<&T>) -> String
+where
+    SystemTime: TryFrom<T>,
+{
+    local_time(at, |time| time.format("%H:%M:%S").to_string())
 }
 
 /// Seconds of a protobuf duration; none when absent or negative.
@@ -2215,19 +2224,6 @@ fn os_arch(os: &str, arch: &str) -> String {
     } else {
         format!("{os}/{arch}")
     }
-}
-
-/// A protobuf timestamp in this machine's local time, `-` when absent.
-fn stamp<T: Copy>(at: Option<&T>) -> String
-where
-    SystemTime: TryFrom<T>,
-{
-    unix_millis(at)
-        .and_then(|millis| match Local.timestamp_millis_opt(millis) {
-            LocalResult::Single(time) => Some(time.to_rfc3339()),
-            _ => None,
-        })
-        .unwrap_or_else(|| "-".to_owned())
 }
 
 /// Aligns tab-separated columns: consecutive column lines share widths, and a

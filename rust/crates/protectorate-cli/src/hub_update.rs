@@ -58,10 +58,10 @@ pub(crate) fn run(
             }
             restarting |= phase == UpdatePhase::Restarting;
             skipped |= phase == UpdatePhase::Skipped;
-            // A sending phase is reported once, when the whole bundle is out.
             if as_json {
                 write(output, &json_line(&progress)?)?;
             } else if progress.total_bytes == 0 || progress.sent_bytes == progress.total_bytes {
+                // Transfer progress shows once, when the whole bundle is out.
                 write(
                     output,
                     &format!(
