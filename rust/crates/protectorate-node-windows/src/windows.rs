@@ -249,11 +249,90 @@ fn update_marker(exe: &Path) -> io::Result<(String, u64)> {
     ))
 }
 
-fn spawn_guard_child(exe: &Path, args: &[std::ffi::OsString]) -> io::Result<tokio::process::Child> {
-    tokio::process::Command::new(exe)
-        .args(args)
-        .env(GUARD_CHILD, "1")
-        .spawn()
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtResumeProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
+}
+
+/// Kill-on-close job holding every node child. Only the guardian holds the
+/// (non-inheritable) handle, so the node dies with the guardian however it
+/// ends: task stop, crash or kill. Under a scheduled task's job it nests.
+struct GuardJob(windows_sys::Win32::Foundation::HANDLE);
+
+impl GuardJob {
+    fn new() -> io::Result<Self> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        // SAFETY: null attributes and name create an unnamed job whose handle is not inheritable.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(context("create guardian job", io::Error::last_os_error()));
+        }
+        let job = Self(handle);
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: the buffer and size match the extended limit information class.
+        let applied = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        };
+        if applied == 0 {
+            return Err(context("limit guardian job", io::Error::last_os_error()));
+        }
+        Ok(job)
+    }
+
+    fn spawn(&self, exe: &Path, args: &[std::ffi::OsString]) -> io::Result<tokio::process::Child> {
+        let mut child = tokio::process::Command::new(exe)
+            .args(args)
+            .env(GUARD_CHILD, "1")
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED)
+            .spawn()
+            .map_err(|error| context(&format!("start node child {}", exe.display()), error))?;
+        let started = child
+            .raw_handle()
+            .ok_or_else(|| io::Error::other("start node child: process handle missing"))
+            .and_then(|process| self.assign_and_resume(process));
+        if let Err(error) = started {
+            let _ = child.start_kill();
+            return Err(error);
+        }
+        Ok(child)
+    }
+
+    fn assign_and_resume(&self, process: windows_sys::Win32::Foundation::HANDLE) -> io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+        // SAFETY: the child is suspended, so it cannot run or spawn before it joins the job.
+        if unsafe { AssignProcessToJobObject(self.0, process) } == 0 {
+            let error = io::Error::last_os_error();
+            return Err(context("assign node child to guardian job", error));
+        }
+        // SAFETY: this resumes only the suspended child assigned above.
+        let status = unsafe { NtResumeProcess(process) };
+        if status < 0 {
+            return Err(io::Error::other(format!(
+                "resume node child: NTSTATUS {status:#x}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for GuardJob {
+    fn drop(&mut self) {
+        // SAFETY: the owned job handle is closed exactly once.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+fn context(operation: &str, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{operation}: {error}"))
 }
 
 fn guarded_binary(guardian: &Path) -> PathBuf {
@@ -269,7 +348,8 @@ fn guarded_binary(guardian: &Path) -> PathBuf {
 
 async fn supervise_node_restart(exe: &Path) -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args_os().skip(1).collect();
-    let mut child = spawn_guard_child(exe, &args)?;
+    let job = GuardJob::new()?;
+    let mut child = job.spawn(exe, &args)?;
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
@@ -284,12 +364,12 @@ async fn supervise_node_restart(exe: &Path) -> Result<(), Box<dyn Error>> {
                     Err(error) => return Err(error.into()),
                 };
                 if status.code() == Some(75) {
-                    child = spawn_guard_child(exe, &args)?;
+                    child = job.spawn(exe, &args)?;
                     continue;
                 }
                 if phase == "trial" {
                     protectorate_node::recover_failed_trial(exe, &format!("new node binary exited {status} before confirmation"))?;
-                    child = spawn_guard_child(exe, &args)?;
+                    child = job.spawn(exe, &args)?;
                     continue;
                 }
                 if status.success() {
@@ -297,7 +377,7 @@ async fn supervise_node_restart(exe: &Path) -> Result<(), Box<dyn Error>> {
                 }
                 if phase == "confirmed" || phase == "rolledback" {
                     tokio::time::sleep(Duration::from_secs(1)).await;
-                    child = spawn_guard_child(exe, &args)?;
+                    child = job.spawn(exe, &args)?;
                     continue;
                 }
                 return Err(format!("node child exited {status} with unknown update state").into());
@@ -312,7 +392,7 @@ async fn supervise_node_restart(exe: &Path) -> Result<(), Box<dyn Error>> {
                 if phase == "trial" && now_ms >= deadline_ms.saturating_add(15_000) {
                     let _ = child.kill().await;
                     protectorate_node::recover_failed_trial(exe, "new node binary did not confirm before deadline")?;
-                    child = spawn_guard_child(exe, &args)?;
+                    child = job.spawn(exe, &args)?;
                 }
             }
         }

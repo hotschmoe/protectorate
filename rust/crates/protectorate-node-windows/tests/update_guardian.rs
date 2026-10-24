@@ -4,11 +4,24 @@ use protectorate_connect_client::{Client, NodeTls};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    fs,
+    fs, mem,
     net::{SocketAddr, TcpListener},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
+};
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0},
+    System::{
+        Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        },
+        Threading::{
+            OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+            PROCESS_TERMINATE,
+        },
+    },
 };
 
 const METRICS: &str = "/protectorate.v1.NodeAgentService/GetMetrics";
@@ -102,15 +115,14 @@ fn apply(node: &Joined, stage: &Path, name: &str, version: &str) -> Value {
     .unwrap()
 }
 
-#[test]
-fn update_keeps_task_guardian_and_recovers_failing_candidate() {
-    let temp = tempfile::tempdir().unwrap();
+/// A task-style install in `root`: the guardian copy runs `node serve`, which
+/// launches protectorate-rs.exe beside it as the node child.
+fn start_guardian(root: &Path) -> (Joined, Guard, PathBuf) {
     let source = Path::new(env!("CARGO_BIN_EXE_protectorate-rs-windows"));
-    let guardian = temp.path().join("protectorate-rs-guardian.exe");
-    let binary = temp.path().join("protectorate-rs.exe");
+    let guardian = root.join("protectorate-rs-guardian.exe");
     fs::copy(source, &guardian).unwrap();
-    fs::copy(source, &binary).unwrap();
-    let home = temp.path().join("state");
+    fs::copy(source, root.join("protectorate-rs.exe")).unwrap();
+    let home = root.join("state");
     let files = home.join("node-files");
     fs::create_dir_all(&files).unwrap();
     let port = TcpListener::bind("127.0.0.1:0")
@@ -127,7 +139,85 @@ fn update_keeps_task_guardian_and_recovers_failing_candidate() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let mut guard = Guard(child);
+    (node, Guard(child), files)
+}
+
+struct Process(HANDLE);
+
+impl Process {
+    /// Opens the single protectorate-rs.exe child of the live process `parent`.
+    fn child_of(parent: u32) -> Self {
+        // SAFETY: a process snapshot takes no pointers and its handle is closed below.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        assert_ne!(snapshot, INVALID_HANDLE_VALUE, "process snapshot failed");
+        let mut entry = PROCESSENTRY32W {
+            dwSize: mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut children = Vec::new();
+        // SAFETY: entry is a properly sized PROCESSENTRY32W for this snapshot.
+        let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+        while more {
+            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(0);
+            let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+            if entry.th32ParentProcessID == parent
+                && name.eq_ignore_ascii_case("protectorate-rs.exe")
+            {
+                children.push(entry.th32ProcessID);
+            }
+            // SAFETY: as above.
+            more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
+        }
+        // SAFETY: the snapshot handle is owned here and closed once.
+        unsafe { CloseHandle(snapshot) };
+        assert_eq!(
+            children.len(),
+            1,
+            "node children of guardian {parent}: {children:?}"
+        );
+        // SAFETY: opening a PID only yields a handle or null.
+        let handle =
+            unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, children[0]) };
+        assert!(!handle.is_null(), "open node child {}", children[0]);
+        Self(handle)
+    }
+
+    fn exited_within(&self, timeout: Duration) -> bool {
+        // SAFETY: the handle is live and opened with SYNCHRONIZE.
+        unsafe { WaitForSingleObject(self.0, timeout.as_millis() as u32) == WAIT_OBJECT_0 }
+    }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        // SAFETY: the handle names the node child this test located; it is closed once.
+        unsafe {
+            TerminateProcess(self.0, 1);
+            CloseHandle(self.0);
+        }
+    }
+}
+
+#[test]
+fn node_child_dies_with_its_guardian() {
+    let temp = tempfile::tempdir().unwrap();
+    let (node, mut guard, _) = start_guardian(temp.path());
+    wait_metrics(&node, None, &mut guard);
+    let child = Process::child_of(guard.0.id());
+    guard.0.kill().unwrap();
+    guard.0.wait().unwrap();
+    assert!(
+        child.exited_within(Duration::from_secs(10)),
+        "node child outlived its killed guardian"
+    );
+}
+
+#[test]
+fn update_keeps_task_guardian_and_recovers_failing_candidate() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = Path::new(env!("CARGO_BIN_EXE_protectorate-rs-windows"));
+    let binary = temp.path().join("protectorate-rs.exe");
+    let (node, mut guard, files) = start_guardian(temp.path());
     let original = fs::read(&binary).unwrap();
     let version = wait_metrics(&node, None, &mut guard)["agentVersion"]
         .as_str()
