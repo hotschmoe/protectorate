@@ -53,14 +53,6 @@ pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
 const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
-const LIST_PROJECTS: &str = "/protectorate.v1.DirectoryService/ListProjects";
-const GET_PROJECT: &str = "/protectorate.v1.DirectoryService/GetProject";
-const SUBSCRIBE_EVENTS: &str = "/protectorate.v1.EventService/Subscribe";
-const LIST_NOTES: &str = "/protectorate.v1.BacklogService/ListNotes";
-const GET_NOTE: &str = "/protectorate.v1.BacklogService/GetNote";
-const CREATE_NOTE: &str = "/protectorate.v1.BacklogService/CreateNote";
-const UPDATE_NOTE: &str = "/protectorate.v1.BacklogService/UpdateNote";
-const DELETE_NOTE: &str = "/protectorate.v1.BacklogService/DeleteNote";
 const LIST_JOBS: &str = "/protectorate.v1.JobService/ListJobs";
 const GET_JOB: &str = "/protectorate.v1.JobService/GetJob";
 const CANCEL_JOB: &str = "/protectorate.v1.JobService/CancelJob";
@@ -1089,20 +1081,24 @@ fn render(
             Ok(String::new())
         }
         Command::Events => {
-            client.stream(SUBSCRIBE_EVENTS, &json!({}), |event| {
-                let line = if invocation.json {
-                    value_line(&event)?
-                } else {
-                    format::event_text(&event)
-                };
-                stdout.write_all(line.as_bytes()).map_err(|error| {
-                    RpcError::new(Code::Internal, format!("write hub event: {error}"))
-                })?;
-                stdout.flush().map_err(|error| {
-                    RpcError::new(Code::Internal, format!("flush hub event: {error}"))
-                })?;
-                Ok(())
-            })?;
+            client.server_stream(
+                v1::event_service::SUBSCRIBE,
+                &v1::SubscribeRequest {},
+                |event| {
+                    let line = if invocation.json {
+                        json_line(&event)?
+                    } else {
+                        format::event_text(&event)?
+                    };
+                    stdout.write_all(line.as_bytes()).map_err(|error| {
+                        RpcError::new(Code::Internal, format!("write hub event: {error}"))
+                    })?;
+                    stdout.flush().map_err(|error| {
+                        RpcError::new(Code::Internal, format!("flush hub event: {error}"))
+                    })?;
+                    Ok(())
+                },
+            )?;
             Ok(String::new())
         }
         Command::NodeRemove {
@@ -1495,25 +1491,47 @@ fn execute_commands(
         Command::ApiCall { procedure, body } => api_call(client, procedure, body, json),
         Command::Help => Ok(usage().to_string()),
         Command::HelpPath(path) => command_usage(path),
-        Command::Who { target } => {
-            let response = if let Some(target) = target {
-                let mine = client.call(LIST_PROJECTS, &json!({"sleeve": target}))?;
-                if !format::items(&mine, "projects").is_empty() {
-                    mine
-                } else {
-                    client.call(GET_PROJECT, &json!({"project": target}))?
-                }
-            } else {
-                client.call(LIST_PROJECTS, &json!({}))?
-            };
+        Command::Who { target: None } => {
+            let listing = client.unary(
+                v1::directory_service::LIST_PROJECTS,
+                &v1::ListProjectsRequest::default(),
+            )?;
             if json {
-                value_line(&response)
-            } else if let Some(project) = response.get("project") {
-                Ok(format::project_text(project))
-            } else if target.is_some() {
-                Ok(format::projects_detail_text(&response))
+                json_line(&listing)
             } else {
-                Ok(format::projects_list_text(&response))
+                Ok(format::projects_list_text(&listing))
+            }
+        }
+        Command::Who {
+            target: Some(target),
+        } => {
+            let mine = client.unary(
+                v1::directory_service::LIST_PROJECTS,
+                &v1::ListProjectsRequest {
+                    sleeve: target.clone(),
+                },
+            )?;
+            if !mine.projects.is_empty() {
+                return if json {
+                    json_line(&mine)
+                } else {
+                    Ok(format::projects_detail_text(&mine))
+                };
+            }
+            let found = client.unary(
+                v1::directory_service::GET_PROJECT,
+                &v1::GetProjectRequest {
+                    project: target.clone(),
+                },
+            )?;
+            if json {
+                json_line(&found)
+            } else {
+                Ok(found
+                    .project
+                    .as_ref()
+                    .map(format::project_text)
+                    .unwrap_or_default())
             }
         }
         Command::Status => {
@@ -1940,139 +1958,125 @@ fn execute_commands(
             }
         }
         Command::BacklogList(filter) => {
-            let notes = client.call(
-                LIST_NOTES,
-                &json!({
-                    "project": filter.project,
-                    "query": filter.query,
-                    "state": filter.state.as_str(),
-                }),
+            let notes = client.unary(
+                v1::backlog_service::LIST_NOTES,
+                &v1::ListNotesRequest {
+                    project: filter.project.clone(),
+                    query: filter.query.clone(),
+                    state: filter.state.as_str().to_owned(),
+                },
             )?;
             if json {
-                Ok(format::items(&notes, "notes")
-                    .iter()
-                    .map(value_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&notes.notes)
             } else {
                 Ok(format::note_list_text(&notes))
             }
         }
         Command::BacklogShow { id } => {
-            let response = client.call(GET_NOTE, &json!({"id": id}))?;
-            let note = response
-                .get("note")
-                .filter(|value| !value.is_null())
-                .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))?;
+            let response = client.unary(
+                v1::backlog_service::GET_NOTE,
+                &v1::GetNoteRequest { id: id.clone() },
+            )?;
+            let note = returned_note(response.note)?;
             if json {
-                value_line(note)
+                json_line(&note)
             } else {
-                Ok(format::note_text(note))
+                Ok(format::note_text(&note))
             }
         }
         Command::BacklogAdd(draft) => {
             let body = match (&draft.body_file, &draft.body) {
-                (Some(path), _) if path == "-" => read_stdin()?,
-                (Some(path), _) => fs::read_to_string(path).map_err(|error| {
-                    RpcError::new(Code::Internal, format!("read body: {error}"))
-                })?,
+                (Some(path), _) => read_body(path)?,
                 (None, Some(body)) => body.clone(),
                 (None, None) => String::new(),
             };
-            let response = client.call(
-                CREATE_NOTE,
-                &json!({
-                    "title": draft.title,
-                    "body": body,
-                    "pinned": draft.pinned,
-                    "project": draft.project,
-                }),
+            let response = client.unary(
+                v1::backlog_service::CREATE_NOTE,
+                &v1::CreateNoteRequest {
+                    title: draft.title.clone(),
+                    body,
+                    pinned: draft.pinned,
+                    project: draft.project.clone(),
+                },
             )?;
-            note_output(&response, json)
+            note_output(response.note, json)
         }
         Command::BacklogEdit(edit) => {
-            if json
-                && edit.title.is_none()
+            let interactive = edit.title.is_none()
                 && edit.project.is_none()
                 && edit.body.is_none()
                 && edit.body_file.is_none()
-                && edit.append.is_none()
-            {
+                && edit.append.is_none();
+            if json && interactive {
                 return Err(RpcError::invalid(
                     "edit --json needs --title, --body, --body-file, --append or --project",
                 ));
             }
-            let mut request = json!({"id":edit.id});
-            if let Some(title) = &edit.title {
-                request["title"] = json!(title);
-            }
-            if let Some(project) = &edit.project {
-                request["project"] = json!(project);
-            }
-            if let Some(body) = &edit.body {
-                request["body"] = json!(body);
-            }
+            let mut request = v1::UpdateNoteRequest {
+                id: edit.id.clone(),
+                title: edit.title.clone(),
+                project: edit.project.clone(),
+                body: edit.body.clone(),
+                ..Default::default()
+            };
             if let Some(path) = &edit.body_file {
-                let body = if path == "-" {
-                    read_stdin()?
-                } else {
-                    fs::read_to_string(path).map_err(|error| {
-                        RpcError::new(Code::Internal, format!("read body: {error}"))
-                    })?
-                };
-                request["body"] = json!(body);
+                request.body = Some(read_body(path)?);
             }
             if let Some(append) = &edit.append {
-                let current = client.call(GET_NOTE, &json!({"id":edit.id}))?;
-                let body = current["note"]["body"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .trim_end_matches('\n');
-                request["body"] = json!(format!(
-                    "{}{}{}\n",
-                    body,
+                let current = current_note(client, &edit.id)?;
+                let body = current.body.trim_end_matches('\n');
+                request.body = Some(format!(
+                    "{body}{}{append}\n",
                     if body.is_empty() { "" } else { "\n" },
-                    append
                 ));
             }
-            if edit.title.is_none()
-                && edit.project.is_none()
-                && edit.body.is_none()
-                && edit.body_file.is_none()
-                && edit.append.is_none()
-            {
-                let current = client.call(GET_NOTE, &json!({"id":edit.id}))?;
-                let (title, body) = edit_in_editor(&current["note"])?;
-                request["title"] = json!(title);
-                request["body"] = json!(body);
+            if interactive {
+                let (title, body) = edit_in_editor(&current_note(client, &edit.id)?)?;
+                request.title = Some(title);
+                request.body = Some(body);
             }
-            let response = client.call(UPDATE_NOTE, &request)?;
-            note_output(&response, json)
+            let response = client.unary(v1::backlog_service::UPDATE_NOTE, &request)?;
+            note_output(response.note, json)
         }
         Command::BacklogRemove { id } => {
-            let response = client.call(DELETE_NOTE, &json!({"id":id}))?;
+            let response = client.unary(
+                v1::backlog_service::DELETE_NOTE,
+                &v1::DeleteNoteRequest { id: id.clone() },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("deleted\t{id}\n"))
             }
         }
-        Command::BacklogPin { id, pinned } => {
-            let response = client.call(UPDATE_NOTE, &json!({"id":id,"pinned":pinned}))?;
-            note_output(&response, json)
-        }
-        Command::BacklogDone { id, resolution } => {
-            let mut request = json!({"id": id, "state": "done"});
-            if let Some(resolution) = resolution {
-                request["resolution"] = json!(resolution);
-            }
-            let response = client.call(UPDATE_NOTE, &request)?;
-            note_output(&response, json)
-        }
-        Command::BacklogReopen { id } => {
-            let response = client.call(UPDATE_NOTE, &json!({"id": id, "state": "open"}))?;
-            note_output(&response, json)
-        }
+        Command::BacklogPin { id, pinned } => update_note(
+            client,
+            v1::UpdateNoteRequest {
+                id: id.clone(),
+                pinned: Some(*pinned),
+                ..Default::default()
+            },
+            json,
+        ),
+        Command::BacklogDone { id, resolution } => update_note(
+            client,
+            v1::UpdateNoteRequest {
+                id: id.clone(),
+                state: Some("done".into()),
+                resolution: resolution.clone(),
+                ..Default::default()
+            },
+            json,
+        ),
+        Command::BacklogReopen { id } => update_note(
+            client,
+            v1::UpdateNoteRequest {
+                id: id.clone(),
+                state: Some("open".into()),
+                ..Default::default()
+            },
+            json,
+        ),
         Command::LeaseList => {
             let leases = client.unary(v1::lease_service::LIST_LEASES, &v1::ListLeasesRequest {})?;
             if json {
@@ -2750,7 +2754,7 @@ fn read_stdin() -> Result<String> {
     Ok(text)
 }
 
-fn edit_in_editor(note: &Value) -> Result<(String, String)> {
+fn edit_in_editor(note: &v1::Note) -> Result<(String, String)> {
     use std::io::Write;
     let mut nonce = [0_u8; 8];
     getrandom::getrandom(&mut nonce)
@@ -2780,15 +2784,8 @@ fn edit_in_editor(note: &Value) -> Result<(String, String)> {
         .open(&path)
         .map_err(|error| RpcError::new(Code::Internal, format!("create editor file: {error}")))?;
     let _cleanup = RemoveTemp(path.clone());
-    file.write_all(
-        format!(
-            "{}\n\n{}",
-            note["title"].as_str().unwrap_or_default(),
-            note["body"].as_str().unwrap_or_default()
-        )
-        .as_bytes(),
-    )
-    .map_err(|error| RpcError::new(Code::Internal, format!("write editor file: {error}")))?;
+    file.write_all(format!("{}\n\n{}", note.title, note.body).as_bytes())
+        .map_err(|error| RpcError::new(Code::Internal, format!("write editor file: {error}")))?;
     drop(file);
     let editor = env::var("EDITOR")
         .ok()
@@ -3187,16 +3184,43 @@ fn private_owner_token(path: &Path) -> Result<Option<String>> {
 
 /// What `backlog add`, `done` and `reopen` print: the note the hub just
 /// created or changed, as one text row or one proto-JSON line.
-fn note_output(response: &Value, json: bool) -> Result<String> {
-    let note = response
-        .get("note")
-        .filter(|value| !value.is_null())
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))?;
+fn note_output(note: Option<v1::Note>, json: bool) -> Result<String> {
+    let note = returned_note(note)?;
     if json {
-        value_line(note)
+        json_line(&note)
     } else {
-        Ok(format::note_record_text(note))
+        Ok(format::note_record_text(&note))
     }
+}
+
+fn returned_note(note: Option<v1::Note>) -> Result<v1::Note> {
+    note.ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))
+}
+
+fn update_note(client: &Client, request: v1::UpdateNoteRequest, json: bool) -> Result<String> {
+    note_output(
+        client
+            .unary(v1::backlog_service::UPDATE_NOTE, &request)?
+            .note,
+        json,
+    )
+}
+
+fn current_note(client: &Client, id: &str) -> Result<v1::Note> {
+    let response = client.unary(
+        v1::backlog_service::GET_NOTE,
+        &v1::GetNoteRequest { id: id.to_owned() },
+    )?;
+    returned_note(response.note)
+}
+
+/// A note body from a file, or stdin for `-`.
+fn read_body(path: &str) -> Result<String> {
+    if path == "-" {
+        return read_stdin();
+    }
+    fs::read_to_string(path)
+        .map_err(|error| RpcError::new(Code::Internal, format!("read body: {error}")))
 }
 
 fn spawn_sleeve(client: &Client, spawn: &SleeveSpawn, json: bool) -> Result<String> {

@@ -104,121 +104,109 @@ fn write_error(error: std::io::Error) -> RpcError {
     RpcError::new(Code::Internal, format!("write chat event: {error}"))
 }
 
-fn project_owners(project: &Value) -> String {
+fn project_owners(project: &v1::DirectoryProject) -> String {
     or_dash(
-        items(project, "owners")
+        project
+            .owners
             .iter()
-            .map(|owner| text(owner, "sleeve"))
+            .map(|owner| owner.sleeve.as_str())
             .collect::<Vec<_>>()
             .join(","),
     )
 }
 
-fn project_edges(project: &Value, field: &str) -> String {
+fn project_edges(edges: &[v1::ProjectEdge]) -> String {
     or_dash(
-        items(project, field)
+        edges
             .iter()
-            .map(|edge| text(edge, "display"))
+            .map(|edge| edge.display.as_str())
             .collect::<Vec<_>>()
             .join(","),
     )
 }
 
-pub(crate) fn projects_list_text(response: &Value) -> String {
+pub(crate) fn projects_list_text(response: &v1::ListProjectsResponse) -> String {
     let mut out = String::from("PROJECT\tSLEEVES\tDEPENDS ON\tDEPENDENTS\n");
-    for project in items(response, "projects") {
+    for project in &response.projects {
         out.push_str(&format!(
             "{}\t{}\t{}\t{}\n",
-            text(&project, "display"),
-            project_owners(&project),
-            project_edges(&project, "dependsOn"),
-            project_edges(&project, "dependents")
+            project.display,
+            project_owners(project),
+            project_edges(&project.depends_on),
+            project_edges(&project.dependents)
         ));
     }
     out
 }
 
-pub(crate) fn projects_detail_text(response: &Value) -> String {
-    items(response, "projects")
+pub(crate) fn projects_detail_text(response: &v1::ListProjectsResponse) -> String {
+    response
+        .projects
         .iter()
         .map(project_text)
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-pub(crate) fn project_text(project: &Value) -> String {
-    let mut out = format!(
-        "project\t{}\nid\t{}\n",
-        text(project, "display"),
-        text(project, "id")
-    );
-    let branch = text(project, "defaultBranch");
-    let tag = text(project, "latestTag");
-    if !branch.is_empty() || !tag.is_empty() {
+pub(crate) fn project_text(project: &v1::DirectoryProject) -> String {
+    let mut out = format!("project\t{}\nid\t{}\n", project.display, project.id);
+    if !project.default_branch.is_empty() || !project.latest_tag.is_empty() {
         out.push_str(&format!(
             "release\tbranch {}, latest tag {}\n",
-            or_dash(branch),
-            or_dash(tag)
+            or_dash(project.default_branch.clone()),
+            or_dash(project.latest_tag.clone())
         ));
     }
-    let owners = items(project, "owners");
-    if owners.is_empty() {
+    if project.owners.is_empty() {
         out.push_str("sleeve\t(none live)\n");
     }
-    for owner in owners {
-        let branch = text(&owner, "branch");
-        let branch = if branch.is_empty() {
+    for owner in &project.owners {
+        let branch = if owner.branch.is_empty() {
             "(detached)"
         } else {
-            &branch
+            &owner.branch
         };
-        let head = text(&owner, "head");
-        let head = head.get(..8).unwrap_or(&head);
+        let head = owner.head.get(..8).unwrap_or(&owner.head);
         out.push_str(&format!(
-            "sleeve\t{}\t{} {}\t{}\n",
-            text(&owner, "sleeve"),
-            branch,
-            head,
-            text(&owner, "workspace")
+            "sleeve\t{}\t{branch} {head}\t{}\n",
+            owner.sleeve, owner.workspace
         ));
     }
-    let provides = items(project, "provides")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>()
-        .join(", ");
-    out.push_str(&format!("provides\t{}\n", or_dash(provides)));
-    let dependencies = project["dependencyCount"]
-        .as_u64()
-        .map(|n| n.to_string())
-        .or_else(|| project["dependencyCount"].as_str().map(str::to_owned))
-        .unwrap_or_else(|| "0".into());
-    out.push_str(&format!("dependencies\t{dependencies} external\n"));
-    for (field, label) in [("dependsOn", "depends on"), ("dependents", "dependent")] {
-        for edge in items(project, field) {
-            let via = items(&edge, "via")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            out.push_str(&format!("{label}\t{}\tvia {via}\n", text(&edge, "display")));
+    out.push_str(&format!(
+        "provides\t{}\n",
+        or_dash(project.provides.join(", "))
+    ));
+    out.push_str(&format!(
+        "dependencies\t{} external\n",
+        project.dependency_count
+    ));
+    for (edges, label) in [
+        (&project.depends_on, "depends on"),
+        (&project.dependents, "dependent"),
+    ] {
+        for edge in edges {
+            out.push_str(&format!(
+                "{label}\t{}\tvia {}\n",
+                edge.display,
+                edge.via.join(", ")
+            ));
         }
     }
     out
 }
 
-pub(crate) fn event_text(event: &Value) -> String {
-    let payload = event
-        .get("payload")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    format!(
-        "{}\t{}\t{}\t{}\n",
-        local_stamp(text(event, "time")),
-        text(event, "kind"),
-        text(event, "subject"),
-        payload
-    )
+pub(crate) fn event_text(event: &v1::Event) -> Result<String> {
+    let payload = match &event.payload {
+        Some(payload) => String::from_utf8(protectorate_wire::encode(payload)?)
+            .map_err(|error| RpcError::new(Code::Internal, format!("encode payload: {error}")))?,
+        None => "{}".to_owned(),
+    };
+    Ok(format!(
+        "{}\t{}\t{}\t{payload}\n",
+        stamp(event.time.as_ref()),
+        event.kind,
+        event.subject,
+    ))
 }
 
 const NODE_COLUMNS: &str = "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tFRESHNESS\tALERTS";
@@ -956,33 +944,31 @@ pub(crate) fn local_metrics_text(metrics: &v1::NodeMetrics) -> String {
     align(&out)
 }
 
-pub(crate) fn note_list_text(response: &Value) -> String {
+pub(crate) fn note_list_text(response: &v1::ListNotesResponse) -> String {
     let mut out = String::new();
-    for note in items(response, "notes") {
-        out.push_str(&note_line(&note));
+    for note in &response.notes {
+        out.push_str(&note_line(note));
         out.push('\n');
     }
     align(&out)
 }
 
-pub(crate) fn note_text(note: &Value) -> String {
+pub(crate) fn note_text(note: &v1::Note) -> String {
     let mut out = String::new();
-    row(&mut out, "id", text(note, "id"));
-    row(&mut out, "title", text(note, "title"));
-    optional_row(&mut out, "project", text(note, "project"));
-    row(&mut out, "source", text(note, "source"));
-    row(&mut out, "state", text(note, "state"));
-    if let Some(completion) = at(note, "completion") {
-        row(&mut out, "done at", stamp_minute(completion, "doneAt"));
-        row(&mut out, "done by", text(completion, "doneBy"));
-        optional_row(&mut out, "resolution", text(completion, "resolution"));
+    row(&mut out, "id", note.id.clone());
+    row(&mut out, "title", note.title.clone());
+    optional_row(&mut out, "project", note.project.clone());
+    row(&mut out, "source", note.source.clone());
+    row(&mut out, "state", note.state.clone());
+    if let Some(completion) = &note.completion {
+        row(&mut out, "done at", minute(completion.done_at.as_ref()));
+        row(&mut out, "done by", completion.done_by.clone());
+        optional_row(&mut out, "resolution", completion.resolution.clone());
     }
-    row(&mut out, "pinned", boolean(note, "pinned").to_string());
-    row(&mut out, "created", stamp_minute(note, "createdAt"));
-    row(&mut out, "updated", stamp_minute(note, "updatedAt"));
-    let body = text(note, "body")
-        .trim_end_matches('\n')
-        .replace('\t', "    ");
+    row(&mut out, "pinned", note.pinned.to_string());
+    row(&mut out, "created", minute(note.created_at.as_ref()));
+    row(&mut out, "updated", minute(note.updated_at.as_ref()));
+    let body = note.body.trim_end_matches('\n').replace('\t', "    ");
     if !body.is_empty() {
         out.push('\n');
         out.push_str(&body);
@@ -991,18 +977,19 @@ pub(crate) fn note_text(note: &Value) -> String {
     align(&out)
 }
 
-fn note_line(note: &Value) -> String {
-    let title = match text(note, "title") {
-        title if !title.is_empty() => title,
-        _ => first_line(&text(note, "body"), 80),
+fn note_line(note: &v1::Note) -> String {
+    let title = if note.title.is_empty() {
+        first_line(&note.body, 80)
+    } else {
+        note.title.clone()
     };
     [
-        text(note, "id"),
-        or_dash(text(note, "state")),
-        if boolean(note, "pinned") { "pin" } else { "-" }.to_owned(),
-        stamp_minute(note, "updatedAt"),
-        or_dash(text(note, "project")),
-        or_dash(text(note, "source")),
+        note.id.clone(),
+        or_dash(note.state.clone()),
+        if note.pinned { "pin" } else { "-" }.to_owned(),
+        minute(note.updated_at.as_ref()),
+        or_dash(note.project.clone()),
+        or_dash(note.source.clone()),
         title,
     ]
     .join("\t")
@@ -1010,7 +997,7 @@ fn note_line(note: &Value) -> String {
 
 /// One note record, the way `backlog add`, `done` and `reopen` print the
 /// note the hub just created or changed.
-pub(crate) fn note_record_text(note: &Value) -> String {
+pub(crate) fn note_record_text(note: &v1::Note) -> String {
     align(&note_line(note))
 }
 
@@ -2365,11 +2352,6 @@ fn first_line(text: &str, limit: usize) -> String {
     }
 }
 
-/// A hub timestamp, rendered in this machine's local time to the minute.
-fn stamp_minute(value: &Value, key: &str) -> String {
-    local_minute(text(value, key))
-}
-
 fn local_stamp(raw: String) -> String {
     match timestamp_millis(&raw) {
         Some(millis) => match Local.timestamp_millis_opt(millis) {
@@ -2420,6 +2402,20 @@ where
         Ok(after) => after.as_millis() as i64,
         Err(before) => -(before.duration().as_millis() as i64),
     })
+}
+
+/// A protobuf timestamp in this machine's local time to the minute, `-`
+/// when absent.
+pub(crate) fn minute<T: Copy>(at: Option<&T>) -> String
+where
+    SystemTime: TryFrom<T>,
+{
+    unix_millis(at)
+        .and_then(|millis| match Local.timestamp_millis_opt(millis) {
+            LocalResult::Single(time) => Some(time.format("%Y-%m-%d %H:%M").to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "-".to_owned())
 }
 
 /// Seconds of a protobuf duration; none when absent or negative.
