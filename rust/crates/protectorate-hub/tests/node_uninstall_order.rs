@@ -1,6 +1,7 @@
 #![cfg(target_os = "linux")]
 //! Removing a node with uninstall unregisters its startup first and only then
 //! stops the agent, exactly once, even when the service manager fails.
+use crate::support::executable;
 use protectorate_connect_client::Client;
 use protectorate_hub::Hub;
 use protectorate_inventory::Node;
@@ -10,7 +11,6 @@ use protectorate_wire::Code;
 use serde_json::{json, Value};
 use std::{
     fs, io,
-    os::unix::fs::PermissionsExt,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -40,15 +40,13 @@ async fn uninstall_disables_startup_before_stopping_the_agent_once() {
         let root = tempfile::tempdir().unwrap();
         let calls = root.path().join("systemctl-calls");
         let systemctl = root.path().join("systemctl");
-        fs::write(
+        executable::write_executable(
             &systemctl,
-            format!(
+            &format!(
                 "#!/bin/sh\nsleep 0.3\nprintf '%s\\n' \"$*\" >> '{}'\nexit {exit}\n",
                 calls.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&systemctl, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let plan = UninstallPlan::new(
             root.path().join("node-state"),
             root.path().join("user"),

@@ -1,4 +1,5 @@
 #![cfg(target_os = "linux")]
+use crate::support::executable;
 use crate::support::private_tmux;
 use private_tmux::PrivateTmux;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub, TerminalLauncher};
@@ -7,7 +8,6 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -86,12 +86,10 @@ fn fake_tui(path: &std::path::Path, pane: &str) {
         .collect::<Vec<_>>()
         .join("\n");
     let body = body.trim_end();
-    fs::write(
+    executable::write_executable(
         path,
-        format!("#!/usr/bin/sh\ncat <<'PANE'\n{body}\nPANE\nexec sleep 600\n"),
-    )
-    .unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        &format!("#!/usr/bin/sh\ncat <<'PANE'\n{body}\nPANE\nexec sleep 600\n"),
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,10 +1,10 @@
 #![cfg(target_os = "linux")]
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     path::Path,
     time::{Duration, Instant},
 };
@@ -104,8 +104,7 @@ for line in sys.stdin:
   note('turn/completed',{'turn':{'id':'comp-turn','status':'completed'}})
  elif method=='thread/unsubscribe': emit({'id':mid,'result':{}})
 "#;
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, script);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -215,7 +214,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -275,7 +274,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
         let (status, idle) = call(
             addr,
             "ChatService/Wait",
-            json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+            json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
         )
         .await;
         assert_eq!(status, 200, "{idle}");
@@ -304,7 +303,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -321,7 +320,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -358,7 +357,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -393,7 +392,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"codex-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");

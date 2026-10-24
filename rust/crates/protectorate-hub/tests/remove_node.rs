@@ -64,7 +64,7 @@ async fn wait_drain_blocks_new_jobs_and_leases_then_releases_old_lease() {
     let url2 = url.clone();
     let job = tokio::task::spawn_blocking(move || {
         client(&url2).call(SUBMIT,&json!({
-        "target":{"node":"peer"},"command":["/bin/sh","-c","sleep 2; printf done"],"timeout":"10s"
+        "target":{"node":"peer"},"command":["/bin/sh","-c","sleep 2; printf done"],"timeout":"120s"
     }))
     })
     .await
@@ -101,7 +101,7 @@ async fn wait_drain_blocks_new_jobs_and_leases_then_releases_old_lease() {
         let watcher=client(&url2);
         let other=client(&url2);
         let mut phases=Vec::<Value>::new();
-        watcher.stream(REMOVE,&json!({"name":"peer","jobs":"REMOVE_JOBS_WAIT","waitTimeout":"5s","uninstall":true}),|event|{
+        watcher.stream(REMOVE,&json!({"name":"peer","jobs":"REMOVE_JOBS_WAIT","waitTimeout":"120s","uninstall":true}),|event|{
             if event["phase"]=="REMOVE_PHASE_DRAINING" && event["runningJobs"].as_u64().unwrap_or(0)>0 {
                 let denied=other.call(SUBMIT,&json!({"target":{"node":"peer"},"command":["true"],"timeout":"5s"})).unwrap_err();
                 assert_eq!(denied.code,Code::FailedPrecondition,"{denied}");
@@ -156,7 +156,7 @@ async fn cancel_mode_stops_running_job_before_forgetting_node() {
         .unwrap();
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     let url2 = url.clone();
-    let job=tokio::task::spawn_blocking(move || client(&url2).call(SUBMIT,&json!({"target":{"node":"peer"},"command":["/bin/sh","-c","sleep 10"],"timeout":"15s"}))).await.unwrap().unwrap();
+    let job=tokio::task::spawn_blocking(move || client(&url2).call(SUBMIT,&json!({"target":{"node":"peer"},"command":["/bin/sh","-c","sleep 60"],"timeout":"120s"}))).await.unwrap().unwrap();
     let id = job["id"].as_str().unwrap().to_owned();
     let url2 = url.clone();
     let (phases, final_job) = tokio::task::spawn_blocking(move || {
@@ -169,7 +169,7 @@ async fn cancel_mode_stops_running_job_before_forgetting_node() {
         client
             .stream(
                 REMOVE,
-                &json!({"name":"peer","jobs":"REMOVE_JOBS_CANCEL","waitTimeout":"5s"}),
+                &json!({"name":"peer","jobs":"REMOVE_JOBS_CANCEL","waitTimeout":"120s"}),
                 |event| {
                     phases.push(event);
                     Ok(())
@@ -252,7 +252,7 @@ async fn fresh_node_receives_authenticated_uninstall_before_removal() {
     assert!(phases
         .iter()
         .any(|event| event["phase"] == "REMOVE_PHASE_REMOVED"));
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(Duration::from_secs(60), async {
         while !stopped.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

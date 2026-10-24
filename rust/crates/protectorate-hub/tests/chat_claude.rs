@@ -1,10 +1,10 @@
 #![cfg(target_os = "linux")]
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     path::Path,
     time::{Duration, Instant},
 };
@@ -76,8 +76,7 @@ for line in sys.stdin:
  elif m.get('type')=='control_request' and m['request']['subtype']=='interrupt':
   emit({'type':'result','session_id':sid,'subtype':'interrupted','is_error':False})
 "#;
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, script);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

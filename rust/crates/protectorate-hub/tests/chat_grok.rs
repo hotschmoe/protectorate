@@ -1,10 +1,10 @@
 #![cfg(target_os = "linux")]
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     fs,
-    os::unix::fs::PermissionsExt,
     path::Path,
     time::{Duration, Instant},
 };
@@ -74,8 +74,7 @@ while True:
   note({'sessionUpdate':'agent_message_chunk','messageId':'m1','content':{'type':'text','text':'answer: '+text}})
   emit({'jsonrpc':'2.0','id':mid,'result':{'stopReason':'end_turn','_meta':{'usage':{'inputTokens':7,'outputTokens':2,'cachedReadTokens':1}}}})
 "#;
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, script);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
