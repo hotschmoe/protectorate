@@ -290,10 +290,77 @@ Open items:
   Linux-only; `.ts.net` names are no longer local models; crate comments no
   longer describe Go ports; the CLI binary is `protectorate`; the Windows
   node builds again.
-- Owner approval pending for deleting dead code: the
-  `protectorate-sleeve-layout` crate (nothing depends on it) and the
-  orphaned `protectorate-mailbox/src/json.rs` and `src/gotime.rs` (no `mod`
-  declares them since the mailbox moved to serde).
+- Deleted at 2026-10-24T08:19+08:00 on the owner's "clean up and delete
+  files, worktrees, etc that we are not longer needed" (commit de5ab78):
+  `protectorate-sleeve-layout`, the mailbox `json.rs` and `gotime.rs`, the
+  Go-era coverage, footprint and test-deletion docs, `test-inventory.py`,
+  `e2e-screens.sh`; also the 13 merged worktrees and `wip/*` branches, the
+  stray stash, trial directories in `~` and `/tmp`, dead tmux sockets and the
+  officepc scratch folders. Kept: the live Go hub and its data, backups, the
+  Android signing key.
+- Windows (officepc, Rust 1.96 MSVC) after the final merge: clippy clean, 24
+  tests passed, 0 failed. The update guardian test leaked its node child:
+  when the guardian dies or its scheduled task stops, the child keeps running
+  because it is not in a kill-on-close Job Object. Product bug, open.
+
+## 8. Rust versus Go assessment (owner discussion, 2026-10-24)
+
+Measured on aarch64 Linux after the cleanup:
+
+| | Go (master, v0.4.3) | Rust (rust-yolo) |
+|---|---|---|
+| Hand-written code, excluding tests | 49.8k lines | 78.6k lines, with more features and no tsnet library |
+| Test code | 11.4k lines | 25.8k lines plus 1.9k fuzz |
+| Dependencies | 11 direct, 124 modules incl. Tailscale | 192 external crates |
+| Binaries | one 40.8 MB binary | protectorate-rs 22 MB (16 MB stripped), CLI 8 MB, bridge 8 MB, helpers about 1 MB; no release profile tuning yet |
+| Hub memory | 164 MB live after two days plus Headscale 38 MB | 4.6 MB idle with an empty home (not like for like) |
+| Build loop | seconds | minutes; dev target reached 300 GB before the debug-info trim |
+
+Assessment:
+- Cleaner architecture (one network model, one identity model, no overlay,
+  no bwrap). Uglier handler code: the hub has no typed request or response
+  structs (about 300 `json!` literals and string lookups); two bugs this
+  session (GPU index 0 omitted by protobuf JSON, an internal field leaking
+  into strict proto JSON) came from that. Several files exceed 2.5k lines.
+- Both languages are memory safe. Rust adds compile-time data-race freedom,
+  exhaustive matching, no nil and explicit errors; the verbosity pays off in
+  the sandbox and parsers (fuzzing found 8 real bugs), not in the dynamically
+  typed handler layer. 336 `unsafe` sites (syscalls, Windows API) and 472
+  `unwrap`/`expect` in non-test code remain to trim.
+- Most safety gains this session were design choices (no overlay, mutual TLS,
+  device-bound keys, per-sleeve egress, approvals, audit chain) that either
+  language could carry.
+- Go's decisive argument was tsnet; it disappeared when the routers took over
+  connectivity. Go keeps faster iteration and mature typed Connect codegen;
+  Rust keeps lean nodes (Termux, phones), natural sandbox code, stronger
+  verification tools, and the new design already built and tested.
+- Recommendation: stay on Rust, do not maintain both. Next: generate typed
+  Rust structs from the protos for the hub API; consolidate the ~95
+  integration test binaries into a few per crate; add a tuned release profile
+  (LTO, strip, panic=abort); trim `unwrap`/`unsafe`; fix the Windows guardian
+  Job Object leak.
+- Network layering: WAN exposes only router WireGuard (no port forwards, no
+  WAN entry point for the reverse proxy, split DNS for the hub name);
+  site-to-site home and office, phones as road warriors; UniFi zones for
+  clients, hub, shared nodes and care machines with clients->hub:7470,
+  hub->nodes:7475, nodes->hub:7470 and everything else denied; agent VLAN may
+  reach the internet but no private ranges, narrowed further by the
+  per-sleeve proxy; TLS under the hub CA with mutual TLS hub<->node,
+  private-address listeners and a loopback-only owner token; device keys,
+  capability tokens, approvals and the audit chain; sandboxes with their own
+  network namespace and budgets.
+- Verification: not Verus yet (code still churning). Keep fuzzing with a
+  nightly campaign, add Kani harnesses for small kernels (capability
+  narrowing only shrinks scopes, path confinement, egress decision, replay
+  cache, audit-chain verify), loom for lease and approval state, TLA+ only if
+  a lifecycle race appears; a Verus pilot on capability narrowing once that
+  code settles. Go's options (native fuzzing, race detector, Gobra) are
+  weaker, which slightly favours Rust.
+- Cutover: fresh installs; uninstalling Go is approved per machine as Rust
+  goes in. Hub first (back up `~/.protectorate`, stop the Go service and
+  Headscale, install the Rust hub on a private TLS address, repoint Traefik,
+  re-pair the phone), then nodes one at a time; officepc needs the owner at
+  the desk for the Windows Firewall prompt.
 
 ## Appendix A: research reports (full text)
 
