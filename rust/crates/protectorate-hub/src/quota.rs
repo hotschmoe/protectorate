@@ -1,12 +1,16 @@
-use super::{boolean, input, respond, timestamp, EventBus, Hub};
+use super::{proto_time, EventBus, Hub};
 use chrono::Utc;
+use prost_reflect::ReflectMessage;
 use protectorate_quota::{
     self as quotas, Freshness, Harness, HarnessSuggestion, ProviderQuota, QuotaCache, Reader,
     TaskSize,
 };
-use protectorate_wire::{Code, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
-use std::sync::Arc;
+use protectorate_wire::{
+    self as wire,
+    v1::{self, quota_service},
+    Call, Code, Result, RpcError, UnaryServer,
+};
+use std::{sync::Arc, time::Duration};
 
 pub(crate) fn default_readers() -> Vec<Arc<dyn Reader>> {
     vec![
@@ -19,46 +23,55 @@ pub(crate) fn default_readers() -> Vec<Arc<dyn Reader>> {
 
 pub(crate) fn publish_updates(cache: &QuotaCache, events: Arc<EventBus>) {
     cache.set_on_update(move |quota| {
-        events.publish("quota.updated", &quota.provider, quota_json(quota));
+        match serde_json::to_value(provider_quota(quota).transcode_to_dynamic()) {
+            Ok(payload) => events.publish("quota.updated", &quota.provider, payload),
+            Err(error) => eprintln!("quota {}: encode update: {error}", quota.provider),
+        }
     });
 }
 
 pub(crate) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let get_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.QuotaService/GetQuota", move |request| {
-        let hub = Arc::clone(&get_hub);
-        async move {
-            let refresh = boolean(&input(&request)?, "refresh");
-            if refresh {
-                refresh_cache(Arc::clone(&hub)).await?;
+    server.unary(
+        quota_service::GET_QUOTA,
+        move |call: Call<v1::GetQuotaRequest>| {
+            let hub = Arc::clone(&get_hub);
+            async move {
+                if call.request.refresh {
+                    refresh_cache(Arc::clone(&hub)).await?;
+                }
+                Ok(v1::GetQuotaResponse {
+                    quotas: hub
+                        .quota
+                        .snapshot(Utc::now())
+                        .iter()
+                        .map(provider_quota)
+                        .collect(),
+                })
             }
-            let quotas = hub.quota.snapshot(Utc::now());
-            respond(
-                &request,
-                json!({"quotas": quotas.iter().map(quota_json).collect::<Vec<_>>()}),
-            )
-        }
-    })?;
-    server.register("/protectorate.v1.QuotaService/Suggest", move |request| {
-        let hub = Arc::clone(&hub);
-        async move {
-            let body = input(&request)?;
-            let size = task_size(body.get("taskSize"))?;
-            if boolean(&body, "refresh") {
-                refresh_cache(Arc::clone(&hub)).await?;
+        },
+    )?;
+    server.unary(
+        quota_service::SUGGEST,
+        move |call: Call<v1::SuggestRequest>| {
+            let hub = Arc::clone(&hub);
+            async move {
+                let size = task_size(call.request.task_size)?;
+                if call.request.refresh {
+                    refresh_cache(Arc::clone(&hub)).await?;
+                }
+                let now = Utc::now();
+                let quotas = hub.quota.snapshot(now);
+                Ok(v1::SuggestResponse {
+                    suggestions: quotas::rank_harnesses(&quotas, size, now)
+                        .iter()
+                        .map(suggestion)
+                        .collect(),
+                    generated_at: Some(proto_time(now)),
+                })
             }
-            let now = Utc::now();
-            let quotas = hub.quota.snapshot(now);
-            let suggestions = quotas::rank_harnesses(&quotas, size, now);
-            respond(
-                &request,
-                json!({
-                    "suggestions": suggestions.iter().map(suggestion_json).collect::<Vec<_>>(),
-                    "generatedAt": timestamp(now),
-                }),
-            )
-        }
-    })?;
+        },
+    )?;
     Ok(())
 }
 
@@ -76,180 +89,86 @@ async fn refresh_cache(hub: Arc<Hub>) -> Result<()> {
     })
 }
 
-fn task_size(value: Option<&Value>) -> Result<TaskSize> {
-    match value {
-        None | Some(Value::Null) => Ok(TaskSize::Medium),
-        Some(Value::String(name)) => match name.as_str() {
-            "TASK_SIZE_UNSPECIFIED" | "TASK_SIZE_MEDIUM" => Ok(TaskSize::Medium),
-            "TASK_SIZE_SMALL" => Ok(TaskSize::Small),
-            "TASK_SIZE_LARGE" => Ok(TaskSize::Large),
-            _ => Err(RpcError::new(Code::InvalidArgument, "invalid task size")),
-        },
-        Some(Value::Number(number)) => match number.as_i64() {
-            Some(0 | 2) => Ok(TaskSize::Medium),
-            Some(1) => Ok(TaskSize::Small),
-            Some(3) => Ok(TaskSize::Large),
-            _ => Err(RpcError::new(Code::InvalidArgument, "invalid task size")),
-        },
-        _ => Err(RpcError::new(Code::InvalidArgument, "invalid task size")),
+fn task_size(value: i32) -> Result<TaskSize> {
+    match v1::TaskSize::try_from(value) {
+        Ok(v1::TaskSize::Unspecified | v1::TaskSize::Medium) => Ok(TaskSize::Medium),
+        Ok(v1::TaskSize::Small) => Ok(TaskSize::Small),
+        Ok(v1::TaskSize::Large) => Ok(TaskSize::Large),
+        Err(_) => Err(RpcError::new(Code::InvalidArgument, "invalid task size")),
     }
 }
 
-fn freshness(value: Freshness) -> &'static str {
-    match value {
-        Freshness::Fresh => "FRESHNESS_FRESH",
-        Freshness::Stale => "FRESHNESS_STALE",
-        Freshness::Unknown => "FRESHNESS_UNKNOWN",
-    }
+fn freshness(value: Freshness) -> i32 {
+    let value = match value {
+        Freshness::Fresh => v1::Freshness::Fresh,
+        Freshness::Stale => v1::Freshness::Stale,
+        Freshness::Unknown => v1::Freshness::Unknown,
+    };
+    value as i32
 }
 
-fn harness(value: Harness) -> &'static str {
-    match value {
-        Harness::Claude => "HARNESS_CLAUDE",
-        Harness::Codex => "HARNESS_CODEX",
-        Harness::Grok => "HARNESS_GROK",
-        Harness::Pi => "HARNESS_PI",
-    }
+fn harness(value: Harness) -> i32 {
+    let value = match value {
+        Harness::Claude => v1::Harness::Claude,
+        Harness::Codex => v1::Harness::Codex,
+        Harness::Grok => v1::Harness::Grok,
+        Harness::Pi => v1::Harness::Pi,
+    };
+    value as i32
 }
 
-fn duration_seconds(value: u64) -> String {
-    format!("{value}s")
-}
-
-fn duration(value: std::time::Duration) -> String {
-    let seconds = value.as_secs();
-    let nanos = value.subsec_nanos();
-    if nanos == 0 {
-        return duration_seconds(seconds);
-    }
-    if nanos.is_multiple_of(1_000_000) {
-        format!("{seconds}.{:03}s", nanos / 1_000_000)
-    } else if nanos.is_multiple_of(1_000) {
-        format!("{seconds}.{:06}s", nanos / 1_000)
-    } else {
-        format!("{seconds}.{nanos:09}s")
-    }
-}
-
-fn duration_millis(value: u64) -> String {
-    let seconds = value / 1_000;
-    let millis = value % 1_000;
-    if millis == 0 {
-        duration_seconds(seconds)
-    } else {
-        format!("{seconds}.{millis:03}s")
-    }
-}
-
-pub(crate) fn quota_json(quota: &ProviderQuota) -> Value {
-    let mut out = json!({
-        "freshness": freshness(quota.freshness),
-    });
-    if !quota.provider.is_empty() {
-        out["provider"] = json!(quota.provider);
-    }
-    if !quota.windows.is_empty() {
-        out["windows"] = json!(quota
+fn provider_quota(quota: &ProviderQuota) -> v1::ProviderQuota {
+    v1::ProviderQuota {
+        provider: quota.provider.clone(),
+        plan: quota.plan.clone(),
+        source: quota.source.clone(),
+        freshness: freshness(quota.freshness),
+        fetched_at: quota.fetched_at.map(proto_time),
+        age: quota.age.map(wire::proto_duration),
+        error: quota.error.clone(),
+        checked_at: quota.checked_at.map(proto_time),
+        windows: quota
             .windows
             .iter()
-            .map(|window| {
-                let mut value = json!({});
-                if !window.name.is_empty() {
-                    value["name"] = json!(window.name);
-                }
-                if window.used_percent != 0.0 {
-                    value["usedPercent"] = json!(window.used_percent);
-                }
-                if window.window_seconds != 0 {
-                    value["windowSeconds"] = json!(window.window_seconds.to_string());
-                }
-                if let Some(at) = window.resets_at {
-                    value["resetsAt"] = json!(timestamp(at));
-                }
-                if let Some(estimated) = window.estimated_unused_percent_at_reset {
-                    value["estimatedUnusedPercentAtReset"] = json!(estimated);
-                }
-                value
+            .map(|window| v1::QuotaWindow {
+                name: window.name.clone(),
+                used_percent: window.used_percent,
+                resets_at: window.resets_at.map(proto_time),
+                window_seconds: window.window_seconds,
+                estimated_unused_percent_at_reset: window.estimated_unused_percent_at_reset,
             })
-            .collect::<Vec<_>>());
-    }
-    if !quota.resets.is_empty() {
-        out["resets"] = json!(quota
+            .collect(),
+        resets: quota
             .resets
             .iter()
-            .map(|credit| {
-                let mut value = json!({});
-                if !credit.kind.is_empty() {
-                    value["kind"] = json!(credit.kind);
-                }
-                if credit.count != 0 {
-                    value["count"] = json!(credit.count);
-                }
-                if let Some(at) = credit.expires_at {
-                    value["expiresAt"] = json!(timestamp(at));
-                }
-                value
+            .map(|credit| v1::ResetCredit {
+                kind: credit.kind.clone(),
+                count: credit.count,
+                expires_at: credit.expires_at.map(proto_time),
             })
-            .collect::<Vec<_>>());
+            .collect(),
+        models: quota.models.clone(),
+        latency: quota
+            .latency
+            .filter(|latency| *latency > 0)
+            .map(|millis| wire::proto_duration(Duration::from_millis(millis))),
     }
-    if !quota.plan.is_empty() {
-        out["plan"] = json!(quota.plan);
-    }
-    if !quota.source.is_empty() {
-        out["source"] = json!(quota.source);
-    }
-    if !quota.error.is_empty() {
-        out["error"] = json!(quota.error);
-    }
-    if !quota.models.is_empty() {
-        out["models"] = json!(quota.models);
-    }
-    if let Some(at) = quota.fetched_at {
-        out["fetchedAt"] = json!(timestamp(at));
-    }
-    if let Some(age) = quota.age {
-        out["age"] = json!(duration(age));
-    }
-    if let Some(at) = quota.checked_at {
-        out["checkedAt"] = json!(timestamp(at));
-    }
-    if let Some(latency) = quota.latency.filter(|latency| *latency > 0) {
-        out["latency"] = json!(duration_millis(latency));
-    }
-    out
 }
 
-fn suggestion_json(suggestion: &HarnessSuggestion) -> Value {
-    let mut out = json!({
-        "harness": harness(suggestion.harness),
-        "freshness": freshness(suggestion.freshness),
-    });
-    if suggestion.rank != 0 {
-        out["rank"] = json!(suggestion.rank);
+fn suggestion(suggestion: &HarnessSuggestion) -> v1::HarnessSuggestion {
+    v1::HarnessSuggestion {
+        rank: suggestion.rank,
+        harness: harness(suggestion.harness),
+        provider: suggestion.provider.clone(),
+        recommended: suggestion.recommended,
+        score: suggestion.score,
+        freshness: freshness(suggestion.freshness),
+        usable_percent: suggestion.usable_percent,
+        expiring_percent: suggestion.expiring_percent,
+        window: suggestion.window.clone(),
+        resets_in: suggestion
+            .resets_in
+            .map(|seconds| wire::proto_duration(Duration::from_secs(seconds))),
+        reason: suggestion.reason.clone(),
     }
-    if !suggestion.provider.is_empty() {
-        out["provider"] = json!(suggestion.provider);
-    }
-    if suggestion.recommended {
-        out["recommended"] = json!(true);
-    }
-    if suggestion.score != 0.0 {
-        out["score"] = json!(suggestion.score);
-    }
-    if !suggestion.window.is_empty() {
-        out["window"] = json!(suggestion.window);
-    }
-    if !suggestion.reason.is_empty() {
-        out["reason"] = json!(suggestion.reason);
-    }
-    if let Some(value) = suggestion.usable_percent {
-        out["usablePercent"] = json!(value);
-    }
-    if let Some(value) = suggestion.expiring_percent {
-        out["expiringPercent"] = json!(value);
-    }
-    if let Some(seconds) = suggestion.resets_in {
-        out["resetsIn"] = json!(duration_seconds(seconds));
-    }
-    out
 }

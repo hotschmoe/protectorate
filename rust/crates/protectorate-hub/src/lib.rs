@@ -1224,9 +1224,6 @@ fn unix_timestamp(seconds: i64) -> String {
         .map(timestamp)
         .unwrap_or_default()
 }
-fn boolean(value: &Value, key: &str) -> bool {
-    value.get(key).and_then(Value::as_bool).unwrap_or(false)
-}
 fn sender(actor: &str) -> String {
     actor_sleeve(actor).unwrap_or(actor).into()
 }
