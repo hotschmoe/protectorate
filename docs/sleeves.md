@@ -15,6 +15,14 @@ to list its subdirectories. Pass the selected path to
 The directory is edited in place. The app's NEW SLEEVE dialog offers the same
 browser alongside known workspaces, a typed absolute path and a clone URL.
 
+One sleeve owns a directory: a spawn is refused when the workspace is,
+contains or lies inside another sleeve's, whatever either sleeve's mode. An
+exited sleeve keeps its directory, so respawn or resleeve it under its own
+name; `sleeve kill` frees it. Give a second sleeve its own clone with
+`--new-branch`. `sleeve ls --json` workspaces and the browser report the
+owner as `sleeve` and `requiredName`, and mark directories around or inside
+an owned one as not acceptable.
+
 ## Dispatching onto a branch
 
 ```sh

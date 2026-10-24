@@ -157,6 +157,10 @@ machine. Details: [sleeves](docs/sleeves.md), [sandbox](docs/rust-sandbox.md),
   sandbox admits the hub, the provider's API hosts, `--egress-allow` entries
   and local model hosts; private, metadata and reserved ranges are refused and
   every decision is audited.
+- **Ownership:** one sleeve per directory. A launch is refused when its
+  workspace is, contains or lies inside another sleeve's, chat and terminal
+  alike; an exited sleeve keeps its directory until it is killed. Sub-sleeves
+  get their own branch clone.
 - **Modes:** chat (default) runs the harness's headless protocol and normalizes
   it into a replayable chat log; terminal runs the TUI under tmux
   (`protectorate-sleeve-runner`), with screen-rule status (working, blocked,

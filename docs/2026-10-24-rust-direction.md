@@ -337,8 +337,9 @@ Assessment:
 - Recommendation: stay on Rust, do not maintain both. Next: generate typed
   Rust structs from the protos for the hub API; consolidate the ~95
   integration test binaries into a few per crate; add a tuned release profile
-  (LTO, strip, panic=abort); trim `unwrap`/`unsafe`; fix the Windows guardian
-  Job Object leak.
+  (LTO, strip; not panic=abort, the hub relies on unwinding); trim
+  `unwrap`/`unsafe`; fix the Windows guardian Job Object leak. All done in
+  section 10.
 - Network layering: WAN exposes only router WireGuard (no port forwards, no
   WAN entry point for the reverse proxy, split DNS for the hub name);
   site-to-site home and office, phones as road warriors; UniFi zones for
@@ -433,6 +434,47 @@ Typed API (done this round):
   safe implementation needs a design (an untracked `.gitignore` with `*`
   can hide itself on a delete path). Implement or remove it.
 
+Polish round results (merged on rust-yolo, quiet machine, 12-core aarch64):
+
+| | before | after |
+|---|---|---|
+| touch a hub file, `cargo build --workspace --tests` | 50 s | 8 s |
+| touch protectorate-wire, `cargo build --workspace --tests` | 45 s | 10 s |
+| touch a hub file, `cargo check --workspace --tests` | 17 s | 13 s |
+| `cargo test --workspace` run (built) | about 4.5 min | 85 s |
+| `make check` (built) | not measured | 105 s |
+| protectorate-rs / CLI / MCP bridge, `--profile dist` | 22.9 / 8.8 / 7.6 MB | 13.1 / 5.4 / 4.5 MB |
+
+- One `tests/e2e.rs` binary per crate (no files moved), no empty unit-test
+  harnesses or doctests, incremental compilation kept for local `make`; a
+  `dist` profile (fat LTO, one codegen unit, stripped, unwinding) builds the
+  published assets while `make build` stays on `release`. lld is an optional
+  user-level setting in docs/testing.md.
+- Fuzz seed replay took 257 s and silently stopped exercising Codex and Grok
+  turns: the peers replied before the driver asked, and the drivers now drop
+  unawaited replies. The peers answer each request in order again (2 s).
+- Product bugs fixed this round besides the typed-API ones: sandbox helpers
+  forked from Tokio blocking threads got PDEATHSIG after 10 s idle; terminal
+  ptys leaked into every child the hub spawned; process-group kills after
+  the leader was reaped (PID reuse) in the sandbox and quota readers;
+  sandboxed workloads ran with SIGPIPE ignored; a planted FIFO in a sleeve
+  home could block the host-side runner; a corrupt identity file panicked
+  the hub; all four harness drivers could deadlock writing a large prompt
+  while the harness flooded stdout (stdin now goes through one writer
+  thread, `protectorate_sandbox::LineInput`); Codex and Grok kept late RPC
+  replies forever; node update refused good binaries on ETXTBSY; a status
+  read during a kill recorded the sleeve as exited on its own; wait-idle
+  returned before the turn's usage was charged; the Windows update
+  guardian's node child outlived the guardian (now in a kill-on-close job,
+  verified on officewin both ways).
+- `unsafe` 302 to 285 sites, each reviewed; one input-reachable `unwrap`
+  (identity file) fixed, the rest are lock poisoning or invariants.
+- Open: the identity store holds its lock across fsync, so one slow disk
+  write stalls every authenticated request (seen as 28-71 s stalls under
+  load and the remaining server test flakes); node-windows lists
+  dependencies its source never uses (needs a Windows build to trim);
+  `PruneSleevesRequest.ignored` is unimplemented.
+
 Sleeve model (owner's direction, to build after polish):
 - A sleeve is a long-lived owner of one repository directory, not a
   disposable worker. At most one live owner sleeve per workspace directory,
@@ -451,7 +493,9 @@ Sleeve model (owner's direction, to build after polish):
   Pi at a local model on a GPU node under a GPU lease (a 9B dense model at
   4-bit is about 6 GB of VRAM). NPU inference for that size is unverified.
 - `[decided]` One sleeve per directory in total: the rule covers terminal and
-  chat sleeves alike.
+  chat sleeves alike. `[done]` enforced at launch under the launch lock
+  (same directory, inside or around another sleeve's); exited sleeves keep
+  their directory, killing frees it; listing and browsing show the owner.
 
 ## Appendix A: research reports (full text)
 
