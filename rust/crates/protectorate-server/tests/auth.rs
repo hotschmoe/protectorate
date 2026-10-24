@@ -2,7 +2,7 @@
 //! they registered while pairing, the owner token works only on the loopback
 //! listener, and capabilities renew, narrow and die when revoked.
 #![cfg(target_os = "linux")]
-mod support;
+use crate::support;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use protectorate_auth::{

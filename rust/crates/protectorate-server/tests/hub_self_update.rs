@@ -2,7 +2,7 @@
 //! The real hub and its update guardian against a local release server:
 //! verified fetch and activation, tamper refusal, rollback of a candidate that
 //! never becomes healthy, and confirmation with pruning.
-mod support;
+use crate::support;
 
 use protectorate_connect_client::Client;
 use protectorate_release::RUST_BUNDLE;

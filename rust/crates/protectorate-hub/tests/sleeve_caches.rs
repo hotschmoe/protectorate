@@ -1,6 +1,5 @@
 #![cfg(target_os = "linux")]
-#[path = "support/capability.rs"]
-mod capability;
+use crate::support::capability;
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
 use serde_json::{json, Value};

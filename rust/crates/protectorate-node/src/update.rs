@@ -692,11 +692,25 @@ fn copy_binary(from: &Path, to: &Path) -> io::Result<()> {
     dst.sync_all()
 }
 fn run_version(path: &Path) -> io::Result<String> {
-    let mut child = Command::new(path)
-        .args(["version", "--json"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
+    // The candidate was just written in this process, so a child that a job
+    // forks meanwhile holds it open for writing until that child execs.
+    let busy_until = std::time::Instant::now() + Duration::from_secs(5);
+    let mut child = loop {
+        match Command::new(path)
+            .args(["version", "--json"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Err(error)
+                if error.kind() == io::ErrorKind::ExecutableFileBusy
+                    && std::time::Instant::now() < busy_until =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            result => break result?,
+        }
+    };
     let deadline = std::time::Instant::now() + VERSION_TIMEOUT;
     loop {
         if let Some(status) = child.try_wait()? {

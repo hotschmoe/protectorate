@@ -4,7 +4,7 @@
 //! sleeve registry, the real backlog store and the real Connect JSON router,
 //! driven only through the CLI binary with a sleeve's own token or the owner
 //! token.
-mod common;
+use crate::common;
 
 use common::cli;
 use protectorate_directory::{Scan, Workspace};

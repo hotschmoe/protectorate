@@ -2,6 +2,7 @@
 name = "protectorate-hub"
 version = "0.1.0"
 edition.workspace = true
+autotests = false
 
 [dependencies]
 protectorate-wire = { path = "../protectorate-wire" }
@@ -53,3 +54,21 @@ protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 flate2 = "1"
 tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+
+[lib]
+test = false
+doctest = false
+
+[[bin]]
+name = "protectorate-hub-sandbox-helper"
+path = "src/bin/protectorate-hub-sandbox-helper.rs"
+test = false
+
+[[bin]]
+name = "protectorate-hub-sleeve-runner"
+path = "src/bin/protectorate-hub-sleeve-runner.rs"
+test = false
+
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"

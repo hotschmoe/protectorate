@@ -1,7 +1,6 @@
 //! Paging the audit log over HTTP: newest first across monthly files, with
 //! actor, outcome and run filters, and cursors that cannot leave the log.
-#[path = "support/capability.rs"]
-mod capability;
+use crate::support::capability;
 use chrono::{TimeZone, Utc};
 use protectorate_audit::Entry;
 use protectorate_hub::Hub;

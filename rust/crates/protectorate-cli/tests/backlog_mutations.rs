@@ -1,11 +1,10 @@
 #![cfg(unix)]
 
-mod common;
+use crate::common;
 
 use common::cli;
 use protectorate_hub::Hub;
 use serde_json::Value;
-use std::os::unix::fs::PermissionsExt;
 use tokio::net::TcpListener;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -67,12 +66,10 @@ async fn edit_pin_and_remove_notes_over_real_hub_http() {
         assert!(!unpinned["pinned"].as_bool().unwrap_or(false));
 
         let editor = root.join("editor.sh");
-        std::fs::write(
+        common::write_executable(
             &editor,
             "#!/bin/sh\nprintf 'Editor title\\n\\nEditor body\\n' > \"$1\"\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let edit = std::process::Command::new(env!("CARGO_BIN_EXE_protectorate"))
             .env("PROTECTORATE_HUB", &url)
             .env("PROTECTORATE_TOKEN", "owner-secret")

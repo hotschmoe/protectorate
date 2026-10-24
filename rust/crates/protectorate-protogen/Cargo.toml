@@ -5,3 +5,8 @@ edition.workspace = true
 publish = false
 [dependencies]
 prost-reflect = "0.16"
+
+[[bin]]
+name = "protectorate-protogen"
+path = "src/main.rs"
+test = false

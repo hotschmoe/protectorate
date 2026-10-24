@@ -1,6 +1,5 @@
 #![cfg(target_os = "linux")]
-#[path = "support/executable.rs"]
-mod executable;
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{
@@ -313,7 +312,7 @@ async fn moves_pi_to_codex_with_handoff_history_and_rotated_identity() {
         addr,
         "ChatService/Wait",
         "owner-secret",
-        json!({"sleeve":"task","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"task","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -453,7 +452,7 @@ async fn failed_target_launch_restores_original_pi_session_and_token() {
         addr,
         "ChatService/Wait",
         "owner-secret",
-        json!({"sleeve":"task","until":"WAIT_UNTIL_IDLE","timeout":"3s"}),
+        json!({"sleeve":"task","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -536,7 +535,7 @@ async fn empty_summary_keeps_the_fact_only_handoff() {
         "ChatService/Wait",
         "owner-secret",
         json!({
-            "sleeve":"task", "until":"WAIT_UNTIL_IDLE", "timeout":"3s"
+            "sleeve":"task", "until":"WAIT_UNTIL_IDLE", "timeout":"60s"
         }),
     )
     .await;
@@ -589,7 +588,7 @@ async fn authenticated_pi_summarizes_a_disposable_codex_handoff() {
         "ChatService/Wait",
         "owner-secret",
         json!({
-            "sleeve":"task", "until":"WAIT_UNTIL_IDLE", "timeout":"3s"
+            "sleeve":"task", "until":"WAIT_UNTIL_IDLE", "timeout":"60s"
         }),
     )
     .await;

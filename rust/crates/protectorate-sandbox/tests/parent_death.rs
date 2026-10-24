@@ -95,7 +95,7 @@ fn losing_supervisor_kills_namespace_init() {
     let mut supervisor = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "losing_supervisor_kills_namespace_init",
+            "parent_death::losing_supervisor_kills_namespace_init",
             "--nocapture",
         ])
         .env("PROTECTORATE_PARENT_DEATH_FIXTURE", temp.path())

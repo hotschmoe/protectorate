@@ -2,7 +2,7 @@
 //! `hub backup` and `hub restore` with the real binary: a restored home brings
 //! back what a running hub wrote, and a damaged or hostile archive changes
 //! nothing on disk.
-mod support;
+use crate::support;
 
 use protectorate_connect_client::Client;
 use protectorate_wire::Code;

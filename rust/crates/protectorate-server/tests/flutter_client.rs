@@ -2,7 +2,7 @@
 //! Dart is optional for Rust-only build hosts; CI with Flutter runs this lane.
 
 #[cfg(unix)]
-mod support;
+use crate::support;
 
 #[cfg(unix)]
 mod unix {

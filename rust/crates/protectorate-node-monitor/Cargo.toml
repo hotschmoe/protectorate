@@ -9,3 +9,7 @@ protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 protectorate-tls = { path = "../protectorate-tls" }
 protectorate-wire = { path = "../protectorate-wire" }
+
+[lib]
+test = false
+doctest = false

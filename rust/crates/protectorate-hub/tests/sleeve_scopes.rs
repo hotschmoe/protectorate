@@ -2,9 +2,10 @@
 //! bounded capability allow, on its first launch, after a resleeve and after
 //! the hub restarts and recovers it.
 #![cfg(target_os = "linux")]
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -47,7 +48,7 @@ async fn call(addr: std::net::SocketAddr, method: &str, token: &str, body: Value
 }
 
 fn fake_claude(path: &Path) {
-    fs::write(
+    executable::write_executable(
         path,
         r#"#!/usr/bin/python3
 import json,sys
@@ -64,9 +65,7 @@ for line in sys.stdin:
  emit({'type':'assistant','message':{'id':'msg','model':'claude-test','content':[{'type':'text','text':'done'}],'usage':{'input_tokens':1,'output_tokens':1}}})
  emit({'type':'result','session_id':sid,'subtype':'success','is_error':False})
 "#,
-    )
-    .unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    );
 }
 
 /// The scopes of the one live capability of `principal`.

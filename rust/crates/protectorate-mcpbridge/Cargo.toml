@@ -2,6 +2,7 @@
 name = "protectorate-mcpbridge"
 version = "0.1.0"
 edition.workspace = true
+autotests = false
 description = "MCP bridge that serves the unary hub RPCs as tools over stdio or streamable HTTP"
 
 [dependencies]
@@ -27,7 +28,14 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [[bin]]
 name = "protectorate-mcpbridge"
 path = "src/main.rs"
+test = false
 
 [dev-dependencies]
-protectorate-fsutil = { path = "../protectorate-fsutil" }
 tempfile = "3"
+
+[lib]
+test = false
+
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"

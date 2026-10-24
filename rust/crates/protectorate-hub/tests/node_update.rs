@@ -1,4 +1,5 @@
 #![cfg(unix)]
+use crate::support::executable;
 use protectorate_connect_client::Client;
 use protectorate_hub::Hub;
 use protectorate_inventory::Node;
@@ -6,7 +7,7 @@ use protectorate_node::{Agent, MetricsCollector, UpdateRestart};
 use protectorate_node_metrics::NodeMetrics;
 use protectorate_wire::{Code, RpcError};
 use serde_json::{json, Value};
-use std::{fs, io, os::unix::fs::PermissionsExt, path::Path, sync::Arc, time::Duration};
+use std::{fs, io, path::Path, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 
 struct Metrics;
@@ -28,8 +29,7 @@ fn write_binary(path: &Path, version: &str) {
         other => other,
     };
     let script=format!("#!/bin/sh\nprintf '%s\\n' '{{\"version\":\"{version}\",\"os\":\"{}\",\"arch\":\"{arch}\"}}'\n", std::env::consts::OS);
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    executable::write_executable(path, &script);
 }
 async fn serve(router: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

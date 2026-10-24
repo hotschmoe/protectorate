@@ -11,3 +11,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
 futures-core = "0.3"
+
+[lib]
+test = false
+doctest = false

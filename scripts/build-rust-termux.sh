@@ -47,7 +47,7 @@ fi
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo"
 if [[ "$mode" == release ]]; then
-  cargo build --locked --release --target "$target" -p protectorate-node-termux --bin protectorate-rs-termux
+  cargo build --locked --profile dist --target "$target" -p protectorate-node-termux --bin protectorate-rs-termux
 else
   cargo "$mode" --locked --target "$target" -p protectorate-node-termux --bin protectorate-rs-termux
 fi

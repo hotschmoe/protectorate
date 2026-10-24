@@ -1,8 +1,6 @@
-#[path = "support/capability.rs"]
-mod capability;
+use crate::support::capability;
 #[cfg(unix)]
-#[path = "support/private_tmux.rs"]
-mod private_tmux;
+use crate::support::private_tmux;
 use protectorate_hub::Hub;
 use protectorate_session::Manager as SessionManager;
 use serde_json::{json, Value};

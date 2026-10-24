@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-mod common;
+use crate::common;
 
 use common::{cli, cli_device, device_home};
 use protectorate_hub::Hub;

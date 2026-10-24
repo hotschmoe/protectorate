@@ -10,7 +10,15 @@ make check      # fmt, clippy -D warnings, make test, flutter analyze, check-ver
 ```
 
 `make test` needs Linux with unprivileged user namespaces, tmux and git. The
-scenarios live in `rust/crates/*/tests/`:
+scenarios live in `rust/crates/*/tests/`. A crate with several scenario
+files builds them into one test binary, `e2e` (`tests/e2e.rs` declares each
+file as a module), so the hub links once per crate and the scenarios run in
+parallel threads. Libraries and binaries have no unit-test harness
+(`test = false`) and no doctests, except the two compile-checked examples in
+`protectorate-mcpbridge`. `protectorate-cli --test chat_commands` keeps its own
+binary because it has its own `main` and doubles as the sandbox helper. A
+scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
+--test e2e governance::` runs one file.
 
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
@@ -28,18 +36,39 @@ scenarios live in `rust/crates/*/tests/`:
   catalog.
 - `protectorate-node-windows`: the Windows binary (Windows hosts only).
 
+## Build speed
+
+Incremental compilation stays on for local `make test` and `make check`; the
+hosted workflows set `CARGO_INCREMENTAL=0` themselves. Setting it locally
+costs about 2.4x the CPU to rebuild after a hub edit, and switching it
+between runs recompiles every workspace crate.
+
+The default `cc` linker on aarch64 Linux is GNU ld. Linking with lld cuts
+the CPU of a rebuild after a hub edit by about a third (26 s to 17 s for
+`cargo build --workspace --tests`). It is a per-user setting, so hosts
+without lld are unaffected; with lld installed, add to `~/.cargo/config.toml`
+(x86_64 Linux already links with rust-lld by default):
+
+```toml
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+```
+
+Changing rustflags rebuilds everything once.
+
 ## Host-only lanes
 
 These are `#[ignore]`d because they need host state; run them by name with
-`cargo test -p <crate> --test <file> -- --ignored`:
+`cargo test -p <crate> --test e2e <file>:: -- --ignored`:
 
-- `protectorate-server --test service_job_restart`: a working systemd user
+- `protectorate-server`, `service_job_restart::`: a working systemd user
   manager.
-- `protectorate-sleeve-runner --test pub_offline|go_mod_offline|flutter_offline`
-  and `protectorate-hub --test terminal_sleeve`: published cache generations
-  passed as `PROTECTORATE_TEST_PUB_LOWER`, `PROTECTORATE_TEST_GO_MOD_LOWER` or
-  the `PROTECTORATE_TEST_FLUTTER_*` variables.
-- `protectorate-hub --test sleeve_resleeve`: an installed, authenticated Pi
+- `protectorate-sleeve-runner`, `pub_offline::`, `go_mod_offline::` or
+  `flutter_offline::`, and `protectorate-hub`, `terminal_sleeve::`: published
+  cache generations passed as `PROTECTORATE_TEST_PUB_LOWER`,
+  `PROTECTORATE_TEST_GO_MOD_LOWER` or the `PROTECTORATE_TEST_FLUTTER_*`
+  variables.
+- `protectorate-hub`, `sleeve_resleeve::`: an installed, authenticated Pi
   (`PROTECTORATE_LIVE_PI`, `PROTECTORATE_LIVE_PI_AUTH`), copied only into the
   test's private hub state.
 

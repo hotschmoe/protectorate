@@ -1,8 +1,6 @@
 #![cfg(target_os = "linux")]
-#[path = "support/capability.rs"]
-mod capability;
-#[path = "support/private_tmux.rs"]
-mod private_tmux;
+use crate::support::capability;
+use crate::support::private_tmux;
 use protectorate_hub::Hub;
 use protectorate_session::{CreateOptions, Manager};
 use std::{

@@ -1,6 +1,5 @@
 #![cfg(target_os = "linux")]
-#[path = "support/executable.rs"]
-mod executable;
+use crate::support::executable;
 use protectorate_connect_client::Client;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_sleeve_registry::{Harness, Mode, Record};
@@ -109,7 +108,7 @@ for line in sys.stdin:
    emit({'type':'response','id':m['id'],'command':k,'success':False,'error':'Nothing to compact (session too small)'})
  elif k in ('prompt','steer'):
   emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'disposition':'started'}})
-  if m['message']=='slow': time.sleep(0.3)
+  while m['message']=='slow' and not os.path.exists('release-slow'): time.sleep(0.05)
   emit({'type':'message_start','message':{'role':'assistant'}})
   emit({'type':'message_update','assistantMessageEvent':{'type':'text_delta','delta':'answer: '+m['message']}})
   emit({'type':'message_end','message':{'role':'assistant','model':'test-model','provider':'test-local','usage':{'totalTokens':13,'input':10,'output':3}}})
@@ -527,7 +526,7 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_IDLE","timeout":"1s"}),
+        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -579,7 +578,7 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     let (status, finished) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_REPORT","timeout":"1s"}),
+        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_REPORT","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{finished}");
@@ -601,7 +600,7 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_IDLE","timeout":"1s"}),
+        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");
@@ -625,7 +624,7 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     let (status, current) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_REPORT","timeout":"1s"}),
+        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_REPORT","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{current}");
@@ -655,10 +654,11 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     )
     .await;
     assert_eq!(status, 504, "{waiting}");
+    fs::write(workspace.join("release-slow"), "").unwrap();
     let (status, idle) = call(
         addr,
         "ChatService/Wait",
-        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_IDLE","timeout":"1s"}),
+        json!({"sleeve":"pi-one","until":"WAIT_UNTIL_IDLE","timeout":"60s"}),
     )
     .await;
     assert_eq!(status, 200, "{idle}");

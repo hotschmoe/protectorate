@@ -4,6 +4,7 @@
 
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -14,9 +15,11 @@ static CURRENT: Mutex<String> = Mutex::new(String::new());
 fn every_corpus_seed_passes_its_target() {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus");
     // A panic on a driver or bridge thread must fail the run, as under libFuzzer.
+    // The report goes straight to stderr: the harness captures eprintln! on
+    // the test thread and the abort would discard it.
     std::panic::set_hook(Box::new(|info| {
         let seed = CURRENT.lock().map(|s| s.clone()).unwrap_or_default();
-        eprintln!("seed {seed}: {info}");
+        let _ = writeln!(std::io::stderr(), "seed {seed}: {info}");
         std::process::abort();
     }));
     let mut dirs: Vec<String> = fs::read_dir(&corpus)

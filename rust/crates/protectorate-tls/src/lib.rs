@@ -24,8 +24,6 @@ use std::{
     time::Duration,
 };
 
-pub use protectorate_fsutil::unix_seconds as unix_now;
-
 /// The name every hub certificate carries. Node certificates are named under
 /// `node.protectorate.internal`, so no node can present it.
 pub const HUB_NAME: &str = "hub.protectorate.internal";

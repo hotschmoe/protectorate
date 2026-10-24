@@ -1,7 +1,6 @@
 //! The owner's view of the mailbox over HTTP: its own inbox, reading and
 //! acking as a recipient, and the thread list that only the owner sees whole.
-#[path = "support/capability.rs"]
-mod capability;
+use crate::support::capability;
 use protectorate_hub::Hub;
 use protectorate_sleeve_registry::{Harness, Mode, Record};
 use serde_json::{json, Value};

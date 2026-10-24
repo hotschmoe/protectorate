@@ -1,8 +1,6 @@
 #![cfg(target_os = "linux")]
-#[path = "support/executable.rs"]
-mod executable;
-#[path = "support/private_tmux.rs"]
-mod private_tmux;
+use crate::support::executable;
+use crate::support::private_tmux;
 use private_tmux::PrivateTmux;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub, TerminalLauncher};
 use protectorate_session::Manager;

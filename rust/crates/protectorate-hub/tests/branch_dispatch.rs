@@ -1,7 +1,8 @@
 #![cfg(target_os = "linux")]
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
+use std::{collections::BTreeMap, fs, path::Path, process::Command};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -72,7 +73,9 @@ async fn branch_dispatch_clones_and_rolls_back_failed_launch() {
     git(&source, &["commit", "-qm", "initial"]);
     let tip = git(&source, &["rev-parse", "HEAD"]);
     let pi = tools.join("pi");
-    fs::write(&pi, r#"#!/usr/bin/python3
+    executable::write_executable(
+        &pi,
+        r#"#!/usr/bin/python3
 import json,os,subprocess,sys
 for line in sys.stdin:
  m=json.loads(line)
@@ -105,8 +108,8 @@ for line in sys.stdin:
   os.replace('notice-fetch-proof.part','notice-fetch-proof')
   print(json.dumps({'type':'response','id':m['id'],'command':m['type'],'success':True,'data':{'disposition':'started'}}),flush=True)
   print(json.dumps({'type':'agent_settled','aborted':False}),flush=True)
-"#).unwrap();
-    fs::set_permissions(&pi, fs::Permissions::from_mode(0o755)).unwrap();
+"#,
+    );
     let launcher = ChatLauncher {
         state_root: state.clone(),
         user_home: owner,

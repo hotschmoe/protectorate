@@ -278,16 +278,26 @@ fn real_nested_cgroup_delegation_is_bounded_and_writable() {
 fn real_nested_sleeve_launches_child_without_systemd() {
     let mut f = Fixture::new();
     f.policy.nested_cgroups_available = true;
-    fs::copy(
-        env!("CARGO_BIN_EXE_protectorate-sandbox-nested-probe"),
-        f.workspace.join("nested-probe"),
-    )
-    .unwrap();
-    fs::copy(
-        env!("CARGO_BIN_EXE_protectorate-sandbox-helper"),
-        f.workspace.join("sandbox-helper"),
-    )
-    .unwrap();
+    // Copied by a child process: a write descriptor opened here would leak
+    // into children other test threads fork meanwhile, and executing the
+    // copy would fail with ETXTBSY until they exec.
+    for (binary, name) in [
+        (
+            env!("CARGO_BIN_EXE_protectorate-sandbox-nested-probe"),
+            "nested-probe",
+        ),
+        (
+            env!("CARGO_BIN_EXE_protectorate-sandbox-helper"),
+            "sandbox-helper",
+        ),
+    ] {
+        let copied = Command::new("/bin/cp")
+            .arg(binary)
+            .arg(f.workspace.join(name))
+            .status()
+            .unwrap();
+        assert!(copied.success(), "copy {binary}");
+    }
     let mut request = f.request(format!("{}/nested-probe", f.workspace.display()));
     request.command = vec![f
         .workspace

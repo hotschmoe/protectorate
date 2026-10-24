@@ -1,5 +1,5 @@
 #![cfg(unix)]
-mod common;
+use crate::common;
 
 use common::{echo_companion, installed_cli};
 use std::{

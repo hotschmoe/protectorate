@@ -5,9 +5,18 @@ members = ["rust/crates/*"]
 [workspace.package]
 edition = "2021"
 
-
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# The published release assets: one fully LTO'd codegen unit and no symbol
+# table make them about 40% smaller than `release`, for about 1.5x its build
+# time, so `make build` stays on `release`. Never panic = "abort": the hub
+# relies on unwinding to turn a panicking task into an error.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = true

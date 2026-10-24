@@ -2,14 +2,14 @@
 
 //! The owner's node, lease and audit commands against a real hub admitting
 //! leases on a live in-process node agent.
-mod common;
+use crate::common;
 
 use common::cli;
 use protectorate_hub::Hub;
 use protectorate_node::{Agent, MetricsCollector, UpdateRestart};
 use protectorate_node_metrics::NodeMetrics;
 use serde_json::Value;
-use std::{fs, io, os::unix::fs::PermissionsExt, path::Path, sync::Arc, time::Duration};
+use std::{fs, io, path::Path, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 
 const OWNER: &str = "owner-secret";
@@ -41,8 +41,7 @@ fn node_binary(path: &Path) {
         std::env::consts::OS,
         arch()
     );
-    fs::write(path, format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n")).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    common::write_executable(path, &format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"));
 }
 
 async fn serve(router: axum::Router) -> (String, tokio::task::JoinHandle<()>) {

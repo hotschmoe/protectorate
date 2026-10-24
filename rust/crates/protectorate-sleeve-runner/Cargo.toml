@@ -2,6 +2,7 @@
 name = "protectorate-sleeve-runner"
 version = "0.1.0"
 edition.workspace = true
+autotests = false
 
 [dependencies]
 protectorate-sandbox = { path = "../protectorate-sandbox" }
@@ -13,10 +14,20 @@ libc = "0.2"
 [[bin]]
 name = "protectorate-sleeve-runner"
 path = "src/main.rs"
+test = false
 
 [[bin]]
 name = "protectorate-sleeve-sandbox-helper"
 path = "src/helper.rs"
+test = false
 
 [dev-dependencies]
 tempfile = "3"
+
+[lib]
+test = false
+doctest = false
+
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"

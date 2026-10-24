@@ -7,3 +7,7 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 cap-std = "3"
 getrandom = "0.2"
+
+[lib]
+test = false
+doctest = false

@@ -1,7 +1,7 @@
 //! The hub and its nodes bind private addresses only and authenticate each
 //! other with certificates the hub CA issues when a node joins.
 #![cfg(target_os = "linux")]
-mod support;
+use crate::support;
 
 use protectorate_connect_client::{Client, NodeTls};
 use serde_json::{json, Value};
@@ -185,7 +185,7 @@ fn joined_node_trusts_only_the_hub_and_removal_revokes_it() {
     hub.stop();
     let inventory = hub.home.join("nodes.json");
     let mut nodes = read_json(&inventory);
-    let soon = protectorate_tls::unix_now() + 24 * 3600;
+    let soon = protectorate_fsutil::unix_seconds() + 24 * 3600;
     nodes["nodes"][0]["certExpires"] = json!(soon);
     fs::write(&inventory, serde_json::to_vec(&nodes).unwrap()).unwrap();
     let old_cert = fs::read(node_home.join("tls/node.pem")).unwrap();
