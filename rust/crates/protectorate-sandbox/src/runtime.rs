@@ -11,13 +11,18 @@ use std::{
     io::{self, BufRead, BufReader, Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd, RawFd},
-        unix::{ffi::OsStrExt, fs::MetadataExt, net::UnixStream, process::CommandExt},
+        unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, PermissionsExt},
+            net::UnixStream,
+            process::CommandExt,
+        },
     },
     path::{Component, Path, PathBuf},
     process::{Child, Command, Output, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        mpsc, Arc, Mutex,
     },
     time::Duration,
 };
@@ -364,8 +369,10 @@ impl KillHandle {
                 .stderr(Stdio::null())
                 .status();
         }
-        if self.pid > 0 {
-            // SAFETY: the helper starts in its own session and process group.
+        let _gate = self.kill_gate.lock().unwrap();
+        if self.pid > 0 && self.alive.load(Ordering::Acquire) {
+            // SAFETY: the helper starts in its own session and process group,
+            // and `alive` is cleared under the gate before it is reaped.
             unsafe {
                 libc::kill(-(self.pid as i32), libc::SIGKILL);
             }
@@ -407,62 +414,48 @@ impl ChildHandle {
         Ok(())
     }
     pub fn wait(mut self) -> Result<std::process::ExitStatus> {
-        let kill = self.kill_handle();
         let mut child = self
             .child
             .take()
             .ok_or_else(|| LaunchError::Invalid("child already waited".into()))?;
-        if self.host_direct {
-            // Keep the leader as a zombie until its process group is killed:
-            // reaping first would allow the PID (and PGID) to be reused.
-            wait_unreaped(child.id())?;
-            kill.kill();
-        }
-        let status = child.wait().map_err(ioerr("wait sandbox"))?;
-        self.alive.store(false, Ordering::Release);
+        let status = self.reap(&mut child)?;
         self.cleanup_direct_scope()?;
         Ok(status)
     }
+    /// Keeps the leader a zombie until its group is killed (host-direct) and
+    /// `alive` is cleared under the kill gate: reaping first would let a
+    /// concurrent kill signal a reused PID or PGID.
+    fn reap(&self, child: &mut Child) -> Result<std::process::ExitStatus> {
+        wait_unreaped(child.id())?;
+        if self.host_direct {
+            self.kill_handle().kill();
+        }
+        let _gate = self.kill_gate.lock().unwrap();
+        self.alive.store(false, Ordering::Release);
+        child.wait().map_err(ioerr("wait sandbox"))
+    }
     pub fn wait_with_output(mut self) -> Result<Output> {
-        let kill = self.kill_handle();
         let mut child = self
             .child
             .take()
             .ok_or_else(|| LaunchError::Invalid("child already waited".into()))?;
-        let output = if self.host_direct {
-            drop(child.stdin.take());
-            let stdout = child.stdout.take().map(|mut pipe| {
-                std::thread::spawn(move || {
-                    let mut bytes = Vec::new();
-                    pipe.read_to_end(&mut bytes).map(|_| bytes)
-                })
-            });
-            let stderr = child.stderr.take().map(|mut pipe| {
-                std::thread::spawn(move || {
-                    let mut bytes = Vec::new();
-                    pipe.read_to_end(&mut bytes).map(|_| bytes)
-                })
-            });
-            wait_unreaped(child.id())?;
-            kill.kill();
-            let status = child.wait().map_err(ioerr("wait direct harness"))?;
-            let read = |thread: Option<std::thread::JoinHandle<io::Result<Vec<u8>>>>| {
-                thread.map_or(Ok(Vec::new()), |thread| {
-                    thread
-                        .join()
-                        .map_err(|_| LaunchError::Setup("output reader panicked".into()))?
-                        .map_err(ioerr("read direct harness output"))
-                })
-            };
-            Output {
-                status,
-                stdout: read(stdout)?,
-                stderr: read(stderr)?,
-            }
-        } else {
-            child.wait_with_output().map_err(ioerr("wait sandbox"))?
+        drop(child.stdin.take());
+        let stdout = child.stdout.take().map(read_to_end_thread);
+        let stderr = child.stderr.take().map(read_to_end_thread);
+        let status = self.reap(&mut child)?;
+        let read = |thread: Option<std::thread::JoinHandle<io::Result<Vec<u8>>>>| {
+            thread.map_or(Ok(Vec::new()), |thread| {
+                thread
+                    .join()
+                    .map_err(|_| LaunchError::Setup("output reader panicked".into()))?
+                    .map_err(ioerr("read sandbox output"))
+            })
         };
-        self.alive.store(false, Ordering::Release);
+        let output = Output {
+            status,
+            stdout: read(stdout)?,
+            stderr: read(stderr)?,
+        };
         self.cleanup_direct_scope()?;
         Ok(output)
     }
@@ -485,8 +478,48 @@ impl ChildHandle {
     }
 }
 
-/// Wait for a direct child to exit without releasing its PID. The caller must
-/// kill the process group before it reaps the leader.
+fn read_to_end_thread(
+    mut pipe: impl Read + Send + 'static,
+) -> std::thread::JoinHandle<io::Result<Vec<u8>>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        pipe.read_to_end(&mut bytes).map(|_| bytes)
+    })
+}
+/// Forks every sandbox helper from one thread that never exits. The helper
+/// arms PR_SET_PDEATHSIG, which fires when the forking *thread* ends, and
+/// callers run on pooled threads (Tokio's blocking pool) that are retired
+/// after a few idle seconds and would take the helper down with them.
+fn spawn_from_lasting_thread(command: Command) -> io::Result<Child> {
+    type Request = (Command, mpsc::SyncSender<io::Result<Child>>);
+    static SPAWNER: Mutex<Option<mpsc::Sender<Request>>> = Mutex::new(None);
+    let sender = {
+        let mut spawner = SPAWNER.lock().unwrap();
+        match &*spawner {
+            Some(sender) => sender.clone(),
+            None => {
+                let (sender, requests) = mpsc::channel::<Request>();
+                std::thread::Builder::new()
+                    .name("sandbox-spawner".into())
+                    .spawn(move || {
+                        for (mut command, reply) in requests {
+                            let _ = reply.send(command.spawn());
+                        }
+                    })?;
+                spawner.insert(sender).clone()
+            }
+        }
+    };
+    let (reply, result) = mpsc::sync_channel(1);
+    sender
+        .send((command, reply))
+        .map_err(|_| io::Error::other("sandbox spawner thread stopped"))?;
+    result
+        .recv()
+        .map_err(|_| io::Error::other("sandbox spawner thread stopped"))?
+}
+
+/// Wait for a child to exit without releasing its PID.
 fn wait_unreaped(pid: u32) -> Result<()> {
     let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
     loop {
@@ -497,7 +530,7 @@ fn wait_unreaped(pid: u32) -> Result<()> {
         }
         let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::Interrupted {
-            return Err(ioerr("wait for direct harness without reaping")(error));
+            return Err(ioerr("wait for child without reaping")(error));
         }
     }
 }
@@ -506,7 +539,7 @@ impl Drop for ChildHandle {
         if self.child.is_some() {
             let _ = self.cancel();
             if let Some(mut child) = self.child.take() {
-                let _ = child.wait();
+                let _ = self.reap(&mut child);
             }
         }
         self.alive.store(false, Ordering::Release);
@@ -708,11 +741,8 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         .prefix("sandbox-")
         .tempdir_in(&runtime)
         .map_err(ioerr("create private mount root"))?;
-    fs::set_permissions(
-        root.path(),
-        std::os::unix::fs::PermissionsExt::from_mode(0o700),
-    )
-    .map_err(ioerr("protect runtime directory"))?;
+    fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700))
+        .map_err(ioerr("protect runtime directory"))?;
     let (parent_control, child_control) =
         UnixStream::pair().map_err(ioerr("create private control socket"))?;
     parent_control
@@ -848,10 +878,9 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             if current.dev() != meta.dev() || current.ino() != meta.ino() {
                 return invalid("overlay layer changed while being protected");
             }
-            syscall_ok(
-                unsafe { libc::fchmod(directory.as_raw_fd(), 0o700) } as libc::c_long,
-                "protect pinned overlay layer directory",
-            )?;
+            directory
+                .set_permissions(fs::Permissions::from_mode(0o700))
+                .map_err(ioerr("protect pinned overlay layer directory"))?;
             Ok(())
         };
         protect(&overlay.upper, &upper_meta)?;
@@ -1060,7 +1089,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         }
     }
     let control_fd = child_control.as_raw_fd();
-    let supervisor_pid = unsafe { libc::getpid() };
+    let supervisor_pid = std::process::id() as libc::pid_t;
     // SAFETY: this pre_exec closure performs only async-signal-safe Linux syscalls;
     // it allocates nothing, and does not enter namespaces in the async parent.
     unsafe {
@@ -1068,11 +1097,11 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) < 0 {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong) < 0 {
                 return Err(io::Error::last_os_error());
             }
             if libc::getppid() != supervisor_pid {
-                return Err(io::Error::other("sandbox supervisor died before exec"));
+                return Err(io::Error::from_raw_os_error(libc::ESRCH));
             }
             if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 4u32) < 0 {
                 return Err(io::Error::last_os_error());
@@ -1086,7 +1115,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
             Ok(())
         });
     }
-    let child = command.spawn().map_err(ioerr(
+    let child = spawn_from_lasting_thread(command).map_err(ioerr(
         "start bounded sandbox helper (systemd user manager or delegated parent required)",
     ))?;
     drop(child_control);
@@ -1378,12 +1407,13 @@ fn mount_overlays(plan: &HelperPlan, root: &File) -> Result<()> {
     Ok(())
 }
 fn parent_death() -> Result<()> {
-    let before = unsafe { libc::getppid() };
+    let before = std::os::unix::process::parent_id();
     syscall_ok(
-        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) } as libc::c_long,
+        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong) }
+            as libc::c_long,
         "arm parent-death cleanup",
     )?;
-    if unsafe { libc::getppid() } != before {
+    if std::os::unix::process::parent_id() != before {
         return Err(LaunchError::Setup("parent died during setup".into()));
     }
     Ok(())
@@ -1515,7 +1545,15 @@ fn spawn_relay(relays: Vec<(std::net::TcpListener, PathBuf)>) -> Result<()> {
         unsafe { libc::close(CONTROL_FD) };
         let confined = parent_death().is_ok()
             && drop_privileges(false).is_ok()
-            && unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } == 0;
+            && unsafe {
+                libc::prctl(
+                    libc::PR_SET_DUMPABLE,
+                    0 as libc::c_ulong,
+                    0 as libc::c_ulong,
+                    0 as libc::c_ulong,
+                    0 as libc::c_ulong,
+                )
+            } == 0;
         if confined {
             egress::serve_relays(relays);
         }
@@ -1533,7 +1571,15 @@ fn drop_privileges(nested: bool) -> Result<()> {
         if nested && capability == CAP_SETFCAP {
             continue;
         }
-        let result = unsafe { libc::prctl(libc::PR_CAPBSET_DROP, capability, 0, 0, 0) };
+        let result = unsafe {
+            libc::prctl(
+                libc::PR_CAPBSET_DROP,
+                capability as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            )
+        };
         if result < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EINVAL) {
             return Err(ioerr("drop capability bounding set")(
                 io::Error::last_os_error(),
@@ -1573,7 +1619,15 @@ fn drop_privileges(nested: bool) -> Result<()> {
         "drop effective capabilities",
     )?;
     syscall_ok(
-        unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } as libc::c_long,
+        unsafe {
+            libc::prctl(
+                libc::PR_SET_NO_NEW_PRIVS,
+                1 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            )
+        } as libc::c_long,
         "set no-new-privileges",
     )?;
     Ok(())
@@ -1778,7 +1832,10 @@ fn setup_and_exec(
         unsafe { libc::syscall(libc::SYS_close_range, (error_fd + 1) as u32, u32::MAX, 0u32) },
         "close inherited host descriptors",
     )?;
+    // The helper is a Rust binary, whose runtime ignores SIGPIPE, and an
+    // ignored disposition survives execve.
     unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
         libc::execve(executable.as_ptr(), argv.as_ptr(), environ.as_ptr());
     }
     Err(ioerr("exec isolated workload")(io::Error::last_os_error()))
@@ -1866,39 +1923,29 @@ pub fn helper_main() -> Result<i32> {
         let relays =
             egress::bind_relays(&plan.relays).map_err(ioerr("bind namespace egress relay"))?;
         let parent_pidfd = owned_fd(
-            unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0) },
+            unsafe { libc::syscall(libc::SYS_pidfd_open, std::process::id(), 0) },
             "pin helper parent lifetime",
         )?;
-        let mut pipe = [0; 2];
-        syscall_ok(
-            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) } as libc::c_long,
-            "create exec-error pipe",
-        )?;
+        let (mut errors, error_writer) = io::pipe().map_err(ioerr("create exec-error pipe"))?;
         let pid = syscall_ok(
             unsafe { libc::fork() } as libc::c_long,
             "fork namespace init",
         )? as i32;
         if pid == 0 {
-            unsafe {
-                libc::close(pipe[0]);
-            }
-            if let Err(error) =
-                setup_and_exec(&plan, nested.as_ref(), pipe[1], parent_pidfd.as_raw_fd())
-            {
-                let message = error.to_string();
-                unsafe {
-                    libc::write(pipe[1], message.as_ptr().cast(), message.len());
-                    libc::_exit(125);
-                }
+            drop(errors);
+            if let Err(error) = setup_and_exec(
+                &plan,
+                nested.as_ref(),
+                error_writer.as_raw_fd(),
+                parent_pidfd.as_raw_fd(),
+            ) {
+                let _ = (&error_writer).write_all(error.to_string().as_bytes());
             }
             unsafe {
                 libc::_exit(125);
             }
         }
-        unsafe {
-            libc::close(pipe[1]);
-        }
-        let mut errors = unsafe { File::from_raw_fd(pipe[0]) };
+        drop(error_writer);
         let mut message = String::new();
         errors
             .read_to_string(&mut message)
