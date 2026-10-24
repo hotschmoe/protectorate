@@ -1,18 +1,17 @@
 //! Blocking, verified file transfer over Connect JSON. Call from
 //! `spawn_blocking` when using an async runtime.
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use protectorate_connect_client::Client;
-use protectorate_wire::{Code, Result, RpcError};
+use protectorate_wire::{
+    v1::{self, get_file_response::Part, node_agent_service},
+    Code, Result, RpcError,
+};
 use protectorate_xfer::{Chunk, Header, Kind, Sink, Source, Trailer};
-use serde_json::{json, Value};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
-const PUT: &str = "/protectorate.v1.NodeAgentService/PutFile";
-const GET: &str = "/protectorate.v1.NodeAgentService/GetFile";
 const CHUNK_RETRY_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,52 +48,75 @@ pub fn push_with_progress(
 ) -> Result<TransferResult> {
     let mut source = Source::open(local, compress).map_err(xfer_error)?;
     let header = source.header();
-    let id = random_id()?;
-    let kind = kind_json(header.kind);
+    let first = v1::PutFileRequest {
+        name: node.into(),
+        transfer_id: random_id()?,
+        path: remote.into(),
+        kind: file_kind(header.kind) as i32,
+        mode: header.mode,
+        overwrite,
+        ..Default::default()
+    };
     let mut offset = 0_u64;
-    let mut first = true;
     while let Some(chunk) = source.next_chunk().map_err(xfer_error)? {
         let sent = chunk.raw_size as u64;
-        let input = json!({
-            "name": node, "transferId": id, "path": remote, "kind": kind,
-            "mode": header.mode, "overwrite": overwrite, "offset": offset.to_string(),
-            "chunk": chunk_json(chunk),
-        });
-        let response = put_chunk_with_retry(client, &input)?;
+        let request = v1::PutFileRequest {
+            offset,
+            chunk: Some(v1::FileChunk {
+                data: chunk.data,
+                compressed: chunk.compressed,
+                raw_size: chunk.raw_size,
+            }),
+            ..first.clone()
+        };
+        let response = put_chunk_with_retry(client, &request)?;
         offset = offset
             .checked_add(sent)
             .ok_or_else(|| loss("transfer offset overflow"))?;
         verify_received(&response, offset, false)?;
         progress(offset)?;
-        first = false;
     }
     let trailer = source.trailer().map_err(xfer_error)?;
-    let mut final_input = json!({
-        "name": node, "transferId": id, "offset": offset.to_string(), "last": true,
-        "trailer": trailer_json(&trailer),
+    let end = Some(v1::FileTrailer {
+        size: trailer.size,
+        sha256: trailer.sha256.clone(),
+        skipped: trailer.skipped,
     });
-    if first {
-        final_input["path"] = json!(remote);
-        final_input["kind"] = json!(kind);
-        final_input["mode"] = json!(header.mode);
-        final_input["overwrite"] = json!(overwrite);
-    }
-    let response = put_chunk_with_retry(client, &final_input)?;
+    // Without any chunk the last call is also the first and carries its fields.
+    let last = if offset == 0 {
+        v1::PutFileRequest {
+            last: true,
+            trailer: end,
+            ..first
+        }
+    } else {
+        v1::PutFileRequest {
+            name: first.name,
+            transfer_id: first.transfer_id,
+            offset,
+            last: true,
+            trailer: end,
+            ..Default::default()
+        }
+    };
+    let response = put_chunk_with_retry(client, &last)?;
     verify_received(&response, offset, true)?;
-    let path = PathBuf::from(string(&response, "path")?);
     Ok(TransferResult {
-        path,
+        path: PathBuf::from(response.path),
         size: trailer.size,
         sha256: trailer.sha256,
         skipped: trailer.skipped,
     })
 }
 
-fn put_chunk_with_retry(client: &Client, input: &Value) -> Result<Value> {
+fn put_chunk_with_retry(
+    client: &Client,
+    request: &v1::PutFileRequest,
+) -> Result<v1::PutFileResponse> {
     let mut retry_until = None;
     let mut pause = Duration::from_millis(200);
     loop {
-        match client.call(PUT, input) {
+        match client.unary(node_agent_service::PUT_FILE, request) {
             Ok(reply) => return Ok(reply),
             Err(error) if matches!(error.code, Code::Unavailable | Code::DeadlineExceeded) => {
                 let deadline =
@@ -124,59 +146,56 @@ pub fn pull(
     let local = local.as_ref().to_path_buf();
     let mut sink: Option<Sink> = None;
     let mut trailer: Option<Trailer> = None;
-    client.stream(
-        GET,
-        &json!({"name": node, "path": remote, "noCompress": !compress}),
-        |message| {
-            if let Some(header) = message.get("header") {
+    let request = v1::GetFileRequest {
+        name: node.into(),
+        path: remote.into(),
+        no_compress: !compress,
+    };
+    client.server_stream(node_agent_service::GET_FILE, &request, |message| {
+        match message.part {
+            Some(Part::Header(header)) => {
                 if sink.is_some() || trailer.is_some() {
                     return Err(loss("duplicate file header"));
                 }
-                let kind = parse_kind(string(header, "kind")?)?;
-                let mode = u32::try_from(number(header, "mode")?)
-                    .map_err(|_| loss("invalid file mode"))?;
-                let size = number(header, "size")?;
-                sink = Some(
-                    Sink::new(&local, Header { kind, mode, size }, overwrite)
-                        .map_err(xfer_error)?,
-                );
-            } else if let Some(part) = message.get("chunk") {
+                let kind = match header.kind() {
+                    v1::FileKind::File => Kind::File,
+                    v1::FileKind::Directory => Kind::Directory,
+                    v1::FileKind::Unspecified => return Err(loss("invalid file kind")),
+                };
+                let header = Header {
+                    kind,
+                    mode: header.mode,
+                    size: header.size,
+                };
+                sink = Some(Sink::new(&local, header, overwrite).map_err(xfer_error)?);
+            }
+            Some(Part::Chunk(part)) => {
                 if trailer.is_some() {
                     return Err(loss("chunk after trailer"));
                 }
                 let target = sink.as_mut().ok_or_else(|| loss("chunk before header"))?;
-                let data = STANDARD
-                    .decode(string(part, "data")?)
-                    .map_err(|e| loss(e.to_string()))?;
-                let raw_size = u32::try_from(number(part, "rawSize")?)
-                    .map_err(|_| loss("invalid chunk size"))?;
-                let compressed = part
-                    .get("compressed")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
                 target
                     .write(Chunk {
-                        data,
-                        compressed,
-                        raw_size,
+                        data: part.data,
+                        compressed: part.compressed,
+                        raw_size: part.raw_size,
                     })
                     .map_err(xfer_error)?;
-            } else if let Some(part) = message.get("trailer") {
+            }
+            Some(Part::Trailer(part)) => {
                 if sink.is_none() || trailer.is_some() {
                     return Err(loss("unexpected file trailer"));
                 }
                 trailer = Some(Trailer {
-                    size: number(part, "size")?,
-                    sha256: string(part, "sha256")?.into(),
-                    skipped: u32::try_from(number(part, "skipped")?)
-                        .map_err(|_| loss("invalid skipped count"))?,
+                    size: part.size,
+                    sha256: part.sha256,
+                    skipped: part.skipped,
                 });
-            } else {
-                return Err(loss("unknown file stream part"));
             }
-            Ok(())
-        },
-    )?;
+            None => return Err(loss("unknown file stream part")),
+        }
+        Ok(())
+    })?;
     let trailer = trailer.ok_or_else(|| loss("file stream ended without trailer"))?;
     let sink = sink.ok_or_else(|| loss("file stream ended without header"))?;
     sink.commit(trailer.clone()).map_err(xfer_error)?;
@@ -197,53 +216,19 @@ fn random_id() -> Result<String> {
     }
     Ok(id)
 }
-fn kind_json(kind: Kind) -> &'static str {
+fn file_kind(kind: Kind) -> v1::FileKind {
     match kind {
-        Kind::File => "FILE_KIND_FILE",
-        Kind::Directory => "FILE_KIND_DIRECTORY",
+        Kind::File => v1::FileKind::File,
+        Kind::Directory => v1::FileKind::Directory,
     }
 }
-fn parse_kind(kind: &str) -> Result<Kind> {
-    match kind {
-        "FILE_KIND_FILE" => Ok(Kind::File),
-        "FILE_KIND_DIRECTORY" => Ok(Kind::Directory),
-        _ => Err(loss("invalid file kind")),
-    }
-}
-fn chunk_json(chunk: Chunk) -> Value {
-    json!({"data": STANDARD.encode(chunk.data), "compressed": chunk.compressed, "rawSize": chunk.raw_size})
-}
-fn trailer_json(trailer: &Trailer) -> Value {
-    json!({"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped})
-}
-fn verify_received(response: &Value, expected: u64, done: bool) -> Result<()> {
-    if number(response, "received")? != expected
-        || response
-            .get("done")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-            != done
-    {
+fn verify_received(response: &v1::PutFileResponse, expected: u64, done: bool) -> Result<()> {
+    if response.received != expected || response.done != done {
         return Err(loss(
             "node reported an unexpected transfer offset or completion",
         ));
     }
     Ok(())
-}
-fn number(value: &Value, key: &str) -> Result<u64> {
-    match value.get(key) {
-        None => Ok(0), // protobuf JSON omits scalar fields with default values
-        Some(value) => value
-            .as_u64()
-            .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-            .ok_or_else(|| loss(format!("invalid {key}"))),
-    }
-}
-fn string<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| loss(format!("missing or invalid {key}")))
 }
 fn loss(message: impl Into<String>) -> RpcError {
     RpcError::new(Code::DataLoss, message)
