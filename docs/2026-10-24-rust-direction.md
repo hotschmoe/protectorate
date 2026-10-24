@@ -362,6 +362,97 @@ Assessment:
   re-pair the phone), then nodes one at a time; officepc needs the owner at
   the desk for the Windows Firewall prompt.
 
+## 9. References reviewed against PROBLEMS.md (2026-10-24, second pass)
+
+Question: does an existing product fit P1-P11 better than our own build?
+Three reviews (local clones, component references, a web scan of products
+not cloned). Answer: no. Our build covers about 85% (P1-P5, P7-P9 done; P6,
+P10, P11 partial).
+
+| Candidate | Share of P1-P11 | Disqualifier |
+|---|---|---|
+| t3code | about 55% | injects orchestration instructions into Claude, Codex and Pi prompts and its own MCP server; Antigravity quota calls Google's remote endpoint; Node/Electron on every machine; push through its cloud relay; telemetry on by default; nothing for P3, P8, P11 |
+| herdr | about 30% | single user; other machines over SSH with their own logins; `integration install` edits harness configs; no quota, no isolation; unchanged since A.5 |
+| Happier / Paseo | about 25% | strong multi-machine sessions and Android apps; no quota, central logins, isolation, leases or jobs; Happier's default drives Claude through the Agent SDK with a setup-token (P5 billing question) |
+| Factory, UniiChat, Omnara, Coder Agents | 20% or less | each is its own agent loop (no subscription quota); Factory is closed SaaS |
+
+Assembling Happier or Paseo, Beszel, a Gitea or Nomad runner and the
+CodexBar CLI still lacks central logins, per-workspace isolation, GPU
+leases, quota-aware dispatch, family-machine approvals and audit, Windows ARM
+and Android runners, and one CLI. Nobody builds hub-level quota-aware
+dispatch (P6).
+
+Components: adopt nothing. Where we have an equivalent the reference is 10x
+to 700x larger and conflicts with the ethos: CodexBar scrapes the Claude TUI,
+refreshes OAuth itself and calls Google for Antigravity on Linux; layerfs now
+runs Windows through WSL2 and Docker and is still not crash-safe; beads_rust
+and mcp_agent_mail carry a license rider that voids rights for use "for the
+benefit of" Anthropic or OpenAI; tincan is hosted SaaS with harness hooks;
+cortical-stack installs Claude-only hooks. pi stays a harness; pi-durable
+stays experimental and pi-only. security-audit-skill is worth running from a
+sleeve against this repo now and then.
+
+Ideas to borrow later (features, after polish): redeeming Claude reset
+credits behind the approval gate (t3code's POST
+`/api/organizations/{org}/reset_rate_limits` with `program: "cedar_ember"`;
+we already read the credits, which closes the P1 open question for Claude);
+t3code's learned route selection; herdr's server-side terminal frame API and
+detection `explain`; Happier and Paseo's QR pairing and reattach; UniiChat's
+memory tree for compaction; mcp_agent_mail's path-glob file reservations;
+CodexBar's provider docs for P10 balance readers.
+
+## 10. Typed API, polish round and the sleeve model (2026-10-24)
+
+Owner direction: stay on Rust; low dependencies and supply-chain surface;
+clean up and polish before features; faster builds.
+
+Typed API (done this round):
+- `protectorate-protogen` (about 250 lines, depends only on prost-reflect)
+  generates prost messages, enums and one `Rpc<Req, Resp>` constant per
+  procedure into `protectorate-wire/src/v1.rs` from the embedded descriptor;
+  `make gen` writes it and `make check-gen` checks it. No new crates: prost
+  and prost-types were already in the lock.
+- `UnaryServer::unary` / `::stream` take the constant and a `Call<Req>`, and
+  refuse at startup when handler types differ from the schema; the untyped
+  registration is private. `Client::unary` / `::server_stream` mirror it;
+  JSON `call` / `stream` remain for the MCP bridge and black-box tests.
+- Every hub, node, CLI and server handler or client call is typed. Remaining
+  `json!` is limited to `google.protobuf.Struct` event payloads, harness
+  protocols, files on disk and tests.
+- Bugs the types exposed and fixed: CreateToken checked the untrimmed name
+  against reserved principals but minted the trimmed one; JoinNode never
+  returned `ca`; SubmitJob refused a zero timeout the schema defines as 1h;
+  out-of-range message kinds were read as notes; `node show` read the engine
+  disk measurement time from the wrong field; `orchestrator status` printed
+  a field the schema lacks; zero values printed as "-"; several wrong
+  "invalid ttl" messages; a panicking index in mail delivery; non-UTF-8
+  paths could panic workspace listings. AddNode now returns after the
+  node's first metrics poll, so an immediate lease no longer races it.
+  `chat status`, `sleeve show` and `chat watch` print readable states.
+- Open: `PruneSleevesRequest.ignored` is sent by the CLI but never read; a
+  safe implementation needs a design (an untracked `.gitignore` with `*`
+  can hide itself on a delete path). Implement or remove it.
+
+Sleeve model (owner's direction, to build after polish):
+- A sleeve is a long-lived owner of one repository directory, not a
+  disposable worker. At most one live owner sleeve per workspace directory,
+  enforced by the hub; the user and Envoy talk to "the repository", and any
+  harness can hold it through a resleeve.
+- Sub-sleeves never share the owner's directory: they get their own branch
+  clone (existing `--new-branch` dispatch), draw from the owner's budget and
+  report to it.
+- Quick-task sleeves: disposable workspace, never resleeved, pruned after
+  they report.
+- Resleeve compaction already avoids replaying the log: hub facts plus a
+  sandboxed, tool-less Pi summary into `.protectorate/HANDOFF.md` (16 KB
+  budget) and one plain message. To add: a rolling summary folded in after
+  each settled turn (UniiChat's memory tree), so a resleeve only summarizes
+  the latest delta; and an explicit summarizer model setting that can point
+  Pi at a local model on a GPU node under a GPU lease (a 9B dense model at
+  4-bit is about 6 GB of VRAM). NPU inference for that size is unverified.
+- Open question to the owner: does the one-owner rule cover terminal sleeves
+  too, or chat sleeves only?
+
 ## Appendix A: research reports (full text)
 
 Reports from the agents dispatched during this session, reproduced as returned (agent-internal metadata removed).

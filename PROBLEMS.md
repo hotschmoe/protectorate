@@ -69,8 +69,9 @@ time and redeemable resets, so I can spend each allotment before it resets.
 `[done]` `protectorate quota` and the app's QUOTA view read every provider
 (protectorate-quota); `quota suggest` ranks spare capacity.
 
-`[open]` Do the Codex banked resets match what you see, or do you also get them
-on Claude or Grok?
+`[open]` Do the Codex banked resets match what you see? Claude has reset credits
+too (protectorate-quota reads them; t3code shows how to redeem them, see
+docs/2026-10-24-rust-direction.md section 9). Grok is unconfirmed.
 
 ---
 
