@@ -499,7 +499,10 @@ impl Session {
         let mut command = fields.as_object().cloned().unwrap_or_default();
         command.insert("id".into(), json!(id));
         command.insert("type".into(), json!(kind));
-        self.input.write(&Value::Object(command))?;
+        if let Err(error) = self.input.write(&Value::Object(command)) {
+            state.pending.remove(&id);
+            return Err(error);
+        }
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(reply) = state.replies.remove(&id) {

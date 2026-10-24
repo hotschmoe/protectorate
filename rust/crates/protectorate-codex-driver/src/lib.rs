@@ -8,7 +8,7 @@ use protectorate_sandbox::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read, Write},
     process::ChildStdin,
     sync::{
@@ -96,6 +96,7 @@ struct State {
     compacting: bool,
     selecting: bool,
     next_id: u64,
+    pending: BTreeSet<u64>,
     replies: BTreeMap<u64, Value>,
     thread_id: String,
     turn_id: String,
@@ -308,14 +309,23 @@ impl Session {
         }
         true
     }
+    /// Every id begun here stays in `pending` until `await_rpc` gives up on
+    /// it, and only pending ids keep their replies.
     fn begin_rpc(&self, method: &str, params: Value) -> Result<u64, String> {
         let id = {
             let mut s = self.state.lock().unwrap();
             s.next_id += 1;
-            s.next_id
+            let id = s.next_id;
+            s.pending.insert(id);
+            id
         };
-        self.input
-            .write(&json!({"id":id,"method":method,"params":params}))?;
+        if let Err(error) = self
+            .input
+            .write(&json!({"id":id,"method":method,"params":params}))
+        {
+            self.state.lock().unwrap().pending.remove(&id);
+            return Err(error);
+        }
         Ok(id)
     }
     fn await_rpc(&self, id: u64, timeout: Duration) -> Result<Value, String> {
@@ -323,6 +333,7 @@ impl Session {
         let mut s = self.state.lock().unwrap();
         loop {
             if let Some(reply) = s.replies.remove(&id) {
+                s.pending.remove(&id);
                 if reply.get("error").is_some() {
                     return Err(reply["error"]["message"]
                         .as_str()
@@ -332,10 +343,12 @@ impl Session {
                 return Ok(reply["result"].clone());
             }
             if s.exited {
+                s.pending.remove(&id);
                 return Err("codex app-server exited before replying".into());
             }
             let remain = deadline.saturating_duration_since(Instant::now());
             if remain.is_zero() {
+                s.pending.remove(&id);
                 self.stop();
                 return Err("codex RPC timed out".into());
             }
@@ -394,6 +407,7 @@ impl Session {
                 json!({"user":{"text":text,"from":from,"requestId":request_id}}),
             ))
             .map_err(|e| {
+                self.state.lock().unwrap().pending.remove(&rpc_id);
                 self.stop();
                 e.to_string()
             })?;
@@ -646,8 +660,10 @@ impl Session {
             }
         } else if let Some(id) = message["id"].as_u64() {
             let mut s = self.state.lock().unwrap();
-            s.replies.insert(id, message.clone());
-            self.changed.notify_all();
+            if s.pending.contains(&id) {
+                s.replies.insert(id, message.clone());
+                self.changed.notify_all();
+            }
         }
     }
     fn handle_request(&self, message: &Value, method: &str) {

@@ -15,7 +15,7 @@ use protectorate_sandbox::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read, Write},
     process::ChildStdin,
     sync::{
@@ -54,6 +54,7 @@ struct State {
     next_id: u64,
     prompt_id: Option<u64>,
     per_call: bool,
+    pending: BTreeSet<u64>,
     replies: BTreeMap<u64, Value>,
     approvals: BTreeMap<String, Pending>,
     session_id: String,
@@ -401,14 +402,22 @@ impl Session {
                 return Err("grok session exited".into());
             }
             state.next_id += 1;
-            state.next_id
+            let id = state.next_id;
+            state.pending.insert(id);
+            id
         };
-        self.input
-            .write(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))?;
+        if let Err(error) = self
+            .input
+            .write(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
+        {
+            self.state.lock().unwrap().pending.remove(&id);
+            return Err(error);
+        }
         let deadline = Instant::now() + timeout;
         loop {
             let mut state = self.state.lock().unwrap();
             if let Some(reply) = state.replies.remove(&id) {
+                state.pending.remove(&id);
                 if let Some(error) = reply.get("error") {
                     let code = error["code"].as_i64().unwrap_or(0);
                     let message = error["message"].as_str().unwrap_or("RPC failed");
@@ -417,10 +426,12 @@ impl Session {
                 return Ok(reply.get("result").cloned().unwrap_or(Value::Null));
             }
             if state.exited {
+                state.pending.remove(&id);
                 return Err("grok exited before replying".into());
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
+                state.pending.remove(&id);
                 drop(state);
                 self.stop();
                 return Err(format!("{method} timed out"));
@@ -490,8 +501,10 @@ impl Session {
                 state.approvals.clear();
                 Some(state.per_call)
             } else {
-                state.replies.insert(id, message.clone());
-                self.changed.notify_all();
+                if state.pending.contains(&id) {
+                    state.replies.insert(id, message.clone());
+                    self.changed.notify_all();
+                }
                 None
             }
         };
