@@ -89,7 +89,9 @@ struct Spec {
     env: BTreeMap<String, String>,
     mode: Mode,
     timeout: Duration,
+    #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
     cpu_percent: u32,
+    #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
     memory_bytes: u64,
     source: Source,
     artifact_globs: Vec<String>,
