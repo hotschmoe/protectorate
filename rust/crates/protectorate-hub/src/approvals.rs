@@ -5,7 +5,7 @@
 //! once. Requests bind to the caller and the exact request (or launch
 //! inputs), live in hub memory and expire. Launch pins (rug-pull detection)
 //! use the same requests.
-use super::{proto_time, string, Hub};
+use super::{proto_time, Hub};
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use prost_reflect::Value as FieldValue;
@@ -356,17 +356,42 @@ pub(crate) fn require(hub: &Hub, call: Gated<'_>, reason: &str) -> Result<()> {
     )
 }
 
-/// Who asked for a launch, carried in the launch request as `requester`. A
-/// launch without one is the hub's own, such as recovery after a restart,
-/// and is gated like an agent's.
-pub(crate) fn requester(hub: &Hub, request: &RpcRequest) -> Value {
-    let auth = &request.auth;
-    json!({
-        "actor": auth.actor,
-        "tokenId": auth.token_id,
-        "gated": !(auth.owner || auth.device) && is_agent(hub, &auth.actor, &auth.token_id),
-        "approval": hint(&request.headers),
-    })
+/// Who asked for a launch. The hub's own launches, such as recovery after a
+/// restart, are gated like an agent's.
+#[derive(Clone, Debug)]
+pub(crate) struct Requester {
+    pub actor: String,
+    pub token_id: String,
+    pub gated: bool,
+    pub approval: String,
+}
+
+impl Requester {
+    pub(crate) fn of(hub: &Hub, auth: &AuthContext, headers: &HeaderMap) -> Self {
+        Self {
+            actor: auth.actor.clone(),
+            token_id: auth.token_id.clone(),
+            gated: !(auth.owner || auth.device) && is_agent(hub, &auth.actor, &auth.token_id),
+            approval: hint(headers),
+        }
+    }
+
+    pub(crate) fn hub() -> Self {
+        Self {
+            actor: "hub".into(),
+            token_id: String::new(),
+            gated: true,
+            approval: String::new(),
+        }
+    }
+
+    pub(crate) fn owner() -> Self {
+        Self {
+            actor: "owner".into(),
+            gated: false,
+            ..Self::hub()
+        }
+    }
 }
 
 pub(crate) fn file_sha256(path: &Path) -> Result<String> {
@@ -386,7 +411,7 @@ pub(crate) fn json_sha256(value: &Value) -> String {
 /// needs the owner's approval of exactly the new hashes.
 pub(crate) fn check_pin(
     hub: &Hub,
-    value: &Value,
+    requester: &Requester,
     name: &str,
     run_id: &str,
     harness: &str,
@@ -413,13 +438,10 @@ pub(crate) fn check_pin(
         ));
     }
     let detail = changes.join(", ");
-    let requester = &value["requester"];
-    let actor = requester["actor"].as_str().unwrap_or("hub");
-    let token_id = string(requester, "tokenId");
-    if requester["gated"] == false {
+    if !requester.gated {
         hub.audit.write(AuditEntry {
-            actor: actor.into(),
-            token_id,
+            actor: requester.actor.clone(),
+            token_id: requester.token_id.clone(),
             run_id: run_id.into(),
             procedure: "harness.pin_changed".into(),
             subject: name.into(),
@@ -437,8 +459,8 @@ pub(crate) fn check_pin(
     hub.approvals.check(
         hub,
         Ask {
-            actor: actor.into(),
-            token_id,
+            actor: requester.actor.clone(),
+            token_id: requester.token_id.clone(),
             run_id: run_id.into(),
             procedure: "harness.pin".into(),
             subject: name.into(),
@@ -447,7 +469,7 @@ pub(crate) fn check_pin(
             binding: [name, harness, &pin.executable_sha256, &pin.profile_sha256]
                 .join("\0")
                 .into_bytes(),
-            hint: string(requester, "approval"),
+            hint: requester.approval.clone(),
         },
     )
 }

@@ -1,7 +1,7 @@
 //! Who is calling. The owner token works only on the loopback listener; an
 //! approved device signs each request with its key; everything else holds a
 //! capability the hub minted. Every hub entry point admits callers here.
-use crate::{now_unix, unix_time, unix_timestamp, Hub};
+use crate::{now_unix, unix_time, Hub};
 use axum::http::{header, HeaderMap};
 use prost_reflect::prost_types;
 use protectorate_auth::{
@@ -16,7 +16,6 @@ use protectorate_wire::{
     v1::{self, token_service},
     AuthContext, Call, Code, Denied, Method, Result, RpcError, UnaryServer,
 };
-use serde_json::{json, Value};
 use std::{
     path::Path,
     sync::Arc,
@@ -356,19 +355,6 @@ pub(crate) fn token_info(token: &Capability) -> v1::TokenInfo {
         task: token.task.clone(),
         minted_by: token.minted_by.clone(),
     }
-}
-
-pub(crate) fn token_json(token: &Capability) -> Value {
-    let mut out = json!({
-        "id": token.id, "name": token.principal, "scopes": token.scopes,
-        "createdAt": unix_timestamp(token.created),
-        "expiresAt": unix_timestamp(token.expires),
-        "task": token.task, "mintedBy": token.minted_by,
-    });
-    if let Some(revoked) = token.revoked_at {
-        out["revokedAt"] = json!(unix_timestamp(revoked));
-    }
-    out
 }
 
 pub(crate) fn token_error(error: identity::Error) -> RpcError {

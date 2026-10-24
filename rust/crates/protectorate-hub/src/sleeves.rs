@@ -2,7 +2,7 @@
 //! usage/chat updates are deliberately separate from these read routes.
 pub(super) mod branch;
 mod prune_git;
-use super::{access::token_json, Hub};
+use super::{approvals::Requester, Hub};
 use chrono::{DateTime, Utc};
 use prost_reflect::prost_types;
 use protectorate_audit::Entry as AuditEntry;
@@ -17,8 +17,8 @@ use protectorate_sleeve_registry::{
 };
 use protectorate_sleeve_runner::{Config, ReadOnly};
 use protectorate_wire::{
-    self as wire, v1, v1::sleeve_service, AuthContext, Call, Code, DynamicMessage, ReflectMessage,
-    Result, RpcError, RpcRequest, UnaryServer,
+    self as wire, v1, v1::sleeve_service, AuthContext, Call, Code, ReflectMessage, Result,
+    RpcError, UnaryServer,
 };
 use serde_json::{json, Value};
 use std::{
@@ -146,7 +146,7 @@ fn has_kill_scope(auth: &AuthContext) -> bool {
 pub(super) struct Launch {
     pub request: v1::SpawnSleeveRequest,
     /// The caller as approvals reads it: actor, tokenId, gated and approval.
-    pub requester: Value,
+    pub requester: Requester,
     pub base: Base,
     /// A relaunch after a hub restart, which keeps the native effort default.
     pub recovery: bool,
@@ -162,7 +162,7 @@ pub(super) struct Base {
 }
 
 impl Launch {
-    pub(super) fn new(request: v1::SpawnSleeveRequest, requester: Value) -> Self {
+    pub(super) fn new(request: v1::SpawnSleeveRequest, requester: Requester) -> Self {
         Self {
             request,
             requester,
@@ -201,7 +201,7 @@ impl Launch {
     ) -> Result<()> {
         crate::approvals::check_pin(
             hub,
-            &json!({ "requester": self.requester }),
+            &self.requester,
             &self.request.name,
             run_id,
             pin_key,
@@ -209,20 +209,6 @@ impl Launch {
             pin,
         )
     }
-}
-
-/// approvals::requester reads only the caller's identity and headers.
-fn requester<T>(hub: &Hub, call: &Call<T>) -> Value {
-    crate::approvals::requester(
-        hub,
-        &RpcRequest {
-            method: call.method.clone(),
-            headers: call.headers.clone(),
-            message: DynamicMessage::new(call.method.input()),
-            auth: call.auth.clone(),
-            peer: call.peer,
-        },
-    )
 }
 
 /// The model selection a chat sleeve last asked its harness for.
@@ -258,7 +244,7 @@ fn reserve_resleeve<'a>(hub: &'a Hub, name: &str) -> Result<ResleeveReservation<
 fn resleeve_sleeve(
     hub: &Hub,
     request: &v1::ResleeveSleeveRequest,
-    requester: Value,
+    requester: Requester,
 ) -> Result<Record> {
     let name = request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(registry_error)?;
@@ -472,7 +458,7 @@ fn resleeve_launch(
     old: &Record,
     harness: Harness,
     selection: Option<v1::ModelSelection>,
-    requester: Value,
+    requester: Requester,
 ) -> Launch {
     Launch::new(
         v1::SpawnSleeveRequest {
@@ -910,7 +896,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let hub = Arc::clone(&spawn);
             async move {
                 let parent = SpawnParent::from_auth(&call.auth);
-                let requester = requester(&hub, &call);
+                let requester = Requester::of(&hub, &call.auth, &call.headers);
                 let launch = Launch::new(call.request, requester);
                 launch.env()?;
                 let request = &launch.request;
@@ -1060,7 +1046,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         move |call: Call<v1::ResleeveSleeveRequest>| {
             let hub = Arc::clone(&resleeve);
             async move {
-                let requester = requester(&hub, &call);
+                let requester = Requester::of(&hub, &call.auth, &call.headers);
                 let row = tokio::task::spawn_blocking(move || {
                     resleeve_sleeve(&hub, &call.request, requester)
                 })
@@ -1251,7 +1237,7 @@ fn spawn_envoy(
                     token_budget: request.token_budget,
                     ..Default::default()
                 },
-                json!({"actor": "owner", "gated": false}),
+                Requester::owner(),
             ),
             harness,
         )
@@ -1266,7 +1252,7 @@ fn spawn_envoy(
     hub.directory_kick.notify_one();
     let response = v1::SpawnEnvoyResponse {
         sleeve: Some(sleeve(&row)?),
-        token: Some(stored(&token_json(&token))?),
+        token: Some(crate::access::token_info(&token)),
         workspace: workspace.to_string_lossy().into_owned(),
         reason,
         replaced,

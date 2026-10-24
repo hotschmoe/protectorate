@@ -1025,7 +1025,7 @@ fn recovery_request(hub: &Hub, row: &Record) -> Launch {
             env: row.env.clone(),
             ..Default::default()
         },
-        Value::Null,
+        crate::approvals::Requester::hub(),
     );
     launch.recovery = true;
     launch
