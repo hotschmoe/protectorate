@@ -52,7 +52,6 @@ pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 /// The state home holding this machine's saved device credential.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
-const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
 const CHAT_SEND: &str = "/protectorate.v1.ChatService/Send";
 const CHAT_WATCH: &str = "/protectorate.v1.ChatService/Watch";
 const CHAT_RESPOND: &str = "/protectorate.v1.ChatService/Respond";
@@ -60,19 +59,7 @@ const CHAT_WAIT: &str = "/protectorate.v1.ChatService/Wait";
 const CHAT_INTERRUPT: &str = "/protectorate.v1.ChatService/Interrupt";
 const CHAT_COMPACT: &str = "/protectorate.v1.ChatService/Compact";
 const CHAT_MODELS: &str = "/protectorate.v1.ChatService/ListModels";
-const CHAT_SET_SELECTION: &str = "/protectorate.v1.ChatService/SetSelection";
 const CHAT_REPORT: &str = "/protectorate.v1.ChatService/Report";
-const LIST_SLEEVES: &str = "/protectorate.v1.SleeveService/ListSleeves";
-const LIST_WORKSPACES: &str = "/protectorate.v1.SleeveService/ListWorkspaces";
-const BROWSE_WORKSPACES: &str = "/protectorate.v1.SleeveService/BrowseWorkspaces";
-const GET_SLEEVE: &str = "/protectorate.v1.SleeveService/GetSleeve";
-const GET_TERMINAL_STATUS: &str = "/protectorate.v1.SleeveService/GetTerminalStatus";
-const KILL_SLEEVE: &str = "/protectorate.v1.SleeveService/KillSleeve";
-const SLEEVE_SERVICE: &str = "/protectorate.v1.SleeveService/";
-const SPAWN_SLEEVE: &str = "/protectorate.v1.SleeveService/SpawnSleeve";
-const RESLEEVE_SLEEVE: &str = "/protectorate.v1.SleeveService/ResleeveSleeve";
-const SPAWN_ENVOY: &str = "/protectorate.v1.SleeveService/SpawnEnvoy";
-const PRUNE_SLEEVES: &str = "/protectorate.v1.SleeveService/PruneSleeves";
 const LIST_SESSIONS: &str = "/protectorate.v1.SessionService/ListSessions";
 const CREATE_SESSION: &str = "/protectorate.v1.SessionService/CreateSession";
 const KILL_SESSION: &str = "/protectorate.v1.SessionService/KillSession";
@@ -392,14 +379,13 @@ impl HarnessName {
         }
     }
 
-    /// The protobuf enum name SpawnSleeveRequest and its siblings take.
-    pub fn as_proto(self) -> &'static str {
+    pub fn as_proto(self) -> v1::Harness {
         match self {
-            Self::Claude => "HARNESS_CLAUDE",
-            Self::Codex => "HARNESS_CODEX",
-            Self::Grok => "HARNESS_GROK",
-            Self::Pi => "HARNESS_PI",
-            Self::Shell => "HARNESS_SHELL",
+            Self::Claude => v1::Harness::Claude,
+            Self::Codex => v1::Harness::Codex,
+            Self::Grok => v1::Harness::Grok,
+            Self::Pi => v1::Harness::Pi,
+            Self::Shell => v1::Harness::Shell,
         }
     }
 
@@ -425,11 +411,11 @@ pub enum SleeveModeName {
 }
 
 impl SleeveModeName {
-    pub fn as_proto(self) -> Option<&'static str> {
+    pub fn as_proto(self) -> v1::SleeveMode {
         match self {
-            Self::Default => None,
-            Self::Chat => Some("SLEEVE_MODE_CHAT"),
-            Self::Terminal => Some("SLEEVE_MODE_TERMINAL"),
+            Self::Default => v1::SleeveMode::Unspecified,
+            Self::Chat => v1::SleeveMode::Chat,
+            Self::Terminal => v1::SleeveMode::Terminal,
         }
     }
 }
@@ -541,6 +527,16 @@ pub struct SleevePrune {
     pub workspaces: bool,
     pub running: bool,
     pub ignored: bool,
+}
+
+/// What `sleeve checkpoint` does. A diff without `to` compares with the
+/// working tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckpointAction {
+    List,
+    Create,
+    Diff { from: u64, to: u64 },
+    Restore { id: u64 },
 }
 
 /// The command an invocation asks for.
@@ -780,11 +776,9 @@ pub enum Command {
         name: String,
         drop_caches: bool,
     },
-    /// `method` is a SleeveService checkpoint RPC; `ids` are its id arguments.
     SleeveCheckpoint {
         name: String,
-        method: &'static str,
-        ids: Vec<u64>,
+        action: CheckpointAction,
     },
     SleeveAttach {
         name: String,
@@ -2266,16 +2260,14 @@ fn execute_commands(
             }
         }
         Command::ChatStatus { sleeve } => {
-            let response = client.call(GET_SLEEVE, &json!({"name": sleeve}))?;
-            let chat = response
-                .get("sleeve")
-                .and_then(|sleeve| sleeve.get("chat"))
-                .filter(|chat| !chat.is_null())
+            let chat = require_sleeve(&get_sleeve(client, sleeve)?.sleeve)?
+                .chat
+                .clone()
                 .ok_or_else(|| RpcError::new(Code::FailedPrecondition, "sleeve has no chat"))?;
             if json {
-                value_line(chat)
+                json_line(&chat)
             } else {
-                Ok(format::chat_status_text(chat))
+                Ok(format::chat_status_text(&chat))
             }
         }
         Command::ChatModels { sleeve, harness } => {
@@ -2352,101 +2344,72 @@ fn execute_commands(
             }
         }
         Command::SleeveList => {
-            let sleeves = client.call(LIST_SLEEVES, &json!({}))?;
+            let sleeves =
+                client.unary(v1::sleeve_service::LIST_SLEEVES, &v1::ListSleevesRequest {})?;
             if json {
-                Ok(format::items(&sleeves, "sleeves")
-                    .iter()
-                    .map(value_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&sleeves.sleeves)
             } else {
                 Ok(format::sleeve_list_text(&sleeves))
             }
         }
         Command::SleeveWorkspaces => {
-            let response = client.call(LIST_WORKSPACES, &json!({}))?;
+            let response = client.unary(
+                v1::sleeve_service::LIST_WORKSPACES,
+                &v1::ListWorkspacesRequest {},
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::sleeve_workspaces_text(&response))
             }
         }
         Command::SleeveBrowse { path } => {
-            let response = client.call(BROWSE_WORKSPACES, &json!({"path": path}))?;
+            let response = client.unary(
+                v1::sleeve_service::BROWSE_WORKSPACES,
+                &v1::BrowseWorkspacesRequest { path: path.clone() },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::sleeve_browse_text(&response))
             }
         }
         Command::SleeveShow { name } => {
-            let response = client.call(GET_SLEEVE, &json!({"name": name}))?;
-            let sleeve = response
-                .get("sleeve")
-                .filter(|value| !value.is_null())
-                .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))?;
-            let tail = exited_pane_tail(client, sleeve);
+            let response = get_sleeve(client, name)?;
+            let sleeve = require_sleeve(&response.sleeve)?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
+                let tail = exited_pane_tail(client, sleeve);
                 Ok(format::sleeve_text(sleeve, tail.as_deref()))
             }
         }
         Command::SleeveStatus { name, explain } => {
-            let response = client.call(GET_TERMINAL_STATUS, &json!({"name": name}))?;
+            let response = client.unary(
+                v1::sleeve_service::GET_TERMINAL_STATUS,
+                &v1::GetTerminalStatusRequest { name: name.clone() },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::terminal_status_text(&response, *explain))
             }
         }
         Command::SleeveKill { name, drop_caches } => {
-            let response = client.call(
-                KILL_SLEEVE,
-                &json!({"name": name, "dropCaches": drop_caches}),
+            let response = client.unary(
+                v1::sleeve_service::KILL_SLEEVE,
+                &v1::KillSleeveRequest {
+                    name: name.clone(),
+                    drop_caches: *drop_caches,
+                },
             )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("killed\t{name}\n"))
             }
         }
-        Command::SleeveCheckpoint { name, method, ids } => {
-            let method: &str = method;
-            let mut request = json!({"name": name});
-            let keys: &[&str] = if method == "DiffCheckpoint" {
-                &["fromId", "toId"]
-            } else {
-                &["id"]
-            };
-            for (key, id) in keys.iter().zip(ids) {
-                request[*key] = json!(id.to_string());
-            }
-            let response = client.call(&format!("{SLEEVE_SERVICE}{method}"), &request)?;
-            if json {
-                return value_line(&response);
-            }
-            Ok(match method {
-                "DiffCheckpoint" => {
-                    let mut diff = response["diff"].as_str().unwrap_or_default().to_owned();
-                    if response["truncated"] == true {
-                        diff.push_str("\n(diff truncated)\n");
-                    }
-                    diff
-                }
-                "ListCheckpoints" => response["checkpoints"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(format::checkpoint_line)
-                    .collect(),
-                "CreateCheckpoint" => format::checkpoint_line(&response["checkpoint"]),
-                _ => format!(
-                    "restored\t{name}\tbefore\t{}",
-                    format::checkpoint_line(&response["before"])
-                ),
-            })
-        }
+        Command::SleeveCheckpoint { name, action } => checkpoint(client, name, *action, json),
         Command::SleeveSpawn(spawn) => spawn_sleeve(client, spawn, json),
         Command::SleeveEnvoy(envoy) => spawn_envoy(client, envoy, json),
         Command::SleeveResleeve(resleeve) => resleeve_sleeve(client, resleeve, json),
@@ -2633,24 +2596,18 @@ fn sent_message_output(
 /// The tail of an exited sleeve's kept session, read through
 /// SessionService.CapturePane. A session that is gone, or a hub that
 /// refuses the capture, just means there is no tail to show.
-fn exited_pane_tail(client: &Client, sleeve: &Value) -> Option<String> {
-    if sleeve.get("state").and_then(Value::as_str) != Some("SLEEVE_STATE_EXITED") {
+fn exited_pane_tail(client: &Client, sleeve: &v1::Sleeve) -> Option<String> {
+    if sleeve.state() != v1::SleeveState::Exited || sleeve.session.is_empty() {
         return None;
     }
-    let session = sleeve
-        .get("session")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if session.is_empty() {
-        return None;
-    }
+    let request = v1::CapturePaneRequest {
+        name: sleeve.session.clone(),
+        lines: 100,
+    };
     let pane = client
-        .call(CAPTURE_PANE, &json!({"name": session, "lines": 100}))
+        .unary(v1::session_service::CAPTURE_PANE, &request)
         .ok()?;
-    let tail = format::pane_tail(
-        pane.get("text").and_then(Value::as_str).unwrap_or_default(),
-        format::SHOW_TAIL_LINES,
-    );
+    let tail = format::pane_tail(&pane.text, format::SHOW_TAIL_LINES);
     (!tail.is_empty()).then_some(tail)
 }
 
@@ -3235,55 +3192,90 @@ fn spawn_sleeve(client: &Client, spawn: &SleeveSpawn, json: bool) -> Result<Stri
         }
         raw
     };
-    let response = client.call(
-        SPAWN_SLEEVE,
-        &spawn_body(spawn, &absolute_workspace(&spawn.workspace)?, &brief),
-    )?;
+    let request = v1::SpawnSleeveRequest {
+        name: spawn.name.clone(),
+        workspace: absolute_workspace(&spawn.workspace)?,
+        harness: spawn.harness.as_proto() as i32,
+        args: spawn.args.clone(),
+        limits: (spawn.cpu_percent > 0 || spawn.memory_bytes > 0 || spawn.disk_bytes > 0).then(
+            || v1::SleeveLimits {
+                cpu_percent: spawn.cpu_percent,
+                memory_bytes: spawn.memory_bytes,
+                disk_bytes: spawn.disk_bytes,
+            },
+        ),
+        env: spawn.env.iter().cloned().collect(),
+        mode: spawn.mode.as_proto() as i32,
+        supervised: spawn.supervised,
+        selection: selection(&spawn.selection),
+        read_only: spawn
+            .read_only
+            .iter()
+            .map(|mount| v1::ReadOnlyMount {
+                source: mount.source.clone(),
+                target: mount.target.clone(),
+            })
+            .collect(),
+        exit_after_idle: (!spawn.exit_after_idle.is_zero())
+            .then(|| proto_duration(spawn.exit_after_idle)),
+        branch: spawn.branch.clone(),
+        new_branch: spawn.new_branch.clone(),
+        brief,
+        nested: spawn.nested,
+        token_budget: spawn.token_budget,
+    };
+    let response = client.unary(v1::sleeve_service::SPAWN_SLEEVE, &request)?;
     if json {
-        value_line(&response)
+        json_line(&response)
     } else {
-        require_sleeve(&response)?;
-        Ok(format::sleeve_spawn_text(&response))
+        Ok(format::sleeve_spawn_text(require_sleeve(&response.sleeve)?))
     }
 }
 
+/// `orchestrator status`: Envoy's sleeve and its newest token, which the
+/// JSON form returns as one object with either field absent.
 fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
-    let sleeve = match client.call(GET_SLEEVE, &json!({"name":"envoy"})) {
-        Ok(response) => response.get("sleeve").cloned(),
+    let sleeve = match get_sleeve(client, "envoy") {
+        Ok(response) => response.sleeve,
         Err(error) if error.code == Code::NotFound => None,
         Err(error) => return Err(error),
     };
-    let listing = client.call(LIST_TOKENS, &json!({}))?;
-    let token = listing["tokens"]
-        .as_array()
+    let listing = client.unary(v1::token_service::LIST_TOKENS, &v1::ListTokensRequest {})?;
+    let token = listing
+        .tokens
         .into_iter()
-        .flatten()
-        .filter(|token| token["name"] == "orchestrator-envoy")
-        .max_by_key(|token| {
-            format::timestamp_millis(token["createdAt"].as_str().unwrap_or_default())
-                .unwrap_or_default()
-        })
-        .cloned();
-    let mut status = json!({});
-    if let Some(sleeve) = sleeve {
-        status["sleeve"] = sleeve;
+        .filter(|token| token.name == "orchestrator-envoy")
+        .max_by_key(|token| format::unix_millis(token.created_at.as_ref()).unwrap_or_default());
+    if !json {
+        return Ok(format::orchestrator_status_text(
+            sleeve.as_ref(),
+            token.as_ref(),
+            now_millis(),
+        ));
     }
-    if let Some(token) = token {
-        status["token"] = token;
+    let mut status = serde_json::Map::new();
+    if let Some(sleeve) = &sleeve {
+        status.insert("sleeve".into(), message_value(sleeve)?);
     }
-    if json {
-        value_line(&status)
-    } else {
-        Ok(format::orchestrator_status_text(&status, now_millis()))
+    if let Some(token) = &token {
+        status.insert("token".into(), message_value(token)?);
     }
+    value_line(&Value::Object(status))
 }
 
 fn spawn_envoy(client: &Client, envoy: &SleeveEnvoy, json: bool) -> Result<String> {
-    let response = client.call(SPAWN_ENVOY, &envoy_body(envoy))?;
+    let request = v1::SpawnEnvoyRequest {
+        harness: envoy.harness.map_or(0, |harness| harness.as_proto() as i32),
+        scopes: envoy.scopes.clone(),
+        add_scopes: envoy.add_scopes.clone(),
+        selection: selection(&envoy.selection),
+        token_budget: envoy.token_budget,
+    };
+    let response = client.unary(v1::sleeve_service::SPAWN_ENVOY, &request)?;
     if json {
-        value_line(&response)
+        json_line(&response)
     } else {
-        require_sleeve(&response)?;
+        require_sleeve(&response.sleeve)?;
         Ok(format::sleeve_envoy_text(&response))
     }
 }
@@ -3291,198 +3283,141 @@ fn spawn_envoy(client: &Client, envoy: &SleeveEnvoy, json: bool) -> Result<Strin
 /// `chat settings`: GetSleeve for the current settings, SetSelection when the
 /// invocation carries a selection or --native-defaults.
 fn chat_settings(client: &Client, settings: &ChatSettings, json: bool) -> Result<String> {
-    if !settings.writes() {
-        let response = client.call(GET_SLEEVE, &json!({"name": settings.sleeve}))?;
-        let sleeve = response
-            .get("sleeve")
-            .filter(|value| !value.is_null())
-            .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))?;
-        let chat = sleeve.get("chat").cloned().unwrap_or(Value::Null);
-        return if json {
-            value_line(&chat)
-        } else {
-            Ok(format::chat_settings_text(&chat))
+    let chat = if settings.writes() {
+        let request = v1::SetSelectionRequest {
+            sleeve: settings.sleeve.clone(),
+            selection: Some(v1::ModelSelection {
+                model: settings.model.clone().unwrap_or_default(),
+                effort: settings.effort.clone().unwrap_or_default(),
+            }),
         };
-    }
-    let mut selection = serde_json::Map::new();
-    if let Some(model) = &settings.model {
-        selection.insert("model".into(), json!(model));
-    }
-    if let Some(effort) = &settings.effort {
-        selection.insert("effort".into(), json!(effort));
-    }
-    let response = client.call(
-        CHAT_SET_SELECTION,
-        &json!({"sleeve": settings.sleeve, "selection": Value::Object(selection)}),
-    )?;
-    let chat = response
-        .get("chat")
-        .filter(|value| !value.is_null())
-        .cloned()
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no chat status"))?;
+        client
+            .unary(v1::chat_service::SET_SELECTION, &request)?
+            .chat
+            .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no chat status"))?
+    } else {
+        let response = get_sleeve(client, &settings.sleeve)?;
+        require_sleeve(&response.sleeve)?
+            .chat
+            .clone()
+            .unwrap_or_default()
+    };
     if json {
-        value_line(&chat)
+        json_line(&chat)
     } else {
         Ok(format::chat_settings_text(&chat))
     }
 }
 
 fn resleeve_sleeve(client: &Client, resleeve: &SleeveResleeve, json: bool) -> Result<String> {
-    let response = client.call(RESLEEVE_SLEEVE, &resleeve_body(resleeve))?;
+    let request = v1::ResleeveSleeveRequest {
+        name: resleeve.name.clone(),
+        to: resleeve.to.map_or(0, |harness| harness.as_proto() as i32),
+        interrupt: resleeve.interrupt,
+        wait: (!resleeve.wait.is_zero()).then(|| proto_duration(resleeve.wait)),
+        selection: selection(&resleeve.selection),
+        native_defaults: resleeve.native_defaults,
+    };
+    let response = client.unary(v1::sleeve_service::RESLEEVE_SLEEVE, &request)?;
     if json {
-        value_line(&response)
+        json_line(&response)
     } else {
-        require_sleeve(&response)?;
-        Ok(format::sleeve_resleeve_text(&response))
+        Ok(format::sleeve_resleeve_text(require_sleeve(
+            &response.sleeve,
+        )?))
     }
 }
 
 fn prune_sleeves(client: &Client, prune: &SleevePrune, json: bool) -> Result<String> {
-    let response = client.call(PRUNE_SLEEVES, &prune_body(prune))?;
+    let request = v1::PruneSleevesRequest {
+        yes: prune.yes,
+        caches: prune.caches,
+        homes: prune.homes,
+        workspaces: prune.workspaces,
+        running: prune.running,
+        ignored: prune.ignored,
+    };
+    let response = client.unary(v1::sleeve_service::PRUNE_SLEEVES, &request)?;
     if json {
-        value_line(&response)
+        json_line(&response)
     } else {
         Ok(format::sleeve_prune_text(&response, prune.yes))
     }
 }
 
-fn require_sleeve(response: &Value) -> Result<()> {
-    if response.get("sleeve").is_some_and(|value| !value.is_null()) {
-        Ok(())
-    } else {
-        Err(RpcError::new(Code::DataLoss, "hub returned no sleeve"))
-    }
-}
-
-fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
-    let mut request = json!({
-        "name": spawn.name,
-        "workspace": workspace,
-        "harness": spawn.harness.as_proto(),
-    });
-    if !spawn.args.is_empty() {
-        request["args"] = json!(spawn.args);
-    }
-    let mut limits = serde_json::Map::new();
-    if spawn.cpu_percent > 0 {
-        limits.insert("cpuPercent".into(), json!(spawn.cpu_percent));
-    }
-    if spawn.memory_bytes > 0 {
-        limits.insert("memoryBytes".into(), json!(spawn.memory_bytes.to_string()));
-    }
-    if spawn.disk_bytes > 0 {
-        limits.insert("diskBytes".into(), json!(spawn.disk_bytes.to_string()));
-    }
-    if !limits.is_empty() {
-        request["limits"] = Value::Object(limits);
-    }
-    if !spawn.env.is_empty() {
-        let mut env = serde_json::Map::new();
-        for (key, value) in &spawn.env {
-            env.insert(key.clone(), json!(value));
+/// `sleeve checkpoint`: list, create, diff or restore workspace checkpoints.
+fn checkpoint(client: &Client, name: &str, action: CheckpointAction, json: bool) -> Result<String> {
+    use v1::sleeve_service::{
+        CREATE_CHECKPOINT, DIFF_CHECKPOINT, LIST_CHECKPOINTS, RESTORE_CHECKPOINT,
+    };
+    let name = name.to_owned();
+    match action {
+        CheckpointAction::List => {
+            let response = client.unary(LIST_CHECKPOINTS, &v1::ListCheckpointsRequest { name })?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(response
+                .checkpoints
+                .iter()
+                .map(format::checkpoint_line)
+                .collect())
         }
-        request["env"] = Value::Object(env);
-    }
-    if let Some(mode) = spawn.mode.as_proto() {
-        request["mode"] = json!(mode);
-    }
-    if spawn.supervised {
-        request["supervised"] = json!(true);
-    }
-    if let Some(selection) = selection_body(&spawn.selection) {
-        request["selection"] = selection;
-    }
-    if !spawn.read_only.is_empty() {
-        request["readOnly"] = json!(spawn
-            .read_only
-            .iter()
-            .map(|mount| {
-                let mut item = json!({ "source": mount.source });
-                if !mount.target.is_empty() {
-                    item["target"] = json!(mount.target);
-                }
-                item
-            })
-            .collect::<Vec<_>>());
-    }
-    if !spawn.exit_after_idle.is_zero() {
-        request["exitAfterIdle"] = json!(format_duration(spawn.exit_after_idle));
-    }
-    if !spawn.branch.is_empty() {
-        request["branch"] = json!(spawn.branch);
-    }
-    if !spawn.new_branch.is_empty() {
-        request["newBranch"] = json!(spawn.new_branch);
-    }
-    if !brief.is_empty() {
-        request["brief"] = json!(brief);
-    }
-    if spawn.nested {
-        request["nested"] = json!(true);
-    }
-    if spawn.token_budget > 0 {
-        request["tokenBudget"] = json!(spawn.token_budget.to_string());
-    }
-    request
-}
-
-fn envoy_body(envoy: &SleeveEnvoy) -> Value {
-    let mut request = json!({});
-    if let Some(harness) = envoy.harness {
-        request["harness"] = json!(harness.as_proto());
-    }
-    if !envoy.scopes.is_empty() {
-        request["scopes"] = json!(envoy.scopes);
-    }
-    if !envoy.add_scopes.is_empty() {
-        request["addScopes"] = json!(envoy.add_scopes);
-    }
-    if let Some(selection) = selection_body(&envoy.selection) {
-        request["selection"] = selection;
-    }
-    if envoy.token_budget > 0 {
-        request["tokenBudget"] = json!(envoy.token_budget.to_string());
-    }
-    request
-}
-
-fn resleeve_body(resleeve: &SleeveResleeve) -> Value {
-    let mut request = json!({ "name": resleeve.name });
-    if let Some(to) = resleeve.to {
-        request["to"] = json!(to.as_proto());
-    }
-    if resleeve.interrupt {
-        request["interrupt"] = json!(true);
-    }
-    if !resleeve.wait.is_zero() {
-        request["wait"] = json!(format_duration(resleeve.wait));
-    }
-    if let Some(selection) = selection_body(&resleeve.selection) {
-        request["selection"] = selection;
-    }
-    if resleeve.native_defaults {
-        request["nativeDefaults"] = json!(true);
-    }
-    request
-}
-
-/// False booleans are omitted, the way proto3 JSON omits them. With no
-/// category present the hub inventories caches.
-fn prune_body(prune: &SleevePrune) -> Value {
-    let mut request = serde_json::Map::new();
-    for (name, value) in [
-        ("yes", prune.yes),
-        ("caches", prune.caches),
-        ("homes", prune.homes),
-        ("workspaces", prune.workspaces),
-        ("running", prune.running),
-        ("ignored", prune.ignored),
-    ] {
-        if value {
-            request.insert(name.into(), json!(true));
+        CheckpointAction::Create => {
+            let response =
+                client.unary(CREATE_CHECKPOINT, &v1::CreateCheckpointRequest { name })?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(format::checkpoint_line(
+                &response.checkpoint.unwrap_or_default(),
+            ))
+        }
+        CheckpointAction::Diff { from, to } => {
+            let request = v1::DiffCheckpointRequest {
+                name,
+                from_id: from,
+                to_id: to,
+            };
+            let mut response = client.unary(DIFF_CHECKPOINT, &request)?;
+            if json {
+                return json_line(&response);
+            }
+            if response.truncated {
+                response.diff.push_str("\n(diff truncated)\n");
+            }
+            Ok(response.diff)
+        }
+        CheckpointAction::Restore { id } => {
+            let request = v1::RestoreCheckpointRequest {
+                name: name.clone(),
+                id,
+            };
+            let response = client.unary(RESTORE_CHECKPOINT, &request)?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(format!(
+                "restored\t{name}\tbefore\t{}",
+                format::checkpoint_line(&response.before.unwrap_or_default())
+            ))
         }
     }
-    Value::Object(request)
+}
+
+pub(crate) fn get_sleeve(client: &Client, name: &str) -> Result<v1::GetSleeveResponse> {
+    client.unary(
+        v1::sleeve_service::GET_SLEEVE,
+        &v1::GetSleeveRequest {
+            name: name.to_owned(),
+        },
+    )
+}
+
+fn require_sleeve(sleeve: &Option<v1::Sleeve>) -> Result<&v1::Sleeve> {
+    sleeve
+        .as_ref()
+        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))
 }
 
 /// CreateSessionRequest. Omitted fields stay unset, so the hub uses its own
@@ -3505,18 +3440,17 @@ fn session_new_body(spec: &SessionNew) -> Value {
     request
 }
 
-fn selection_body(selection: &ModelChoice) -> Option<Value> {
-    if !selection.is_set() {
-        return None;
-    }
-    let mut body = serde_json::Map::new();
-    if !selection.model.is_empty() {
-        body.insert("model".into(), json!(selection.model));
-    }
-    if !selection.effort.is_empty() {
-        body.insert("effort".into(), json!(selection.effort));
-    }
-    Some(Value::Object(body))
+fn selection(selection: &ModelChoice) -> Option<v1::ModelSelection> {
+    selection.is_set().then(|| v1::ModelSelection {
+        model: selection.model.clone(),
+        effort: selection.effort.clone(),
+    })
+}
+
+/// A message as a JSON value, for output the CLI composes from several.
+fn message_value<T: ReflectMessage>(message: &T) -> Result<Value> {
+    serde_json::from_slice(&protectorate_wire::encode(message)?)
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
 }
 
 /// A disk path becomes absolute and cleaned. Unlike [`absolute_workspace`],

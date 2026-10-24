@@ -1,9 +1,9 @@
 //! argv parsing. Global options are accepted before or after the command.
 use crate::{
-    AuditQuery, BacklogFilter, ChatSettings, Command, HarnessName, JobFilter, JobLogs, JobRun,
-    JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit, NoteState, ReadOnlyBind,
-    SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve, SleeveSpawn, WaitUntil,
-    DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
+    AuditQuery, BacklogFilter, ChatSettings, CheckpointAction, Command, HarnessName, JobFilter,
+    JobLogs, JobRun, JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit,
+    NoteState, ReadOnlyBind, SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve,
+    SleeveSpawn, WaitUntil, DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
 };
 use protectorate_wire::{v1, Result, RpcError};
 use serde_json::Value;
@@ -1973,17 +1973,21 @@ fn sleeve_checkpoint(args: &[String], index: &mut usize) -> Result<Command> {
         .skip(1)
         .map(|word| word.parse::<u64>().map_err(|_| bad_argument(USAGE)))
         .collect::<Result<Vec<_>>>()?;
-    let method = match (
+    let action = match (
         words.first().map(String::as_str).unwrap_or("list"),
-        ids.len(),
+        &ids[..],
     ) {
-        ("list", 0) => "ListCheckpoints",
-        ("create", 0) => "CreateCheckpoint",
-        ("diff", 1 | 2) => "DiffCheckpoint",
-        ("restore", 1) => "RestoreCheckpoint",
+        ("list", []) => CheckpointAction::List,
+        ("create", []) => CheckpointAction::Create,
+        ("diff", [from]) => CheckpointAction::Diff { from: *from, to: 0 },
+        ("diff", [from, to]) => CheckpointAction::Diff {
+            from: *from,
+            to: *to,
+        },
+        ("restore", [id]) => CheckpointAction::Restore { id: *id },
         _ => return Err(bad_argument(USAGE)),
     };
-    Ok(Command::SleeveCheckpoint { name, method, ids })
+    Ok(Command::SleeveCheckpoint { name, action })
 }
 
 fn sleeve_kill(args: &[String], index: &mut usize) -> Result<Command> {

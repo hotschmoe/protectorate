@@ -252,17 +252,21 @@ pub(crate) fn token_list_text(response: &v1::ListTokensResponse) -> String {
     out
 }
 
-pub(crate) fn orchestrator_status_text(status: &Value, now: i64) -> String {
+pub(crate) fn orchestrator_status_text(
+    sleeve: Option<&v1::Sleeve>,
+    token: Option<&v1::TokenInfo>,
+    now: i64,
+) -> String {
     let mut out = String::new();
-    if let Some(sleeve) = status.get("sleeve").filter(|value| !value.is_null()) {
+    if let Some(sleeve) = sleeve {
         row(
             &mut out,
             "sleeve",
-            format!("{} ({})", text(sleeve, "name"), sleeve_row_state(sleeve)),
+            format!("{} ({})", sleeve.name, sleeve_row_state(sleeve)),
         );
         row(&mut out, "harness", harness_label(sleeve));
-        row(&mut out, "workspace", text(sleeve, "workspace"));
-        row(&mut out, "started", local_stamp(text(sleeve, "createdAt")));
+        row(&mut out, "workspace", sleeve.workspace.clone());
+        row(&mut out, "started", stamp(sleeve.created_at.as_ref()));
     } else {
         row(
             &mut out,
@@ -270,51 +274,19 @@ pub(crate) fn orchestrator_status_text(status: &Value, now: i64) -> String {
             "not created (run: protectorate orchestrator spawn)".into(),
         );
     }
-    if let Some(token) = status.get("token").filter(|value| !value.is_null()) {
-        let expires = text(token, "expiresAt");
-        let state = if !token["revokedAt"].is_null() {
-            "revoked"
-        } else if timestamp_millis(&expires).is_some_and(|time| time <= now) {
-            "expired"
-        } else {
-            "active"
-        };
+    if let Some(token) = token {
         row(
             &mut out,
             "token",
-            format!("{} ({state})", text(token, "id")),
+            format!("{} ({})", token.id, token_state(token, now)),
         );
-        row(
-            &mut out,
-            "scopes",
-            token["scopes"]
-                .as_array()
-                .map(|scopes| {
-                    scopes
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default(),
-        );
+        row(&mut out, "scopes", token.scopes.join(", "));
         row(
             &mut out,
             "expires",
-            if expires.is_empty() {
-                "never".to_owned()
-            } else {
-                local_stamp(expires)
-            },
-        );
-        let last_used = text(token, "lastUsedAt");
-        row(
-            &mut out,
-            "last used",
-            if last_used.is_empty() {
-                "never".to_owned()
-            } else {
-                local_stamp(last_used)
+            match &token.expires_at {
+                None => "never".to_owned(),
+                at => stamp(at.as_ref()),
             },
         );
     } else {
@@ -1357,76 +1329,71 @@ pub(crate) fn msg_wait_text(response: &Value) -> String {
     mail_text(&[at(response, "message").cloned().unwrap_or(Value::Null)])
 }
 
-pub(crate) fn sleeve_workspaces_text(response: &Value) -> String {
+pub(crate) fn sleeve_workspaces_text(response: &v1::ListWorkspacesResponse) -> String {
     let mut out = String::from("NAME\tBRANCH\tREMOTE\tSLEEVE\tNAME REQUIRED\tPATH\tREAD ONLY\n");
-    for workspace in items(response, "workspaces") {
-        let mut sleeve = text(&workspace, "sleeve");
-        if boolean(&workspace, "busy") {
+    for workspace in &response.workspaces {
+        let mut sleeve = workspace.sleeve.clone();
+        if workspace.busy {
             sleeve.push_str(" (running)");
         }
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-            text(&workspace, "name"),
-            text(&workspace, "gitBranch"),
-            text(&workspace, "gitRemote"),
-            sleeve,
-            text(&workspace, "requiredName"),
-            text(&workspace, "path"),
-            boolean(&workspace, "readOnly"),
+            "{}\t{}\t{}\t{sleeve}\t{}\t{}\t{}\n",
+            workspace.name,
+            workspace.git_branch,
+            workspace.git_remote,
+            workspace.required_name,
+            workspace.path,
+            workspace.read_only,
         ));
     }
     align(&out)
 }
 
-pub(crate) fn sleeve_browse_text(response: &Value) -> String {
+pub(crate) fn sleeve_browse_text(response: &v1::BrowseWorkspacesResponse) -> String {
     let mut out = String::from("NAME\tGIT\tBRANCH\tREMOTE\tACCEPTABLE\tREASON\tPATH\n");
-    for directory in items(response, "directories") {
+    for directory in &response.directories {
         out.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-            text(&directory, "name"),
-            boolean(&directory, "isGit"),
-            text(&directory, "gitBranch"),
-            text(&directory, "gitRemote"),
-            boolean(&directory, "acceptable"),
-            text(&directory, "reason"),
-            text(&directory, "path"),
+            directory.name,
+            directory.is_git,
+            directory.git_branch,
+            directory.git_remote,
+            directory.acceptable,
+            directory.reason,
+            directory.path,
         ));
     }
-    if boolean(response, "truncated") {
+    if response.truncated {
         out.push_str("Listing truncated\n");
     }
     align(&out)
 }
 
-pub(crate) fn sleeve_list_text(response: &Value) -> String {
-    let sleeves = items(response, "sleeves");
+pub(crate) fn sleeve_list_text(response: &v1::ListSleevesResponse) -> String {
     let mut out = String::from(
         "NAME\tHARNESS\tMODEL\tEFFORT\tSTATE\tCPU\tMEM\tPEAK\tHOME\tLIMITS\tWORKSPACE\tPARENT\tBRANCH\n",
     );
-    for sleeve in &sleeves {
-        let usage = at(sleeve, "usage").cloned().unwrap_or(Value::Null);
-        let (model, effort) = match at(sleeve, "chat") {
-            Some(chat) => (
-                or_unknown(text(chat, "model")),
-                or_unknown(text(chat, "reasoningEffort")),
-            ),
+    for sleeve in &response.sleeves {
+        let usage = sleeve.usage.clone().unwrap_or_default();
+        let (model, effort) = match &sleeve.chat {
+            Some(chat) => (or_unknown(&chat.model), or_unknown(&chat.reasoning_effort)),
             None => ("-".to_owned(), "-".to_owned()),
         };
         out.push_str(
             &[
-                text(sleeve, "name"),
+                sleeve.name.clone(),
                 harness_label(sleeve),
                 model,
                 effort,
                 sleeve_row_state(sleeve),
-                percent(number(&usage, "cpuPercent").unwrap_or_default()),
-                bytes(number(&usage, "memoryCurrentBytes").unwrap_or_default() as u64),
-                bytes(number(&usage, "memoryPeakBytes").unwrap_or_default() as u64),
-                bytes(number(&usage, "homeDiskBytes").unwrap_or_default() as u64),
+                percent(usage.cpu_percent),
+                bytes(usage.memory_current_bytes),
+                bytes(usage.memory_peak_bytes),
+                bytes(usage.home_disk_bytes),
                 limit_label(sleeve),
-                text(sleeve, "workspace"),
-                text(sleeve, "parent"),
-                text(sleeve, "gitBranch"),
+                sleeve.workspace.clone(),
+                sleeve.parent.clone(),
+                sleeve.git_branch.clone(),
             ]
             .join("\t"),
         );
@@ -1493,73 +1460,72 @@ pub(crate) fn session_list_text(response: &Value) -> String {
 /// `chat settings` rows: the effective model and effort, the
 /// requested selection, and the native defaults the harness captured before
 /// any override.
-pub(crate) fn chat_settings_text(chat: &Value) -> String {
-    let filled = |value: String, fallback: &str| {
+pub(crate) fn chat_settings_text(chat: &v1::ChatStatus) -> String {
+    let settings = chat.settings.clone().unwrap_or_default();
+    let requested = settings.requested.unwrap_or_default();
+    let native = settings.native_defaults.unwrap_or_default();
+    let filled = |value: &str, fallback: &str| {
         if value.is_empty() {
             fallback.to_owned()
         } else {
-            value
+            value.to_owned()
         }
     };
-    let mut out = String::new();
-    for (label, path, fallback) in [
-        ("model", "model", "unknown"),
-        ("effort", "reasoningEffort", "unknown"),
-        (
-            "requested model",
-            "settings.requested.model",
-            "native default",
-        ),
-        (
-            "requested effort",
-            "settings.requested.effort",
-            "native default",
-        ),
-        ("native model", "settings.nativeDefaults.model", "unknown"),
-        ("native effort", "settings.nativeDefaults.effort", "unknown"),
-    ] {
-        out.push_str(&format!(
-            "{label}\t{}\n",
-            filled(text(chat, path), fallback)
-        ));
-    }
-    out
-}
-
-fn token_counts_text(counts: &Value) -> String {
     format!(
-        "{} calls, in {} out {} read {} write {}, {} read",
-        fmt_int(number(counts, "calls")),
-        fmt_int(number(counts, "inputTokens")),
-        fmt_int(number(counts, "outputTokens")),
-        fmt_int(number(counts, "cacheReadTokens")),
-        fmt_int(number(counts, "cacheWriteTokens")),
-        percent(number(counts, "readRatio").unwrap_or_default() * 100.0),
+        "model\t{}\neffort\t{}\nrequested model\t{}\nrequested effort\t{}\nnative model\t{}\nnative effort\t{}\n",
+        filled(&chat.model, "unknown"),
+        filled(&chat.reasoning_effort, "unknown"),
+        filled(&requested.model, "native default"),
+        filled(&requested.effort, "native default"),
+        filled(&native.model, "unknown"),
+        filled(&native.effort, "unknown"),
     )
 }
 
+fn token_counts_text(counts: &v1::TokenCounts) -> String {
+    format!(
+        "{} calls, in {} out {} read {} write {}, {} read",
+        counts.calls,
+        counts.input_tokens,
+        counts.output_tokens,
+        counts.cache_read_tokens,
+        counts.cache_write_tokens,
+        percent(counts.read_ratio * 100.0),
+    )
+}
+
+/// What a chat is doing, in words.
+fn chat_state_label(state: v1::ChatState) -> &'static str {
+    match state {
+        v1::ChatState::Unspecified => "unknown",
+        v1::ChatState::AwaitingApproval => "awaiting approval",
+        v1::ChatState::Working => "working",
+        v1::ChatState::Compacting => "compacting",
+        v1::ChatState::Idle => "idle",
+        v1::ChatState::Failed => "failed",
+        v1::ChatState::Exited => "exited",
+    }
+}
+
 /// Sequence, activity and prompt-cache rows of a chat status.
-fn chat_tail_text(chat: &Value) -> String {
+fn chat_tail_text(chat: &v1::ChatStatus) -> String {
     let mut out = String::new();
-    row(&mut out, "last sequence", fmt_int(number(chat, "lastSeq")));
-    if !text(chat, "lastActivityAt").is_empty() {
+    row(&mut out, "last sequence", chat.last_seq.to_string());
+    if chat.last_activity_at.is_some() {
         row(
             &mut out,
             "last activity",
-            local_stamp(text(chat, "lastActivityAt")),
+            stamp(chat.last_activity_at.as_ref()),
         );
     }
-    let cache = at(chat, "cache").filter(|cache| !cache.is_null());
-    if let Some(total) = cache.and_then(|cache| at(cache, "total")) {
-        if number(total, "calls").unwrap_or_default() > 0.0 {
+    if let Some(cache) = &chat.cache {
+        if let Some(total) = cache.total.as_ref().filter(|total| total.calls > 0) {
             row(&mut out, "cache total", token_counts_text(total));
         }
-    }
-    if let Some(cache) = cache {
-        if let Some(first) = at(cache, "firstCall") {
-            let verdict = if boolean(cache, "coldResume") {
+        if let Some(first) = &cache.first_call {
+            let verdict = if cache.cold_resume {
                 "resumed but nothing was read from the cache"
-            } else if boolean(cache, "resumed") {
+            } else if cache.resumed {
                 "resumed"
             } else {
                 "fresh"
@@ -1575,139 +1541,122 @@ fn chat_tail_text(chat: &Value) -> String {
 }
 
 /// What `chat status` prints: state, context size and cache telemetry.
-pub(crate) fn chat_status_text(chat: &Value) -> String {
+pub(crate) fn chat_status_text(chat: &v1::ChatStatus) -> String {
     let mut out = String::new();
-    row(&mut out, "chat state", text(chat, "state"));
-    row(&mut out, "model", text(chat, "model"));
+    row(
+        &mut out,
+        "chat state",
+        chat_state_label(chat.state()).into(),
+    );
+    row(&mut out, "model", chat.model.clone());
     row(
         &mut out,
         "context tokens",
-        format!(
-            "{}/{}",
-            fmt_int(number(chat, "contextTokens")),
-            fmt_int(number(chat, "contextWindow"))
-        ),
+        format!("{}/{}", chat.context_tokens, chat.context_window),
     );
     out.push_str(&chat_tail_text(chat));
     align(&out)
 }
 
-pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
+/// A report's status word: complete, partial or blocked.
+fn result_status(result: &v1::SleeveResult) -> String {
+    word(result.status().as_str_name(), "REPORT_STATUS_")
+}
+
+pub(crate) fn sleeve_text(sleeve: &v1::Sleeve, tail: Option<&str>) -> String {
     let mut out = String::new();
-    row(&mut out, "name", text(sleeve, "name"));
+    row(&mut out, "name", sleeve.name.clone());
     row(&mut out, "harness", harness_label(sleeve));
     row(&mut out, "state", sleeve_row_state(sleeve));
-    row(&mut out, "workspace", text(sleeve, "workspace"));
-    row(&mut out, "session", text(sleeve, "session"));
-    row(&mut out, "branch", text(sleeve, "gitBranch"));
-    if !text(sleeve, "baseRepo").is_empty() {
-        row(&mut out, "base repo", text(sleeve, "baseRepo"));
-        row(&mut out, "base branch", text(sleeve, "baseBranch"));
-        row(&mut out, "base tip", text(sleeve, "baseTip"));
+    row(&mut out, "workspace", sleeve.workspace.clone());
+    row(&mut out, "session", sleeve.session.clone());
+    row(&mut out, "branch", sleeve.git_branch.clone());
+    if !sleeve.base_repo.is_empty() {
+        row(&mut out, "base repo", sleeve.base_repo.clone());
+        row(&mut out, "base branch", sleeve.base_branch.clone());
+        row(&mut out, "base tip", sleeve.base_tip.clone());
     }
-    row(&mut out, "parent", text(sleeve, "parent"));
-    optional_row(&mut out, "run", text(sleeve, "runId"));
-    optional_row(&mut out, "harness sha256", text(sleeve, "harnessSha256"));
-    optional_row(&mut out, "profile sha256", text(sleeve, "profileSha256"));
-    if number(sleeve, "tokenBudget").unwrap_or_default() > 0.0 {
+    row(&mut out, "parent", sleeve.parent.clone());
+    optional_row(&mut out, "run", sleeve.run_id.clone());
+    optional_row(&mut out, "harness sha256", sleeve.harness_sha256.clone());
+    optional_row(&mut out, "profile sha256", sleeve.profile_sha256.clone());
+    if sleeve.token_budget > 0 {
         row(
             &mut out,
             "token budget",
             format!(
                 "{} of {} weighted tokens used",
-                fmt_int(number(sleeve, "tokensUsed")),
-                fmt_int(number(sleeve, "tokenBudget"))
+                sleeve.tokens_used, sleeve.token_budget
             ),
         );
     }
     row(&mut out, "mode", mode_label(sleeve));
-    if let Some(result) = at(sleeve, "result").filter(|value| !value.is_null()) {
+    if let Some(result) = &sleeve.result {
         out.push_str(&format!(
             "report\t{} (chat seq {}, {})\n{}\n",
-            report_status(result),
-            fmt_int(number(result, "chatSeq")),
-            text(result, "time"),
-            text(result, "summary")
+            result_status(result),
+            result.chat_seq,
+            result.time.map(|time| time.to_string()).unwrap_or_default(),
+            result.summary
         ));
     }
-    row(&mut out, "nested", boolean(sleeve, "nested").to_string());
-    row(&mut out, "created", local_stamp(text(sleeve, "createdAt")));
-    if !text(sleeve, "exitedAt").is_empty() {
-        row(&mut out, "exited", local_stamp(text(sleeve, "exitedAt")));
+    row(&mut out, "nested", sleeve.nested.to_string());
+    row(&mut out, "created", stamp(sleeve.created_at.as_ref()));
+    if sleeve.exited_at.is_some() {
+        row(&mut out, "exited", stamp(sleeve.exited_at.as_ref()));
     }
-    let exited = text(sleeve, "state") == "SLEEVE_STATE_EXITED";
+    let exited = sleeve.state() == v1::SleeveState::Exited;
     if exited {
         row(&mut out, "exit", exit_label(sleeve));
-        row(
-            &mut out,
-            "exit signal",
-            fmt_int(number(sleeve, "exitSignal")),
-        );
-        row(
-            &mut out,
-            "oom killed",
-            boolean(sleeve, "oomKilled").to_string(),
-        );
+        row(&mut out, "exit signal", sleeve.exit_signal.to_string());
+        row(&mut out, "oom killed", sleeve.oom_killed.to_string());
     }
-    row(
-        &mut out,
-        "args",
-        items(sleeve, "args")
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join(" "),
-    );
+    row(&mut out, "args", sleeve.args.join(" "));
     row(&mut out, "limits", limit_label(sleeve));
     row(
         &mut out,
         "exit after idle",
-        go_duration(duration_seconds(sleeve, "exitAfterIdle").unwrap_or_default()),
+        go_duration(seconds(sleeve.exit_after_idle.as_ref()).unwrap_or_default()),
     );
-    for mount in items(sleeve, "readOnly") {
+    for mount in &sleeve.read_only {
         row(
             &mut out,
             "read-only mount",
-            format!("{} -> {}", text(&mount, "source"), text(&mount, "target")),
+            format!("{} -> {}", mount.source, mount.target),
         );
     }
-    if boolean(sleeve, "supervised") {
+    if sleeve.supervised {
         out.push_str("supervised\tyes (the harness asks; answer with chat respond)\n");
     } else {
         out.push_str("supervised\tno\n");
     }
-    if let Some(chat) = at(sleeve, "chat").filter(|value| !value.is_null()) {
+    if let Some(chat) = &sleeve.chat {
         out.push_str(&chat_settings_text(chat));
-        row(&mut out, "chat state", text(chat, "state"));
-        row(&mut out, "harness session", text(chat, "harnessSessionId"));
-        row(&mut out, "provider", text(chat, "provider"));
         row(
             &mut out,
-            "local model",
-            boolean(chat, "localModel").to_string(),
+            "chat state",
+            chat_state_label(chat.state()).into(),
         );
+        row(&mut out, "harness session", chat.harness_session_id.clone());
+        row(&mut out, "provider", chat.provider.clone());
+        row(&mut out, "local model", chat.local_model.to_string());
         row(
             &mut out,
             "context tokens",
-            format!(
-                "{}/{}",
-                fmt_int(number(chat, "contextTokens")),
-                fmt_int(number(chat, "contextWindow"))
-            ),
+            format!("{}/{}", chat.context_tokens, chat.context_window),
         );
         out.push_str(&chat_tail_text(chat));
     }
-    if let Some(handoff) = at(sleeve, "handoff").filter(|value| !value.is_null()) {
+    if let Some(handoff) = &sleeve.handoff {
         append_handoff(&mut out, handoff);
     }
-    let usage = at(sleeve, "usage").cloned().unwrap_or(Value::Null);
+    let usage = sleeve.usage.clone().unwrap_or_default();
     row(
         &mut out,
         "cpu",
         format!(
             "{:.1}% ({:.1}s total)",
-            number(&usage, "cpuPercent").unwrap_or_default(),
-            number(&usage, "cpuSeconds").unwrap_or_default()
+            usage.cpu_percent, usage.cpu_seconds
         ),
     );
     row(
@@ -1715,52 +1664,45 @@ pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
         "memory",
         format!(
             "{} (peak {})",
-            bytes(number(&usage, "memoryCurrentBytes").unwrap_or_default() as u64),
-            bytes(number(&usage, "memoryPeakBytes").unwrap_or_default() as u64)
+            bytes(usage.memory_current_bytes),
+            bytes(usage.memory_peak_bytes)
         ),
     );
-    row(&mut out, "pids", fmt_int(number(&usage, "pids")));
-    row(&mut out, "oom kills", fmt_int(number(&usage, "oomKills")));
+    row(&mut out, "pids", usage.pids.to_string());
+    row(&mut out, "oom kills", usage.oom_kills.to_string());
     row(
         &mut out,
         "workspace disk",
-        bytes(number(&usage, "workspaceDiskBytes").unwrap_or_default() as u64),
+        bytes(usage.workspace_disk_bytes),
     );
-    let home = number(&usage, "homeDiskBytes").unwrap_or_default() as u64;
-    let cache = number(&usage, "cacheDiskBytes").unwrap_or_default() as u64;
     row(
         &mut out,
         "home disk",
         format!(
             "{} (cache {}, rest {})",
-            bytes(home),
-            bytes(cache),
-            bytes(home.saturating_sub(cache))
+            bytes(usage.home_disk_bytes),
+            bytes(usage.cache_disk_bytes),
+            bytes(usage.home_disk_bytes.saturating_sub(usage.cache_disk_bytes))
         ),
     );
     row(
         &mut out,
         "go build cache",
-        bytes(number(&usage, "goBuildCacheDiskBytes").unwrap_or_default() as u64),
+        bytes(usage.go_build_cache_disk_bytes),
     );
-    if !text(&usage, "sampledAt").is_empty() {
-        row(
-            &mut out,
-            "usage sampled",
-            local_stamp(text(&usage, "sampledAt")),
-        );
+    if usage.sampled_at.is_some() {
+        row(&mut out, "usage sampled", stamp(usage.sampled_at.as_ref()));
     }
-    if !text(&usage, "diskSampledAt").is_empty() {
+    if usage.disk_sampled_at.is_some() {
         row(
             &mut out,
             "disk sampled",
-            local_stamp(text(&usage, "diskSampledAt")),
+            stamp(usage.disk_sampled_at.as_ref()),
         );
     }
     match tail {
         Some(tail) => out.push_str(&format!(
-            "\nlast {} lines of output:\n{tail}\n",
-            SHOW_TAIL_LINES
+            "\nlast {SHOW_TAIL_LINES} lines of output:\n{tail}\n"
         )),
         None if exited => out.push_str("\n(no output kept: the session is gone)\n"),
         None => {}
@@ -1769,10 +1711,9 @@ pub(crate) fn sleeve_text(sleeve: &Value, tail: Option<&str>) -> String {
 }
 
 /// What `sleeve spawn` prints: the name, then how to drive the new sleeve.
-pub(crate) fn sleeve_spawn_text(response: &Value) -> String {
-    let sleeve = at(response, "sleeve").unwrap_or(&Value::Null);
-    let name = text(sleeve, "name");
-    let next = if text(sleeve, "mode") == "SLEEVE_MODE_CHAT" {
+pub(crate) fn sleeve_spawn_text(sleeve: &v1::Sleeve) -> String {
+    let name = &sleeve.name;
+    let next = if sleeve.mode() == v1::SleeveMode::Chat {
         format!("chat\tprotectorate chat send {name} \"...\"; protectorate chat watch {name}\n")
     } else {
         format!("attach\tprotectorate sleeve attach {name}\n")
@@ -1781,34 +1722,29 @@ pub(crate) fn sleeve_spawn_text(response: &Value) -> String {
 }
 
 /// What `sleeve envoy` prints. `replaced` chooses spawned or respawned.
-pub(crate) fn sleeve_envoy_text(response: &Value) -> String {
-    let sleeve = at(response, "sleeve").unwrap_or(&Value::Null);
-    let token = at(response, "token").unwrap_or(&Value::Null);
-    let name = text(sleeve, "name");
-    let verb = if boolean(response, "replaced") {
+pub(crate) fn sleeve_envoy_text(response: &v1::SpawnEnvoyResponse) -> String {
+    let sleeve = response.sleeve.clone().unwrap_or_default();
+    let token = response.token.clone().unwrap_or_default();
+    let name = &sleeve.name;
+    let verb = if response.replaced {
         "respawned"
     } else {
         "spawned"
     };
-    let scopes = items(token, "scopes")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>()
-        .join(", ");
     align(&format!(
-        "{verb}\t{name}\nharness\t{} ({})\nworkspace\t{}\ntoken\t{}\nscopes\t{scopes}\nchat\tprotectorate chat watch {name}\n",
-        harness_label(sleeve),
-        text(response, "reason"),
-        text(response, "workspace"),
-        text(token, "id"),
+        "{verb}\t{name}\nharness\t{} ({})\nworkspace\t{}\ntoken\t{}\nscopes\t{}\nchat\tprotectorate chat watch {name}\n",
+        harness_label(&sleeve),
+        response.reason,
+        response.workspace,
+        token.id,
+        token.scopes.join(", "),
     ))
 }
 
 /// What `sleeve resleeve` prints: the name and the handoff the hub made.
-pub(crate) fn sleeve_resleeve_text(response: &Value) -> String {
-    let sleeve = at(response, "sleeve").unwrap_or(&Value::Null);
-    let mut out = format!("resleeved\t{}\n", text(sleeve, "name"));
-    if let Some(handoff) = at(sleeve, "handoff").filter(|value| !value.is_null()) {
+pub(crate) fn sleeve_resleeve_text(sleeve: &v1::Sleeve) -> String {
+    let mut out = format!("resleeved\t{}\n", sleeve.name);
+    if let Some(handoff) = &sleeve.handoff {
         append_handoff(&mut out, handoff);
     }
     align(&out)
@@ -1816,23 +1752,23 @@ pub(crate) fn sleeve_resleeve_text(response: &Value) -> String {
 
 /// What `sleeve prune` prints. `yes` is the flag the CLI sent: without it
 /// the hub only inventoried, and the footer says so.
-pub(crate) fn sleeve_prune_text(response: &Value, yes: bool) -> String {
+pub(crate) fn sleeve_prune_text(response: &v1::PruneSleevesResponse, yes: bool) -> String {
     let mut out = String::from("SLEEVE\tKIND\tSIZE\tACTION\tPATH\tREASON\n");
-    for entry in items(response, "entries") {
-        let action = if boolean(&entry, "removed") {
+    for entry in &response.entries {
+        let action = if entry.removed {
             "removed"
-        } else if boolean(&entry, "eligible") {
+        } else if entry.eligible {
             "would remove"
         } else {
             "keep"
         };
         out.push_str(&format!(
             "{}\t{}\t{}\t{action}\t{}\t{}\n",
-            text(&entry, "sleeve"),
-            text(&entry, "kind"),
-            bytes(number(&entry, "bytes").unwrap_or_default() as u64),
-            text(&entry, "path"),
-            text(&entry, "reason"),
+            entry.sleeve,
+            entry.kind,
+            bytes(entry.bytes),
+            entry.path,
+            entry.reason,
         ));
     }
     if !yes {
@@ -1841,32 +1777,28 @@ pub(crate) fn sleeve_prune_text(response: &Value, yes: bool) -> String {
     align(&out)
 }
 
-fn append_handoff(out: &mut String, handoff: &Value) {
+fn append_handoff(out: &mut String, handoff: &v1::Handoff) {
     row(
         out,
         "resleeved from",
         format!(
             "{} (session {}) to {} at {}",
-            text(handoff, "fromHarness"),
-            text(handoff, "fromSessionId"),
-            text(handoff, "toHarness"),
-            local_stamp(text(handoff, "at"))
+            handoff.from_harness,
+            handoff.from_session_id,
+            handoff.to_harness,
+            stamp(handoff.at.as_ref())
         ),
     );
     let by = [
-        text(handoff, "summarizerHarness"),
-        text(handoff, "summarizerProvider"),
-        text(handoff, "summarizerModel"),
+        handoff.summarizer_harness.as_str(),
+        handoff.summarizer_provider.as_str(),
+        handoff.summarizer_model.as_str(),
     ]
     .join(" ");
     let by = by.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text(handoff, "summarizerHarness").is_empty() {
-        row(
-            out,
-            "summary",
-            format!("none: {}", text(handoff, "summaryError")),
-        );
-    } else if boolean(handoff, "summarizerLocal") {
+    if handoff.summarizer_harness.is_empty() {
+        row(out, "summary", format!("none: {}", handoff.summary_error));
+    } else if handoff.summarizer_local {
         row(
             out,
             "summary",
@@ -1875,12 +1807,10 @@ fn append_handoff(out: &mut String, handoff: &Value) {
     } else {
         row(out, "summary", format!("by {by}"));
     }
-    row(out, "handoff", text(handoff, "path"));
-    if !text(handoff, "archivePath").is_empty() {
-        row(out, "archive", text(handoff, "archivePath"));
-    }
-    if !text(handoff, "summarizerHarness").is_empty() && !text(handoff, "summaryError").is_empty() {
-        row(out, "summary error", text(handoff, "summaryError"));
+    row(out, "handoff", handoff.path.clone());
+    optional_row(out, "archive", handoff.archive_path.clone());
+    if !handoff.summarizer_harness.is_empty() {
+        optional_row(out, "summary error", handoff.summary_error.clone());
     }
 }
 
@@ -1917,32 +1847,25 @@ fn strip_sgr(text: &str) -> String {
     out
 }
 
-fn harness_label(sleeve: &Value) -> String {
-    match text(sleeve, "harness").as_str() {
-        "HARNESS_CLAUDE" => "claude",
-        "HARNESS_CODEX" => "codex",
-        "HARNESS_GROK" => "grok",
-        "HARNESS_PI" => "pi",
-        "HARNESS_SHELL" => "shell",
-        _ => "?",
+fn harness_label(sleeve: &v1::Sleeve) -> String {
+    match sleeve.harness() {
+        v1::Harness::Unspecified => "?".to_owned(),
+        harness => word(harness.as_str_name(), "HARNESS_"),
     }
-    .to_owned()
 }
 
-/// The STATE column: "killed", "running", "exited", "exited(3)" or
-/// "exited(137,oom)".
-fn terminal_activity(status: &Value) -> String {
-    text(status, "activity")
-        .strip_prefix("TERMINAL_ACTIVITY_")
-        .unwrap_or_default()
-        .to_lowercase()
+fn terminal_activity(activity: v1::TerminalActivity) -> String {
+    word(activity.as_str_name(), "TERMINAL_ACTIVITY_")
 }
 
 /// What `sleeve status` prints: the activity and deciding rule, and with
 /// `explain` every rule of the harness and the screen lines they read.
-pub(crate) fn terminal_status_text(response: &Value, explain: bool) -> String {
-    let status = at(response, "status").cloned().unwrap_or(Value::Null);
-    let activity = terminal_activity(&status);
+pub(crate) fn terminal_status_text(
+    response: &v1::GetTerminalStatusResponse,
+    explain: bool,
+) -> String {
+    let status = response.status.clone().unwrap_or_default();
+    let activity = terminal_activity(status.activity());
     let mut out = String::new();
     row(
         &mut out,
@@ -1953,38 +1876,37 @@ pub(crate) fn terminal_status_text(response: &Value, explain: bool) -> String {
             activity
         },
     );
-    optional_row(&mut out, "rule", text(&status, "rule"));
+    optional_row(&mut out, "rule", status.rule);
     let mut out = align(&out);
     if explain {
         out.push_str("\nrules, first match decides\n");
-        for rule in items(response, "rules") {
+        for rule in &response.rules {
             out.push_str(&format!(
                 "  {}\t{}\t{}\n",
-                if boolean(&rule, "matched") {
-                    "match"
-                } else {
-                    "-"
-                },
-                terminal_activity(&rule),
-                text(&rule, "id"),
+                if rule.matched { "match" } else { "-" },
+                terminal_activity(rule.activity()),
+                rule.id,
             ));
         }
         out.push_str("\nscreen lines read\n");
-        for line in items(response, "lines") {
-            out.push_str(&format!("  {}\n", line.as_str().unwrap_or_default()));
+        for line in &response.lines {
+            out.push_str(&format!("  {line}\n"));
         }
     }
     out
 }
 
-fn sleeve_row_state(sleeve: &Value) -> String {
-    if boolean(sleeve, "killed") {
+/// The STATE column: "killed", "running", "running (idle)", "exited",
+/// "exited(3)" or "exited(137,oom)".
+fn sleeve_row_state(sleeve: &v1::Sleeve) -> String {
+    if sleeve.killed {
         return "killed".to_owned();
     }
-    let running = text(sleeve, "state") == "SLEEVE_STATE_RUNNING";
-    if running {
-        let activity = at(sleeve, "terminal")
-            .map(terminal_activity)
+    if sleeve.state() == v1::SleeveState::Running {
+        let activity = sleeve
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal_activity(terminal.activity()))
             .unwrap_or_default();
         return if activity.is_empty() {
             "running".to_owned()
@@ -1992,55 +1914,46 @@ fn sleeve_row_state(sleeve: &Value) -> String {
             format!("running ({activity})")
         };
     }
-    if at(sleeve, "exitCode").is_none() {
-        return "exited".to_owned();
-    }
-    let code = text(sleeve, "exitCode");
-    if boolean(sleeve, "oomKilled") {
-        format!("exited({code},oom)")
-    } else {
-        format!("exited({code})")
+    match sleeve.exit_code {
+        None => "exited".to_owned(),
+        Some(code) if sleeve.oom_killed => format!("exited({code},oom)"),
+        Some(code) => format!("exited({code})"),
     }
 }
 
 /// The LIMITS column: "cpu/mem", each "-" when unlimited.
-fn limit_label(sleeve: &Value) -> String {
-    let limits = at(sleeve, "limits").cloned().unwrap_or(Value::Null);
-    let cpu = number(&limits, "cpuPercent").unwrap_or_default();
-    let mem = number(&limits, "memoryBytes").unwrap_or_default();
-    let cpu = if cpu > 0.0 {
-        format!("{cpu:.0}%")
+fn limit_label(sleeve: &v1::Sleeve) -> String {
+    let limits = sleeve.limits.clone().unwrap_or_default();
+    let cpu = if limits.cpu_percent > 0 {
+        format!("{}%", limits.cpu_percent)
     } else {
         "-".to_owned()
     };
-    let mem = if mem > 0.0 {
-        bytes(mem as u64)
+    let mem = if limits.memory_bytes > 0 {
+        bytes(limits.memory_bytes)
     } else {
         "-".to_owned()
     };
     format!("{cpu}/{mem}")
 }
 
-fn mode_label(sleeve: &Value) -> String {
-    let mode = text(sleeve, "mode");
-    if mode.is_empty() {
-        return "unspecified".to_owned();
+fn mode_label(sleeve: &v1::Sleeve) -> String {
+    match sleeve.mode() {
+        v1::SleeveMode::Unspecified => "unspecified".to_owned(),
+        mode => word(mode.as_str_name(), "SLEEVE_MODE_"),
     }
-    mode.strip_prefix("SLEEVE_MODE_")
-        .unwrap_or(&mode)
-        .to_lowercase()
 }
 
 /// How an exited sleeve ended: "exit 3", "killed by signal 9 (exit 137)" or
 /// "exit 137 (OOM killed)".
-fn exit_label(sleeve: &Value) -> String {
-    let signal = number(sleeve, "exitSignal").unwrap_or_default() as i64;
-    let mut label = match number(sleeve, "exitCode") {
+fn exit_label(sleeve: &v1::Sleeve) -> String {
+    let signal = sleeve.exit_signal;
+    let mut label = match sleeve.exit_code {
         None => "unknown".to_owned(),
-        Some(code) if signal > 0 => format!("killed by signal {signal} (exit {:.0})", code),
-        Some(code) => format!("exit {:.0}", code),
+        Some(code) if signal > 0 => format!("killed by signal {signal} (exit {code})"),
+        Some(code) => format!("exit {code}"),
     };
-    if boolean(sleeve, "oomKilled") {
+    if sleeve.oom_killed {
         label.push_str(" (OOM killed)");
     }
     label
@@ -2050,11 +1963,11 @@ fn fmt_int(value: Option<f64>) -> String {
     format!("{:.0}", value.unwrap_or_default())
 }
 
-fn or_unknown(value: String) -> String {
+fn or_unknown(value: &str) -> String {
     if value.is_empty() {
         "unknown".to_owned()
     } else {
-        value
+        value.to_owned()
     }
 }
 
@@ -2204,13 +2117,6 @@ fn fmt_minutes(seconds: f64) -> String {
         return format!("{hours}h{:02}m", minutes % 60);
     }
     format!("{}d{:02}h", hours / 24, hours % 24)
-}
-
-fn duration_seconds(value: &Value, key: &str) -> Option<f64> {
-    at(value, key)
-        .and_then(Value::as_str)
-        .and_then(|text| text.strip_suffix('s'))
-        .and_then(|text| text.parse().ok())
 }
 
 fn version_cell(node_version: &str, hub_version: &str) -> String {
@@ -2513,14 +2419,16 @@ fn flush(block: &mut Vec<Vec<String>>, out: &mut String) {
     }
 }
 
-pub(crate) fn checkpoint_line(checkpoint: &Value) -> String {
-    let field = |key: &str| checkpoint[key].as_str().unwrap_or_default();
-    let commit = field("commit");
+pub(crate) fn checkpoint_line(checkpoint: &v1::Checkpoint) -> String {
+    let commit = &checkpoint.commit;
     format!(
         "{}\t{}\t{}\t{}\n",
-        field("id"),
-        field("createdAt"),
+        checkpoint.id,
+        checkpoint
+            .created_at
+            .map(|at| at.to_string())
+            .unwrap_or_default(),
         &commit[..commit.len().min(12)],
-        field("reason")
+        checkpoint.reason
     )
 }

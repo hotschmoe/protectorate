@@ -487,15 +487,14 @@ pub(super) fn run(
     stderr: &mut dyn Write,
 ) -> Result<String> {
     require_tty()?;
-    let response = client.call(
-        "/protectorate.v1.SleeveService/GetSleeve",
-        &serde_json::json!({"name":name}),
-    )?;
-    let session = response["sleeve"]["session"]
-        .as_str()
-        .filter(|s| !s.is_empty())
+    let session = crate::get_sleeve(client, name)?
+        .sleeve
+        .map(|sleeve| sleeve.session)
+        .filter(|session| !session.is_empty())
         .ok_or_else(|| RpcError::new(Code::DataLoss, "sleeve has no session"))?;
-    bridge(invocation, name, session, read_only, escape, stdout, stderr)
+    bridge(
+        invocation, name, &session, read_only, escape, stdout, stderr,
+    )
 }
 
 /// `session attach`: the name is the session itself, no sleeve record.
