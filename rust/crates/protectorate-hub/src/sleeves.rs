@@ -15,7 +15,9 @@ use protectorate_sleeve_registry::{
     DiskUsage, Error, Harness, Limits, Mode, Pin, ReadOnlyMount, Record, State,
 };
 use protectorate_sleeve_runner::{Config, ReadOnly};
-use protectorate_wire::{AuthContext, Code, Result, RpcError, UnaryServer};
+use protectorate_wire::{
+    self as wire, AuthContext, Code, ReflectMessage, Result, RpcError, UnaryServer,
+};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -3048,4 +3050,21 @@ fn registry_error(error: Error) -> RpcError {
         Error::Io(_) | Error::Json(_) => Code::Internal,
     };
     RpcError::new(code, error.to_string())
+}
+
+/// Decodes protobuf JSON the hub keeps outside the API (registry records,
+/// chat logs, driver status) into its generated message.
+pub(super) fn stored<T: ReflectMessage + Default>(value: &Value) -> Result<T> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    wire::decode(&bytes).map_err(|error| {
+        RpcError::new(
+            Code::Internal,
+            format!(
+                "stored {}: {}",
+                T::default().descriptor().name(),
+                error.message
+            ),
+        )
+    })
 }

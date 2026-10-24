@@ -1,7 +1,8 @@
 //! Headless chat sleeves. Pi is the first live driver; unsupported harnesses
 //! remain explicit failures rather than shell sessions pretending to be chat.
-use super::{input, respond, string, EventBus, Hub};
+use super::{sleeves::stored, string, EventBus, Hub};
 use chrono::{SecondsFormat, TimeZone, Utc};
+use prost_reflect::prost_types;
 use protectorate_chatlog::{Error as LogError, Event, Log};
 use protectorate_claude_driver::Session as ClaudeSession;
 use protectorate_codex_driver::Session as CodexSession;
@@ -14,7 +15,9 @@ use protectorate_sandbox::{
 use protectorate_sleeve_registry::{
     Harness, Mode, Pin, ReadOnlyMount, Record, Registry as SleeveRegistry, State,
 };
-use protectorate_wire::{self as wire, Code, Result, RpcError, UnaryServer};
+use protectorate_wire::{
+    self as wire, v1, v1::chat_service, Call, Code, Result, RpcError, UnaryServer,
+};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -711,161 +714,179 @@ impl Drop for ChatRuntime {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let send_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/Send", move |request| {
+    server.unary(chat_service::SEND, move |call: Call<v1::SendRequest>| {
         let hub = Arc::clone(&send_hub);
         async move {
-            let value = input(&request)?;
-            let name = string(&value, "sleeve");
-            let text = string(&value, "text");
+            let v1::SendRequest {
+                sleeve,
+                text,
+                request_id,
+            } = call.request;
             if text.trim().is_empty() {
                 return Err(RpcError::new(Code::InvalidArgument, "text is required"));
             }
-            let request_id = string(&value, "requestId");
             if !request_id.is_empty() && !valid_request_id(&request_id) {
                 return Err(RpcError::new(
                     Code::InvalidArgument,
                     "request_id must be 8 to 128 characters of letters, digits, '.', '_' and '-'",
                 ));
             }
-            let actor = request.auth.actor.clone();
-            let seq =
-                tokio::task::spawn_blocking(move || send(&hub, &name, &text, &request_id, &actor))
-                    .await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, json!({"seq":seq.to_string()}))
+            let actor = call.auth.actor;
+            let seq = tokio::task::spawn_blocking(move || {
+                send(&hub, &sleeve, &text, &request_id, &actor)
+            })
+            .await
+            .map_err(super::join_error)??;
+            Ok(v1::SendResponse { seq })
         }
     })?;
     let interrupt_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/Interrupt", move |request| {
-        let hub = Arc::clone(&interrupt_hub);
-        async move {
-            let name = string(&input(&request)?, "sleeve");
-            tokio::task::spawn_blocking(move || interrupt(&hub, &name))
-                .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, json!({}))
-        }
-    })?;
-    let models_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/ListModels", move |request| {
-        let hub = Arc::clone(&models_hub);
-        async move {
-            let value = input(&request)?;
-            let name = string(&value, "sleeve");
-            let harness = string(&value, "harness");
-            if !name.is_empty() {
-                own_sleeve(&request.auth.actor, &name)?;
+    server.unary(
+        chat_service::INTERRUPT,
+        move |call: Call<v1::InterruptRequest>| {
+            let hub = Arc::clone(&interrupt_hub);
+            async move {
+                let name = call.request.sleeve;
+                tokio::task::spawn_blocking(move || interrupt(&hub, &name))
+                    .await
+                    .map_err(super::join_error)??;
+                Ok(v1::InterruptResponse {})
             }
-            let result = tokio::task::spawn_blocking(move || list_models(&hub, &name, &harness))
-                .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, result)
-        }
-    })?;
+        },
+    )?;
+    let models_hub = Arc::clone(&hub);
+    server.unary(
+        chat_service::LIST_MODELS,
+        move |call: Call<v1::ListModelsRequest>| {
+            let hub = Arc::clone(&models_hub);
+            async move {
+                let v1::ListModelsRequest { sleeve, harness } = call.request;
+                if !sleeve.is_empty() {
+                    own_sleeve(&call.auth.actor, &sleeve)?;
+                }
+                tokio::task::spawn_blocking(move || list_models(&hub, &sleeve, &harness))
+                    .await
+                    .map_err(super::join_error)?
+            }
+        },
+    )?;
     let selection_hub = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.ChatService/SetSelection",
-        move |request| {
+    server.unary(
+        chat_service::SET_SELECTION,
+        move |call: Call<v1::SetSelectionRequest>| {
             let hub = Arc::clone(&selection_hub);
             async move {
-                let value = input(&request)?;
-                let name = string(&value, "sleeve");
-                own_sleeve(&request.auth.actor, &name)?;
-                let model = string(&value["selection"], "model");
-                let effort = string(&value["selection"], "effort");
+                let name = call.request.sleeve;
+                own_sleeve(&call.auth.actor, &name)?;
+                let selection = call.request.selection.unwrap_or_default();
                 let chat = tokio::task::spawn_blocking(move || {
-                    set_selection(&hub, &name, &model, &effort)
+                    set_selection(&hub, &name, &selection.model, &selection.effort)
                 })
                 .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-                respond(&request, json!({"chat":chat}))
+                .map_err(super::join_error)??;
+                Ok(v1::SetSelectionResponse {
+                    chat: Some(stored(&chat)?),
+                })
             }
         },
     )?;
     let compact_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/Compact", move |request| {
-        let hub = Arc::clone(&compact_hub);
-        async move {
-            let name = string(&input(&request)?, "sleeve");
-            own_sleeve(&request.auth.actor, &name)?;
-            let compaction = tokio::task::spawn_blocking(move || compact(&hub, &name))
-                .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, json!({"compaction":compaction}))
-        }
-    })?;
-    let respond_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/Respond", move |request| {
-        let hub = Arc::clone(&respond_hub);
-        async move {
-            let value = input(&request)?;
-            let name = string(&value, "sleeve");
-            own_sleeve(&request.auth.actor, &name)?;
-            let approval = string(&value, "approvalId");
-            if approval.is_empty() {
-                return Err(RpcError::new(
-                    Code::InvalidArgument,
-                    "approval_id is required",
-                ));
-            }
-            let row = hub.sleeves.get(&name).map_err(registry_error)?;
-            if row.harness == Harness::Pi {
-                return Err(RpcError::new(
-                    Code::Unimplemented,
-                    "Pi has no approval gate",
-                ));
-            }
-            let allow = value["allow"] == true;
-            let note = string(&value, "note");
-            let actor = request.auth.actor.clone();
-            tokio::task::spawn_blocking(move || {
-                let session = live_session(&hub, &name)?;
-                session
-                    .respond(&approval, allow, &note, &actor)
-                    .map_err(driver_error)?;
-                hub.sleeves
-                    .set_chat(&name, chat_status(&hub, session.as_ref()))
-                    .map_err(registry_error)?;
-                Ok::<(), RpcError>(())
-            })
-            .await
-            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, json!({}))
-        }
-    })?;
-    let report_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/Report", move |request| {
-        let hub = Arc::clone(&report_hub);
-        async move {
-            let value = input(&request)?;
-            let actor = request.auth.actor.clone();
-            let (result, dropped) =
-                tokio::task::spawn_blocking(move || report(&hub, &actor, &value))
+    server.unary(
+        chat_service::COMPACT,
+        move |call: Call<v1::CompactRequest>| {
+            let hub = Arc::clone(&compact_hub);
+            async move {
+                let name = call.request.sleeve;
+                own_sleeve(&call.auth.actor, &name)?;
+                let compaction = tokio::task::spawn_blocking(move || compact(&hub, &name))
                     .await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-            respond(&request, json!({"result":result,"dropped":dropped}))
-        }
-    })?;
+                    .map_err(super::join_error)??;
+                Ok(v1::CompactResponse {
+                    compaction: Some(stored(&compaction)?),
+                })
+            }
+        },
+    )?;
+    let respond_hub = Arc::clone(&hub);
+    server.unary(
+        chat_service::RESPOND,
+        move |call: Call<v1::RespondRequest>| {
+            let hub = Arc::clone(&respond_hub);
+            async move {
+                let v1::RespondRequest {
+                    sleeve: name,
+                    approval_id,
+                    allow,
+                    note,
+                } = call.request;
+                own_sleeve(&call.auth.actor, &name)?;
+                if approval_id.is_empty() {
+                    return Err(RpcError::new(
+                        Code::InvalidArgument,
+                        "approval_id is required",
+                    ));
+                }
+                let row = hub.sleeves.get(&name).map_err(registry_error)?;
+                if row.harness == Harness::Pi {
+                    return Err(RpcError::new(
+                        Code::Unimplemented,
+                        "Pi has no approval gate",
+                    ));
+                }
+                let actor = call.auth.actor;
+                tokio::task::spawn_blocking(move || {
+                    let session = live_session(&hub, &name)?;
+                    session
+                        .respond(&approval_id, allow, &note, &actor)
+                        .map_err(driver_error)?;
+                    hub.sleeves
+                        .set_chat(&name, chat_status(&hub, session.as_ref()))
+                        .map_err(registry_error)?;
+                    Ok::<(), RpcError>(())
+                })
+                .await
+                .map_err(super::join_error)??;
+                Ok(v1::RespondResponse {})
+            }
+        },
+    )?;
+    let report_hub = Arc::clone(&hub);
+    server.unary(
+        chat_service::REPORT,
+        move |call: Call<v1::ReportRequest>| {
+            let hub = Arc::clone(&report_hub);
+            async move {
+                let actor = call.auth.actor;
+                let request = call.request;
+                let (result, dropped) =
+                    tokio::task::spawn_blocking(move || report(&hub, &actor, &request))
+                        .await
+                        .map_err(super::join_error)??;
+                Ok(v1::ReportResponse {
+                    result: Some(stored(&result)?),
+                    dropped,
+                })
+            }
+        },
+    )?;
     let wait_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.ChatService/Wait", move |request| {
+    server.unary(chat_service::WAIT, move |call: Call<v1::WaitRequest>| {
         let hub = Arc::clone(&wait_hub);
         async move {
-            let value = input(&request)?;
-            let name = string(&value, "sleeve");
-            own_sleeve(&request.auth.actor, &name)?;
-            let result = wait(&hub, &name, &value).await?;
-            respond(&request, result)
+            own_sleeve(&call.auth.actor, &call.request.sleeve)?;
+            wait(&hub, &call.request).await
         }
     })?;
-    server.register_streaming(
-        "/protectorate.v1.ChatService/Watch",
-        move |request, sender| {
+    server.stream(
+        chat_service::WATCH,
+        move |call: Call<v1::WatchRequest>, sender| {
             let hub = Arc::clone(&hub);
             async move {
-                let value = input(&request)?;
-                let name = string(&value, "sleeve");
-                own_sleeve(&request.auth.actor, &name)?;
-                let after = number(&value, "afterSeq")?;
+                let v1::WatchRequest {
+                    sleeve: name,
+                    after_seq: after,
+                } = call.request;
+                own_sleeve(&call.auth.actor, &name)?;
                 let row = hub.sleeves.get(&name).map_err(registry_error)?;
                 if row.helper {
                     return Err(RpcError::new(Code::NotFound, "sleeve not found"));
@@ -877,7 +898,6 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     ));
                 }
                 let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
-                let descriptor = request.method.output();
                 if row.mode == Mode::Terminal || row.state == State::Exited || runtime.exited(&name)
                 {
                     let path = runtime
@@ -887,14 +907,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         .join(&name)
                         .join("chat.jsonl");
                     for event in protectorate_chatlog::read_all(path).map_err(log_error)? {
-                        if event.seq <= after {
-                            continue;
+                        if event.seq > after {
+                            sender.send(&chat_event(&event)?).await?;
                         }
-                        let bytes = serde_json::to_vec(&event_json(&event))
-                            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                        sender
-                            .send(&wire::decode_json(descriptor.clone(), &bytes)?)
-                            .await?;
                     }
                     return Ok(Default::default());
                 }
@@ -909,17 +924,14 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let result = tokio::task::spawn_blocking(move || {
                     let handle = tokio::runtime::Handle::current();
                     log.watch(after, &cancelled, |event| {
-                        let value = event_json(event);
-                        let bytes = serde_json::to_vec(&value).map_err(|e| e.to_string())?;
-                        let message = wire::decode_json(descriptor.clone(), &bytes)
-                            .map_err(|e| e.to_string())?;
+                        let message = chat_event(event).map_err(|e| e.to_string())?;
                         handle
                             .block_on(sender.send(&message))
                             .map_err(|e| e.to_string())
                     })
                 })
                 .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                .map_err(super::join_error)?;
                 cancel_task.abort();
                 match result {
                     Ok(()) | Err(LogError::Closed | LogError::Callback(_)) => {
@@ -2219,7 +2231,11 @@ pub(super) fn revoke_identity(hub: &Hub, name: &str) -> Result<()> {
 fn issue_identity(hub: &Hub, name: &str, parent: &crate::sleeves::SpawnParent) -> Result<()> {
     crate::access::issue_sleeve(hub, name, parent, &identity_path(hub, name)).map(|_| ())
 }
-fn list_models(hub: &Hub, name: &str, harness: &str) -> Result<Value> {
+fn list_models(hub: &Hub, name: &str, harness: &str) -> Result<v1::ListModelsResponse> {
+    let unsupported = |reason: String| v1::ListModelsResponse {
+        reason,
+        ..Default::default()
+    };
     if name.is_empty() {
         if harness.is_empty() {
             return Err(RpcError::new(
@@ -2229,9 +2245,9 @@ fn list_models(hub: &Hub, name: &str, harness: &str) -> Result<Value> {
         }
         return match harness.to_ascii_lowercase().as_str() {
             "codex" => catalog_codex(hub),
-            "pi" | "claude" | "grok" => Ok(
-                json!({"supported":false,"reason":format!("model/effort controls are not implemented for {harness}")}),
-            ),
+            "pi" | "claude" | "grok" => Ok(unsupported(format!(
+                "model/effort controls are not implemented for {harness}"
+            ))),
             _ => Err(RpcError::new(
                 Code::InvalidArgument,
                 format!("unknown chat harness {harness:?}"),
@@ -2240,16 +2256,20 @@ fn list_models(hub: &Hub, name: &str, harness: &str) -> Result<Value> {
     }
     let row = hub.sleeves.get(name).map_err(registry_error)?;
     if !matches!(row.harness, Harness::Pi | Harness::Codex | Harness::Grok) {
-        return Ok(
-            json!({"supported":false,"reason":"model controls are not implemented for this harness"}),
-        );
+        return Ok(unsupported(
+            "model controls are not implemented for this harness".into(),
+        ));
     }
-    live_session(hub, name)?.list_models().map_err(driver_error)
+    stored(
+        &live_session(hub, name)?
+            .list_models()
+            .map_err(driver_error)?,
+    )
 }
 
 /// Query Codex's native catalog in a short lived sandbox. The app server is
 /// initialized, but no thread is created and no sleeve is registered.
-fn catalog_codex(hub: &Hub) -> Result<Value> {
+fn catalog_codex(hub: &Hub) -> Result<v1::ListModelsResponse> {
     let launcher = &hub.chat_runtime.as_ref().ok_or_else(unavailable)?.launcher;
     let executable = launcher
         .codex_executable
@@ -2368,7 +2388,7 @@ fn catalog_codex(hub: &Hub) -> Result<Value> {
 
 fn query_codex_catalog(
     child: &mut protectorate_sandbox::runtime::ChildHandle,
-) -> std::result::Result<Value, String> {
+) -> std::result::Result<v1::ListModelsResponse, String> {
     let mut stdin = child.take_stdin().ok_or("Codex catalog has no stdin")?;
     let stdout = child.take_stdout().ok_or("Codex catalog has no stdout")?;
     let stderr = child.take_stderr().ok_or("Codex catalog has no stderr")?;
@@ -2433,14 +2453,29 @@ fn query_codex_catalog(
         let entries = page["data"]
             .as_array()
             .ok_or("Codex model/list returned no data")?;
-        models.extend(entries.iter().map(|model| json!({
-            "model":model["model"], "name":model["displayName"], "isDefault":model["isDefault"],
-            "defaultEffort":model["defaultReasoningEffort"],
-            "efforts":model["supportedReasoningEfforts"].as_array().map(|efforts| efforts.iter().map(|effort| effort["reasoningEffort"].clone()).collect::<Vec<_>>()).unwrap_or_default()
-        })));
+        let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
+        models.extend(entries.iter().map(|model| {
+            v1::ModelOption {
+                model: text(&model["model"]),
+                name: text(&model["displayName"]),
+                efforts: model["supportedReasoningEfforts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|effort| text(&effort["reasoningEffort"]))
+                    .collect(),
+                default_effort: text(&model["defaultReasoningEffort"]),
+                is_default: model["isDefault"] == true,
+            }
+        }));
         cursor = page["nextCursor"].as_str().unwrap_or_default().to_owned();
         if cursor.is_empty() {
-            return Ok(json!({"supported":true,"liveUpdate":true,"models":models}));
+            return Ok(v1::ListModelsResponse {
+                supported: true,
+                live_update: true,
+                models,
+                ..Default::default()
+            });
         }
         if !seen.insert(cursor.clone()) || models.len() > 10_000 {
             break;
@@ -2478,7 +2513,7 @@ fn compact(hub: &Hub, name: &str) -> Result<Value> {
     Ok(compaction)
 }
 /// Records a sleeve report; the flag is true for a report dropped as stale.
-fn report(hub: &Hub, actor: &str, value: &Value) -> Result<(Value, bool)> {
+fn report(hub: &Hub, actor: &str, request: &v1::ReportRequest) -> Result<(Value, bool)> {
     let self_name = if actor == "token:orchestrator-envoy" {
         "envoy"
     } else {
@@ -2489,24 +2524,22 @@ fn report(hub: &Hub, actor: &str, value: &Value) -> Result<(Value, bool)> {
             )
         })?
     };
-    let target = string(value, "sleeve");
+    let target = &request.sleeve;
     if !target.is_empty() && target != self_name {
         return Err(RpcError::new(
             Code::PermissionDenied,
             "a sleeve may only report for itself",
         ));
     }
-    let status = string(value, "status");
-    if !matches!(
-        status.as_str(),
-        "REPORT_STATUS_COMPLETE" | "REPORT_STATUS_PARTIAL" | "REPORT_STATUS_BLOCKED"
-    ) {
+    let status = request.status();
+    if status == v1::ReportStatus::Unspecified {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "status must be complete, partial or blocked",
         ));
     }
-    let summary = string(value, "summary");
+    let status = status.as_str_name();
+    let summary = &request.summary;
     if summary.len() > 32 * 1024 {
         return Err(RpcError::new(
             Code::InvalidArgument,
@@ -2527,7 +2560,7 @@ fn report(hub: &Hub, actor: &str, value: &Value) -> Result<(Value, bool)> {
         Err(LogError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(error) => return Err(log_error(error)),
     };
-    let source_seq = number(value, "sourceSeq")?;
+    let source_seq = request.source_seq;
     let reported = |event: &Event| {
         event.payload["report"]["sourceSeq"]
             .as_str()?
@@ -2580,23 +2613,13 @@ fn report(hub: &Hub, actor: &str, value: &Value) -> Result<(Value, bool)> {
     );
     Ok((result, false))
 }
-async fn wait(hub: &Hub, name: &str, value: &Value) -> Result<Value> {
+async fn wait(hub: &Hub, request: &v1::WaitRequest) -> Result<v1::WaitResponse> {
+    let name = request.sleeve.as_str();
     if name.is_empty() {
         return Err(RpcError::new(Code::InvalidArgument, "sleeve is required"));
     }
-    let until = string(value, "until");
-    let until = if until.is_empty() || until == "WAIT_UNTIL_UNSPECIFIED" {
-        "WAIT_UNTIL_IDLE"
-    } else {
-        until.as_str()
-    };
-    if until != "WAIT_UNTIL_IDLE" && until != "WAIT_UNTIL_REPORT" {
-        return Err(RpcError::new(
-            Code::InvalidArgument,
-            "until must be idle or report",
-        ));
-    }
-    let timeout = wait_timeout(value.get("timeout"))?;
+    let report = request.until() == v1::WaitUntil::Report;
+    let timeout = wait_timeout(request.timeout.as_ref())?;
     let deadline = if timeout.is_zero() {
         None
     } else {
@@ -2604,9 +2627,12 @@ async fn wait(hub: &Hub, name: &str, value: &Value) -> Result<Value> {
     };
     loop {
         let row = hub.sleeves.get(name).map_err(registry_error)?;
-        if until == "WAIT_UNTIL_REPORT" {
+        if report {
             if let Some(result) = row.result {
-                return Ok(json!({"sleeve":name,"result":result}));
+                return Ok(v1::WaitResponse {
+                    sleeve: name.into(),
+                    result: Some(stored(&result)?),
+                });
             }
         }
         if row.state == State::Exited {
@@ -2615,7 +2641,7 @@ async fn wait(hub: &Hub, name: &str, value: &Value) -> Result<Value> {
                 "sleeve exited before wait condition",
             ));
         }
-        if until == "WAIT_UNTIL_IDLE" {
+        if !report {
             if row.mode != Mode::Chat {
                 return Err(RpcError::new(
                     Code::FailedPrecondition,
@@ -2624,7 +2650,10 @@ async fn wait(hub: &Hub, name: &str, value: &Value) -> Result<Value> {
             }
             let session = live_session(hub, name)?;
             if session.is_idle() && hub.mail.pending().get(name).is_none_or(Vec::is_empty) {
-                return Ok(json!({"sleeve":name}));
+                return Ok(v1::WaitResponse {
+                    sleeve: name.into(),
+                    result: None,
+                });
             }
         }
         if let Some(at) = deadline {
@@ -2641,25 +2670,17 @@ async fn wait(hub: &Hub, name: &str, value: &Value) -> Result<Value> {
         }
     }
 }
-fn wait_timeout(value: Option<&Value>) -> Result<std::time::Duration> {
+fn wait_timeout(value: Option<&prost_types::Duration>) -> Result<Duration> {
     let Some(value) = value else {
-        return Ok(std::time::Duration::from_secs(600));
+        return Ok(Duration::from_secs(600));
     };
-    let text = value
-        .as_str()
-        .ok_or_else(|| RpcError::new(Code::InvalidArgument, "timeout must be a duration"))?;
-    let seconds = text
-        .strip_suffix('s')
-        .ok_or_else(|| RpcError::new(Code::InvalidArgument, "timeout must end in s"))?;
-    let seconds: f64 = seconds
-        .parse()
-        .map_err(|_| RpcError::new(Code::InvalidArgument, "invalid timeout"))?;
-    if !seconds.is_finite() || !(0.0..=86_400.0 * 365.0).contains(&seconds) {
+    let timeout = wire::duration(Some(value), "timeout")?;
+    if timeout > Duration::from_secs(86_400 * 365) {
         return Err(RpcError::new(Code::InvalidArgument, "invalid timeout"));
     }
-    Ok(std::time::Duration::from_secs_f64(seconds))
+    Ok(timeout)
 }
-fn event_json(event: &Event) -> Value {
+fn chat_event(event: &Event) -> Result<v1::ChatEvent> {
     let time = Utc
         .timestamp_millis_opt(event.time_ms as i64)
         .single()
@@ -2680,7 +2701,7 @@ fn event_json(event: &Event) -> Value {
             to.insert(key.clone(), item);
         }
     }
-    value
+    stored(&value)
 }
 fn number(value: &Value, key: &str) -> Result<u64> {
     match value.get(key) {
