@@ -1,11 +1,13 @@
 //! Polls registered node agents and keeps the last successful metrics for hub
 //! status and lease admission. HTTP work never holds the status lock.
-use chrono::{DateTime, SecondsFormat, Utc};
 use protectorate_connect_client::{Client, NodeTls};
 use protectorate_inventory::{Inventory, Node};
-use protectorate_node_metrics::{Collector, Options};
-use protectorate_wire::{Code, RpcError};
-use serde_json::{json, Value};
+use protectorate_node_metrics::{metrics_proto, Collector, Options};
+use protectorate_wire::{
+    self as wire,
+    v1::{self, node_agent_service, AlertKind, NodeFreshness},
+    Code, RpcError,
+};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -100,7 +102,7 @@ impl Default for Timing {
 struct Good {
     at: Instant,
     wall_at: SystemTime,
-    metrics: Value,
+    metrics: v1::NodeMetrics,
 }
 #[derive(Clone, Debug)]
 struct GpuPoint {
@@ -129,15 +131,15 @@ struct State {
     stamp: Option<(String, u64)>,
 }
 
-fn stamp_of(metrics: &Value) -> Option<(String, u64)> {
-    let seq = uint(metrics, "seq").filter(|seq| *seq > 0)?;
-    Some((metrics.get("instance")?.as_str()?.to_owned(), seq))
+fn stamp_of(metrics: &v1::NodeMetrics) -> Option<(String, u64)> {
+    (metrics.seq > 0 && !metrics.instance.is_empty())
+        .then(|| (metrics.instance.clone(), metrics.seq))
 }
 
 impl State {
     /// A sample no newer than the last accepted one from the same agent
     /// instance arrived late or twice. A new instance starts a fresh count.
-    fn is_stale(&self, metrics: &Value) -> bool {
+    fn is_stale(&self, metrics: &v1::NodeMetrics) -> bool {
         match (&self.stamp, stamp_of(metrics)) {
             (Some((last, last_seq)), Some((instance, seq))) => {
                 *last == instance && seq <= *last_seq
@@ -241,7 +243,7 @@ impl Monitor {
             .and_then(|collector| {
                 collector
                     .collect()
-                    .map(|metrics| protectorate_node_metrics::metrics_json(&metrics))
+                    .map(|metrics| metrics_proto(&metrics))
                     .map_err(|error| error.to_string())
             });
         self.record(&self.local_name, "local", false, false, result);
@@ -255,7 +257,7 @@ impl Monitor {
             .dialer
             .client(node, self.timing.fetch_timeout)
             .and_then(|client| {
-                client.call("/protectorate.v1.NodeAgentService/GetMetrics", &json!({}))
+                client.unary(node_agent_service::GET_METRICS, &v1::GetMetricsRequest {})
             })
             .map_err(|error| error.to_string());
         if self
@@ -271,9 +273,9 @@ impl Monitor {
             if node.invited && self.inventory.clear_invited(&node.name).is_ok() {
                 joined = true;
             }
-            let os = metrics.get("os").and_then(Value::as_str).unwrap_or("");
-            let arch = metrics.get("arch").and_then(Value::as_str).unwrap_or("");
-            let _ = self.inventory.set_platform(&node.name, os, arch);
+            let _ = self
+                .inventory
+                .set_platform(&node.name, &metrics.os, &metrics.arch);
         }
         self.record(
             &node.name,
@@ -290,7 +292,7 @@ impl Monitor {
         address: &str,
         invited: bool,
         joined: bool,
-        result: Result<Value, String>,
+        result: Result<v1::NodeMetrics, String>,
     ) {
         let mut states = self.state.lock().unwrap();
         let state = states.entry(name.to_owned()).or_default();
@@ -353,46 +355,58 @@ impl Monitor {
         }
     }
 
-    pub fn status(&self, name: &str, address: &str, invited: bool) -> Value {
+    /// The node's health without its inventory record (`node` is unset).
+    pub fn status(&self, name: &str, address: &str, invited: bool) -> v1::NodeStatus {
         if invited {
-            return json!({"freshness":"NODE_FRESHNESS_INVITED", "error":"invited, not yet joined"});
+            return v1::NodeStatus {
+                freshness: NodeFreshness::Invited as i32,
+                error: "invited, not yet joined".into(),
+                ..Default::default()
+            };
         }
         let states = self.state.lock().unwrap();
         let state = states.get(name).filter(|state| state.address == address);
         let Some(state) = state.filter(|state| state.attempted) else {
-            return json!({"error":"awaiting first poll"});
+            return v1::NodeStatus {
+                error: "awaiting first poll".into(),
+                ..Default::default()
+            };
         };
         let Some(good) = &state.good else {
-            return json!({
-                "freshness":"NODE_FRESHNESS_UNREACHABLE", "error":state.last_error,
-                "alerts":[{"kind":"ALERT_KIND_UNREACHABLE", "message":format!("node is unreachable: {}", state.last_error)}]
-            });
+            return v1::NodeStatus {
+                freshness: NodeFreshness::Unreachable as i32,
+                error: state.last_error.clone(),
+                alerts: vec![unreachable_alert(&state.last_error)],
+                ..Default::default()
+            };
         };
         let age = good.at.elapsed();
         let freshness = if age > self.timing.stale_after {
-            "NODE_FRESHNESS_UNREACHABLE"
+            NodeFreshness::Unreachable
         } else if state.last_error.is_empty() {
-            "NODE_FRESHNESS_FRESH"
+            NodeFreshness::Fresh
         } else {
-            "NODE_FRESHNESS_STALE"
+            NodeFreshness::Stale
         };
-        let mut status = json!({
-            "metrics":good.metrics,
-            "freshness":freshness,
-            "fetchedAt": DateTime::<Utc>::from(good.wall_at).to_rfc3339_opts(SecondsFormat::Nanos, true),
-            "age": format!("{}.{:09}s", age.as_secs(), age.subsec_nanos()),
-            "error":state.last_error,
-        });
-        if freshness != "NODE_FRESHNESS_UNREACHABLE" {
-            let busy = busy_gpus(&state.gpus, SystemTime::now());
-            if !busy.is_empty() {
-                status["busyGpus"] = json!(busy);
-            }
+        let unreachable = freshness == NodeFreshness::Unreachable;
+        v1::NodeStatus {
+            metrics: Some(good.metrics.clone()),
+            freshness: freshness as i32,
+            fetched_at: Some(good.wall_at.into()),
+            age: Some(wire::proto_duration(age)),
+            error: state.last_error.clone(),
+            alerts: if unreachable {
+                vec![unreachable_alert(&state.last_error)]
+            } else {
+                Vec::new()
+            },
+            busy_gpus: if unreachable {
+                Vec::new()
+            } else {
+                busy_gpus(&state.gpus, SystemTime::now())
+            },
+            ..Default::default()
         }
-        if freshness == "NODE_FRESHNESS_UNREACHABLE" {
-            status["alerts"] = json!([{"kind":"ALERT_KIND_UNREACHABLE", "message":format!("node is unreachable: {}", state.last_error)}]);
-        }
-        status
     }
 
     /// Refuses an explicit GPU, or any discrete GPU on a whole-node grant,
@@ -418,59 +432,33 @@ fn age(later: SystemTime, earlier: SystemTime) -> Duration {
     later.duration_since(earlier).unwrap_or(Duration::ZERO)
 }
 
-fn uint(value: &Value, key: &str) -> Option<u64> {
-    match value.get(key)? {
-        Value::String(text) => text.parse().ok(),
-        Value::Number(number) => number.as_u64(),
-        _ => None,
+fn unreachable_alert(error: &str) -> v1::NodeAlert {
+    v1::NodeAlert {
+        kind: AlertKind::Unreachable as i32,
+        message: format!("node is unreachable: {error}"),
+        ..Default::default()
     }
 }
 
-fn int32(value: &Value, key: &str) -> Option<i32> {
-    match value.get(key)? {
-        Value::Number(number) => number.as_i64().and_then(|n| i32::try_from(n).ok()),
-        Value::String(text) => text.parse().ok(),
-        _ => None,
-    }
-}
-
-/// Protobuf JSON omits a zero index, so an absent one is the first GPU.
-fn gpu_index(gpu: &Value) -> Option<i32> {
-    match gpu.get("index") {
-        None => Some(0),
-        Some(_) => int32(gpu, "index"),
-    }
-}
-
-fn float(value: &Value, key: &str) -> f64 {
-    match value.get(key) {
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(0.0),
-        Some(Value::String(text)) => text.parse().unwrap_or(0.0),
-        _ => 0.0,
-    }
-}
-
-fn gpu_points(metrics: &Value) -> Vec<GpuPoint> {
+fn gpu_points(metrics: &v1::NodeMetrics) -> Vec<GpuPoint> {
     metrics
-        .get("gpus")
-        .and_then(Value::as_array)
-        .map(|gpus| {
-            gpus.iter()
-                .filter_map(|gpu| {
-                    Some(GpuPoint {
-                        index: gpu_index(gpu)?,
-                        memory_used_bytes: uint(gpu, "memoryUsedBytes"),
-                        memory_total_bytes: uint(gpu, "memoryTotalBytes").unwrap_or(0),
-                        utilization_percent: float(gpu, "utilizationPercent"),
-                        temperature_celsius: float(gpu, "temperatureCelsius"),
-                    })
-                })
-                .collect()
+        .gpus
+        .iter()
+        .map(|gpu| GpuPoint {
+            index: gpu.index,
+            memory_used_bytes: gpu.memory_used_bytes,
+            memory_total_bytes: gpu.memory_total_bytes,
+            utilization_percent: gpu.utilization_percent,
+            temperature_celsius: gpu.temperature_celsius,
         })
-        .unwrap_or_default()
+        .collect()
 }
 
-fn add_gpu_sample(mut hist: Vec<GpuSample>, at: SystemTime, metrics: &Value) -> Vec<GpuSample> {
+fn add_gpu_sample(
+    mut hist: Vec<GpuSample>,
+    at: SystemTime,
+    metrics: &v1::NodeMetrics,
+) -> Vec<GpuSample> {
     hist.push(GpuSample {
         at,
         gpus: gpu_points(metrics),
@@ -487,7 +475,7 @@ fn add_gpu_sample(mut hist: Vec<GpuSample>, at: SystemTime, metrics: &Value) -> 
     hist
 }
 
-fn busy_gpus(hist: &[GpuSample], now: SystemTime) -> Vec<Value> {
+fn busy_gpus(hist: &[GpuSample], now: SystemTime) -> Vec<v1::GpuBusy> {
     let Some(latest) = hist.last() else {
         return Vec::new();
     };
@@ -496,7 +484,10 @@ fn busy_gpus(hist: &[GpuSample], now: SystemTime) -> Vec<Value> {
         .iter()
         .filter_map(|gpu| {
             let reason = gpu_busy_reason(gpu, hist, now);
-            (!reason.is_empty()).then(|| json!({"index": gpu.index, "reason": reason}))
+            (!reason.is_empty()).then_some(v1::GpuBusy {
+                index: gpu.index,
+                reason,
+            })
         })
         .collect()
 }
@@ -564,57 +555,51 @@ fn go_duration(duration: Duration) -> String {
     format!("{}h{}m{seconds}s", minutes / 60, minutes % 60)
 }
 
-fn busy_reason(status: &Value, index: i32) -> String {
+fn busy_reason(status: &v1::NodeStatus, index: i32) -> String {
     status
-        .get("busyGpus")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .find(|busy| int32(busy, "index") == Some(index))
-        .and_then(|busy| busy.get("reason").and_then(Value::as_str))
+        .busy_gpus
+        .iter()
+        .find(|busy| busy.index == index)
+        .map(|busy| busy.reason.clone())
         .unwrap_or_default()
-        .to_owned()
 }
 
-fn busy_discrete(status: &Value) -> Option<(i32, String)> {
-    let gpus = status.pointer("/metrics/gpus").and_then(Value::as_array)?;
-    for gpu in gpus {
-        if gpu.get("integrated").and_then(Value::as_bool) == Some(true) {
-            continue;
-        }
-        let Some(index) = gpu_index(gpu) else {
-            continue;
-        };
-        let reason = busy_reason(status, index);
-        if !reason.is_empty() {
-            return Some((index, reason));
-        }
-    }
-    None
+fn busy_discrete(status: &v1::NodeStatus) -> Option<(i32, String)> {
+    let metrics = status.metrics.as_ref()?;
+    metrics
+        .gpus
+        .iter()
+        .filter(|gpu| !gpu.integrated)
+        .map(|gpu| (gpu.index, busy_reason(status, gpu.index)))
+        .find(|(_, reason)| !reason.is_empty())
 }
 
-fn holders(status: &Value) -> String {
-    let mut names = Vec::new();
-    let Some(containers) = status
-        .pointer("/metrics/engine/containers")
-        .and_then(Value::as_array)
-    else {
-        return String::new();
-    };
-    for container in containers {
-        if container.get("state").and_then(Value::as_str) == Some("running") && names.len() < 3 {
-            if let Some(name) = container.get("name").and_then(Value::as_str) {
-                names.push(name);
-            }
-        }
-    }
+fn holders(status: &v1::NodeStatus) -> String {
+    let names = status
+        .metrics
+        .as_ref()
+        .and_then(|metrics| metrics.engine.as_ref())
+        .map(|engine| {
+            engine
+                .containers
+                .iter()
+                .filter(|container| container.state == "running" && !container.name.is_empty())
+                .take(3)
+                .map(|container| container.name.as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     if names.is_empty() {
         return String::new();
     }
     format!(" (running containers: {})", names.join(", "))
 }
 
-fn gpu_free_from_status(name: &str, gpu: Option<u32>, status: &Value) -> Result<(), String> {
+fn gpu_free_from_status(
+    name: &str,
+    gpu: Option<u32>,
+    status: &v1::NodeStatus,
+) -> Result<(), String> {
     let (index, reason) = match gpu {
         Some(index) => {
             let index = i32::try_from(index).unwrap_or(i32::MAX);

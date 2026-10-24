@@ -1,10 +1,11 @@
 //! Node binary push, verified apply and restart observation.
-use super::{input, respond, string, Hub};
+use super::Hub;
 use protectorate_node_client::push_with_progress;
 use protectorate_wire::{
-    self as wire, Code, Result, RpcError, RpcRequest, StreamSender, UnaryServer,
+    self as wire,
+    v1::{self, node_agent_service, node_service, UpdatePhase},
+    Call, Code, Result, RpcError, StreamSender, UnaryServer,
 };
-use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     fs::File,
@@ -14,8 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-const APPLY: &str = "/protectorate.v1.NodeAgentService/ApplyUpdate";
-const METRICS: &str = "/protectorate.v1.NodeAgentService/GetMetrics";
 const STAGE: &str = "updates/protectorate-rs-next";
 const STAGE_BUNDLE: &str = "updates/protectorate-rs-bundle-next";
 
@@ -28,38 +27,35 @@ struct Payload {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let apply = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/ApplyUpdate", move |request| {
+    server.unary(node_service::APPLY_UPDATE, move |call: Call<_>| {
         let hub = Arc::clone(&apply);
         async move {
-            let value = input(&request)?;
-            let name = node_name(&value)?;
+            let name = node_name(&call.request.name)?;
             remote_node(&hub, &name)?;
             let client =
                 hub.node_files
-                    .client_with_timeout(&request, &name, Duration::from_secs(60))?;
-            let reply = tokio::task::spawn_blocking(move || client.call(APPLY, &value))
-                .await
-                .map_err(super::join_error)??;
-            respond(&request, reply)
+                    .client_with_timeout(&call.auth, &name, Duration::from_secs(60))?;
+            tokio::task::spawn_blocking(move || {
+                client.unary(node_agent_service::APPLY_UPDATE, &call.request)
+            })
+            .await
+            .map_err(super::join_error)?
         }
     })?;
-    server.register_streaming(
-        "/protectorate.v1.NodeService/UpdateNode",
-        move |request, sender| {
-            let hub = Arc::clone(&hub);
-            async move { update_node(hub, request, sender).await }
-        },
-    )?;
+    server.stream(node_service::UPDATE_NODE, move |call: Call<_>, sender| {
+        let hub = Arc::clone(&hub);
+        async move { update_node(hub, call, sender).await }
+    })?;
     Ok(())
 }
 
 async fn update_node(
     hub: Arc<Hub>,
-    request: RpcRequest,
+    call: Call<v1::UpdateNodeRequest>,
     sender: StreamSender,
 ) -> Result<wire::StreamTrailers> {
-    let body = input(&request)?;
-    let requested = node_name(&body)?;
+    let auth = &call.auth;
+    let requested = node_name(&call.request.name)?;
     let node = remote_node(&hub, &requested)?;
     let name = node.name.clone();
     let _serial = Arc::clone(&hub.node_update_lock)
@@ -76,31 +72,37 @@ async fn update_node(
         .await
         .map_err(super::join_error)?;
     let status = hub.node_monitor.status(&name, &node.address, node.invited);
-    if status["freshness"] != "NODE_FRESHNESS_FRESH" {
-        return Err(RpcError::new(
-            Code::FailedPrecondition,
-            format!("node {name} is not reachable"),
-        ));
-    }
-    let previous = string(&status["metrics"], "agentVersion").to_owned();
-    let force = body.get("force").and_then(Value::as_bool).unwrap_or(false);
-    if previous == hub.version && !force {
-        send(
-            &request,
-            &sender,
-            json!({"phase":"UPDATE_PHASE_SKIPPED", "version":previous,
-            "previousVersion":previous, "message":format!("already at {}", hub.version)}),
-        )
-        .await?;
+    let metrics = match status.metrics {
+        Some(metrics) if status.freshness() == v1::NodeFreshness::Fresh => metrics,
+        _ => {
+            return Err(RpcError::new(
+                Code::FailedPrecondition,
+                format!("node {name} is not reachable"),
+            ))
+        }
+    };
+    let previous = metrics.agent_version;
+    if previous == hub.version && !call.request.force {
+        sender
+            .send(&v1::UpdateNodeProgress {
+                phase: UpdatePhase::Skipped as i32,
+                version: previous.clone(),
+                previous_version: previous,
+                message: format!("already at {}", hub.version),
+                ..Default::default()
+            })
+            .await?;
         return Ok(Default::default());
     }
-    let os = string(&status["metrics"], "os");
-    let os = if os.is_empty() { node.os.clone() } else { os };
-    let arch = string(&status["metrics"], "arch");
-    let arch = if arch.is_empty() {
+    let os = if metrics.os.is_empty() {
+        node.os.clone()
+    } else {
+        metrics.os
+    };
+    let arch = if metrics.arch.is_empty() {
         node.arch.clone()
     } else {
-        arch
+        metrics.arch
     };
     let payload = payload_path(&hub, &os, &arch).await?;
     let binary = &payload.binary;
@@ -116,16 +118,26 @@ async fn update_node(
             format!("read Rust node binary {}: {e}", binary.display()),
         )
     })?;
-    send(
-        &request,
-        &sender,
-        json!({"phase":"UPDATE_PHASE_SENDING","totalBytes":if payload.bundle {"0".to_owned()} else {size.to_string()},
-        "message":if payload.bundle {"verified Rust release bundle".to_owned()} else {binary.file_name().unwrap_or_default().to_string_lossy().into_owned()}}),
-    )
-    .await?;
+    let total_bytes = if payload.bundle { 0 } else { size };
+    sender
+        .send(&v1::UpdateNodeProgress {
+            phase: UpdatePhase::Sending as i32,
+            total_bytes,
+            message: if payload.bundle {
+                "verified Rust release bundle".to_owned()
+            } else {
+                binary
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            },
+            ..Default::default()
+        })
+        .await?;
     let client = hub
         .node_files
-        .client_with_timeout(&request, &name, Duration::from_secs(3600))?;
+        .client_with_timeout(auth, &name, Duration::from_secs(3600))?;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<u64>(8);
     let pushed = tokio::task::spawn_blocking({
         let transfer = payload.transfer.clone();
@@ -146,17 +158,18 @@ async fn update_node(
             )
         }
     });
-    while let Some(sent) = tokio::select! {
+    while let Some(sent_bytes) = tokio::select! {
         _ = sender.cancelled() => return Err(RpcError::new(Code::Canceled, "node update stream closed")),
         item = rx.recv() => item,
     } {
-        send(
-            &request,
-            &sender,
-            json!({"phase":"UPDATE_PHASE_SENDING", "sentBytes":sent.to_string(),
-            "totalBytes":if payload.bundle {"0".to_owned()} else {size.to_string()}}),
-        )
-        .await?;
+        sender
+            .send(&v1::UpdateNodeProgress {
+                phase: UpdatePhase::Sending as i32,
+                sent_bytes,
+                total_bytes,
+                ..Default::default()
+            })
+            .await?;
     }
     let transfer = pushed.await.map_err(super::join_error)??;
     if (!payload.bundle && (transfer.size != size || !transfer.sha256.eq_ignore_ascii_case(&sha)))
@@ -167,32 +180,45 @@ async fn update_node(
             "node transfer differs from the verified release payload",
         ));
     }
-    send(
-        &request,
-        &sender,
-        json!({"phase":"UPDATE_PHASE_VERIFYING", "sentBytes":transfer.size.to_string(),
-        "totalBytes":transfer.size.to_string()}),
-    )
-    .await?;
+    sender
+        .send(&v1::UpdateNodeProgress {
+            phase: UpdatePhase::Verifying as i32,
+            sent_bytes: transfer.size,
+            total_bytes: transfer.size,
+            ..Default::default()
+        })
+        .await?;
     let client = hub
         .node_files
-        .client_with_timeout(&request, &name, Duration::from_secs(60))?;
-    let apply = json!({"name":name,"path":transfer.path.to_string_lossy(),"size":size.to_string(),"sha256":sha,
-        "expectedVersion":hub.version});
-    let result = tokio::task::spawn_blocking(move || client.call(APPLY, &apply))
-        .await
-        .map_err(super::join_error)??;
-    let version = string(&result, "version").to_owned();
-    let before = string(&result, "previousVersion").to_owned();
-    let restart = string(&result, "restart").to_owned();
-    let base = json!({"sentBytes":transfer.size.to_string(),"totalBytes":transfer.size.to_string(),
-        "version":version,"previousVersion":before,"restart":restart});
-    let mut swapped = base.clone();
-    swapped["phase"] = json!("UPDATE_PHASE_SWAPPING");
-    send(&request, &sender, swapped).await?;
-    let mut waiting = base.clone();
-    waiting["phase"] = json!("UPDATE_PHASE_RESTARTING");
-    send(&request, &sender, waiting).await?;
+        .client_with_timeout(auth, &name, Duration::from_secs(60))?;
+    let apply = v1::ApplyUpdateRequest {
+        name: name.clone(),
+        path: transfer.path.to_string_lossy().into_owned(),
+        size,
+        sha256: sha,
+        expected_version: hub.version.clone(),
+    };
+    let result =
+        tokio::task::spawn_blocking(move || client.unary(node_agent_service::APPLY_UPDATE, &apply))
+            .await
+            .map_err(super::join_error)??;
+    let base = v1::UpdateNodeProgress {
+        sent_bytes: transfer.size,
+        total_bytes: transfer.size,
+        version: result.version.clone(),
+        previous_version: result.previous_version.clone(),
+        restart: result.restart,
+        ..Default::default()
+    };
+    for phase in [UpdatePhase::Swapping, UpdatePhase::Restarting] {
+        sender
+            .send(&v1::UpdateNodeProgress {
+                phase: phase as i32,
+                ..base.clone()
+            })
+            .await?;
+    }
+    let (version, before) = (result.version, result.previous_version);
     let deadline = Instant::now() + hub.node_update_timeout;
     while Instant::now() < deadline {
         tokio::select! {
@@ -201,33 +227,38 @@ async fn update_node(
         }
         let client = hub
             .node_files
-            .client_with_timeout(&request, &name, Duration::from_secs(5))?;
-        let probed = tokio::task::spawn_blocking(move || client.call(METRICS, &json!({})))
-            .await
-            .map_err(super::join_error)?;
-        if let Ok(metrics) = probed {
-            let actual = string(&metrics, "agentVersion");
-            let state = &metrics["update"];
-            if string(state, "version") == version
-                && string(state, "previousVersion") == before
-                && (string(state, "phase") == "confirmed" || string(state, "phase") == "rolledback")
-            {
-                let mut final_event = base.clone();
-                if string(state, "phase") == "confirmed" && actual == version {
-                    final_event["phase"] = json!("UPDATE_PHASE_CONFIRMED");
-                    final_event["message"] = json!(format!("node reports {actual}"));
-                } else if string(state, "phase") == "rolledback" && actual == before {
-                    final_event["phase"] = json!("UPDATE_PHASE_ROLLED_BACK");
-                    final_event["message"] = json!(format!(
-                        "node came back on {actual}; it put the previous binary back"
-                    ));
-                } else {
-                    continue;
-                }
-                send(&request, &sender, final_event).await?;
-                return Ok(Default::default());
+            .client_with_timeout(auth, &name, Duration::from_secs(5))?;
+        let probed = tokio::task::spawn_blocking(move || {
+            client.unary(node_agent_service::GET_METRICS, &v1::GetMetricsRequest {})
+        })
+        .await
+        .map_err(super::join_error)?;
+        let Ok(metrics) = probed else { continue };
+        let actual = metrics.agent_version;
+        let Some(state) = metrics
+            .update
+            .filter(|state| state.version == version && state.previous_version == before)
+        else {
+            continue;
+        };
+        let (phase, message) = match state.phase.as_str() {
+            "confirmed" if actual == version => {
+                (UpdatePhase::Confirmed, format!("node reports {actual}"))
             }
-        }
+            "rolledback" if actual == before => (
+                UpdatePhase::RolledBack,
+                format!("node came back on {actual}; it put the previous binary back"),
+            ),
+            _ => continue,
+        };
+        sender
+            .send(&v1::UpdateNodeProgress {
+                phase: phase as i32,
+                message,
+                ..base
+            })
+            .await?;
+        return Ok(Default::default());
     }
     Err(RpcError::new(Code::DeadlineExceeded, format!(
         "node {name} did not confirm {version} within {:?}; its trial watchdog should restore the previous binary if it remains unconfirmed",
@@ -235,12 +266,11 @@ async fn update_node(
     )))
 }
 
-fn node_name(value: &Value) -> Result<String> {
-    let name = string(value, "name");
+fn node_name(name: &str) -> Result<String> {
     if name.trim().is_empty() {
         Err(RpcError::invalid("node name is required"))
     } else {
-        Ok(name)
+        Ok(name.to_owned())
     }
 }
 fn remote_node(hub: &Hub, name: &str) -> Result<protectorate_inventory::Node> {
@@ -440,11 +470,4 @@ fn digest(path: &Path) -> io::Result<(u64, String)> {
             .ok_or_else(|| io::Error::other("binary size overflow"))?;
     }
     Ok((size, format!("{:x}", hash.finalize())))
-}
-async fn send(request: &RpcRequest, sender: &StreamSender, value: Value) -> Result<()> {
-    let bytes =
-        serde_json::to_vec(&value).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-    sender
-        .send(&wire::decode_json(request.method.output(), &bytes)?)
-        .await
 }

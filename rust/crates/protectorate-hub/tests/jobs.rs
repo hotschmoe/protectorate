@@ -724,13 +724,13 @@ async fn selector_uses_fresh_shared_metrics_and_lease_conflicts() {
     .unwrap();
     assert!(
         hub.node_monitor.is_fresh("alpha", &alpha_addr.to_string()),
-        "{}",
+        "{:?}",
         hub.node_monitor
             .status("alpha", &alpha_addr.to_string(), false)
     );
     assert!(
         hub.node_monitor.is_fresh("beta", &beta_addr.to_string()),
-        "{}",
+        "{:?}",
         hub.node_monitor
             .status("beta", &beta_addr.to_string(), false)
     );
