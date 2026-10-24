@@ -2,7 +2,6 @@
 //! local time.
 use chrono::{Local, LocalResult, TimeZone};
 use protectorate_wire::{v1, Code, Result, RpcError};
-use serde_json::Value;
 use std::{
     io::Write,
     time::{SystemTime, UNIX_EPOCH},
@@ -1185,37 +1184,37 @@ pub(crate) fn chat_wait_text(response: &v1::WaitResponse) -> String {
 /// What `msg send` prints: the message the hub created, then what the hub did
 /// around it - a retry that matched an earlier request, mail waiting for a
 /// project's sleeves, and the backlog note a request was filed as.
-pub(crate) fn msg_send_text(response: &Value) -> String {
-    let message = at(response, "message").cloned().unwrap_or(Value::Null);
+pub(crate) fn msg_send_text(response: &v1::MessageServiceSendResponse) -> String {
+    let message = response.message.clone().unwrap_or_default();
     let mut out = String::new();
-    row(&mut out, "message", text(&message, "id"));
-    row(&mut out, "thread", text(&message, "threadId"));
-    if boolean(response, "duplicate") {
+    row(&mut out, "message", message.id);
+    row(&mut out, "thread", message.thread_id);
+    if response.duplicate {
         out.push_str("note\tsame request id as an earlier send; nothing was sent again\n");
     }
-    if boolean(response, "waiting") {
+    if response.waiting {
         out.push_str("waiting\tno live recipient yet; it is delivered when one appears\n");
     }
-    optional_row(&mut out, "note", text(&message, "noteId"));
+    optional_row(&mut out, "note", message.note_id);
     align(&out)
 }
 
 /// What `msg reply` prints: the answer, its thread and who it went to.
-pub(crate) fn msg_reply_text(message: &Value) -> String {
+pub(crate) fn msg_reply_text(message: &v1::MailMessage) -> String {
     let mut out = String::new();
-    row(&mut out, "message", text(message, "id"));
-    row(&mut out, "thread", text(message, "threadId"));
-    row(&mut out, "to", text(message, "to"));
+    row(&mut out, "message", message.id.clone());
+    row(&mut out, "thread", message.thread_id.clone());
+    row(&mut out, "to", message.to.clone());
     align(&out)
 }
 
-pub(crate) fn msg_ack_text(message: &Value) -> String {
-    align(&format!("acked\t{}\n", text(message, "id")))
+pub(crate) fn msg_ack_text(message: &v1::MailMessage) -> String {
+    align(&format!("acked\t{}\n", message.id))
 }
 
 /// One block per message: a header row with its id, thread, direction, kind
 /// and state, then the body indented. The hub's own guidance heads the list.
-pub(crate) fn mail_text(messages: &[Value]) -> String {
+pub(crate) fn mail_text(messages: &[v1::MailMessage]) -> String {
     if messages.is_empty() {
         return "no messages\n".to_owned();
     }
@@ -1225,93 +1224,87 @@ pub(crate) fn mail_text(messages: &[Value]) -> String {
     for message in messages {
         out.push_str(&format!(
             "{}\t{}\t{} -> {}\t{}{}\t{}\n",
-            text(message, "id"),
-            text(message, "threadId"),
-            text(message, "from"),
-            text(message, "to"),
+            message.id,
+            message.thread_id,
+            message.from,
+            message.to,
             message_kind_label(message),
             mail_flags(message),
-            local_stamp(text(message, "createdAt")),
+            stamp(message.created_at.as_ref()),
         ));
-        for line in text(message, "body").trim_end_matches('\n').split('\n') {
+        for line in message.body.trim_end_matches('\n').split('\n') {
             out.push_str(&format!("\t  {line}\n"));
         }
     }
     align(&out)
 }
 
-fn message_kind_label(message: &Value) -> String {
-    let kind = text(message, "kind");
-    if kind.is_empty() {
-        return "note".to_owned();
+fn message_kind_label(message: &v1::MailMessage) -> String {
+    match message.kind() {
+        v1::MessageKind::Unspecified => "note".to_owned(),
+        kind => word(kind.as_str_name(), "MESSAGE_KIND_"),
     }
-    kind.strip_prefix("MESSAGE_KIND_")
-        .unwrap_or(&kind)
-        .to_lowercase()
 }
 
 /// The state appended to a message's kind: who has to ack, who already did,
 /// who was shown it, and whether it was escalated.
-fn mail_flags(message: &Value) -> String {
+fn mail_flags(message: &v1::MailMessage) -> String {
     let mut flags = String::new();
-    if boolean(message, "ackRequired") {
+    if message.ack_required {
         flags.push_str(" ack-required");
     }
-    for delivery in items(message, "deliveries") {
-        let recipient = text(&delivery, "recipient");
-        if !text(&delivery, "ackedAt").is_empty() {
-            flags.push_str(&format!(" acked:{recipient}"));
-        } else if !text(&delivery, "deliveredAt").is_empty() {
-            flags.push_str(&format!(" delivered:{recipient}"));
+    for delivery in &message.deliveries {
+        if delivery.acked_at.is_some() {
+            flags.push_str(&format!(" acked:{}", delivery.recipient));
+        } else if delivery.delivered_at.is_some() {
+            flags.push_str(&format!(" delivered:{}", delivery.recipient));
         }
     }
-    if !text(message, "escalatedAt").is_empty() {
+    if message.escalated_at.is_some() {
         flags.push_str(" escalated");
     }
     flags
 }
 
 /// `msg threads` rows, most recently active first.
-pub(crate) fn thread_list_text(response: &Value) -> String {
-    let threads = items(response, "threads");
-    if threads.is_empty() {
+pub(crate) fn thread_list_text(response: &v1::ListThreadsResponse) -> String {
+    if response.threads.is_empty() {
         return "no threads\n".to_owned();
     }
     let mut out = String::new();
-    for thread in &threads {
+    for thread in &response.threads {
         let flags: Vec<String> = [
-            (number(thread, "unread"), "unread"),
-            (number(thread, "openAcks"), "open-acks"),
-            (number(thread, "escalated"), "escalated"),
+            (thread.unread, "unread"),
+            (thread.open_acks, "open-acks"),
+            (thread.escalated, "escalated"),
         ]
         .into_iter()
-        .filter_map(|(count, name)| {
-            let count = count.unwrap_or_default();
-            (count > 0.0).then(|| format!("{count:.0} {name}"))
-        })
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, name)| format!("{count} {name}"))
         .collect();
         out.push_str(&format!(
             "{}\t{} msgs\t{}\t{}\t{}\n",
-            text(thread, "threadId"),
-            text(thread, "messageCount"),
-            items(thread, "participants")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(","),
+            thread.thread_id,
+            thread.message_count,
+            thread.participants.join(","),
             flags.join(", "),
-            local_stamp(text(thread, "last.createdAt")),
+            stamp(
+                thread
+                    .last
+                    .as_ref()
+                    .and_then(|last| last.created_at.as_ref())
+            ),
         ));
     }
     align(&out)
 }
 
 /// What `msg wait` prints: the message the wait ended on, or the timeout.
-pub(crate) fn msg_wait_text(response: &Value) -> String {
-    if boolean(response, "timedOut") {
+pub(crate) fn msg_wait_text(response: &v1::MessageServiceWaitResponse) -> String {
+    if response.timed_out {
         return "timed out\n".to_owned();
     }
-    mail_text(&[at(response, "message").cloned().unwrap_or(Value::Null)])
+    mail_text(&[response.message.clone().unwrap_or_default()])
 }
 
 pub(crate) fn sleeve_workspaces_text(response: &v1::ListWorkspacesResponse) -> String {
@@ -1389,55 +1382,43 @@ pub(crate) fn sleeve_list_text(response: &v1::ListSleevesResponse) -> String {
 
 /// The STATE column of a session: "running", "exited(3)" or
 /// "exited(signal 9)".
-fn session_state_label(session: &Value) -> String {
-    if text(session, "state") != "SESSION_STATE_EXITED" {
-        return "running".to_owned();
-    }
-    match number(session, "exitSignal") {
-        Some(signal) if signal > 0.0 => format!("exited(signal {:.0})", signal),
-        _ => format!(
-            "exited({:.0})",
-            number(session, "exitCode").unwrap_or_default()
-        ),
+fn session_state_label(session: &v1::Session) -> String {
+    if session.state() != v1::SessionState::Exited {
+        "running".to_owned()
+    } else if session.exit_signal > 0 {
+        format!("exited(signal {})", session.exit_signal)
+    } else {
+        format!("exited({})", session.exit_code)
     }
 }
 
 /// A hub timestamp as this machine's local clock, HH:MM:SS.
-fn local_clock(raw: String) -> String {
-    match timestamp_millis(&raw) {
-        Some(millis) => match Local.timestamp_millis_opt(millis) {
-            LocalResult::Single(time) => time.format("%H:%M:%S").to_string(),
-            _ => raw,
-        },
-        None => or_dash(raw),
-    }
+fn local_clock<T: Copy>(at: Option<&T>) -> String
+where
+    SystemTime: TryFrom<T>,
+{
+    unix_millis(at)
+        .and_then(|millis| match Local.timestamp_millis_opt(millis) {
+            LocalResult::Single(time) => Some(time.format("%H:%M:%S").to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "-".to_owned())
 }
 
-pub(crate) fn session_list_text(response: &Value) -> String {
-    let sessions = items(response, "sessions");
+pub(crate) fn session_list_text(response: &v1::ListSessionsResponse) -> String {
     let mut out = String::from("NAME\tSTATE\tCLIENTS\tSIZE\tACTIVE\tCWD\tCOMMAND\n");
-    for session in &sessions {
-        out.push_str(
-            &[
-                text(session, "name"),
-                session_state_label(session),
-                fmt_int(number(session, "attachedClients")),
-                format!(
-                    "{}x{}",
-                    fmt_int(number(session, "paneCols")),
-                    fmt_int(number(session, "paneRows"))
-                ),
-                local_clock(text(session, "lastActivity")),
-                text(session, "cwd"),
-                items(session, "command")
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            ]
-            .join("\t"),
-        );
-        out.push('\n');
+    for session in &response.sessions {
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{}x{}\t{}\t{}\t{}\n",
+            session.name,
+            session_state_label(session),
+            session.attached_clients,
+            session.pane_cols,
+            session.pane_rows,
+            local_clock(session.last_activity.as_ref()),
+            session.cwd,
+            session.command.join(" "),
+        ));
     }
     align(&out)
 }
@@ -1944,10 +1925,6 @@ fn exit_label(sleeve: &v1::Sleeve) -> String {
     label
 }
 
-fn fmt_int(value: Option<f64>) -> String {
-    format!("{:.0}", value.unwrap_or_default())
-}
-
 fn or_unknown(value: &str) -> String {
     if value.is_empty() {
         "unknown".to_owned()
@@ -1985,42 +1962,6 @@ fn truncate(text: &str, limit: usize) -> String {
         return text.to_owned();
     }
     format!("{}~", chars[..limit - 1].iter().collect::<String>())
-}
-
-pub(crate) fn items(value: &Value, path: &str) -> Vec<Value> {
-    at(value, path)
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn at<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut current = value;
-    for part in path.split('.') {
-        current = current.get(part)?;
-    }
-    Some(current)
-}
-
-fn text(value: &Value, key: &str) -> String {
-    match at(value, key) {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Number(number)) => number.to_string(),
-        Some(Value::Bool(flag)) => flag.to_string(),
-        _ => String::new(),
-    }
-}
-
-fn number(value: &Value, key: &str) -> Option<f64> {
-    match at(value, key) {
-        Some(Value::Number(number)) => number.as_f64(),
-        Some(Value::String(text)) => text.parse().ok(),
-        _ => None,
-    }
-}
-
-fn boolean(value: &Value, key: &str) -> bool {
-    at(value, key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn or_dash(value: String) -> String {
@@ -2200,16 +2141,6 @@ fn first_line(text: &str, limit: usize) -> String {
         format!("{}...", chars[..limit - 1].iter().collect::<String>())
     } else {
         line
-    }
-}
-
-fn local_stamp(raw: String) -> String {
-    match timestamp_millis(&raw) {
-        Some(millis) => match Local.timestamp_millis_opt(millis) {
-            LocalResult::Single(time) => time.to_rfc3339(),
-            _ => raw,
-        },
-        None => or_dash(raw),
     }
 }
 

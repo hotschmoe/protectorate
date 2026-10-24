@@ -52,19 +52,6 @@ pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 /// The state home holding this machine's saved device credential.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
-const LIST_SESSIONS: &str = "/protectorate.v1.SessionService/ListSessions";
-const CREATE_SESSION: &str = "/protectorate.v1.SessionService/CreateSession";
-const KILL_SESSION: &str = "/protectorate.v1.SessionService/KillSession";
-const RESPAWN_SESSION: &str = "/protectorate.v1.SessionService/RespawnSession";
-const CAPTURE_PANE: &str = "/protectorate.v1.SessionService/CapturePane";
-const MSG_SEND: &str = "/protectorate.v1.MessageService/Send";
-const MSG_INBOX: &str = "/protectorate.v1.MessageService/Inbox";
-const MSG_ACK: &str = "/protectorate.v1.MessageService/Ack";
-const MSG_REPLY: &str = "/protectorate.v1.MessageService/Reply";
-const MSG_THREAD: &str = "/protectorate.v1.MessageService/Thread";
-const MSG_THREADS: &str = "/protectorate.v1.MessageService/ListThreads";
-const MSG_WAIT: &str = "/protectorate.v1.MessageService/Wait";
-
 /// The transport slack added to a `chat wait` deadline so the hub answers
 /// with its own DeadlineExceeded instead of the HTTP client giving up.
 const WAIT_SLACK: Duration = Duration::from_secs(5);
@@ -324,12 +311,11 @@ impl MessageKind {
         }
     }
 
-    /// The enum name MessageServiceSendRequest takes.
-    pub fn as_proto(&self) -> &'static str {
+    pub fn as_proto(&self) -> v1::MessageKind {
         match self {
-            Self::Note => "MESSAGE_KIND_NOTE",
-            Self::Request => "MESSAGE_KIND_REQUEST",
-            Self::Notice => "MESSAGE_KIND_NOTICE",
+            Self::Note => v1::MessageKind::Note,
+            Self::Request => v1::MessageKind::Request,
+            Self::Notice => v1::MessageKind::Notice,
         }
     }
 
@@ -2407,53 +2393,76 @@ fn execute_commands(
         Command::SleeveResleeve(resleeve) => resleeve_sleeve(client, resleeve, json),
         Command::SleevePrune(prune) => prune_sleeves(client, prune, json),
         Command::SessionList => {
-            let sessions = client.call(LIST_SESSIONS, &json!({}))?;
+            let sessions = client.unary(
+                v1::session_service::LIST_SESSIONS,
+                &v1::ListSessionsRequest {},
+            )?;
             if json {
-                value_line(&sessions)
+                json_line(&sessions)
             } else {
                 Ok(format::session_list_text(&sessions))
             }
         }
         Command::SessionNew(spec) => {
-            let response = client.call(CREATE_SESSION, &session_new_body(spec))?;
+            let request = v1::CreateSessionRequest {
+                name: spec.name.clone(),
+                cwd: spec.cwd.clone(),
+                command: spec.command.clone(),
+                env: spec.env.iter().cloned().collect(),
+            };
+            let response = client.unary(v1::session_service::CREATE_SESSION, &request)?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!(
                     "created\t{}\n",
-                    response["session"]["name"].as_str().unwrap_or(&spec.name)
+                    response
+                        .session
+                        .as_ref()
+                        .map_or(spec.name.as_str(), |session| or(&session.name, &spec.name))
                 ))
             }
         }
         Command::SessionKill { name } => {
-            let response = client.call(KILL_SESSION, &json!({"name": name}))?;
+            let response = client.unary(
+                v1::session_service::KILL_SESSION,
+                &v1::KillSessionRequest { name: name.clone() },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("killed\t{name}\n"))
             }
         }
         Command::SessionRespawn { name } => {
-            let response = client.call(RESPAWN_SESSION, &json!({"name": name}))?;
+            let response = client.unary(
+                v1::session_service::RESPAWN_SESSION,
+                &v1::RespawnSessionRequest { name: name.clone() },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!(
                     "respawned\t{}\n",
-                    response["session"]["name"].as_str().unwrap_or(name)
+                    response
+                        .session
+                        .as_ref()
+                        .map_or(name.as_str(), |session| or(&session.name, name))
                 ))
             }
         }
         Command::SessionCapture { name, lines } => {
-            let pane = client.call(CAPTURE_PANE, &json!({"name": name, "lines": lines}))?;
+            let pane = client.unary(
+                v1::session_service::CAPTURE_PANE,
+                &v1::CapturePaneRequest {
+                    name: name.clone(),
+                    lines: *lines,
+                },
+            )?;
             if json {
-                value_line(&pane)
+                json_line(&pane)
             } else {
-                Ok(pane
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned())
+                Ok(pane.text)
             }
         }
         Command::MsgSend {
@@ -2468,19 +2477,17 @@ fn execute_commands(
                 "-" => read_stdin()?,
                 _ => body.clone(),
             };
-            let mut request = json!({
-                "to": to,
-                "body": body,
-                "threadId": thread,
-                "kind": kind.as_proto(),
-                "requestId": request_id,
-            });
-            if let Some(ack) = ack {
-                request["ackRequired"] = json!(ack);
-            }
-            let response = client.call(MSG_SEND, &request)?;
+            let request = v1::MessageServiceSendRequest {
+                to: to.clone(),
+                body,
+                thread_id: thread.clone(),
+                kind: kind.as_proto() as i32,
+                ack_required: *ack,
+                request_id: request_id.clone(),
+            };
+            let response = client.unary(v1::message_service::SEND, &request)?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::msg_send_text(&response))
             }
@@ -2491,16 +2498,18 @@ fn execute_commands(
             act_as,
             thread,
         } => {
-            let response = client.call(
-                MSG_INBOX,
-                &json!({
-                    "unreadOnly": unread,
-                    "peek": peek,
-                    "as": act_as,
-                    "threadId": thread,
-                }),
-            )?;
-            mail_list_output(&response, json)
+            let request = v1::InboxRequest {
+                unread_only: *unread,
+                peek: *peek,
+                r#as: act_as.clone(),
+                thread_id: thread.clone(),
+            };
+            let response = client.unary(v1::message_service::INBOX, &request)?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format::mail_text(&response.messages))
+            }
         }
         Command::MsgReply {
             id,
@@ -2511,46 +2520,60 @@ fn execute_commands(
                 "-" => read_stdin()?,
                 _ => body.clone(),
             };
-            let response = client.call(
-                MSG_REPLY,
-                &json!({"id": id, "body": body, "requestId": request_id}),
-            )?;
-            sent_message_output(&response, json, format::msg_reply_text)
+            let request = v1::ReplyRequest {
+                id: id.clone(),
+                body,
+                request_id: request_id.clone(),
+            };
+            let response = client.unary(v1::message_service::REPLY, &request)?;
+            sent_message_output(response.message, json, format::msg_reply_text)
         }
         Command::MsgAck { id, act_as } => {
-            let response = client.call(MSG_ACK, &json!({"id": id, "as": act_as}))?;
-            sent_message_output(&response, json, format::msg_ack_text)
+            let request = v1::AckRequest {
+                id: id.clone(),
+                r#as: act_as.clone(),
+            };
+            let response = client.unary(v1::message_service::ACK, &request)?;
+            sent_message_output(response.message, json, format::msg_ack_text)
         }
         Command::MsgThread { thread } => {
-            let response = client.call(MSG_THREAD, &json!({"threadId": thread}))?;
-            mail_list_output(&response, json)
+            let response = client.unary(
+                v1::message_service::THREAD,
+                &v1::ThreadRequest {
+                    thread_id: thread.clone(),
+                },
+            )?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format::mail_text(&response.messages))
+            }
         }
         Command::MsgThreads {
             sleeve,
             project,
             limit,
         } => {
-            let response = client.call(
-                MSG_THREADS,
-                &json!({"sleeve": sleeve, "project": project, "limit": limit}),
-            )?;
+            let request = v1::ListThreadsRequest {
+                sleeve: sleeve.clone(),
+                project: project.clone(),
+                limit: *limit,
+            };
+            let response = client.unary(v1::message_service::LIST_THREADS, &request)?;
             if json {
-                Ok(format::items(&response, "threads")
-                    .iter()
-                    .map(value_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&response.threads)
             } else {
                 Ok(format::thread_list_text(&response))
             }
         }
         Command::MsgWait { target, timeout } => {
-            let response = client.call(
-                MSG_WAIT,
-                &json!({"target": target, "timeout": format_duration(*timeout)}),
-            )?;
+            let request = v1::MessageServiceWaitRequest {
+                target: target.clone(),
+                timeout: Some(proto_duration(*timeout)),
+            };
+            let response = client.unary(v1::message_service::WAIT, &request)?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format::msg_wait_text(&response))
             }
@@ -2558,30 +2581,19 @@ fn execute_commands(
     }
 }
 
-/// What `msg inbox` and `msg thread` print.
-fn mail_list_output(response: &Value, json: bool) -> Result<String> {
-    if json {
-        value_line(response)
-    } else {
-        Ok(format::mail_text(&format::items(response, "messages")))
-    }
-}
-
 /// What `msg reply` and `msg ack` print: the message the hub just sent or
 /// changed.
 fn sent_message_output(
-    response: &Value,
+    message: Option<v1::MailMessage>,
     json: bool,
-    human: impl Fn(&Value) -> String,
+    human: impl Fn(&v1::MailMessage) -> String,
 ) -> Result<String> {
-    let message = response
-        .get("message")
-        .filter(|value| !value.is_null())
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no message"))?;
+    let message =
+        message.ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no message"))?;
     if json {
-        value_line(message)
+        json_line(&message)
     } else {
-        Ok(human(message))
+        Ok(human(&message))
     }
 }
 
@@ -2681,18 +2693,6 @@ fn transport_timeout(invocation: &Invocation) -> Duration {
             .max(invocation.timeout),
         _ => invocation.timeout,
     }
-}
-
-/// A google.protobuf.Duration in protobuf JSON. The hub reads it as seconds.
-pub(crate) fn format_duration(timeout: Duration) -> String {
-    let micros = timeout.as_micros();
-    let seconds = micros / 1_000_000;
-    let fraction = micros % 1_000_000;
-    if fraction == 0 {
-        return format!("{seconds}s");
-    }
-    let fraction = fraction.to_string().trim_end_matches('0').to_owned();
-    format!("{seconds}.{fraction}s")
 }
 
 fn read_stdin() -> Result<String> {
@@ -3443,26 +3443,6 @@ fn require_sleeve(sleeve: &Option<v1::Sleeve>) -> Result<&v1::Sleeve> {
     sleeve
         .as_ref()
         .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))
-}
-
-/// CreateSessionRequest. Omitted fields stay unset, so the hub uses its own
-/// defaults for cwd and the login shell.
-fn session_new_body(spec: &SessionNew) -> Value {
-    let mut request = json!({ "name": spec.name });
-    if !spec.cwd.is_empty() {
-        request["cwd"] = json!(spec.cwd);
-    }
-    if !spec.command.is_empty() {
-        request["command"] = json!(spec.command);
-    }
-    if !spec.env.is_empty() {
-        let mut env = serde_json::Map::new();
-        for (key, value) in &spec.env {
-            env.insert(key.clone(), json!(value));
-        }
-        request["env"] = Value::Object(env);
-    }
-    request
 }
 
 fn selection(selection: &ModelChoice) -> Option<v1::ModelSelection> {
