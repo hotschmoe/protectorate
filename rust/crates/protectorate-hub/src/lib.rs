@@ -27,6 +27,7 @@ use access::scope_methods;
 use axum::{http::HeaderMap, Router};
 pub use chat::{ChatLauncher, ChatRuntime};
 use chrono::{DateTime, SecondsFormat, Utc};
+use prost_reflect::prost_types;
 use protectorate_audit::Audit;
 use protectorate_auth::{self as auth, Method as ScopeMethod};
 use protectorate_backlog::{self as backlog, Filter, NewNote, Note, Patch, Store as BacklogStore};
@@ -46,8 +47,9 @@ use protectorate_session::{
 };
 use protectorate_sleeve_registry::{Record as SleeveRecord, Registry as SleeveRegistry};
 use protectorate_wire::{
-    self as wire, AuthContext, Catalog, Code, Method, RpcError, RpcRequest, RpcResponse,
-    UnaryServer,
+    self as wire,
+    v1::{self, backlog_service, event_service, hub_service, session_service},
+    AuthContext, Call, Catalog, Code, Method, RpcError, RpcRequest, RpcResponse, UnaryServer,
 };
 use serde_json::{json, Value};
 pub use sleeves::TerminalLauncher;
@@ -65,7 +67,7 @@ pub type NoteEventSink = Arc<dyn Fn(&str, &Note) + Send + Sync>;
 
 struct EventBus {
     sequence: AtomicU64,
-    sender: tokio::sync::broadcast::Sender<Value>,
+    sender: tokio::sync::broadcast::Sender<v1::Event>,
 }
 
 impl EventBus {
@@ -77,16 +79,52 @@ impl EventBus {
         }
     }
 
-    fn publish(&self, kind: &str, subject: &str, payload: Value) {
-        let event = json!({
-            "id": self.sequence.fetch_add(1, Ordering::Relaxed).wrapping_add(1).to_string(),
-            "time": timestamp(Utc::now()),
-            "kind": kind,
-            "subject": subject,
-            "payload": payload,
-        });
-        let _ = self.sender.send(event);
+    fn event(&self, kind: &str, subject: &str, payload: Value) -> v1::Event {
+        v1::Event {
+            id: self
+                .sequence
+                .fetch_add(1, Ordering::Relaxed)
+                .wrapping_add(1)
+                .to_string(),
+            time: Some(proto_time(Utc::now())),
+            kind: kind.into(),
+            subject: subject.into(),
+            payload: proto_struct(payload),
+        }
     }
+
+    fn publish(&self, kind: &str, subject: &str, payload: Value) {
+        let _ = self.sender.send(self.event(kind, subject, payload));
+    }
+}
+
+/// An event payload as google.protobuf.Struct; anything but an object is
+/// no payload.
+fn proto_struct(payload: Value) -> Option<prost_types::Struct> {
+    let Value::Object(fields) = payload else {
+        return None;
+    };
+    Some(prost_types::Struct {
+        fields: fields
+            .into_iter()
+            .map(|(key, value)| (key, proto_value(value)))
+            .collect(),
+    })
+}
+
+fn proto_value(value: Value) -> prost_types::Value {
+    use prost_types::value::Kind;
+    let kind = match value {
+        Value::Null => Kind::NullValue(prost_types::NullValue::NullValue as i32),
+        Value::Bool(value) => Kind::BoolValue(value),
+        Value::Number(value) => Kind::NumberValue(value.as_f64().unwrap_or_default()),
+        Value::String(value) => Kind::StringValue(value),
+        Value::Array(values) => Kind::ListValue(prost_types::ListValue {
+            values: values.into_iter().map(proto_value).collect(),
+        }),
+        object @ Value::Object(_) => Kind::StructValue(proto_struct(object).unwrap_or_default()),
+    };
+    prost_types::Value { kind: Some(kind) }
 }
 
 pub struct Hub {
@@ -685,13 +723,13 @@ impl Hub {
         workspaces::register(&mut server, Arc::clone(&hub))?;
         chat::register(&mut server, Arc::clone(&hub))?;
         let subscribe = Arc::clone(&hub);
-        server.register_streaming("/protectorate.v1.EventService/Subscribe", move |request, sender| {
+        server.stream(event_service::SUBSCRIBE, move |call: Call<_>, sender| {
             let hub = Arc::clone(&subscribe);
             async move {
                 let mut events = hub.events.sender.subscribe();
                 let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
-                let watch = (!request.auth.token_id.is_empty())
-                    .then(|| hub.identity.watch(&request.auth.token_id, now_unix()));
+                let watch = (!call.auth.token_id.is_empty())
+                    .then(|| hub.identity.watch(&call.auth.token_id, now_unix()));
                 let mut check_revocation = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     let event = tokio::select! {
@@ -702,22 +740,18 @@ impl Hub {
                             }
                             continue;
                         },
-                        _ = heartbeat.tick() => json!({
-                            "id": hub.events.sequence.fetch_add(1, Ordering::Relaxed).wrapping_add(1).to_string(),
-                            "time": timestamp(Utc::now()),
-                            "kind": "heartbeat", "subject": "hub",
-                            "payload": {"uptime_seconds": hub.started.elapsed().as_secs_f64()},
-                        }),
+                        _ = heartbeat.tick() => hub.events.event(
+                            "heartbeat",
+                            "hub",
+                            json!({"uptime_seconds": hub.started.elapsed().as_secs_f64()}),
+                        ),
                         next = events.recv() => match next {
                             Ok(event) => event,
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         },
                     };
-                    let bytes = serde_json::to_vec(&event)
-                        .map_err(|_| RpcError::new(Code::Internal, "failed to encode event"))?;
-                    let message = wire::decode_json(request.method.output(), &bytes)?;
-                    let send = sender.send(&message);
+                    let send = sender.send(&event);
                     tokio::pin!(send);
                     loop {
                         tokio::select! {
@@ -737,7 +771,7 @@ impl Hub {
             }
         })?;
         let status = Arc::clone(&hub);
-        server.register("/protectorate.v1.HubService/GetStatus", move |request| {
+        server.unary(hub_service::GET_STATUS, move |_: Call<_>| {
             let hub = Arc::clone(&status);
             async move {
                 let available = hub
@@ -750,231 +784,195 @@ impl Hub {
                     .as_ref()
                     .map(|source| source.channel())
                     .unwrap_or("");
-                respond(
-                    &request,
-                    json!({
-                        "version": hub.version,
-                        "releaseConfirmed": hub.releases.as_ref().is_none_or(|source| {
-                            !source.dir().join(".hub-trial.json").exists()
-                                && source.current().version == hub.version
-                        }),
-                        "hostname": hub.hostname,
-                        "os": platform_os(),
-                        "arch": platform_arch(),
-                        "uptimeSeconds": hub.started.elapsed().as_secs().to_string(),
-                        "startedAt": timestamp(hub.started_at),
-                        "availableVersion": available.version,
-                        "updateChannel": channel,
-                        "releaseNotesUrl": available.notes_url,
-                        "auditHead": audit::head_json(hub.audit.head().ok().flatten().unwrap_or_default()),
+                Ok(v1::GetStatusResponse {
+                    version: hub.version.clone(),
+                    release_confirmed: hub.releases.as_ref().is_none_or(|source| {
+                        !source.dir().join(".hub-trial.json").exists()
+                            && source.current().version == hub.version
                     }),
-                )
+                    hostname: hub.hostname.clone(),
+                    os: platform_os().into(),
+                    arch: platform_arch().into(),
+                    uptime_seconds: hub
+                        .started
+                        .elapsed()
+                        .as_secs()
+                        .try_into()
+                        .unwrap_or(i64::MAX),
+                    started_at: Some(proto_time(hub.started_at)),
+                    available_version: available.version,
+                    update_channel: channel.into(),
+                    release_notes_url: available.notes_url,
+                    audit_head: Some(audit::head(
+                        hub.audit.head().ok().flatten().unwrap_or_default(),
+                    )),
+                })
             }
         })?;
         let runtime_status = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.HubService/GetSleeveRuntime",
-            move |request| {
-                let hub = Arc::clone(&runtime_status);
-                async move {
-                    let configured = hub.terminal_launcher.is_some() || hub.chat_runtime.is_some();
-                    let helper = hub
-                        .terminal_launcher
-                        .as_ref()
-                        .map(|launcher| launcher.helper.as_path())
-                        .or_else(|| {
-                            hub.chat_runtime
-                                .as_ref()
-                                .map(|runtime| runtime.helper_path())
-                        })
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let overlays = configured
-                        && cfg!(target_os = "linux")
-                        && std::fs::read_to_string("/proc/filesystems").is_ok_and(|filesystems| {
-                            filesystems
-                                .lines()
-                                .any(|line| line.split_whitespace().last() == Some("overlay"))
-                        });
-                    respond(
-                        &request,
-                        json!({
-                            "runtime": if configured { "rust-namespaces" } else { "" },
-                            "helperPath": helper,
-                            "overlays": overlays,
-                        }),
-                    )
-                }
-            },
-        )?;
+        server.unary(hub_service::GET_SLEEVE_RUNTIME, move |_: Call<_>| {
+            let hub = Arc::clone(&runtime_status);
+            async move {
+                let configured = hub.terminal_launcher.is_some() || hub.chat_runtime.is_some();
+                let helper = hub
+                    .terminal_launcher
+                    .as_ref()
+                    .map(|launcher| launcher.helper.as_path())
+                    .or_else(|| {
+                        hub.chat_runtime
+                            .as_ref()
+                            .map(|runtime| runtime.helper_path())
+                    })
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let overlays = configured
+                    && cfg!(target_os = "linux")
+                    && std::fs::read_to_string("/proc/filesystems").is_ok_and(|filesystems| {
+                        filesystems
+                            .lines()
+                            .any(|line| line.split_whitespace().last() == Some("overlay"))
+                    });
+                Ok(v1::GetSleeveRuntimeResponse {
+                    runtime: if configured { "rust-namespaces" } else { "" }.into(),
+                    helper_path: helper,
+                    overlays,
+                })
+            }
+        })?;
         let list = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.BacklogService/ListNotes",
-            move |request| {
-                let hub = Arc::clone(&list);
-                async move {
-                    let input = input(&request)?;
-                    let notes = hub
-                        .backlog
-                        .list(Filter {
-                            project: string(&input, "project"),
-                            query: string(&input, "query"),
-                            state: string(&input, "state"),
-                        })
-                        .map_err(backlog_error)?;
-                    respond(
-                        &request,
-                        json!({"notes": notes.iter().map(note_json).collect::<Vec<_>>() }),
-                    )
-                }
-            },
-        )?;
+        server.unary(backlog_service::LIST_NOTES, move |call: Call<_>| {
+            let hub = Arc::clone(&list);
+            async move {
+                let request = call.request;
+                let notes = hub
+                    .backlog
+                    .list(Filter {
+                        project: request.project,
+                        query: request.query,
+                        state: request.state,
+                    })
+                    .map_err(backlog_error)?;
+                Ok(v1::ListNotesResponse {
+                    notes: notes.iter().map(note).collect(),
+                })
+            }
+        })?;
         let get = Arc::clone(&hub);
-        server.register("/protectorate.v1.BacklogService/GetNote", move |request| {
+        server.unary(backlog_service::GET_NOTE, move |call: Call<_>| {
             let hub = Arc::clone(&get);
             async move {
-                let input = input(&request)?;
-                let note = hub
-                    .backlog
-                    .get(&string(&input, "id"))
-                    .map_err(backlog_error)?;
-                respond(&request, json!({"note": note_json(&note)}))
+                let found = hub.backlog.get(&call.request.id).map_err(backlog_error)?;
+                Ok(v1::GetNoteResponse {
+                    note: Some(note(&found)),
+                })
             }
         })?;
         let create = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.BacklogService/CreateNote",
-            move |request| {
-                let hub = Arc::clone(&create);
-                async move {
-                    let input = input(&request)?;
-                    let note = hub
-                        .backlog
-                        .create(NewNote {
-                            title: string(&input, "title"),
-                            body: string(&input, "body"),
-                            pinned: boolean(&input, "pinned"),
-                            project: string(&input, "project"),
-                            source: sender(&request.auth.actor),
-                        })
-                        .map_err(backlog_error)?;
-                    if let Some(events) = &hub.note_events {
-                        events("note.created", &note);
-                    }
-                    hub.emit("note.created", &note.id, note_event_payload(&note));
-                    respond(&request, json!({"note": note_json(&note)}))
+        server.unary(backlog_service::CREATE_NOTE, move |call: Call<_>| {
+            let hub = Arc::clone(&create);
+            async move {
+                let request = call.request;
+                let created = hub
+                    .backlog
+                    .create(NewNote {
+                        title: request.title,
+                        body: request.body,
+                        pinned: request.pinned,
+                        project: request.project,
+                        source: sender(&call.auth.actor),
+                    })
+                    .map_err(backlog_error)?;
+                if let Some(events) = &hub.note_events {
+                    events("note.created", &created);
                 }
-            },
-        )?;
+                hub.emit("note.created", &created.id, note_event_payload(&created));
+                Ok(v1::CreateNoteResponse {
+                    note: Some(note(&created)),
+                })
+            }
+        })?;
         let update = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.BacklogService/UpdateNote",
-            move |request| {
-                let hub = Arc::clone(&update);
-                async move {
-                    let input = input(&request)?;
-                    let (note, changed) = hub
-                        .backlog
-                        .update(
-                            &string(&input, "id"),
-                            Patch {
-                                title: optional_string(&input, "title"),
-                                body: optional_string(&input, "body"),
-                                pinned: input.get("pinned").and_then(Value::as_bool),
-                                project: optional_string(&input, "project"),
-                                state: optional_string(&input, "state"),
-                                resolution: optional_string(&input, "resolution"),
-                                done_by: request.auth.actor.clone(),
-                            },
-                        )
-                        .map_err(backlog_error)?;
-                    if changed {
-                        if let Some(events) = &hub.note_events {
-                            events("note.updated", &note);
-                        }
-                        hub.emit("note.updated", &note.id, note_event_payload(&note));
-                    }
-                    respond(&request, json!({"note": note_json(&note)}))
-                }
-            },
-        )?;
-        let delete = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.BacklogService/DeleteNote",
-            move |request| {
-                let hub = Arc::clone(&delete);
-                async move {
-                    let input = input(&request)?;
-                    let note = hub
-                        .backlog
-                        .delete(&string(&input, "id"))
-                        .map_err(backlog_error)?;
-                    if let Some(events) = &hub.note_events {
-                        events("note.deleted", &note);
-                    }
-                    hub.emit("note.deleted", &note.id, note_event_payload(&note));
-                    respond(&request, json!({}))
-                }
-            },
-        )?;
-        let list_sessions = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.SessionService/ListSessions",
-            move |request| {
-                let manager = Arc::clone(&list_sessions.sessions);
-                async move {
-                    let sessions = tokio::task::spawn_blocking(move || manager.list())
-                        .await
-                        .map_err(join_error)?
-                        .map_err(session_error)?;
-                    let own_session = sleeve_session(&request.auth.actor);
-                    respond(
-                        &request,
-                        json!({"sessions": sessions.iter().filter(|s| own_session.as_ref().is_none_or(|name| s.name == *name)).map(session_json).collect::<Vec<_>>() }),
+        server.unary(backlog_service::UPDATE_NOTE, move |call: Call<_>| {
+            let hub = Arc::clone(&update);
+            async move {
+                let request = call.request;
+                let (updated, changed) = hub
+                    .backlog
+                    .update(
+                        &request.id,
+                        Patch {
+                            title: request.title,
+                            body: request.body,
+                            pinned: request.pinned,
+                            project: request.project,
+                            state: request.state,
+                            resolution: request.resolution,
+                            done_by: call.auth.actor,
+                        },
                     )
+                    .map_err(backlog_error)?;
+                if changed {
+                    if let Some(events) = &hub.note_events {
+                        events("note.updated", &updated);
+                    }
+                    hub.emit("note.updated", &updated.id, note_event_payload(&updated));
                 }
-            },
-        )?;
+                Ok(v1::UpdateNoteResponse {
+                    note: Some(note(&updated)),
+                })
+            }
+        })?;
+        let delete = Arc::clone(&hub);
+        server.unary(backlog_service::DELETE_NOTE, move |call: Call<_>| {
+            let hub = Arc::clone(&delete);
+            async move {
+                let deleted = hub
+                    .backlog
+                    .delete(&call.request.id)
+                    .map_err(backlog_error)?;
+                if let Some(events) = &hub.note_events {
+                    events("note.deleted", &deleted);
+                }
+                hub.emit("note.deleted", &deleted.id, note_event_payload(&deleted));
+                Ok(v1::DeleteNoteResponse {})
+            }
+        })?;
+        let list_sessions = Arc::clone(&hub);
+        server.unary(session_service::LIST_SESSIONS, move |call: Call<_>| {
+            let manager = Arc::clone(&list_sessions.sessions);
+            async move {
+                let sessions = tokio::task::spawn_blocking(move || manager.list())
+                    .await
+                    .map_err(join_error)?
+                    .map_err(session_error)?;
+                let own_session = sleeve_session(&call.auth.actor);
+                Ok(v1::ListSessionsResponse {
+                    sessions: sessions
+                        .iter()
+                        .filter(|s| own_session.as_ref().is_none_or(|name| s.name == *name))
+                        .map(session_message)
+                        .collect(),
+                })
+            }
+        })?;
         let create_session = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.SessionService/CreateSession",
-            move |request| {
+        server.unary(
+            session_service::CREATE_SESSION,
+            move |call: Call<v1::CreateSessionRequest>| {
                 let hub = Arc::clone(&create_session);
                 async move {
-                    let input = input(&request)?;
-                    let name = string(&input, "name");
-                    if name.starts_with("sleeve-") {
+                    let request = call.request;
+                    if request.name.starts_with("sleeve-") {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
                             "sleeve names are reserved",
                         ));
                     }
                     let options = SessionOptions {
-                        name,
-                        cwd: optional_string(&input, "cwd")
-                            .filter(|s| !s.is_empty())
-                            .map(Into::into),
-                        command: input
-                            .get("command")
-                            .and_then(Value::as_array)
-                            .map(|a| {
-                                a.iter()
-                                    .filter_map(Value::as_str)
-                                    .map(str::to_owned)
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        env: input
-                            .get("env")
-                            .and_then(Value::as_object)
-                            .map(|m| {
-                                m.iter()
-                                    .filter_map(|(k, v)| {
-                                        v.as_str().map(|v| (k.clone(), v.to_owned()))
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
+                        name: request.name,
+                        cwd: Some(request.cwd).filter(|s| !s.is_empty()).map(Into::into),
+                        command: request.command,
+                        env: request.env.into_iter().collect(),
                     };
                     let session = tokio::task::spawn_blocking(move || {
                         hub.session_monitor.scan(&hub);
@@ -987,17 +985,19 @@ impl Hub {
                     .await
                     .map_err(join_error)?
                     .map_err(session_error)?;
-                    respond(&request, json!({"session": session_json(&session)}))
+                    Ok(v1::CreateSessionResponse {
+                        session: Some(session_message(&session)),
+                    })
                 }
             },
         )?;
         let kill_session = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.SessionService/KillSession",
-            move |request| {
+        server.unary(
+            session_service::KILL_SESSION,
+            move |call: Call<v1::KillSessionRequest>| {
                 let hub = Arc::clone(&kill_session);
                 async move {
-                    let name = string(&input(&request)?, "name");
+                    let name = call.request.name;
                     tokio::task::spawn_blocking(move || {
                         hub.session_monitor.scan(&hub);
                         let result = hub.sessions.kill(&name);
@@ -1009,17 +1009,17 @@ impl Hub {
                     .await
                     .map_err(join_error)?
                     .map_err(session_error)?;
-                    respond(&request, json!({}))
+                    Ok(v1::KillSessionResponse {})
                 }
             },
         )?;
         let respawn_session = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.SessionService/RespawnSession",
-            move |request| {
+        server.unary(
+            session_service::RESPAWN_SESSION,
+            move |call: Call<v1::RespawnSessionRequest>| {
                 let hub = Arc::clone(&respawn_session);
                 async move {
-                    let name = string(&input(&request)?, "name");
+                    let name = call.request.name;
                     if name.starts_with("sleeve-") {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
@@ -1037,7 +1037,9 @@ impl Hub {
                     .await
                     .map_err(join_error)?
                     .map_err(session_error)?;
-                    respond(&request, json!({"session": session_json(&session)}))
+                    Ok(v1::RespawnSessionResponse {
+                        session: Some(session_message(&session)),
+                    })
                 }
             },
         )?;
@@ -1052,29 +1054,24 @@ impl Hub {
         let debug_unknown = Arc::clone(&hub);
         let debug_index = Arc::clone(&hub);
         let debug_node = Arc::clone(&hub);
-        server.register(
-            "/protectorate.v1.SessionService/CapturePane",
-            move |request| {
+        server.unary(
+            session_service::CAPTURE_PANE,
+            move |call: Call<v1::CapturePaneRequest>| {
                 let manager = Arc::clone(&hub.sessions);
                 async move {
-                    let input = input(&request)?;
-                    let name = string(&input, "name");
-                    if sleeve_session(&request.auth.actor).is_some_and(|own| own != name) {
+                    let name = call.request.name;
+                    if sleeve_session(&call.auth.actor).is_some_and(|own| own != name) {
                         return Err(RpcError::new(
                             Code::PermissionDenied,
                             "sleeve may only capture its own session",
                         ));
                     }
-                    let lines = input
-                        .get("lines")
-                        .and_then(Value::as_i64)
-                        .unwrap_or_default()
-                        .max(0) as usize;
+                    let lines = call.request.lines.max(0) as usize;
                     let text = tokio::task::spawn_blocking(move || manager.capture(&name, lines))
                         .await
                         .map_err(join_error)?
                         .map_err(session_error)?;
-                    respond(&request, json!({"text": text}))
+                    Ok(v1::CapturePaneResponse { text })
                 }
             },
         )?;
@@ -1240,9 +1237,6 @@ fn unix_timestamp(seconds: i64) -> String {
         .map(timestamp)
         .unwrap_or_default()
 }
-fn optional_string(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(Value::as_str).map(str::to_owned)
-}
 fn boolean(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -1288,16 +1282,29 @@ fn platform_arch() -> &'static str {
 fn timestamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Nanos, true)
 }
-fn note_json(note: &Note) -> Value {
-    let mut out = json!({
-        "id": note.id, "title": note.title, "body": note.body,
-        "createdAt": timestamp(note.created_at), "updatedAt": timestamp(note.updated_at),
-        "pinned": note.pinned, "project": note.project, "source": note.source, "state": note.state,
-    });
-    if let Some(done_at) = note.done_at {
-        out["completion"] = json!({"doneAt": timestamp(done_at), "doneBy": note.done_by, "resolution": note.resolution});
+fn proto_time(time: DateTime<Utc>) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: time.timestamp(),
+        nanos: time.timestamp_subsec_nanos().min(999_999_999) as i32,
     }
-    out
+}
+fn note(note: &Note) -> v1::Note {
+    v1::Note {
+        id: note.id.clone(),
+        title: note.title.clone(),
+        body: note.body.clone(),
+        created_at: Some(proto_time(note.created_at)),
+        updated_at: Some(proto_time(note.updated_at)),
+        pinned: note.pinned,
+        project: note.project.clone(),
+        source: note.source.clone(),
+        state: note.state.clone(),
+        completion: note.done_at.map(|done_at| v1::NoteCompletion {
+            done_at: Some(proto_time(done_at)),
+            done_by: note.done_by.clone(),
+            resolution: note.resolution.clone(),
+        }),
+    }
 }
 fn note_event_payload(note: &Note) -> Value {
     json!({
@@ -1318,27 +1325,24 @@ fn backlog_error(error: backlog::Error) -> RpcError {
     RpcError::new(code, error.to_string())
 }
 
-fn session_json(session: &session::Session) -> Value {
-    let mut out = json!({
-        "name": session.name,
-        "cwd": session.cwd.to_string_lossy(),
-        "command": session.command,
-        "createdAt": timestamp(DateTime::<Utc>::from(session.created)),
-        "attachedClients": session.attached_clients,
-        "lastActivity": timestamp(DateTime::<Utc>::from(session.last_activity)),
-        "paneCols": session.cols,
-        "paneRows": session.rows,
-        "state": match session.state {
-            SessionState::Running => "SESSION_STATE_RUNNING",
-            SessionState::Exited => "SESSION_STATE_EXITED",
-        },
-        "exitCode": session.exit_code,
-        "exitSignal": session.exit_signal,
-    });
-    if let Some(exited) = session.exited {
-        out["exitedAt"] = json!(timestamp(DateTime::<Utc>::from(exited)));
+fn session_message(session: &session::Session) -> v1::Session {
+    v1::Session {
+        name: session.name.clone(),
+        cwd: session.cwd.to_string_lossy().into_owned(),
+        command: session.command.clone(),
+        created_at: Some(proto_time(session.created.into())),
+        attached_clients: session.attached_clients.try_into().unwrap_or(i32::MAX),
+        last_activity: Some(proto_time(session.last_activity.into())),
+        pane_cols: session.cols.try_into().unwrap_or(i32::MAX),
+        pane_rows: session.rows.try_into().unwrap_or(i32::MAX),
+        state: match session.state {
+            SessionState::Running => v1::SessionState::Running,
+            SessionState::Exited => v1::SessionState::Exited,
+        } as i32,
+        exit_code: session.exit_code,
+        exit_signal: session.exit_signal,
+        exited_at: session.exited.map(|exited| proto_time(exited.into())),
     }
-    out
 }
 
 fn session_error(error: session::Error) -> RpcError {
