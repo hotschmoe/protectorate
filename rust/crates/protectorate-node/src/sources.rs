@@ -331,14 +331,14 @@ impl Sources {
             ));
         }
         let upload = state.active.get_mut(id).expect("checked above");
-        if let Err(error) = upload.file.write_all(&data) {
+        if let Err(error) = upload.file.write_all(data) {
             if let Some(failed) = state.active.remove(id) {
                 state.bytes -= failed.size;
             }
             let _ = fs::remove_file(self.job_dir(id).join("upload.part"));
             return Err(io_rpc(error));
         }
-        upload.hash.update(&data);
+        upload.hash.update(data);
         upload.size += data.len() as u64;
         upload.touched = Instant::now();
         let received = upload.size;
