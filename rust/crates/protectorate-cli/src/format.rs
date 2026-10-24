@@ -2144,16 +2144,6 @@ fn first_line(text: &str, limit: usize) -> String {
     }
 }
 
-pub(crate) fn local_minute(raw: String) -> String {
-    match timestamp_millis(&raw) {
-        Some(millis) => match Local.timestamp_millis_opt(millis) {
-            LocalResult::Single(time) => time.format("%Y-%m-%d %H:%M").to_string(),
-            _ => raw,
-        },
-        None => or_dash(raw),
-    }
-}
-
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2238,58 +2228,6 @@ where
             _ => None,
         })
         .unwrap_or_else(|| "-".to_owned())
-}
-
-/// Protobuf JSON timestamps to Unix milliseconds, without a date crate.
-pub(crate) fn timestamp_millis(text: &str) -> Option<i64> {
-    let (date, rest) = text.trim().split_once(['T', 't'])?;
-    let rest = rest.trim_end_matches(['Z', 'z']);
-    let mut date_parts = date.split('-');
-    let year: i64 = date_parts.next()?.parse().ok()?;
-    let month: i64 = date_parts.next()?.parse().ok()?;
-    let day: i64 = date_parts.next()?.parse().ok()?;
-    let (time, offset) = match (rest.find('+'), rest.rfind('-')) {
-        (Some(index), _) => (&rest[..index], (b'+', &rest[index + 1..])),
-        (None, Some(index)) => (&rest[..index], (b'-', &rest[index + 1..])),
-        (None, None) => (rest, (b'+', "")),
-    };
-    let sign = offset.0;
-    let mut time_parts = time.split(':');
-    let hours: i64 = time_parts.next()?.parse().ok()?;
-    let minutes: i64 = time_parts.next()?.parse().ok()?;
-    let seconds = time_parts.next()?;
-    let (seconds, fraction) = match seconds.split_once('.') {
-        Some((whole, fraction)) => (whole, fraction),
-        None => (seconds, ""),
-    };
-    let seconds: i64 = seconds.parse().ok()?;
-    let fraction: String = fraction.chars().take(3).collect();
-    let millis: i64 = format!("{fraction:0<3}").parse().ok()?;
-    let offset_seconds = match offset.1.split_once(':') {
-        Some((hours, minutes)) => {
-            let hours: i64 = hours.parse().ok()?;
-            let minutes: i64 = minutes.parse().ok()?;
-            let seconds = hours * 3600 + minutes * 60;
-            if sign == b'-' {
-                -seconds
-            } else {
-                seconds
-            }
-        }
-        None => 0,
-    };
-    let days = days_from_civil(year, month, day);
-    Some((days * 86_400 + hours * 3600 + minutes * 60 + seconds - offset_seconds) * 1000 + millis)
-}
-
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_of_year = (month + 9) % 12;
-    let day_of_year = (153 * month_of_year + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
 }
 
 /// Aligns tab-separated columns: consecutive column lines share widths, and a

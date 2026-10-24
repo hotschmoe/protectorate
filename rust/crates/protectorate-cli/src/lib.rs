@@ -3453,7 +3453,7 @@ fn selection(selection: &ModelChoice) -> Option<v1::ModelSelection> {
 }
 
 /// A message as a JSON value, for output the CLI composes from several.
-fn message_value<T: ReflectMessage>(message: &T) -> Result<Value> {
+pub(crate) fn message_value<T: ReflectMessage>(message: &T) -> Result<Value> {
     serde_json::from_slice(&protectorate_wire::encode(message)?)
         .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
 }
