@@ -1417,3 +1417,56 @@ fn validate_mask(mask: FileMask, state: &Path, grants: &[BindGrant]) -> Result<F
         target: mask.target,
     })
 }
+
+/// Writes newline-terminated JSON lines to a child's stdin from a dedicated
+/// thread, so no caller blocks on a full pipe while holding locks the child's
+/// output reader needs. Unread input is capped; on a write error `failed` runs
+/// once and the thread stops.
+pub struct LineInput {
+    lines: std::sync::mpsc::Sender<Vec<u8>>,
+    unread: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    name: &'static str,
+}
+
+impl LineInput {
+    pub const MAX_UNREAD: usize = 64 << 20;
+
+    pub fn start(
+        mut stdin: impl std::io::Write + Send + 'static,
+        name: &'static str,
+        failed: impl FnOnce(std::io::Error) + Send + 'static,
+    ) -> Self {
+        use std::sync::atomic::Ordering;
+        let (lines, queue) = std::sync::mpsc::channel::<Vec<u8>>();
+        let unread = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let written = std::sync::Arc::clone(&unread);
+        std::thread::spawn(move || {
+            for line in queue {
+                if let Err(error) = stdin.write_all(&line) {
+                    failed(error);
+                    return;
+                }
+                written.fetch_sub(line.len(), Ordering::Relaxed);
+            }
+        });
+        Self {
+            lines,
+            unread,
+            name,
+        }
+    }
+
+    pub fn write(&self, value: &serde_json::Value) -> std::result::Result<(), String> {
+        use std::sync::atomic::Ordering;
+        let mut line = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+        line.push(b'\n');
+        let len = line.len();
+        if self.unread.fetch_add(len, Ordering::Relaxed) + len > Self::MAX_UNREAD {
+            self.unread.fetch_sub(len, Ordering::Relaxed);
+            return Err(format!("{} is not reading its input", self.name));
+        }
+        self.lines
+            .send(line)
+            .map_err(|_| format!("{} stdin is closed", self.name))
+    }
+}

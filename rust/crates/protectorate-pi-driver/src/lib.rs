@@ -4,25 +4,20 @@
 use protectorate_chatlog::{Event, Log};
 use protectorate_sandbox::{
     runtime::{self, KillHandle, LaunchOptions, StdioMode},
-    PlanKind, ValidatedPlan,
+    LineInput, PlanKind, ValidatedPlan,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{BufRead, BufReader, Read, Write},
-    process::ChildStdin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc, Arc, Condvar, Mutex,
-    },
+    io::{BufRead, BufReader, Read},
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
 const MAX_LINE: usize = 4 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
-const MAX_UNREAD_INPUT: usize = 64 << 20;
 
 /// One entry of Pi's `get_available_models` reply.
 #[derive(Deserialize)]
@@ -71,49 +66,8 @@ struct State {
     context_tokens: u64,
 }
 
-/// Pi's stdin, written by its own thread. Callers queue lines under
-/// `event_gate` or the state lock without blocking, so Pi stalling on a full
-/// stdout pipe cannot also stall the stdout reader that waits for them.
-struct Input {
-    lines: mpsc::Sender<Vec<u8>>,
-    unread: Arc<AtomicUsize>,
-}
-
-impl Input {
-    fn start(mut stdin: ChildStdin, log: Arc<Log>, kill: KillHandle) -> Self {
-        let (lines, queue) = mpsc::channel::<Vec<u8>>();
-        let unread = Arc::new(AtomicUsize::new(0));
-        let written = Arc::clone(&unread);
-        thread::spawn(move || {
-            for line in queue {
-                if let Err(error) = stdin.write_all(&line) {
-                    let _ = log.append(Event::new(
-                        json!({"error":{"text":format!("write pi stdin: {error}")}}),
-                    ));
-                    kill.kill();
-                    return;
-                }
-                written.fetch_sub(line.len(), Ordering::Relaxed);
-            }
-        });
-        Self { lines, unread }
-    }
-    fn write(&self, value: &Value) -> Result<(), String> {
-        let mut line = serde_json::to_vec(value).map_err(|e| e.to_string())?;
-        line.push(b'\n');
-        let len = line.len();
-        if self.unread.fetch_add(len, Ordering::Relaxed) + len > MAX_UNREAD_INPUT {
-            self.unread.fetch_sub(len, Ordering::Relaxed);
-            return Err("pi is not reading its input".into());
-        }
-        self.lines
-            .send(line)
-            .map_err(|_| "pi stdin is closed".into())
-    }
-}
-
 pub struct Session {
-    input: Input,
+    input: LineInput,
     event_gate: Mutex<()>,
     operation: Mutex<()>,
     state: Mutex<State>,
@@ -141,7 +95,16 @@ impl Session {
         let stdout = child.take_stdout().ok_or("sandbox did not supply stdout")?;
         let stderr = child.take_stderr().ok_or("sandbox did not supply stderr")?;
         let session = Arc::new(Self {
-            input: Input::start(stdin, Arc::clone(&log), child.kill_handle()),
+            input: LineInput::start(stdin, "pi", {
+                let log = Arc::clone(&log);
+                let kill = child.kill_handle();
+                move |error| {
+                    let _ = log.append(Event::new(
+                        json!({"error":{"text":format!("write pi stdin: {error}")}}),
+                    ));
+                    kill.kill();
+                }
+            }),
             event_gate: Mutex::new(()),
             operation: Mutex::new(()),
             state: Mutex::new(State::default()),
