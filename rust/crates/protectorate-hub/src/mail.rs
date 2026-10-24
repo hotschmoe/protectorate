@@ -1,10 +1,14 @@
 //! MessageService projection of the durable mailbox.
-use super::{input, respond, string, Hub};
-use chrono::{SecondsFormat, Utc};
-use protectorate_mailbox::{self as mailbox, Action, Kind, Message, NewMessage, ThreadInfo, Time};
+use super::{proto_time, Hub};
+use chrono::Utc;
+use protectorate_mailbox::{self as mailbox, Action, Kind, Message, NewMessage, ThreadInfo};
 use protectorate_sleeve_registry::{Mode, State};
-use protectorate_wire::{Code, Result, RpcError, RpcRequest, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    self as wire,
+    v1::{self, message_service},
+    AuthContext, Call, Code, Result, RpcError, UnaryServer,
+};
+use serde_json::json;
 use std::{
     collections::BTreeMap,
     fs,
@@ -35,20 +39,19 @@ fn directory_error(error: protectorate_directory::Error) -> RpcError {
     RpcError::new(code, error.to_string())
 }
 
-fn who(request: &RpcRequest) -> String {
-    if request.auth.device {
+fn who(auth: &AuthContext) -> String {
+    if auth.device {
         "owner".into()
     } else {
-        super::sender(&request.auth.actor)
+        super::sender(&auth.actor)
     }
 }
 
-fn acting_as(request: &RpcRequest, value: &Value) -> Result<String> {
-    let self_name = who(request);
-    let as_name = string(value, "as");
+fn acting_as(auth: &AuthContext, as_name: String) -> Result<String> {
+    let self_name = who(auth);
     if as_name.is_empty() || as_name == self_name {
         Ok(self_name)
-    } else if request.auth.owner {
+    } else if auth.owner {
         Ok(as_name)
     } else {
         Err(RpcError::new(
@@ -62,63 +65,69 @@ fn visible(message: &Message, actor: &str, owner: bool) -> bool {
     owner || message.from == actor || message.deliveries.contains_key(actor)
 }
 
-fn rfc3339(time: Time) -> String {
-    time.to_rfc3339_opts(SecondsFormat::Nanos, true)
-}
-
-fn message_json(message: &Message) -> Value {
+fn mail_message(message: &Message) -> v1::MailMessage {
     let kind = match message.kind.as_str() {
-        "request" => "MESSAGE_KIND_REQUEST",
-        "notice" => "MESSAGE_KIND_NOTICE",
-        _ => "MESSAGE_KIND_NOTE",
+        "request" => v1::MessageKind::Request,
+        "notice" => v1::MessageKind::Notice,
+        _ => v1::MessageKind::Note,
     };
-    let mut value = json!({
-        "id": message.id, "threadId": message.thread, "from": message.from,
-        "to": message.to, "kind": kind, "ackRequired": message.ack_required,
-        "body": message.body, "replyTo": message.reply_to,
-        "createdAt": rfc3339(message.created), "noteId": message.note_id,
-        "runId": message.run_id,
-        "deliveries": message.recipients.iter().map(|recipient| {
-            let delivery = &message.deliveries[recipient];
-            let mut value = json!({"recipient": recipient, "reminders": delivery.reminders.max(0)});
-            for (key, at) in [
-                ("deliveredAt", delivery.delivered),
-                ("readAt", delivery.read),
-                ("ackedAt", delivery.acked),
-            ] {
-                if let Some(at) = at.map(rfc3339) {
-                    value[key] = json!(at);
-                }
-            }
-            value
-        }).collect::<Vec<_>>(),
-    });
-    if let Some(at) = message.escalated.map(rfc3339) {
-        value["escalatedAt"] = json!(at);
-    }
-    value
-}
-
-fn thread_json(info: &ThreadInfo) -> Value {
-    json!({
-        "threadId": info.id, "participants": info.participants,
-        "messageCount": info.messages, "last": message_json(&info.last),
-        "unread": info.unread, "openAcks": info.open_acks,
-        "escalated": info.escalated, "projects": info.projects,
-    })
-}
-
-fn kind(value: &Value) -> Result<Kind> {
-    match value.get("kind").and_then(Value::as_str).unwrap_or("") {
-        "" | "MESSAGE_KIND_UNSPECIFIED" | "MESSAGE_KIND_NOTE" => Ok(Kind::NOTE),
-        "MESSAGE_KIND_REQUEST" => Ok(Kind::REQUEST),
-        "MESSAGE_KIND_NOTICE" => Ok(Kind::NOTICE),
-        _ => Err(RpcError::new(Code::InvalidArgument, "unknown message kind")),
+    v1::MailMessage {
+        id: message.id.clone(),
+        thread_id: message.thread.clone(),
+        from: message.from.clone(),
+        to: message.to.clone(),
+        kind: kind as i32,
+        ack_required: message.ack_required,
+        body: message.body.clone(),
+        reply_to: message.reply_to.clone(),
+        created_at: Some(proto_time(message.created)),
+        deliveries: message
+            .recipients
+            .iter()
+            .filter_map(|recipient| {
+                let delivery = message.deliveries.get(recipient)?;
+                Some(v1::MailDelivery {
+                    recipient: recipient.clone(),
+                    delivered_at: delivery.delivered.map(proto_time),
+                    read_at: delivery.read.map(proto_time),
+                    acked_at: delivery.acked.map(proto_time),
+                    reminders: delivery.reminders.max(0).try_into().unwrap_or(u32::MAX),
+                })
+            })
+            .collect(),
+        escalated_at: message.escalated.map(proto_time),
+        note_id: message.note_id.clone(),
+        run_id: message.run_id.clone(),
     }
 }
 
-fn request_id(value: &Value) -> Result<String> {
-    let id = string(value, "requestId");
+fn count(value: usize) -> u32 {
+    value.try_into().unwrap_or(u32::MAX)
+}
+
+fn thread_summary(info: &ThreadInfo) -> v1::ThreadSummary {
+    v1::ThreadSummary {
+        thread_id: info.id.clone(),
+        participants: info.participants.clone(),
+        message_count: count(info.messages),
+        last: Some(mail_message(&info.last)),
+        unread: count(info.unread),
+        open_acks: count(info.open_acks),
+        escalated: count(info.escalated),
+        projects: info.projects.clone(),
+    }
+}
+
+fn kind(value: i32) -> Result<Kind> {
+    match v1::MessageKind::try_from(value) {
+        Ok(v1::MessageKind::Unspecified | v1::MessageKind::Note) => Ok(Kind::NOTE),
+        Ok(v1::MessageKind::Request) => Ok(Kind::REQUEST),
+        Ok(v1::MessageKind::Notice) => Ok(Kind::NOTICE),
+        Err(_) => Err(RpcError::new(Code::InvalidArgument, "unknown message kind")),
+    }
+}
+
+fn request_id(id: String) -> Result<String> {
     if !id.is_empty()
         && (id.len() < 8
             || id.len() > 128
@@ -688,245 +697,257 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         });
     }
     let send_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.MessageService/Send", move |request| {
-        let hub = Arc::clone(&send_hub);
-        async move {
-            let value = input(&request)?;
-            let kind = kind(&value)?;
-            let ack_required = value
-                .get("ackRequired")
-                .and_then(Value::as_bool)
-                .unwrap_or(kind == Kind::REQUEST);
-            let (message, duplicate) = send(
-                &hub,
-                &who(&request),
-                Send {
-                    to: string(&value, "to"),
-                    body: string(&value, "body"),
-                    thread: string(&value, "threadId"),
-                    kind,
-                    ack_required,
-                    request_id: request_id(&value)?,
-                    reply_to: String::new(),
-                    direct: false,
-                    footer: None,
-                },
-            )?;
-            respond(
-                &request,
-                json!({
-                    "message": message_json(&message), "duplicate": duplicate,
-                    "waiting": message.recipients.is_empty(), "noteId": message.note_id,
-                }),
-            )
-        }
-    })?;
+    server.unary(
+        message_service::SEND,
+        move |call: Call<v1::MessageServiceSendRequest>| {
+            let hub = Arc::clone(&send_hub);
+            async move {
+                let request = call.request;
+                let kind = kind(request.kind)?;
+                let ack_required = request.ack_required.unwrap_or(kind == Kind::REQUEST);
+                let (message, duplicate) = send(
+                    &hub,
+                    &who(&call.auth),
+                    Send {
+                        to: request.to,
+                        body: request.body,
+                        thread: request.thread_id,
+                        kind,
+                        ack_required,
+                        request_id: request_id(request.request_id)?,
+                        reply_to: String::new(),
+                        direct: false,
+                        footer: None,
+                    },
+                )?;
+                Ok(v1::MessageServiceSendResponse {
+                    message: Some(mail_message(&message)),
+                    duplicate,
+                    waiting: message.recipients.is_empty(),
+                    note_id: message.note_id,
+                })
+            }
+        },
+    )?;
     let inbox_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.MessageService/Inbox", move |request| {
-        let hub = Arc::clone(&inbox_hub);
-        async move {
-            let value = input(&request)?;
-            let actor = acting_as(&request, &value)?;
-            let peek = value.get("peek").and_then(Value::as_bool).unwrap_or(false);
-            let messages = hub
-                .mail
-                .inbox(
-                    &actor,
-                    &string(&value, "threadId"),
-                    value
-                        .get("unreadOnly")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                    peek,
-                )
-                .map_err(error)?;
-            if !peek {
-                for message in &messages {
-                    if message
-                        .deliveries
-                        .get(&actor)
-                        .is_some_and(|d| d.read.is_none())
-                    {
-                        hub.emit("msg.read", &message.id, json!({"recipient": actor}));
+    server.unary(
+        message_service::INBOX,
+        move |call: Call<v1::InboxRequest>| {
+            let hub = Arc::clone(&inbox_hub);
+            async move {
+                let request = call.request;
+                let actor = acting_as(&call.auth, request.r#as)?;
+                let messages = hub
+                    .mail
+                    .inbox(
+                        &actor,
+                        &request.thread_id,
+                        request.unread_only,
+                        request.peek,
+                    )
+                    .map_err(error)?;
+                if !request.peek {
+                    for message in &messages {
+                        if message
+                            .deliveries
+                            .get(&actor)
+                            .is_some_and(|d| d.read.is_none())
+                        {
+                            hub.emit("msg.read", &message.id, json!({"recipient": actor}));
+                        }
                     }
                 }
+                Ok(v1::InboxResponse {
+                    messages: messages.iter().map(mail_message).collect(),
+                })
             }
-            respond(
-                &request,
-                json!({"messages": messages.iter().map(message_json).collect::<Vec<_>>()}),
-            )
-        }
-    })?;
+        },
+    )?;
     let ack_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.MessageService/Ack", move |request| {
+    server.unary(message_service::ACK, move |call: Call<v1::AckRequest>| {
         let hub = Arc::clone(&ack_hub);
         async move {
-            let value = input(&request)?;
-            let message = ack(&hub, &string(&value, "id"), &acting_as(&request, &value)?)?;
-            respond(&request, json!({"message": message_json(&message)}))
+            let actor = acting_as(&call.auth, call.request.r#as)?;
+            let message = ack(&hub, &call.request.id, &actor)?;
+            Ok(v1::AckResponse {
+                message: Some(mail_message(&message)),
+            })
         }
     })?;
     let reply_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.MessageService/Reply", move |request| {
-        let hub = Arc::clone(&reply_hub);
-        async move {
-            let value = input(&request)?;
-            let actor = who(&request);
-            let id = string(&value, "id");
-            let original = hub
-                .mail
-                .get(&id)
-                .ok_or_else(|| RpcError::new(Code::NotFound, format!("no message {id:?}")))?;
-            if !request.auth.owner && !original.deliveries.contains_key(&actor) {
-                return Err(RpcError::new(
-                    Code::PermissionDenied,
-                    format!("{actor} is not a recipient of {id}"),
-                ));
+    server.unary(
+        message_service::REPLY,
+        move |call: Call<v1::ReplyRequest>| {
+            let hub = Arc::clone(&reply_hub);
+            async move {
+                let request = call.request;
+                let actor = who(&call.auth);
+                let id = request.id;
+                let original = hub
+                    .mail
+                    .get(&id)
+                    .ok_or_else(|| RpcError::new(Code::NotFound, format!("no message {id:?}")))?;
+                if !call.auth.owner && !original.deliveries.contains_key(&actor) {
+                    return Err(RpcError::new(
+                        Code::PermissionDenied,
+                        format!("{actor} is not a recipient of {id}"),
+                    ));
+                }
+                if original.from == "hub" {
+                    return Err(RpcError::new(
+                        Code::FailedPrecondition,
+                        format!("{id} is a notice from the hub; ack it instead"),
+                    ));
+                }
+                let (message, duplicate) = send(
+                    &hub,
+                    &actor,
+                    Send {
+                        to: original.from.clone(),
+                        body: request.body,
+                        thread: original.thread,
+                        kind: Kind::NOTE,
+                        ack_required: false,
+                        request_id: request_id(request.request_id)?,
+                        reply_to: id.clone(),
+                        direct: true,
+                        footer: None,
+                    },
+                )?;
+                if !duplicate && original.deliveries.contains_key(&actor) {
+                    ack(&hub, &id, &actor)?;
+                }
+                Ok(v1::ReplyResponse {
+                    message: Some(mail_message(&message)),
+                })
             }
-            if original.from == "hub" {
-                return Err(RpcError::new(
-                    Code::FailedPrecondition,
-                    format!("{id} is a notice from the hub; ack it instead"),
-                ));
-            }
-            let (message, duplicate) = send(
-                &hub,
-                &actor,
-                Send {
-                    to: original.from.clone(),
-                    body: string(&value, "body"),
-                    thread: original.thread,
-                    kind: Kind::NOTE,
-                    ack_required: false,
-                    request_id: request_id(&value)?,
-                    reply_to: id.clone(),
-                    direct: true,
-                    footer: None,
-                },
-            )?;
-            if !duplicate && original.deliveries.contains_key(&actor) {
-                ack(&hub, &id, &actor)?;
-            }
-            respond(&request, json!({"message": message_json(&message)}))
-        }
-    })?;
+        },
+    )?;
     let thread_hub = Arc::clone(&hub);
-    server.register("/protectorate.v1.MessageService/Thread", move |request| {
-        let hub = Arc::clone(&thread_hub);
-        async move {
-            let id = string(&input(&request)?, "threadId");
-            let messages = hub.mail.thread(&id);
-            if messages.is_empty() {
-                return Err(RpcError::new(Code::NotFound, format!("no thread {id:?}")));
+    server.unary(
+        message_service::THREAD,
+        move |call: Call<v1::ThreadRequest>| {
+            let hub = Arc::clone(&thread_hub);
+            async move {
+                let id = call.request.thread_id;
+                let messages = hub.mail.thread(&id);
+                if messages.is_empty() {
+                    return Err(RpcError::new(Code::NotFound, format!("no thread {id:?}")));
+                }
+                let actor = who(&call.auth);
+                if !messages
+                    .iter()
+                    .any(|message| visible(message, &actor, call.auth.owner))
+                {
+                    return Err(RpcError::new(
+                        Code::PermissionDenied,
+                        "not a participant in this thread",
+                    ));
+                }
+                Ok(v1::ThreadResponse {
+                    messages: messages.iter().map(mail_message).collect(),
+                })
             }
-            if !messages
-                .iter()
-                .any(|message| visible(message, &who(&request), request.auth.owner))
-            {
-                return Err(RpcError::new(
-                    Code::PermissionDenied,
-                    "not a participant in this thread",
-                ));
-            }
-            respond(
-                &request,
-                json!({"messages": messages.iter().map(message_json).collect::<Vec<_>>()}),
-            )
-        }
-    })?;
+        },
+    )?;
     let list_hub = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.MessageService/ListThreads",
-        move |request| {
+    server.unary(
+        message_service::LIST_THREADS,
+        move |call: Call<v1::ListThreadsRequest>| {
             let hub = Arc::clone(&list_hub);
             async move {
-                let value = input(&request)?;
-                let limit = value.get("limit").and_then(Value::as_i64).unwrap_or(0);
-                if limit < 0 {
+                let request = call.request;
+                if request.limit < 0 {
                     return Err(RpcError::new(
                         Code::InvalidArgument,
                         "limit must not be negative",
                     ));
                 }
-                let limit = if limit == 0 {
+                let limit = if request.limit == 0 {
                     100
                 } else {
-                    limit.min(500) as usize
+                    request.limit.min(500) as usize
                 };
-                let sleeve = string(&value, "sleeve").trim().to_owned();
-                let query = string(&value, "project");
-                let project = if query.trim().is_empty() {
+                let sleeve = request.sleeve.trim();
+                let query = request.project.trim();
+                let project = if query.is_empty() {
                     String::new()
                 } else {
                     hub.directory
-                        .get(query.trim().trim_start_matches("project:"))
+                        .get(query.trim_start_matches("project:"))
                         .map_err(directory_error)?
                         .project
                         .id
                 };
-                let actor = who(&request);
-                let threads = hub
-                    .mail
-                    .threads(&actor)
-                    .into_iter()
-                    .filter(|thread| request.auth.owner || thread.participants.contains(&actor))
-                    .filter(|thread| sleeve.is_empty() || thread.participants.contains(&sleeve))
-                    .filter(|thread| project.is_empty() || thread.projects.contains(&project))
-                    .take(limit)
-                    .map(|thread| thread_json(&thread))
-                    .collect::<Vec<_>>();
-                respond(&request, json!({"threads": threads}))
+                let actor = who(&call.auth);
+                Ok(v1::ListThreadsResponse {
+                    threads: hub
+                        .mail
+                        .threads(&actor)
+                        .into_iter()
+                        .filter(|thread| call.auth.owner || thread.participants.contains(&actor))
+                        .filter(|thread| {
+                            sleeve.is_empty() || thread.participants.iter().any(|p| p == sleeve)
+                        })
+                        .filter(|thread| project.is_empty() || thread.projects.contains(&project))
+                        .take(limit)
+                        .map(|thread| thread_summary(&thread))
+                        .collect(),
+                })
             }
         },
     )?;
-    server.register("/protectorate.v1.MessageService/Wait", move |request| {
-        let hub = Arc::clone(&hub);
-        async move {
-            let value = input(&request)?;
-            let target = string(&value, "target");
-            let duration = if value.get("timeout").is_none() {
-                Duration::from_secs(600)
-            } else {
-                super::parse_duration(value.get("timeout"))?
-            };
-            if duration.is_zero() || duration > Duration::from_secs(86_400) {
-                return Err(RpcError::new(
-                    Code::InvalidArgument,
-                    "timeout must be positive and at most 24h",
-                ));
+    server.unary(
+        message_service::WAIT,
+        move |call: Call<v1::MessageServiceWaitRequest>| {
+            let hub = Arc::clone(&hub);
+            async move {
+                let target = call.request.target;
+                let duration = match &call.request.timeout {
+                    None => Duration::from_secs(600),
+                    Some(timeout) => wire::duration(Some(timeout), "timeout")?,
+                };
+                if duration.is_zero() || duration > Duration::from_secs(86_400) {
+                    return Err(RpcError::new(
+                        Code::InvalidArgument,
+                        "timeout must be positive and at most 24h",
+                    ));
+                }
+                let thread = if let Some(message) = hub.mail.get(&target) {
+                    message.thread
+                } else {
+                    target.clone()
+                };
+                let messages = hub.mail.thread(&thread);
+                if messages.is_empty() {
+                    return Err(RpcError::new(
+                        Code::NotFound,
+                        format!("no message or thread {target:?}"),
+                    ));
+                }
+                let actor = who(&call.auth);
+                if !messages
+                    .iter()
+                    .any(|message| visible(message, &actor, call.auth.owner))
+                {
+                    return Err(RpcError::new(
+                        Code::PermissionDenied,
+                        "not a participant in this thread",
+                    ));
+                }
+                match hub.mail.wait_async(&target, &actor, Some(duration)).await {
+                    Ok(message) => Ok(v1::MessageServiceWaitResponse {
+                        message: Some(mail_message(&message)),
+                        timed_out: false,
+                    }),
+                    Err(mailbox::Error::Timeout { .. }) => Ok(v1::MessageServiceWaitResponse {
+                        timed_out: true,
+                        ..Default::default()
+                    }),
+                    Err(failure) => Err(error(failure)),
+                }
             }
-            let thread = if let Some(message) = hub.mail.get(&target) {
-                message.thread
-            } else {
-                target.clone()
-            };
-            let messages = hub.mail.thread(&thread);
-            if messages.is_empty() {
-                return Err(RpcError::new(
-                    Code::NotFound,
-                    format!("no message or thread {target:?}"),
-                ));
-            }
-            let actor = who(&request);
-            if !messages
-                .iter()
-                .any(|message| visible(message, &actor, request.auth.owner))
-            {
-                return Err(RpcError::new(
-                    Code::PermissionDenied,
-                    "not a participant in this thread",
-                ));
-            }
-            let outcome = hub.mail.wait_async(&target, &actor, Some(duration)).await;
-            match outcome {
-                Ok(message) => respond(
-                    &request,
-                    json!({"message": message_json(&message), "timedOut": false}),
-                ),
-                Err(mailbox::Error::Timeout { .. }) => respond(&request, json!({"timedOut": true})),
-                Err(failure) => Err(error(failure)),
-            }
-        }
-    })?;
+        },
+    )?;
     Ok(())
 }
