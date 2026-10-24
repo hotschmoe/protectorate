@@ -1229,7 +1229,6 @@ name = "protectorate-node-termux"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
  "libc",
  "protectorate-connect-client",
  "protectorate-fsutil",
