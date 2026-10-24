@@ -1,10 +1,12 @@
 //! Device pairing and trusted-device management. A device registers its
 //! public key when it starts pairing and signs every later request.
-use super::{input, now_unix, respond, string, unix_timestamp, Hub};
-use base64::{engine::general_purpose::STANDARD, Engine};
+use super::{now_unix, unix_time, Hub};
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_identity::{self as identity, Device, PollStatus};
-use protectorate_wire::{Code, Result, RpcError, UnaryServer};
+use protectorate_wire::{
+    v1::{self, device_service},
+    AuthContext, Call, Code, Result, RpcError, UnaryServer,
+};
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -13,9 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const START: &str = "/protectorate.v1.DeviceService/StartDeviceAuth";
-const POLL: &str = "/protectorate.v1.DeviceService/PollDeviceAuth";
-const JOIN: &str = "/protectorate.v1.NodeService/JoinNode";
+const START: &str = device_service::START_DEVICE_AUTH.procedure;
+const POLL: &str = device_service::POLL_DEVICE_AUTH.procedure;
+const JOIN: &str = v1::node_service::JOIN_NODE.procedure;
 const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(super) fn start_expiry_sweep(hub: &Arc<Hub>) {
@@ -129,15 +131,15 @@ pub(super) fn source_ip(
         .unwrap_or(peer)
 }
 
-fn device_json(device: &Device) -> serde_json::Value {
-    let mut out = json!({
-        "id": device.id, "name": device.name, "platform": device.platform,
-        "approvedAt": unix_timestamp(device.approved_at), "approvedBy": device.approved_by,
-    });
-    if let Some(used) = device.last_used {
-        out["lastUsedAt"] = json!(unix_timestamp(used));
+fn device_info(device: &Device) -> v1::DeviceInfo {
+    v1::DeviceInfo {
+        id: device.id.clone(),
+        name: device.name.clone(),
+        platform: device.platform.clone(),
+        approved_at: Some(unix_time(device.approved_at)),
+        approved_by: device.approved_by.clone(),
+        last_used_at: device.last_used.map(unix_time),
     }
-    out
 }
 
 fn error(error: identity::Error) -> RpcError {
@@ -152,168 +154,197 @@ fn error(error: identity::Error) -> RpcError {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let start = Arc::clone(&hub);
-    server.register(START, move |request| {
-        let hub = Arc::clone(&start);
-        async move {
-            let body = input(&request)?;
-            let key = STANDARD
-                .decode(string(&body, "publicKey"))
-                .map_err(|_| RpcError::invalid("publicKey must be base64"))?;
-            let started = hub
-                .identity
-                .start_device(
-                    string(&body, "name").trim(),
-                    string(&body, "platform").trim(),
-                    &key,
-                    &request
-                        .auth
-                        .requesting_ip
-                        .map(|ip| ip.to_string())
-                        .unwrap_or_else(|| "127.0.0.1".into()),
-                    now_unix(),
-                )
-                .map_err(error)?;
-            hub.emit("device_auth.pending", "", json!({}));
-            respond(
-                &request,
-                json!({
-                    "deviceCode": started.device_code.expose(),
-                    "userCode": started.request.user_code,
-                    "expiresAt": unix_timestamp(started.request.expires),
-                    "interval": started.request.interval,
-                }),
-            )
-        }
-    })?;
-    let poll = Arc::clone(&hub);
-    server.register(POLL, move |request| {
-        let hub = Arc::clone(&poll);
-        async move {
-            let code = string(&input(&request)?, "deviceCode");
-            if code.len() > 128 {
-                return Err(RpcError::new(
-                    Code::InvalidArgument,
-                    "device code is too long",
-                ));
-            }
-            let outcome = hub.identity.poll_device(&code, now_unix()).map_err(error)?;
-            let status = match outcome.status {
-                PollStatus::Expired => "expired",
-                PollStatus::Pending => "pending",
-                PollStatus::SlowDown => "slow_down",
-                PollStatus::Denied => "denied",
-                PollStatus::Consumed => "consumed",
-                PollStatus::Approved => "approved",
-            };
-            let mut body = json!({"status": status, "interval": outcome.interval});
-            if let Some(device) = outcome.device {
-                hub.emit("devices.changed", &device.id, json!({}));
-                body["device"] = device_json(&device);
-            }
-            respond(&request, body)
-        }
-    })?;
-    let pending = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.DeviceService/ListDeviceAuth",
-        move |request| {
-            let hub = Arc::clone(&pending);
+    server.unary(
+        device_service::START_DEVICE_AUTH,
+        move |call: Call<v1::StartDeviceAuthRequest>| {
+            let hub = Arc::clone(&start);
             async move {
-                let requests = hub
+                let request = call.request;
+                let started = hub
+                    .identity
+                    .start_device(
+                        request.name.trim(),
+                        request.platform.trim(),
+                        &request.public_key,
+                        &call
+                            .auth
+                            .requesting_ip
+                            .map(|ip| ip.to_string())
+                            .unwrap_or_else(|| "127.0.0.1".into()),
+                        now_unix(),
+                    )
+                    .map_err(error)?;
+                hub.emit("device_auth.pending", "", json!({}));
+                Ok(v1::StartDeviceAuthResponse {
+                    device_code: started.device_code.expose().to_owned(),
+                    user_code: started.request.user_code,
+                    expires_at: Some(unix_time(started.request.expires)),
+                    interval: started.request.interval.try_into().unwrap_or(i32::MAX),
+                })
+            }
+        },
+    )?;
+    let poll = Arc::clone(&hub);
+    server.unary(
+        device_service::POLL_DEVICE_AUTH,
+        move |call: Call<v1::PollDeviceAuthRequest>| {
+            let hub = Arc::clone(&poll);
+            async move {
+                let code = call.request.device_code;
+                if code.len() > 128 {
+                    return Err(RpcError::new(
+                        Code::InvalidArgument,
+                        "device code is too long",
+                    ));
+                }
+                let outcome = hub.identity.poll_device(&code, now_unix()).map_err(error)?;
+                let status = match outcome.status {
+                    PollStatus::Expired => "expired",
+                    PollStatus::Pending => "pending",
+                    PollStatus::SlowDown => "slow_down",
+                    PollStatus::Denied => "denied",
+                    PollStatus::Consumed => "consumed",
+                    PollStatus::Approved => "approved",
+                };
+                if let Some(device) = &outcome.device {
+                    hub.emit("devices.changed", &device.id, json!({}));
+                }
+                Ok(v1::PollDeviceAuthResponse {
+                    status: status.into(),
+                    interval: outcome.interval.try_into().unwrap_or(i32::MAX),
+                    device: outcome.device.as_ref().map(device_info),
+                })
+            }
+        },
+    )?;
+    let pending = Arc::clone(&hub);
+    server.unary(device_service::LIST_DEVICE_AUTH, move |_: Call<_>| {
+        let hub = Arc::clone(&pending);
+        async move {
+            Ok(v1::ListDeviceAuthResponse {
+                requests: hub
                     .identity
                     .pending_devices(now_unix())
                     .into_iter()
-                    .map(|r| {
-                        json!({
-                            "userCode": r.user_code, "name": r.name, "platform": r.platform,
-                            "requestingIp": r.ip, "expiresAt": unix_timestamp(r.expires),
-                        })
+                    .map(|r| v1::DeviceAuthInfo {
+                        user_code: r.user_code,
+                        name: r.name,
+                        platform: r.platform,
+                        requesting_ip: r.ip,
+                        expires_at: Some(unix_time(r.expires)),
                     })
-                    .collect::<Vec<_>>();
-                respond(&request, json!({"requests": requests}))
+                    .collect(),
+            })
+        }
+    })?;
+    let approve = Arc::clone(&hub);
+    server.unary(
+        device_service::APPROVE_DEVICE_AUTH,
+        move |call: Call<v1::ApproveDeviceAuthRequest>| {
+            let hub = Arc::clone(&approve);
+            async move {
+                decide(
+                    &hub,
+                    &call.auth,
+                    call.method.procedure,
+                    &call.request.user_code,
+                    true,
+                )?;
+                Ok(v1::ApproveDeviceAuthResponse {})
             }
         },
     )?;
-    for (procedure, approve) in [
-        ("/protectorate.v1.DeviceService/ApproveDeviceAuth", true),
-        ("/protectorate.v1.DeviceService/DenyDeviceAuth", false),
-    ] {
-        let decide = Arc::clone(&hub);
-        server.register(procedure, move |request| {
-            let hub = Arc::clone(&decide);
+    let deny = Arc::clone(&hub);
+    server.unary(
+        device_service::DENY_DEVICE_AUTH,
+        move |call: Call<v1::DenyDeviceAuthRequest>| {
+            let hub = Arc::clone(&deny);
             async move {
-                if !request.auth.owner && !request.auth.device {
-                    return Err(RpcError::new(
-                        Code::PermissionDenied,
-                        "approval requires the owner or an approved device",
-                    ));
-                }
-                let code = string(&input(&request)?, "userCode");
-                let decided = hub
-                    .identity
-                    .decide_device(&code, &request.auth.actor, approve, now_unix())
-                    .map_err(error)?;
-                hub.audit.write(AuditEntry {
-                    actor: request.auth.actor.clone(),
-                    token_id: request.auth.token_id.clone(),
-                    task: request.auth.task.clone(),
-                    procedure: procedure.into(),
-                    subject: decided.name,
-                    outcome: "ok".into(),
-                    detail: format!("platform={} requesting_ip={}", decided.platform, decided.ip),
-                    ..AuditEntry::default()
-                });
-                hub.emit("device_auth.changed", "", json!({}));
-                respond(&request, json!({}))
+                decide(
+                    &hub,
+                    &call.auth,
+                    call.method.procedure,
+                    &call.request.user_code,
+                    false,
+                )?;
+                Ok(v1::DenyDeviceAuthResponse {})
             }
-        })?;
-    }
+        },
+    )?;
     let list = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.DeviceService/ListDevices",
-        move |request| {
-            let hub = Arc::clone(&list);
-            async move {
-                let devices = hub
-                    .identity
-                    .devices()
-                    .iter()
-                    .map(device_json)
-                    .collect::<Vec<_>>();
-                respond(&request, json!({"devices": devices}))
-            }
-        },
-    )?;
+    server.unary(device_service::LIST_DEVICES, move |_: Call<_>| {
+        let hub = Arc::clone(&list);
+        async move {
+            Ok(v1::ListDevicesResponse {
+                devices: hub.identity.devices().iter().map(device_info).collect(),
+            })
+        }
+    })?;
     let revoke = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.DeviceService/RevokeDevice",
-        move |request| {
+    server.unary(
+        device_service::REVOKE_DEVICE,
+        move |call: Call<v1::RevokeDeviceRequest>| {
             let hub = Arc::clone(&revoke);
             async move {
-                let id = string(&input(&request)?, "id");
                 let device = hub
                     .identity
-                    .remove_device(&id)
+                    .remove_device(&call.request.id)
                     .map_err(|_| RpcError::new(Code::NotFound, "no such device"))?;
                 hub.emit("devices.changed", &device.id, json!({}));
-                respond(&request, json!({"device": device_json(&device)}))
+                Ok(v1::RevokeDeviceResponse {
+                    device: Some(device_info(&device)),
+                })
             }
         },
     )?;
-    server.register(
-        "/protectorate.v1.DeviceService/RenameDevice",
-        move |request| {
+    server.unary(
+        device_service::RENAME_DEVICE,
+        move |call: Call<v1::RenameDeviceRequest>| {
             let hub = Arc::clone(&hub);
             async move {
-                let body = input(&request)?;
                 let device = hub
                     .identity
-                    .rename_device(&string(&body, "id"), string(&body, "name").trim())
+                    .rename_device(&call.request.id, call.request.name.trim())
                     .map_err(error)?;
                 hub.emit("devices.changed", &device.id, json!({}));
-                respond(&request, json!({"device": device_json(&device)}))
+                Ok(v1::RenameDeviceResponse {
+                    device: Some(device_info(&device)),
+                })
             }
         },
     )?;
+    Ok(())
+}
+
+/// Approves or denies a pairing request; only the owner or an approved
+/// device decides.
+fn decide(
+    hub: &Hub,
+    auth: &AuthContext,
+    procedure: String,
+    code: &str,
+    approve: bool,
+) -> Result<()> {
+    if !auth.owner && !auth.device {
+        return Err(RpcError::new(
+            Code::PermissionDenied,
+            "approval requires the owner or an approved device",
+        ));
+    }
+    let decided = hub
+        .identity
+        .decide_device(code, &auth.actor, approve, now_unix())
+        .map_err(error)?;
+    hub.audit.write(AuditEntry {
+        actor: auth.actor.clone(),
+        token_id: auth.token_id.clone(),
+        task: auth.task.clone(),
+        procedure,
+        subject: decided.name,
+        outcome: "ok".into(),
+        detail: format!("platform={} requesting_ip={}", decided.platform, decided.ip),
+        ..AuditEntry::default()
+    });
+    hub.emit("device_auth.changed", "", json!({}));
     Ok(())
 }
