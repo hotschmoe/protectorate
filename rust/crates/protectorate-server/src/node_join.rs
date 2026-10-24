@@ -1,6 +1,6 @@
 //! Join a hub: create this node's key, redeem the invite code with it and keep
 //! the certificate the hub CA issues. The private key never leaves the node.
-use base64::{engine::general_purpose::STANDARD, Engine};
+use protectorate_wire::v1;
 use std::{
     env,
     error::Error,
@@ -235,19 +235,20 @@ fn join(command: Command) -> Result<Joined, Box<dyn Error + Send + Sync>> {
         Duration::from_secs(30),
         Some(&ca),
     )?;
-    let reply = client.call(
-        "/protectorate.v1.NodeService/JoinNode",
-        &serde_json::json!({
-            "name": command.name,
-            "code": code,
-            "publicKey": STANDARD.encode(&public_key),
-            "proof": STANDARD.encode(&proof),
-            "address": address.to_string(),
-        }),
+    let reply = client.unary(
+        v1::node_service::JOIN_NODE,
+        &v1::JoinNodeRequest {
+            name: command.name.clone(),
+            code,
+            public_key,
+            proof,
+            address: address.to_string(),
+        },
     )?;
-    let cert = reply["certificate"]
-        .as_str()
-        .ok_or("hub returned no certificate")?;
+    let cert = reply.certificate;
+    if cert.is_empty() {
+        return Err("hub returned no certificate".into());
+    }
     protectorate_tls::NodeCert::new(&ca, cert.as_bytes(), key_pem.as_bytes())?;
     let tls = command.home.join("tls");
     write_private_dir(&tls)?;

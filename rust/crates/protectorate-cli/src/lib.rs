@@ -31,12 +31,13 @@ pub use args::{parse, Invocation};
 pub use job::RunError;
 pub use protectorate_connect_client::Client;
 use protectorate_connect_client::Credential;
+use protectorate_wire::{proto_duration, v1, ReflectMessage};
 pub use protectorate_wire::{Code, Result, RpcError};
 use serde_json::{json, Value};
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 /// The hub URL used when neither `--hub` nor `PROTECTORATE_HUB` is set.
@@ -50,82 +51,6 @@ pub const TOKEN_FILE_ENV: &str = "PROTECTORATE_TOKEN_FILE";
 pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 /// The state home holding this machine's saved device credential.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
-
-const STATUS: &str = "/protectorate.v1.HubService/GetStatus";
-const GET_QUOTA: &str = "/protectorate.v1.QuotaService/GetQuota";
-const SUGGEST_QUOTA: &str = "/protectorate.v1.QuotaService/Suggest";
-const SLEEVE_RUNTIME: &str = "/protectorate.v1.HubService/GetSleeveRuntime";
-const CREATE_TOKEN: &str = "/protectorate.v1.TokenService/CreateToken";
-const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
-const REVOKE_TOKEN: &str = "/protectorate.v1.TokenService/RevokeToken";
-const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
-const GRANT_ADMIN: &str = "/protectorate.v1.GrantService/Admin";
-const LIST_AUDIT: &str = "/protectorate.v1.AuditService/ListAuditEntries";
-const VERIFY_AUDIT: &str = "/protectorate.v1.AuditService/VerifyAudit";
-const LIST_DEVICES: &str = "/protectorate.v1.DeviceService/ListDevices";
-const LIST_APPROVALS: &str = "/protectorate.v1.ApprovalService/ListApprovals";
-const DECIDE_APPROVAL: &str = "/protectorate.v1.ApprovalService/DecideApproval";
-const LIST_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ListDeviceAuth";
-const APPROVE_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ApproveDeviceAuth";
-const DENY_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/DenyDeviceAuth";
-const REVOKE_DEVICE: &str = "/protectorate.v1.DeviceService/RevokeDevice";
-const RENAME_DEVICE: &str = "/protectorate.v1.DeviceService/RenameDevice";
-const LIST_PROJECTS: &str = "/protectorate.v1.DirectoryService/ListProjects";
-const GET_PROJECT: &str = "/protectorate.v1.DirectoryService/GetProject";
-const SUBSCRIBE_EVENTS: &str = "/protectorate.v1.EventService/Subscribe";
-const LIST_NODES: &str = "/protectorate.v1.NodeService/ListNodes";
-const GET_NODE: &str = "/protectorate.v1.NodeService/GetNode";
-const ADD_NODE: &str = "/protectorate.v1.NodeService/AddNode";
-const REMOVE_NODE: &str = "/protectorate.v1.NodeService/RemoveNode";
-const SET_NODE_TIER: &str = "/protectorate.v1.NodeService/SetNodeTier";
-const UPDATE_NODE: &str = "/protectorate.v1.NodeService/UpdateNode";
-const INVITE_NODE: &str = "/protectorate.v1.NodeService/InviteNode";
-const PUT_FILE: &str = "/protectorate.v1.NodeService/PutFile";
-const GET_FILE: &str = "/protectorate.v1.NodeService/GetFile";
-const LIST_NOTES: &str = "/protectorate.v1.BacklogService/ListNotes";
-const GET_NOTE: &str = "/protectorate.v1.BacklogService/GetNote";
-const CREATE_NOTE: &str = "/protectorate.v1.BacklogService/CreateNote";
-const UPDATE_NOTE: &str = "/protectorate.v1.BacklogService/UpdateNote";
-const DELETE_NOTE: &str = "/protectorate.v1.BacklogService/DeleteNote";
-const LIST_LEASES: &str = "/protectorate.v1.LeaseService/ListLeases";
-const ACQUIRE_LEASE: &str = "/protectorate.v1.LeaseService/AcquireLease";
-const RENEW_LEASE: &str = "/protectorate.v1.LeaseService/RenewLease";
-const RELEASE_LEASE: &str = "/protectorate.v1.LeaseService/ReleaseLease";
-const LIST_JOBS: &str = "/protectorate.v1.JobService/ListJobs";
-const GET_JOB: &str = "/protectorate.v1.JobService/GetJob";
-const CANCEL_JOB: &str = "/protectorate.v1.JobService/CancelJob";
-const CHAT_SEND: &str = "/protectorate.v1.ChatService/Send";
-const CHAT_WATCH: &str = "/protectorate.v1.ChatService/Watch";
-const CHAT_RESPOND: &str = "/protectorate.v1.ChatService/Respond";
-const CHAT_WAIT: &str = "/protectorate.v1.ChatService/Wait";
-const CHAT_INTERRUPT: &str = "/protectorate.v1.ChatService/Interrupt";
-const CHAT_COMPACT: &str = "/protectorate.v1.ChatService/Compact";
-const CHAT_MODELS: &str = "/protectorate.v1.ChatService/ListModels";
-const CHAT_SET_SELECTION: &str = "/protectorate.v1.ChatService/SetSelection";
-const CHAT_REPORT: &str = "/protectorate.v1.ChatService/Report";
-const LIST_SLEEVES: &str = "/protectorate.v1.SleeveService/ListSleeves";
-const LIST_WORKSPACES: &str = "/protectorate.v1.SleeveService/ListWorkspaces";
-const BROWSE_WORKSPACES: &str = "/protectorate.v1.SleeveService/BrowseWorkspaces";
-const GET_SLEEVE: &str = "/protectorate.v1.SleeveService/GetSleeve";
-const GET_TERMINAL_STATUS: &str = "/protectorate.v1.SleeveService/GetTerminalStatus";
-const KILL_SLEEVE: &str = "/protectorate.v1.SleeveService/KillSleeve";
-const SLEEVE_SERVICE: &str = "/protectorate.v1.SleeveService/";
-const SPAWN_SLEEVE: &str = "/protectorate.v1.SleeveService/SpawnSleeve";
-const RESLEEVE_SLEEVE: &str = "/protectorate.v1.SleeveService/ResleeveSleeve";
-const SPAWN_ENVOY: &str = "/protectorate.v1.SleeveService/SpawnEnvoy";
-const PRUNE_SLEEVES: &str = "/protectorate.v1.SleeveService/PruneSleeves";
-const LIST_SESSIONS: &str = "/protectorate.v1.SessionService/ListSessions";
-const CREATE_SESSION: &str = "/protectorate.v1.SessionService/CreateSession";
-const KILL_SESSION: &str = "/protectorate.v1.SessionService/KillSession";
-const RESPAWN_SESSION: &str = "/protectorate.v1.SessionService/RespawnSession";
-const CAPTURE_PANE: &str = "/protectorate.v1.SessionService/CapturePane";
-const MSG_SEND: &str = "/protectorate.v1.MessageService/Send";
-const MSG_INBOX: &str = "/protectorate.v1.MessageService/Inbox";
-const MSG_ACK: &str = "/protectorate.v1.MessageService/Ack";
-const MSG_REPLY: &str = "/protectorate.v1.MessageService/Reply";
-const MSG_THREAD: &str = "/protectorate.v1.MessageService/Thread";
-const MSG_THREADS: &str = "/protectorate.v1.MessageService/ListThreads";
-const MSG_WAIT: &str = "/protectorate.v1.MessageService/Wait";
 
 /// The transport slack added to a `chat wait` deadline so the hub answers
 /// with its own DeadlineExceeded instead of the HTTP client giving up.
@@ -249,16 +174,15 @@ impl JobState {
         }
     }
 
-    /// The enum name ListJobsRequest takes.
-    pub fn as_proto(&self) -> &'static str {
+    pub fn as_proto(&self) -> v1::JobState {
         match self {
-            Self::Preparing => "JOB_STATE_PREPARING",
-            Self::Running => "JOB_STATE_RUNNING",
-            Self::Succeeded => "JOB_STATE_SUCCEEDED",
-            Self::Failed => "JOB_STATE_FAILED",
-            Self::Canceled => "JOB_STATE_CANCELED",
-            Self::TimedOut => "JOB_STATE_TIMED_OUT",
-            Self::Killed => "JOB_STATE_KILLED",
+            Self::Preparing => v1::JobState::Preparing,
+            Self::Running => v1::JobState::Running,
+            Self::Succeeded => v1::JobState::Succeeded,
+            Self::Failed => v1::JobState::Failed,
+            Self::Canceled => v1::JobState::Canceled,
+            Self::TimedOut => v1::JobState::TimedOut,
+            Self::Killed => v1::JobState::Killed,
         }
     }
 
@@ -349,11 +273,10 @@ impl WaitUntil {
         }
     }
 
-    /// The enum name WaitRequest takes.
-    pub fn as_proto(&self) -> &'static str {
+    pub fn as_proto(&self) -> v1::WaitUntil {
         match self {
-            Self::Idle => "WAIT_UNTIL_IDLE",
-            Self::Report => "WAIT_UNTIL_REPORT",
+            Self::Idle => v1::WaitUntil::Idle,
+            Self::Report => v1::WaitUntil::Report,
         }
     }
 
@@ -388,12 +311,11 @@ impl MessageKind {
         }
     }
 
-    /// The enum name MessageServiceSendRequest takes.
-    pub fn as_proto(&self) -> &'static str {
+    pub fn as_proto(&self) -> v1::MessageKind {
         match self {
-            Self::Note => "MESSAGE_KIND_NOTE",
-            Self::Request => "MESSAGE_KIND_REQUEST",
-            Self::Notice => "MESSAGE_KIND_NOTICE",
+            Self::Note => v1::MessageKind::Note,
+            Self::Request => v1::MessageKind::Request,
+            Self::Notice => v1::MessageKind::Notice,
         }
     }
 
@@ -434,14 +356,13 @@ impl HarnessName {
         }
     }
 
-    /// The protobuf enum name SpawnSleeveRequest and its siblings take.
-    pub fn as_proto(self) -> &'static str {
+    pub fn as_proto(self) -> v1::Harness {
         match self {
-            Self::Claude => "HARNESS_CLAUDE",
-            Self::Codex => "HARNESS_CODEX",
-            Self::Grok => "HARNESS_GROK",
-            Self::Pi => "HARNESS_PI",
-            Self::Shell => "HARNESS_SHELL",
+            Self::Claude => v1::Harness::Claude,
+            Self::Codex => v1::Harness::Codex,
+            Self::Grok => v1::Harness::Grok,
+            Self::Pi => v1::Harness::Pi,
+            Self::Shell => v1::Harness::Shell,
         }
     }
 
@@ -467,11 +388,11 @@ pub enum SleeveModeName {
 }
 
 impl SleeveModeName {
-    pub fn as_proto(self) -> Option<&'static str> {
+    pub fn as_proto(self) -> v1::SleeveMode {
         match self {
-            Self::Default => None,
-            Self::Chat => Some("SLEEVE_MODE_CHAT"),
-            Self::Terminal => Some("SLEEVE_MODE_TERMINAL"),
+            Self::Default => v1::SleeveMode::Unspecified,
+            Self::Chat => v1::SleeveMode::Chat,
+            Self::Terminal => v1::SleeveMode::Terminal,
         }
     }
 }
@@ -585,6 +506,16 @@ pub struct SleevePrune {
     pub ignored: bool,
 }
 
+/// What `sleeve checkpoint` does. A diff without `to` compares with the
+/// working tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckpointAction {
+    List,
+    Create,
+    Diff { from: u64, to: u64 },
+    Restore { id: u64 },
+}
+
 /// The command an invocation asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -694,7 +625,7 @@ pub enum Command {
     },
     NodeRemove {
         name: String,
-        jobs: String,
+        jobs: v1::RemoveJobs,
         uninstall: bool,
         wait_timeout: Option<Duration>,
     },
@@ -822,11 +753,9 @@ pub enum Command {
         name: String,
         drop_caches: bool,
     },
-    /// `method` is a SleeveService checkpoint RPC; `ids` are its id arguments.
     SleeveCheckpoint {
         name: String,
-        method: &'static str,
-        ids: Vec<u64>,
+        action: CheckpointAction,
     },
     SleeveAttach {
         name: String,
@@ -1094,45 +1023,49 @@ fn render(
         Command::JobLogs(spec) => job::logs(client, spec, signals, stdout, stderr),
         Command::ChatWatch { sleeve, after } => {
             let mut renderer = format::ChatRenderer::default();
-            client.stream(
-                CHAT_WATCH,
-                &json!({"sleeve": sleeve, "afterSeq": after.to_string()}),
-                |event| {
-                    if invocation.json {
-                        stdout
-                            .write_all(json_line(&event)?.as_bytes())
-                            .map_err(|error| {
-                                RpcError::new(Code::Internal, format!("write chat event: {error}"))
-                            })?;
-                    } else {
-                        renderer.render(stdout, &event)?;
-                    }
-                    stdout.flush().map_err(|error| {
-                        RpcError::new(Code::Internal, format!("flush chat event: {error}"))
-                    })?;
-                    Ok(())
-                },
-            )?;
+            let request = v1::WatchRequest {
+                sleeve: sleeve.clone(),
+                after_seq: *after,
+            };
+            client.server_stream(v1::chat_service::WATCH, &request, |event| {
+                if invocation.json {
+                    stdout
+                        .write_all(json_line(&event)?.as_bytes())
+                        .map_err(|error| {
+                            RpcError::new(Code::Internal, format!("write chat event: {error}"))
+                        })?;
+                } else {
+                    renderer.render(stdout, &event)?;
+                }
+                stdout.flush().map_err(|error| {
+                    RpcError::new(Code::Internal, format!("flush chat event: {error}"))
+                })?;
+                Ok(())
+            })?;
             if !invocation.json {
                 renderer.flush(stdout)?;
             }
             Ok(String::new())
         }
         Command::Events => {
-            client.stream(SUBSCRIBE_EVENTS, &json!({}), |event| {
-                let line = if invocation.json {
-                    json_line(&event)?
-                } else {
-                    format::event_text(&event)
-                };
-                stdout.write_all(line.as_bytes()).map_err(|error| {
-                    RpcError::new(Code::Internal, format!("write hub event: {error}"))
-                })?;
-                stdout.flush().map_err(|error| {
-                    RpcError::new(Code::Internal, format!("flush hub event: {error}"))
-                })?;
-                Ok(())
-            })?;
+            client.server_stream(
+                v1::event_service::SUBSCRIBE,
+                &v1::SubscribeRequest {},
+                |event| {
+                    let line = if invocation.json {
+                        json_line(&event)?
+                    } else {
+                        format::event_text(&event)?
+                    };
+                    stdout.write_all(line.as_bytes()).map_err(|error| {
+                        RpcError::new(Code::Internal, format!("write hub event: {error}"))
+                    })?;
+                    stdout.flush().map_err(|error| {
+                        RpcError::new(Code::Internal, format!("flush hub event: {error}"))
+                    })?;
+                    Ok(())
+                },
+            )?;
             Ok(String::new())
         }
         Command::NodeRemove {
@@ -1141,31 +1074,26 @@ fn render(
             uninstall,
             wait_timeout,
         } => {
-            let mut request = json!({"name": name, "jobs": jobs, "uninstall": uninstall});
-            if let Some(timeout) = wait_timeout {
-                request["waitTimeout"] = json!(format_duration(*timeout));
-            }
-            client.stream(REMOVE_NODE, &request, |progress| {
+            let request = v1::RemoveNodeRequest {
+                name: name.clone(),
+                jobs: *jobs as i32,
+                uninstall: *uninstall,
+                wait_timeout: wait_timeout.map(proto_duration),
+            };
+            client.server_stream(v1::node_service::REMOVE_NODE, &request, |progress| {
                 let line = if invocation.json {
                     json_line(&progress)?
                 } else {
-                    let phase = progress["phase"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .trim_start_matches("REMOVE_PHASE_")
-                        .to_ascii_lowercase();
                     format!(
-                        "{phase}\t{}\n",
-                        progress["message"].as_str().unwrap_or_default()
+                        "{}\t{}\n",
+                        format::word(progress.phase().as_str_name(), "REMOVE_PHASE_"),
+                        progress.message
                     )
                 };
                 stdout
                     .write_all(line.as_bytes())
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                stdout
-                    .flush()
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                Ok(())
+                    .and_then(|()| stdout.flush())
+                    .map_err(|e| RpcError::new(Code::Internal, format!("write node removal: {e}")))
             })?;
             Ok(String::new())
         }
@@ -1239,15 +1167,11 @@ fn chat_wait_multi(
     for sleeve in sleeves {
         let client = client.clone();
         let sender = sender.clone();
-        let request = json!({
-            "sleeve": sleeve,
-            "until": until.as_proto(),
-            "timeout": format_duration(timeout),
-        });
+        let request = wait_request(sleeve, until, timeout);
         std::thread::Builder::new()
             .name("protectorate-chat-wait".into())
             .spawn(move || {
-                let _ = sender.send(client.call(CHAT_WAIT, &request));
+                let _ = sender.send(client.unary(v1::chat_service::WAIT, &request));
             })
             .map_err(|error| {
                 RpcError::new(Code::ResourceExhausted, format!("start chat wait: {error}"))
@@ -1271,6 +1195,14 @@ fn chat_wait_multi(
             .map_err(|error| RpcError::new(Code::Internal, format!("flush chat wait: {error}")))?;
     }
     Ok(())
+}
+
+fn wait_request(sleeve: &str, until: WaitUntil, timeout: Duration) -> v1::WaitRequest {
+    v1::WaitRequest {
+        sleeve: sleeve.to_owned(),
+        until: until.as_proto() as i32,
+        timeout: Some(proto_duration(timeout)),
+    }
 }
 
 fn reserve_grant_file(path: &std::path::Path) -> Result<std::fs::File> {
@@ -1327,20 +1259,18 @@ fn update_nodes(
     json: bool,
     stdout: &mut dyn std::io::Write,
 ) -> Result<()> {
-    let listing = client.call(LIST_NODES, &json!({}))?;
-    let nodes = listing["nodes"]
-        .as_array()
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "node listing is missing nodes"))?;
+    let listing = client.unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})?;
+    let wanted = name.map(str::to_ascii_lowercase);
     let mut matched = false;
     let mut errors = Vec::new();
-    for status in nodes {
-        let node = &status["node"];
-        let current = node["name"].as_str().unwrap_or_default();
-        if !all && Some(current) != name.map(|name| name.to_ascii_lowercase()).as_deref() {
+    for status in &listing.nodes {
+        let Some(node) = &status.node else { continue };
+        let current = node.name.as_str();
+        if !all && Some(current) != wanted.as_deref() {
             continue;
         }
         matched = true;
-        if node["local"].as_bool().unwrap_or(false) {
+        if node.local {
             if all {
                 continue;
             }
@@ -1351,13 +1281,12 @@ fn update_nodes(
                 ),
             ));
         }
-        let freshness = status["freshness"]
-            .as_str()
-            .unwrap_or("NODE_FRESHNESS_UNSPECIFIED");
-        if freshness != "NODE_FRESHNESS_FRESH" || status["metrics"].is_null() {
+        if status.freshness() != v1::NodeFreshness::Fresh || status.metrics.is_none() {
             let reason = format!(
                 "node is not reachable ({})",
-                freshness
+                status
+                    .freshness()
+                    .as_str_name()
                     .trim_start_matches("NODE_FRESHNESS_")
                     .to_ascii_lowercase()
             );
@@ -1368,32 +1297,29 @@ fn update_nodes(
             }
             return Err(RpcError::new(Code::Unavailable, reason));
         }
-        let mut last_phase = String::new();
-        let result = client.stream(
-            UPDATE_NODE,
-            &json!({"name":current,"force":force}),
-            |progress| {
-                let phase = progress["phase"].as_str().unwrap_or_default();
-                last_phase = phase.to_owned();
-                let line = if json {
-                    json_line(&progress)?
-                } else {
-                    update_line(current, &progress)
-                };
-                if !line.is_empty() {
-                    stdout
-                        .write_all(line.as_bytes())
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    stdout
-                        .flush()
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                }
-                if no_wait && phase == "UPDATE_PHASE_SWAPPING" {
-                    return Err(RpcError::new(Code::Canceled, "node update no-wait"));
-                }
-                Ok(())
-            },
-        );
+        let mut last_phase = v1::UpdatePhase::Unspecified;
+        let request = v1::UpdateNodeRequest {
+            name: current.to_owned(),
+            force,
+        };
+        let result = client.server_stream(v1::node_service::UPDATE_NODE, &request, |progress| {
+            last_phase = progress.phase();
+            let line = if json {
+                json_line(&progress)?
+            } else {
+                update_line(current, &progress)
+            };
+            if !line.is_empty() {
+                stdout
+                    .write_all(line.as_bytes())
+                    .and_then(|()| stdout.flush())
+                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+            }
+            if no_wait && last_phase == v1::UpdatePhase::Swapping {
+                return Err(RpcError::new(Code::Canceled, "node update no-wait"));
+            }
+            Ok(())
+        });
         if let Err(error) = result {
             if !(no_wait && error.code == Code::Canceled && error.message == "node update no-wait")
             {
@@ -1402,7 +1328,7 @@ fn update_nodes(
                 }
                 errors.push(format!("{current}: {}", error.message));
             }
-        } else if last_phase == "UPDATE_PHASE_ROLLED_BACK" {
+        } else if last_phase == v1::UpdatePhase::RolledBack {
             if !all {
                 return Err(RpcError::new(
                     Code::Aborted,
@@ -1427,39 +1353,23 @@ fn update_nodes(
     }
 }
 
-fn update_line(name: &str, progress: &Value) -> String {
-    let phase = progress["phase"].as_str().unwrap_or_default();
-    let message = progress["message"].as_str().unwrap_or_default();
-    let detail = match phase {
-        "UPDATE_PHASE_SKIPPED" => message.to_owned(),
-        "UPDATE_PHASE_SENDING" => {
-            let total = progress["totalBytes"]
-                .as_str()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(0);
-            let sent = progress["sentBytes"]
-                .as_str()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(0);
-            if total == 0 || sent < total {
-                String::new()
-            } else {
-                format!("sent {}", format::bytes(sent))
-            }
+fn update_line(name: &str, progress: &v1::UpdateNodeProgress) -> String {
+    use v1::UpdatePhase;
+    let detail = match progress.phase() {
+        UpdatePhase::Skipped => progress.message.clone(),
+        UpdatePhase::Sending
+            if progress.total_bytes > 0 && progress.sent_bytes >= progress.total_bytes =>
+        {
+            format!("sent {}", format::bytes(progress.sent_bytes))
         }
-        "UPDATE_PHASE_VERIFYING" => "verifying".into(),
-        "UPDATE_PHASE_SWAPPING" => format!(
+        UpdatePhase::Verifying => "verifying".into(),
+        UpdatePhase::Swapping => format!(
             "swapped {} -> {}, restarting ({})",
-            progress["previousVersion"].as_str().unwrap_or_default(),
-            progress["version"].as_str().unwrap_or_default(),
-            progress["restart"].as_str().unwrap_or_default()
+            progress.previous_version, progress.version, progress.restart
         ),
-        "UPDATE_PHASE_RESTARTING" => "waiting for the node to come back".into(),
-        "UPDATE_PHASE_CONFIRMED" => format!(
-            "reports {}",
-            progress["version"].as_str().unwrap_or_default()
-        ),
-        "UPDATE_PHASE_ROLLED_BACK" => format!("rolled back: {message}"),
+        UpdatePhase::Restarting => "waiting for the node to come back".into(),
+        UpdatePhase::Confirmed => format!("reports {}", progress.version),
+        UpdatePhase::RolledBack => format!("rolled back: {}", progress.message),
         _ => String::new(),
     };
     if detail.is_empty() {
@@ -1552,31 +1462,56 @@ fn execute_commands(
         Command::ApiCall { procedure, body } => api_call(client, procedure, body, json),
         Command::Help => Ok(usage().to_string()),
         Command::HelpPath(path) => command_usage(path),
-        Command::Who { target } => {
-            let response = if let Some(target) = target {
-                let mine = client.call(LIST_PROJECTS, &json!({"sleeve": target}))?;
-                if !format::items(&mine, "projects").is_empty() {
-                    mine
-                } else {
-                    client.call(GET_PROJECT, &json!({"project": target}))?
-                }
-            } else {
-                client.call(LIST_PROJECTS, &json!({}))?
-            };
+        Command::Who { target: None } => {
+            let listing = client.unary(
+                v1::directory_service::LIST_PROJECTS,
+                &v1::ListProjectsRequest::default(),
+            )?;
             if json {
-                json_line(&response)
-            } else if let Some(project) = response.get("project") {
-                Ok(format::project_text(project))
-            } else if target.is_some() {
-                Ok(format::projects_detail_text(&response))
+                json_line(&listing)
             } else {
-                Ok(format::projects_list_text(&response))
+                Ok(format::projects_list_text(&listing))
+            }
+        }
+        Command::Who {
+            target: Some(target),
+        } => {
+            let mine = client.unary(
+                v1::directory_service::LIST_PROJECTS,
+                &v1::ListProjectsRequest {
+                    sleeve: target.clone(),
+                },
+            )?;
+            if !mine.projects.is_empty() {
+                return if json {
+                    json_line(&mine)
+                } else {
+                    Ok(format::projects_detail_text(&mine))
+                };
+            }
+            let found = client.unary(
+                v1::directory_service::GET_PROJECT,
+                &v1::GetProjectRequest {
+                    project: target.clone(),
+                },
+            )?;
+            if json {
+                json_line(&found)
+            } else {
+                Ok(found
+                    .project
+                    .as_ref()
+                    .map(format::project_text)
+                    .unwrap_or_default())
             }
         }
         Command::Status => {
-            let status = client.call(STATUS, &json!({}))?;
-            let runtime = match client.call(SLEEVE_RUNTIME, &json!({})) {
-                Ok(value) => Some(value),
+            let status = client.unary(v1::hub_service::GET_STATUS, &v1::GetStatusRequest {})?;
+            let runtime = match client.unary(
+                v1::hub_service::GET_SLEEVE_RUNTIME,
+                &v1::GetSleeveRuntimeRequest {},
+            ) {
+                Ok(runtime) => Some(runtime),
                 Err(error) if error.code == Code::Unimplemented => None,
                 Err(error) => return Err(error),
             };
@@ -1587,7 +1522,10 @@ fn execute_commands(
             }
         }
         Command::Quota { refresh } => {
-            let quota = client.call(GET_QUOTA, &json!({"refresh": refresh}))?;
+            let quota = client.unary(
+                v1::quota_service::GET_QUOTA,
+                &v1::GetQuotaRequest { refresh: *refresh },
+            )?;
             if json {
                 json_line(&quota)
             } else {
@@ -1595,11 +1533,17 @@ fn execute_commands(
             }
         }
         Command::QuotaSuggest { task_size, refresh } => {
-            let mut request = json!({"refresh": refresh});
+            let mut request = v1::SuggestRequest {
+                refresh: *refresh,
+                ..Default::default()
+            };
             if let Some(size) = task_size {
-                request["taskSize"] = json!(format!("TASK_SIZE_{}", size.to_ascii_uppercase()));
+                let name = format!("TASK_SIZE_{}", size.to_ascii_uppercase());
+                let size = v1::TaskSize::from_str_name(&name)
+                    .ok_or_else(|| RpcError::invalid(format!("unknown task size {size:?}")))?;
+                request.set_task_size(size);
             }
-            let suggestions = client.call(SUGGEST_QUOTA, &request)?;
+            let suggestions = client.unary(v1::quota_service::SUGGEST, &request)?;
             if json {
                 json_line(&suggestions)
             } else {
@@ -1607,9 +1551,13 @@ fn execute_commands(
             }
         }
         Command::TokenCreate { name, scopes, ttl } => {
-            let issued = client.call(
-                CREATE_TOKEN,
-                &json!({"name":name,"scopes":scopes,"ttl":format_duration(*ttl)}),
+            let issued = client.unary(
+                v1::token_service::CREATE_TOKEN,
+                &v1::CreateTokenRequest {
+                    name: name.clone(),
+                    scopes: scopes.clone(),
+                    ttl: Some(proto_duration(*ttl)),
+                },
             )?;
             if json {
                 json_line(&issued)
@@ -1618,7 +1566,8 @@ fn execute_commands(
             }
         }
         Command::TokenList => {
-            let listing = client.call(LIST_TOKENS, &json!({}))?;
+            let listing =
+                client.unary(v1::token_service::LIST_TOKENS, &v1::ListTokensRequest {})?;
             if json {
                 json_line(&listing)
             } else {
@@ -1627,7 +1576,10 @@ fn execute_commands(
         }
         Command::OrchestratorStatus => orchestrator_status(client, json),
         Command::TokenRevoke { id } => {
-            let revoked = client.call(REVOKE_TOKEN, &json!({"id":id}))?;
+            let revoked = client.unary(
+                v1::token_service::REVOKE_TOKEN,
+                &v1::RevokeTokenRequest { id: id.clone() },
+            )?;
             if json {
                 json_line(&revoked)
             } else {
@@ -1635,7 +1587,8 @@ fn execute_commands(
             }
         }
         Command::TokenRenew => {
-            let renewed = client.call(RENEW_TOKEN, &json!({}))?;
+            let renewed =
+                client.unary(v1::token_service::RENEW_TOKEN, &v1::RenewTokenRequest {})?;
             if json {
                 json_line(&renewed)
             } else {
@@ -1655,9 +1608,13 @@ fn execute_commands(
                 .as_ref()
                 .map(|path| reserve_grant_file(path))
                 .transpose()?;
-            let issued = client.call(
-                GRANT_ADMIN,
-                &json!({"node":node,"task":task,"ttl":format_duration(*ttl)}),
+            let issued = client.unary(
+                v1::grant_service::ADMIN,
+                &v1::GrantServiceAdminRequest {
+                    node: node.clone(),
+                    ttl: Some(proto_duration(*ttl)),
+                    task: task.clone(),
+                },
             );
             let mut issued = match issued {
                 Ok(issued) => issued,
@@ -1669,21 +1626,14 @@ fn execute_commands(
                     return Err(error);
                 }
             };
-            if let Some(path) = out {
-                let mut file = reserved.take().expect("reserved output file");
-                let saved = write_grant_secret(
-                    &mut file,
-                    path,
-                    issued["secret"].as_str().unwrap_or_default(),
-                );
+            if let (Some(path), Some(mut file)) = (out, reserved.take()) {
+                let saved = write_grant_secret(&mut file, path, &issued.secret);
                 drop(file);
                 if let Err(error) = saved {
                     let _ = std::fs::remove_file(path);
                     return Err(error);
                 }
-                if let Some(object) = issued.as_object_mut() {
-                    object.remove("secret");
-                }
+                issued.secret.clear();
             }
             if json {
                 json_line(&issued)
@@ -1692,15 +1642,21 @@ fn execute_commands(
             }
         }
         Command::AuditList(query) => {
-            let page = client.call(LIST_AUDIT, &json!({"limit":query.limit,"pageToken":query.page_token,"actor":query.actor,"procedure":query.procedure,"subject":query.subject,"outcome":query.outcome,"runId":query.run_id}))?;
+            let page = client.unary(
+                v1::audit_service::LIST_AUDIT_ENTRIES,
+                &v1::ListAuditEntriesRequest {
+                    limit: query.limit,
+                    page_token: query.page_token.clone(),
+                    actor: query.actor.clone(),
+                    procedure: query.procedure.clone(),
+                    subject: query.subject.clone(),
+                    outcome: query.outcome.clone(),
+                    run_id: query.run_id.clone(),
+                },
+            )?;
             if json {
                 if query.chronological {
-                    Ok(format::items(&page, "entries")
-                        .iter()
-                        .rev()
-                        .map(json_line)
-                        .collect::<Result<Vec<_>>>()?
-                        .concat())
+                    json_lines(page.entries.iter().rev())
                 } else {
                     json_line(&page)
                 }
@@ -1709,14 +1665,15 @@ fn execute_commands(
             }
         }
         Command::AuditVerify => {
-            let report = client.call_with_timeout(VERIFY_AUDIT, &json!({}), MAX_WAIT)?;
-            if report["ok"] != true {
+            let report = client.unary_with_timeout(
+                v1::audit_service::VERIFY_AUDIT,
+                &v1::VerifyAuditRequest {},
+                MAX_WAIT,
+            )?;
+            if !report.ok {
                 return Err(RpcError::new(
                     Code::DataLoss,
-                    format!(
-                        "audit chain broken: {}",
-                        report["error"].as_str().unwrap_or_default()
-                    ),
+                    format!("audit chain broken: {}", report.error),
                 ));
             }
             if json {
@@ -1726,7 +1683,10 @@ fn execute_commands(
             }
         }
         Command::ApprovalList { all } => {
-            let approvals = client.call(LIST_APPROVALS, &json!({"all": all}))?;
+            let approvals = client.unary(
+                v1::approval_service::LIST_APPROVALS,
+                &v1::ListApprovalsRequest { all: *all },
+            )?;
             if json {
                 json_line(&approvals)
             } else {
@@ -1734,7 +1694,13 @@ fn execute_commands(
             }
         }
         Command::ApprovalDecide { id, approve } => {
-            let response = client.call(DECIDE_APPROVAL, &json!({"id": id, "approve": approve}))?;
+            let response = client.unary(
+                v1::approval_service::DECIDE_APPROVAL,
+                &v1::DecideApprovalRequest {
+                    id: id.clone(),
+                    approve: *approve,
+                },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -1745,7 +1711,8 @@ fn execute_commands(
             }
         }
         Command::DeviceList => {
-            let devices = client.call(LIST_DEVICES, &json!({}))?;
+            let devices =
+                client.unary(v1::device_service::LIST_DEVICES, &v1::ListDevicesRequest {})?;
             if json {
                 json_line(&devices)
             } else {
@@ -1753,7 +1720,10 @@ fn execute_commands(
             }
         }
         Command::DevicePendingList => {
-            let requests = client.call(LIST_DEVICE_AUTH, &json!({}))?;
+            let requests = client.unary(
+                v1::device_service::LIST_DEVICE_AUTH,
+                &v1::ListDeviceAuthRequest {},
+            )?;
             if json {
                 json_line(&requests)
             } else {
@@ -1761,7 +1731,12 @@ fn execute_commands(
             }
         }
         Command::DeviceApprove { code } => {
-            let response = client.call(APPROVE_DEVICE_AUTH, &json!({"userCode": code}))?;
+            let response = client.unary(
+                v1::device_service::APPROVE_DEVICE_AUTH,
+                &v1::ApproveDeviceAuthRequest {
+                    user_code: code.clone(),
+                },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -1769,7 +1744,12 @@ fn execute_commands(
             }
         }
         Command::DeviceDeny { code } => {
-            let response = client.call(DENY_DEVICE_AUTH, &json!({"userCode": code}))?;
+            let response = client.unary(
+                v1::device_service::DENY_DEVICE_AUTH,
+                &v1::DenyDeviceAuthRequest {
+                    user_code: code.clone(),
+                },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -1777,7 +1757,10 @@ fn execute_commands(
             }
         }
         Command::DeviceRevoke { id } => {
-            let response = client.call(REVOKE_DEVICE, &json!({"id": id}))?;
+            let response = client.unary(
+                v1::device_service::REVOKE_DEVICE,
+                &v1::RevokeDeviceRequest { id: id.clone() },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -1785,7 +1768,13 @@ fn execute_commands(
             }
         }
         Command::DeviceRename { id, name } => {
-            let response = client.call(RENAME_DEVICE, &json!({"id": id, "name": name}))?;
+            let response = client.unary(
+                v1::device_service::RENAME_DEVICE,
+                &v1::RenameDeviceRequest {
+                    id: id.clone(),
+                    name: name.clone(),
+                },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -1793,7 +1782,7 @@ fn execute_commands(
             }
         }
         Command::NodeList => {
-            let nodes = client.call(LIST_NODES, &json!({}))?;
+            let nodes = client.unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})?;
             if json {
                 json_line(&nodes)
             } else {
@@ -1801,7 +1790,10 @@ fn execute_commands(
             }
         }
         Command::NodeShow { name } => {
-            let node = client.call(GET_NODE, &json!({"name": name}))?;
+            let node = client.unary(
+                v1::node_service::GET_NODE,
+                &v1::GetNodeRequest { name: name.clone() },
+            )?;
             if json {
                 json_line(&node)
             } else {
@@ -1817,27 +1809,45 @@ fn execute_commands(
             notes,
             update,
         } => {
-            let node = client.call(ADD_NODE, &json!({"node": {"name": name, "address": address, "sshAlias": ssh_alias, "tier": tier, "tags": tags, "notes": notes}, "update": update}))?;
+            let request = v1::AddNodeRequest {
+                node: Some(v1::NodeInfo {
+                    name: name.clone(),
+                    address: address.clone(),
+                    ssh_alias: ssh_alias.clone(),
+                    tier: tier.clone(),
+                    tags: tags.clone(),
+                    notes: notes.clone(),
+                    ..Default::default()
+                }),
+                update: *update,
+            };
+            let node = client.unary(v1::node_service::ADD_NODE, &request)?;
             if json {
                 json_line(&node)
             } else {
                 Ok(format!(
                     "added {} ({}, tier {})\n",
-                    node["name"].as_str().unwrap_or(name),
-                    node["address"].as_str().unwrap_or(address),
-                    node["tier"].as_str().unwrap_or(tier)
+                    or(&node.name, name),
+                    or(&node.address, address),
+                    or(&node.tier, tier)
                 ))
             }
         }
         Command::NodeTier { name, tier } => {
-            let node = client.call(SET_NODE_TIER, &json!({"name": name, "tier": tier}))?;
+            let node = client.unary(
+                v1::node_service::SET_NODE_TIER,
+                &v1::SetNodeTierRequest {
+                    name: name.clone(),
+                    tier: tier.clone(),
+                },
+            )?;
             if json {
                 json_line(&node)
             } else {
                 Ok(format!(
                     "{} is now tier {}\n",
-                    node["name"].as_str().unwrap_or(name),
-                    node["tier"].as_str().unwrap_or(tier)
+                    or(&node.name, name),
+                    or(&node.tier, tier)
                 ))
             }
         }
@@ -1847,27 +1857,25 @@ fn execute_commands(
             ttl,
             install_url,
         } => {
-            let invite = client.call(
-                INVITE_NODE,
-                &json!({
-                    "name": name,
-                    "tier": tier,
-                    "ttl": format_duration(*ttl),
-                    "installUrl": install_url,
-                }),
+            let invite = client.unary(
+                v1::node_service::INVITE_NODE,
+                &v1::InviteNodeRequest {
+                    name: name.clone(),
+                    tier: tier.clone(),
+                    ttl: Some(proto_duration(*ttl)),
+                    install_url: install_url.clone(),
+                },
             )?;
             if json {
                 json_line(&invite)
             } else {
                 let invited_name = invite
-                    .get("node")
-                    .and_then(|node| node.get("name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(name);
+                    .node
+                    .as_ref()
+                    .map_or(name.as_str(), |node| or(&node.name, name));
                 let expiry = invite
-                    .get("expiresAt")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown time");
+                    .expires_at
+                    .map_or_else(|| "unknown time".to_owned(), |at| at.to_string());
                 writeln!(stderr, "{invited_name} is in the inventory as invited; the key is single-use and expires {expiry}")
                     .map_err(|error| RpcError::new(Code::Internal, format!("write invite status: {error}")))?;
                 Ok(format::node_invite_text(&invite))
@@ -1887,10 +1895,7 @@ fn execute_commands(
             } else {
                 Ok(format!(
                     "put\t{name}:{}\nbytes\t{total} ({wire} bytes sent, {elapsed:?})\n",
-                    response
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .unwrap_or(remote)
+                    or(&response.path, remote)
                 ))
             }
         }
@@ -1904,9 +1909,11 @@ fn execute_commands(
             let (trailer, wire, elapsed) =
                 transfer::get(client, name, remote, local, *force, *no_compress)?;
             if json {
-                json_line(
-                    &json!({"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped}),
-                )
+                json_line(&v1::FileTrailer {
+                    size: trailer.size,
+                    sha256: trailer.sha256,
+                    skipped: trailer.skipped,
+                })
             } else {
                 let mut output = format!(
                     "get\t{name}:{remote}\nbytes\t{} ({wire} bytes received, {elapsed:?})\n",
@@ -1922,155 +1929,157 @@ fn execute_commands(
             }
         }
         Command::BacklogList(filter) => {
-            let notes = client.call(
-                LIST_NOTES,
-                &json!({
-                    "project": filter.project,
-                    "query": filter.query,
-                    "state": filter.state.as_str(),
-                }),
+            let notes = client.unary(
+                v1::backlog_service::LIST_NOTES,
+                &v1::ListNotesRequest {
+                    project: filter.project.clone(),
+                    query: filter.query.clone(),
+                    state: filter.state.as_str().to_owned(),
+                },
             )?;
             if json {
-                Ok(format::items(&notes, "notes")
-                    .iter()
-                    .map(json_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&notes.notes)
             } else {
                 Ok(format::note_list_text(&notes))
             }
         }
         Command::BacklogShow { id } => {
-            let response = client.call(GET_NOTE, &json!({"id": id}))?;
-            let note = response
-                .get("note")
-                .filter(|value| !value.is_null())
-                .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))?;
+            let response = client.unary(
+                v1::backlog_service::GET_NOTE,
+                &v1::GetNoteRequest { id: id.clone() },
+            )?;
+            let note = returned_note(response.note)?;
             if json {
-                json_line(note)
+                json_line(&note)
             } else {
-                Ok(format::note_text(note))
+                Ok(format::note_text(&note))
             }
         }
         Command::BacklogAdd(draft) => {
             let body = match (&draft.body_file, &draft.body) {
-                (Some(path), _) if path == "-" => read_stdin()?,
-                (Some(path), _) => fs::read_to_string(path).map_err(|error| {
-                    RpcError::new(Code::Internal, format!("read body: {error}"))
-                })?,
+                (Some(path), _) => read_body(path)?,
                 (None, Some(body)) => body.clone(),
                 (None, None) => String::new(),
             };
-            let response = client.call(
-                CREATE_NOTE,
-                &json!({
-                    "title": draft.title,
-                    "body": body,
-                    "pinned": draft.pinned,
-                    "project": draft.project,
-                }),
+            let response = client.unary(
+                v1::backlog_service::CREATE_NOTE,
+                &v1::CreateNoteRequest {
+                    title: draft.title.clone(),
+                    body,
+                    pinned: draft.pinned,
+                    project: draft.project.clone(),
+                },
             )?;
-            note_output(&response, json)
+            note_output(response.note, json)
         }
         Command::BacklogEdit(edit) => {
-            if json
-                && edit.title.is_none()
+            let interactive = edit.title.is_none()
                 && edit.project.is_none()
                 && edit.body.is_none()
                 && edit.body_file.is_none()
-                && edit.append.is_none()
-            {
+                && edit.append.is_none();
+            if json && interactive {
                 return Err(RpcError::invalid(
                     "edit --json needs --title, --body, --body-file, --append or --project",
                 ));
             }
-            let mut request = json!({"id":edit.id});
-            if let Some(title) = &edit.title {
-                request["title"] = json!(title);
-            }
-            if let Some(project) = &edit.project {
-                request["project"] = json!(project);
-            }
-            if let Some(body) = &edit.body {
-                request["body"] = json!(body);
-            }
+            let mut request = v1::UpdateNoteRequest {
+                id: edit.id.clone(),
+                title: edit.title.clone(),
+                project: edit.project.clone(),
+                body: edit.body.clone(),
+                ..Default::default()
+            };
             if let Some(path) = &edit.body_file {
-                let body = if path == "-" {
-                    read_stdin()?
-                } else {
-                    fs::read_to_string(path).map_err(|error| {
-                        RpcError::new(Code::Internal, format!("read body: {error}"))
-                    })?
-                };
-                request["body"] = json!(body);
+                request.body = Some(read_body(path)?);
             }
             if let Some(append) = &edit.append {
-                let current = client.call(GET_NOTE, &json!({"id":edit.id}))?;
-                let body = current["note"]["body"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .trim_end_matches('\n');
-                request["body"] = json!(format!(
-                    "{}{}{}\n",
-                    body,
+                let current = current_note(client, &edit.id)?;
+                let body = current.body.trim_end_matches('\n');
+                request.body = Some(format!(
+                    "{body}{}{append}\n",
                     if body.is_empty() { "" } else { "\n" },
-                    append
                 ));
             }
-            if edit.title.is_none()
-                && edit.project.is_none()
-                && edit.body.is_none()
-                && edit.body_file.is_none()
-                && edit.append.is_none()
-            {
-                let current = client.call(GET_NOTE, &json!({"id":edit.id}))?;
-                let (title, body) = edit_in_editor(&current["note"])?;
-                request["title"] = json!(title);
-                request["body"] = json!(body);
+            if interactive {
+                let (title, body) = edit_in_editor(&current_note(client, &edit.id)?)?;
+                request.title = Some(title);
+                request.body = Some(body);
             }
-            let response = client.call(UPDATE_NOTE, &request)?;
-            note_output(&response, json)
+            let response = client.unary(v1::backlog_service::UPDATE_NOTE, &request)?;
+            note_output(response.note, json)
         }
         Command::BacklogRemove { id } => {
-            let response = client.call(DELETE_NOTE, &json!({"id":id}))?;
+            let response = client.unary(
+                v1::backlog_service::DELETE_NOTE,
+                &v1::DeleteNoteRequest { id: id.clone() },
+            )?;
             if json {
                 json_line(&response)
             } else {
                 Ok(format!("deleted\t{id}\n"))
             }
         }
-        Command::BacklogPin { id, pinned } => {
-            let response = client.call(UPDATE_NOTE, &json!({"id":id,"pinned":pinned}))?;
-            note_output(&response, json)
-        }
-        Command::BacklogDone { id, resolution } => {
-            let mut request = json!({"id": id, "state": "done"});
-            if let Some(resolution) = resolution {
-                request["resolution"] = json!(resolution);
-            }
-            let response = client.call(UPDATE_NOTE, &request)?;
-            note_output(&response, json)
-        }
-        Command::BacklogReopen { id } => {
-            let response = client.call(UPDATE_NOTE, &json!({"id": id, "state": "open"}))?;
-            note_output(&response, json)
-        }
+        Command::BacklogPin { id, pinned } => update_note(
+            client,
+            v1::UpdateNoteRequest {
+                id: id.clone(),
+                pinned: Some(*pinned),
+                ..Default::default()
+            },
+            json,
+        ),
+        Command::BacklogDone { id, resolution } => update_note(
+            client,
+            v1::UpdateNoteRequest {
+                id: id.clone(),
+                state: Some("done".into()),
+                resolution: resolution.clone(),
+                ..Default::default()
+            },
+            json,
+        ),
+        Command::BacklogReopen { id } => update_note(
+            client,
+            v1::UpdateNoteRequest {
+                id: id.clone(),
+                state: Some("open".into()),
+                ..Default::default()
+            },
+            json,
+        ),
         Command::LeaseList => {
-            let leases = client.call(LIST_LEASES, &json!({}))?;
+            let leases = client.unary(v1::lease_service::LIST_LEASES, &v1::ListLeasesRequest {})?;
             if json {
                 json_line(&leases)
             } else {
-                Ok(format::lease_list_text(&leases, now_millis()))
+                Ok(format::lease_list_text(&leases, format::now_millis()))
             }
         }
         Command::LeaseAcquire(spec) => {
-            let mut request = json!({"holder":spec.holder,"ttl":format_duration(spec.ttl),"wait":spec.wait,"priority":spec.priority});
-            if spec.resource.is_empty() {
-                request["selector"] = json!({"os":spec.os,"arch":spec.arch,"minFreeMemoryBytes":spec.min_free_memory_bytes.to_string(),"gpuVramBytes":spec.gpu_vram_bytes.to_string(),"gpu":spec.gpu,"npu":spec.npu});
+            use v1::acquire_lease_request::Target;
+            let target = if spec.resource.is_empty() {
+                Target::Selector(v1::NodeSelector {
+                    os: spec.os.clone(),
+                    arch: spec.arch.clone(),
+                    min_free_memory_bytes: spec.min_free_memory_bytes,
+                    gpu_vram_bytes: spec.gpu_vram_bytes,
+                    gpu: spec.gpu.clone(),
+                    npu: spec.npu.clone(),
+                })
             } else {
-                request["resource"] = json!(spec.resource);
-            }
-            let lease = client.call(ACQUIRE_LEASE, &request)?;
+                Target::Resource(spec.resource.clone())
+            };
+            let lease = client.unary(
+                v1::lease_service::ACQUIRE_LEASE,
+                &v1::AcquireLeaseRequest {
+                    target: Some(target),
+                    holder: spec.holder.clone(),
+                    ttl: Some(proto_duration(spec.ttl)),
+                    wait: spec.wait,
+                    priority: spec.priority,
+                },
+            )?;
             if json {
                 json_line(&lease)
             } else {
@@ -2078,11 +2087,13 @@ fn execute_commands(
             }
         }
         Command::LeaseRenew { id, ttl } => {
-            let mut request = json!({"id": id});
-            if let Some(ttl) = ttl {
-                request["ttl"] = json!(format_duration(*ttl));
-            }
-            let lease = client.call(RENEW_LEASE, &request)?;
+            let lease = client.unary(
+                v1::lease_service::RENEW_LEASE,
+                &v1::RenewLeaseRequest {
+                    id: id.clone(),
+                    ttl: ttl.map(proto_duration),
+                },
+            )?;
             if json {
                 json_line(&lease)
             } else {
@@ -2093,7 +2104,8 @@ fn execute_commands(
             let mut output = String::new();
             let mut failures = Vec::new();
             for id in ids {
-                match client.call(RELEASE_LEASE, &json!({"id": id})) {
+                let request = v1::ReleaseLeaseRequest { id: id.clone() };
+                match client.unary(v1::lease_service::RELEASE_LEASE, &request) {
                     Ok(reply) => {
                         if json {
                             output.push_str(&json_line(&reply)?);
@@ -2117,23 +2129,22 @@ fn execute_commands(
             }
         }
         Command::JobList(filter) => {
-            let mut request = json!({ "limit": filter.limit });
-            if let Some(state) = filter.state {
-                request["state"] = json!(state.as_proto());
-            }
-            let jobs = client.call(LIST_JOBS, &request)?;
+            let request = v1::ListJobsRequest {
+                state: filter.state.map_or(0, |state| state.as_proto() as i32),
+                limit: filter.limit,
+            };
+            let jobs = client.unary(v1::job_service::LIST_JOBS, &request)?;
             if json {
-                Ok(format::items(&jobs, "jobs")
-                    .iter()
-                    .map(json_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&jobs.jobs)
             } else {
-                Ok(format::job_list_text(&jobs, now_millis()))
+                Ok(format::job_list_text(&jobs, format::now_millis()))
             }
         }
         Command::JobShow { id } => {
-            let job = client.call(GET_JOB, &json!({"id": id}))?;
+            let job = client.unary(
+                v1::job_service::GET_JOB,
+                &v1::GetJobRequest { id: id.clone() },
+            )?;
             if json {
                 json_line(&job)
             } else {
@@ -2149,13 +2160,13 @@ fn execute_commands(
                 "-" => read_stdin()?,
                 _ => text.clone(),
             };
-            let response = client.call(
-                CHAT_SEND,
-                &json!({
-                    "sleeve": sleeve,
-                    "text": text,
-                    "requestId": request_id,
-                }),
+            let response = client.unary(
+                v1::chat_service::SEND,
+                &v1::SendRequest {
+                    sleeve: sleeve.clone(),
+                    text,
+                    request_id: request_id.clone(),
+                },
             )?;
             if json {
                 json_line(&response)
@@ -2171,13 +2182,9 @@ fn execute_commands(
             let sleeve = sleeves.first().ok_or_else(|| {
                 RpcError::new(Code::InvalidArgument, "chat wait requires a sleeve")
             })?;
-            let response = client.call(
-                CHAT_WAIT,
-                &json!({
-                    "sleeve": sleeve,
-                    "until": until.as_proto(),
-                    "timeout": format_duration(*timeout),
-                }),
+            let response = client.unary(
+                v1::chat_service::WAIT,
+                &wait_request(sleeve, *until, *timeout),
             )?;
             if json {
                 json_line(&response)
@@ -2191,9 +2198,14 @@ fn execute_commands(
             allow,
             note,
         } => {
-            let response = client.call(
-                CHAT_RESPOND,
-                &json!({"sleeve": sleeve, "approvalId": approval_id, "allow": allow, "note": note}),
+            let response = client.unary(
+                v1::chat_service::RESPOND,
+                &v1::RespondRequest {
+                    sleeve: sleeve.clone(),
+                    approval_id: approval_id.clone(),
+                    allow: *allow,
+                    note: note.clone(),
+                },
             )?;
             if json {
                 json_line(&response)
@@ -2202,7 +2214,12 @@ fn execute_commands(
             }
         }
         Command::ChatInterrupt { sleeve } => {
-            let response = client.call(CHAT_INTERRUPT, &json!({"sleeve": sleeve}))?;
+            let response = client.unary(
+                v1::chat_service::INTERRUPT,
+                &v1::InterruptRequest {
+                    sleeve: sleeve.clone(),
+                },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -2210,67 +2227,53 @@ fn execute_commands(
             }
         }
         Command::ChatCompact { sleeve } => {
-            let response = client.call(CHAT_COMPACT, &json!({"sleeve": sleeve}))?;
+            let response = client.unary(
+                v1::chat_service::COMPACT,
+                &v1::CompactRequest {
+                    sleeve: sleeve.clone(),
+                },
+            )?;
             if json {
                 json_line(&response)
             } else {
-                let compaction = &response["compaction"];
-                let tokens = |field: &str| {
-                    compaction[field]
-                        .as_str()
-                        .map(str::to_owned)
-                        .or_else(|| compaction[field].as_u64().map(|n| n.to_string()))
-                        .unwrap_or_else(|| "0".into())
-                };
+                let compaction = response.compaction.unwrap_or_default();
                 Ok(format!(
                     "compacted\t{} -> {} tokens\n",
-                    tokens("tokensBefore"),
-                    tokens("tokensAfter")
+                    compaction.tokens_before, compaction.tokens_after
                 ))
             }
         }
         Command::ChatStatus { sleeve } => {
-            let response = client.call(GET_SLEEVE, &json!({"name": sleeve}))?;
-            let chat = response
-                .get("sleeve")
-                .and_then(|sleeve| sleeve.get("chat"))
-                .filter(|chat| !chat.is_null())
+            let chat = require_sleeve(&get_sleeve(client, sleeve)?.sleeve)?
+                .chat
+                .clone()
                 .ok_or_else(|| RpcError::new(Code::FailedPrecondition, "sleeve has no chat"))?;
             if json {
-                json_line(chat)
+                json_line(&chat)
             } else {
-                Ok(format::chat_status_text(chat))
+                Ok(format::chat_status_text(&chat))
             }
         }
         Command::ChatModels { sleeve, harness } => {
-            let response =
-                client.call(CHAT_MODELS, &json!({"sleeve": sleeve, "harness": harness}))?;
+            let models = chat_models(client, sleeve.as_deref(), harness)?;
             if json {
-                json_line(&response)
-            } else if response["supported"].as_bool() != Some(true) {
-                Ok(format!(
-                    "{}\n",
-                    response["reason"]
-                        .as_str()
-                        .unwrap_or("model controls are unavailable")
-                ))
+                json_line(&models)
+            } else if !models.supported {
+                Ok(format!("{}\n", models.reason))
             } else {
-                let mut out = String::new();
-                for model in format::items(&response, "models") {
-                    let efforts = format::items(&model, "efforts")
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    out.push_str(&format!(
-                        "{}\t{}\tefforts=[{}]\tdefault effort={}\n",
-                        model["model"].as_str().unwrap_or_default(),
-                        model["name"].as_str().unwrap_or_default(),
-                        efforts,
-                        model["defaultEffort"].as_str().unwrap_or_default()
-                    ));
-                }
-                Ok(out)
+                Ok(models
+                    .models
+                    .iter()
+                    .map(|model| {
+                        format!(
+                            "{}\t{}\tefforts=[{}]\tdefault effort={}\n",
+                            model.model,
+                            model.name,
+                            model.efforts.join(" "),
+                            model.default_effort
+                        )
+                    })
+                    .collect())
             }
         }
         Command::ChatSettings(settings) => chat_settings(client, settings, json),
@@ -2279,30 +2282,39 @@ fn execute_commands(
             summary_file,
         } => {
             let summary = read_report_summary(summary_file.as_deref())?;
-            let response = client.call(
-                CHAT_REPORT,
-                &json!({"status": format!("REPORT_STATUS_{}", status.to_ascii_uppercase()),
-                    "summary": summary, "sourceSeq": next_report_seq().to_string()}),
+            let report_status = v1::ReportStatus::from_str_name(&format!(
+                "REPORT_STATUS_{}",
+                status.to_ascii_uppercase()
+            ))
+            .ok_or_else(|| RpcError::invalid("--status must be complete, partial or blocked"))?;
+            let response = client.unary(
+                v1::chat_service::REPORT,
+                &v1::ReportRequest {
+                    status: report_status as i32,
+                    summary,
+                    source_seq: next_report_seq(),
+                    ..Default::default()
+                },
             )?;
             if json {
                 json_line(&response)
-            } else if response["dropped"].as_bool() == Some(true) {
+            } else if response.dropped {
                 Ok("dropped: a newer report is already recorded\n".into())
             } else {
-                let seq = response["result"]["chatSeq"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| {
-                        response["result"]["chatSeq"]
-                            .as_u64()
-                            .map(|n| n.to_string())
-                    })
-                    .unwrap_or_else(|| "0".into());
-                Ok(format!("reported {status} at chat seq {seq}\n"))
+                Ok(format!(
+                    "reported {status} at chat seq {}\n",
+                    response.result.map_or(0, |result| result.chat_seq)
+                ))
             }
         }
         Command::JobCancel { id } => {
-            let job = client.call(CANCEL_JOB, &json!({"id": id}))?;
+            let job = client.unary(
+                v1::job_service::CANCEL_JOB,
+                &v1::CancelJobRequest {
+                    id: id.clone(),
+                    ..Default::default()
+                },
+            )?;
             if json {
                 json_line(&job)
             } else {
@@ -2310,19 +2322,19 @@ fn execute_commands(
             }
         }
         Command::SleeveList => {
-            let sleeves = client.call(LIST_SLEEVES, &json!({}))?;
+            let sleeves =
+                client.unary(v1::sleeve_service::LIST_SLEEVES, &v1::ListSleevesRequest {})?;
             if json {
-                Ok(format::items(&sleeves, "sleeves")
-                    .iter()
-                    .map(json_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&sleeves.sleeves)
             } else {
                 Ok(format::sleeve_list_text(&sleeves))
             }
         }
         Command::SleeveWorkspaces => {
-            let response = client.call(LIST_WORKSPACES, &json!({}))?;
+            let response = client.unary(
+                v1::sleeve_service::LIST_WORKSPACES,
+                &v1::ListWorkspacesRequest {},
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -2330,7 +2342,10 @@ fn execute_commands(
             }
         }
         Command::SleeveBrowse { path } => {
-            let response = client.call(BROWSE_WORKSPACES, &json!({"path": path}))?;
+            let response = client.unary(
+                v1::sleeve_service::BROWSE_WORKSPACES,
+                &v1::BrowseWorkspacesRequest { path: path.clone() },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -2338,20 +2353,20 @@ fn execute_commands(
             }
         }
         Command::SleeveShow { name } => {
-            let response = client.call(GET_SLEEVE, &json!({"name": name}))?;
-            let sleeve = response
-                .get("sleeve")
-                .filter(|value| !value.is_null())
-                .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))?;
-            let tail = exited_pane_tail(client, sleeve);
+            let response = get_sleeve(client, name)?;
+            let sleeve = require_sleeve(&response.sleeve)?;
             if json {
                 json_line(&response)
             } else {
+                let tail = exited_pane_tail(client, sleeve);
                 Ok(format::sleeve_text(sleeve, tail.as_deref()))
             }
         }
         Command::SleeveStatus { name, explain } => {
-            let response = client.call(GET_TERMINAL_STATUS, &json!({"name": name}))?;
+            let response = client.unary(
+                v1::sleeve_service::GET_TERMINAL_STATUS,
+                &v1::GetTerminalStatusRequest { name: name.clone() },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -2359,9 +2374,12 @@ fn execute_commands(
             }
         }
         Command::SleeveKill { name, drop_caches } => {
-            let response = client.call(
-                KILL_SLEEVE,
-                &json!({"name": name, "dropCaches": drop_caches}),
+            let response = client.unary(
+                v1::sleeve_service::KILL_SLEEVE,
+                &v1::KillSleeveRequest {
+                    name: name.clone(),
+                    drop_caches: *drop_caches,
+                },
             )?;
             if json {
                 json_line(&response)
@@ -2369,48 +2387,16 @@ fn execute_commands(
                 Ok(format!("killed\t{name}\n"))
             }
         }
-        Command::SleeveCheckpoint { name, method, ids } => {
-            let method: &str = method;
-            let mut request = json!({"name": name});
-            let keys: &[&str] = if method == "DiffCheckpoint" {
-                &["fromId", "toId"]
-            } else {
-                &["id"]
-            };
-            for (key, id) in keys.iter().zip(ids) {
-                request[*key] = json!(id.to_string());
-            }
-            let response = client.call(&format!("{SLEEVE_SERVICE}{method}"), &request)?;
-            if json {
-                return json_line(&response);
-            }
-            Ok(match method {
-                "DiffCheckpoint" => {
-                    let mut diff = response["diff"].as_str().unwrap_or_default().to_owned();
-                    if response["truncated"] == true {
-                        diff.push_str("\n(diff truncated)\n");
-                    }
-                    diff
-                }
-                "ListCheckpoints" => response["checkpoints"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(format::checkpoint_line)
-                    .collect(),
-                "CreateCheckpoint" => format::checkpoint_line(&response["checkpoint"]),
-                _ => format!(
-                    "restored\t{name}\tbefore\t{}",
-                    format::checkpoint_line(&response["before"])
-                ),
-            })
-        }
+        Command::SleeveCheckpoint { name, action } => checkpoint(client, name, *action, json),
         Command::SleeveSpawn(spawn) => spawn_sleeve(client, spawn, json),
         Command::SleeveEnvoy(envoy) => spawn_envoy(client, envoy, json),
         Command::SleeveResleeve(resleeve) => resleeve_sleeve(client, resleeve, json),
         Command::SleevePrune(prune) => prune_sleeves(client, prune, json),
         Command::SessionList => {
-            let sessions = client.call(LIST_SESSIONS, &json!({}))?;
+            let sessions = client.unary(
+                v1::session_service::LIST_SESSIONS,
+                &v1::ListSessionsRequest {},
+            )?;
             if json {
                 json_line(&sessions)
             } else {
@@ -2418,18 +2404,30 @@ fn execute_commands(
             }
         }
         Command::SessionNew(spec) => {
-            let response = client.call(CREATE_SESSION, &session_new_body(spec))?;
+            let request = v1::CreateSessionRequest {
+                name: spec.name.clone(),
+                cwd: spec.cwd.clone(),
+                command: spec.command.clone(),
+                env: spec.env.iter().cloned().collect(),
+            };
+            let response = client.unary(v1::session_service::CREATE_SESSION, &request)?;
             if json {
                 json_line(&response)
             } else {
                 Ok(format!(
                     "created\t{}\n",
-                    response["session"]["name"].as_str().unwrap_or(&spec.name)
+                    response
+                        .session
+                        .as_ref()
+                        .map_or(spec.name.as_str(), |session| or(&session.name, &spec.name))
                 ))
             }
         }
         Command::SessionKill { name } => {
-            let response = client.call(KILL_SESSION, &json!({"name": name}))?;
+            let response = client.unary(
+                v1::session_service::KILL_SESSION,
+                &v1::KillSessionRequest { name: name.clone() },
+            )?;
             if json {
                 json_line(&response)
             } else {
@@ -2437,26 +2435,34 @@ fn execute_commands(
             }
         }
         Command::SessionRespawn { name } => {
-            let response = client.call(RESPAWN_SESSION, &json!({"name": name}))?;
+            let response = client.unary(
+                v1::session_service::RESPAWN_SESSION,
+                &v1::RespawnSessionRequest { name: name.clone() },
+            )?;
             if json {
                 json_line(&response)
             } else {
                 Ok(format!(
                     "respawned\t{}\n",
-                    response["session"]["name"].as_str().unwrap_or(name)
+                    response
+                        .session
+                        .as_ref()
+                        .map_or(name.as_str(), |session| or(&session.name, name))
                 ))
             }
         }
         Command::SessionCapture { name, lines } => {
-            let pane = client.call(CAPTURE_PANE, &json!({"name": name, "lines": lines}))?;
+            let pane = client.unary(
+                v1::session_service::CAPTURE_PANE,
+                &v1::CapturePaneRequest {
+                    name: name.clone(),
+                    lines: *lines,
+                },
+            )?;
             if json {
                 json_line(&pane)
             } else {
-                Ok(pane
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned())
+                Ok(pane.text)
             }
         }
         Command::MsgSend {
@@ -2471,17 +2477,15 @@ fn execute_commands(
                 "-" => read_stdin()?,
                 _ => body.clone(),
             };
-            let mut request = json!({
-                "to": to,
-                "body": body,
-                "threadId": thread,
-                "kind": kind.as_proto(),
-                "requestId": request_id,
-            });
-            if let Some(ack) = ack {
-                request["ackRequired"] = json!(ack);
-            }
-            let response = client.call(MSG_SEND, &request)?;
+            let request = v1::MessageServiceSendRequest {
+                to: to.clone(),
+                body,
+                thread_id: thread.clone(),
+                kind: kind.as_proto() as i32,
+                ack_required: *ack,
+                request_id: request_id.clone(),
+            };
+            let response = client.unary(v1::message_service::SEND, &request)?;
             if json {
                 json_line(&response)
             } else {
@@ -2494,16 +2498,18 @@ fn execute_commands(
             act_as,
             thread,
         } => {
-            let response = client.call(
-                MSG_INBOX,
-                &json!({
-                    "unreadOnly": unread,
-                    "peek": peek,
-                    "as": act_as,
-                    "threadId": thread,
-                }),
-            )?;
-            mail_list_output(&response, json)
+            let request = v1::InboxRequest {
+                unread_only: *unread,
+                peek: *peek,
+                r#as: act_as.clone(),
+                thread_id: thread.clone(),
+            };
+            let response = client.unary(v1::message_service::INBOX, &request)?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format::mail_text(&response.messages))
+            }
         }
         Command::MsgReply {
             id,
@@ -2514,44 +2520,58 @@ fn execute_commands(
                 "-" => read_stdin()?,
                 _ => body.clone(),
             };
-            let response = client.call(
-                MSG_REPLY,
-                &json!({"id": id, "body": body, "requestId": request_id}),
-            )?;
-            sent_message_output(&response, json, format::msg_reply_text)
+            let request = v1::ReplyRequest {
+                id: id.clone(),
+                body,
+                request_id: request_id.clone(),
+            };
+            let response = client.unary(v1::message_service::REPLY, &request)?;
+            sent_message_output(response.message, json, format::msg_reply_text)
         }
         Command::MsgAck { id, act_as } => {
-            let response = client.call(MSG_ACK, &json!({"id": id, "as": act_as}))?;
-            sent_message_output(&response, json, format::msg_ack_text)
+            let request = v1::AckRequest {
+                id: id.clone(),
+                r#as: act_as.clone(),
+            };
+            let response = client.unary(v1::message_service::ACK, &request)?;
+            sent_message_output(response.message, json, format::msg_ack_text)
         }
         Command::MsgThread { thread } => {
-            let response = client.call(MSG_THREAD, &json!({"threadId": thread}))?;
-            mail_list_output(&response, json)
+            let response = client.unary(
+                v1::message_service::THREAD,
+                &v1::ThreadRequest {
+                    thread_id: thread.clone(),
+                },
+            )?;
+            if json {
+                json_line(&response)
+            } else {
+                Ok(format::mail_text(&response.messages))
+            }
         }
         Command::MsgThreads {
             sleeve,
             project,
             limit,
         } => {
-            let response = client.call(
-                MSG_THREADS,
-                &json!({"sleeve": sleeve, "project": project, "limit": limit}),
-            )?;
+            let request = v1::ListThreadsRequest {
+                sleeve: sleeve.clone(),
+                project: project.clone(),
+                limit: *limit,
+            };
+            let response = client.unary(v1::message_service::LIST_THREADS, &request)?;
             if json {
-                Ok(format::items(&response, "threads")
-                    .iter()
-                    .map(json_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&response.threads)
             } else {
                 Ok(format::thread_list_text(&response))
             }
         }
         Command::MsgWait { target, timeout } => {
-            let response = client.call(
-                MSG_WAIT,
-                &json!({"target": target, "timeout": format_duration(*timeout)}),
-            )?;
+            let request = v1::MessageServiceWaitRequest {
+                target: target.clone(),
+                timeout: Some(proto_duration(*timeout)),
+            };
+            let response = client.unary(v1::message_service::WAIT, &request)?;
             if json {
                 json_line(&response)
             } else {
@@ -2561,54 +2581,37 @@ fn execute_commands(
     }
 }
 
-/// What `msg inbox` and `msg thread` print.
-fn mail_list_output(response: &Value, json: bool) -> Result<String> {
-    if json {
-        json_line(response)
-    } else {
-        Ok(format::mail_text(&format::items(response, "messages")))
-    }
-}
-
 /// What `msg reply` and `msg ack` print: the message the hub just sent or
 /// changed.
 fn sent_message_output(
-    response: &Value,
+    message: Option<v1::MailMessage>,
     json: bool,
-    human: impl Fn(&Value) -> String,
+    human: impl Fn(&v1::MailMessage) -> String,
 ) -> Result<String> {
-    let message = response
-        .get("message")
-        .filter(|value| !value.is_null())
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no message"))?;
+    let message =
+        message.ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no message"))?;
     if json {
-        json_line(message)
+        json_line(&message)
     } else {
-        Ok(human(message))
+        Ok(human(&message))
     }
 }
 
 /// The tail of an exited sleeve's kept session, read through
 /// SessionService.CapturePane. A session that is gone, or a hub that
 /// refuses the capture, just means there is no tail to show.
-fn exited_pane_tail(client: &Client, sleeve: &Value) -> Option<String> {
-    if sleeve.get("state").and_then(Value::as_str) != Some("SLEEVE_STATE_EXITED") {
+fn exited_pane_tail(client: &Client, sleeve: &v1::Sleeve) -> Option<String> {
+    if sleeve.state() != v1::SleeveState::Exited || sleeve.session.is_empty() {
         return None;
     }
-    let session = sleeve
-        .get("session")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if session.is_empty() {
-        return None;
-    }
+    let request = v1::CapturePaneRequest {
+        name: sleeve.session.clone(),
+        lines: 100,
+    };
     let pane = client
-        .call(CAPTURE_PANE, &json!({"name": session, "lines": 100}))
+        .unary(v1::session_service::CAPTURE_PANE, &request)
         .ok()?;
-    let tail = format::pane_tail(
-        pane.get("text").and_then(Value::as_str).unwrap_or_default(),
-        format::SHOW_TAIL_LINES,
-    );
+    let tail = format::pane_tail(&pane.text, format::SHOW_TAIL_LINES);
     (!tail.is_empty()).then_some(tail)
 }
 
@@ -2645,7 +2648,7 @@ fn transport_timeout(invocation: &Invocation) -> Duration {
         Command::NodeRemove {
             jobs, wait_timeout, ..
         } => {
-            let wait = if jobs == "REMOVE_JOBS_WAIT" {
+            let wait = if *jobs == v1::RemoveJobs::Wait {
                 wait_timeout.unwrap_or(Duration::from_secs(3600))
             } else {
                 Duration::from_secs(120)
@@ -2692,18 +2695,6 @@ fn transport_timeout(invocation: &Invocation) -> Duration {
     }
 }
 
-/// A google.protobuf.Duration in protobuf JSON. The hub reads it as seconds.
-pub(crate) fn format_duration(timeout: Duration) -> String {
-    let micros = timeout.as_micros();
-    let seconds = micros / 1_000_000;
-    let fraction = micros % 1_000_000;
-    if fraction == 0 {
-        return format!("{seconds}s");
-    }
-    let fraction = fraction.to_string().trim_end_matches('0').to_owned();
-    format!("{seconds}.{fraction}s")
-}
-
 fn read_stdin() -> Result<String> {
     use std::io::Read;
     let mut text = String::new();
@@ -2713,7 +2704,7 @@ fn read_stdin() -> Result<String> {
     Ok(text)
 }
 
-fn edit_in_editor(note: &Value) -> Result<(String, String)> {
+fn edit_in_editor(note: &v1::Note) -> Result<(String, String)> {
     use std::io::Write;
     let mut nonce = [0_u8; 8];
     getrandom::getrandom(&mut nonce)
@@ -2743,15 +2734,8 @@ fn edit_in_editor(note: &Value) -> Result<(String, String)> {
         .open(&path)
         .map_err(|error| RpcError::new(Code::Internal, format!("create editor file: {error}")))?;
     let _cleanup = RemoveTemp(path.clone());
-    file.write_all(
-        format!(
-            "{}\n\n{}",
-            note["title"].as_str().unwrap_or_default(),
-            note["body"].as_str().unwrap_or_default()
-        )
-        .as_bytes(),
-    )
-    .map_err(|error| RpcError::new(Code::Internal, format!("write editor file: {error}")))?;
+    file.write_all(format!("{}\n\n{}", note.title, note.body).as_bytes())
+        .map_err(|error| RpcError::new(Code::Internal, format!("write editor file: {error}")))?;
     drop(file);
     let editor = env::var("EDITOR")
         .ok()
@@ -2851,11 +2835,13 @@ fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
     let snapshot = snapshot.map_err(|error| {
         RpcError::new(Code::Internal, format!("collect local metrics: {error}"))
     })?;
-    let value = metrics_json(&snapshot);
+    let encoded = serde_json::to_vec(&metrics_json(&snapshot))
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode local metrics: {error}")))?;
+    let metrics: v1::NodeMetrics = protectorate_wire::decode(&encoded)?;
     if json {
-        json_line(&value)
+        json_line(&metrics)
     } else {
-        Ok(format::local_metrics_text(&value))
+        Ok(format::local_metrics_text(&metrics))
     }
 }
 
@@ -3148,16 +3134,43 @@ fn private_owner_token(path: &Path) -> Result<Option<String>> {
 
 /// What `backlog add`, `done` and `reopen` print: the note the hub just
 /// created or changed, as one text row or one proto-JSON line.
-fn note_output(response: &Value, json: bool) -> Result<String> {
-    let note = response
-        .get("note")
-        .filter(|value| !value.is_null())
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))?;
+fn note_output(note: Option<v1::Note>, json: bool) -> Result<String> {
+    let note = returned_note(note)?;
     if json {
-        json_line(note)
+        json_line(&note)
     } else {
-        Ok(format::note_record_text(note))
+        Ok(format::note_record_text(&note))
     }
+}
+
+fn returned_note(note: Option<v1::Note>) -> Result<v1::Note> {
+    note.ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))
+}
+
+fn update_note(client: &Client, request: v1::UpdateNoteRequest, json: bool) -> Result<String> {
+    note_output(
+        client
+            .unary(v1::backlog_service::UPDATE_NOTE, &request)?
+            .note,
+        json,
+    )
+}
+
+fn current_note(client: &Client, id: &str) -> Result<v1::Note> {
+    let response = client.unary(
+        v1::backlog_service::GET_NOTE,
+        &v1::GetNoteRequest { id: id.to_owned() },
+    )?;
+    returned_note(response.note)
+}
+
+/// A note body from a file, or stdin for `-`.
+fn read_body(path: &str) -> Result<String> {
+    if path == "-" {
+        return read_stdin();
+    }
+    fs::read_to_string(path)
+        .map_err(|error| RpcError::new(Code::Internal, format!("read body: {error}")))
 }
 
 fn spawn_sleeve(client: &Client, spawn: &SleeveSpawn, json: bool) -> Result<String> {
@@ -3171,91 +3184,148 @@ fn spawn_sleeve(client: &Client, spawn: &SleeveSpawn, json: bool) -> Result<Stri
         }
         raw
     };
-    let response = client.call(
-        SPAWN_SLEEVE,
-        &spawn_body(spawn, &absolute_workspace(&spawn.workspace)?, &brief),
-    )?;
+    let request = v1::SpawnSleeveRequest {
+        name: spawn.name.clone(),
+        workspace: absolute_workspace(&spawn.workspace)?,
+        harness: spawn.harness.as_proto() as i32,
+        args: spawn.args.clone(),
+        limits: (spawn.cpu_percent > 0 || spawn.memory_bytes > 0 || spawn.disk_bytes > 0)
+            .then_some(v1::SleeveLimits {
+                cpu_percent: spawn.cpu_percent,
+                memory_bytes: spawn.memory_bytes,
+                disk_bytes: spawn.disk_bytes,
+            }),
+        env: spawn.env.iter().cloned().collect(),
+        mode: spawn.mode.as_proto() as i32,
+        supervised: spawn.supervised,
+        selection: selection(&spawn.selection),
+        read_only: spawn
+            .read_only
+            .iter()
+            .map(|mount| v1::ReadOnlyMount {
+                source: mount.source.clone(),
+                target: mount.target.clone(),
+            })
+            .collect(),
+        exit_after_idle: (!spawn.exit_after_idle.is_zero())
+            .then(|| proto_duration(spawn.exit_after_idle)),
+        branch: spawn.branch.clone(),
+        new_branch: spawn.new_branch.clone(),
+        brief,
+        nested: spawn.nested,
+        token_budget: spawn.token_budget,
+    };
+    let response = client.unary(v1::sleeve_service::SPAWN_SLEEVE, &request)?;
     if json {
         json_line(&response)
     } else {
-        require_sleeve(&response)?;
-        Ok(format::sleeve_spawn_text(&response))
+        Ok(format::sleeve_spawn_text(require_sleeve(&response.sleeve)?))
     }
 }
 
+/// `orchestrator status`: Envoy's sleeve and its newest token, which the
+/// JSON form returns as one object with either field absent.
 fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
-    let sleeve = match client.call(GET_SLEEVE, &json!({"name":"envoy"})) {
-        Ok(response) => response.get("sleeve").cloned(),
+    let sleeve = match get_sleeve(client, "envoy") {
+        Ok(response) => response.sleeve,
         Err(error) if error.code == Code::NotFound => None,
         Err(error) => return Err(error),
     };
-    let listing = client.call(LIST_TOKENS, &json!({}))?;
-    let token = listing["tokens"]
-        .as_array()
+    let listing = client.unary(v1::token_service::LIST_TOKENS, &v1::ListTokensRequest {})?;
+    let token = listing
+        .tokens
         .into_iter()
-        .flatten()
-        .filter(|token| token["name"] == "orchestrator-envoy")
-        .max_by_key(|token| {
-            format::timestamp_millis(token["createdAt"].as_str().unwrap_or_default())
-                .unwrap_or_default()
-        })
-        .cloned();
-    let mut status = json!({});
-    if let Some(sleeve) = sleeve {
-        status["sleeve"] = sleeve;
+        .filter(|token| token.name == "orchestrator-envoy")
+        .max_by_key(|token| format::unix_millis(token.created_at.as_ref()).unwrap_or_default());
+    if !json {
+        return Ok(format::orchestrator_status_text(
+            sleeve.as_ref(),
+            token.as_ref(),
+            format::now_millis(),
+        ));
     }
-    if let Some(token) = token {
-        status["token"] = token;
+    let mut status = serde_json::Map::new();
+    if let Some(sleeve) = &sleeve {
+        status.insert("sleeve".into(), message_value(sleeve)?);
     }
-    if json {
-        json_line(&status)
-    } else {
-        Ok(format::orchestrator_status_text(&status, now_millis()))
+    if let Some(token) = &token {
+        status.insert("token".into(), message_value(token)?);
     }
+    value_line(&Value::Object(status))
 }
 
 fn spawn_envoy(client: &Client, envoy: &SleeveEnvoy, json: bool) -> Result<String> {
-    let response = client.call(SPAWN_ENVOY, &envoy_body(envoy))?;
+    let request = v1::SpawnEnvoyRequest {
+        harness: envoy.harness.map_or(0, |harness| harness.as_proto() as i32),
+        scopes: envoy.scopes.clone(),
+        add_scopes: envoy.add_scopes.clone(),
+        selection: selection(&envoy.selection),
+        token_budget: envoy.token_budget,
+    };
+    let response = client.unary(v1::sleeve_service::SPAWN_ENVOY, &request)?;
     if json {
         json_line(&response)
     } else {
-        require_sleeve(&response)?;
+        require_sleeve(&response.sleeve)?;
         Ok(format::sleeve_envoy_text(&response))
+    }
+}
+
+/// `chat models`. A harness without model listing is an answer, not a
+/// failure: the hub says so with `supported` false, and a hub that does not
+/// list models for a harness this CLI knows gets the same answer.
+fn chat_models(
+    client: &Client,
+    sleeve: Option<&str>,
+    harness: &str,
+) -> Result<v1::ListModelsResponse> {
+    let request = v1::ListModelsRequest {
+        sleeve: sleeve.unwrap_or_default().to_owned(),
+        harness: harness.to_owned(),
+    };
+    let unsupported = || v1::ListModelsResponse {
+        reason: format!("model listing is not supported for {harness}"),
+        ..Default::default()
+    };
+    match client.unary(v1::chat_service::LIST_MODELS, &request) {
+        Ok(models) if !models.supported && models.reason.is_empty() => Ok(v1::ListModelsResponse {
+            reason: unsupported().reason,
+            ..models
+        }),
+        Ok(models) => Ok(models),
+        Err(error)
+            if sleeve.is_none()
+                && HarnessName::parse(harness).is_some()
+                && matches!(error.code, Code::Unimplemented | Code::InvalidArgument) =>
+        {
+            Ok(unsupported())
+        }
+        Err(error) => Err(error),
     }
 }
 
 /// `chat settings`: GetSleeve for the current settings, SetSelection when the
 /// invocation carries a selection or --native-defaults.
 fn chat_settings(client: &Client, settings: &ChatSettings, json: bool) -> Result<String> {
-    if !settings.writes() {
-        let response = client.call(GET_SLEEVE, &json!({"name": settings.sleeve}))?;
-        let sleeve = response
-            .get("sleeve")
-            .filter(|value| !value.is_null())
-            .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))?;
-        let chat = sleeve.get("chat").cloned().unwrap_or(Value::Null);
-        return if json {
-            json_line(&chat)
-        } else {
-            Ok(format::chat_settings_text(&chat))
+    let chat = if settings.writes() {
+        let request = v1::SetSelectionRequest {
+            sleeve: settings.sleeve.clone(),
+            selection: Some(v1::ModelSelection {
+                model: settings.model.clone().unwrap_or_default(),
+                effort: settings.effort.clone().unwrap_or_default(),
+            }),
         };
-    }
-    let mut selection = serde_json::Map::new();
-    if let Some(model) = &settings.model {
-        selection.insert("model".into(), json!(model));
-    }
-    if let Some(effort) = &settings.effort {
-        selection.insert("effort".into(), json!(effort));
-    }
-    let response = client.call(
-        CHAT_SET_SELECTION,
-        &json!({"sleeve": settings.sleeve, "selection": Value::Object(selection)}),
-    )?;
-    let chat = response
-        .get("chat")
-        .filter(|value| !value.is_null())
-        .cloned()
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no chat status"))?;
+        client
+            .unary(v1::chat_service::SET_SELECTION, &request)?
+            .chat
+            .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no chat status"))?
+    } else {
+        let response = get_sleeve(client, &settings.sleeve)?;
+        require_sleeve(&response.sleeve)?
+            .chat
+            .clone()
+            .unwrap_or_default()
+    };
     if json {
         json_line(&chat)
     } else {
@@ -3264,17 +3334,34 @@ fn chat_settings(client: &Client, settings: &ChatSettings, json: bool) -> Result
 }
 
 fn resleeve_sleeve(client: &Client, resleeve: &SleeveResleeve, json: bool) -> Result<String> {
-    let response = client.call(RESLEEVE_SLEEVE, &resleeve_body(resleeve))?;
+    let request = v1::ResleeveSleeveRequest {
+        name: resleeve.name.clone(),
+        to: resleeve.to.map_or(0, |harness| harness.as_proto() as i32),
+        interrupt: resleeve.interrupt,
+        wait: (!resleeve.wait.is_zero()).then(|| proto_duration(resleeve.wait)),
+        selection: selection(&resleeve.selection),
+        native_defaults: resleeve.native_defaults,
+    };
+    let response = client.unary(v1::sleeve_service::RESLEEVE_SLEEVE, &request)?;
     if json {
         json_line(&response)
     } else {
-        require_sleeve(&response)?;
-        Ok(format::sleeve_resleeve_text(&response))
+        Ok(format::sleeve_resleeve_text(require_sleeve(
+            &response.sleeve,
+        )?))
     }
 }
 
 fn prune_sleeves(client: &Client, prune: &SleevePrune, json: bool) -> Result<String> {
-    let response = client.call(PRUNE_SLEEVES, &prune_body(prune))?;
+    let request = v1::PruneSleevesRequest {
+        yes: prune.yes,
+        caches: prune.caches,
+        homes: prune.homes,
+        workspaces: prune.workspaces,
+        running: prune.running,
+        ignored: prune.ignored,
+    };
+    let response = client.unary(v1::sleeve_service::PRUNE_SLEEVES, &request)?;
     if json {
         json_line(&response)
     } else {
@@ -3282,177 +3369,92 @@ fn prune_sleeves(client: &Client, prune: &SleevePrune, json: bool) -> Result<Str
     }
 }
 
-fn require_sleeve(response: &Value) -> Result<()> {
-    if response.get("sleeve").is_some_and(|value| !value.is_null()) {
-        Ok(())
-    } else {
-        Err(RpcError::new(Code::DataLoss, "hub returned no sleeve"))
-    }
-}
-
-fn spawn_body(spawn: &SleeveSpawn, workspace: &str, brief: &str) -> Value {
-    let mut request = json!({
-        "name": spawn.name,
-        "workspace": workspace,
-        "harness": spawn.harness.as_proto(),
-    });
-    if !spawn.args.is_empty() {
-        request["args"] = json!(spawn.args);
-    }
-    let mut limits = serde_json::Map::new();
-    if spawn.cpu_percent > 0 {
-        limits.insert("cpuPercent".into(), json!(spawn.cpu_percent));
-    }
-    if spawn.memory_bytes > 0 {
-        limits.insert("memoryBytes".into(), json!(spawn.memory_bytes.to_string()));
-    }
-    if spawn.disk_bytes > 0 {
-        limits.insert("diskBytes".into(), json!(spawn.disk_bytes.to_string()));
-    }
-    if !limits.is_empty() {
-        request["limits"] = Value::Object(limits);
-    }
-    if !spawn.env.is_empty() {
-        let mut env = serde_json::Map::new();
-        for (key, value) in &spawn.env {
-            env.insert(key.clone(), json!(value));
+/// `sleeve checkpoint`: list, create, diff or restore workspace checkpoints.
+fn checkpoint(client: &Client, name: &str, action: CheckpointAction, json: bool) -> Result<String> {
+    use v1::sleeve_service::{
+        CREATE_CHECKPOINT, DIFF_CHECKPOINT, LIST_CHECKPOINTS, RESTORE_CHECKPOINT,
+    };
+    let name = name.to_owned();
+    match action {
+        CheckpointAction::List => {
+            let response = client.unary(LIST_CHECKPOINTS, &v1::ListCheckpointsRequest { name })?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(response
+                .checkpoints
+                .iter()
+                .map(format::checkpoint_line)
+                .collect())
         }
-        request["env"] = Value::Object(env);
-    }
-    if let Some(mode) = spawn.mode.as_proto() {
-        request["mode"] = json!(mode);
-    }
-    if spawn.supervised {
-        request["supervised"] = json!(true);
-    }
-    if let Some(selection) = selection_body(&spawn.selection) {
-        request["selection"] = selection;
-    }
-    if !spawn.read_only.is_empty() {
-        request["readOnly"] = json!(spawn
-            .read_only
-            .iter()
-            .map(|mount| {
-                let mut item = json!({ "source": mount.source });
-                if !mount.target.is_empty() {
-                    item["target"] = json!(mount.target);
-                }
-                item
-            })
-            .collect::<Vec<_>>());
-    }
-    if !spawn.exit_after_idle.is_zero() {
-        request["exitAfterIdle"] = json!(format_duration(spawn.exit_after_idle));
-    }
-    if !spawn.branch.is_empty() {
-        request["branch"] = json!(spawn.branch);
-    }
-    if !spawn.new_branch.is_empty() {
-        request["newBranch"] = json!(spawn.new_branch);
-    }
-    if !brief.is_empty() {
-        request["brief"] = json!(brief);
-    }
-    if spawn.nested {
-        request["nested"] = json!(true);
-    }
-    if spawn.token_budget > 0 {
-        request["tokenBudget"] = json!(spawn.token_budget.to_string());
-    }
-    request
-}
-
-fn envoy_body(envoy: &SleeveEnvoy) -> Value {
-    let mut request = json!({});
-    if let Some(harness) = envoy.harness {
-        request["harness"] = json!(harness.as_proto());
-    }
-    if !envoy.scopes.is_empty() {
-        request["scopes"] = json!(envoy.scopes);
-    }
-    if !envoy.add_scopes.is_empty() {
-        request["addScopes"] = json!(envoy.add_scopes);
-    }
-    if let Some(selection) = selection_body(&envoy.selection) {
-        request["selection"] = selection;
-    }
-    if envoy.token_budget > 0 {
-        request["tokenBudget"] = json!(envoy.token_budget.to_string());
-    }
-    request
-}
-
-fn resleeve_body(resleeve: &SleeveResleeve) -> Value {
-    let mut request = json!({ "name": resleeve.name });
-    if let Some(to) = resleeve.to {
-        request["to"] = json!(to.as_proto());
-    }
-    if resleeve.interrupt {
-        request["interrupt"] = json!(true);
-    }
-    if !resleeve.wait.is_zero() {
-        request["wait"] = json!(format_duration(resleeve.wait));
-    }
-    if let Some(selection) = selection_body(&resleeve.selection) {
-        request["selection"] = selection;
-    }
-    if resleeve.native_defaults {
-        request["nativeDefaults"] = json!(true);
-    }
-    request
-}
-
-/// False booleans are omitted, the way proto3 JSON omits them. With no
-/// category present the hub inventories caches.
-fn prune_body(prune: &SleevePrune) -> Value {
-    let mut request = serde_json::Map::new();
-    for (name, value) in [
-        ("yes", prune.yes),
-        ("caches", prune.caches),
-        ("homes", prune.homes),
-        ("workspaces", prune.workspaces),
-        ("running", prune.running),
-        ("ignored", prune.ignored),
-    ] {
-        if value {
-            request.insert(name.into(), json!(true));
+        CheckpointAction::Create => {
+            let response =
+                client.unary(CREATE_CHECKPOINT, &v1::CreateCheckpointRequest { name })?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(format::checkpoint_line(
+                &response.checkpoint.unwrap_or_default(),
+            ))
+        }
+        CheckpointAction::Diff { from, to } => {
+            let request = v1::DiffCheckpointRequest {
+                name,
+                from_id: from,
+                to_id: to,
+            };
+            let mut response = client.unary(DIFF_CHECKPOINT, &request)?;
+            if json {
+                return json_line(&response);
+            }
+            if response.truncated {
+                response.diff.push_str("\n(diff truncated)\n");
+            }
+            Ok(response.diff)
+        }
+        CheckpointAction::Restore { id } => {
+            let request = v1::RestoreCheckpointRequest {
+                name: name.clone(),
+                id,
+            };
+            let response = client.unary(RESTORE_CHECKPOINT, &request)?;
+            if json {
+                return json_line(&response);
+            }
+            Ok(format!(
+                "restored\t{name}\tbefore\t{}",
+                format::checkpoint_line(&response.before.unwrap_or_default())
+            ))
         }
     }
-    Value::Object(request)
 }
 
-/// CreateSessionRequest. Omitted fields stay unset, so the hub uses its own
-/// defaults for cwd and the login shell.
-fn session_new_body(spec: &SessionNew) -> Value {
-    let mut request = json!({ "name": spec.name });
-    if !spec.cwd.is_empty() {
-        request["cwd"] = json!(spec.cwd);
-    }
-    if !spec.command.is_empty() {
-        request["command"] = json!(spec.command);
-    }
-    if !spec.env.is_empty() {
-        let mut env = serde_json::Map::new();
-        for (key, value) in &spec.env {
-            env.insert(key.clone(), json!(value));
-        }
-        request["env"] = Value::Object(env);
-    }
-    request
+pub(crate) fn get_sleeve(client: &Client, name: &str) -> Result<v1::GetSleeveResponse> {
+    client.unary(
+        v1::sleeve_service::GET_SLEEVE,
+        &v1::GetSleeveRequest {
+            name: name.to_owned(),
+        },
+    )
 }
 
-fn selection_body(selection: &ModelChoice) -> Option<Value> {
-    if !selection.is_set() {
-        return None;
-    }
-    let mut body = serde_json::Map::new();
-    if !selection.model.is_empty() {
-        body.insert("model".into(), json!(selection.model));
-    }
-    if !selection.effort.is_empty() {
-        body.insert("effort".into(), json!(selection.effort));
-    }
-    Some(Value::Object(body))
+fn require_sleeve(sleeve: &Option<v1::Sleeve>) -> Result<&v1::Sleeve> {
+    sleeve
+        .as_ref()
+        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))
+}
+
+fn selection(selection: &ModelChoice) -> Option<v1::ModelSelection> {
+    selection.is_set().then(|| v1::ModelSelection {
+        model: selection.model.clone(),
+        effort: selection.effort.clone(),
+    })
+}
+
+/// A message as a JSON value, for output the CLI composes from several.
+pub(crate) fn message_value<T: ReflectMessage>(message: &T) -> Result<Value> {
+    serde_json::from_slice(&protectorate_wire::encode(message)?)
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
 }
 
 /// A disk path becomes absolute and cleaned. Unlike [`absolute_workspace`],
@@ -3502,17 +3504,37 @@ fn normalize_path(path: &std::path::Path) -> String {
     out.to_string_lossy().into_owned()
 }
 
-pub(crate) fn json_line(value: &Value) -> Result<String> {
+/// One message as a compact protobuf JSON line.
+pub(crate) fn json_line<T: ReflectMessage>(message: &T) -> Result<String> {
+    let mut line = protectorate_wire::encode(message)?;
+    line.push(b'\n');
+    String::from_utf8(line)
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
+}
+
+/// One compact protobuf JSON line per message.
+fn json_lines<'a, T: ReflectMessage + 'a>(
+    messages: impl IntoIterator<Item = &'a T>,
+) -> Result<String> {
+    messages
+        .into_iter()
+        .map(json_line)
+        .collect::<Result<Vec<_>>>()
+        .map(|lines| lines.concat())
+}
+
+/// A JSON value the CLI composed itself, as one compact line.
+pub(crate) fn value_line(value: &Value) -> Result<String> {
     serde_json::to_string(value)
         .map(|line| format!("{line}\n"))
         .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
+/// `value`, or `fallback` when the hub left it empty.
+fn or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+    if value.is_empty() {
+        fallback
+    } else {
+        value
+    }
 }

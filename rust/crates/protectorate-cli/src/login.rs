@@ -3,13 +3,16 @@
 //! per hub under the state home. Ordinary commands sign with that key when no
 //! `--token-file` and no token environment variable is set.
 use crate::{
-    format::{local_minute, timestamp_millis},
-    hub_url, Invocation,
+    format::{minute, now_millis, unix_millis},
+    hub_url, json_line, message_value, value_line, Invocation,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use protectorate_auth::proof::DeviceKey;
 use protectorate_connect_client::Client;
-use protectorate_wire::{Code, Result, RpcError};
+use protectorate_wire::{
+    v1::{self, device_service},
+    Code, Result, RpcError,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -28,8 +31,6 @@ pub(crate) fn read_private_token_file(path: &Path) -> std::io::Result<String> {
     windows::read_private_file(path)
 }
 
-const START_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/StartDeviceAuth";
-const POLL_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/PollDeviceAuth";
 /// The directory under the state home holding one credential file per hub.
 const CREDENTIALS_DIR: &str = "credentials";
 const DEFAULT_INTERVAL: u64 = 5;
@@ -49,52 +50,46 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
     let (key, pkcs8) =
         DeviceKey::generate().map_err(|error| RpcError::new(Code::Internal, error))?;
     let pkcs8 = zeroize::Zeroizing::new(pkcs8);
-    let started = match client.call(
-        START_DEVICE_AUTH,
-        &json!({"name": name, "platform": platform, "publicKey": STANDARD.encode(key.public_key())}),
-    ) {
-        Ok(started) => started,
-        Err(error) => {
-            return Err(RpcError::new(
+    let request = v1::StartDeviceAuthRequest {
+        name,
+        platform,
+        public_key: key.public_key().to_vec(),
+    };
+    let started = client
+        .unary(device_service::START_DEVICE_AUTH, &request)
+        .map_err(|error| {
+            RpcError::new(
                 error.code,
                 format!("start device authorization at {hub}: {}", error.message),
-            ))
-        }
-    };
-    let device_code = field(&started, "deviceCode")
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no device code"))?;
-    let user_code = field(&started, "userCode")
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no user code"))?;
-    let expiry = field(&started, "expiresAt");
-    let deadline = expiry
-        .as_deref()
-        .and_then(timestamp_millis)
-        .and_then(|millis| millis.try_into().ok())
-        .map(|millis: u64| UNIX_EPOCH + Duration::from_millis(millis));
-    let mut interval = started
-        .get("interval")
-        .and_then(Value::as_u64)
+            )
+        })?;
+    if started.device_code.is_empty() {
+        return Err(RpcError::new(Code::DataLoss, "hub returned no device code"));
+    }
+    if started.user_code.is_empty() {
+        return Err(RpcError::new(Code::DataLoss, "hub returned no user code"));
+    }
+    let deadline = unix_millis(started.expires_at.as_ref())
+        .and_then(|millis| u64::try_from(millis).ok())
+        .map(|millis| UNIX_EPOCH + Duration::from_millis(millis));
+    let mut interval = u64::try_from(started.interval)
+        .ok()
         .filter(|interval| *interval > 0)
         .unwrap_or(DEFAULT_INTERVAL);
+    let user_code = &started.user_code;
     if invocation.json {
-        stdout
-            .write_all(
-                json_line(&json!({
-                    "userCode": user_code,
-                    "expiresAt": expiry,
-                    "interval": interval,
-                }))?
-                .as_bytes(),
-            )
-            .and_then(|_| stdout.flush())
-            .map_err(|error| {
-                RpcError::new(Code::Internal, format!("write login status: {error}"))
-            })?;
+        // The device code stays private to this process.
+        let shown = v1::StartDeviceAuthResponse {
+            device_code: String::new(),
+            interval: interval as i32,
+            ..started.clone()
+        };
+        write_stdout(stdout, &json_line(&shown)?)?;
     } else {
-        let waiting = expiry
-            .clone()
-            .map(local_minute)
-            .unwrap_or_else(|| "its expiry".to_owned());
+        let waiting = match &started.expires_at {
+            None => "its expiry".to_owned(),
+            at => minute(at.as_ref()),
+        };
         write_stdout(
             stdout,
             &format!(
@@ -102,6 +97,9 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
             ),
         )?;
     }
+    let poll = v1::PollDeviceAuthRequest {
+        device_code: started.device_code.clone(),
+    };
     loop {
         let now = SystemTime::now();
         if deadline.is_some_and(|deadline| now >= deadline) {
@@ -115,7 +113,7 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
             None => Duration::from_secs(interval),
         };
         std::thread::sleep(wait);
-        let reply = match client.call(POLL_DEVICE_AUTH, &json!({"deviceCode": device_code})) {
+        let reply = match client.unary(device_service::POLL_DEVICE_AUTH, &poll) {
             Ok(reply) => reply,
             Err(error) if error.code == Code::ResourceExhausted => {
                 interval = next_interval(interval, "rate_limited", 0);
@@ -132,14 +130,16 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
                 ))
             }
         };
-        let status = field(&reply, "status").unwrap_or_default();
-        let hub_interval = reply.get("interval").and_then(Value::as_u64).unwrap_or(0);
-        interval = next_interval(interval, &status, hub_interval);
-        match status.as_str() {
+        interval = next_interval(
+            interval,
+            &reply.status,
+            u64::try_from(reply.interval).unwrap_or(0),
+        );
+        match reply.status.as_str() {
             "pending" | "slow_down" => continue,
             "approved" => {
-                let device = reply.get("device").cloned().unwrap_or(Value::Null);
-                if device.get("id").and_then(Value::as_str) != Some(key.id().as_str()) {
+                let device = reply.device.unwrap_or_default();
+                if device.id != key.id() {
                     return Err(RpcError::new(
                         Code::DataLoss,
                         "hub approved a device with another key; run login again",
@@ -147,9 +147,9 @@ pub(crate) fn run(invocation: &Invocation, stdout: &mut dyn Write) -> Result<Str
                 }
                 save_credential(&path, &hub, &device, &pkcs8)?;
                 if invocation.json {
-                    return json_line(&json!({
+                    return value_line(&json!({
                         "status": "approved",
-                        "device": device,
+                        "device": message_value(&device)?,
                         "credentialFile": path.display().to_string(),
                     }));
                 }
@@ -313,7 +313,7 @@ fn credential_path(home: &Path, hub: &str) -> Result<PathBuf> {
 
 /// Save the device key: a private directory, a private file, written through
 /// a temporary file and one rename.
-fn save_credential(path: &Path, hub: &str, device: &Value, pkcs8: &[u8]) -> Result<()> {
+fn save_credential(path: &Path, hub: &str, device: &v1::DeviceInfo, pkcs8: &[u8]) -> Result<()> {
     let dir = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -358,9 +358,9 @@ fn save_credential(path: &Path, hub: &str, device: &Value, pkcs8: &[u8]) -> Resu
     }
     let record = json!({
         "hub": normalized_hub(hub)?,
-        "deviceId": device.get("id").cloned().unwrap_or(Value::Null),
-        "name": device.get("name").cloned().unwrap_or(Value::Null),
-        "platform": device.get("platform").cloned().unwrap_or(Value::Null),
+        "deviceId": device.id,
+        "name": device.name,
+        "platform": device.platform,
         "savedAt": json!(now_millis()),
         "key": STANDARD.encode(pkcs8),
     });
@@ -500,25 +500,6 @@ pub(crate) fn saved_device(invocation: &Invocation) -> Result<Option<Arc<DeviceK
                 ),
             )
         })
-}
-
-fn field(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(Value::as_str).map(str::to_owned)
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
-}
-
-fn json_line(value: &Value) -> Result<String> {
-    serde_json::to_string(value)
-        .map(|line| format!("{line}\n"))
-        .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
 }
 
 fn write_stdout(stdout: &mut dyn Write, text: &str) -> Result<()> {

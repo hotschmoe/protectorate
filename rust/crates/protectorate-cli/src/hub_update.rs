@@ -1,15 +1,13 @@
 //! Owner hub release update. The stream ends before a cross-version guardian
 //! trial completes, so the CLI checks the authenticated listener afterward.
-use crate::{json_line, Client, Code, Result, RpcError};
-use serde_json::{json, Value};
+use crate::{format::word, json_line, Client, Code, Result, RpcError};
+use protectorate_wire::v1::{self, hub_service, release_service, UpdatePhase};
 use std::{
     io::Write,
     thread,
     time::{Duration, Instant},
 };
 
-const UPDATE_HUB: &str = "/protectorate.v1.ReleaseService/UpdateHub";
-const HUB_STATUS: &str = "/protectorate.v1.HubService/GetStatus";
 const CONFIRM_WAIT: Duration = Duration::from_secs(3 * 60);
 const ROLLBACK_GRACE: Duration = Duration::from_secs(15);
 
@@ -42,31 +40,34 @@ pub(crate) fn run(
     let mut previous = String::new();
     let mut restarting = false;
     let mut skipped = false;
-    let result = client.stream_with_timeout(
-        UPDATE_HUB,
-        &json!({"channel": channel, "version": version}),
+    let request = v1::UpdateHubRequest {
+        channel: channel.to_owned(),
+        version: version.to_owned(),
+    };
+    let result = client.server_stream_with_timeout(
+        release_service::UPDATE_HUB,
+        &request,
         transfer_timeout,
         |progress| {
-            let phase = progress["phase"].as_str().unwrap_or_default();
-            if let Some(value) = progress["version"].as_str() {
-                target = value.to_owned();
+            let phase = progress.phase();
+            if !progress.version.is_empty() {
+                target.clone_from(&progress.version);
             }
-            if let Some(value) = progress["previousVersion"].as_str() {
-                previous = value.to_owned();
+            if !progress.previous_version.is_empty() {
+                previous.clone_from(&progress.previous_version);
             }
-            restarting |= phase == "UPDATE_PHASE_RESTARTING";
-            skipped |= phase == "UPDATE_PHASE_SKIPPED";
+            restarting |= phase == UpdatePhase::Restarting;
+            skipped |= phase == UpdatePhase::Skipped;
             if as_json {
                 write(output, &json_line(&progress)?)?;
-            } else if reportable(&progress) {
+            } else if progress.total_bytes == 0 || progress.sent_bytes == progress.total_bytes {
+                // Transfer progress shows once, when the whole bundle is out.
                 write(
                     output,
                     &format!(
                         "{}\t{}\n",
-                        phase
-                            .trim_start_matches("UPDATE_PHASE_")
-                            .to_ascii_lowercase(),
-                        progress["message"].as_str().unwrap_or_default()
+                        word(phase.as_str_name(), "UPDATE_PHASE_"),
+                        progress.message
                     ),
                 )?;
             }
@@ -120,8 +121,12 @@ fn confirm(
             ));
         }
         thread::sleep(timing.interval);
-        match client.call_with_timeout(HUB_STATUS, &json!({}), Duration::from_secs(2)) {
-            Ok(status) if status["version"] == target && status["releaseConfirmed"] == true => {
+        match client.unary_with_timeout(
+            hub_service::GET_STATUS,
+            &v1::GetStatusRequest {},
+            Duration::from_secs(2),
+        ) {
+            Ok(status) if status.version == target && status.release_confirmed => {
                 if as_json {
                     write(output, &json_line(&status)?)?;
                 } else {
@@ -129,7 +134,7 @@ fn confirm(
                 }
                 return Ok(());
             }
-            Ok(status) if !previous.is_empty() && status["version"] == previous => {
+            Ok(status) if !previous.is_empty() && status.version == previous => {
                 let first_seen = previous_since.get_or_insert_with(Instant::now);
                 if !saw_down && first_seen.elapsed() < timing.rollback_grace {
                     continue;
@@ -149,18 +154,6 @@ fn confirm(
             }
         }
     }
-}
-
-fn reportable(progress: &Value) -> bool {
-    let total = progress["totalBytes"]
-        .as_str()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    let sent = progress["sentBytes"]
-        .as_str()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(0);
-    total == 0 || sent == total
 }
 
 fn write(output: &mut dyn Write, text: &str) -> Result<()> {

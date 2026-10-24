@@ -1,6 +1,6 @@
 //! Shell completion for the installed CLI. Keep this command tree in step with
 //! `args.rs` and the local companion aliases in `main.rs`.
-use serde_json::json;
+use protectorate_wire::v1;
 use std::{collections::HashSet, time::Duration};
 
 type Candidate = (&'static str, &'static str);
@@ -741,15 +741,6 @@ impl ResourceKind {
             Self::JobTarget => "Job target",
         }
     }
-
-    fn procedure(self) -> Option<&'static str> {
-        match self {
-            Self::Node => Some("/protectorate.v1.NodeService/ListNodes"),
-            Self::Sleeve => Some("/protectorate.v1.SleeveService/ListSleeves"),
-            Self::Lease => Some("/protectorate.v1.LeaseService/ListLeases"),
-            Self::JobTarget => None,
-        }
-    }
 }
 
 fn resource_kind(path: &str, positionals: usize) -> Option<ResourceKind> {
@@ -825,29 +816,43 @@ fn fetch_names(
     kind: ResourceKind,
     prefix: &str,
 ) -> Vec<(String, &'static str)> {
-    let Some(procedure) = kind.procedure() else {
-        return Vec::new();
+    let names = match kind {
+        ResourceKind::Node => client
+            .unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})
+            .map(|listing| {
+                listing
+                    .nodes
+                    .into_iter()
+                    .filter_map(|status| status.node.map(|node| node.name))
+                    .collect()
+            }),
+        ResourceKind::Sleeve => client
+            .unary(v1::sleeve_service::LIST_SLEEVES, &v1::ListSleevesRequest {})
+            .map(|listing| {
+                listing
+                    .sleeves
+                    .into_iter()
+                    .map(|sleeve| sleeve.name)
+                    .collect()
+            }),
+        ResourceKind::Lease => client
+            .unary(v1::lease_service::LIST_LEASES, &v1::ListLeasesRequest {})
+            .map(|listing| {
+                listing
+                    .leases
+                    .into_iter()
+                    .filter(|lease| lease.state() != v1::LeaseState::Queued)
+                    .map(|lease| lease.id)
+                    .collect()
+            }),
+        ResourceKind::JobTarget => Ok(Vec::<String>::new()),
     };
-    let Ok(response) = client.call(procedure, &json!({})) else {
-        return Vec::new();
-    };
-    let rows = match kind {
-        ResourceKind::Node => response.get("nodes").and_then(|v| v.as_array()),
-        ResourceKind::Sleeve => response.get("sleeves").and_then(|v| v.as_array()),
-        ResourceKind::Lease => response.get("leases").and_then(|v| v.as_array()),
-        ResourceKind::JobTarget => None,
-    };
-    let Some(rows) = rows else { return Vec::new() };
-    rows.iter()
-        .filter_map(|row| match kind {
-            ResourceKind::Node => row.get("node")?.get("name")?.as_str(),
-            ResourceKind::Sleeve => row.get("name")?.as_str(),
-            ResourceKind::Lease if row["state"] != "LEASE_STATE_QUEUED" => row.get("id")?.as_str(),
-            ResourceKind::Lease | ResourceKind::JobTarget => None,
-        })
+    names
+        .unwrap_or_default()
+        .into_iter()
         .filter(|name| {
             !name.is_empty() && name.starts_with(prefix) && !name.chars().any(char::is_control)
         })
-        .map(|name| (name.to_owned(), kind.label()))
+        .map(|name| (name, kind.label()))
         .collect()
 }

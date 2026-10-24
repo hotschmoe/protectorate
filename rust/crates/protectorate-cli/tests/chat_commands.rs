@@ -416,7 +416,7 @@ for line in sys.stdin:
         assert!(small.contains("Nothing to compact"), "{small}");
 
         let status = owner.ok(&["chat", "status", "alpha"]);
-        assert_eq!(row(&status, "chat state"), "CHAT_STATE_IDLE", "{status}");
+        assert_eq!(row(&status, "chat state"), "idle", "{status}");
         assert_eq!(row(&status, "context tokens"), "21/8192", "{status}");
         assert!(row(&status, "cache total").starts_with("1 calls, in 10 out 3 read 6 write 2"));
         assert!(row(&status, "cache first call").ends_with("fresh"));

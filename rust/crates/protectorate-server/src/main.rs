@@ -1704,12 +1704,12 @@ async fn hub_health(options: &Options, expected: &str) -> bool {
             protectorate_connect_client::Client::new(&endpoint, token, Duration::from_secs(2))
                 .ok()?;
         let status = client
-            .call(
-                "/protectorate.v1.HubService/GetStatus",
-                &serde_json::json!({}),
+            .unary(
+                protectorate_wire::v1::hub_service::GET_STATUS,
+                &protectorate_wire::v1::GetStatusRequest {},
             )
             .ok()?;
-        Some(status["version"] == expected)
+        Some(status.version == expected)
     })
     .await
     .ok()

@@ -1,11 +1,11 @@
 //! argv parsing. Global options are accepted before or after the command.
 use crate::{
-    AuditQuery, BacklogFilter, ChatSettings, Command, HarnessName, JobFilter, JobLogs, JobRun,
-    JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit, NoteState, ReadOnlyBind,
-    SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve, SleeveSpawn, WaitUntil,
-    DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
+    AuditQuery, BacklogFilter, ChatSettings, CheckpointAction, Command, HarnessName, JobFilter,
+    JobLogs, JobRun, JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit,
+    NoteState, ReadOnlyBind, SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve,
+    SleeveSpawn, WaitUntil, DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
 };
-use protectorate_wire::{Result, RpcError};
+use protectorate_wire::{v1, Result, RpcError};
 use serde_json::Value;
 use std::{path::PathBuf, time::Duration};
 
@@ -818,7 +818,7 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
         }
         "rm" => {
             let mut name = None;
-            let mut jobs = "REMOVE_JOBS_UNSPECIFIED".to_owned();
+            let mut jobs = v1::RemoveJobs::Unspecified;
             let mut uninstall = false;
             let mut wait_timeout = None;
             while let Some(token) = next(args, *index + 1) {
@@ -827,10 +827,10 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
                     "--jobs" => {
                         *index += 1;
                         jobs = match value(args, index, flag, inline)?.as_str() {
-                            "wait" => "REMOVE_JOBS_WAIT",
-                            "cancel" => "REMOVE_JOBS_CANCEL",
+                            "wait" => v1::RemoveJobs::Wait,
+                            "cancel" => v1::RemoveJobs::Cancel,
                             _ => return Err(bad_argument("--jobs must be wait or cancel")),
-                        }.to_owned();
+                        };
                     }
                     "--wait-timeout" => {
                         *index += 1;
@@ -1973,17 +1973,21 @@ fn sleeve_checkpoint(args: &[String], index: &mut usize) -> Result<Command> {
         .skip(1)
         .map(|word| word.parse::<u64>().map_err(|_| bad_argument(USAGE)))
         .collect::<Result<Vec<_>>>()?;
-    let method = match (
+    let action = match (
         words.first().map(String::as_str).unwrap_or("list"),
-        ids.len(),
+        &ids[..],
     ) {
-        ("list", 0) => "ListCheckpoints",
-        ("create", 0) => "CreateCheckpoint",
-        ("diff", 1 | 2) => "DiffCheckpoint",
-        ("restore", 1) => "RestoreCheckpoint",
+        ("list", []) => CheckpointAction::List,
+        ("create", []) => CheckpointAction::Create,
+        ("diff", [from]) => CheckpointAction::Diff { from: *from, to: 0 },
+        ("diff", [from, to]) => CheckpointAction::Diff {
+            from: *from,
+            to: *to,
+        },
+        ("restore", [id]) => CheckpointAction::Restore { id: *id },
         _ => return Err(bad_argument(USAGE)),
     };
-    Ok(Command::SleeveCheckpoint { name, method, ids })
+    Ok(Command::SleeveCheckpoint { name, action })
 }
 
 fn sleeve_kill(args: &[String], index: &mut usize) -> Result<Command> {
