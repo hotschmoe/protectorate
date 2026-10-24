@@ -514,10 +514,19 @@ Build profile (round 3, 12-core CIX P1: 8 Cortex-A720 + 4 Cortex-A520):
   new hashes. Workspace-wide feature unification is still unstable on 1.96.
   One day of agent work left 82 GB in target/debug (721 executables, 32 GB
   incremental), and each worktree carries its own target dir.
-- fsync on this root filesystem: ext4 is mounted `nodelalloc` (not from
-  fstab) in data=ordered mode, so any fsync forces out other files' dirty
-  data. A 1 KB write+fsync measured p50 50 ms, p90 1 s, max 6.7 s during
-  builds, against 4 ms p50 for an in-place fdatasync.
+- fsync on this root filesystem: ext4 runs `nodelalloc` in data=ordered
+  mode because the vendor package cix-debian-misc ships
+  `cix_resume_prepare.service`, which runs `mount -o
+  remount,nodelalloc,rw / /` at every boot. It is a hibernate-resume
+  helper, and this host has no swap and no `resume=`. With nodelalloc,
+  every fsync also forces out other files' dirty data. During a cold
+  workspace build, a 1 KB write+fsync measured p50 15-31 ms and p90
+  57-198 ms with nodelalloc, against p50 5-7 ms and p90 14-30 ms after a
+  live `remount,delalloc`. The 0.4-1.5 s tails remain either way, and an
+  in-place fdatasync shows them too, so they come from the DRAM-less
+  Kingston OM8TAP4 drive under write load, not from the journal. Smaller
+  dirty-writeback limits did not remove them. So the code must never hold
+  a lock across fsync.
 
 Sleeve model (owner's direction, to build after polish):
 - A sleeve is a long-lived owner of one repository directory, not a
