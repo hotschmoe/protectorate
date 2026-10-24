@@ -11,7 +11,10 @@ use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
     process::ChildStdin,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -19,6 +22,7 @@ use std::{
 const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_UNREAD_INPUT: usize = 64 << 20;
 
 /// One page of the app-server's `model/list` reply.
 #[derive(Deserialize)]
@@ -110,8 +114,49 @@ struct State {
     approvals: BTreeMap<String, Approval>,
 }
 
+/// Codex's stdin, written by its own thread. Callers queue lines under
+/// `event_gate` without blocking, so Codex stalling on a full stdout pipe
+/// cannot also stall the stdout reader that waits for that gate.
+struct Input {
+    lines: mpsc::Sender<Vec<u8>>,
+    unread: Arc<AtomicUsize>,
+}
+
+impl Input {
+    fn start(mut stdin: ChildStdin, log: Arc<Log>, kill: KillHandle) -> Self {
+        let (lines, queue) = mpsc::channel::<Vec<u8>>();
+        let unread = Arc::new(AtomicUsize::new(0));
+        let written = Arc::clone(&unread);
+        thread::spawn(move || {
+            for line in queue {
+                if let Err(error) = stdin.write_all(&line) {
+                    let _ = log.append(Event::new(
+                        json!({"error":{"text":format!("write codex stdin: {error}")}}),
+                    ));
+                    kill.kill();
+                    return;
+                }
+                written.fetch_sub(line.len(), Ordering::Relaxed);
+            }
+        });
+        Self { lines, unread }
+    }
+    fn write(&self, value: &Value) -> Result<(), String> {
+        let mut line = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+        line.push(b'\n');
+        let len = line.len();
+        if self.unread.fetch_add(len, Ordering::Relaxed) + len > MAX_UNREAD_INPUT {
+            self.unread.fetch_sub(len, Ordering::Relaxed);
+            return Err("codex is not reading its input".into());
+        }
+        self.lines
+            .send(line)
+            .map_err(|_| "codex stdin is closed".into())
+    }
+}
+
 pub struct Session {
-    stdin: Mutex<ChildStdin>,
+    input: Input,
     event_gate: Mutex<()>,
     operation: Mutex<()>,
     state: Mutex<State>,
@@ -141,7 +186,7 @@ impl Session {
         let stdout = child.take_stdout().ok_or("sandbox did not supply stdout")?;
         let stderr = child.take_stderr().ok_or("sandbox did not supply stderr")?;
         let session = Arc::new(Self {
-            stdin: Mutex::new(stdin),
+            input: Input::start(stdin, Arc::clone(&log), child.kill_handle()),
             event_gate: Mutex::new(()),
             operation: Mutex::new(()),
             state: Mutex::new(State::default()),
@@ -179,7 +224,10 @@ impl Session {
             session.stop();
             return Err(format!("codex initialize: {e}"));
         }
-        if let Err(error) = session.write(&json!({"method":"initialized","params":{}})) {
+        if let Err(error) = session
+            .input
+            .write(&json!({"method":"initialized","params":{}}))
+        {
             session.stop();
             return Err(error);
         }
@@ -260,19 +308,14 @@ impl Session {
         }
         true
     }
-    fn write(&self, value: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        serde_json::to_writer(&mut *stdin, value).map_err(|e| e.to_string())?;
-        stdin.write_all(b"\n").map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())
-    }
     fn begin_rpc(&self, method: &str, params: Value) -> Result<u64, String> {
         let id = {
             let mut s = self.state.lock().unwrap();
             s.next_id += 1;
             s.next_id
         };
-        self.write(&json!({"id":id,"method":method,"params":params}))?;
+        self.input
+            .write(&json!({"id":id,"method":method,"params":params}))?;
         Ok(id)
     }
     fn await_rpc(&self, id: u64, timeout: Duration) -> Result<Value, String> {
@@ -403,7 +446,8 @@ impl Session {
         } else {
             json!({"decision":if allow {"accept"} else {"decline"}})
         };
-        self.write(&json!({"id":approval.rpc_id,"result":result}))?;
+        self.input
+            .write(&json!({"id":approval.rpc_id,"result":result}))?;
         self.state.lock().unwrap().approvals.remove(id);
         self.log
             .append(Event::new(
@@ -627,7 +671,7 @@ impl Session {
                 message["params"]["reason"].as_str().unwrap_or_default(),
             ),
             _ => {
-                let _ = self.write(&json!({"id":message["id"],"error":{"code":-32601,"message":format!("request not supported by driver: {method}")}}));
+                let _ = self.input.write(&json!({"id":message["id"],"error":{"code":-32601,"message":format!("request not supported by driver: {method}")}}));
                 self.log_error(&format!("unsupported codex server request: {method}"));
                 return;
             }

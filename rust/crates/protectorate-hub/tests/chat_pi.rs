@@ -731,3 +731,122 @@ async fn pi_chat_sleeve_sandbox_send_replay_and_kill() {
     server.abort();
     let _ = server.await;
 }
+
+/// A Pi that answers a prompt only after flooding stdout with far more than a
+/// pipe holds, before it has read the whole prompt line.
+fn flooding_fake(path: &Path) {
+    let script = r#"#!/usr/bin/python3
+import json,os,sys,threading
+buf=b''; flooded=False
+def emit(x): sys.stdout.write(json.dumps(x)+'\n'); sys.stdout.flush()
+def recv():
+ global buf,flooded
+ while b'\n' not in buf:
+  chunk=os.read(0,4096)
+  if not chunk: raise SystemExit(0)
+  buf+=chunk
+  if not flooded and b'\n' not in buf and len(buf)>=4096:
+   flooded=True; threading.Timer(20,os._exit,[3]).start()
+   for _ in range(256): emit({'type':'noise','pad':'x'*1024})
+ line,_,buf=buf.partition(b'\n')
+ return json.loads(line)
+while True:
+ m=recv(); k=m.get('type')
+ if k=='get_state':
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'sessionId':'pi-flood','model':{'id':'test-model','provider':'test-local','contextWindow':8192},'thinkingLevel':'medium'}})
+ elif k=='prompt':
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'disposition':'started'}})
+  emit({'type':'message_start','message':{'role':'assistant'}})
+  emit({'type':'message_update','assistantMessageEvent':{'type':'text_delta','delta':'answer: '+str(len(m['message']))}})
+  emit({'type':'agent_settled','aborted':False})
+ elif k=='get_available_models':
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'models':[{'id':'test-model','provider':'test-local','name':'Test Model','reasoning':True}]}})
+ elif k=='get_available_thinking_levels':
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{'levels':['off','medium']}})
+ elif 'id' in m:
+  emit({'type':'response','id':m['id'],'command':k,'success':True,'data':{}})
+"#;
+    executable::write_executable(path, script);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pi_prompt_larger_than_a_pipe_while_pi_floods_stdout() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let owner = root.path().join("owner");
+    let workspace = root.path().join("work");
+    let tools = root.path().join("tools");
+    let runtime = root.path().join("runtime");
+    for dir in [
+        &state,
+        &owner,
+        &workspace,
+        &tools,
+        &runtime,
+        &state.join("auth/pi"),
+    ] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let pi = tools.join("pi");
+    flooding_fake(&pi);
+    let hub = Hub::open(&state, "owner-secret", "test")
+        .unwrap()
+        .with_chat_runtime(ChatRuntime::new(ChatLauncher {
+            state_root: state.clone(),
+            user_home: owner,
+            runtime_dir: runtime,
+            helper: env!("CARGO_BIN_EXE_protectorate-hub-sandbox-helper").into(),
+            pi_executable: Some(pi),
+            claude_executable: None,
+            codex_executable: None,
+            codex_tool_roots: Vec::new(),
+            grok_executable: None,
+            grok_tool_roots: Vec::new(),
+            claude_tool_roots: Vec::new(),
+            tool_roots: vec![tools],
+            flutter_sdk_root: None,
+            flutter_cache_lower: None,
+            flutter_tools_lower: None,
+            pub_cache_lower: None,
+            go_mod_cache_lower: None,
+            environment: BTreeMap::new(),
+            tasks_max: 64,
+        }));
+    let (addr, server) = serve(hub).await;
+    let (status, spawned) = call(
+        addr,
+        "SleeveService/SpawnSleeve",
+        json!({"name":"pi-flood","harness":"HARNESS_PI","workspace":workspace}),
+    )
+    .await;
+    assert_eq!(status, 200, "{spawned}");
+    let prompt = "x".repeat(200_000);
+    let (status, sent) = tokio::time::timeout(
+        Duration::from_secs(15),
+        call(
+            addr,
+            "ChatService/Send",
+            json!({"sleeve":"pi-flood","text":prompt,"requestId":"pi-flood-0001"}),
+        ),
+    )
+    .await
+    .expect("Send deadlocked against a harness blocked on stdout");
+    assert_eq!(status, 200, "{sent}");
+    let (status, idle) = call(
+        addr,
+        "ChatService/Wait",
+        json!({"sleeve":"pi-flood","until":"WAIT_UNTIL_IDLE","timeout":"10s"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{idle}");
+    let events = protectorate_chatlog::read_all(state.join("sleeves/pi-flood/chat.jsonl")).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e.payload["text"]["delta"] == "answer: 200000"),
+        "{events:?}"
+    );
+    let (status, killed) = call(addr, "SleeveService/KillSleeve", json!({"name":"pi-flood"})).await;
+    assert_eq!(status, 200, "{killed}");
+    server.abort();
+}
