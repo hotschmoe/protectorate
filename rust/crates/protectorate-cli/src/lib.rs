@@ -3189,13 +3189,12 @@ fn spawn_sleeve(client: &Client, spawn: &SleeveSpawn, json: bool) -> Result<Stri
         workspace: absolute_workspace(&spawn.workspace)?,
         harness: spawn.harness.as_proto() as i32,
         args: spawn.args.clone(),
-        limits: (spawn.cpu_percent > 0 || spawn.memory_bytes > 0 || spawn.disk_bytes > 0).then(
-            || v1::SleeveLimits {
+        limits: (spawn.cpu_percent > 0 || spawn.memory_bytes > 0 || spawn.disk_bytes > 0)
+            .then_some(v1::SleeveLimits {
                 cpu_percent: spawn.cpu_percent,
                 memory_bytes: spawn.memory_bytes,
                 disk_bytes: spawn.disk_bytes,
-            },
-        ),
+            }),
         env: spawn.env.iter().cloned().collect(),
         mode: spawn.mode.as_proto() as i32,
         supervised: spawn.supervised,

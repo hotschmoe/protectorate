@@ -201,7 +201,7 @@ fn submit_request(spec: &JobRun, key: &str) -> Result<v1::SubmitJobRequest, RpcE
         artifact_globs: spec.artifact_globs.clone(),
         request_id: key.to_owned(),
         admin: spec.admin,
-        limits: (spec.cpu_percent > 0 || spec.memory_bytes > 0).then(|| v1::JobLimits {
+        limits: (spec.cpu_percent > 0 || spec.memory_bytes > 0).then_some(v1::JobLimits {
             cpu_percent: spec.cpu_percent,
             memory_bytes: spec.memory_bytes,
         }),
