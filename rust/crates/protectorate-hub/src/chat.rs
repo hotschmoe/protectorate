@@ -1,6 +1,9 @@
 //! Headless chat sleeves. Pi is the first live driver; unsupported harnesses
 //! remain explicit failures rather than shell sessions pretending to be chat.
-use super::{sleeves::stored, string, EventBus, Hub};
+use super::{
+    sleeves::{stored, Launch, SpawnParent},
+    EventBus, Hub,
+};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use prost_reflect::prost_types;
 use protectorate_chatlog::{Error as LogError, Event, Log};
@@ -863,7 +866,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         .await
                         .map_err(super::join_error)??;
                 Ok(v1::ReportResponse {
-                    result: Some(stored(&result)?),
+                    result: Some(result),
                     dropped,
                 })
             }
@@ -945,56 +948,33 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn spawn_pi(
-    hub: &Hub,
-    value: &Value,
-    parent: &crate::sleeves::SpawnParent,
-) -> Result<Record> {
-    spawn_chat(hub, value, Harness::Pi, false, false, parent)
+pub(super) fn spawn_pi(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Record> {
+    spawn_chat(hub, launch, Harness::Pi, false, false, parent)
 }
 
-pub(super) fn spawn_claude(
-    hub: &Hub,
-    value: &Value,
-    parent: &crate::sleeves::SpawnParent,
-) -> Result<Record> {
-    spawn_chat(hub, value, Harness::Claude, false, false, parent)
+pub(super) fn spawn_claude(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Record> {
+    spawn_chat(hub, launch, Harness::Claude, false, false, parent)
 }
 
-pub(super) fn spawn_codex(
-    hub: &Hub,
-    value: &Value,
-    parent: &crate::sleeves::SpawnParent,
-) -> Result<Record> {
-    spawn_chat(hub, value, Harness::Codex, false, false, parent)
+pub(super) fn spawn_codex(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Record> {
+    spawn_chat(hub, launch, Harness::Codex, false, false, parent)
 }
 
-pub(super) fn spawn_grok(
-    hub: &Hub,
-    value: &Value,
-    parent: &crate::sleeves::SpawnParent,
-) -> Result<Record> {
-    spawn_chat(hub, value, Harness::Grok, false, false, parent)
+pub(super) fn spawn_grok(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Record> {
+    spawn_chat(hub, launch, Harness::Grok, false, false, parent)
 }
 
-pub(super) fn spawn_envoy(hub: &Hub, value: &Value, harness: Harness) -> Result<Record> {
-    spawn_chat(
-        hub,
-        value,
-        harness,
-        true,
-        false,
-        &crate::sleeves::SpawnParent::owner(),
-    )
+pub(super) fn spawn_envoy(hub: &Hub, launch: &Launch, harness: Harness) -> Result<Record> {
+    spawn_chat(hub, launch, harness, true, false, &SpawnParent::owner())
 }
 
-pub(super) fn spawn_resleeve(hub: &Hub, value: &Value, harness: Harness) -> Result<Record> {
-    let name = string(value, "name");
-    let parent = match hub.sleeves.get(&name) {
-        Ok(record) => crate::sleeves::SpawnParent::of_record(&record),
-        Err(_) => crate::sleeves::SpawnParent::owner(),
+pub(super) fn spawn_resleeve(hub: &Hub, launch: &Launch, harness: Harness) -> Result<Record> {
+    let name = &launch.request.name;
+    let parent = match hub.sleeves.get(name) {
+        Ok(record) => SpawnParent::of_record(&record),
+        Err(_) => SpawnParent::owner(),
     };
-    spawn_chat(hub, value, harness, name == "envoy", true, &parent)
+    spawn_chat(hub, launch, harness, name == "envoy", true, &parent)
 }
 
 pub(super) fn recover_chat_sleeves(hub: &Hub) -> Vec<(String, String)> {
@@ -1017,7 +997,7 @@ pub(super) fn recover_chat_sleeves(hub: &Hub) -> Vec<(String, String)> {
     failures
 }
 
-fn recovery_request(hub: &Hub, row: &Record) -> Value {
+fn recovery_request(hub: &Hub, row: &Record) -> Launch {
     let generated =
         crate::sleeves::branch::base_grants(hub.workspaces.state_root(), &row.name, &row.base_repo)
             .unwrap_or_default();
@@ -1030,20 +1010,25 @@ fn recovery_request(hub: &Hub, row: &Record) -> Value {
                     && mount.target == grant.target.to_string_lossy()
             })
         })
-        .collect::<Vec<_>>();
-    json!({
-        "name": row.name,
-        "workspace": row.workspace,
-        "mode": "SLEEVE_MODE_CHAT",
-        "recovery": true,
-        "selection": row.chat.as_ref().and_then(|chat| chat.pointer("/settings/requested")),
-        "supervised": row.supervised,
-        "limits": row.limits,
-        "readOnly": read_only,
-        "nested": row.nested,
-        "env": row.env,
-        "exitAfterIdle": row.exit_after_idle,
-    })
+        .map(crate::sleeves::proto_mount)
+        .collect();
+    let mut launch = Launch::new(
+        v1::SpawnSleeveRequest {
+            name: row.name.clone(),
+            workspace: row.workspace.clone(),
+            mode: v1::SleeveMode::Chat as i32,
+            selection: crate::sleeves::requested_selection(row),
+            supervised: row.supervised,
+            limits: Some(crate::sleeves::proto_limits(&row.limits)),
+            read_only,
+            nested: row.nested,
+            env: row.env.clone(),
+            ..Default::default()
+        },
+        Value::Null,
+    );
+    launch.recovery = true;
+    launch
 }
 
 /// Resume the owner-facing Envoy after an unplanned process exit. An explicit
@@ -1070,12 +1055,13 @@ pub(super) fn resume_envoy_for_mail(hub: &Hub) -> Result<bool> {
 /// None when the harness is not installed, which the launch itself reports.
 pub(super) fn chat_pin(
     hub: &Hub,
-    value: &Value,
+    launch: &Launch,
     harness: Harness,
-    parent: &crate::sleeves::SpawnParent,
+    parent: &SpawnParent,
 ) -> Result<Option<Pin>> {
     let launcher = &hub.chat_runtime.as_ref().ok_or_else(unavailable)?.launcher;
-    let name = string(value, "name");
+    let request = &launch.request;
+    let name = request.name.as_str();
     let (executable, roots) = match harness {
         Harness::Pi => (&launcher.pi_executable, &launcher.tool_roots),
         Harness::Claude => (&launcher.claude_executable, &launcher.claude_tool_roots),
@@ -1094,22 +1080,20 @@ pub(super) fn chat_pin(
     tool_roots.dedup();
     let base_repo = hub
         .sleeves
-        .get(&name)
-        .map_or_else(|_| string(value, "baseRepo"), |row| row.base_repo);
-    let mut read_only = value["readOnly"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|item| {
-            let source = string(item, "source");
-            let target = string(item, "target");
+        .get(name)
+        .map_or_else(|_| launch.base.repo.clone(), |row| row.base_repo);
+    let mut read_only = request
+        .read_only
+        .iter()
+        .map(|mount| {
+            let (source, target) = crate::sleeves::mount_paths(mount);
             (
-                source.clone(),
-                if target.is_empty() { source } else { target },
+                source.to_string_lossy().into_owned(),
+                target.to_string_lossy().into_owned(),
             )
         })
         .chain(
-            crate::sleeves::branch::base_grants(&launcher.state_root, &name, &base_repo)?
+            crate::sleeves::branch::base_grants(&launcher.state_root, name, &base_repo)?
                 .into_iter()
                 .map(|grant| {
                     (
@@ -1126,18 +1110,18 @@ pub(super) fn chat_pin(
     } else {
         crate::access::sleeve_scopes(hub, parent)
     };
-    let limits = &value["limits"];
+    let limits = launch.limits();
     let profile = json!({
         "mode": "chat",
         "executable": executable,
         "toolRoots": tool_roots,
         "readOnly": read_only,
-        "cpuPercent": number(limits, "cpuPercent")?,
-        "memoryBytes": number(limits, "memoryBytes")?,
-        "diskBytes": number(limits, "diskBytes")?,
-        "nested": value["nested"] == true,
-        "supervised": value["supervised"] == true,
-        "env": crate::sleeves::request_env(value)?,
+        "cpuPercent": limits.cpu_percent,
+        "memoryBytes": limits.memory_bytes,
+        "diskBytes": limits.disk_bytes,
+        "nested": request.nested,
+        "supervised": request.supervised,
+        "env": launch.env()?,
         "egress": crate::sleeves::sleeve_egress(hub, harness == Harness::Pi),
         "scopes": scopes,
     });
@@ -1149,17 +1133,18 @@ pub(super) fn chat_pin(
 
 fn spawn_chat(
     hub: &Hub,
-    value: &Value,
+    launch: &Launch,
     harness: Harness,
     envoy: bool,
     resleeve: bool,
-    parent: &crate::sleeves::SpawnParent,
+    parent: &SpawnParent,
 ) -> Result<Record> {
-    let exit_after_idle = parse_exit_after_idle(value)?;
+    let request = &launch.request;
+    let exit_after_idle = launch.exit_after_idle()?;
     let _guard = hub.sleeve_launch_lock.lock().unwrap();
     let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
     let launcher = &runtime.launcher;
-    let name = string(value, "name");
+    let name = request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(registry_error)?;
     if (name == "envoy") != envoy {
         return Err(RpcError::new(
@@ -1173,25 +1158,20 @@ fn spawn_chat(
             "sleeve is being resleeved",
         ));
     }
-    let mode = string(value, "mode");
-    if !mode.is_empty() && mode != "SLEEVE_MODE_UNSPECIFIED" && mode != "SLEEVE_MODE_CHAT" {
+    if request.mode() == v1::SleeveMode::Terminal {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "chat harness needs chat mode",
         ));
     }
-    if value
-        .get("args")
-        .and_then(Value::as_array)
-        .is_some_and(|a| !a.is_empty())
-    {
+    if !request.args.is_empty() {
         return Err(RpcError::new(
             Code::InvalidArgument,
             "args apply to terminal mode; a chat sleeve runs the harness's headless protocol",
         ));
     }
-    let caller_env = crate::sleeves::request_env(value)?;
-    let workspace = fs::canonicalize(PathBuf::from(string(value, "workspace")))
+    let caller_env = launch.env()?;
+    let workspace = fs::canonicalize(PathBuf::from(&request.workspace))
         .map_err(|e| RpcError::new(Code::InvalidArgument, e.to_string()))?;
     if !workspace.is_dir() || !workspace.is_absolute() {
         return Err(RpcError::new(
@@ -1277,39 +1257,29 @@ fn spawn_chat(
             ),
         ));
     }
-    let mut readonly = value
-        .get("readOnly")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|item| {
-                    let source = PathBuf::from(string(item, "source"));
-                    let target = PathBuf::from(
-                        item["target"]
-                            .as_str()
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(item["source"].as_str().unwrap_or("")),
-                    );
-                    BindGrant {
-                        source,
-                        target,
-                        access: Access::ReadOnly,
-                    }
-                })
-                .collect::<Vec<_>>()
+    let mut readonly = request
+        .read_only
+        .iter()
+        .map(|mount| {
+            let (source, target) = crate::sleeves::mount_paths(mount);
+            BindGrant {
+                source,
+                target,
+                access: Access::ReadOnly,
+            }
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     let base_repo = previous
         .as_ref()
-        .map_or_else(|| string(value, "baseRepo"), |row| row.base_repo.clone());
+        .map_or_else(|| launch.base.repo.clone(), |row| row.base_repo.clone());
     let base_grants = crate::sleeves::branch::base_grants(&launcher.state_root, &name, &base_repo)?;
     readonly.extend(base_grants);
-    let limits = &value["limits"];
-    let cpu_percent = u32::try_from(number(limits, "cpuPercent")?)
-        .map_err(|_| RpcError::new(Code::InvalidArgument, "CPU limit exceeds u32"))?;
-    let memory_bytes = number(limits, "memoryBytes")?;
-    let disk_bytes = number(limits, "diskBytes")?;
-    let nested = value.get("nested").and_then(Value::as_bool) == Some(true);
+    let v1::SleeveLimits {
+        cpu_percent,
+        memory_bytes,
+        disk_bytes,
+    } = launch.limits();
+    let nested = request.nested;
     let mut command = if harness == Harness::Pi {
         vec![
             executable.to_string_lossy().into_owned(),
@@ -1581,16 +1551,14 @@ fn spawn_chat(
         );
     }
     let pin_key = crate::sleeves::pin_key(Mode::Chat, harness);
-    let pin = chat_pin(hub, value, harness, parent)?.ok_or_else(|| {
+    let pin = chat_pin(hub, launch, harness, parent)?.ok_or_else(|| {
         RpcError::new(
             Code::Unavailable,
             format!("{harness_name} executable is missing"),
         )
     })?;
-    crate::approvals::check_pin(
+    launch.check_pin(
         hub,
-        value,
-        &name,
         &run_id,
         &pin_key,
         previous.as_ref().and_then(|row| row.pins.get(&pin_key)),
@@ -1601,7 +1569,7 @@ fn spawn_chat(
             (old.token_budget, old.tokens_used, old.parent_run_id.clone())
         })
     } else {
-        let (budget, parent_run) = spawn_budget(hub, parent, number(value, "tokenBudget")?)?;
+        let (budget, parent_run) = spawn_budget(hub, parent, request.token_budget)?;
         (budget, 0, parent_run)
     };
     let log = runtime.log(&name)?;
@@ -1619,7 +1587,7 @@ fn spawn_chat(
             options,
             Arc::clone(&log),
             session_id.unwrap(),
-            !value["supervised"].as_bool().unwrap_or(false),
+            !request.supervised,
         )
         .map(|s| s as Arc<dyn ChatSession>)
     } else if harness == Harness::Codex {
@@ -1628,7 +1596,7 @@ fn spawn_chat(
             options,
             Arc::clone(&log),
             old_session.as_deref(),
-            !value["supervised"].as_bool().unwrap_or(false),
+            !request.supervised,
         )
         .map(|s| s as Arc<dyn ChatSession>)
     } else {
@@ -1637,7 +1605,7 @@ fn spawn_chat(
             options,
             Arc::clone(&log),
             old_session.as_deref(),
-            !value["supervised"].as_bool().unwrap_or(false),
+            !request.supervised,
         )
         .map(|s| s as Arc<dyn ChatSession>)
     }
@@ -1645,10 +1613,9 @@ fn spawn_chat(
         let _ = revoke_identity(hub, &name);
         RpcError::new(Code::Unavailable, e)
     })?;
-    let model = string(&value["selection"], "model");
-    let mut effort = string(&value["selection"], "effort");
+    let v1::ModelSelection { model, mut effort } = launch.selection();
     let defaulted_effort = effort.is_empty()
-        && value["recovery"] != true
+        && !launch.recovery
         && matches!(harness, Harness::Pi | Harness::Codex)
         && !hub.sleeve_effort.is_empty();
     if defaulted_effort {
@@ -1696,10 +1663,10 @@ fn spawn_chat(
         row.base_tip = old.base_tip;
         row.managed_clone = old.managed_clone;
     } else {
-        row.base_repo = string(value, "baseRepo");
-        row.base_branch = string(value, "baseBranch");
-        row.base_tip = string(value, "baseTip");
-        row.managed_clone = value["managedClone"] == true;
+        row.base_repo = launch.base.repo.clone();
+        row.base_branch = launch.base.branch.clone();
+        row.base_tip = launch.base.tip.clone();
+        row.managed_clone = launch.base.managed_clone;
     }
     row.chat = Some(chat_status(hub, session.as_ref()));
     row.env = caller_env;
@@ -1707,9 +1674,9 @@ fn spawn_chat(
     row.pins.insert(pin_key, pin);
     (row.token_budget, row.tokens_used, row.parent_run_id) = budget;
     let state_event_cursor = log.last();
-    row.supervised = value["supervised"] == true;
+    row.supervised = request.supervised;
     if !resleeve && !exit_after_idle.is_zero() {
-        row.exit_after_idle = value["exitAfterIdle"].as_str().map(str::to_owned);
+        row.exit_after_idle = request.exit_after_idle.map(|idle| idle.to_string());
     }
     if !resleeve {
         row.parent = parent.label.clone();
@@ -1727,12 +1694,8 @@ fn spawn_chat(
             target: g.target.to_string_lossy().into_owned(),
         })
         .collect();
-    if let Some(brief) = value
-        .get("brief")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-    {
-        if let Err(error) = session.send(brief, "hub", "") {
+    if !request.brief.is_empty() {
+        if let Err(error) = session.send(&request.brief, "hub", "") {
             session.stop();
             let _ = revoke_identity(hub, &name);
             return Err(RpcError::new(Code::Unavailable, error));
@@ -1897,11 +1860,6 @@ pub(super) fn kill_pi(hub: &Hub, name: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn parse_exit_after_idle(value: &Value) -> Result<Duration> {
-    super::parse_duration(value.get("exitAfterIdle").filter(|raw| !raw.is_null()))
-        .map_err(|_| RpcError::new(Code::InvalidArgument, "invalid exit-after-idle duration"))
-}
-
 pub(super) fn start_idle_reaper(runtime: &tokio::runtime::Handle, hub: &Arc<Hub>) {
     let weak = Arc::downgrade(hub);
     runtime.spawn(async move {
@@ -1938,8 +1896,9 @@ fn reap_idle(
         }
         let Some(limit) = row
             .exit_after_idle
-            .as_ref()
-            .and_then(|raw| super::parse_duration(Some(&Value::String(raw.clone()))).ok())
+            .as_deref()
+            .and_then(|raw| raw.parse::<prost_types::Duration>().ok())
+            .and_then(|idle| Duration::try_from(idle).ok())
         else {
             continue;
         };
@@ -2111,7 +2070,7 @@ pub(super) fn quiesce_for_resleeve(
     name: &str,
     interrupt: bool,
     wait: std::time::Duration,
-) -> Result<Value> {
+) -> Result<v1::ChatStatus> {
     let session = live_session(hub, name)?;
     let deadline = std::time::Instant::now()
         .checked_add(wait)
@@ -2120,7 +2079,7 @@ pub(super) fn quiesce_for_resleeve(
     let mut stop_deadline = deadline;
     loop {
         if session.is_idle() || session.is_exited() {
-            return Ok(chat_status(hub, session.as_ref()));
+            return stored(&chat_status(hub, session.as_ref()));
         }
         if !interrupted && (interrupt || std::time::Instant::now() >= deadline) {
             let _ = session.interrupt();
@@ -2128,7 +2087,7 @@ pub(super) fn quiesce_for_resleeve(
             stop_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         }
         if interrupted && std::time::Instant::now() >= stop_deadline {
-            return Ok(chat_status(hub, session.as_ref()));
+            return stored(&chat_status(hub, session.as_ref()));
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -2513,7 +2472,7 @@ fn compact(hub: &Hub, name: &str) -> Result<Value> {
     Ok(compaction)
 }
 /// Records a sleeve report; the flag is true for a report dropped as stale.
-fn report(hub: &Hub, actor: &str, request: &v1::ReportRequest) -> Result<(Value, bool)> {
+fn report(hub: &Hub, actor: &str, request: &v1::ReportRequest) -> Result<(v1::SleeveResult, bool)> {
     let self_name = if actor == "token:orchestrator-envoy" {
         "envoy"
     } else {
@@ -2568,7 +2527,8 @@ fn report(hub: &Hub, actor: &str, request: &v1::ReportRequest) -> Result<(Value,
             .ok()
     };
     if source_seq > 0 && events.iter().filter_map(reported).max() >= Some(source_seq) {
-        return Ok((row.result.unwrap_or_else(|| json!({})), true));
+        let result = row.result.as_ref().map(stored).transpose()?;
+        return Ok((result.unwrap_or_default(), true));
     }
     let brief_seq = events
         .into_iter()
@@ -2611,7 +2571,7 @@ fn report(hub: &Hub, actor: &str, request: &v1::ReportRequest) -> Result<(Value,
             "summary":summary,"time":result["time"],"chat_seq":result["chatSeq"],
             "brief_seq":result["briefSeq"]}),
     );
-    Ok((result, false))
+    Ok((stored(&result)?, false))
 }
 async fn wait(hub: &Hub, request: &v1::WaitRequest) -> Result<v1::WaitResponse> {
     let name = request.sleeve.as_str();
@@ -2702,21 +2662,6 @@ fn chat_event(event: &Event) -> Result<v1::ChatEvent> {
         }
     }
     stored(&value)
-}
-fn number(value: &Value, key: &str) -> Result<u64> {
-    match value.get(key) {
-        None | Some(Value::Null) => Ok(0),
-        Some(Value::Number(n)) => n
-            .as_u64()
-            .ok_or_else(|| RpcError::new(Code::InvalidArgument, format!("invalid {key}"))),
-        Some(Value::String(s)) => s
-            .parse()
-            .map_err(|_| RpcError::new(Code::InvalidArgument, format!("invalid {key}"))),
-        _ => Err(RpcError::new(
-            Code::InvalidArgument,
-            format!("invalid {key}"),
-        )),
-    }
 }
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true)
