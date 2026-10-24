@@ -1,4 +1,5 @@
 //! Windows direct harness launch. Sandboxed workloads remain unsupported.
+use crate::job::{resume_process, Job};
 use crate::{PlanKind, ValidatedPlan};
 use std::{
     collections::BTreeMap,
@@ -6,7 +7,6 @@ use std::{
     os::windows::{io::AsRawHandle, process::CommandExt},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
-    ptr,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -14,21 +14,9 @@ use std::{
     time::Duration,
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE},
-    System::{
-        JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        },
-        Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED},
-    },
+    Foundation::HANDLE,
+    System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED},
 };
-
-#[link(name = "ntdll")]
-unsafe extern "system" {
-    fn NtResumeProcess(process: HANDLE) -> i32;
-}
 
 #[derive(Debug)]
 pub enum LaunchError {
@@ -92,64 +80,13 @@ impl LaunchOptions {
     }
 }
 
-struct Job(HANDLE);
-unsafe impl Send for Job {}
-unsafe impl Sync for Job {}
-impl Job {
-    fn new() -> Result<Self> {
-        // SAFETY: null attributes and name create a private unnamed Job Object.
-        let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-        if handle.is_null() {
-            return Err(ioerr("create direct harness job")(
-                io::Error::last_os_error(),
-            ));
-        }
-        let job = Self(handle);
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        // SAFETY: the buffer and size match the selected information class.
-        if unsafe {
-            SetInformationJobObject(
-                job.0,
-                JobObjectExtendedLimitInformation,
-                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                std::mem::size_of_val(&limits) as u32,
-            )
-        } == 0
-        {
-            return Err(ioerr("limit direct harness job")(io::Error::last_os_error()));
-        }
-        Ok(job)
-    }
-
-    fn attach(&self, child: &Child) -> Result<()> {
-        let process = child.as_raw_handle() as HANDLE;
-        // SAFETY: the spawned process is suspended and both handles are live.
-        if unsafe { AssignProcessToJobObject(self.0, process) } == 0 {
-            return Err(ioerr("assign direct harness job")(
-                io::Error::last_os_error(),
-            ));
-        }
-        // SAFETY: this resumes only the suspended process assigned above.
-        let status = unsafe { NtResumeProcess(process) };
-        if status < 0 {
-            return Err(LaunchError::Io {
-                operation: "resume direct harness",
-                source: io::Error::other(format!("NTSTATUS {status:#x}")),
-            });
-        }
-        Ok(())
-    }
-
-    fn terminate(&self) {
-        // SAFETY: this job is private to the direct harness process tree.
-        unsafe { TerminateJobObject(self.0, 1) };
-    }
-}
-impl Drop for Job {
-    fn drop(&mut self) {
-        // SAFETY: the owned job handle is closed exactly once.
-        unsafe { CloseHandle(self.0) };
+fn attach(job: &Job, child: &Child) -> Result<()> {
+    let process = child.as_raw_handle() as HANDLE;
+    // SAFETY: the child is suspended and its handle is live for both calls.
+    unsafe {
+        job.assign(process)
+            .map_err(ioerr("assign direct harness job"))?;
+        resume_process(process).map_err(ioerr("resume direct harness"))
     }
 }
 
@@ -161,7 +98,7 @@ pub struct KillHandle {
 impl KillHandle {
     pub fn kill(&self) {
         if self.alive.swap(false, Ordering::AcqRel) {
-            self.job.terminate();
+            let _ = self.job.terminate();
         }
     }
 }
@@ -226,7 +163,7 @@ pub fn spawn_direct_harness(plan: &ValidatedPlan, options: &LaunchOptions) -> Re
     if command.is_empty() || !Path::new(&command[0]).is_absolute() {
         return Err(LaunchError::Invalid("absolute executable required"));
     }
-    let job = Arc::new(Job::new()?);
+    let job = Arc::new(Job::new().map_err(ioerr("create direct harness job"))?);
     let mut process = Command::new(&command[0]);
     process
         .args(&command[1..])
@@ -237,7 +174,7 @@ pub fn spawn_direct_harness(plan: &ValidatedPlan, options: &LaunchOptions) -> Re
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = process.spawn().map_err(ioerr("start direct harness"))?;
-    if let Err(error) = job.attach(&child) {
+    if let Err(error) = attach(&job, &child) {
         let _ = child.kill();
         let _ = child.wait();
         return Err(error);

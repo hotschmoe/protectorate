@@ -1249,7 +1249,6 @@ name = "protectorate-node-windows"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
  "protectorate-chatlog",
  "protectorate-claude-driver",
  "protectorate-codex-driver",
@@ -1304,6 +1303,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "libc",
+ "protectorate-sandbox",
  "serde",
  "serde_json",
  "ureq",

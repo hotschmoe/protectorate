@@ -5,6 +5,9 @@
 
 #[cfg(target_os = "linux")]
 pub mod egress;
+#[cfg(windows)]
+#[path = "job_windows.rs"]
+pub mod job;
 #[cfg(target_os = "linux")]
 pub mod runtime;
 #[cfg(windows)]

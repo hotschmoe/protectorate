@@ -1,6 +1,6 @@
 //! Dedicated Windows account for shared sandboxed jobs. Provisioning must run
 //! elevated as the same user that later runs the node agent.
-use crate::windows_process::{resume_process, ProcessTree};
+use protectorate_sandbox::job::{resume_process, Job};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -87,7 +87,7 @@ pub(crate) struct Runner {
 }
 
 pub(crate) struct RunnerProcess {
-    job: ProcessTree,
+    job: Job,
     process: usize,
     output: Option<fs::File>,
 }
@@ -213,7 +213,7 @@ impl Runner {
             return Err(io::Error::last_os_error());
         }
         let stdin = OwnedHandle::new(stdin);
-        let job = ProcessTree::new(cpu_percent, memory_bytes)?;
+        let job = Job::with_limits(cpu_percent, memory_bytes)?;
         let startup = STARTUPINFOW {
             cb: std::mem::size_of::<STARTUPINFOW>() as u32,
             dwFlags: STARTF_USESTDHANDLES,
@@ -250,10 +250,12 @@ impl Runner {
         }
         let process_handle = OwnedHandle::new(process.hProcess);
         let thread = OwnedHandle::new(process.hThread);
-        if let Err(error) = job
-            .attach_process(process_handle.handle())
-            .and_then(|_| resume_process(process_handle.handle()))
-        {
+        // SAFETY: the owned handle is the suspended process just created.
+        let attached = unsafe {
+            job.assign(process_handle.handle())
+                .and_then(|_| resume_process(process_handle.handle()))
+        };
+        if let Err(error) = attached {
             // SAFETY: the suspended process is ours; it may not be a job member yet.
             unsafe {
                 TerminateProcess(process_handle.handle(), 1);
