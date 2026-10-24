@@ -5,11 +5,17 @@
 //! once. Requests bind to the caller and the exact request (or launch
 //! inputs), live in hub memory and expire. Launch pins (rug-pull detection)
 //! use the same requests.
-use super::{input, respond, string, Hub};
+use super::{proto_time, string, Hub};
+use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
+use prost_reflect::Value as FieldValue;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_sleeve_registry::Pin;
-use protectorate_wire::{encode_json, Code, Result, RpcError, RpcRequest, UnaryServer};
+use protectorate_wire::{
+    encode_json,
+    v1::{self, approval_service},
+    AuthContext, Call, Code, DynamicMessage, Method, Result, RpcError, RpcRequest, UnaryServer,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -23,7 +29,6 @@ use std::{
 pub(crate) const HEADER: &str = "protectorate-approval";
 pub(crate) const DEFAULT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_PENDING_PER_ACTOR: usize = 20;
-const DECIDE: &str = "/protectorate.v1.ApprovalService/DecideApproval";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -35,13 +40,13 @@ enum State {
 }
 
 impl State {
-    fn proto(self) -> &'static str {
+    fn proto(self) -> v1::ApprovalState {
         match self {
-            Self::Pending => "APPROVAL_STATE_PENDING",
-            Self::Approved => "APPROVAL_STATE_APPROVED",
-            Self::Denied => "APPROVAL_STATE_DENIED",
-            Self::Expired => "APPROVAL_STATE_EXPIRED",
-            Self::Used => "APPROVAL_STATE_USED",
+            Self::Pending => v1::ApprovalState::Pending,
+            Self::Approved => v1::ApprovalState::Approved,
+            Self::Denied => v1::ApprovalState::Denied,
+            Self::Expired => v1::ApprovalState::Expired,
+            Self::Used => v1::ApprovalState::Used,
         }
     }
 }
@@ -254,24 +259,24 @@ fn event(request: &Request) -> Value {
         "procedure": request.ask.procedure,
         "subject": request.ask.subject,
         "reason": request.ask.reason,
-        "state": request.state.proto(),
+        "state": request.state.proto().as_str_name(),
     })
 }
 
-fn approval_json(request: &Request) -> Value {
-    json!({
-        "id": request.id,
-        "actor": request.ask.actor,
-        "procedure": request.ask.procedure,
-        "subject": request.ask.subject,
-        "reason": request.ask.reason,
-        "detail": request.ask.detail,
-        "runId": request.ask.run_id,
-        "state": request.state.proto(),
-        "createdAt": super::timestamp(request.created),
-        "expiresAt": super::timestamp(request.expires),
-        "decidedBy": request.decided_by,
-    })
+fn approval(request: &Request) -> v1::Approval {
+    v1::Approval {
+        id: request.id.clone(),
+        actor: request.ask.actor.clone(),
+        procedure: request.ask.procedure.clone(),
+        subject: request.ask.subject.clone(),
+        reason: request.ask.reason.clone(),
+        detail: request.ask.detail.clone(),
+        run_id: request.ask.run_id.clone(),
+        state: request.state.proto() as i32,
+        created_at: Some(proto_time(request.created)),
+        expires_at: Some(proto_time(request.expires)),
+        decided_by: request.decided_by.clone(),
+    }
 }
 
 /// Envoy, a sleeve, or a capability lineage Envoy minted. The owner,
@@ -293,8 +298,11 @@ pub(crate) fn gate(hub: &Hub, request: &RpcRequest) -> Result<()> {
     let method = &request.method;
     let reason = if method.destructive {
         "destructive"
-    } else if method.procedure == "/protectorate.v1.JobService/SubmitJob"
-        && input(request)?["admin"] == true
+    } else if method.procedure == v1::job_service::SUBMIT_JOB.procedure
+        && matches!(
+            request.message.get_field_by_name("admin").as_deref(),
+            Some(FieldValue::Bool(true))
+        )
     {
         "node admin job"
     } else {
@@ -304,12 +312,34 @@ pub(crate) fn gate(hub: &Hub, request: &RpcRequest) -> Result<()> {
     if auth.owner || auth.device || !is_agent(hub, &auth.actor, &auth.token_id) {
         return Ok(());
     }
-    require(hub, request, reason)
+    require(
+        hub,
+        Gated {
+            method: &request.method,
+            auth,
+            headers: &request.headers,
+            message: &request.message,
+        },
+        reason,
+    )
+}
+
+/// One call to gate: its procedure, caller, headers and decoded request.
+pub(crate) struct Gated<'a> {
+    pub method: &'a Method,
+    pub auth: &'a AuthContext,
+    pub headers: &'a HeaderMap,
+    pub message: &'a DynamicMessage,
 }
 
 /// Ok once the owner approved this exact call by this caller.
-pub(crate) fn require(hub: &Hub, request: &RpcRequest, reason: &str) -> Result<()> {
-    let (method, auth) = (&request.method, &request.auth);
+pub(crate) fn require(hub: &Hub, call: Gated<'_>, reason: &str) -> Result<()> {
+    let Gated {
+        method,
+        auth,
+        headers,
+        message,
+    } = call;
     hub.approvals.check(
         hub,
         Ask {
@@ -317,11 +347,11 @@ pub(crate) fn require(hub: &Hub, request: &RpcRequest, reason: &str) -> Result<(
             token_id: auth.token_id.clone(),
             run_id: super::actor_run(hub, &auth.actor),
             procedure: method.procedure.clone(),
-            subject: crate::audit::subject(method, auth, &request.message, false),
+            subject: crate::audit::subject(method, auth, message, false),
             reason: reason.into(),
             detail: String::new(),
-            binding: encode_json(&request.message)?,
-            hint: hint(&request.headers),
+            binding: encode_json(message)?,
+            hint: hint(headers),
         },
     )
 }
@@ -422,7 +452,7 @@ pub(crate) fn check_pin(
     )
 }
 
-pub(crate) fn hint(headers: &axum::http::HeaderMap) -> String {
+pub(crate) fn hint(headers: &HeaderMap) -> String {
     headers
         .get(HEADER)
         .and_then(|value| value.to_str().ok())
@@ -432,12 +462,12 @@ pub(crate) fn hint(headers: &axum::http::HeaderMap) -> String {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let list = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.ApprovalService/ListApprovals",
-        move |request| {
+    server.unary(
+        approval_service::LIST_APPROVALS,
+        move |call: Call<v1::ListApprovalsRequest>| {
             let hub = Arc::clone(&list);
             async move {
-                let all = input(&request)?["all"] == true;
+                let all = call.request.all;
                 let mut requests = hub.approvals.requests.lock().unwrap();
                 hub.approvals.sweep(&hub, &mut requests, Utc::now());
                 let mut rows = requests
@@ -445,36 +475,40 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     .filter(|r| all || r.state == State::Pending)
                     .collect::<Vec<_>>();
                 rows.sort_by_key(|r| r.created);
-                let approvals = rows.into_iter().map(approval_json).collect::<Vec<_>>();
-                drop(requests);
-                respond(&request, json!({"approvals": approvals}))
+                Ok(v1::ListApprovalsResponse {
+                    approvals: rows.into_iter().map(approval).collect(),
+                })
             }
         },
     )?;
-    server.register(DECIDE, move |request| {
-        let hub = Arc::clone(&hub);
-        async move {
-            let value = input(&request)?;
-            let approve = value["approve"] == true;
-            let decided =
-                hub.approvals
-                    .decide(&hub, &string(&value, "id"), approve, &request.auth.actor)?;
-            hub.audit.write(AuditEntry {
-                actor: request.auth.actor.clone(),
-                token_id: request.auth.token_id.clone(),
-                run_id: decided.ask.run_id.clone(),
-                procedure: DECIDE.into(),
-                subject: decided.id.clone(),
-                outcome: "ok".into(),
-                detail: format!(
-                    "{} {} for {}",
-                    if approve { "approved" } else { "denied" },
-                    summary(&decided.ask),
-                    decided.ask.actor
-                ),
-                ..AuditEntry::default()
-            });
-            respond(&request, json!({"approval": approval_json(&decided)}))
-        }
-    })
+    server.unary(
+        approval_service::DECIDE_APPROVAL,
+        move |call: Call<v1::DecideApprovalRequest>| {
+            let hub = Arc::clone(&hub);
+            async move {
+                let approve = call.request.approve;
+                let decided =
+                    hub.approvals
+                        .decide(&hub, &call.request.id, approve, &call.auth.actor)?;
+                hub.audit.write(AuditEntry {
+                    actor: call.auth.actor.clone(),
+                    token_id: call.auth.token_id.clone(),
+                    run_id: decided.ask.run_id.clone(),
+                    procedure: call.method.procedure.clone(),
+                    subject: decided.id.clone(),
+                    outcome: "ok".into(),
+                    detail: format!(
+                        "{} {} for {}",
+                        if approve { "approved" } else { "denied" },
+                        summary(&decided.ask),
+                        decided.ask.actor
+                    ),
+                    ..AuditEntry::default()
+                });
+                Ok(v1::DecideApprovalResponse {
+                    approval: Some(approval(&decided)),
+                })
+            }
+        },
+    )
 }

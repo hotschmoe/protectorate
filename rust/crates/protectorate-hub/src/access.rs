@@ -1,8 +1,9 @@
 //! Who is calling. The owner token works only on the loopback listener; an
 //! approved device signs each request with its key; everything else holds a
 //! capability the hub minted. Every hub entry point admits callers here.
-use crate::{input, now_unix, parse_duration, respond, string, strings, unix_timestamp, Hub};
+use crate::{now_unix, unix_time, unix_timestamp, Hub};
 use axum::http::{header, HeaderMap};
+use prost_reflect::prost_types;
 use protectorate_auth::{
     self as auth,
     capability::{self, Claims},
@@ -10,7 +11,11 @@ use protectorate_auth::{
     Method as ScopeMethod,
 };
 use protectorate_identity::{self as identity, Capability, Device, Mint, Secret, Store};
-use protectorate_wire::{AuthContext, Code, Denied, Method, Result, RpcError, UnaryServer};
+use protectorate_wire::{
+    self as wire,
+    v1::{self, token_service},
+    AuthContext, Call, Code, Denied, Method, Result, RpcError, UnaryServer,
+};
 use serde_json::{json, Value};
 use std::{
     path::Path,
@@ -340,6 +345,19 @@ pub(crate) fn refresh_interval(ttl: Duration) -> Duration {
     (ttl / 8).clamp(Duration::from_millis(250), Duration::from_secs(60))
 }
 
+pub(crate) fn token_info(token: &Capability) -> v1::TokenInfo {
+    v1::TokenInfo {
+        id: token.id.clone(),
+        name: token.principal.clone(),
+        scopes: token.scopes.clone(),
+        created_at: Some(unix_time(token.created)),
+        expires_at: Some(unix_time(token.expires)),
+        revoked_at: token.revoked_at.map(unix_time),
+        task: token.task.clone(),
+        minted_by: token.minted_by.clone(),
+    }
+}
+
 pub(crate) fn token_json(token: &Capability) -> Value {
     let mut out = json!({
         "id": token.id, "name": token.principal, "scopes": token.scopes,
@@ -364,12 +382,9 @@ pub(crate) fn token_error(error: identity::Error) -> RpcError {
     RpcError::new(code, error.to_string())
 }
 
-pub(crate) fn ttl(value: &Value, default: Duration) -> Result<Duration> {
-    if value.get("ttl").is_some() {
-        parse_duration(value.get("ttl"))
-    } else {
-        Ok(default)
-    }
+/// A requested lifetime: `default` when absent, never negative.
+pub(crate) fn ttl(value: Option<&prost_types::Duration>, default: Duration) -> Result<Duration> {
+    value.map_or(Ok(default), |value| wire::duration(Some(value), "ttl"))
 }
 
 fn reserved(name: &str) -> bool {
@@ -378,21 +393,24 @@ fn reserved(name: &str) -> bool {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let create = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.TokenService/CreateToken",
-        move |request| {
+    server.unary(
+        token_service::CREATE_TOKEN,
+        move |call: Call<v1::CreateTokenRequest>| {
             let hub = Arc::clone(&create);
             async move {
-                let body = input(&request)?;
-                let name = string(&body, "name");
-                if name.trim().is_empty() || reserved(&name) {
+                let request = call.request;
+                let name = request.name.trim();
+                if name.is_empty() || reserved(name) {
                     return Err(RpcError::invalid(
                         "a capability needs a name that is not a sleeve, grant or Envoy identity",
                     ));
                 }
-                let scopes = strings(&body, "scopes");
                 let scopes = auth::validate_scopes(
-                    &scopes.iter().map(String::as_str).collect::<Vec<_>>(),
+                    &request
+                        .scopes
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
                     &scope_methods(&hub.methods),
                 )
                 .map_err(|error| RpcError::invalid(error.to_string()))?;
@@ -400,61 +418,61 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     .identity
                     .mint(
                         Mint {
-                            principal: name.trim(),
+                            principal: name,
                             scopes,
                             task: "",
                             minted_by: "owner",
-                            ttl: ttl(&body, DEFAULT_TTL)?,
+                            ttl: ttl(request.ttl.as_ref(), DEFAULT_TTL)?,
                             file: None,
                         },
                         now_unix(),
                     )
                     .map_err(token_error)?;
-                respond(
-                    &request,
-                    json!({"token": token_json(&record), "secret": secret.expose()}),
-                )
+                Ok(v1::CreateTokenResponse {
+                    token: Some(token_info(&record)),
+                    secret: secret.expose().to_owned(),
+                })
             }
         },
     )?;
     let list = Arc::clone(&hub);
-    server.register("/protectorate.v1.TokenService/ListTokens", move |request| {
+    server.unary(token_service::LIST_TOKENS, move |_: Call<_>| {
         let hub = Arc::clone(&list);
         async move {
-            let tokens = hub.identity.capabilities();
-            respond(
-                &request,
-                json!({"tokens": tokens.iter().map(token_json).collect::<Vec<_>>()}),
-            )
+            Ok(v1::ListTokensResponse {
+                tokens: hub.identity.capabilities().iter().map(token_info).collect(),
+            })
         }
     })?;
     let revoke = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.TokenService/RevokeToken",
-        move |request| {
+    server.unary(
+        token_service::REVOKE_TOKEN,
+        move |call: Call<v1::RevokeTokenRequest>| {
             let hub = Arc::clone(&revoke);
             async move {
                 let token = hub
                     .identity
-                    .revoke(&string(&input(&request)?, "id"), now_unix())
+                    .revoke(&call.request.id, now_unix())
                     .map_err(token_error)?;
-                respond(&request, json!({"token": token_json(&token)}))
+                Ok(v1::RevokeTokenResponse {
+                    token: Some(token_info(&token)),
+                })
             }
         },
     )?;
-    server.register("/protectorate.v1.TokenService/RenewToken", move |request| {
+    server.unary(token_service::RENEW_TOKEN, move |call: Call<_>| {
         let hub = Arc::clone(&hub);
         async move {
-            let presented = bearer(&request.headers)
+            let presented = bearer(&call.headers)
                 .ok_or_else(|| RpcError::new(Code::Unauthenticated, "no capability presented"))?;
             let (record, secret) = hub
                 .identity
                 .renew(presented, now_unix())
                 .map_err(|error| RpcError::new(Code::Unauthenticated, error.to_string()))?;
-            respond(
-                &request,
-                json!({"token": token_json(&record), "secret": secret.expose()}),
-            )
+            Ok(v1::RenewTokenResponse {
+                token: Some(token_info(&record)),
+                secret: secret.expose().to_owned(),
+            })
         }
     })
 }

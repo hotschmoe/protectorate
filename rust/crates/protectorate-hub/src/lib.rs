@@ -1188,19 +1188,6 @@ fn string(value: &Value, key: &str) -> String {
         .unwrap_or_default()
         .into()
 }
-fn strings(value: &Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
 fn parse_duration(value: Option<&Value>) -> wire::Result<std::time::Duration> {
     let Some(value) = value else {
         return Ok(std::time::Duration::ZERO);
@@ -1287,6 +1274,9 @@ fn proto_time(time: DateTime<Utc>) -> prost_types::Timestamp {
         seconds: time.timestamp(),
         nanos: time.timestamp_subsec_nanos().min(999_999_999) as i32,
     }
+}
+fn unix_time(seconds: i64) -> prost_types::Timestamp {
+    prost_types::Timestamp { seconds, nanos: 0 }
 }
 fn note(note: &Note) -> v1::Note {
     v1::Note {
