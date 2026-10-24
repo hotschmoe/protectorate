@@ -22,7 +22,7 @@ chmod +x "$temp/mock-bin/systemctl" "$temp/mock-bin/systemd-run"
 export PATH="$temp/mock-bin:$PATH"
 case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo 'unsupported test architecture' >&2; exit 1 ;; esac
 source_bytes=0
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
   [[ -x "$binary_dir/$component" ]] || { echo "missing Rust binary: $binary_dir/$component" >&2; exit 1; }
   source_bytes=$((source_bytes + $(stat -c %s "$binary_dir/$component")))
 done
@@ -36,7 +36,7 @@ version=$("$binary_dir/protectorate-rs" version --json | python3 -c 'import json
 printf '%s\n' "$version" > "$temp/bundle/VERSION"
 printf '%s\n' '<html>installed Rust hub</html>' > "$temp/web/index.html"
 tar -czf "$temp/bundle/protectorate-web-$version.tar.gz" -C "$temp/web" .
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
   cp --reflink=auto -- "$binary_dir/$component" "$temp/bundle/$component-linux-$arch"
 done
 (cd "$temp/bundle" && sha256sum VERSION *-linux-"$arch" "protectorate-web-$version.tar.gz" > SHA256SUMS)
@@ -44,7 +44,7 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/state" --r
 unit="$HOME/.config/systemd/user/protectorate-hub.service"
 [[ "$(readlink "$HOME/releases/current")" == "$version" ]]
 [[ "$(stat -c %a "$HOME/state/token")" == 600 ]]
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
   cmp -s "$binary_dir/$component" "$HOME/releases/$version/$component"
 done
 systemd-analyze verify "$unit" > "$temp/systemd-verify.log" 2>&1

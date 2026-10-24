@@ -4086,14 +4086,12 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
   factory InviteNodeRequest({
     $core.String? name,
     $core.String? tier,
-    $core.Iterable<$core.String>? pools,
     $3.Duration? ttl,
     $core.String? installUrl,
   }) {
     final result = InviteNodeRequest._();
     if (name != null) result.name = name;
     if (tier != null) result.tier = tier;
-    if (pools != null) result.pools.addAll(pools);
     if (ttl != null) result.ttl = ttl;
     if (installUrl != null) result.installUrl = installUrl;
     return result;
@@ -4115,7 +4113,6 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
       createEmptyInstance: InviteNodeRequest.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'name')
     ..aOS(2, _omitFieldNames ? '' : 'tier')
-    ..pPS(3, _omitFieldNames ? '' : 'pools')
     ..aOM<$3.Duration>(4, _omitFieldNames ? '' : 'ttl',
         subBuilder: $3.Duration.$_createMessage)
     ..aOS(5, _omitFieldNames ? '' : 'installUrl')
@@ -4163,31 +4160,27 @@ class InviteNodeRequest extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   void clearTier() => $_clearField(2);
 
-  /// pools become pool-<name> tags on the node.
-  @$pb.TagNumber(3)
-  $pb.PbList<$core.String> get pools => $_getList(2);
-
   /// ttl is how long the code can be redeemed; unset means 1h, at most 24h.
   @$pb.TagNumber(4)
-  $3.Duration get ttl => $_getN(3);
+  $3.Duration get ttl => $_getN(2);
   @$pb.TagNumber(4)
   set ttl($3.Duration value) => $_setField(4, value);
   @$pb.TagNumber(4)
-  $core.bool hasTtl() => $_has(3);
+  $core.bool hasTtl() => $_has(2);
   @$pb.TagNumber(4)
   void clearTtl() => $_clearField(4);
   @$pb.TagNumber(4)
-  $3.Duration ensureTtl() => $_ensure(3);
+  $3.Duration ensureTtl() => $_ensure(2);
 
   /// install_url is the hub's HTTPS URL the new machine downloads from and
   /// joins through. Empty means the hub's --public-url, else its first TLS
   /// listener.
   @$pb.TagNumber(5)
-  $core.String get installUrl => $_getSZ(4);
+  $core.String get installUrl => $_getSZ(3);
   @$pb.TagNumber(5)
-  set installUrl($core.String value) => $_setString(4, value);
+  set installUrl($core.String value) => $_setString(3, value);
   @$pb.TagNumber(5)
-  $core.bool hasInstallUrl() => $_has(4);
+  $core.bool hasInstallUrl() => $_has(3);
   @$pb.TagNumber(5)
   void clearInstallUrl() => $_clearField(5);
 }

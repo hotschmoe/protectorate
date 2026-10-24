@@ -112,7 +112,9 @@ protectorate mcp --https 192.168.22.5:7471 \
 ```
 
 The HTTPS endpoint still requires `Authorization: Bearer <token>` on every
-request. Bind a private address, never a wildcard or public one. Use
+request. `--https` takes an explicit private IP address (loopback, RFC 1918,
+100.64.0.0/10, fc00::/7 or fe80::/10) and refuses wildcard and public
+addresses and host names, like every other protectorate listener. Use
 `https://HOST:7471` in the MCP client and configure it to trust
 the certificate or its issuing CA. Keep the key file private (`chmod 600` on
 Unix). On Windows, the key must be owned by the current user, SYSTEM, or

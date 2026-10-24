@@ -36,7 +36,7 @@ async fn call(addr: std::net::SocketAddr, method: &str, body: Value) -> (u16, Va
 }
 fn fake(path: &Path) {
     let script = r#"#!/usr/bin/python3
-import json,os,sys
+import json,os,subprocess,sys
 assert sys.argv[1:] == ['app-server']
 home=os.environ['CODEX_HOME']
 assert json.load(open(os.path.join(home,'auth.json')))['test']=='credential'
@@ -58,6 +58,7 @@ for line in sys.stdin:
   emit({'id':mid,'result':{}})
  elif method=='thread/start':
   assert p['cwd'] and 'approvalPolicy' not in p
+  assert subprocess.run(['git','config','user.email'],capture_output=True,text=True).stdout=='owner@example.com\n'
   emit({'id':mid,'result':{'thread':{'id':tid},'model':'gpt-test','reasoningEffort':'medium'}})
  elif method=='thread/resume':
   assert p['threadId']==tid and p['excludeTurns']==True
@@ -125,6 +126,11 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     ] {
         fs::create_dir_all(dir).unwrap();
     }
+    fs::write(
+        owner.join(".gitconfig"),
+        "[user]\n\tname = Owner\n\temail = owner@example.com\n",
+    )
+    .unwrap();
     fs::write(
         state.join("auth/codex/auth.json"),
         r#"{"test":"credential"}"#,

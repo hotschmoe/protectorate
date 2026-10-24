@@ -25,6 +25,11 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
     for dir in [&state, &owner_home, &workspace, &runtime, &tools] {
         fs::create_dir_all(dir).unwrap();
     }
+    fs::write(
+        owner_home.join(".gitconfig"),
+        "[user]\n\tname = Owner \\\"Q\\\" Name\n\temail = owner@example.com\n",
+    )
+    .unwrap();
     let mut executables = Vec::new();
     for provider in ["pi", "claude", "codex", "grok"] {
         let auth = state.join("auth").join(provider);
@@ -33,7 +38,7 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         let executable = tools.join(provider);
         executable::write_executable(
             &executable,
-            "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
+            "#!/usr/bin/sh\nfor other in pi claude codex grok; do if [ \"$other\" != \"$PROTECTORATE_SLEEVE\" ] && [ -e \"/run/protectorate/auth/$other\" ]; then echo credential-leak > \"proof-$PROTECTORATE_SLEEVE\"; exit 1; fi; done\nprintf '%s|%s|%s|%s|%s|%s|%s <%s>|%s|%s %s %s %s' \"$*\" \"$(cat /run/protectorate/auth/$PROTECTORATE_SLEEVE/token)\" \"${PI_CODING_AGENT_DIR:-}\" \"${CLAUDE_CONFIG_DIR:-}\" \"${CODEX_HOME:-}\" \"${GROK_HOME:-}\" \"$(git config user.name)\" \"$(git config user.email)\" \"${DISABLE_AUTOUPDATER:-}\" \"${GOMAXPROCS:-}\" \"${GOFLAGS:-}\" \"${CARGO_BUILD_JOBS:-}\" \"${FLUTTER_TEST_CONCURRENCY:-}\" > \"proof-$PROTECTORATE_SLEEVE\"\nexec /usr/bin/sh\n",
         );
         executables.push(executable);
     }
@@ -95,7 +100,8 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         let (status, spawned) = call(
             addr,
             "/protectorate.v1.SleeveService/SpawnSleeve",
-            json!({"name":provider,"harness":harness,"mode":"SLEEVE_MODE_TERMINAL","workspace":workspace,"args":["--example"]}),
+            json!({"name":provider,"harness":harness,"mode":"SLEEVE_MODE_TERMINAL","workspace":workspace,"args":["--example"],
+                "limits":{"cpuPercent":250},"env":{"CARGO_BUILD_JOBS":"1"}}),
         )
         .await;
         assert_eq!(status, 200, "{provider}: {spawned}");
@@ -137,6 +143,22 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
             _ => unreachable!(),
         };
         assert_eq!(fields[env_index], provider_env, "{provider}: {result}");
+        assert_eq!(
+            fields[6], "Owner \"Q\" Name <owner@example.com>",
+            "{provider}: {result}"
+        );
+        let claude = provider == "claude";
+        assert_eq!(fields[7], if claude { "1" } else { "" }, "{result}");
+        // A 2.5-core quota sizes worker pools to two; the caller's value wins.
+        assert_eq!(fields[8], "2 -p=2 1 2", "{result}");
+        assert_eq!(
+            state
+                .join("sleeves")
+                .join(provider)
+                .join("home/.claude/.claude.json")
+                .exists(),
+            claude
+        );
         assert!(
             result.starts_with(if provider == "codex" {
                 "--disable daemon_auto_start --example"
@@ -311,7 +333,7 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
         json!({"sdk":sdk,"sha256":"test"}).to_string(),
     )
     .unwrap();
-    let fake_cli = root.path().join("protectorate-cli");
+    let fake_cli = root.path().join("protectorate");
     executable::write_executable(
         &fake_cli,
         "#!/usr/bin/sh\nif [ \"$1\" = mcp ]; then shift; exec /opt/protectorate/bin/protectorate-mcpbridge \"$@\"; fi\nprintf 'cli-ok:%s' \"$PROTECTORATE_SLEEVE\"\n",
@@ -330,10 +352,10 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
             .parent()
             .unwrap()
             .to_path_buf();
-        let cli = build_dir.join("protectorate-cli");
+        let cli = build_dir.join("protectorate");
         assert!(
             cli.is_file(),
-            "build protectorate-cli before the live MCP trial"
+            "build protectorate before the live MCP trial"
         );
         assert!(
             build_dir.join("protectorate-mcpbridge").is_file(),
@@ -499,7 +521,7 @@ async fn http_spawn_capture_and_kill_real_sandboxed_shell() {
     );
     let cli_proof = fs::read_to_string(workspace.join("cli-proof")).unwrap();
     if real_mcp {
-        assert!(cli_proof.starts_with("protectorate-cli "), "{cli_proof}");
+        assert!(cli_proof.starts_with("protectorate "), "{cli_proof}");
         let catalog: Value =
             serde_json::from_str(&fs::read_to_string(workspace.join("mcp-proof")).unwrap())
                 .unwrap();

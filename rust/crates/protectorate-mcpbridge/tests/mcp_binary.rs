@@ -1,6 +1,6 @@
 //! The distributed binary must keep stdout as an MCP protocol stream.
 use serde_json::{json, Value};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
 #[test]
@@ -130,4 +130,49 @@ fn stdio_initialize_and_list_are_json_rpc_only() {
     assert_eq!(replies[0]["id"], 1);
     assert_eq!(replies[1]["id"], 2);
     assert!(replies[1]["result"]["tools"].as_array().is_some());
+}
+
+#[test]
+fn https_binds_only_explicit_private_addresses() {
+    let dir = tempfile::tempdir().unwrap();
+    let ca = protectorate_tls::Ca::open_or_create(&dir.path().join("ca")).unwrap();
+    let identity = ca.hub_identity(&["127.0.0.1".to_owned()]).unwrap();
+    let cert = dir.path().join("cert.pem");
+    let key = dir.path().join("key.pem");
+    protectorate_fsutil::write_file(&cert, identity.cert_pem.as_bytes(), 0o644).unwrap();
+    protectorate_fsutil::write_file(&key, identity.key_pem.as_bytes(), 0o600).unwrap();
+    let bridge = |listen: &str| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-mcpbridge"));
+        command
+            .args(["--https", listen, "--tls-cert"])
+            .arg(&cert)
+            .arg("--tls-key")
+            .arg(&key)
+            .env("PROTECTORATE_TOKEN", "test-token")
+            .env_remove("PROTECTORATE_TOKEN_FILE")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        command
+    };
+    for listen in ["0.0.0.0:0", "[::]:0", "8.8.8.8:7471", "localhost:0"] {
+        let output = bridge(listen).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{listen} was accepted: {stderr}");
+        assert!(
+            stderr.contains("refusing to listen") || stderr.contains("an IP address and a port"),
+            "{listen}: {stderr}"
+        );
+    }
+    let mut child = bridge("127.0.0.1:0").spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stderr.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(
+        line.starts_with("mcp listening on https://127.0.0.1:"),
+        "{line}"
+    );
 }

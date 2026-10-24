@@ -27,7 +27,7 @@ async fn serve(router: axum::Router) -> (String, tokio::task::JoinHandle<()>) {
 }
 
 async fn cli(url: &str, args: &[&str]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
     command
         .env("PROTECTORATE_HUB", url)
         .env("PROTECTORATE_TOKEN", "owner-secret")

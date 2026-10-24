@@ -1,8 +1,8 @@
-//! Capability probe and command construction for explicitly elevated jobs.
-//! The node agent token is the trust boundary; the hub separately checks the
-//! caller's named-node admin grant before forwarding such a job.
+//! Capability probe and command construction for explicitly elevated jobs,
+//! which only Linux nodes run. The hub checks the caller's named-node admin
+//! grant before forwarding such a job.
 use std::{path::PathBuf, sync::OnceLock};
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::{
     process::Stdio,
     thread,
@@ -10,7 +10,7 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) enum Admin {
     Root,
     Sudo(PathBuf),
@@ -61,7 +61,7 @@ pub(crate) fn probe() -> (Option<Admin>, String) {
 }
 
 fn probe_once() -> (Option<Admin>, String) {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         if unsafe { libc::geteuid() } == 0 {
             return (Some(Admin::Root), String::new());
@@ -98,11 +98,8 @@ fn probe_once() -> (Option<Admin>, String) {
             }
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     {
-        (
-            None,
-            "no admin jobs: elevation unavailable on this platform".into(),
-        )
+        (None, "no admin jobs: Linux-only".into())
     }
 }

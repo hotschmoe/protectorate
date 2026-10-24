@@ -1755,6 +1755,7 @@ fn spawn_terminal(hub: &Hub, value: &Value, parent: &SpawnParent) -> Result<Reco
         protectorate_sleeve_runner::prepare_private_caches(&root.join("home"), &launcher.user_home)
             .map_err(internal)?,
     );
+    seed_git_identity(&root.join("home"), &launcher.user_home)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -1995,11 +1996,74 @@ fn prepare_terminal_credentials(
             Err(error) => return Err(internal(error)),
         }
     }
+    if provider == "claude" {
+        seed_file(
+            &config.join(".claude.json"),
+            "{\"hasCompletedOnboarding\":true}\n",
+        )?;
+        env.insert("DISABLE_AUTOUPDATER".into(), "1".into());
+    }
     env.insert(
         variable.into(),
         user_home.join(directory).to_string_lossy().into_owned(),
     );
     Ok(())
+}
+
+/// Writes a first-run file in a sleeve home once. Whatever already sits at
+/// the path, possibly placed by the sleeve, is kept and never followed.
+pub(crate) fn seed_file(path: &Path, content: &str) -> Result<()> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+    {
+        Ok(mut file) => file.write_all(content.as_bytes()).map_err(internal),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(internal(error)),
+    }
+}
+
+/// Seeds the sleeve's `.gitconfig` with the owner's global git name and
+/// email, so agents commit with a real identity. Nothing is seeded unless
+/// both are set.
+pub(crate) fn seed_git_identity(home: &Path, user_home: &Path) -> Result<()> {
+    let path = home.join(".gitconfig");
+    if fs::symlink_metadata(&path).is_ok() {
+        return Ok(());
+    }
+    let (Some(name), Some(email)) = (
+        owner_git(user_home, "user.name"),
+        owner_git(user_home, "user.email"),
+    ) else {
+        return Ok(());
+    };
+    let quote = |value: &str| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""));
+    seed_file(
+        &path,
+        &format!(
+            "[user]\n\tname = {}\n\temail = {}\n",
+            quote(&name),
+            quote(&email)
+        ),
+    )
+}
+
+fn owner_git(user_home: &Path, key: &str) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["config", "--global", "--includes", "--get", key])
+        .current_dir("/")
+        .env("HOME", user_home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.strip_suffix('\n').unwrap_or(&value);
+    (output.status.success() && !value.is_empty() && !value.contains(char::is_control))
+        .then(|| value.to_owned())
 }
 
 fn kill_shell(hub: &Hub, name: &str) -> Result<()> {

@@ -90,7 +90,7 @@ fn verify_bundle(
         "protectorate-sleeve-runner",
         "protectorate-sleeve-sandbox-helper",
         "protectorate-node-sandbox-helper",
-        "protectorate-cli",
+        "protectorate",
         "protectorate-mcpbridge",
     ];
     let mut checked = Vec::with_capacity(components.len());

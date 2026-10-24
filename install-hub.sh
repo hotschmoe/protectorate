@@ -168,7 +168,7 @@ main() {
   [[ "$build_version" != *-dirty ]] || die "dirty build refused"
   [[ -z "$version" || "$version" == dev || "$version" == "$build_version" ]] || die "VERSION differs from requested tag"
   local component name
-  for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+  for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
     name="$component-linux-$arch"
     fetch "$name" "$stage/$name"
     verify "$name" "$stage/$name"
@@ -222,7 +222,7 @@ PY
   if [[ -e "$install_dir" || -L "$install_dir" ]]; then
     [[ -d "$install_dir" && ! -L "$install_dir" ]] || die "release path is not a real directory: $install_dir"
     cmp -s "$stage/SHA256SUMS" "$install_dir/SHA256SUMS" || die "existing release has different checksums: $install_dir"
-    for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+    for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
       cmp -s "$stage/$component-linux-$arch" "$install_dir/$component-linux-$arch" || die "existing release component differs: $component"
       [[ -x "$install_dir/$component" && ! -L "$install_dir/$component" ]] || die "existing release companion is missing: $component"
     done
@@ -264,7 +264,7 @@ PY
   if [[ ! -e "$install_dir" ]]; then
     local prepared="$release_root/.install-$build_version-$$"
     mkdir -m 700 -- "$prepared"
-    for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+    for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
       install -m 755 -- "$stage/$component-linux-$arch" "$prepared/$component-linux-$arch"
       ln -- "$prepared/$component-linux-$arch" "$prepared/$component"
     done

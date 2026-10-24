@@ -255,7 +255,7 @@ impl Jobs {
         if matches!(spec.mode, Mode::Admin) && self.admin.is_none() {
             return Err(RpcError::new(
                 Code::FailedPrecondition,
-                format!("this node cannot run admin jobs: {}", self.admin_note),
+                self.admin_note.clone(),
             ));
         }
         if matches!(spec.mode, Mode::Sandboxed) {
@@ -915,6 +915,7 @@ impl Jobs {
             env.insert("GIT_CONFIG_KEY_0".into(), "safe.directory".into());
             env.insert("GIT_CONFIG_VALUE_0".into(), safe);
         }
+        protectorate_sandbox::limit_build_jobs(&mut env, spec.cpu_percent);
         let id = spec.id.clone();
         let path = workdir.clone();
         let cpu = spec.cpu_percent;
@@ -1467,7 +1468,6 @@ fn parse_duration(s: &str) -> Option<Duration> {
 fn internal(e: serde_json::Error) -> RpcError {
     RpcError::new(Code::Internal, e.to_string())
 }
-#[cfg(not(windows))]
 /// How a command that the node did not stop itself ended: a signal nobody on
 /// the node sent is a kill (a resource limit or the OOM killer).
 fn exit_outcome(
@@ -1509,15 +1509,13 @@ async fn spawn_unless_busy(command: &mut Command) -> io::Result<tokio::process::
     }
 }
 
+#[cfg(not(windows))]
 fn kill_group(pid: u32) {
-    #[cfg(unix)]
     if pid > 0 {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
     }
-    #[cfg(not(unix))]
-    let _ = pid;
 }
 
 #[cfg(target_os = "linux")]

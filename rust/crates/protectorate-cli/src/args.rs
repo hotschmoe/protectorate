@@ -1,5 +1,4 @@
-//! argv parsing. Global options are accepted before or after the command, the
-//! way the Go CLI's persistent flags behave.
+//! argv parsing. Global options are accepted before or after the command.
 use crate::{
     AuditQuery, BacklogFilter, ChatSettings, Command, HarnessName, JobFilter, JobLogs, JobRun,
     JobState, LeaseAcquire, MessageKind, ModelChoice, NoteDraft, NoteEdit, NoteState, ReadOnlyBind,
@@ -340,8 +339,7 @@ fn hub(args: &[String], index: &mut usize) -> Result<Command> {
 }
 
 /// `api call <Service/Method> [json]`: one raw unary call. An omitted body is
-/// `{}`. A service without a package gets the `protectorate.v1.` prefix, the
-/// way the Go CLI spells it.
+/// `{}`. A service without a package gets the `protectorate.v1.` prefix.
 fn api(args: &[String], index: &mut usize) -> Result<Command> {
     if next(args, *index + 1) != Some("call") {
         return Err(bad_argument("api needs call <Service/Method> [json]"));
@@ -889,7 +887,6 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
                 ));
             }
             let mut tier = "shared".to_owned();
-            let mut pools = Vec::new();
             let mut ttl = Duration::from_secs(3600);
             let mut install_url = String::new();
             while let Some(token) = next(args, *index + 1) {
@@ -901,10 +898,6 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
                     "--tier" => {
                         *index += 1;
                         tier = value(args, index, flag, inline)?;
-                    }
-                    "--pool" => {
-                        *index += 1;
-                        pools.extend(csv_flag_values(flag, &value(args, index, flag, inline)?)?);
                     }
                     "--expires" => {
                         *index += 1;
@@ -926,7 +919,6 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
             Ok(Command::NodeInvite {
                 name,
                 tier,
-                pools,
                 ttl,
                 install_url,
             })
@@ -2513,7 +2505,7 @@ fn cpu_percent_flag(text: &str) -> Result<u32> {
     })
 }
 
-/// 512, 512M, 8G or 8GiB, in powers of 1024, the way the Go CLI reads `--mem`.
+/// 512, 512M, 8G or 8GiB, in powers of 1024.
 fn parse_size(text: &str) -> Result<u64> {
     let mut body = text.trim().to_ascii_uppercase();
     if let Some(stripped) = body.strip_suffix('B') {
@@ -2553,7 +2545,7 @@ fn split_scopes(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// A Go duration: 0, 250ms, 1.5s, 5m, 1h30m, 720h. Unlike `chat wait`, zero
+/// A duration: 0, 250ms, 1.5s, 5m, 1h30m, 720h. Unlike `chat wait`, zero
 /// is a real value and there is no 24h cap.
 fn go_duration(flag: &str, text: &str) -> Result<Duration> {
     parse_go_duration(text).map_err(|_| {
@@ -2568,7 +2560,7 @@ fn parse_go_duration(text: &str) -> std::result::Result<Duration, ()> {
     if text.is_empty() || text.starts_with(['+', '-']) {
         return Err(());
     }
-    // Go's ParseDuration accepts a bare 0 and no other unitless value.
+    // A bare 0 is the only unitless duration.
     if text == "0" {
         return Ok(Duration::ZERO);
     }
@@ -2641,8 +2633,8 @@ fn scaled_nanos(whole: &str, fraction: &str, unit: u128) -> std::result::Result<
 }
 
 /// `msg send`, `inbox`, `reply`, `ack`, `thread`, `threads` and `wait`,
-/// matching the Go CLI's mailbox commands: a body is every token after the
-/// address or id, joined with spaces, and a bare `-` reads stdin.
+/// where a body is every token after the address or id, joined with spaces,
+/// and a bare `-` reads stdin.
 fn msg(args: &[String], index: &mut usize) -> Result<Command> {
     let action = next(args, *index + 1).ok_or_else(|| {
         bad_argument("msg needs send <to> <body>, inbox, reply <id> <body>, ack <id>, thread <thread-id>, threads or wait <message-id|thread>")
@@ -2876,7 +2868,7 @@ fn option(token: &str) -> (&str, Option<String>) {
     }
 }
 
-/// A Go-style duration: 90s, 1.5s, 5m, 1h30m, 250ms. Zero means no deadline.
+/// A duration: 90s, 1.5s, 5m, 1h30m, 250ms. Zero means no deadline.
 fn wait_timeout(text: &str) -> Result<Duration> {
     let text = text.trim();
     let mut total = Duration::ZERO;
@@ -2900,8 +2892,7 @@ fn wait_timeout(text: &str) -> Result<Duration> {
         };
         let letters = leading(tail, |c| c.is_ascii_alphabetic());
         let unit_ms: u64 = match tail.split_at(letters).0 {
-            // A bare 0 is the only unitless duration: it means no deadline,
-            // the way Go reads it.
+            // A bare 0 is the only unitless duration: it means no deadline.
             "" if whole == "0" && tail.is_empty() => 1_000,
             "ms" => 1,
             "s" => 1_000,
@@ -2966,8 +2957,7 @@ fn next(args: &[String], at: usize) -> Option<&str> {
     args.get(at).map(String::as_str)
 }
 
-/// A boolean flag: bare means true, `=true` or `=false` say it outright, the
-/// way Go's pflag reads one.
+/// A boolean flag: bare means true, `=true` or `=false` say it outright.
 fn bool_flag(flag: &str, inline: Option<String>) -> Result<bool> {
     match inline {
         None => Ok(true),

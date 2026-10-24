@@ -50,7 +50,7 @@ fn now_unix() -> i64 {
 /// The real CLI binary with a disposable HOME and no hub credentials, so only
 /// a saved device credential can authenticate it.
 fn cli(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
     command
         .env("HOME", home)
         .env_remove("PROTECTORATE_HOME")
@@ -396,7 +396,7 @@ async fn a_credential_readable_by_others_is_refused() {
 #[test]
 fn login_without_a_home_or_a_token_names_both_fixes() {
     let home = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_protectorate"))
         .args(["--hub", "http://127.0.0.1:1", "status"])
         .env("HOME", home.path())
         .env_remove("PROTECTORATE_HOME")

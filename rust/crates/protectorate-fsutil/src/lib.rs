@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 /// Replace a file after syncing its data. `mode` is the Unix permission mask.
-/// The parent directory must already exist, matching the Go helper.
+/// The parent directory must already exist.
 pub fn write_file(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
     let dir = path
         .parent()
@@ -49,7 +49,7 @@ pub fn write_file(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
     result
 }
 
-/// Retry Windows sharing conflicts for up to five seconds, as the Go helper does.
+/// Retry Windows sharing conflicts for up to five seconds.
 pub fn retry<T>(mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     #[cfg(windows)]
     {

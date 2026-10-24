@@ -6,7 +6,7 @@ fn local_metrics_collects_without_hub_or_token() {
     let watch = tempfile::tempdir().unwrap();
     fs::write(watch.path().join("sample"), b"local-metrics").unwrap();
     let cli = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+        let output = Command::new(env!("CARGO_BIN_EXE_protectorate"))
             .env_remove("PROTECTORATE_TOKEN")
             .env_remove("PROTECTORATE_TOKEN_FILE")
             .args(args)

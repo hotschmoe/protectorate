@@ -245,8 +245,8 @@ async fn watch_node_setup(
     hub.inventory.get(&name).map_err(node_error)?;
     let mut last = None;
     // A node that just joined is only seen when the hub next polls it. Kick
-    // the poll from the watch, as Go's WatchNodeSetup does, so the setup flow
-    // does not sit at JOINED for a whole poll interval.
+    // the poll from the watch so the setup flow does not sit at JOINED for a
+    // whole poll interval.
     let mut kicked = None::<Instant>;
     loop {
         let node = hub.inventory.get(&name).map_err(node_error)?;
@@ -396,7 +396,6 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
     if ttl.is_zero() || ttl > Duration::from_secs(24 * 3600) {
         return Err(RpcError::invalid("ttl must be positive and at most 24h"));
     }
-    let pools = super::strings(&body, "pools");
     let base = install_base(
         &hub,
         body.get("installUrl").and_then(Value::as_str).unwrap_or(""),
@@ -415,7 +414,6 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
     let node = Node {
         name: name.clone(),
         tier,
-        tags: pools.iter().map(|pool| format!("pool-{pool}")).collect(),
         invited: true,
         code_sha256: hex(&Sha256::digest(code.as_bytes())),
         code_expires: expires,

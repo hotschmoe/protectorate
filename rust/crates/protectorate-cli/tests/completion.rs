@@ -13,7 +13,7 @@ fn closed_stdout_pipe_exits_cleanly() {
         let reader = unsafe { File::from_raw_fd(fds[0]) };
         let writer = unsafe { File::from_raw_fd(fds[1]) };
         drop(reader);
-        let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+        let output = Command::new(env!("CARGO_BIN_EXE_protectorate"))
             .args(args)
             .stdout(Stdio::from(writer))
             .output()
@@ -28,7 +28,7 @@ fn closed_stdout_pipe_exits_cleanly() {
 }
 
 fn cli(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+    Command::new(env!("CARGO_BIN_EXE_protectorate"))
         .args(args)
         .output()
         .expect("run CLI")
@@ -178,7 +178,7 @@ async fn resource_completion_uses_authenticated_live_names() {
     let complete = move |token: &str, words: &[&str]| {
         let mut args = vec!["--hub", url.as_str(), "__complete"];
         args.extend_from_slice(words);
-        let output = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+        let output = Command::new(env!("CARGO_BIN_EXE_protectorate"))
             .args(args)
             .env("PROTECTORATE_TOKEN", token)
             .env_remove("PROTECTORATE_TOKEN_FILE")

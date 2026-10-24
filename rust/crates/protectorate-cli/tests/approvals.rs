@@ -12,7 +12,7 @@ use std::{
 use tokio::net::TcpListener;
 
 fn spawn_cli(url: &str, token: &str, args: &[&str]) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_protectorate-cli"))
+    Command::new(env!("CARGO_BIN_EXE_protectorate"))
         .env("PROTECTORATE_HUB", url)
         .env("PROTECTORATE_TOKEN", token)
         .args(args)

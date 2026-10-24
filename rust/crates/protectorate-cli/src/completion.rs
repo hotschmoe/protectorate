@@ -362,7 +362,7 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--env", "Environment entry"),
             ("--cpu", "CPU limit"),
             ("--mem", "Memory limit"),
-            ("--admin", "Run with admin grant"),
+            ("--admin", "Run elevated (Linux nodes)"),
         ],
         "job test-cross" => &[
             ("--os", "Target OS"),
@@ -375,7 +375,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
         ],
         "node invite" => &[
             ("--tier", "Node tier"),
-            ("--pool", "Network pool"),
             ("--expires", "Code lifetime"),
             ("--url", "Install URL"),
         ],

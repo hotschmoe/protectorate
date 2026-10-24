@@ -327,7 +327,7 @@ pub struct JobLogs {
     pub follow: bool,
 }
 
-/// The default `msg wait` deadline, the Go CLI's 10 minutes.
+/// The default `msg wait` deadline.
 pub const DEFAULT_MSG_WAIT: Duration = Duration::from_secs(600);
 
 /// Which condition `chat wait` blocks on.
@@ -413,7 +413,7 @@ impl MessageKind {
     }
 }
 
-/// A harness name, in the Go CLI's spelling.
+/// A harness name as the CLI spells it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HarnessName {
     Claude,
@@ -711,7 +711,6 @@ pub enum Command {
     NodeInvite {
         name: String,
         tier: String,
-        pools: Vec<String>,
         ttl: Duration,
         install_url: String,
     },
@@ -898,7 +897,7 @@ pub enum Command {
 /// argv plus the global options, ready to run.
 fn usage() -> &'static str {
     "Usage:\n  \
-     protectorate-cli [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
+     protectorate [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
      Commands:\n  \
      status                      hub version, host and uptime\n  \
      hub serve                   run the local Rust hub (--home, --listen, --tls-listen, --tls-name, and serve flags)\n  \
@@ -946,7 +945,7 @@ fn usage() -> &'static str {
      node serve                run this machine's Rust node agent over mutual TLS (--home DIR, --listen IP:PORT, --file-root DIR, --file-unconfined, --job-concurrency N, --sandbox-helper FILE, --allow-plain-jobs, --watch-dir DIR, --docker-host URL)\n  \
      node doctor               inspect this machine's Rust node install (--home DIR, --json)\n  \
      node join                 join a hub with an invite code (--hub URL, --ca-cert FILE, --code CODE or PROTECTORATE_JOIN_CODE, --name, --listen IP:PORT, --home DIR)\n  \
-     node invite <name>         issue a single-use join code (--tier, --pool, --expires, --url)\n  \
+     node invite <name>         issue a single-use join code (--tier, --expires, --url)\n  \
      node put <node> <local> <remote>  copy file or directory to a node (-f, --no-compress)\n  \
      node get <node> <remote> <local>  copy file or directory from a node (-f, --no-compress)\n  \
      backlog ls | backlog list  notes, pinned first (--project, --query, --state open|done|all, --all)\n  \
@@ -967,7 +966,7 @@ fn usage() -> &'static str {
      job run --on <target> -- <cmd...>\n                             \
        run a command on a node, lease or selector and stream its output\n                             \
        (--git repo[@commit] | --artifact file|dir, --workdir, --artifact-glob,\n                             \
-       --env K=V, --timeout, --cpu, --mem, --admin)\n  \
+       --env K=V, --timeout, --cpu, --mem, --admin on Linux nodes)\n  \
      job test-cross              run cargo test on a matching node (--os, --arch, --on, --git, --artifact, --artifact-glob, --package, --timeout; cargo args after --)\n  \
      job logs <id>              print a job's output (--follow, -f)\n  \
      chat send <sleeve> <text>  send a message (- reads stdin; --request-id makes a retry safe; -- before leading-dash text)\n  \
@@ -1845,7 +1844,6 @@ fn execute_commands(
         Command::NodeInvite {
             name,
             tier,
-            pools,
             ttl,
             install_url,
         } => {
@@ -1854,7 +1852,6 @@ fn execute_commands(
                 &json!({
                     "name": name,
                     "tier": tier,
-                    "pools": pools,
                     "ttl": format_duration(*ttl),
                     "installUrl": install_url,
                 }),
@@ -2591,8 +2588,8 @@ fn sent_message_output(
     }
 }
 
-/// The tail of an exited sleeve's kept session, the way the Go CLI reads it
-/// through SessionService.CapturePane. A session that is gone, or a hub that
+/// The tail of an exited sleeve's kept session, read through
+/// SessionService.CapturePane. A session that is gone, or a hub that
 /// refuses the capture, just means there is no tail to show.
 fn exited_pane_tail(client: &Client, sleeve: &Value) -> Option<String> {
     if sleeve.get("state").and_then(Value::as_str) != Some("SLEEVE_STATE_EXITED") {
@@ -2922,12 +2919,12 @@ fn host_arch() -> &'static str {
     }
 }
 
-/// This machine's platform the way releases and the Go CLI name it.
+/// This machine's platform as releases name it (`linux/amd64`).
 fn client_platform() -> String {
     format!("{}/{}", std::env::consts::OS, host_arch())
 }
 
-/// What `version` prints: `protectorate-cli 0.1.0 linux/amd64`, or one JSON
+/// What `version` prints: `protectorate 0.1.0 linux/amd64`, or one JSON
 /// object holding the same three fields.
 fn version_text(json: bool) -> String {
     let version = client_version();
@@ -2937,7 +2934,7 @@ fn version_text(json: bool) -> String {
             json!({"version": version, "os": std::env::consts::OS, "arch": host_arch()})
         );
     }
-    format!("protectorate-cli {version} {}\n", client_platform())
+    format!("protectorate {version} {}\n", client_platform())
 }
 
 pub(crate) fn hub_url(invocation: &Invocation) -> String {
@@ -3150,7 +3147,7 @@ fn private_owner_token(path: &Path) -> Result<Option<String>> {
 }
 
 /// What `backlog add`, `done` and `reopen` print: the note the hub just
-/// created or changed, as one Go-style row or one proto-JSON line.
+/// created or changed, as one text row or one proto-JSON line.
 fn note_output(response: &Value, json: bool) -> Result<String> {
     let note = response
         .get("note")
@@ -3474,7 +3471,7 @@ pub(crate) fn absolute_disk_path(path: &str) -> Result<String> {
 }
 
 /// A local path becomes absolute and cleaned. A git URL, recognized by
-/// `://` or `@` the way the Go CLI recognizes one, is left unchanged.
+/// `://` or `@`, is left unchanged.
 fn absolute_workspace(workspace: &str) -> Result<String> {
     if workspace.contains("://") || workspace.contains('@') {
         return Ok(workspace.to_owned());

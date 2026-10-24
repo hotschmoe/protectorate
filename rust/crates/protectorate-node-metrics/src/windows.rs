@@ -1,6 +1,6 @@
 //! Windows CPU, memory, uptime, filesystem, configured Docker and NVIDIA readings.
 //!
-//! Published fields follow the Go collector: system CPU deltas, physical
+//! Published fields: system CPU deltas, physical
 //! memory plus page-file swap, a `windows major.minor.build` platform string,
 //! tick-count uptime, and logical-drive usage. Load averages stay unset.
 //! NVIDIA metrics use bounded `nvidia-smi` output; other Windows display and
@@ -18,8 +18,8 @@ impl Probe for WindowsProbe {
         host: Option<&str>,
         include_disk: bool,
     ) -> io::Result<Option<crate::ContainerEngine>> {
-        // Windows has no implicit Unix socket. Match the Go collector: a
-        // configured Docker host enables probing; an unset host is absent.
+        // Windows has no implicit Unix socket: a configured Docker host
+        // enables probing; an unset host is absent.
         let host = host
             .filter(|value| !value.is_empty())
             .map(str::to_owned)

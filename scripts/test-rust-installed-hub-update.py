@@ -29,7 +29,7 @@ COMPONENTS = (
     "protectorate-sleeve-runner",
     "protectorate-sleeve-sandbox-helper",
     "protectorate-node-sandbox-helper",
-    "protectorate-cli",
+    "protectorate",
     "protectorate-mcpbridge",
 )
 FIRST = "0.1.0"
@@ -213,8 +213,8 @@ def main():
     releases = root / "releases"
     port = free_port()
     unit = f"protectorate-rust-update-trial-{os.getpid()}.service"
-    cli = str(DEBUG / "protectorate-cli")
-    assert pathlib.Path(cli).is_file(), "build protectorate-cli first"
+    cli = str(DEBUG / "protectorate")
+    assert pathlib.Path(cli).is_file(), "build protectorate first"
     try:
         run("bash", str(ROOT / "install-hub.sh"), "--bundle-dir", str(bundles[FIRST]),
             "--home", str(state), "--release-dir", str(releases),

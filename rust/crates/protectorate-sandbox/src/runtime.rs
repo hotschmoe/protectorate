@@ -948,6 +948,7 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
         }
     }
     environment.entry("LANG".into()).or_insert("C.UTF-8".into());
+    crate::limit_build_jobs(&mut environment, plan.limits().cpu_percent);
     if let Some(proxy) = &proxy {
         let port = proxy.relays[0].0;
         let url = format!("http://127.0.0.1:{port}");

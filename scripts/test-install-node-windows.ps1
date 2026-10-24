@@ -5,7 +5,7 @@ $installer = Join-Path (Split-Path $PSScriptRoot -Parent) "install-node-windows.
 $bundle = Join-Path ([IO.Path]::GetTempPath()) ("protectorate-installer-test-" + [Guid]::NewGuid().ToString("N"))
 $version = "v9.8.7"
 $server = "protectorate-rs-windows-amd64.exe"
-$cli = "protectorate-cli-windows-amd64.exe"
+$cli = "protectorate-windows-amd64.exe"
 $bridge = "protectorate-mcpbridge-windows-amd64.exe"
 $state = Join-Path $env:LOCALAPPDATA "Protectorate-Node"
 $install = Join-Path $env:LOCALAPPDATA "Programs\Protectorate-Node"
@@ -67,7 +67,7 @@ try {
     & $installer -Version $version -ManifestSha256 (Pin-Manifest) -BundleDir $bundle -Architecture amd64 -VerifyOnly | Out-Null
 
     $armServer = "protectorate-rs-windows-arm64.exe"
-    $armCli = "protectorate-cli-windows-arm64.exe"
+    $armCli = "protectorate-windows-arm64.exe"
     $armBridge = "protectorate-mcpbridge-windows-arm64.exe"
     [IO.File]::WriteAllBytes((Join-Path $bundle $armServer), [byte[]](77, 90, 11, 12))
     [IO.File]::WriteAllBytes((Join-Path $bundle $armCli), [byte[]](77, 90, 13, 14))

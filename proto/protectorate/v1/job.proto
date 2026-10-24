@@ -60,15 +60,13 @@ enum JobMode {
 // JobIsolation is what a node can do for jobs, reported in its metrics.
 message JobIsolation {
   // sandbox is how JOB_MODE_SANDBOXED jobs are isolated: "rust-namespaces"
-  // (Linux: a direct namespace launcher in a systemd user scope),
-  // "runner" (Windows: the
-  // protectorate-runner account in a job object), "job-object" (Windows:
-  // the agent's own account in a job object, unisolated) or "none".
+  // (Linux: a direct namespace launcher in a systemd user scope), "runner"
+  // (Windows: the protectorate-runner account in a job object) or "none".
   string sandbox = 1;
   // note says why isolation is missing or partial.
   string note = 2;
-  // admin is how admin jobs elevate: "sudo", "root" or "elevated"; empty
-  // when this node cannot run them.
+  // admin is how admin jobs elevate on a Linux node: "sudo" or "root"; empty
+  // when this node cannot run them, always on Windows and Termux.
   string admin = 3;
 }
 
@@ -158,10 +156,10 @@ message SubmitJobRequest {
   // that lost the response can still find or cancel the job (CancelJob
   // request_id). Empty means no deduplication.
   string request_id = 7;
-  // admin runs the command elevated (sudo -n on Linux, the agent's own
-  // elevated token on Windows). It needs a named node or a lease (not a
-  // selector), a node that reports it can elevate, and the owner token or a
-  // node_admin grant for the node. Admin jobs are never sandboxed.
+  // admin runs the command elevated with sudo -n, or directly when the agent
+  // is root; only Linux nodes run admin jobs. It needs a named node or a
+  // lease (not a selector), a node that reports it can elevate, and the owner
+  // token or a node_admin grant for the node. Admin jobs are never sandboxed.
   bool admin = 8;
   // limits cap a sandboxed job (JOB_MODE_SANDBOXED on a node whose sandbox
   // is "bwrap" or a Windows job object); unset means no cap.

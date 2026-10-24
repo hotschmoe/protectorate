@@ -43,7 +43,7 @@ isolates nothing.
 | Binary | Crate | Role |
 |---|---|---|
 | `protectorate-rs` | protectorate-server | `serve` (the hub), `node join/install/serve/doctor/uninstall`, `hub backup/restore/publish-*`, `api call` |
-| `protectorate-cli` | protectorate-cli | every client command (`protectorate-cli --help`); forwards `hub ...` to the server and `mcp` to the bridge. Mounted as `protectorate` inside sleeves |
+| `protectorate` | protectorate-cli | every client command (`protectorate --help`); forwards `hub ...` to the server and `mcp` to the bridge. Mounted at `/opt/protectorate/bin/protectorate` inside sleeves |
 | `protectorate-mcpbridge` | protectorate-mcpbridge | MCP tools over stdio, loopback HTTP or HTTPS ([mcp](docs/mcp.md)) |
 | `protectorate-sleeve-runner` | protectorate-sleeve-runner | tmux pane process of a terminal sleeve; owns its sandbox for the session |
 | `protectorate-sleeve-sandbox-helper`, `protectorate-node-sandbox-helper` | protectorate-sleeve-runner, protectorate-node | the re-exec helper that builds namespaces and execs the workload |
@@ -51,8 +51,7 @@ isolates nothing.
 | `protectorate-rs-termux` | protectorate-node-termux | Android/Termux node, shipped as `protectorate-rs-android-arm64` |
 
 The Linux release bundle holds the first six for amd64 and arm64; the server
-refuses to serve without the runner and sleeve helper beside it. Examples in
-the docs write the CLI as `protectorate`.
+refuses to serve without the runner and sleeve helper beside it.
 
 ## Crates
 
@@ -89,7 +88,7 @@ the docs write the CLI as `protectorate`.
 | sandbox | validated Linux sandbox plans, launcher and egress proxy |
 | server | `protectorate-rs` entry points |
 | session | tmux sessions |
-| sleeve-layout | per-harness sleeve home plan; no crate depends on it yet |
+| sleeve-layout | unused (sleeve homes are prepared by hub and sleeve-runner); pending deletion |
 | sleeve-registry | durable sleeve lifecycle records |
 | sleeve-runner | terminal sleeve runner and sandbox helper |
 | svcgen | systemd, Windows task and Termux service definitions |
@@ -150,8 +149,9 @@ machine. Details: [sleeves](docs/sleeves.md), [sandbox](docs/rust-sandbox.md),
   CPU, memory and task limits. Writable: the workspace and a private home.
   Read-only: system and narrow tool directories, named references. The
   harness's credential directory is shared live, never copied (one canonical
-  login per provider on the hub; Claude `CLAUDE_SECURESTORAGE_CONFIG_DIR`,
-  Codex and Grok symlinked `auth.json`, Pi `PI_CODING_AGENT_DIR`). `--nested`
+  login per provider on the hub; Claude's symlinked `.credentials.json`,
+  Codex and Grok symlinked `auth.json`, Pi `PI_CODING_AGENT_DIR`). The home
+  is seeded once with the owner's global git name and email. `--nested`
   delegates a cgroup subtree for runtime tests. No bwrap.
 - **Egress:** the namespace has only loopback. A host-side CONNECT proxy per
   sandbox admits the hub, the provider's API hosts, `--egress-allow` entries
@@ -210,8 +210,8 @@ machine: never scheduled or leased; work only under an owner-minted
   matching node.
 - **Job isolation:** Linux nodes run sandboxed jobs in the same namespace
   sandbox; Windows nodes as a separate runner account in a Job Object; plain
-  jobs (care nodes) need `--allow-plain-jobs`; `--admin` runs elevated only
-  under a grant. Every job records how it ran.
+  jobs (care nodes) need `--allow-plain-jobs`; `--admin` runs elevated
+  (sudo or root, Linux nodes only) under a grant. Every job records how it ran.
 - **Files:** `node put/get`, sha256-verified, atomic, confined to the node's
   file root (P11). Windows desktop control is shelved (tag `shelf/windows-desk`).
 

@@ -60,9 +60,9 @@ NAME`, and pair the phone with `protectorate pair --app`. The
 router WireGuard, hub CA and mutual TLS), Windows and Termux nodes, and the
 recommended router firewall.
 
-The CLI is `protectorate-cli` in the release directory
-(`~/.local/share/protectorate/releases/current/`); the docs call it
-`protectorate`, which is also its name inside sleeves.
+The CLI is `protectorate` in the release directory
+(`~/.local/share/protectorate/releases/current/`), the same name it has
+inside sleeves.
 
 ## Build
 

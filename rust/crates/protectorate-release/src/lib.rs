@@ -1,7 +1,6 @@
 //! Release metadata for the builds published as GitHub releases.
 //!
-//! Ports internal/release/source.go: input validation, channel matching,
-//! ETag-checked release lookups, checksum verified asset downloads staged into
+//! Input validation, channel matching, ETag-checked release lookups, checksum verified asset downloads staged into
 //! a temporary directory and published by rename, bounded gzip/tar extraction
 //! of the web archive, and the local release store (release.json, atomic
 //! current and previous pointers, pruning). Pointers are symlinks on Unix and
@@ -27,7 +26,7 @@ pub use transport::{
     resolve_url, validate_url, Budget, Got, Transport, CHECK_TIMEOUT, FETCH_TIMEOUT,
 };
 
-/// Response body caps copied from the Go source.
+/// Response body caps.
 pub const MAX_RELEASE_JSON: u64 = 4 << 20;
 pub const MAX_SUMS: u64 = 1 << 20;
 pub const MAX_VERSION_ASSET: u64 = 1024;
@@ -58,7 +57,7 @@ pub const RUST_BUNDLE: [&str; 6] = [
     "protectorate-sleeve-runner",
     "protectorate-sleeve-sandbox-helper",
     "protectorate-node-sandbox-helper",
-    "protectorate-cli",
+    "protectorate",
     "protectorate-mcpbridge",
 ];
 
@@ -947,7 +946,7 @@ impl Source {
     }
 
     /// Publish a release directory only after every fleet platform and the web
-    /// archive have been downloaded and verified, exactly as the Go Fetch does.
+    /// archive have been downloaded and verified.
     /// `progress` sees each asset before and after its download and can cancel
     /// the whole fetch by returning an error. Re-fetching verifies cached
     /// assets and adds only verified files missing from a partial release.

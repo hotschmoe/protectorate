@@ -92,7 +92,7 @@ fn mute_echo(master: &OwnedFd) {
 }
 
 fn spawn_attach(url: &str, args: &[&str], slave: &OwnedFd, stderr: Stdio) -> Child {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
     command
         .arg("session")
         .arg("attach")

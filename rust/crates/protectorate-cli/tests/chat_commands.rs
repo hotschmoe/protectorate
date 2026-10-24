@@ -115,7 +115,7 @@ for line in sys.stdin:
 
     impl Cli {
         fn command(&self, args: &[&str]) -> Command {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-cli"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
             command.env("PROTECTORATE_HUB", &self.url).args(args);
             match &self.token_file {
                 Some(file) => command

@@ -18,7 +18,7 @@ const USAGE: &str = r#"usage: protectorate-mcpbridge [--allow GLOB] [--deny GLOB
                   [--http ADDR | --https ADDR --tls-cert FILE --tls-key FILE] [--help]
 
 Serves every unary hub RPC as an MCP tool over stdio, loopback streamable HTTP,
-or HTTPS on a requested address. Network requests require the bridge token as
+or HTTPS on an explicit private address. Network requests require the bridge token as
 a bearer. Without --allow only read-only tools are served; --allow replaces
 that default with globs over tool names and --deny always removes matches. The
 hub URL comes from --hub or PROTECTORATE_HUB. The bridge authenticates with the
@@ -273,8 +273,8 @@ fn parse(args: impl Iterator<Item = String>) -> std::result::Result<Options, Str
     Ok(options)
 }
 
-// Cobra's StringSlice flags accept comma-separated values, including quoted
-// values with literal commas. Keep repeated flags additive.
+// Comma-separated values, CSV-quoted to hold a literal comma ("a,b").
+// Repeated flags are additive.
 fn slice_value(value: &str) -> std::result::Result<Vec<String>, String> {
     let mut result = Vec::new();
     let mut field = String::new();

@@ -656,7 +656,7 @@ fn configured_sdk_bin_is_available_and_explicit_path_is_preserved() {
 #[test]
 fn a_single_readonly_cli_file_is_visible_without_its_parent_directory() {
     let f = Fixture::new();
-    let source = f.root.path().join("protectorate-cli");
+    let source = f.root.path().join("protectorate");
     fs::write(&source, b"narrow-cli-proof\n").unwrap();
     fs::write(f.root.path().join("other-tool-secret"), b"hidden\n").unwrap();
     let target = PathBuf::from("/opt/protectorate/bin/protectorate");
@@ -685,7 +685,7 @@ fn a_single_readonly_cli_file_is_visible_without_its_parent_directory() {
 #[test]
 fn a_cli_built_inside_the_writable_workspace_can_be_mounted_on_path() {
     let f = Fixture::new();
-    let source = f.workspace.join("protectorate-cli");
+    let source = f.workspace.join("protectorate");
     fs::write(&source, b"self-hosted-cli-proof\n").unwrap();
     let mut request = f.request("cat /opt/protectorate/bin/protectorate > result".into());
     request.grants.push(BindGrant {

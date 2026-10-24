@@ -51,7 +51,7 @@ jobs:
           version=$(git describe --tags --match 'v[0-9]*' --always)
           PROTECTORATE_BUILD_VERSION="$version" cargo build --locked --release -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
           mkdir -p dist
-          for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate-cli protectorate-mcpbridge; do
+          for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
             cp "target/release/$name" "dist/$name-linux-arm64"
           done
           test "$(dist/protectorate-rs-linux-arm64 version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$version"
@@ -88,7 +88,7 @@ jobs:
           name: rust-windows-amd64
           path: |
             dist/protectorate-rs-windows-amd64.exe
-            dist/protectorate-cli-windows-amd64.exe
+            dist/protectorate-windows-amd64.exe
             dist/protectorate-mcpbridge-windows-amd64.exe
           if-no-files-found: error
 
@@ -119,7 +119,7 @@ jobs:
           name: rust-windows-arm64
           path: |
             dist/protectorate-rs-windows-arm64.exe
-            dist/protectorate-cli-windows-arm64.exe
+            dist/protectorate-windows-arm64.exe
             dist/protectorate-mcpbridge-windows-arm64.exe
           if-no-files-found: error
 

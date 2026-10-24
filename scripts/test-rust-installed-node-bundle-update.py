@@ -74,7 +74,7 @@ expected_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
 node_unit = 'protectorate-installed-node-layout-%d.service' % os.getpid()
 native_unit = 'protectorate-native-node-layout-%d.service' % os.getpid()
 native_started = False
-cli = str(repo/'target/debug/protectorate-cli')
+cli = str(repo/'target/debug/protectorate')
 
 def cli_run(*args):
     return subprocess.run((cli, '--hub', hub_url, '--token-file', str(owner_path), *args), capture_output=True, text=True, timeout=180)
