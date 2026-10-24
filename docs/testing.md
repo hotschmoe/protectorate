@@ -44,8 +44,8 @@ costs about 2.4x the CPU to rebuild after a hub edit, and switching it
 between runs recompiles every workspace crate.
 
 The default `cc` linker on aarch64 Linux is GNU ld. Linking with lld cuts
-the CPU of a rebuild after a hub edit by about a third (26 s to 17 s for
-`cargo build --workspace --tests`). It is a per-user setting, so hosts
+link CPU after a hub edit from about 23 s to 7 s and the wall time of
+`cargo build --workspace --tests` from 8-10 s to 5-7 s. It is a per-user setting, so hosts
 without lld are unaffected; with lld installed, add to `~/.cargo/config.toml`
 (x86_64 Linux already links with rust-lld by default):
 
@@ -55,6 +55,11 @@ rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 ```
 
 Changing rustflags rebuilds everything once.
+
+Prefer `--workspace` builds and select tests by name. A `-p <crate>` build
+resolves features for that crate alone, so it recompiles tokio, serde, hyper
+and axum under new hashes and stores a second copy of them. Cargo never
+removes stale artifacts from `target/`; reclaim space with `cargo clean`.
 
 ## Host-only lanes
 

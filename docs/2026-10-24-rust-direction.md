@@ -430,9 +430,8 @@ Typed API (done this round):
   paths could panic workspace listings. AddNode now returns after the
   node's first metrics poll, so an immediate lease no longer races it.
   `chat status`, `sleeve show` and `chat watch` print readable states.
-- Open: `PruneSleevesRequest.ignored` is sent by the CLI but never read; a
-  safe implementation needs a design (an untracked `.gitignore` with `*`
-  can hide itself on a delete path). Implement or remove it.
+- `PruneSleevesRequest.ignored` was sent by the CLI but never read; it is
+  now implemented (round 3 below).
 
 Polish round results (merged on rust-yolo, quiet machine, 12-core aarch64):
 
@@ -469,11 +468,56 @@ Polish round results (merged on rust-yolo, quiet machine, 12-core aarch64):
   verified on officewin both ways).
 - `unsafe` 302 to 285 sites, each reviewed; one input-reachable `unwrap`
   (identity file) fixed, the rest are lock poisoning or invariants.
-- Open: the identity store holds its lock across fsync, so one slow disk
-  write stalls every authenticated request (seen as 28-71 s stalls under
-  load and the remaining server test flakes); node-windows lists
-  dependencies its source never uses (needs a Windows build to trim);
-  `PruneSleevesRequest.ignored` is unimplemented.
+- The identity-store stall, the node-windows dependencies and
+  `PruneSleevesRequest.ignored` were closed in round 3 below.
+
+Round 3 (merged on rust-yolo; `make check` 227 passed, 0 failed, 6 ignored):
+- Identity store: writers serialize on their own lock, write a snapshot
+  durably without the state lock, then swap it in; readers never wait on the
+  disk, and an Ok mutation is already on disk. The advisory `last_used`
+  stamp is flushed off the request path. The sleeve registry and lease table
+  got the same split. Still holding a lock across fsync: mailbox `commit`
+  (readers share it), inventory `commit`, directory `update`, and the audit
+  writer (serializes audited requests only).
+- `sleeve prune --ignored`: untracked files are excused only by .gitignore
+  blobs committed at HEAD, matched in a scratch tree with excludes forced
+  off; an untracked or modified .gitignore, `.git/info/exclude`, nested
+  repos and symlinks keep the clone.
+- Windows: one kill-on-close `protectorate_sandbox::job` (create suspended,
+  assign, `NtResumeProcess`) replaces five copies; node jobs no longer
+  re-open the child by PID. node-windows dropped base64. The dist script
+  built and tested on officewin (rs 9.3 MB, CLI 7.6 MB, bridge 6.3 MB).
+- Termux: `build-rust-termux.sh` check/build/release all pass on this
+  aarch64 host; release binary 5.3 MB, stripped, `/system/bin/linker64`,
+  API 24. Not run on a device yet.
+
+Build profile (round 3, 12-core CIX P1: 8 Cortex-A720 + 4 Cortex-A520):
+- Cold, fresh target dir: dev bins 40 s, + tests 16 s, clippy all-targets
+  26 s, release 91 s, dist 336 s (release and dist measured with other
+  builds running). A clean dev target with tests and clippy is 3.6 GB.
+- Third-party crates are 57% of cold CPU time (rustls, tokio, prost-reflect,
+  syn, axum, toml_edit). In the workspace, hub (11 s), the protectorate-rs
+  binary (7.5 s), sandbox, wire and identity lead.
+- A one-file hub edit is 8-10 s; GNU ld links take 22-24 s CPU of it, with
+  the slowest link 5.5 s. With lld the links drop to 7 s CPU and the edit
+  takes 5-7 s. With lld, the hub e2e crate itself takes 2.5 s, half of it
+  linking. No debuginfo saves 15% disk and little time; split debuginfo
+  changes nothing; pinning to the big cores at -j8 changes nothing.
+  Turning incremental off costs 22 s per edit and halves disk.
+- dist: the protectorate-rs fat-LTO link is 174 s of the 336 s. Thin LTO
+  with 16 codegen units builds in 124 s, but the binaries are about 35%
+  larger (18.7 vs 13.8 MB).
+- Disk: cargo never collects old artifacts. Every change to a crate's
+  dependencies, features or profile writes new hashed copies (about 60-100
+  MB per test binary). A single `cargo build -p <crate>` resolves features
+  for that crate alone and recompiles tokio, serde, hyper and axum under
+  new hashes. Workspace-wide feature unification is still unstable on 1.96.
+  One day of agent work left 82 GB in target/debug (721 executables, 32 GB
+  incremental), and each worktree carries its own target dir.
+- fsync on this root filesystem: ext4 is mounted `nodelalloc` (not from
+  fstab) in data=ordered mode, so any fsync forces out other files' dirty
+  data. A 1 KB write+fsync measured p50 50 ms, p90 1 s, max 6.7 s during
+  builds, against 4 ms p50 for an in-place fdatasync.
 
 Sleeve model (owner's direction, to build after polish):
 - A sleeve is a long-lived owner of one repository directory, not a
