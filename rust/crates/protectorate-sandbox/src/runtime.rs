@@ -387,8 +387,11 @@ impl ChildHandle {
         &self.unit
     }
     pub fn kill_handle(&self) -> KillHandle {
+        self.kill_handle_for(self.id())
+    }
+    fn kill_handle_for(&self, pid: u32) -> KillHandle {
         KillHandle {
-            pid: self.id(),
+            pid,
             unit: self.unit.clone(),
             direct_scope: self.direct_scope.clone(),
             host_direct: self.host_direct,
@@ -428,7 +431,7 @@ impl ChildHandle {
     fn reap(&self, child: &mut Child) -> Result<std::process::ExitStatus> {
         wait_unreaped(child.id())?;
         if self.host_direct {
-            self.kill_handle().kill();
+            self.kill_handle_for(child.id()).kill();
         }
         let _gate = self.kill_gate.lock().unwrap();
         self.alive.store(false, Ordering::Release);
