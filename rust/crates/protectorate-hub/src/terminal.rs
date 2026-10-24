@@ -10,7 +10,8 @@ use axum::{
 };
 use protectorate_fsutil::unix_seconds;
 use std::{
-    io,
+    fs::File,
+    io::{self, Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd, OwnedFd},
         unix::process::CommandExt,
@@ -157,33 +158,33 @@ fn query_value<'a>(query: &'a str, key: &str) -> Option<&'a str> {
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
+/// Opens both pty ends close-on-exec from the start (openpty does not), so a
+/// process spawned concurrently by another hub thread never inherits them;
+/// an inherited master would also keep the pty from hanging up on detach.
 fn open_pty(cols: u16, rows: u16) -> io::Result<(OwnedFd, OwnedFd)> {
-    let mut master = -1;
-    let mut slave = -1;
+    let flags = libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC;
+    let master = unsafe { libc::posix_openpt(flags | libc::O_NONBLOCK) };
+    if master < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let master = unsafe { OwnedFd::from_raw_fd(master) };
+    if unsafe { libc::grantpt(master.as_raw_fd()) } < 0
+        || unsafe { libc::unlockpt(master.as_raw_fd()) } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let slave = unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCGPTPEER, flags) };
+    if slave < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
     let size = libc::winsize {
         ws_row: rows,
         ws_col: cols,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    if unsafe {
-        libc::openpty(
-            &raw mut master,
-            &raw mut slave,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            &size,
-        )
-    } < 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    let master = unsafe { OwnedFd::from_raw_fd(master) };
-    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
-    let flags = unsafe { libc::fcntl(master.as_raw_fd(), libc::F_GETFL) };
-    if flags < 0
-        || unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
-    {
+    if unsafe { libc::ioctl(slave.as_raw_fd(), libc::TIOCSWINSZ, &size) } < 0 {
         return Err(io::Error::last_os_error());
     }
     Ok((master, slave))
@@ -193,7 +194,7 @@ fn spawn_client(
     mut command: Command,
     cols: u16,
     rows: u16,
-) -> io::Result<(AsyncFd<OwnedFd>, std::process::Child)> {
+) -> io::Result<(AsyncFd<File>, std::process::Child)> {
     let (master, slave) = open_pty(cols, rows)?;
     let stdin = slave.try_clone()?;
     let stdout = slave.try_clone()?;
@@ -211,7 +212,7 @@ fn spawn_client(
     }
     let child = command.spawn()?;
     Ok((
-        unsafe { AsyncFd::register(master) }.map_err(io::Error::from)?,
+        unsafe { AsyncFd::register(File::from(master)) }.map_err(io::Error::from)?,
         child,
     ))
 }
@@ -283,8 +284,7 @@ async fn bridge(
                         while written < bytes.len() {
                             let mut guard = master.writable().await?;
                             match guard.try_io(|fd| {
-                                let count = unsafe { libc::write(fd.as_raw_fd(), bytes[written..].as_ptr().cast(), bytes.len() - written) };
-                                if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count as usize) }
+                                fd.get_ref().write(&bytes[written..])
                             }) {
                                 Ok(Ok(0)) | Ok(Err(_)) => break,
                                 Ok(Ok(count)) => written += count,
@@ -309,8 +309,7 @@ async fn bridge(
                 let mut guard = ready?;
                 let mut data = [0u8; 32 << 10];
                 match guard.try_io(|fd| {
-                    let count = unsafe { libc::read(fd.as_raw_fd(), data.as_mut_ptr().cast(), data.len()) };
-                    if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count as usize) }
+                    fd.get_ref().read(&mut data)
                 }) {
                     Ok(Ok(0)) | Ok(Err(_)) => break,
                     Ok(Ok(count)) => if socket.send(Message::Binary(frame(b'0', &data[..count]))).await.is_err() { break; },

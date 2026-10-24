@@ -2489,15 +2489,9 @@ fn quarantine_error(path: &Path, error: io::Error) -> RpcError {
 }
 
 fn same_directory(left: &fs::File, right: &fs::File) -> io::Result<bool> {
-    let mut a: libc::stat = unsafe { std::mem::zeroed() };
-    let mut b: libc::stat = unsafe { std::mem::zeroed() };
-    if unsafe { libc::fstat(left.as_raw_fd(), &mut a) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if unsafe { libc::fstat(right.as_raw_fd(), &mut b) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(a.st_dev == b.st_dev && a.st_ino == b.st_ino)
+    use std::os::unix::fs::MetadataExt;
+    let (a, b) = (left.metadata()?, right.metadata()?);
+    Ok(a.dev() == b.dev() && a.ino() == b.ino())
 }
 
 fn rename_child(parent: &fs::File, from: &OsStr, to: &OsStr) -> io::Result<()> {
@@ -2857,29 +2851,39 @@ fn open_inaccessible_overlay_directory(parent: &fs::File, name: &OsStr) -> io::R
         return Err(io::Error::last_os_error());
     }
     let pinned = unsafe { fs::File::from_raw_fd(fd) };
-    let empty = c"";
-    // Linux fchmodat2 is syscall 452 on supported amd64 and arm64 hosts.
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let changed = unsafe {
-        libc::syscall(
-            452 as libc::c_long,
-            pinned.as_raw_fd(),
-            empty.as_ptr(),
-            0o700,
-            libc::AT_EMPTY_PATH,
-        )
-    };
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let changed = -1;
-    if changed != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    chmod_path_fd(&pinned, 0o700)?;
     open_child_directory(parent, OsStr::from_bytes(name.as_bytes()))?.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
             "overlay work directory disappeared",
         )
     })
+}
+
+/// fchmodat2(fd, "", mode, AT_EMPTY_PATH): chmod through an O_PATH descriptor.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn chmod_path_fd(file: &fs::File, mode: libc::mode_t) -> io::Result<()> {
+    // Syscall 452 on both amd64 and arm64; libc has no constant for arm64.
+    let changed = unsafe {
+        libc::syscall(
+            452 as libc::c_long,
+            file.as_raw_fd(),
+            c"".as_ptr(),
+            mode,
+            libc::AT_EMPTY_PATH,
+        )
+    };
+    if changed != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn chmod_path_fd(_file: &fs::File, _mode: libc::mode_t) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "fchmodat2 is only wired for amd64 and arm64",
+    ))
 }
 
 fn unlink_child(parent: &fs::File, name: &OsStr, flags: libc::c_int) -> io::Result<()> {
@@ -2893,9 +2897,7 @@ fn unlink_child(parent: &fs::File, name: &OsStr, flags: libc::c_int) -> io::Resu
 }
 
 fn remove_open_tree(parent: &fs::File, name: &OsStr, tree: fs::File) -> io::Result<()> {
-    if unsafe { libc::fchmod(tree.as_raw_fd(), 0o700) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    tree.set_permissions(fs::Permissions::from_mode(0o700))?;
     // /proc/self/fd points at the directory already opened with O_NOFOLLOW.
     // Every mutation below is anchored to that descriptor with openat/unlinkat.
     for entry in fs::read_dir(format!("/proc/self/fd/{}", tree.as_raw_fd()))? {
