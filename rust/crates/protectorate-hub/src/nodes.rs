@@ -262,7 +262,7 @@ async fn watch_node_setup(
             let bytes = serde_json::to_vec(&progress)
                 .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
             sender
-                .send(wire::decode_json(request.method.output(), &bytes)?)
+                .send(&wire::decode_json(request.method.output(), &bytes)?)
                 .await?;
             last = Some(progress);
         }
@@ -784,7 +784,7 @@ async fn progress(
     let bytes = serde_json::to_vec(&value)
         .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
     sender
-        .send(wire::decode_json(request.method.output(), &bytes)?)
+        .send(&wire::decode_json(request.method.output(), &bytes)?)
         .await
 }
 

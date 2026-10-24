@@ -1307,6 +1307,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "protectorate-protogen"
+version = "0.1.0"
+dependencies = [
+ "prost-reflect",
+]
+
+[[package]]
 name = "protectorate-quota"
 version = "0.1.0"
 dependencies = [
@@ -1433,7 +1440,9 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-core",
+ "prost",
  "prost-reflect",
+ "prost-types",
  "serde",
  "serde_json",
  "tokio",

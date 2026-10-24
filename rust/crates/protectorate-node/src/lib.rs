@@ -386,7 +386,7 @@ impl Agent {
                 let header = source.header();
                 let kind = if header.kind == Kind::File { "FILE_KIND_FILE" } else { "FILE_KIND_DIRECTORY" };
                 let header_value = json!({"header": {"kind": kind, "mode": header.mode, "size": header.size.to_string(), "path": resolved.to_string_lossy()}});
-                sender.send(decode(&request, header_value)?).await?;
+                sender.send(&decode(&request, header_value)?).await?;
                 loop {
                     if sender.is_cancelled() { return Err(RpcError::new(Code::Canceled, "stream cancelled")); }
                     let (next, chunk) = tokio::task::spawn_blocking(move || {
@@ -396,12 +396,12 @@ impl Agent {
                     let chunk = chunk.map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
                     let Some(chunk) = chunk else { break };
                     let value = json!({"chunk": {"data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &chunk.data), "compressed": chunk.compressed, "rawSize": chunk.raw_size}});
-                    sender.send(decode(&request, value)?).await?;
+                    sender.send(&decode(&request, value)?).await?;
                 }
                 let trailer = tokio::task::spawn_blocking(move || source.trailer()).await
                     .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
                     .map_err(|e| RpcError::new(Code::Aborted, e.to_string()))?;
-                sender.send(decode(&request, json!({"trailer": {"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped}}))?).await?;
+                sender.send(&decode(&request, json!({"trailer": {"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped}}))?).await?;
                 Ok(Default::default())
             }
         })?;
@@ -424,7 +424,7 @@ impl Agent {
                             let mut value = metrics_json(&metrics);
                             beat.stamp(&mut value);
                             let message = decode(&request, value)?;
-                            sender.send(message).await?;
+                            sender.send(&message).await?;
                         }
                     }
                 }

@@ -445,6 +445,6 @@ async fn send(request: &RpcRequest, sender: &StreamSender, value: Value) -> Resu
     let bytes =
         serde_json::to_vec(&value).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
     sender
-        .send(wire::decode_json(request.method.output(), &bytes)?)
+        .send(&wire::decode_json(request.method.output(), &bytes)?)
         .await
 }

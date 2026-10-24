@@ -1751,7 +1751,7 @@ async fn watch(jobs: &Jobs, request: &RpcRequest, sender: StreamSender) -> Resul
 async fn send(request: &RpcRequest, sender: &StreamSender, value: Value) -> Result<()> {
     let bytes = serde_json::to_vec(&value).map_err(internal)?;
     sender
-        .send(wire::decode_json(request.method.output(), &bytes)?)
+        .send(&wire::decode_json(request.method.output(), &bytes)?)
         .await
 }
 fn persist(root: &Path, id: &str, stored: &Stored) -> Result<()> {

@@ -132,7 +132,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         let bytes = serde_json::to_vec(&part)
                             .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
                         let message = wire::decode_json(output.clone(), &bytes)?;
-                        handle.block_on(sender.send(message))
+                        handle.block_on(sender.send(&message))
                     })
                 })
                 .await

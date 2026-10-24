@@ -38,7 +38,7 @@ app/                     Flutter client (app/lib/gen is generated Dart, committe
 ```
 
 ```
-make gen        # buf lint + Dart generation + the embedded descriptor set (needs buf; protoc-gen-dart and protoc-gen-connect-dart via dart pub global activate protoc_plugin / connectrpc, on PATH from ~/.pub-cache/bin)
+make gen        # buf lint + Dart generation + the embedded descriptor set + Rust types (needs buf; protoc-gen-dart and protoc-gen-connect-dart via dart pub global activate protoc_plugin / connectrpc, on PATH from ~/.pub-cache/bin)
 make build      # release binaries for the host into target/release
 make test       # real-binary e2e and fuzz seeds
 make check      # cargo fmt --check, clippy -D warnings, test, app-check, check-version
@@ -46,4 +46,4 @@ make check-gen  # fails if generated Dart or the descriptor set are stale or unc
 make app-check  # flutter analyze in app/
 ```
 
-Never hand-edit or reformat `app/lib/gen/` (no `dart format` there) or `rust/crates/protectorate-wire/assets/`; change the .proto and run `make gen`.
+Never hand-edit or reformat `app/lib/gen/` (no `dart format` there), `rust/crates/protectorate-wire/assets/` or `rust/crates/protectorate-wire/src/v1.rs`; change the .proto and run `make gen`. Handlers and clients use the generated types and `v1::<service>::<METHOD>` constants, never JSON literals.

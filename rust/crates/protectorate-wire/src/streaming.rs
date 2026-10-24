@@ -107,7 +107,8 @@ impl StreamSender {
     pub(crate) fn deadline_expired(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.deadline_expired)
     }
-    pub async fn send(&self, message: DynamicMessage) -> Result<()> {
+    pub async fn send<T: ReflectMessage>(&self, message: &T) -> Result<()> {
+        let message = message.transcode_to_dynamic();
         if message.descriptor() != self.output {
             return Err(RpcError::new(
                 Code::Internal,

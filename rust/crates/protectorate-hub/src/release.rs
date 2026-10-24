@@ -277,7 +277,7 @@ async fn send_progress(
     let bytes = serde_json::to_vec(&body)
         .map_err(|_| RpcError::new(Code::Internal, "encode release update progress"))?;
     sender
-        .send(wire::decode_json(request.method.output(), &bytes)?)
+        .send(&wire::decode_json(request.method.output(), &bytes)?)
         .await
 }
 

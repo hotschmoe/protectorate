@@ -717,7 +717,7 @@ impl Hub {
                     let bytes = serde_json::to_vec(&event)
                         .map_err(|_| RpcError::new(Code::Internal, "failed to encode event"))?;
                     let message = wire::decode_json(request.method.output(), &bytes)?;
-                    let send = sender.send(message);
+                    let send = sender.send(&message);
                     tokio::pin!(send);
                     loop {
                         tokio::select! {

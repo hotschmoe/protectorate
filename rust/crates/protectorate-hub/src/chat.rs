@@ -893,7 +893,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         let bytes = serde_json::to_vec(&event_json(&event))
                             .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
                         sender
-                            .send(wire::decode_json(descriptor.clone(), &bytes)?)
+                            .send(&wire::decode_json(descriptor.clone(), &bytes)?)
                             .await?;
                     }
                     return Ok(Default::default());
@@ -914,7 +914,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         let message = wire::decode_json(descriptor.clone(), &bytes)
                             .map_err(|e| e.to_string())?;
                         handle
-                            .block_on(sender.send(message))
+                            .block_on(sender.send(&message))
                             .map_err(|e| e.to_string())
                     })
                 })

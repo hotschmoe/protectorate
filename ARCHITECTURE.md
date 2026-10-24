@@ -99,8 +99,9 @@ refuses to serve without the runner and sleeve helper beside it.
 
 `proto/protectorate/v1/*.proto` is the only API definition (19 services, 100
 RPCs). `make gen` runs buf, writes the Dart client to `app/lib/gen` and the
-descriptor sets to `rust/crates/protectorate-wire/assets/`; the Rust side has
-no generated code. The hub serves Connect's JSON protocol over HTTP/1.1
+descriptor sets to `rust/crates/protectorate-wire/assets/`, and
+`protectorate-protogen` writes prost message types and typed procedure
+constants to `protectorate-wire/src/v1.rs` from that descriptor. The hub serves Connect's JSON protocol over HTTP/1.1
 straight from the embedded descriptor, so `curl -d '{}'` against
 `/protectorate.v1.HubService/GetStatus` works.
 

@@ -440,14 +440,14 @@ impl Jobs {
             drop(state);
             if let Some(started) = started {
                 sender
-                    .send(decode(request, json!({"started":started}))?)
+                    .send(&decode(request, json!({"started":started}))?)
                     .await?;
                 sent_started = true;
             }
             if !data.is_empty() {
                 offset += data.len();
                 sender
-                    .send(decode(
+                    .send(&decode(
                         request,
                         json!({"output":{"data":STANDARD.encode(data)}}),
                     )?)
@@ -473,7 +473,7 @@ impl Jobs {
                             first = false;
                         }
                         sender
-                            .send(decode(request, json!({"artifact":frame}))?)
+                            .send(&decode(request, json!({"artifact":frame}))?)
                             .await?;
                         if last {
                             break;
@@ -481,7 +481,7 @@ impl Jobs {
                     }
                 }
                 sender
-                    .send(decode(request, json!({"finished":finished}))?)
+                    .send(&decode(request, json!({"finished":finished}))?)
                     .await?;
                 return Ok(());
             }

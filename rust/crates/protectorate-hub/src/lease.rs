@@ -1,13 +1,16 @@
 //! Lease RPCs backed by the persistent lease table. Node admission is supplied
 //! by a chooser once the node monitor is connected to this hub.
-use super::{input, parse_duration, respond, string, EventBus, Hub};
+use super::{EventBus, Hub};
 use chrono::{DateTime, SecondsFormat, Utc};
 use protectorate_inventory::{Inventory, SHARED};
 use protectorate_lease::{self as leases, Chooser, Entry, Event, EventKind, LeaseTable, Wait};
 use protectorate_mailbox::{Kind, NewMessage, Store as MailStore};
 use protectorate_node_monitor::Monitor as NodeMonitor;
-use protectorate_wire::{Code, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    self as wire, v1, v1::acquire_lease_request::Target, v1::lease_service, Call, Code, Result,
+    RpcError, UnaryServer,
+};
+use serde_json::json;
 use std::{
     collections::BTreeSet,
     path::Path,
@@ -195,26 +198,36 @@ fn duration(ttl: Duration) -> String {
     }
 }
 
-fn entry_json(entry: &Entry) -> Value {
+fn entry(entry: &Entry) -> v1::Lease {
     match entry {
-        Entry::Active(lease) => {
-            let mut value = json!({
-                "id": lease.id, "resource": lease.resource.to_string(),
-                "node": lease.resource.node, "holder": lease.holder, "runId": lease.run_id,
-                "ttl": duration(lease.ttl), "acquiredAt": at(lease.acquired_at),
-                "expiresAt": at(lease.expires_at),
-            });
-            if let Some(gpu) = lease.resource.gpu {
-                value["gpuIndex"] = json!(gpu);
-            }
-            value
-        }
-        Entry::Queued { ticket, position } => json!({
-            "id": ticket.id, "resource": ticket.resource, "holder": ticket.holder, "runId": ticket.run_id,
-            "ttl": duration(ticket.ttl), "acquiredAt": at(ticket.enqueued_at),
-            "expiresAt": at(ticket.enqueued_at.saturating_add(leases::MAX_QUEUE_WAIT.as_millis() as i64)),
-            "state": "LEASE_STATE_QUEUED", "queuePosition": position,
-        }),
+        Entry::Active(lease) => v1::Lease {
+            id: lease.id.clone(),
+            resource: lease.resource.to_string(),
+            node: lease.resource.node.clone(),
+            gpu_index: lease.resource.gpu.map(|gpu| gpu as i32),
+            holder: lease.holder.clone(),
+            run_id: lease.run_id.clone(),
+            ttl: Some(wire::proto_duration(lease.ttl)),
+            acquired_at: Some(wire::timestamp_millis(lease.acquired_at)),
+            expires_at: Some(wire::timestamp_millis(lease.expires_at)),
+            ..Default::default()
+        },
+        Entry::Queued { ticket, position } => v1::Lease {
+            id: ticket.id.clone(),
+            resource: ticket.resource.clone(),
+            holder: ticket.holder.clone(),
+            run_id: ticket.run_id.clone(),
+            ttl: Some(wire::proto_duration(ticket.ttl)),
+            acquired_at: Some(wire::timestamp_millis(ticket.enqueued_at)),
+            expires_at: Some(wire::timestamp_millis(
+                ticket
+                    .enqueued_at
+                    .saturating_add(leases::MAX_QUEUE_WAIT.as_millis() as i64),
+            )),
+            state: v1::LeaseState::Queued as i32,
+            queue_position: *position as i32,
+            ..Default::default()
+        },
     }
 }
 
@@ -235,120 +248,107 @@ fn holder(actor: &str, requested: String) -> String {
         .unwrap_or(requested)
 }
 
-fn request_key(input: &Value) -> Result<(String, String)> {
-    if let Some(resource) = input.get("resource").and_then(Value::as_str) {
-        if resource.trim().is_empty() {
-            return Err(RpcError::new(
-                Code::InvalidArgument,
-                "set resource or selector",
-            ));
+fn request_key(target: Option<&Target>) -> Result<(String, String)> {
+    match target {
+        Some(Target::Resource(resource)) if !resource.trim().is_empty() => {
+            Ok((resource.clone(), resource.clone()))
         }
-        return Ok((resource.to_owned(), resource.to_owned()));
+        Some(Target::Selector(selector)) => {
+            let selector = String::from_utf8(wire::encode(selector)?)
+                .map_err(|_| RpcError::new(Code::Internal, "encode selector"))?;
+            Ok(("(selector)".into(), format!("{{\"selector\":{selector}}}")))
+        }
+        _ => Err(RpcError::new(
+            Code::InvalidArgument,
+            "set resource or selector",
+        )),
     }
-    if let Some(selector) = input.get("selector") {
-        return Ok((
-            "(selector)".into(),
-            json!({"selector": selector}).to_string(),
-        ));
-    }
-    Err(RpcError::new(
-        Code::InvalidArgument,
-        "set resource or selector",
-    ))
 }
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let acquire = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.LeaseService/AcquireLease",
-        move |request| {
-            let hub = Arc::clone(&acquire);
-            async move {
-                let body = input(&request)?;
-                let (resource, key) = request_key(&body)?;
-                let holder = holder(&request.auth.actor, string(&body, "holder"));
-                let ttl = parse_duration(body.get("ttl"))?;
-                let wait = body.get("wait").and_then(Value::as_bool).unwrap_or(false);
-                let priority = body.get("priority").and_then(Value::as_i64).unwrap_or(0) as i32;
-                let notify = request
-                    .auth
-                    .actor
-                    .strip_prefix("token:sleeve:")
-                    .map(str::to_owned)
-                    .unwrap_or_default();
-                let table = Arc::clone(&hub.leases);
-                let run_id = super::actor_run(&hub, &request.auth.actor);
-                let entry = tokio::task::spawn_blocking(move || {
-                    let now = now_millis();
-                    if wait {
-                        table.acquire_wait(
-                            Wait {
-                                holder,
-                                run_id,
-                                notify,
-                                resource,
-                                request: key,
-                                ttl,
-                                priority,
-                            },
-                            now,
-                        )
-                    } else {
-                        table
-                            .acquire(&holder, &run_id, ttl, &key, now)
-                            .map(Entry::Active)
-                    }
-                })
-                .await
-                .map_err(super::join_error)?
-                .map_err(error)?;
-                respond(&request, entry_json(&entry))
-            }
-        },
-    )?;
+    server.unary(lease_service::ACQUIRE_LEASE, move |call: Call<_>| {
+        let hub = Arc::clone(&acquire);
+        async move {
+            let body = call.request;
+            let (resource, key) = request_key(body.target.as_ref())?;
+            let holder = holder(&call.auth.actor, body.holder);
+            let ttl = wire::duration(body.ttl.as_ref(), "ttl")?;
+            let (wait, priority) = (body.wait, body.priority);
+            let notify = call
+                .auth
+                .actor
+                .strip_prefix("token:sleeve:")
+                .map(str::to_owned)
+                .unwrap_or_default();
+            let table = Arc::clone(&hub.leases);
+            let run_id = super::actor_run(&hub, &call.auth.actor);
+            let granted = tokio::task::spawn_blocking(move || {
+                let now = now_millis();
+                if wait {
+                    table.acquire_wait(
+                        Wait {
+                            holder,
+                            run_id,
+                            notify,
+                            resource,
+                            request: key,
+                            ttl,
+                            priority,
+                        },
+                        now,
+                    )
+                } else {
+                    table
+                        .acquire(&holder, &run_id, ttl, &key, now)
+                        .map(Entry::Active)
+                }
+            })
+            .await
+            .map_err(super::join_error)?
+            .map_err(error)?;
+            Ok(entry(&granted))
+        }
+    })?;
     let renew = Arc::clone(&hub);
-    server.register("/protectorate.v1.LeaseService/RenewLease", move |request| {
+    server.unary(lease_service::RENEW_LEASE, move |call: Call<_>| {
         let table = Arc::clone(&renew.leases);
         async move {
-            let body = input(&request)?;
-            let id = string(&body, "id");
-            let ttl = body
-                .get("ttl")
-                .map(|value| parse_duration(Some(value)))
+            let id = call.request.id;
+            let ttl = call
+                .request
+                .ttl
+                .map(|ttl| wire::duration(Some(&ttl), "ttl"))
                 .transpose()?;
             let lease = tokio::task::spawn_blocking(move || table.renew(&id, ttl, now_millis()))
                 .await
                 .map_err(super::join_error)?
                 .map_err(error)?;
-            respond(&request, entry_json(&Entry::Active(lease)))
+            Ok(entry(&Entry::Active(lease)))
         }
     })?;
     let release = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.LeaseService/ReleaseLease",
-        move |request| {
-            let table = Arc::clone(&release.leases);
-            async move {
-                let id = string(&input(&request)?, "id");
-                tokio::task::spawn_blocking(move || table.release(&id, now_millis()))
-                    .await
-                    .map_err(super::join_error)?
-                    .map_err(error)?;
-                respond(&request, json!({}))
-            }
-        },
-    )?;
-    server.register("/protectorate.v1.LeaseService/ListLeases", move |request| {
+    server.unary(lease_service::RELEASE_LEASE, move |call: Call<_>| {
+        let table = Arc::clone(&release.leases);
+        async move {
+            let id = call.request.id;
+            tokio::task::spawn_blocking(move || table.release(&id, now_millis()))
+                .await
+                .map_err(super::join_error)?
+                .map_err(error)?;
+            Ok(v1::ReleaseLeaseResponse {})
+        }
+    })?;
+    server.unary(lease_service::LIST_LEASES, move |_: Call<_>| {
         let table = Arc::clone(&hub.leases);
         async move {
             let entries = tokio::task::spawn_blocking(move || table.list(now_millis()))
                 .await
                 .map_err(super::join_error)?
                 .map_err(error)?;
-            respond(
-                &request,
-                json!({"leases": entries.iter().map(entry_json).collect::<Vec<_>>() }),
-            )
+            Ok(v1::ListLeasesResponse {
+                leases: entries.iter().map(entry).collect(),
+            })
         }
     })?;
     Ok(())

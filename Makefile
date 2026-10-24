@@ -25,19 +25,23 @@ APP_FLAGS ?=
 build test check: export CARGO_INCREMENTAL ?= 0
 
 MCP_CATALOG := rust/crates/protectorate-mcpbridge/tests/testdata/mcp_tools.json
+DESCRIPTOR := rust/crates/protectorate-wire/assets/protectorate.binpb
+RUST_API := rust/crates/protectorate-wire/src/v1.rs
 
 gen:
 	buf lint
 	buf generate
 	sh rust/crates/protectorate-wire/scripts/update-descriptor.sh
+	cargo run --quiet --locked -p protectorate-protogen -- $(DESCRIPTOR) protectorate.v1 $(RUST_API)
 	cargo run --quiet --locked -p protectorate-mcpbridge -- --allow '*' --list > $(MCP_CATALOG)
 
 check-gen:
 	buf lint
 	buf generate
 	sh rust/crates/protectorate-wire/scripts/update-descriptor.sh --check
+	cargo run --quiet --locked -p protectorate-protogen -- $(DESCRIPTOR) protectorate.v1 $(RUST_API)
 	cargo run --quiet --locked -p protectorate-mcpbridge -- --allow '*' --list > $(MCP_CATALOG)
-	@git diff --exit-code --stat -- app/lib/gen $(MCP_CATALOG) || (echo "generated code is stale: commit the output of make gen"; exit 1)
+	@git diff --exit-code --stat -- app/lib/gen $(MCP_CATALOG) $(RUST_API) || (echo "generated code is stale: commit the output of make gen"; exit 1)
 	@test -z "$$(git status --porcelain -- app/lib/gen)" || (echo "untracked generated files: commit the output of make gen"; exit 1)
 
 build:

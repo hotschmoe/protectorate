@@ -30,6 +30,21 @@ pub const DESCRIPTOR_SET: &[u8] = include_bytes!("../assets/protectorate.binpb")
 /// The same API image with proto comments, for tool descriptions and schemas.
 pub const SOURCE_DESCRIPTOR_SET: &[u8] = include_bytes!("../assets/protectorate-source.binpb");
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 4 << 20;
+/// Generated message types for protectorate.v1 (`make gen`).
+#[allow(clippy::all)]
+#[rustfmt::skip]
+pub mod v1;
+/// The embedded API pool; generated types and the catalog share it, so their
+/// descriptors compare equal.
+pub fn pool() -> &'static DescriptorPool {
+    static POOL: std::sync::OnceLock<DescriptorPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| DescriptorPool::decode(DESCRIPTOR_SET).expect("embedded API descriptor"))
+}
+fn message(name: &str) -> MessageDescriptor {
+    pool()
+        .get_message_by_name(name)
+        .unwrap_or_else(|| panic!("{name} is missing from the embedded descriptor"))
+}
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Code {
@@ -229,6 +244,34 @@ fn validate_duplicates(
     }
     Ok(())
 }
+/// A request duration; absent is zero and negative is invalid.
+pub fn duration(value: Option<&prost_types::Duration>, field: &str) -> Result<Duration> {
+    value.map_or(Ok(Duration::ZERO), |value| {
+        Duration::try_from(*value).map_err(|_| RpcError::invalid(format!("invalid {field}")))
+    })
+}
+pub fn proto_duration(value: Duration) -> prost_types::Duration {
+    prost_types::Duration {
+        seconds: i64::try_from(value.as_secs()).unwrap_or(i64::MAX),
+        nanos: value.subsec_nanos() as i32,
+    }
+}
+pub fn timestamp_millis(millis: i64) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: millis.div_euclid(1000),
+        nanos: (millis.rem_euclid(1000) * 1_000_000) as i32,
+    }
+}
+/// Decodes protobuf JSON into a generated message with `decode_json`'s rules.
+pub fn decode<T: ReflectMessage + Default>(data: &[u8]) -> Result<T> {
+    decode_json(T::default().descriptor(), data)?
+        .transcode_to::<T>()
+        .map_err(|e| RpcError::new(Code::Internal, format!("transcode protobuf message: {e}")))
+}
+/// Encodes a generated message as protobuf JSON.
+pub fn encode<T: ReflectMessage>(message: &T) -> Result<Vec<u8>> {
+    encode_json(&message.transcode_to_dynamic())
+}
 /// Emits protobuf JSON: int64/uint64 as strings, symbolic enums, RFC3339
 /// timestamps, duration strings, bytes as base64, and absent defaults omitted.
 pub fn encode_json(message: &DynamicMessage) -> Result<Vec<u8>> {
@@ -302,14 +345,14 @@ fn snake(s: &str) -> String {
 }
 impl Catalog {
     pub fn embedded() -> Result<Self> {
-        Self::from_descriptor_set(DESCRIPTOR_SET)
+        Self::from_pool(pool().clone())
     }
     pub fn with_source_info() -> Result<Self> {
-        Self::from_descriptor_set(SOURCE_DESCRIPTOR_SET)
-    }
-    pub fn from_descriptor_set(bytes: &[u8]) -> Result<Self> {
-        let pool = DescriptorPool::decode(bytes)
+        let pool = DescriptorPool::decode(SOURCE_DESCRIPTOR_SET)
             .map_err(|e| RpcError::new(Code::Internal, format!("invalid API descriptor: {e}")))?;
+        Self::from_pool(pool)
+    }
+    fn from_pool(pool: DescriptorPool) -> Result<Self> {
         let extension = |options: &DynamicMessage, name: &str| {
             pool.get_extension_by_name(&format!("protectorate.v1.{name}"))
                 .is_some_and(|e| options.get_extension(&e).as_bool() == Some(true))
@@ -411,6 +454,50 @@ pub struct RpcRequest {
     pub message: DynamicMessage,
     pub auth: AuthContext,
     pub peer: Option<Peer>,
+}
+/// A procedure with its schema's request and response types (generated in `v1`).
+pub struct Rpc<Req, Resp> {
+    pub procedure: &'static str,
+    types: std::marker::PhantomData<fn(Req) -> Resp>,
+}
+impl<Req, Resp> Rpc<Req, Resp> {
+    pub const fn new(procedure: &'static str) -> Self {
+        Self {
+            procedure,
+            types: std::marker::PhantomData,
+        }
+    }
+}
+impl<Req, Resp> Clone for Rpc<Req, Resp> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<Req, Resp> Copy for Rpc<Req, Resp> {}
+/// A decoded request for a typed handler.
+pub struct Call<T> {
+    pub request: T,
+    pub method: Method,
+    pub headers: HeaderMap,
+    pub auth: AuthContext,
+    pub peer: Option<Peer>,
+}
+impl<T: ReflectMessage + Default> Call<T> {
+    fn decode(request: RpcRequest) -> Result<Self> {
+        let message = request.message.transcode_to::<T>().map_err(|e| {
+            RpcError::new(
+                Code::Internal,
+                format!("transcode {}: {e}", request.method.procedure),
+            )
+        })?;
+        Ok(Self {
+            request: message,
+            method: request.method,
+            headers: request.headers,
+            auth: request.auth,
+            peer: request.peer,
+        })
+    }
 }
 #[derive(Clone, Debug)]
 pub struct RpcResponse {
@@ -657,6 +744,57 @@ impl UnaryServer {
                 }
             }),
         );
+        Ok(())
+    }
+    /// Registers a typed unary handler. The request and response types must be
+    /// the method's declared messages.
+    pub fn unary<Req, Resp, F, Fut>(&mut self, rpc: Rpc<Req, Resp>, handler: F) -> Result<()>
+    where
+        Req: ReflectMessage + Default + Send + 'static,
+        Resp: ReflectMessage + Default + Send + 'static,
+        F: Fn(Call<Req>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Resp>> + Send + 'static,
+    {
+        self.check_types::<Req, Resp>(rpc.procedure)?;
+        let handler = Arc::new(handler);
+        self.register(rpc.procedure, move |request| {
+            let handler = Arc::clone(&handler);
+            async move {
+                let response = handler(Call::decode(request)?).await?;
+                Ok(RpcResponse::from(response.transcode_to_dynamic()))
+            }
+        })
+    }
+    /// Registers a typed server-stream producer; see `register_streaming`.
+    pub fn stream<Req, Resp, F, Fut>(&mut self, rpc: Rpc<Req, Resp>, handler: F) -> Result<()>
+    where
+        Req: ReflectMessage + Default + Send + 'static,
+        Resp: ReflectMessage + Default + Send + 'static,
+        F: Fn(Call<Req>, StreamSender) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<StreamTrailers>> + Send + 'static,
+    {
+        self.check_types::<Req, Resp>(rpc.procedure)?;
+        let handler = Arc::new(handler);
+        self.register_streaming(rpc.procedure, move |request, sender| {
+            let handler = Arc::clone(&handler);
+            async move { handler(Call::decode(request)?, sender).await }
+        })
+    }
+    fn check_types<Req: ReflectMessage + Default, Resp: ReflectMessage + Default>(
+        &self,
+        procedure: &str,
+    ) -> Result<()> {
+        let method = self.catalog.method(procedure).ok_or_else(|| {
+            RpcError::new(Code::NotFound, format!("unknown procedure {procedure}"))
+        })?;
+        if Req::default().descriptor() != method.input()
+            || Resp::default().descriptor() != method.output()
+        {
+            return Err(RpcError::new(
+                Code::Internal,
+                format!("{procedure}: handler types differ from the schema"),
+            ));
+        }
         Ok(())
     }
     /// Registers a producer for a schema-declared server stream. Return trailer
