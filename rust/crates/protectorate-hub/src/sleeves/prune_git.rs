@@ -197,12 +197,21 @@ fn command(repo: &Path) -> Command {
 }
 
 fn run(repo: &Path, args: &[&OsStr]) -> std::result::Result<Output, String> {
+    run_with_input(repo, args, Vec::new())
+}
+
+fn execute(repo: &Path, args: &[&OsStr], input: Vec<u8>) -> std::result::Result<Output, String> {
     let mut child = command(repo)
         .args(args)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("start Git: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("missing Git stdin")?;
+    let feed = thread::spawn(move || {
+        let _ = stdin.write_all(&input);
+    });
     let stdout = child.stdout.take().ok_or("missing Git stdout")?;
     let stderr = child.stderr.take().ok_or("missing Git stderr")?;
     let out = thread::spawn(move || read_limited(stdout));
@@ -221,18 +230,12 @@ fn run(repo: &Path, args: &[&OsStr]) -> std::result::Result<Output, String> {
     };
     let stdout = out.join().map_err(|_| "Git stdout reader failed")??;
     let stderr = err.join().map_err(|_| "Git stderr reader failed")??;
-    let output = Output {
+    let _ = feed.join();
+    Ok(Output {
         status,
         stdout,
         stderr,
-    };
-    if !output.status.success() {
-        return Err(format!(
-            "Git verification failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(output)
+    })
 }
 
 fn read_limited(mut input: impl Read) -> std::result::Result<Vec<u8>, String> {
@@ -423,10 +426,109 @@ fn remote_url(git_dir: &Path, scratch: &Path) -> std::result::Result<String, Str
     Ok(url)
 }
 
+/// Untracked paths that no committed .gitignore ignores. The rules are the
+/// HEAD blobs checked out into a scratch tree, so .git/info/exclude, global
+/// excludes and the working copy's own .gitignore files never apply. Nested
+/// repositories and any file named .gitignore are never excused.
+fn unexcused(
+    clone: &Path,
+    repo_arg: &str,
+    tree: &[u8],
+    others: &[u8],
+    scratch: &Path,
+) -> std::result::Result<bool, String> {
+    let mut rules = Vec::new();
+    for line in tree.split(|&b| b == 0).filter(|l| !l.is_empty()) {
+        let tab = line
+            .iter()
+            .position(|&b| b == b'\t')
+            .ok_or("invalid Git tree listing")?;
+        let (meta, path) = (&line[..tab], &line[tab + 1..]);
+        let name = path.rsplit(|&b| b == b'/').next().unwrap_or(path);
+        if name == b".gitignore" && meta.starts_with(b"100") {
+            rules.extend_from_slice(path);
+            rules.push(0);
+        }
+    }
+    let mut candidates = Vec::new();
+    for path in others.split(|&b| b == 0).filter(|p| !p.is_empty()) {
+        let name = path.rsplit(|&b| b == b'/').next().unwrap_or(path);
+        if path.ends_with(b"/") || name == b".gitignore" || name.is_empty() {
+            return Ok(true);
+        }
+        candidates.push(path);
+    }
+    if rules.is_empty() {
+        return Ok(!candidates.is_empty());
+    }
+    let rules_dir = scratch.join("rules");
+    fs::create_dir(&rules_dir).map_err(|e| e.to_string())?;
+    let rules_arg = format!("--work-tree={}", rules_dir.display());
+    let prefix = format!("--prefix={}/", rules_dir.display());
+    run_with_input(
+        clone,
+        &[
+            OsStr::new(repo_arg),
+            OsStr::new(&rules_arg),
+            OsStr::new("checkout-index"),
+            OsStr::new(&prefix),
+            OsStr::new("-z"),
+            OsStr::new("--stdin"),
+        ],
+        rules,
+    )?;
+    let mut stdin = Vec::new();
+    for path in &candidates {
+        stdin.extend_from_slice(path);
+        stdin.push(0);
+    }
+    let output = execute(
+        clone,
+        &[
+            OsStr::new("-c"),
+            OsStr::new("core.excludesFile=/dev/null"),
+            OsStr::new(repo_arg),
+            OsStr::new(&rules_arg),
+            OsStr::new("check-ignore"),
+            OsStr::new("--no-index"),
+            OsStr::new("-z"),
+            OsStr::new("--stdin"),
+        ],
+        stdin,
+    )?;
+    match output.status.code() {
+        Some(0) => {
+            let ignored = output.stdout.split(|&b| b == 0).filter(|p| !p.is_empty());
+            Ok(ignored.count() != candidates.len())
+        }
+        Some(1) => Ok(true),
+        _ => Err(format!(
+            "Git ignore check failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
+}
+
+fn run_with_input(
+    repo: &Path,
+    args: &[&OsStr],
+    input: Vec<u8>,
+) -> std::result::Result<Output, String> {
+    let output = execute(repo, args, input)?;
+    if !output.status.success() {
+        return Err(format!(
+            "Git verification failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(output)
+}
+
 pub(super) fn verify(
     workspace: &Path,
     origin_hint: &str,
     workspaces: &Path,
+    excuse_ignored: bool,
 ) -> std::result::Result<(), String> {
     let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
     let clone_git = workspace.join(".git");
@@ -477,12 +579,13 @@ pub(super) fn verify(
             OsStr::new(&repo_arg),
             OsStr::new("ls-tree"),
             OsStr::new("-r"),
+            OsStr::new("-z"),
             OsStr::new("HEAD"),
         ],
     )?;
     if tree
         .stdout
-        .split(|&b| b == b'\n')
+        .split(|&b| b == 0)
         .any(|line| line.starts_with(b"160000 "))
     {
         return Err("submodule checkout cannot be verified".into());
@@ -545,7 +648,18 @@ pub(super) fn verify(
             OsStr::new("--"),
         ],
     )?;
-    if !others.stdout.is_empty() {
+    let kept = if excuse_ignored {
+        unexcused(
+            &clone,
+            &repo_arg,
+            &tree.stdout,
+            &others.stdout,
+            scratch.path(),
+        )?
+    } else {
+        !others.stdout.is_empty()
+    };
+    if kept {
         return Err("untracked or ignored files".into());
     }
 

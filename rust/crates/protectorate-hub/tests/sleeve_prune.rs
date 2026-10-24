@@ -570,3 +570,70 @@ async fn mounted_private_home_is_kept_even_when_its_own_sleeve_exited() {
     assert!(home.join(".cache/go-build/artifact").exists());
     server.abort();
 }
+
+#[tokio::test]
+async fn ignored_flag_excuses_only_committed_gitignore_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    fs::create_dir(&state).unwrap();
+    let source = source(dir.path(), "sha1");
+    write(&source.join(".gitignore"), "target/\n*.o\n");
+    git(&source, &["add", ".gitignore"]);
+    git(&source, &["commit", "-qm", "ignore build output"]);
+    let hub = Hub::open(&state, "owner", "test").unwrap();
+    let build = managed_clone(&hub, &source, "build", &state);
+    write(&build.join("target/debug/app"), "binary\n");
+    write(&build.join("target/odd\nname.o"), "odd\n");
+    write(&build.join("src/main.o"), "object\n");
+    let untracked = managed_clone(&hub, &source, "untracked", &state);
+    write(&untracked.join("target/debug/app"), "binary\n");
+    write(&untracked.join("notes.txt"), "work\n");
+    let odd = managed_clone(&hub, &source, "odd", &state);
+    write(&odd.join("target/app"), "binary\n");
+    write(&odd.join("keep\nme"), "work\n");
+    let exclude = managed_clone(&hub, &source, "exclude", &state);
+    write(&exclude.join(".git/info/exclude"), "secret\n");
+    write(&exclude.join("secret"), "work\n");
+    let hidden = managed_clone(&hub, &source, "hidden", &state);
+    write(&hidden.join("sub/.gitignore"), "*\n");
+    write(&hidden.join("sub/work"), "work\n");
+    let modified = managed_clone(&hub, &source, "modified", &state);
+    write(&modified.join(".gitignore"), "target/\n*.o\nwork\n");
+    write(&modified.join("work"), "work\n");
+    let nested = managed_clone(&hub, &source, "nested", &state);
+    write(&nested.join("target/inner/file"), "work\n");
+    git(&nested.join("target/inner"), &["init", "-q"]);
+    let linked = managed_clone(&hub, &source, "linked", &state);
+    symlink("/etc", linked.join("outside")).unwrap();
+    let (addr, server) = serve(hub).await;
+
+    let kept = [
+        &untracked, &odd, &exclude, &hidden, &modified, &nested, &linked,
+    ];
+    for flags in [
+        json!({"workspaces":true,"yes":true}),
+        json!({"workspaces":true,"yes":true,"ignored":true}),
+    ] {
+        let with_flag = flags.get("ignored").is_some();
+        let (status, response) = call(addr, "owner", flags).await;
+        assert_eq!(status, 200, "{response}");
+        for path in kept {
+            let row = workspace_row(&response, path);
+            assert_ne!(row["eligible"], true, "{response}");
+            let reason = if *path == modified {
+                "uncommitted changes or unreadable worktree"
+            } else {
+                "untracked or ignored files"
+            };
+            assert_eq!(row["reason"], reason, "{response}");
+            assert!(path.exists(), "{}", path.display());
+        }
+        assert_eq!(
+            workspace_row(&response, &build)["removed"] == true,
+            with_flag,
+            "{response}"
+        );
+        assert_eq!(build.exists(), !with_flag);
+    }
+    server.abort();
+}
