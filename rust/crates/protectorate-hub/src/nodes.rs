@@ -169,9 +169,13 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 .await
                 .map_err(super::join_error)??;
                 hub.node_monitor.invalidate(&node.name);
+                // Wait for the first poll, so a lease or job asked for right
+                // after AddNode returns sees the node's health.
                 let monitor = Arc::clone(&hub.node_monitor);
                 let name = node.name.clone();
-                tokio::task::spawn_blocking(move || monitor.poll_node(&name));
+                tokio::task::spawn_blocking(move || monitor.poll_node(&name))
+                    .await
+                    .map_err(super::join_error)?;
                 Ok(node_info(&node, false))
             }
         },
