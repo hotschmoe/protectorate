@@ -1,6 +1,5 @@
 use crate::{DiskBucket, NodeMetrics};
-use protectorate_wire::{self as wire, v1, ReflectMessage};
-use serde_json::Value;
+use protectorate_wire::{self as wire, v1};
 
 fn disk_bucket(bucket: &DiskBucket) -> v1::DiskBucket {
     v1::DiskBucket {
@@ -145,9 +144,4 @@ pub fn metrics_proto(m: &NodeMetrics) -> v1::NodeMetrics {
         }),
         ..Default::default()
     }
-}
-
-/// The snapshot as protobuf JSON, for printing.
-pub fn metrics_json(m: &NodeMetrics) -> Value {
-    serde_json::to_value(metrics_proto(m).transcode_to_dynamic()).unwrap_or(Value::Null)
 }

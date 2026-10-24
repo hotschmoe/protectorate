@@ -2822,7 +2822,7 @@ pub fn run_with_status(
 }
 
 fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
-    use protectorate_node_metrics::{metrics_json, Collector, Options};
+    use protectorate_node_metrics::{metrics_proto, Collector, Options};
     let options = Options {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         watch_paths: watch.to_vec(),
@@ -2835,9 +2835,7 @@ fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
     let snapshot = snapshot.map_err(|error| {
         RpcError::new(Code::Internal, format!("collect local metrics: {error}"))
     })?;
-    let encoded = serde_json::to_vec(&metrics_json(&snapshot))
-        .map_err(|error| RpcError::new(Code::Internal, format!("encode local metrics: {error}")))?;
-    let metrics: v1::NodeMetrics = protectorate_wire::decode(&encoded)?;
+    let metrics = metrics_proto(&snapshot);
     if json {
         json_line(&metrics)
     } else {

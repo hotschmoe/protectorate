@@ -1363,7 +1363,6 @@ dependencies = [
  "protectorate-grok-driver",
  "protectorate-hub",
  "protectorate-node",
- "protectorate-node-client",
  "protectorate-node-metrics",
  "protectorate-node-monitor",
  "protectorate-pi-driver",

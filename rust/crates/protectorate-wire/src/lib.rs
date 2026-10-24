@@ -694,7 +694,7 @@ impl UnaryServer {
         }
         error
     }
-    pub fn register<F, Fut>(&mut self, procedure: &str, handler: F) -> Result<()>
+    fn register<F, Fut>(&mut self, procedure: &str, handler: F) -> Result<()>
     where
         F: Fn(RpcRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<RpcResponse>> + Send + 'static,
@@ -799,7 +799,7 @@ impl UnaryServer {
     }
     /// Registers a producer for a schema-declared server stream. Return trailer
     /// metadata on completion or a Connect error; send messages through sender.
-    pub fn register_streaming<F, Fut>(&mut self, procedure: &str, handler: F) -> Result<()>
+    fn register_streaming<F, Fut>(&mut self, procedure: &str, handler: F) -> Result<()>
     where
         F: Fn(RpcRequest, StreamSender) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<StreamTrailers>> + Send + 'static,

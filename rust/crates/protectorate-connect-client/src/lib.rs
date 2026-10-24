@@ -428,17 +428,6 @@ impl Client {
         self.call_json(procedure, input, None)
     }
 
-    /// Call one unary RPC with a shorter per-request deadline while retaining
-    /// this client's endpoint, bearer credential, and TLS trust roots.
-    pub fn call_with_timeout(
-        &self,
-        procedure: &str,
-        input: &Value,
-        timeout: Duration,
-    ) -> Result<Value> {
-        self.call_json(procedure, input, Some(timeout))
-    }
-
     fn call_json(
         &self,
         procedure: &str,
@@ -527,21 +516,6 @@ impl Client {
     ) -> Result<()> {
         let body = self.input(self.method(procedure)?, input)?;
         self.stream_inner(procedure, &body, None, &mut |message| {
-            on_message(to_value(&message)?)
-        })
-    }
-
-    /// Stream with a per-request deadline while retaining this client's
-    /// endpoint, bearer credential, and TLS trust roots.
-    pub fn stream_with_timeout(
-        &self,
-        procedure: &str,
-        input: &Value,
-        timeout: Duration,
-        mut on_message: impl FnMut(Value) -> Result<()>,
-    ) -> Result<()> {
-        let body = self.input(self.method(procedure)?, input)?;
-        self.stream_inner(procedure, &body, Some(timeout), &mut |message| {
             on_message(to_value(&message)?)
         })
     }

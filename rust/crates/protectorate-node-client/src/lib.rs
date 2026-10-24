@@ -3,10 +3,10 @@
 
 use protectorate_connect_client::Client;
 use protectorate_wire::{
-    v1::{self, get_file_response::Part, node_agent_service},
+    v1::{self, node_agent_service},
     Code, Result, RpcError,
 };
-use protectorate_xfer::{Chunk, Header, Kind, Sink, Source, Trailer};
+use protectorate_xfer::{Kind, Source};
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -20,19 +20,6 @@ pub struct TransferResult {
     pub size: u64,
     pub sha256: String,
     pub skipped: u32,
-}
-
-/// Pushes a local file or directory. Each chunk is one unary PutFile call.
-/// The returned path is the destination resolved by the node.
-pub fn push(
-    client: &Client,
-    node: &str,
-    local: impl AsRef<Path>,
-    remote: &str,
-    overwrite: bool,
-    compress: bool,
-) -> Result<TransferResult> {
-    push_with_progress(client, node, local, remote, overwrite, compress, |_| Ok(()))
 }
 
 /// Pushes a file while reporting acknowledged uncompressed byte offsets.
@@ -131,80 +118,6 @@ fn put_chunk_with_retry(
             Err(error) => return Err(error),
         }
     }
-}
-
-/// Pulls a remote file or directory. Publishing waits until a verified
-/// trailer *and* a successful Connect end frame have both arrived.
-pub fn pull(
-    client: &Client,
-    node: &str,
-    remote: &str,
-    local: impl AsRef<Path>,
-    overwrite: bool,
-    compress: bool,
-) -> Result<TransferResult> {
-    let local = local.as_ref().to_path_buf();
-    let mut sink: Option<Sink> = None;
-    let mut trailer: Option<Trailer> = None;
-    let request = v1::GetFileRequest {
-        name: node.into(),
-        path: remote.into(),
-        no_compress: !compress,
-    };
-    client.server_stream(node_agent_service::GET_FILE, &request, |message| {
-        match message.part {
-            Some(Part::Header(header)) => {
-                if sink.is_some() || trailer.is_some() {
-                    return Err(loss("duplicate file header"));
-                }
-                let kind = match header.kind() {
-                    v1::FileKind::File => Kind::File,
-                    v1::FileKind::Directory => Kind::Directory,
-                    v1::FileKind::Unspecified => return Err(loss("invalid file kind")),
-                };
-                let header = Header {
-                    kind,
-                    mode: header.mode,
-                    size: header.size,
-                };
-                sink = Some(Sink::new(&local, header, overwrite).map_err(xfer_error)?);
-            }
-            Some(Part::Chunk(part)) => {
-                if trailer.is_some() {
-                    return Err(loss("chunk after trailer"));
-                }
-                let target = sink.as_mut().ok_or_else(|| loss("chunk before header"))?;
-                target
-                    .write(Chunk {
-                        data: part.data,
-                        compressed: part.compressed,
-                        raw_size: part.raw_size,
-                    })
-                    .map_err(xfer_error)?;
-            }
-            Some(Part::Trailer(part)) => {
-                if sink.is_none() || trailer.is_some() {
-                    return Err(loss("unexpected file trailer"));
-                }
-                trailer = Some(Trailer {
-                    size: part.size,
-                    sha256: part.sha256,
-                    skipped: part.skipped,
-                });
-            }
-            None => return Err(loss("unknown file stream part")),
-        }
-        Ok(())
-    })?;
-    let trailer = trailer.ok_or_else(|| loss("file stream ended without trailer"))?;
-    let sink = sink.ok_or_else(|| loss("file stream ended without header"))?;
-    sink.commit(trailer.clone()).map_err(xfer_error)?;
-    Ok(TransferResult {
-        path: local,
-        size: trailer.size,
-        sha256: trailer.sha256,
-        skipped: trailer.skipped,
-    })
 }
 
 fn random_id() -> Result<String> {
