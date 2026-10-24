@@ -202,6 +202,7 @@ struct Disk {
 pub struct LeaseTable {
     path: Option<PathBuf>,
     disk: Mutex<Disk>,
+    writer: Mutex<()>,
     chooser: Chooser,
     admission: Option<Arc<std::sync::RwLock<()>>>,
     on_event: Option<EventHandler>,
@@ -283,6 +284,7 @@ impl LeaseTable {
         Self {
             path: None,
             disk: Mutex::new(Disk::default()),
+            writer: Mutex::new(()),
             chooser: Arc::new(|request, blocked| {
                 let resource = parse_resource(request)?;
                 if let Some(l) = blocked(&resource) {
@@ -391,15 +393,15 @@ impl LeaseTable {
             .admission
             .as_ref()
             .map(|lock| lock.read().unwrap_or_else(|error| error.into_inner()));
-        let mut guard = self.disk.lock().unwrap_or_else(|e| e.into_inner());
-        let mut next = guard.clone();
+        let _writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let current = self.disk.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut next = current.clone();
         let mut events = Vec::new();
         let out = change(&mut next, &mut events)?;
-        if next != *guard {
+        if next != current {
             self.persist(&next)?;
         }
-        *guard = next;
-        drop(guard);
+        *self.disk.lock().unwrap_or_else(|e| e.into_inner()) = next;
         for event in events {
             if let Some(handler) = &self.on_event {
                 handler(&event)
@@ -459,6 +461,12 @@ impl LeaseTable {
         Ok(())
     }
     pub fn sweep(&self, now: i64) -> Result<()> {
+        {
+            let d = self.disk.lock().unwrap_or_else(|e| e.into_inner());
+            if d.queue.is_empty() && d.leases.values().all(|l| l.expires_at > now) {
+                return Ok(());
+            }
+        }
         self.transaction(|d, events| {
             let expired: Vec<_> = d
                 .leases
