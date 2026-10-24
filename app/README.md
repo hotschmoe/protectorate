@@ -96,10 +96,6 @@ Connecting creates the profile's device key and registers its public half; appro
 
 Native handling uses the `app_links` package. Android registers an intent filter for `protectorate://pair` in `AndroidManifest.xml`. Untested: Android (no device or SDK here), Windows/Linux/macOS scheme registration (the OS must launch the app with the URL; no installer registers the scheme yet), iOS (not scaffolded).
 
-## Screenshots
-
-`scripts/e2e-screens.sh` builds the web app, runs a throwaway hub with demo data and screenshots every main screen at 412x860 and 1280x800 into `e2e-out/`, each in light and dark (`E2E_ONLY=<name glob>` limits the pass). A fake unreachable node `ghost` is added to show that styling.
-
 ## Known limitations
 
 - `flutter build apk` fails on linux/arm64 hosts: the Android SDK CMake/NDK binaries are x86_64 only. Build Android on an x86_64 host.

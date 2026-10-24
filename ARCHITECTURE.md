@@ -55,7 +55,7 @@ refuses to serve without the runner and sleeve helper beside it.
 
 ## Crates
 
-`rust/crates/`, one Cargo workspace (40 crates):
+`rust/crates/`, one Cargo workspace (39 crates):
 
 | Crate | Purpose |
 |---|---|
@@ -88,7 +88,6 @@ refuses to serve without the runner and sleeve helper beside it.
 | sandbox | validated Linux sandbox plans, launcher and egress proxy |
 | server | `protectorate-rs` entry points |
 | session | tmux sessions |
-| sleeve-layout | unused (sleeve homes are prepared by hub and sleeve-runner); pending deletion |
 | sleeve-registry | durable sleeve lifecycle records |
 | sleeve-runner | terminal sleeve runner and sandbox helper |
 | svcgen | systemd, Windows task and Termux service definitions |

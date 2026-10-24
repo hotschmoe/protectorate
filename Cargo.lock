@@ -1390,13 +1390,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "protectorate-sleeve-layout"
-version = "0.1.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "protectorate-sleeve-registry"
 version = "0.1.0"
 dependencies = [
