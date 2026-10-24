@@ -337,8 +337,12 @@ message WorkspaceDirectory {
   bool is_git = 3;
   string git_branch = 4;
   string git_remote = 5;
+  // acceptable is false with a reason for directories no sleeve may use,
+  // including one inside or around another sleeve's workspace.
   bool acceptable = 6;
   string reason = 7;
+  // required_name is the only sleeve name that may use this directory: the
+  // sleeve that owns it, or a state-directory workspace's name.
   string required_name = 8;
 }
 
@@ -419,12 +423,15 @@ message Workspace {
   // git_branch is the checked-out branch of a git checkout; empty for a
   // detached HEAD or a directory that is not a git checkout.
   string git_branch = 4;
-  // sleeve is the sleeve that uses this workspace, running or exited.
+  // sleeve owns this workspace, running or exited, until it is killed. One
+  // sleeve per directory: SpawnSleeve refuses the workspace, and any
+  // directory inside or around it, for every other name.
   string sleeve = 5;
-  // busy is true while that sleeve is running; SpawnSleeve then refuses it.
+  // busy is true while the owning sleeve is running.
   bool busy = 6;
-  // required_name is set for a workspace in the hub's state directory: only a
-  // sleeve of exactly that name may use it. Other workspaces take any name.
+  // required_name is the only sleeve name that may use this workspace: its
+  // owner, or the name of a workspace in the hub's state directory. Empty
+  // means any name.
   string required_name = 7;
   bool read_only = 8;
 }

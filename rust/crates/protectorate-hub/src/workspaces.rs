@@ -178,7 +178,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     ));
                 }
                 let path = call.request.path;
-                tokio::task::spawn_blocking(move || browse(&hub.workspaces, &path))
+                tokio::task::spawn_blocking(move || browse(&hub.workspaces, &owners(&hub), &path))
                     .await
                     .map_err(super::join_error)?
             }
@@ -204,8 +204,9 @@ fn list_workspaces(hub: &Hub) -> Vec<v1::Workspace> {
             continue;
         }
         if let Some(row) = add_workspace(cfg, &mut by_path, Path::new(&sleeve.workspace)) {
-            if row.sleeve.is_empty() || sleeve.state == State::Running {
+            if !sleeve.killed {
                 row.busy = sleeve.state == State::Running;
+                row.required_name = sleeve.name.clone();
                 row.sleeve = sleeve.name;
             }
         }
@@ -253,7 +254,38 @@ fn add_workspace<'a>(
     }))
 }
 
-fn browse(cfg: &Config, path: &str) -> Result<v1::BrowseWorkspacesResponse> {
+/// Each live sleeve's resolved workspace and name. One sleeve per directory:
+/// a killed sleeve gives its directory up, an exited one keeps it.
+pub(super) fn owners(hub: &Hub) -> Vec<(PathBuf, String)> {
+    hub.sleeves
+        .list()
+        .into_iter()
+        .filter(|row| !row.killed && !row.workspace.is_empty())
+        .map(|row| {
+            let path =
+                fs::canonicalize(&row.workspace).unwrap_or_else(|_| PathBuf::from(&row.workspace));
+            (path, row.name)
+        })
+        .collect()
+}
+
+/// The sleeve whose workspace is `path` or overlaps it, if any.
+pub(super) fn owner_of<'a>(
+    owners: &'a [(PathBuf, String)],
+    path: &Path,
+) -> Option<&'a (PathBuf, String)> {
+    owners.iter().find(|(owned, _)| owned == path).or_else(|| {
+        owners
+            .iter()
+            .find(|(owned, _)| owned.starts_with(path) || path.starts_with(owned))
+    })
+}
+
+fn browse(
+    cfg: &Config,
+    owners: &[(PathBuf, String)],
+    path: &str,
+) -> Result<v1::BrowseWorkspacesResponse> {
     if path.is_empty() {
         let mut directories = Vec::new();
         for root in &cfg.roots {
@@ -264,7 +296,7 @@ fn browse(cfg: &Config, path: &str) -> Result<v1::BrowseWorkspacesResponse> {
             if directories.len() >= MAX_RESULTS {
                 break;
             }
-            directories.push(directory(cfg, root, file_name(root)));
+            directories.push(directory(cfg, owners, root, file_name(root)));
         }
         return Ok(v1::BrowseWorkspacesResponse {
             directories,
@@ -321,7 +353,7 @@ fn browse(cfg: &Config, path: &str) -> Result<v1::BrowseWorkspacesResponse> {
             truncated = true;
             break;
         }
-        directories.push(directory(cfg, &child, name));
+        directories.push(directory(cfg, owners, &child, name));
     }
     directories.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(v1::BrowseWorkspacesResponse {
@@ -334,18 +366,35 @@ fn browse(cfg: &Config, path: &str) -> Result<v1::BrowseWorkspacesResponse> {
     })
 }
 
-fn directory(cfg: &Config, path: &Path, name: String) -> v1::WorkspaceDirectory {
+fn directory(
+    cfg: &Config,
+    owners: &[(PathBuf, String)],
+    path: &Path,
+    name: String,
+) -> v1::WorkspaceDirectory {
     let (git_remote, git_branch, is_git) = git_details(path);
-    let reason = cfg.reason(path);
+    let owner = owner_of(owners, path);
+    let mut required_name = cfg.required_name(path);
+    let reason = match (cfg.reason(path), owner) {
+        (Some(reason), _) => reason.to_owned(),
+        (None, Some((owned, sleeve))) if owned == path => {
+            required_name = sleeve.clone();
+            String::new()
+        }
+        (None, Some((owned, sleeve))) => {
+            format!("overlaps sleeve {sleeve}'s workspace {}", owned.display())
+        }
+        (None, None) => String::new(),
+    };
     v1::WorkspaceDirectory {
         name,
         path: path.to_string_lossy().into_owned(),
         is_git,
         git_branch,
         git_remote,
-        acceptable: reason.is_none(),
-        reason: reason.unwrap_or_default().into(),
-        required_name: cfg.required_name(path),
+        acceptable: reason.is_empty(),
+        reason,
+        required_name,
     }
 }
 

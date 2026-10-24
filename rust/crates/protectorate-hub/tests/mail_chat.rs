@@ -243,7 +243,9 @@ async fn idle_reaper_waits_for_work_and_pending_mail() {
     )
     .await;
     assert_eq!(status, 400, "{rejected}");
-    for (name, brief) in [("busy", "slow"), ("mailbox", "")] {
+    let mailbox_work = temp.path().join("mailbox-work");
+    fs::create_dir_all(&mailbox_work).unwrap();
+    for (name, brief, workspace) in [("busy", "slow", &workspace), ("mailbox", "", &mailbox_work)] {
         let (status, spawned) = call(
             addr,
             "SleeveService/SpawnSleeve",

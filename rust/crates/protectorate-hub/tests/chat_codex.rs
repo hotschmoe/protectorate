@@ -114,12 +114,14 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let state = root.path().join("state");
     let owner = root.path().join("owner");
     let work = root.path().join("work");
+    let explicit_work = root.path().join("work-explicit");
     let tools = root.path().join("tools");
     let runtime = root.path().join("runtime");
     for dir in [
         &state,
         &owner,
         &work,
+        &explicit_work,
         &tools,
         &runtime,
         &state.join("auth/codex"),
@@ -196,7 +198,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     let (status, explicit) = call(
         addr,
         "SleeveService/SpawnSleeve",
-        json!({"name":"codex-explicit","harness":"HARNESS_CODEX","workspace":work,
+        json!({"name":"codex-explicit","harness":"HARNESS_CODEX","workspace":explicit_work,
             "selection":{"effort":"medium"}}),
     )
     .await;

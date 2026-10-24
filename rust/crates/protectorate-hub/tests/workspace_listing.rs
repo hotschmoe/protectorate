@@ -155,8 +155,8 @@ async fn workspaces_are_listed_redacted_and_browsed_only_inside_roots() {
                 false
             ),
             row(&managed.join("beta"), "beta", "main", "", "", false, false),
-            row(&outside, "", "", "", "old", false, false),
-            row(&project, "", "main", "", "worker", true, false),
+            row(&outside, "old", "", "", "old", false, false),
+            row(&project, "worker", "main", "", "worker", true, false),
             row(
                 &managed.join("alpha/references"),
                 "",

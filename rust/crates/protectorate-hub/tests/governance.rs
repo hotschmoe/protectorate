@@ -561,7 +561,9 @@ async fn budgets_warn_at_90_percent_and_stop_the_turn_at_100_including_children(
     )
     .1;
     let kid_work = setup.work.with_file_name("kid-work");
+    let kid2_work = setup.work.with_file_name("kid2-work");
     fs::create_dir_all(&kid_work).unwrap();
+    fs::create_dir_all(&kid2_work).unwrap();
     let (status, kid) = call(
         addr,
         "SleeveService/SpawnSleeve",
@@ -606,7 +608,7 @@ async fn budgets_warn_at_90_percent_and_stop_the_turn_at_100_including_children(
         addr,
         "SleeveService/SpawnSleeve",
         &parent,
-        json!({"name":"kid2","harness":"HARNESS_CLAUDE","workspace":kid_work}),
+        json!({"name":"kid2","harness":"HARNESS_CLAUDE","workspace":kid2_work}),
     )
     .await;
     assert_eq!(status, 429, "{refused}");
