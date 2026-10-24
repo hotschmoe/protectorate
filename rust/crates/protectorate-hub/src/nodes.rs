@@ -929,18 +929,12 @@ fn status(hub: &Arc<Hub>, node: v1::NodeInfo) -> Result<v1::NodeStatus> {
                 .filter(|row| {
                     row.state == protectorate_sleeve_registry::State::Running && !row.helper
                 })
-                .map(sleeve)
+                .map(crate::sleeves::sleeve)
                 .collect::<Result<_>>()?;
         }
     }
     status.node = Some(node);
     Ok(status)
-}
-
-fn sleeve(row: &protectorate_sleeve_registry::Record) -> Result<v1::Sleeve> {
-    let bytes = serde_json::to_vec(&crate::sleeves::sleeve_json(row))
-        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
-    wire::decode(&bytes)
 }
 
 /// Pushes a fresh certificate for the node's own key once its current one

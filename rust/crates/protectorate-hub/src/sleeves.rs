@@ -3112,16 +3112,6 @@ pub(super) fn sleeve(row: &Record) -> Result<v1::Sleeve> {
     })
 }
 
-/// The protobuf JSON of a sleeve, for node metrics still assembled as JSON.
-pub(super) fn sleeve_json(row: &Record) -> Value {
-    sleeve(row)
-        .and_then(|sleeve| to_stored(&sleeve))
-        .unwrap_or_else(|error| {
-            eprintln!("sleeve {}: {error}", row.name);
-            Value::Null
-        })
-}
-
 fn proto_harness(harness: Harness) -> v1::Harness {
     match harness {
         Harness::Claude => v1::Harness::Claude,

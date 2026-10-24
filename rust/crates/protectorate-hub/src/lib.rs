@@ -49,7 +49,7 @@ use protectorate_sleeve_registry::{Record as SleeveRecord, Registry as SleeveReg
 use protectorate_wire::{
     self as wire,
     v1::{self, backlog_service, event_service, hub_service, session_service},
-    AuthContext, Call, Catalog, Code, Method, RpcError, RpcRequest, RpcResponse, UnaryServer,
+    AuthContext, Call, Catalog, Code, Method, RpcError, UnaryServer,
 };
 use serde_json::{json, Value};
 pub use sleeves::TerminalLauncher;
@@ -1171,58 +1171,6 @@ fn now_unix() -> i64 {
         .as_secs()
         .try_into()
         .unwrap_or(i64::MAX)
-}
-fn input(request: &RpcRequest) -> wire::Result<Value> {
-    serde_json::to_value(&request.message)
-        .map_err(|_| RpcError::new(Code::Internal, "failed to read request"))
-}
-fn respond(request: &RpcRequest, value: Value) -> wire::Result<RpcResponse> {
-    let bytes = serde_json::to_vec(&value)
-        .map_err(|_| RpcError::new(Code::Internal, "failed to encode response"))?;
-    Ok(wire::decode_json(request.method.output(), &bytes)?.into())
-}
-fn string(value: &Value, key: &str) -> String {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .into()
-}
-fn parse_duration(value: Option<&Value>) -> wire::Result<std::time::Duration> {
-    let Some(value) = value else {
-        return Ok(std::time::Duration::ZERO);
-    };
-    let text = value
-        .as_str()
-        .ok_or_else(|| RpcError::new(Code::InvalidArgument, "invalid ttl"))?;
-    let number = text
-        .strip_suffix('s')
-        .ok_or_else(|| RpcError::new(Code::InvalidArgument, "invalid ttl"))?;
-    let (seconds, fraction) = number.split_once('.').unwrap_or((number, ""));
-    if seconds.is_empty()
-        || !seconds.bytes().all(|b| b.is_ascii_digit())
-        || fraction.len() > 9
-        || !fraction.bytes().all(|b| b.is_ascii_digit())
-        || number.matches('.').count() > 1
-    {
-        return Err(RpcError::new(Code::InvalidArgument, "invalid ttl"));
-    }
-    let seconds = seconds
-        .parse()
-        .map_err(|_| RpcError::new(Code::InvalidArgument, "invalid ttl"))?;
-    let nanos = if fraction.is_empty() {
-        0
-    } else {
-        format!("{fraction:0<9}")
-            .parse()
-            .map_err(|_| RpcError::new(Code::InvalidArgument, "invalid ttl"))?
-    };
-    Ok(std::time::Duration::new(seconds, nanos))
-}
-fn unix_timestamp(seconds: i64) -> String {
-    DateTime::<Utc>::from_timestamp(seconds, 0)
-        .map(timestamp)
-        .unwrap_or_default()
 }
 fn sender(actor: &str) -> String {
     actor_sleeve(actor).unwrap_or(actor).into()
