@@ -282,15 +282,18 @@ Open items:
   fresh Rust install (decision 16).
 - The Rust-versus-Go architecture discussion is still to come.
 - Verus deferred (decision 15).
-- Found during the docs pass: the MCP bridge's `--https` binds any address
-  (the private-address rule is not applied there); `node invite --pool` only
-  writes `pool-<name>` inventory tags that nothing reads; no crate uses
-  `protectorate-sleeve-layout`, so sleeves get no seeded `.gitconfig`
-  identity; the Go hub's CPU-derived build concurrency defaults
-  (`GOMAXPROCS`, `GOFLAGS=-p`, `FLUTTER_TEST_CONCURRENCY`) were not ported;
-  Windows nodes report no admin jobs; local-model detection still treats
-  `.ts.net` names as local; a few crate doc comments still say "port of
-  internal/..." or compare with Go.
+- The loose ends the docs pass found are fixed (wip/loose): the MCP bridge's
+  `--https` obeys the private-address rule; `node invite --pool` is gone;
+  sleeve homes are seeded with the owner's git identity; a CPU quota sets
+  `GOMAXPROCS`, `GOFLAGS=-p`, `CARGO_BUILD_JOBS` and
+  `FLUTTER_TEST_CONCURRENCY`; admin jobs are documented and reported as
+  Linux-only; `.ts.net` names are no longer local models; crate comments no
+  longer describe Go ports; the CLI binary is `protectorate`; the Windows
+  node builds again.
+- Owner approval pending for deleting dead code: the
+  `protectorate-sleeve-layout` crate (nothing depends on it) and the
+  orphaned `protectorate-mailbox/src/json.rs` and `src/gotime.rs` (no `mod`
+  declares them since the mailbox moved to serde).
 
 ## Appendix A: research reports (full text)
 
