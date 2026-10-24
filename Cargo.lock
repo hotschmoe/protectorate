@@ -982,6 +982,7 @@ version = "0.1.0"
 dependencies = [
  "protectorate-chatlog",
  "protectorate-sandbox",
+ "serde",
  "serde_json",
 ]
 
@@ -1052,6 +1053,7 @@ version = "0.1.0"
 dependencies = [
  "protectorate-chatlog",
  "protectorate-sandbox",
+ "serde",
  "serde_json",
 ]
 
@@ -1299,6 +1301,7 @@ version = "0.1.0"
 dependencies = [
  "protectorate-chatlog",
  "protectorate-sandbox",
+ "serde",
  "serde_json",
 ]
 
