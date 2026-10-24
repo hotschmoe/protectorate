@@ -59,7 +59,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::Instant,
 };
 use zeroize::Zeroizing;
 
@@ -265,7 +265,7 @@ impl Hub {
             })
             .collect();
         sleeves
-            .mark_unmanaged_chat_exited(&timestamp(Utc::now()))
+            .mark_unmanaged_chat_exited(&now())
             .map_err(|error| identity::Error::Invalid(error.to_string()))?;
         let identity = Arc::new(IdentityStore::open(home.join("identity.json"))?);
         // A restarted hub cannot reattach its chat driver processes. The
@@ -729,7 +729,7 @@ impl Hub {
                 let mut events = hub.events.sender.subscribe();
                 let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
                 let watch = (!call.auth.token_id.is_empty())
-                    .then(|| hub.identity.watch(&call.auth.token_id, now_unix()));
+                    .then(|| hub.identity.watch(&call.auth.token_id, protectorate_fsutil::unix_seconds()));
                 let mut check_revocation = tokio::time::interval(std::time::Duration::from_secs(1));
                 loop {
                     let event = tokio::select! {
@@ -1164,14 +1164,6 @@ impl Hub {
     }
 }
 
-fn now_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .try_into()
-        .unwrap_or(i64::MAX)
-}
 fn sender(actor: &str) -> String {
     actor_sleeve(actor).unwrap_or(actor).into()
 }
@@ -1213,6 +1205,10 @@ fn platform_arch() -> &'static str {
 }
 fn timestamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Nanos, true)
+}
+/// The current time as the RFC 3339 text the registries store.
+fn now() -> String {
+    timestamp(Utc::now())
 }
 fn proto_time(time: DateTime<Utc>) -> prost_types::Timestamp {
     prost_types::Timestamp {

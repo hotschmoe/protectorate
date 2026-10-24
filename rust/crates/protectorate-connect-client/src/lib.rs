@@ -11,7 +11,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use ureq::unversioned::{
     resolver::{ResolvedSocketAddrs, Resolver},
@@ -79,13 +79,6 @@ pub fn read_device_credential(path: &Path) -> Result<Credential> {
     let record: Value = serde_json::from_slice(&raw)
         .map_err(|error| RpcError::new(Code::DataLoss, format!("device credential: {error}")))?;
     device_key(&record).map(Credential::Device)
-}
-
-fn now_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 /// Parsed private CA bundle for explicit daemon-to-node TLS trust.
@@ -664,7 +657,7 @@ impl Client {
             Credential::Bearer(token) => Ok(bearer(token)),
             Credential::TokenFile(path) => Ok(bearer(&self.held_token(path)?)),
             Credential::Device(key) => key
-                .prove(verb, path, now_unix())
+                .prove(verb, path, protectorate_fsutil::unix_seconds())
                 .map(|proof| Some(Zeroizing::new(format!("Proof {proof}"))))
                 .map_err(|error| RpcError::new(Code::Internal, error)),
         }
@@ -687,7 +680,7 @@ impl Client {
         let Ok(claims) = capability::decode(&token) else {
             return Ok(token);
         };
-        let now = now_unix();
+        let now = protectorate_fsutil::unix_seconds();
         if claims.expires <= now || claims.expires - now > (claims.expires - claims.issued) / 2 {
             return Ok(token);
         }
@@ -805,5 +798,5 @@ fn transcode<T: ReflectMessage + Default>(message: &DynamicMessage) -> Result<T>
 }
 
 fn to_value(message: &DynamicMessage) -> Result<Value> {
-    serde_json::to_value(message).map_err(|e| RpcError::new(Code::Internal, e.to_string()))
+    serde_json::to_value(message).map_err(RpcError::internal)
 }

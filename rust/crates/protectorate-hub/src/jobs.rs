@@ -5,6 +5,7 @@ use chrono::Utc;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_auth as auth;
 use protectorate_connect_client::Client;
+use protectorate_fsutil::{hex, random_hex, unix_millis, unix_seconds};
 use protectorate_inventory::{Inventory, CARE, SHARED};
 use protectorate_lease::{Entry, LeaseTable, Resource};
 use protectorate_node_monitor::{Dialer, Monitor};
@@ -27,7 +28,7 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex, RwLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime},
 };
 use tokio::sync::Notify;
 
@@ -76,7 +77,7 @@ pub struct Jobs {
     local_name: String,
     dialer: Dialer,
     state: Mutex<BTreeMap<String, Stored>>,
-    canceled_request_ids: Mutex<BTreeMap<String, u64>>,
+    canceled_request_ids: Mutex<BTreeMap<String, i64>>,
     changed: Notify,
     admission: Option<Arc<RwLock<()>>>,
     draining: Option<Arc<Mutex<BTreeSet<String>>>>,
@@ -185,10 +186,7 @@ impl SourcePlan {
             base = "repo".into();
         }
         let digest = Sha256::digest(repo.to_string_lossy().as_bytes());
-        let key = format!(
-            "{base}-{:02x}{:02x}{:02x}{:02x}",
-            digest[0], digest[1], digest[2], digest[3]
-        );
+        let key = format!("{base}-{}", hex(&digest[..4]));
         Ok(Self::Git { repo, key, commit })
     }
 
@@ -196,7 +194,7 @@ impl SourcePlan {
         let raw = required(&artifact.path, "path")?;
         let path = fs::canonicalize(raw)
             .map_err(|e| RpcError::invalid(format!("source artifact {raw:?}: {e}")))?;
-        let meta = fs::metadata(&path).map_err(internal)?;
+        let meta = fs::metadata(&path).map_err(RpcError::internal)?;
         let workdir = artifact.workdir.as_str();
         if meta.is_dir() {
             if !workdir.is_empty() && !safe_relative(workdir) {
@@ -266,13 +264,13 @@ fn write_archive(root: &Path, out: &mut File) -> Result<()> {
     let mut raw_bytes = 0_u64;
     while let Some(dir) = pending.pop() {
         let mut children = fs::read_dir(&dir)
-            .map_err(internal)?
+            .map_err(RpcError::internal)?
             .collect::<std::io::Result<Vec<_>>>()
-            .map_err(internal)?;
+            .map_err(RpcError::internal)?;
         children.sort_by_key(|entry| entry.file_name());
         for child in children {
             let path = child.path();
-            let meta = fs::symlink_metadata(&path).map_err(internal)?;
+            let meta = fs::symlink_metadata(&path).map_err(RpcError::internal)?;
             if !meta.is_file() && !meta.is_dir() {
                 continue;
             }
@@ -283,7 +281,7 @@ fn write_archive(root: &Path, out: &mut File) -> Result<()> {
                     "source directory has too many entries",
                 ));
             }
-            let rel = path.strip_prefix(root).map_err(internal)?;
+            let rel = path.strip_prefix(root).map_err(RpcError::internal)?;
             let name = rel
                 .to_str()
                 .ok_or_else(|| RpcError::invalid("source directory has a non-UTF-8 path"))?
@@ -300,7 +298,7 @@ fn write_archive(root: &Path, out: &mut File) -> Result<()> {
                 .unix_permissions(mode);
             if meta.is_dir() {
                 zip.add_directory(format!("{name}/"), options)
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                    .map_err(RpcError::internal)?;
                 pending.push(path);
             } else {
                 raw_bytes = raw_bytes.saturating_add(meta.len());
@@ -310,14 +308,13 @@ fn write_archive(root: &Path, out: &mut File) -> Result<()> {
                         "source directory exceeds 4 GiB",
                     ));
                 }
-                zip.start_file(name, options)
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                let mut input = File::open(&path).map_err(internal)?;
+                zip.start_file(name, options).map_err(RpcError::internal)?;
+                let mut input = File::open(&path).map_err(RpcError::internal)?;
                 let copied = std::io::copy(
                     &mut std::io::Read::by_ref(&mut input).take(meta.len() + 1),
                     &mut zip,
                 )
-                .map_err(internal)?;
+                .map_err(RpcError::internal)?;
                 if copied != meta.len() {
                     return Err(RpcError::new(
                         Code::DataLoss,
@@ -327,8 +324,7 @@ fn write_archive(root: &Path, out: &mut File) -> Result<()> {
             }
         }
     }
-    zip.finish()
-        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+    zip.finish().map_err(RpcError::internal)?;
     Ok(())
 }
 
@@ -389,18 +385,18 @@ impl ArtifactSink {
                     tempfile::Builder::new()
                         .prefix(&format!(".{}-artifacts-", self.id))
                         .tempdir_in(&self.root)
-                        .map_err(internal)?,
+                        .map_err(RpcError::internal)?,
                 );
             }
             let dest = self.stage.as_ref().unwrap().path().join(path);
             if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).map_err(internal)?;
+                fs::create_dir_all(parent).map_err(RpcError::internal)?;
             }
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
             #[cfg(unix)]
             options.mode(0o600);
-            let file = options.open(dest).map_err(internal)?;
+            let file = options.open(dest).map_err(RpcError::internal)?;
             self.current = Some(ArtifactFile {
                 path: path.into(),
                 file,
@@ -409,18 +405,18 @@ impl ArtifactSink {
             });
         }
         let current = self.current.as_mut().unwrap();
-        current.file.write_all(data).map_err(internal)?;
+        current.file.write_all(data).map_err(RpcError::internal)?;
         current.size += data.len() as u64;
         self.total += data.len() as u64;
         if chunk.last {
             let current = self.current.take().unwrap();
-            current.file.sync_all().map_err(internal)?;
+            current.file.sync_all().map_err(RpcError::internal)?;
             #[cfg(unix)]
             fs::set_permissions(
                 self.stage.as_ref().unwrap().path().join(&current.path),
                 fs::Permissions::from_mode((current.mode & 0o777) | 0o600),
             )
-            .map_err(internal)?;
+            .map_err(RpcError::internal)?;
             self.files.push(v1::JobArtifact {
                 path: current.path,
                 size_bytes: current.size,
@@ -437,9 +433,9 @@ impl ArtifactSink {
         if let Some(stage) = self.stage.take() {
             let dest = self.root.join(format!("{}.artifacts", self.id));
             if dest.exists() {
-                fs::remove_dir_all(&dest).map_err(internal)?;
+                fs::remove_dir_all(&dest).map_err(RpcError::internal)?;
             }
-            fs::rename(stage.path(), dest).map_err(internal)?;
+            fs::rename(stage.path(), dest).map_err(RpcError::internal)?;
         }
         Ok((self.files.clone(), self.total))
     }
@@ -627,12 +623,7 @@ impl Jobs {
         monitor: &Monitor,
         leases: &LeaseTable,
     ) -> Result<Placement> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .try_into()
-            .unwrap_or(i64::MAX);
+        let now = unix_millis();
         let leased = if let Target::LeaseId(id) = target {
             if id.is_empty() {
                 return Err(RpcError::invalid("lease id is required"));
@@ -1028,7 +1019,7 @@ impl Jobs {
         options.mode(0o600);
         options
             .open(self.root.join(format!("{id}.log")))
-            .map_err(internal)?;
+            .map_err(RpcError::internal)?;
         if let Err(error) = persist(&self.root, &id, &stored) {
             let _ = fs::remove_file(self.root.join(format!("{id}.log")));
             return Err(error);
@@ -1084,8 +1075,8 @@ impl Jobs {
         match source {
             SourcePlan::None => Ok(0),
             SourcePlan::File { path, .. } => {
-                let file = File::open(path).map_err(internal)?;
-                if file.metadata().map_err(internal)?.len() > MAX_SOURCE_BYTES {
+                let file = File::open(path).map_err(RpcError::internal)?;
+                if file.metadata().map_err(RpcError::internal)?.len() > MAX_SOURCE_BYTES {
                     return Err(RpcError::new(
                         Code::ResourceExhausted,
                         "source exceeds 4 GiB",
@@ -1094,15 +1085,22 @@ impl Jobs {
                 self.upload(client, id, file)
             }
             SourcePlan::Directory { path, .. } => {
-                let mut archive = tempfile::NamedTempFile::new_in(&self.root).map_err(internal)?;
+                let mut archive =
+                    tempfile::NamedTempFile::new_in(&self.root).map_err(RpcError::internal)?;
                 write_archive(path, archive.as_file_mut())?;
-                if archive.as_file().metadata().map_err(internal)?.len() > MAX_SOURCE_BYTES {
+                if archive
+                    .as_file()
+                    .metadata()
+                    .map_err(RpcError::internal)?
+                    .len()
+                    > MAX_SOURCE_BYTES
+                {
                     return Err(RpcError::new(
                         Code::ResourceExhausted,
                         "source exceeds 4 GiB",
                     ));
                 }
-                let file = archive.reopen().map_err(internal)?;
+                let file = archive.reopen().map_err(RpcError::internal)?;
                 self.upload(client, id, file)
             }
             SourcePlan::Git { repo, key, commit } => {
@@ -1141,13 +1139,16 @@ impl Jobs {
                         prereqs.push(known.clone());
                     }
                 }
-                let mut bundle = tempfile::NamedTempFile::new_in(&self.root).map_err(internal)?;
+                let mut bundle =
+                    tempfile::NamedTempFile::new_in(&self.root).map_err(RpcError::internal)?;
                 let mut header = String::from("# v2 git bundle\n");
                 for prereq in &prereqs {
                     header.push_str(&format!("-{prereq} prerequisite\n"));
                 }
                 header.push_str(&format!("{commit} refs/pc/{commit}\n\n"));
-                bundle.write_all(header.as_bytes()).map_err(internal)?;
+                bundle
+                    .write_all(header.as_bytes())
+                    .map_err(RpcError::internal)?;
                 let mut child = Command::new("git")
                     .arg("-C")
                     .arg(repo)
@@ -1172,11 +1173,11 @@ impl Jobs {
                     .ok_or_else(|| RpcError::new(Code::Internal, "git stdin unavailable"))?;
                 stdin
                     .write_all(format!("{commit}\n").as_bytes())
-                    .map_err(internal)?;
+                    .map_err(RpcError::internal)?;
                 for prereq in &prereqs {
                     stdin
                         .write_all(format!("^{prereq}\n").as_bytes())
-                        .map_err(internal)?;
+                        .map_err(RpcError::internal)?;
                 }
                 drop(stdin);
                 let mut stdout = child
@@ -1187,7 +1188,7 @@ impl Jobs {
                     &mut stdout.by_ref().take(MAX_SOURCE_BYTES + 1),
                     bundle.as_file_mut(),
                 )
-                .map_err(internal)?;
+                .map_err(RpcError::internal)?;
                 if copied.saturating_add(header.len() as u64) > MAX_SOURCE_BYTES {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -1196,13 +1197,13 @@ impl Jobs {
                         "Git bundle exceeds 4 GiB",
                     ));
                 }
-                if !child.wait().map_err(internal)?.success() {
+                if !child.wait().map_err(RpcError::internal)?.success() {
                     return Err(RpcError::new(
                         Code::FailedPrecondition,
                         "git pack-objects failed",
                     ));
                 }
-                let sent = self.upload(client, id, bundle.reopen().map_err(internal)?)?;
+                let sent = self.upload(client, id, bundle.reopen().map_err(RpcError::internal)?)?;
                 run.bundle_uploaded = true;
                 Ok(sent)
             }
@@ -1214,7 +1215,7 @@ impl Jobs {
         let mut offset = 0_u64;
         let mut buf = vec![0_u8; UPLOAD_CHUNK];
         loop {
-            let n = reader.read(&mut buf).map_err(internal)?;
+            let n = reader.read(&mut buf).map_err(RpcError::internal)?;
             if offset.saturating_add(n as u64) > MAX_SOURCE_BYTES {
                 return Err(RpcError::new(
                     Code::ResourceExhausted,
@@ -1408,9 +1409,9 @@ impl Jobs {
                 let mut file = OpenOptions::new()
                     .append(true)
                     .open(self.root.join(format!("{id}.log")))
-                    .map_err(internal)?;
-                file.write_all(&data).map_err(internal)?;
-                file.sync_data().map_err(internal)?;
+                    .map_err(RpcError::internal)?;
+                file.write_all(&data).map_err(RpcError::internal)?;
+                file.sync_data().map_err(RpcError::internal)?;
                 self.update(id, |s| s.job.log_bytes = old + data.len() as u64)
                     .map(|_| ())
             }
@@ -1506,7 +1507,7 @@ impl Jobs {
                 "too many request ids in use; retry later",
             ));
         }
-        let expires = now + REQUEST_ID_WINDOW.as_secs();
+        let expires = now + REQUEST_ID_WINDOW.as_secs() as i64;
         let prior = canceled.insert(key.to_owned(), expires);
         if let Err(error) = persist_canceled_request_ids(&self.root, &canceled) {
             if let Some(prior) = prior {
@@ -1659,10 +1660,11 @@ async fn watch(jobs: &Jobs, request: v1::WatchJobRequest, sender: StreamSender) 
         if offset < size {
             let count = (size - offset).min(CHUNK as u64) as usize;
             let path = jobs.root.join(format!("{id}.log"));
-            let mut file = File::open(path).map_err(internal)?;
-            file.seek(SeekFrom::Start(offset)).map_err(internal)?;
+            let mut file = File::open(path).map_err(RpcError::internal)?;
+            file.seek(SeekFrom::Start(offset))
+                .map_err(RpcError::internal)?;
             let mut data = vec![0; count];
-            file.read_exact(&mut data).map_err(internal)?;
+            file.read_exact(&mut data).map_err(RpcError::internal)?;
             sender
                 .send(&v1::WatchJobResponse {
                     event: Some(watch_job_response::Event::Log(v1::JobLog { offset, data })),
@@ -1678,19 +1680,18 @@ async fn watch(jobs: &Jobs, request: v1::WatchJobRequest, sender: StreamSender) 
     }
 }
 fn persist(root: &Path, id: &str, stored: &Stored) -> Result<()> {
-    let job = serde_json::to_value(stored.job.transcode_to_dynamic()).map_err(internal)?;
-    let bytes = serde_json::to_vec(&json!({"id":id,"job":job,"requestId":stored.request_id,"cancelRequested":stored.cancel_requested})).map_err(internal)?;
-    let mut nonce = [0_u8; 8];
-    getrandom::getrandom(&mut nonce).map_err(internal)?;
+    let job =
+        serde_json::to_value(stored.job.transcode_to_dynamic()).map_err(RpcError::internal)?;
+    let bytes = serde_json::to_vec(&json!({"id":id,"job":job,"requestId":stored.request_id,"cancelRequested":stored.cancel_requested})).map_err(RpcError::internal)?;
     let temp = root.join(format!(
         ".{id}-{}.tmp",
-        nonce.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        random_hex(8).map_err(RpcError::internal)?
     ));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     options.mode(0o600);
-    let mut file = options.open(&temp).map_err(internal)?;
+    let mut file = options.open(&temp).map_err(RpcError::internal)?;
     let result = (|| -> std::io::Result<()> {
         file.write_all(&bytes)?;
         file.sync_all()?;
@@ -1700,22 +1701,16 @@ fn persist(root: &Path, id: &str, stored: &Stored) -> Result<()> {
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
-    result.map_err(internal)
+    result.map_err(RpcError::internal)
 }
-fn persist_canceled_request_ids(root: &Path, canceled: &BTreeMap<String, u64>) -> Result<()> {
-    let bytes = serde_json::to_vec(canceled).map_err(internal)?;
-    let mut file = tempfile::NamedTempFile::new_in(root).map_err(internal)?;
-    file.write_all(&bytes).map_err(internal)?;
-    file.as_file().sync_all().map_err(internal)?;
+fn persist_canceled_request_ids(root: &Path, canceled: &BTreeMap<String, i64>) -> Result<()> {
+    let bytes = serde_json::to_vec(canceled).map_err(RpcError::internal)?;
+    let mut file = tempfile::NamedTempFile::new_in(root).map_err(RpcError::internal)?;
+    file.write_all(&bytes).map_err(RpcError::internal)?;
+    file.as_file().sync_all().map_err(RpcError::internal)?;
     file.persist(root.join("canceled-requests"))
-        .map_err(internal)?;
+        .map_err(RpcError::internal)?;
     Ok(())
-}
-fn unix_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 fn validate_request_id(key: &str) -> Result<()> {
     if key.len() < 8
@@ -1759,9 +1754,6 @@ fn recovery_deadline(job: &v1::Job) -> SystemTime {
         .and_then(|time| time.checked_add(RECOVERY_GRACE))
         .unwrap_or_else(SystemTime::now)
 }
-fn internal(e: impl std::fmt::Display) -> RpcError {
-    RpcError::new(Code::Internal, e.to_string())
-}
 fn valid_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 80
@@ -1769,12 +1761,10 @@ fn valid_id(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 fn random_id() -> Result<String> {
-    let mut bytes = [0; 12];
-    getrandom::getrandom(&mut bytes).map_err(internal)?;
     Ok(format!(
         "{}-{}",
         Utc::now().format("%Y%m%d-%H%M%S"),
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        random_hex(12).map_err(RpcError::internal)?
     ))
 }
 fn lease_error(error: protectorate_lease::Error) -> RpcError {

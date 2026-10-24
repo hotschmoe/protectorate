@@ -6,6 +6,6 @@ description = "Verified file push and pull over Protectorate Connect JSON"
 
 [dependencies]
 protectorate-connect-client = { path = "../protectorate-connect-client" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-wire = { path = "../protectorate-wire" }
 protectorate-xfer = { path = "../protectorate-xfer" }
-getrandom = "0.2"

@@ -21,8 +21,10 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::Path,
     sync::{Arc, RwLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
+
+pub use protectorate_fsutil::unix_seconds as unix_now;
 
 /// The name every hub certificate carries. Node certificates are named under
 /// `node.protectorate.internal`, so no node can present it.
@@ -64,12 +66,6 @@ pub fn check_listen(addr: SocketAddr) -> io::Result<()> {
         ));
     }
     Ok(())
-}
-
-pub fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
 
 fn invalid(error: impl std::fmt::Display) -> io::Error {
@@ -190,7 +186,10 @@ impl Ca {
         let cert = leaf(vec![node_name(name, id)], LEAF_LIFETIME)?
             .signed_by(&key, &self.issuer)
             .map_err(invalid)?;
-        Ok((cert.pem(), unix_now() + LEAF_LIFETIME.as_secs() as i64))
+        Ok((
+            cert.pem(),
+            protectorate_fsutil::unix_seconds() + LEAF_LIFETIME.as_secs() as i64,
+        ))
     }
 }
 

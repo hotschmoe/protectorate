@@ -108,6 +108,9 @@ impl RpcError {
     pub fn invalid(message: impl Into<String>) -> Self {
         Self::new(Code::InvalidArgument, message)
     }
+    pub fn internal(error: impl std::fmt::Display) -> Self {
+        Self::new(Code::Internal, error.to_string())
+    }
     fn status(mut self, status: StatusCode) -> Self {
         self.status = Some(status);
         self

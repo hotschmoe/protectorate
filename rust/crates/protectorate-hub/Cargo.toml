@@ -27,6 +27,7 @@ protectorate-lease = { path = "../protectorate-lease" }
 protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-node-monitor = { path = "../protectorate-node-monitor" }
 protectorate-tls = { path = "../protectorate-tls" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }
 protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }

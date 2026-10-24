@@ -998,11 +998,6 @@ async fn read_body(body: Body, limit: usize) -> std::result::Result<Bytes, BodyF
 }
 
 fn new_session_id() -> Result<String> {
-    let mut bytes = [0_u8; SESSION_ID_BYTES];
-    getrandom::getrandom(&mut bytes)
-        .map_err(|error| RpcError::new(Code::Internal, format!("create session id: {error}")))?;
-    Ok(bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>())
+    protectorate_fsutil::random_hex(SESSION_ID_BYTES)
+        .map_err(|error| RpcError::new(Code::Internal, format!("create session id: {error}")))
 }

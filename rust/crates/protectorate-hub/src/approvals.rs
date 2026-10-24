@@ -239,9 +239,7 @@ impl Approvals {
 }
 
 fn new_id() -> Result<String> {
-    let mut bytes = [0u8; 6];
-    getrandom::getrandom(&mut bytes).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+    protectorate_fsutil::random_hex(6).map_err(RpcError::internal)
 }
 
 fn summary(ask: &Ask) -> String {

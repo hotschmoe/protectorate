@@ -593,7 +593,7 @@ fn bridge(
                     stdout
                         .write_all(&frame[1..])
                         .and_then(|_| stdout.flush())
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                        .map_err(RpcError::internal)?;
                 }
                 b'2' => notice = String::from_utf8_lossy(&frame[1..]).into_owned(),
                 _ => {}

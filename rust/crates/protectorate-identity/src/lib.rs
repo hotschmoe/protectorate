@@ -8,6 +8,7 @@ use protectorate_auth::{
     capability::{self, Claims},
     proof::{self, Proof},
 };
+use protectorate_fsutil::hex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -207,9 +208,6 @@ fn random_bytes(n: usize) -> Result<Zeroizing<Vec<u8>>> {
     let mut b = Zeroizing::new(vec![0u8; n]);
     getrandom::getrandom(&mut b).map_err(|e| io::Error::other(e.to_string()))?;
     Ok(b)
-}
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 fn ttl_seconds(ttl: Duration) -> Result<i64> {
     if ttl.is_zero() || ttl > MAX_TTL {

@@ -42,10 +42,8 @@ pub(crate) fn run_job(
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<String, RunError> {
-    let mut nonce = [0_u8; 16];
-    getrandom::getrandom(&mut nonce)
+    let key = protectorate_fsutil::random_hex(16)
         .map_err(|e| RpcError::new(Code::Internal, format!("request id: {e}")))?;
-    let key = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let request = submit_request(spec, &key)?;
     let _guard = SignalGuard::install(signals);
     if signals && _guard.is_none() {
@@ -224,41 +222,14 @@ fn selector(text: &str) -> Result<v1::NodeSelector, RpcError> {
             "arch" => selector.arch = value.into(),
             "gpu" => selector.gpu = value.into(),
             "npu" => selector.npu = value.into(),
-            "mem" | "min-free-mem" => selector.min_free_memory_bytes = parse_size(value)?,
-            "gpu-vram" | "vram" => selector.gpu_vram_bytes = parse_size(value)?,
+            "mem" | "min-free-mem" => {
+                selector.min_free_memory_bytes = crate::args::parse_size(value)?
+            }
+            "gpu-vram" | "vram" => selector.gpu_vram_bytes = crate::args::parse_size(value)?,
             _ => return Err(RpcError::invalid(format!("unknown selector key {key:?}"))),
         }
     }
     Ok(selector)
-}
-fn parse_size(text: &str) -> Result<u64, RpcError> {
-    let mut body = text.trim().to_ascii_uppercase();
-    if let Some(stripped) = body.strip_suffix('B') {
-        body = stripped.into();
-    }
-    if let Some(stripped) = body.strip_suffix('I') {
-        body = stripped.into();
-    }
-    let mut mult = 1_u64;
-    for (index, suffix) in ["K", "M", "G", "T"].into_iter().enumerate() {
-        if let Some(stripped) = body.strip_suffix(suffix) {
-            mult = 1_u64 << (10 * (index + 1));
-            body = stripped.into();
-            break;
-        }
-    }
-    let magnitude: f64 = body
-        .trim()
-        .parse()
-        .map_err(|_| RpcError::invalid("invalid selector size"))?;
-    if !magnitude.is_finite() || magnitude < 0.0 {
-        return Err(RpcError::invalid("invalid selector size"));
-    }
-    let bytes = magnitude * mult as f64;
-    if bytes > u64::MAX as f64 {
-        return Err(RpcError::invalid("selector size overflow"));
-    }
-    Ok(bytes as u64)
 }
 fn follow(
     client: &Client,

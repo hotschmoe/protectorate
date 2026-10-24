@@ -1,5 +1,5 @@
 //! Authenticated terminal WebSocket bridge to tmux's private PTY client.
-use crate::{audit, now_unix, Hub};
+use crate::{audit, Hub};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -8,6 +8,7 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+use protectorate_fsutil::unix_seconds;
 use std::{
     io,
     os::{
@@ -265,7 +266,7 @@ async fn bridge(
     );
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut token_tick = tokio::time::interval(Duration::from_secs(1));
-    let watch = (!owner).then(|| hub.identity.watch(&token_id, now_unix()));
+    let watch = (!owner).then(|| hub.identity.watch(&token_id, unix_seconds()));
     let mut shown_exit = session.state == protectorate_session::State::Exited;
     loop {
         tokio::select! {

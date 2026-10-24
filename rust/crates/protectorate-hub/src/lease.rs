@@ -2,6 +2,7 @@
 //! by a chooser once the node monitor is connected to this hub.
 use super::{EventBus, Hub};
 use chrono::{DateTime, SecondsFormat, Utc};
+use protectorate_fsutil::unix_millis;
 use protectorate_inventory::{Inventory, SHARED};
 use protectorate_lease::{self as leases, Chooser, Entry, Event, EventKind, LeaseTable, Wait};
 use protectorate_mailbox::{Kind, NewMessage, Store as MailStore};
@@ -15,7 +16,7 @@ use std::{
     collections::BTreeSet,
     path::Path,
     sync::{Arc, Mutex, RwLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 pub(super) fn default_chooser(
@@ -93,7 +94,7 @@ pub(super) fn open_table(
             }
             let seconds = lease
                 .expires_at
-                .saturating_sub(now_millis())
+                .saturating_sub(unix_millis())
                 .max(0)
                 / 1000;
             let body = format!(
@@ -168,15 +169,6 @@ fn publish_event(bus: &EventBus, event: &Event) {
         }
     };
     bus.publish(kind, subject, payload);
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
 }
 
 fn at(millis: i64) -> String {
@@ -284,7 +276,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let table = Arc::clone(&hub.leases);
             let run_id = super::actor_run(&hub, &call.auth.actor);
             let granted = tokio::task::spawn_blocking(move || {
-                let now = now_millis();
+                let now = unix_millis();
                 if wait {
                     table.acquire_wait(
                         Wait {
@@ -320,7 +312,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 .ttl
                 .map(|ttl| wire::duration(Some(&ttl), "ttl"))
                 .transpose()?;
-            let lease = tokio::task::spawn_blocking(move || table.renew(&id, ttl, now_millis()))
+            let lease = tokio::task::spawn_blocking(move || table.renew(&id, ttl, unix_millis()))
                 .await
                 .map_err(super::join_error)?
                 .map_err(error)?;
@@ -332,7 +324,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         let table = Arc::clone(&release.leases);
         async move {
             let id = call.request.id;
-            tokio::task::spawn_blocking(move || table.release(&id, now_millis()))
+            tokio::task::spawn_blocking(move || table.release(&id, unix_millis()))
                 .await
                 .map_err(super::join_error)?
                 .map_err(error)?;
@@ -342,7 +334,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     server.unary(lease_service::LIST_LEASES, move |_: Call<_>| {
         let table = Arc::clone(&hub.leases);
         async move {
-            let entries = tokio::task::spawn_blocking(move || table.list(now_millis()))
+            let entries = tokio::task::spawn_blocking(move || table.list(unix_millis()))
                 .await
                 .map_err(super::join_error)?
                 .map_err(error)?;

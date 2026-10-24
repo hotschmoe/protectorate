@@ -1,7 +1,7 @@
 //! Who is calling. The owner token works only on the loopback listener; an
 //! approved device signs each request with its key; everything else holds a
 //! capability the hub minted. Every hub entry point admits callers here.
-use crate::{now_unix, unix_time, Hub};
+use crate::{unix_time, Hub};
 use axum::http::{header, HeaderMap};
 use prost_reflect::prost_types;
 use protectorate_auth::{
@@ -10,6 +10,7 @@ use protectorate_auth::{
     proof::{self, Proof},
     Method as ScopeMethod,
 };
+use protectorate_fsutil::unix_seconds;
 use protectorate_identity::{self as identity, Capability, Device, Mint, Secret, Store};
 use protectorate_wire::{
     self as wire,
@@ -91,7 +92,7 @@ pub(crate) fn authenticate(
     path: &str,
     tls: bool,
 ) -> Result<Caller> {
-    let now = now_unix();
+    let now = unix_seconds();
     let signed = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -241,7 +242,7 @@ pub(crate) fn issue_held(
     path: &Path,
 ) -> Result<Capability> {
     revoke_held(hub, principal)?;
-    let now = now_unix();
+    let now = unix_seconds();
     let (record, secret) = hub
         .identity
         .mint(
@@ -274,7 +275,7 @@ pub(crate) fn sleeve_scopes(hub: &Hub, parent: &crate::sleeves::SpawnParent) -> 
 
 /// The scopes of Envoy's live capability, empty when it holds none.
 pub(crate) fn envoy_scopes(hub: &Hub) -> Vec<String> {
-    let now = now_unix();
+    let now = unix_seconds();
     hub.identity
         .capabilities()
         .into_iter()
@@ -295,14 +296,14 @@ pub(crate) fn issue_sleeve(
 
 /// Revokes every lineage of `principal` and removes the files the hub keeps.
 pub(crate) fn revoke_held(hub: &Hub, principal: &str) -> Result<()> {
-    let now = now_unix();
+    let now = unix_seconds();
     for record in hub.identity.capabilities() {
         if record.principal != principal || record.revoked_at.is_some() {
             continue;
         }
         hub.identity
             .revoke(&record.id, now)
-            .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+            .map_err(RpcError::internal)?;
         if let Some(file) = &record.file {
             match std::fs::remove_file(file) {
                 Ok(()) => {}
@@ -329,7 +330,7 @@ pub(crate) fn refresh_held(hub: &Hub, now: i64) {
         let written = hub
             .identity
             .refresh(&record.id, now)
-            .map_err(|error| RpcError::new(Code::Internal, error.to_string()))
+            .map_err(RpcError::internal)
             .and_then(|secret| write_held(file, &secret));
         if let Err(error) = written {
             eprintln!("refresh {} capability: {}", record.principal, error.message);
@@ -411,7 +412,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             ttl: ttl(request.ttl.as_ref(), DEFAULT_TTL)?,
                             file: None,
                         },
-                        now_unix(),
+                        unix_seconds(),
                     )
                     .map_err(token_error)?;
                 Ok(v1::CreateTokenResponse {
@@ -438,7 +439,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             async move {
                 let token = hub
                     .identity
-                    .revoke(&call.request.id, now_unix())
+                    .revoke(&call.request.id, unix_seconds())
                     .map_err(token_error)?;
                 Ok(v1::RevokeTokenResponse {
                     token: Some(token_info(&token)),
@@ -453,7 +454,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 .ok_or_else(|| RpcError::new(Code::Unauthenticated, "no capability presented"))?;
             let (record, secret) = hub
                 .identity
-                .renew(presented, now_unix())
+                .renew(presented, unix_seconds())
                 .map_err(|error| RpcError::new(Code::Unauthenticated, error.to_string()))?;
             Ok(v1::RenewTokenResponse {
                 token: Some(token_info(&record)),
@@ -478,7 +479,7 @@ pub(crate) fn start_refresh(runtime: &tokio::runtime::Handle, hub: &Arc<Hub>) {
                 hosts = Instant::now();
             }
             let done = tokio::task::spawn_blocking(move || {
-                refresh_held(&hub, now_unix());
+                refresh_held(&hub, unix_seconds());
                 if write_hosts {
                     if let Err(error) = crate::envoy::write_hosts(&hub) {
                         eprintln!("Envoy hosts: {}", error.message);

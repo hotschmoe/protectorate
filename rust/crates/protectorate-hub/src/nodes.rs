@@ -1,5 +1,6 @@
 use super::Hub;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use protectorate_fsutil::{hex, random_hex, unix_millis, unix_seconds};
 use protectorate_inventory::{Error, Node, CARE, SHARED};
 use protectorate_lease::Entry;
 use protectorate_node_monitor::PollEvent;
@@ -15,7 +16,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 const DEFAULT_DRAIN_WAIT: Duration = Duration::from_secs(3600);
@@ -26,10 +27,6 @@ const MEM_ALERT_PERCENT: f64 = 90.0;
 // How often WatchNodeSetup re-reads progress, and how often it kicks the
 // monitor's poll while a node is between joining and ready.
 const SETUP_POLL: Duration = Duration::from_secs(1);
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
 
 /// One-line installers: fetch the CA, check its SHA-256 against the invite,
 /// then fetch and run the installer over TLS pinned to that CA.
@@ -417,10 +414,10 @@ async fn invite_node(hub: Arc<Hub>, body: v1::InviteNodeRequest) -> Result<v1::I
         ));
     }
     let mut secret = [0_u8; 32];
-    getrandom::getrandom(&mut secret).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+    getrandom::getrandom(&mut secret).map_err(RpcError::internal)?;
     let code = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret);
     let ca_sha256 = hex(&Sha256::digest(ca.pem().as_bytes()));
-    let expires = protectorate_tls::unix_now() + ttl.as_secs() as i64;
+    let expires = unix_seconds() + ttl.as_secs() as i64;
     let node = Node {
         name: name.clone(),
         tier,
@@ -497,12 +494,10 @@ async fn join_node(hub: Arc<Hub>, body: v1::JoinNodeRequest) -> Result<v1::JoinN
         .map_err(|_| RpcError::invalid("address must be IP:PORT"))?;
     protectorate_tls::check_listen(address)
         .map_err(|error| RpcError::invalid(error.to_string()))?;
-    let mut id = [0_u8; 8];
-    getrandom::getrandom(&mut id).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-    let cert_id = hex(&id);
+    let cert_id = random_hex(8).map_err(RpcError::internal)?;
     let (certificate, cert_expires) = ca
         .issue_node(&name, &cert_id, &public_key)
-        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+        .map_err(RpcError::internal)?;
     let inventory = Arc::clone(&hub.inventory);
     let code_sha256 = hex(&Sha256::digest(code.as_bytes()));
     let joined = Node {
@@ -514,12 +509,7 @@ async fn join_node(hub: Arc<Hub>, body: v1::JoinNodeRequest) -> Result<v1::JoinN
     };
     let node_name = name.clone();
     tokio::task::spawn_blocking(move || {
-        inventory.redeem(
-            &node_name,
-            &code_sha256,
-            protectorate_tls::unix_now(),
-            joined,
-        )
+        inventory.redeem(&node_name, &code_sha256, unix_seconds(), joined)
     })
     .await
     .map_err(super::join_error)?
@@ -732,10 +722,7 @@ async fn remove_node(
         "the node certificate is no longer trusted"
     };
     progress(&sender, RemovePhase::Revoking, 0, revoke_message).await?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = unix_millis();
     let entries = hub.leases.list(now).map_err(lease_error)?;
     let mut released = 0;
     for entry in entries {
@@ -947,8 +934,7 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
         return;
     };
     if node.cert_id.is_empty()
-        || node.cert_expires - protectorate_tls::unix_now()
-            > protectorate_tls::RENEW_BEFORE.as_secs() as i64
+        || node.cert_expires - unix_seconds() > protectorate_tls::RENEW_BEFORE.as_secs() as i64
         || !hub.renewing.lock().unwrap().insert(node.name.clone())
     {
         return;

@@ -1,7 +1,8 @@
 //! Device pairing and trusted-device management. A device registers its
 //! public key when it starts pairing and signs every later request.
-use super::{now_unix, unix_time, Hub};
+use super::{unix_time, Hub};
 use protectorate_audit::Entry as AuditEntry;
+use protectorate_fsutil::unix_seconds;
 use protectorate_identity::{self as identity, Device, PollStatus};
 use protectorate_wire::{
     v1::{self, device_service},
@@ -28,7 +29,7 @@ pub(super) fn start_expiry_sweep(hub: &Arc<Hub>) {
             let Some(hub) = weak.upgrade() else {
                 break;
             };
-            sweep_expired(&hub, now_unix());
+            sweep_expired(&hub, unix_seconds());
             drop(hub);
             std::thread::sleep(EXPIRY_SWEEP_INTERVAL);
         })
@@ -171,7 +172,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             .requesting_ip
                             .map(|ip| ip.to_string())
                             .unwrap_or_else(|| "127.0.0.1".into()),
-                        now_unix(),
+                        unix_seconds(),
                     )
                     .map_err(error)?;
                 hub.emit("device_auth.pending", "", json!({}));
@@ -197,7 +198,10 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         "device code is too long",
                     ));
                 }
-                let outcome = hub.identity.poll_device(&code, now_unix()).map_err(error)?;
+                let outcome = hub
+                    .identity
+                    .poll_device(&code, unix_seconds())
+                    .map_err(error)?;
                 let status = match outcome.status {
                     PollStatus::Expired => "expired",
                     PollStatus::Pending => "pending",
@@ -224,7 +228,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             Ok(v1::ListDeviceAuthResponse {
                 requests: hub
                     .identity
-                    .pending_devices(now_unix())
+                    .pending_devices(unix_seconds())
                     .into_iter()
                     .map(|r| v1::DeviceAuthInfo {
                         user_code: r.user_code,
@@ -333,7 +337,7 @@ fn decide(
     }
     let decided = hub
         .identity
-        .decide_device(code, &auth.actor, approve, now_unix())
+        .decide_device(code, &auth.actor, approve, unix_seconds())
         .map_err(error)?;
     hub.audit.write(AuditEntry {
         actor: auth.actor.clone(),

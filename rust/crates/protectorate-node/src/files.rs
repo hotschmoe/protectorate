@@ -1,3 +1,4 @@
+use protectorate_fsutil::unix_seconds;
 use protectorate_wire::{self as wire, v1, Code, ReflectMessage, RpcError};
 #[cfg(any(unix, windows))]
 use protectorate_xfer::directory_digest;
@@ -19,7 +20,7 @@ use std::{
     fs, io,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
@@ -81,7 +82,7 @@ struct Receipt {
     sha256: String,
     #[serde(default)]
     directory: bool,
-    expires: u64,
+    expires: i64,
 }
 
 impl Receipt {
@@ -239,13 +240,6 @@ fn windows_directory_identity(path: &Path) -> io::Result<(u64, u64, u64, i64)> {
     windows_file_identity(&file)
 }
 
-fn now_epoch() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 impl Files {
     pub(crate) fn new(root: impl AsRef<Path>, unconfined: bool) -> io::Result<Self> {
         Self::open_store(root, unconfined, None)
@@ -282,7 +276,7 @@ impl Files {
                     }
                     entries
                         .into_iter()
-                        .filter(|(_, receipt)| receipt.expires > now_epoch())
+                        .filter(|(_, receipt)| receipt.expires > unix_seconds())
                         .collect()
                 }
                 Ok(_) => return Err(io::Error::other("file receipts exceed 1 MiB")),
@@ -392,7 +386,8 @@ impl Files {
             .map_err(|_| err(Code::Internal, "transfer lock poisoned"))?;
         map.completed
             .retain(|_, entry| entry.finished.elapsed() <= COMPLETED_TTL);
-        map.durable.retain(|_, entry| entry.expires > now_epoch());
+        map.durable
+            .retain(|_, entry| entry.expires > unix_seconds());
         if let Some(entry) = map.completed.get(id) {
             if entry.replay.offset == offset && entry.replay.request_hash == request_hash {
                 return Ok(entry.replay.reply.clone());
@@ -634,7 +629,7 @@ impl Files {
                 mtime_nsec: 0,
                 sha256: trailer.sha256.to_ascii_lowercase(),
                 directory: false,
-                expires: now_epoch() + COMPLETED_TTL.as_secs(),
+                expires: unix_seconds() + COMPLETED_TTL.as_secs() as i64,
             };
             self.record_receipt(id, receipt)?;
             prepared.publish().map_err(|e| err(Code::DataLoss, e))?;
@@ -690,7 +685,7 @@ impl Files {
                     mtime_nsec: 0,
                     sha256: digest,
                     directory: true,
-                    expires: now_epoch() + COMPLETED_TTL.as_secs(),
+                    expires: unix_seconds() + COMPLETED_TTL.as_secs() as i64,
                 };
                 self.record_receipt(id, receipt)?;
             }
@@ -712,7 +707,7 @@ impl Files {
             .lock()
             .map_err(|_| err(Code::Internal, "transfer lock poisoned"))?;
         let mut entries = map.durable.clone();
-        entries.retain(|_, entry| entry.expires > now_epoch());
+        entries.retain(|_, entry| entry.expires > unix_seconds());
         if entries.len() >= MAX_COMPLETED {
             if let Some(oldest) = entries
                 .iter()

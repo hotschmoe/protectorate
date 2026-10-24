@@ -1291,8 +1291,7 @@ fn update_nodes(
                     .to_ascii_lowercase()
             );
             if all {
-                writeln!(stdout, "{current}\tskipped: {reason}")
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                writeln!(stdout, "{current}\tskipped: {reason}").map_err(RpcError::internal)?;
                 continue;
             }
             return Err(RpcError::new(Code::Unavailable, reason));
@@ -1313,7 +1312,7 @@ fn update_nodes(
                 stdout
                     .write_all(line.as_bytes())
                     .and_then(|()| stdout.flush())
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                    .map_err(RpcError::internal)?;
             }
             if no_wait && last_phase == v1::UpdatePhase::Swapping {
                 return Err(RpcError::new(Code::Canceled, "node update no-wait"));
@@ -2053,7 +2052,10 @@ fn execute_commands(
             if json {
                 json_line(&leases)
             } else {
-                Ok(format::lease_list_text(&leases, format::now_millis()))
+                Ok(format::lease_list_text(
+                    &leases,
+                    protectorate_fsutil::unix_millis(),
+                ))
             }
         }
         Command::LeaseAcquire(spec) => {
@@ -2137,7 +2139,10 @@ fn execute_commands(
             if json {
                 json_lines(&jobs.jobs)
             } else {
-                Ok(format::job_list_text(&jobs, format::now_millis()))
+                Ok(format::job_list_text(
+                    &jobs,
+                    protectorate_fsutil::unix_millis(),
+                ))
             }
         }
         Command::JobShow { id } => {
@@ -2706,13 +2711,8 @@ fn read_stdin() -> Result<String> {
 
 fn edit_in_editor(note: &v1::Note) -> Result<(String, String)> {
     use std::io::Write;
-    let mut nonce = [0_u8; 8];
-    getrandom::getrandom(&mut nonce)
+    let suffix = protectorate_fsutil::random_hex(8)
         .map_err(|error| RpcError::new(Code::Internal, format!("editor temp name: {error}")))?;
-    let suffix = nonce
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
     let path = env::temp_dir().join(format!(
         "protectorate-note-{}-{suffix}.md",
         std::process::id()
@@ -3239,7 +3239,7 @@ fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
         return Ok(format::orchestrator_status_text(
             sleeve.as_ref(),
             token.as_ref(),
-            format::now_millis(),
+            protectorate_fsutil::unix_millis(),
         ));
     }
     let mut status = serde_json::Map::new();

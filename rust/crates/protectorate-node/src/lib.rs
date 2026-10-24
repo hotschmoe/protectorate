@@ -342,8 +342,7 @@ impl Agent {
                         .await
                         .map_err(join_error)?;
                         source = next;
-                        let chunk =
-                            chunk.map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                        let chunk = chunk.map_err(RpcError::internal)?;
                         let Some(chunk) = chunk else { break };
                         sender
                             .send(&file_part(Part::Chunk(v1::FileChunk {

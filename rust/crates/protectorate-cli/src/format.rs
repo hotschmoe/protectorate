@@ -224,7 +224,7 @@ pub(crate) fn token_created_text(response: &v1::CreateTokenResponse) -> String {
 
 pub(crate) fn token_list_text(response: &v1::ListTokensResponse) -> String {
     let mut out = "ID\tNAME\tSTATE\tEXPIRES\tSCOPES\tTASK\n".to_owned();
-    let now = now_millis();
+    let now = protectorate_fsutil::unix_millis();
     for token in &response.tokens {
         let task = if token.task.is_empty() {
             "-".into()
@@ -489,7 +489,7 @@ fn quota_freshness(quota: &v1::ProviderQuota) -> String {
 pub(crate) fn quota_text(response: &v1::GetQuotaResponse) -> String {
     let mut out =
         String::from("PROVIDER\tPLAN\tWINDOW\tUSED\tRESETS IN\tPROJ. UNUSED (est.)\tFRESHNESS\n");
-    let now = now_millis();
+    let now = protectorate_fsutil::unix_millis();
     let mut notes = Vec::new();
     for quota in &response.quotas {
         let provider = &quota.provider;
@@ -2131,22 +2131,13 @@ fn first_line(text: &str, limit: usize) -> String {
     }
 }
 
-pub(crate) fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
-}
-
 /// How long ago a hub timestamp is, in seconds; zero when absent.
 fn age_since<T: Copy>(at: Option<&T>) -> f64
 where
     SystemTime: TryFrom<T>,
 {
     match unix_millis(at) {
-        Some(millis) => (now_millis() - millis) as f64 / 1000.0,
+        Some(millis) => (protectorate_fsutil::unix_millis() - millis) as f64 / 1000.0,
         None => 0.0,
     }
 }

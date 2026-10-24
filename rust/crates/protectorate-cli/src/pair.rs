@@ -30,8 +30,7 @@ pub(crate) fn run(invocation: &Invocation, url: Option<&str>, app_qr: bool) -> R
     }
     let qr_link = if app_qr { &links.app } else { &links.web };
     let mut bytes = Vec::new();
-    write_qr(&mut bytes, qr_link)
-        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    write_qr(&mut bytes, qr_link).map_err(RpcError::internal)?;
     let mut output = String::from_utf8(bytes)
         .map_err(|error| RpcError::new(Code::Internal, format!("encode pairing QR: {error}")))?;
     output.push_str(&format!(
