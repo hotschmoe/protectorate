@@ -3,7 +3,7 @@ use crate::Hub;
 use axum::{
     body::Body,
     http::{header, HeaderValue, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
 };
 use protectorate_release::{self as release, RUST_BUNDLE};
 use sha2::{Digest, Sha256};
@@ -118,5 +118,3 @@ pub(super) async fn serve(hub: Arc<Hub>, file: String) -> Response {
     }
     response
 }
-
-use axum::response::IntoResponse;

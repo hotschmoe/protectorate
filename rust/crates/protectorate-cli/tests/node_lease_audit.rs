@@ -82,7 +82,6 @@ async fn node_lease_and_audit_commands_print_what_the_hub_did() {
         .unwrap()
         .with_node_binary_dir(&bins)
         .with_node_update_timing(Duration::from_secs(5), Duration::from_millis(20));
-    let monitor = Arc::clone(&hub.node_monitor);
     let (url, hub_task) = serve(hub.router().unwrap()).await;
     let address = node_url.trim_start_matches("http://").to_owned();
 
@@ -102,8 +101,6 @@ async fn node_lease_and_audit_commands_print_what_the_hub_did() {
         assert!(ok(&["node", "show", "peer"]).contains("gpu box"));
         let pool = fails(&["node", "invite", "spare", "--pool", "gpu"]);
         assert!(pool.contains("--pool"), "{pool}");
-        // AddNode polls in the background; poll here so admission is settled.
-        monitor.poll_node("peer");
 
         let held = ok(&[
             "lease", "acquire", "--node", "peer", "--holder", "first", "--ttl", "10m",

@@ -1,10 +1,9 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use protectorate_wire::{Code, RpcError};
+use protectorate_wire::{self as wire, v1, Code, ReflectMessage, RpcError};
 #[cfg(any(unix, windows))]
 use protectorate_xfer::directory_digest;
 use protectorate_xfer::{Chunk, Error as XferError, Kind, Sink, Source, Trailer};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 #[cfg(any(unix, windows))]
 use std::io::Read;
@@ -58,7 +57,7 @@ struct Put {
 struct Replay {
     offset: u64,
     request_hash: [u8; 32],
-    reply: Value,
+    reply: v1::PutFileResponse,
 }
 
 struct Completed {
@@ -70,6 +69,7 @@ struct Completed {
 struct Receipt {
     offset: u64,
     request_hash: [u8; 32],
+    /// The PutFileResponse as protobuf JSON.
     reply: Value,
     dest: PathBuf,
     dev: u64,
@@ -366,8 +366,13 @@ impl Files {
         Ok((path, source))
     }
 
-    pub(crate) fn put(&self, request: &Value) -> Result<Value, RpcError> {
-        let id = field(request, "transferId")?;
+    pub(crate) fn put(
+        &self,
+        mut request: v1::PutFileRequest,
+    ) -> Result<v1::PutFileResponse, RpcError> {
+        let request_hash: [u8; 32] = Sha256::digest(wire::encode(&request)?).into();
+        let chunk = request.chunk.take();
+        let id = request.transfer_id.as_str();
         if id.len() < 8
             || id.len() > 80
             || !id.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
@@ -380,11 +385,7 @@ impl Files {
                 "transfer_id must be 8 to 80 characters of [A-Za-z0-9._-]",
             ));
         }
-        let offset = number(request, "offset").unwrap_or(0);
-        let request_hash: [u8; 32] = Sha256::digest(
-            serde_json::to_vec(request).map_err(|error| err(Code::Internal, error))?,
-        )
-        .into();
+        let offset = request.offset;
         let mut map = self
             .puts
             .lock()
@@ -415,72 +416,68 @@ impl Files {
                 ));
             }
             if entry.matches_destination() {
-                return Ok(entry.reply.clone());
+                return stored_reply(&entry.reply);
             }
             return Err(err(
                 Code::FailedPrecondition,
                 "transfer publication outcome is ambiguous",
             ));
         }
-        let (put, existing) = if offset == 0 {
-            let kind = match field(request, "kind")? {
-                "FILE_KIND_FILE" => Kind::File,
-                "FILE_KIND_DIRECTORY" => Kind::Directory,
-                _ => return Err(err(Code::InvalidArgument, "kind must be file or directory")),
-            };
-            let dest = self.resolve(field(request, "path")?)?;
-            map.active.retain(|_, transfer| {
-                transfer
-                    .try_lock()
-                    .map_or(true, |p| p.last.elapsed() <= IDLE)
-            });
-            if let Some(put) = map.active.get(id) {
-                (Arc::clone(put), true)
-            } else {
-                if map.active.len() >= MAX_TRANSFERS {
-                    return Err(err(
-                        Code::ResourceExhausted,
-                        "too many transfers in progress",
-                    ));
-                }
-                let mode = if kind == Kind::Directory {
-                    0o700
-                } else {
-                    let requested = number(request, "mode").unwrap_or(0) as u32;
-                    if requested == 0 {
-                        0o600
-                    } else {
-                        requested
-                    }
+        let (put, existing) =
+            if offset == 0 {
+                let kind = match request.kind() {
+                    v1::FileKind::File => Kind::File,
+                    v1::FileKind::Directory => Kind::Directory,
+                    _ => return Err(err(Code::InvalidArgument, "kind must be file or directory")),
                 };
-                let overwrite = request
-                    .get("overwrite")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let sink =
-                    Sink::new_unknown_size(&dest, kind, mode, overwrite).map_err(|e| match &e {
-                        XferError::Invalid(message) if message == "destination exists" => {
-                            err(Code::AlreadyExists, e)
+                let dest = self.resolve(&request.path)?;
+                map.active.retain(|_, transfer| {
+                    transfer
+                        .try_lock()
+                        .map_or(true, |p| p.last.elapsed() <= IDLE)
+                });
+                if let Some(put) = map.active.get(id) {
+                    (Arc::clone(put), true)
+                } else {
+                    if map.active.len() >= MAX_TRANSFERS {
+                        return Err(err(
+                            Code::ResourceExhausted,
+                            "too many transfers in progress",
+                        ));
+                    }
+                    let mode = if kind == Kind::Directory {
+                        0o700
+                    } else {
+                        if request.mode == 0 {
+                            0o600
+                        } else {
+                            request.mode
                         }
-                        _ => err(Code::FailedPrecondition, e),
-                    })?;
-                let put = Arc::new(Mutex::new(Put {
-                    sink: Some(sink),
-                    last: Instant::now(),
-                    dest,
-                    replay: None,
-                }));
-                map.active.insert(id.into(), Arc::clone(&put));
-                (put, false)
-            }
-        } else {
-            let put = map
-                .active
-                .get(id)
-                .cloned()
-                .ok_or_else(|| err(Code::NotFound, "unknown or expired transfer"))?;
-            (put, true)
-        };
+                    };
+                    let sink = Sink::new_unknown_size(&dest, kind, mode, request.overwrite)
+                        .map_err(|e| match &e {
+                            XferError::Invalid(message) if message == "destination exists" => {
+                                err(Code::AlreadyExists, e)
+                            }
+                            _ => err(Code::FailedPrecondition, e),
+                        })?;
+                    let put = Arc::new(Mutex::new(Put {
+                        sink: Some(sink),
+                        last: Instant::now(),
+                        dest,
+                        replay: None,
+                    }));
+                    map.active.insert(id.into(), Arc::clone(&put));
+                    (put, false)
+                }
+            } else {
+                let put = map
+                    .active
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| err(Code::NotFound, "unknown or expired transfer"))?;
+                (put, true)
+            };
         drop(map);
         let mut p = put
             .lock()
@@ -501,8 +498,8 @@ impl Files {
         if existing && offset == 0 {
             return Err(err(Code::AlreadyExists, "transfer id is in use"));
         }
-        let is_final = request.get("last").and_then(Value::as_bool) == Some(true);
-        let result = self.apply(&mut p, request, offset, id, request_hash);
+        let is_final = request.last;
+        let result = self.apply(&mut p, &request, chunk, id, request_hash);
         if let Ok(reply) = &result {
             let replay = Replay {
                 offset,
@@ -544,11 +541,12 @@ impl Files {
     fn apply(
         &self,
         p: &mut Put,
-        request: &Value,
-        offset: u64,
+        request: &v1::PutFileRequest,
+        chunk: Option<v1::FileChunk>,
         id: &str,
         request_hash: [u8; 32],
-    ) -> Result<Value, RpcError> {
+    ) -> Result<v1::PutFileResponse, RpcError> {
+        let offset = request.offset;
         let sink = p
             .sink
             .as_mut()
@@ -560,37 +558,35 @@ impl Files {
             ));
         }
         p.last = Instant::now();
-        if let Some(chunk) = request.get("chunk") {
-            let data = STANDARD
-                .decode(field(chunk, "data")?)
-                .map_err(|e| err(Code::InvalidArgument, e))?;
-            let raw_size = number(chunk, "rawSize").unwrap_or(0);
-            let raw_size = u32::try_from(raw_size)
-                .map_err(|_| err(Code::InvalidArgument, "rawSize is too large"))?;
-            let compressed = chunk
-                .get("compressed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+        if let Some(chunk) = chunk {
             sink.write(Chunk {
-                data,
-                compressed,
-                raw_size,
+                data: chunk.data,
+                compressed: chunk.compressed,
+                raw_size: chunk.raw_size,
             })
             .map_err(|e| err(Code::InvalidArgument, e))?;
         }
         let received = sink.received();
-        if request.get("last").and_then(Value::as_bool) != Some(true) {
-            return Ok(json!({"received": received.to_string()}));
+        if !request.last {
+            return Ok(v1::PutFileResponse {
+                received,
+                ..Default::default()
+            });
         }
         let trailer = request
-            .get("trailer")
+            .trailer
+            .as_ref()
             .ok_or_else(|| err(Code::InvalidArgument, "last chunk needs a trailer"))?;
         let trailer = Trailer {
-            size: number(trailer, "size").unwrap_or(0),
-            sha256: field(trailer, "sha256")?.into(),
-            skipped: number(trailer, "skipped").unwrap_or(0) as u32,
+            size: trailer.size,
+            sha256: trailer.sha256.clone(),
+            skipped: trailer.skipped,
         };
-        let reply = json!({"path": p.dest.to_string_lossy(), "received": received.to_string(), "done": true});
+        let reply = v1::PutFileResponse {
+            path: p.dest.to_string_lossy().into_owned(),
+            received,
+            done: true,
+        };
         let sink = p
             .sink
             .take()
@@ -610,7 +606,7 @@ impl Files {
             let receipt = Receipt {
                 offset,
                 request_hash,
-                reply: reply.clone(),
+                reply: reply_json(&reply)?,
                 dest: p.dest.clone(),
                 #[cfg(unix)]
                 dev: meta.dev(),
@@ -666,7 +662,7 @@ impl Files {
                 let receipt = Receipt {
                     offset,
                     request_hash,
-                    reply: reply.clone(),
+                    reply: reply_json(&reply)?,
                     dest: p.dest.clone(),
                     #[cfg(unix)]
                     dev: meta.dev(),
@@ -746,17 +742,13 @@ impl Files {
     }
 }
 
-fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str, RpcError> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| err(Code::InvalidArgument, format!("missing {key}")))
+#[cfg(any(unix, windows))]
+fn reply_json(reply: &v1::PutFileResponse) -> Result<Value, RpcError> {
+    serde_json::to_value(reply.transcode_to_dynamic()).map_err(|e| err(Code::Internal, e))
 }
-fn number(value: &Value, key: &str) -> Option<u64> {
-    value.get(key).and_then(|v| {
-        v.as_u64()
-            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-    })
+fn stored_reply(reply: &Value) -> Result<v1::PutFileResponse, RpcError> {
+    wire::decode(&serde_json::to_vec(reply).map_err(|e| err(Code::Internal, e))?)
+        .map_err(|e| err(Code::Internal, format!("file receipt reply: {}", e.message)))
 }
 fn err(code: Code, message: impl std::fmt::Display) -> RpcError {
     RpcError::new(code, message.to_string())

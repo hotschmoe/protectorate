@@ -6,6 +6,7 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
+use protectorate_wire::ReflectMessage;
 use serde_json::json;
 use std::{fs, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
@@ -175,6 +176,7 @@ pub(super) async fn node(
         return status_response(StatusCode::NOT_FOUND);
     };
     let current = hub.node_monitor.status(&name, &node.address, node.invited);
+    let current = serde_json::to_value(current.transcode_to_dynamic()).unwrap_or_default();
     result(
         &hub,
         &headers,

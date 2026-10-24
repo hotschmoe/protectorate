@@ -5,12 +5,11 @@ use crate::artifacts::{self, Artifact};
 use crate::journal;
 use crate::retention::{self, DiskLimits};
 use crate::sources::{valid_id, Source, Sources};
-use crate::{decode, respond};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use chrono::{DateTime, SecondsFormat, Utc};
 use protectorate_node_metrics::JobIsolation;
-use protectorate_wire::{Code, RpcError, RpcRequest, RpcResponse, StreamSender};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    v1::{self, job_event::Event, JobEnd},
+    Code, RpcError, StreamSender,
+};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -74,11 +73,11 @@ struct Run {
 }
 #[derive(Default)]
 struct State {
-    started: Option<Value>,
+    started: Option<v1::JobStarted>,
     started_at: Option<Instant>,
     log: Vec<u8>,
     log_truncated: bool,
-    finished: Option<Value>,
+    finished: Option<v1::JobFinished>,
     finished_at: Option<SystemTime>,
     budget_used: usize,
     artifacts: Vec<Artifact>,
@@ -243,9 +242,9 @@ impl Jobs {
         self.sandbox = Some(config);
         self
     }
-    pub async fn start(&self, value: Value) -> Result<String, RpcError> {
+    pub async fn start(&self, request: &v1::RunJobRequest) -> Result<String, RpcError> {
         self.sweep_expired().await;
-        let spec = Spec::parse(&value)?;
+        let spec = Spec::parse(request)?;
         if matches!(spec.mode, Mode::Plain) && !self.allow_plain {
             return Err(RpcError::new(
                 Code::PermissionDenied,
@@ -323,33 +322,31 @@ impl Jobs {
         });
         Ok(id)
     }
-    pub async fn prepare(&self, request: &RpcRequest) -> Result<RpcResponse, RpcError> {
-        let input = serde_json::to_value(&request.message).map_err(internal)?;
+    pub async fn prepare(
+        &self,
+        request: v1::PrepareJobRequest,
+    ) -> Result<v1::PrepareJobResponse, RpcError> {
         let sources = Arc::clone(&self.sources);
-        let value = tokio::task::spawn_blocking(move || sources.prepare(&input))
+        tokio::task::spawn_blocking(move || sources.prepare(&request))
             .await
-            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-        respond(request, value)
+            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
     }
-    pub async fn upload(&self, request: &RpcRequest) -> Result<RpcResponse, RpcError> {
-        let input = serde_json::to_value(&request.message).map_err(internal)?;
-        let id = input
-            .get("jobId")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if self.runs.lock().await.contains_key(id) {
+    pub async fn upload(
+        &self,
+        request: v1::UploadJobDataRequest,
+    ) -> Result<v1::UploadJobDataResponse, RpcError> {
+        if self.runs.lock().await.contains_key(&request.job_id) {
             return Err(RpcError::new(
                 Code::FailedPrecondition,
                 "job has already started",
             ));
         }
         let sources = Arc::clone(&self.sources);
-        let value = tokio::task::spawn_blocking(move || sources.upload(&input))
+        tokio::task::spawn_blocking(move || sources.upload(&request))
             .await
-            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-        respond(request, value)
+            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
     }
-    pub async fn list(&self, request: &RpcRequest) -> Result<RpcResponse, RpcError> {
+    pub async fn list(&self) -> v1::NodeAgentServiceListJobsResponse {
         self.sweep_expired().await;
         let runs = self
             .runs
@@ -359,28 +356,20 @@ impl Jobs {
             .map(|(id, run)| (id.clone(), Arc::clone(run)))
             .collect::<Vec<_>>();
         let mut jobs = Vec::new();
-        for (id, run) in runs {
+        for (job_id, run) in runs {
             let state = run.state.lock().await;
-            let mut item = json!({"jobId": id, "started": state.started.is_some(), "logBytes": state.log.len().to_string()});
-            if let Some(finished) = &state.finished {
-                item["finished"] = finished.clone();
-            }
-            if let Some(finished_at) = state.finished_at {
-                item["finishedAt"] =
-                    json!(DateTime::<Utc>::from(finished_at)
-                        .to_rfc3339_opts(SecondsFormat::Nanos, true));
-            }
-            jobs.push(item);
+            jobs.push(v1::NodeJob {
+                job_id,
+                started: state.started.is_some(),
+                finished: state.finished.clone(),
+                log_bytes: state.log.len() as u64,
+                finished_at: state.finished_at.map(Into::into),
+            });
         }
-        respond(request, json!({"jobs": jobs}))
+        v1::NodeAgentServiceListJobsResponse { jobs }
     }
-    pub async fn cancel(&self, request: &RpcRequest) -> Result<RpcResponse, RpcError> {
+    pub async fn cancel(&self, id: &str) -> v1::NodeAgentServiceCancelJobResponse {
         self.sweep_expired().await;
-        let input = serde_json::to_value(&request.message).map_err(internal)?;
-        let id = input
-            .get("jobId")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
         let run = self.runs.lock().await.get(id).cloned();
         let found = if let Some(run) = run {
             if run.state.lock().await.finished.is_some() {
@@ -392,11 +381,10 @@ impl Jobs {
         } else {
             false
         };
-        respond(request, json!({"found": found}))
+        v1::NodeAgentServiceCancelJobResponse { found }
     }
     pub async fn attach(
         &self,
-        request: &RpcRequest,
         sender: StreamSender,
         id: &str,
         mut offset: usize,
@@ -439,18 +427,13 @@ impl Jobs {
             };
             drop(state);
             if let Some(started) = started {
-                sender
-                    .send(&decode(request, json!({"started":started}))?)
-                    .await?;
+                sender.send(&event(Event::Started(started))).await?;
                 sent_started = true;
             }
             if !data.is_empty() {
                 offset += data.len();
                 sender
-                    .send(&decode(
-                        request,
-                        json!({"output":{"data":STANDARD.encode(data)}}),
-                    )?)
+                    .send(&event(Event::Output(v1::JobOutput { data })))
                     .await?;
                 continue;
             }
@@ -466,38 +449,34 @@ impl Jobs {
                             .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
                         buf.truncate(n);
                         let last = n < CHUNK;
-                        let mut frame =
-                            json!({"path":artifact.path,"data":STANDARD.encode(&buf),"last":last});
-                        if first {
-                            frame["mode"] = json!(artifact.mode);
-                            first = false;
-                        }
-                        sender
-                            .send(&decode(request, json!({"artifact":frame}))?)
-                            .await?;
+                        let frame = v1::JobArtifactChunk {
+                            path: artifact.path.clone(),
+                            data: buf,
+                            last,
+                            mode: if first { artifact.mode } else { 0 },
+                        };
+                        first = false;
+                        sender.send(&event(Event::Artifact(frame))).await?;
                         if last {
                             break;
                         }
                     }
                 }
-                sender
-                    .send(&decode(request, json!({"finished":finished}))?)
-                    .await?;
+                sender.send(&event(Event::Finished(finished))).await?;
                 return Ok(());
             }
             tokio::select! { _ = notified => {}, _ = sender.cancelled() => return Err(RpcError::new(Code::Canceled, "stream cancelled")) }
         }
     }
     async fn execute(&self, spec: Spec, run: Arc<Run>) {
-        let permit = tokio::select! { p = self.slots.clone().acquire_owned() => p, _ = wait_cancel(run.cancel.subscribe()) => { run.finish("JOB_END_CANCELED", -1, "").await; return; } };
+        let permit = tokio::select! { p = self.slots.clone().acquire_owned() => p, _ = wait_cancel(run.cancel.subscribe()) => { run.finish(JobEnd::Canceled, -1, "").await; return; } };
         if permit.is_err() {
-            run.finish("JOB_END_ERROR", -1, "job scheduler closed")
-                .await;
+            run.finish(JobEnd::Error, -1, "job scheduler closed").await;
             return;
         }
         let dir = self.root.join("jobs").join(&spec.id);
         if let Err(e) = fs::create_dir_all(&dir) {
-            run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+            run.finish(JobEnd::Error, -1, &e.to_string()).await;
             return;
         }
         let repo_guard = if let Some(key) = spec.source.repo_key() {
@@ -512,7 +491,7 @@ impl Jobs {
             {
                 Some(guard) => Some(guard),
                 None => {
-                    run.finish("JOB_END_CANCELED", -1, "").await;
+                    run.finish(JobEnd::Canceled, -1, "").await;
                     return;
                 }
             }
@@ -703,7 +682,7 @@ impl Jobs {
         let stage_home: Option<PathBuf> = None;
         if let Some(home) = &stage_home {
             if let Err(error) = fs::create_dir_all(home) {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         }
@@ -714,11 +693,11 @@ impl Jobs {
         {
             Ok(Ok(result)) => result,
             Ok(Err(error)) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
             Err(error) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         };
@@ -728,7 +707,7 @@ impl Jobs {
                 if let Err(error) =
                     run_linux_git_stage(config, dir, &workdir, commit, &spec.id, spec.timeout).await
                 {
-                    run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                    run.finish(JobEnd::Error, -1, &error.to_string()).await;
                     return;
                 }
             }
@@ -767,7 +746,7 @@ impl Jobs {
         let (mut child, process_tree) = match spawned {
             Ok(pair) => pair,
             Err(e) => {
-                run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+                run.finish(JobEnd::Error, -1, &e.to_string()).await;
                 return;
             }
         };
@@ -775,7 +754,7 @@ impl Jobs {
         let mut child = match spawned {
             Ok(child) => child,
             Err(e) => {
-                run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+                run.finish(JobEnd::Error, -1, &e.to_string()).await;
                 return;
             }
         };
@@ -795,15 +774,15 @@ impl Jobs {
         let stderr = tokio::spawn(read_log(err, Arc::clone(run)));
         #[cfg(not(windows))]
         let result = tokio::select! {
-            status = child.wait() => ("JOB_END_EXITED", status),
-            _ = tokio::time::sleep(spec.timeout) => { kill_group(pid); ("JOB_END_TIMED_OUT", child.wait().await) },
-            _ = wait_cancel(run.cancel.subscribe()) => { kill_group(pid); ("JOB_END_CANCELED", child.wait().await) },
+            status = child.wait() => (JobEnd::Exited, status),
+            _ = tokio::time::sleep(spec.timeout) => { kill_group(pid); (JobEnd::TimedOut, child.wait().await) },
+            _ = wait_cancel(run.cancel.subscribe()) => { kill_group(pid); (JobEnd::Canceled, child.wait().await) },
         };
         #[cfg(windows)]
         let result = tokio::select! {
-            status = child.wait() => ("JOB_END_EXITED", status),
-            _ = tokio::time::sleep(spec.timeout) => { let _ = process_tree.terminate(); ("JOB_END_TIMED_OUT", bounded_wait(&mut child).await) },
-            _ = wait_cancel(run.cancel.subscribe()) => { let _ = process_tree.terminate(); ("JOB_END_CANCELED", bounded_wait(&mut child).await) },
+            status = child.wait() => (JobEnd::Exited, status),
+            _ = tokio::time::sleep(spec.timeout) => { let _ = process_tree.terminate(); (JobEnd::TimedOut, bounded_wait(&mut child).await) },
+            _ = wait_cancel(run.cancel.subscribe()) => { let _ = process_tree.terminate(); (JobEnd::Canceled, bounded_wait(&mut child).await) },
         };
         #[cfg(windows)]
         drop(process_tree);
@@ -833,14 +812,14 @@ impl Jobs {
                 #[cfg(windows)]
                 run.finish(result.0, -1, &e.to_string()).await;
                 #[cfg(not(windows))]
-                run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+                run.finish(JobEnd::Error, -1, &e.to_string()).await;
             }
         }
     }
     #[cfg(windows)]
     async fn execute_windows_runner(&self, spec: &Spec, base: &Path, run: &Arc<Run>) {
         let Some(runner) = self.runner.clone() else {
-            run.finish("JOB_END_ERROR", -1, "dedicated runner is unavailable")
+            run.finish(JobEnd::Error, -1, "dedicated runner is unavailable")
                 .await;
             return;
         };
@@ -853,7 +832,7 @@ impl Jobs {
         )
         .await
         {
-            run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+            run.finish(JobEnd::Error, -1, &error.to_string()).await;
             return;
         }
         let sources = Arc::clone(&self.sources);
@@ -868,11 +847,11 @@ impl Jobs {
         {
             Ok(Ok(result)) => result,
             Ok(Err(error)) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
             Err(error) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         };
@@ -882,7 +861,7 @@ impl Jobs {
                 run_windows_git_stage(&runner, &workdir, &bundle, commit, &spec.id, spec.timeout)
                     .await
             {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         }
@@ -897,7 +876,7 @@ impl Jobs {
             )
             .await
             {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         }
@@ -907,7 +886,7 @@ impl Jobs {
             let safe = match crate::windows_runner::process_path(&workdir) {
                 Ok(path) => path.to_string_lossy().replace('\\', "/"),
                 Err(error) => {
-                    run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                    run.finish(JobEnd::Error, -1, &error.to_string()).await;
                     return;
                 }
             };
@@ -927,11 +906,11 @@ impl Jobs {
         {
             Ok(Ok(process)) => process,
             Ok(Err(error)) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
             Err(error) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         };
@@ -939,14 +918,14 @@ impl Jobs {
         let output = process.take_output().expect("runner output pipe");
         let mut reader = tokio::spawn(read_log(tokio::fs::File::from_std(output), Arc::clone(run)));
         let (end, result) = tokio::select! {
-            status = process.wait() => ("JOB_END_EXITED", status),
+            status = process.wait() => (JobEnd::Exited, status),
             _ = tokio::time::sleep(spec.timeout) => {
                 let _ = process.terminate();
-                ("JOB_END_TIMED_OUT", bounded_runner_wait(&process).await)
+                (JobEnd::TimedOut, bounded_runner_wait(&process).await)
             },
             _ = wait_cancel(run.cancel.subscribe()) => {
                 let _ = process.terminate();
-                ("JOB_END_CANCELED", bounded_runner_wait(&process).await)
+                (JobEnd::Canceled, bounded_runner_wait(&process).await)
             },
         };
         drop(process); // KILL_ON_JOB_CLOSE reaps any remaining descendants.
@@ -968,7 +947,7 @@ impl Jobs {
     async fn execute_sandbox(&self, spec: &Spec, base: &Path, run: &Arc<Run>) {
         use protectorate_sandbox::{Limits, Request, Workload};
         let Some(config) = self.sandbox.clone() else {
-            run.finish("JOB_END_ERROR", -1, "sandbox unavailable").await;
+            run.finish(JobEnd::Error, -1, "sandbox unavailable").await;
             return;
         };
         // Sandbox private-home names have a narrower grammar than public job IDs.
@@ -988,11 +967,11 @@ impl Jobs {
             .unwrap_or_default()
             .to_string();
         if let Err(e) = fs::create_dir_all(&home) {
-            run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+            run.finish(JobEnd::Error, -1, &e.to_string()).await;
             return;
         }
         if let Err(e) = fs::create_dir_all(&workspace) {
-            run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+            run.finish(JobEnd::Error, -1, &e.to_string()).await;
             return;
         }
         let sources = Arc::clone(&self.sources);
@@ -1007,11 +986,11 @@ impl Jobs {
         {
             Ok(Ok(result)) => result,
             Ok(Err(error)) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
             Err(error) => {
-                run.finish("JOB_END_ERROR", -1, &error.to_string()).await;
+                run.finish(JobEnd::Error, -1, &error.to_string()).await;
                 return;
             }
         };
@@ -1035,12 +1014,8 @@ impl Jobs {
             match executable {
                 Some(path) => command[0] = path.to_string_lossy().into_owned(),
                 None => {
-                    run.finish(
-                        "JOB_END_ERROR",
-                        -1,
-                        "command is not an accessible executable",
-                    )
-                    .await;
+                    run.finish(JobEnd::Error, -1, "command is not an accessible executable")
+                        .await;
                     return;
                 }
             }
@@ -1087,7 +1062,7 @@ impl Jobs {
         let plan = match config.policy.plan(req) {
             Ok(plan) => plan,
             Err(e) => {
-                run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+                run.finish(JobEnd::Error, -1, &e.to_string()).await;
                 return;
             }
         };
@@ -1108,11 +1083,11 @@ impl Jobs {
         {
             Ok(Ok(handle)) => handle,
             Ok(Err(e)) => {
-                run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+                run.finish(JobEnd::Error, -1, &e.to_string()).await;
                 return;
             }
             Err(e) => {
-                run.finish("JOB_END_ERROR", -1, &e.to_string()).await;
+                run.finish(JobEnd::Error, -1, &e.to_string()).await;
                 return;
             }
         };
@@ -1134,9 +1109,9 @@ impl Jobs {
         });
         let mut wait = tokio::task::spawn_blocking(move || handle.wait());
         let (end, result) = tokio::select! {
-            result = &mut wait => ("JOB_END_EXITED", result),
-            _ = tokio::time::sleep(spec.timeout) => { kill.kill(); ("JOB_END_TIMED_OUT", wait.await) },
-            _ = wait_cancel(run.cancel.subscribe()) => { kill.kill(); ("JOB_END_CANCELED", wait.await) },
+            result = &mut wait => (JobEnd::Exited, result),
+            _ = tokio::time::sleep(spec.timeout) => { kill.kill(); (JobEnd::TimedOut, wait.await) },
+            _ = wait_cancel(run.cancel.subscribe()) => { kill.kill(); (JobEnd::Canceled, wait.await) },
         };
         if let Some(reader) = stdout {
             let _ = reader.await;
@@ -1150,8 +1125,8 @@ impl Jobs {
                 self.finish_with_artifacts(spec, &workdir, run, end, code, &error)
                     .await;
             }
-            Ok(Err(e)) => run.finish("JOB_END_ERROR", -1, &e.to_string()).await,
-            Err(e) => run.finish("JOB_END_ERROR", -1, &e.to_string()).await,
+            Ok(Err(e)) => run.finish(JobEnd::Error, -1, &e.to_string()).await,
+            Err(e) => run.finish(JobEnd::Error, -1, &e.to_string()).await,
         }
     }
     async fn finish_with_artifacts(
@@ -1159,15 +1134,13 @@ impl Jobs {
         spec: &Spec,
         workdir: &Path,
         run: &Arc<Run>,
-        end: &str,
+        end: JobEnd,
         code: i32,
         error: &str,
     ) {
         let mut result_error = error.to_string();
-        if matches!(
-            end,
-            "JOB_END_EXITED" | "JOB_END_TIMED_OUT" | "JOB_END_KILLED"
-        ) && !spec.artifact_globs.is_empty()
+        if matches!(end, JobEnd::Exited | JobEnd::TimedOut | JobEnd::Killed)
+            && !spec.artifact_globs.is_empty()
         {
             let _retention_guard = self.artifact_lock.lock().await;
             let root = self.root.clone();
@@ -1265,7 +1238,10 @@ async fn read_log<R: tokio::io::AsyncRead + Unpin>(mut reader: R, run: Arc<Run>)
 impl Run {
     async fn started(&self, isolation: &str, reused: bool) {
         let mut state = self.state.lock().await;
-        state.started = Some(json!({"workspaceReused":reused,"isolation":isolation}));
+        state.started = Some(v1::JobStarted {
+            workspace_reused: reused,
+            isolation: isolation.into(),
+        });
         state.started_at = Some(Instant::now());
         if let Some(dir) = &self.persist_dir {
             if let Err(error) = journal::write_record(dir, state.started.as_ref(), None, None) {
@@ -1302,22 +1278,21 @@ impl Run {
         drop(state);
         self.changed.notify_waiters();
     }
-    async fn finish(&self, end: &str, code: i32, error: &str) {
+    async fn finish(&self, end: JobEnd, code: i32, error: &str) {
         let mut state = self.state.lock().await;
         let error = if state.log_truncated && error.is_empty() {
             "job output truncated at 64 MiB"
         } else {
             error
         };
-        state.finished = Some(json!({"end":end,"exitCode":code,"error":error}));
-        if let Some(started_at) = state.started_at {
-            let elapsed = started_at.elapsed();
-            state.finished.as_mut().unwrap()["runTime"] = json!(format!(
-                "{}.{:09}s",
-                elapsed.as_secs(),
-                elapsed.subsec_nanos()
-            ));
-        }
+        state.finished = Some(v1::JobFinished {
+            end: end as i32,
+            exit_code: code,
+            error: error.into(),
+            run_time: state
+                .started_at
+                .map(|started_at| protectorate_wire::proto_duration(started_at.elapsed())),
+        });
         state.finished_at = Some(SystemTime::now());
         if let Some(dir) = &self.persist_dir {
             if let Err(error) = journal::replace_log(dir, &state.log).and_then(|_| {
@@ -1362,120 +1337,64 @@ fn reserve_exact(budget: &AtomicUsize, want: usize) -> bool {
     }
 }
 impl Spec {
-    fn parse(v: &Value) -> Result<Self, RpcError> {
-        let id = v.get("jobId").and_then(Value::as_str).unwrap_or_default();
-        if !valid_id(id) {
+    fn parse(request: &v1::RunJobRequest) -> Result<Self, RpcError> {
+        if !valid_id(&request.job_id) {
             return Err(RpcError::invalid("invalid job id"));
         }
-        let command = v
-            .get("command")
-            .and_then(Value::as_array)
-            .ok_or_else(|| RpcError::invalid("command is empty"))?
-            .iter()
-            .map(|v| v.as_str().map(str::to_string))
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| RpcError::invalid("command must contain strings"))?;
+        let command = request.command.clone();
         if command.is_empty() || command[0].is_empty() || command.iter().any(|s| s.contains('\0')) {
             return Err(RpcError::invalid("command is empty or contains NUL"));
         }
-        let source = Source::parse(v)?;
-        let artifact_globs = v
-            .get("artifactGlobs")
-            .and_then(Value::as_array)
-            .map(|array| {
-                array
-                    .iter()
-                    .map(|value| value.as_str().map(str::to_owned))
-                    .collect::<Option<Vec<_>>>()
-            })
-            .unwrap_or(Some(vec![]))
-            .ok_or_else(|| RpcError::invalid("artifact globs must be strings"))?;
-        artifacts::validate(&artifact_globs).map_err(RpcError::invalid)?;
-        let mode = match v
-            .get("mode")
-            .and_then(Value::as_str)
-            .unwrap_or("JOB_MODE_UNSPECIFIED")
-        {
-            "JOB_MODE_PLAIN" => Mode::Plain,
-            "JOB_MODE_UNSPECIFIED" | "JOB_MODE_SANDBOXED" => Mode::Sandboxed,
-            "JOB_MODE_ADMIN" => Mode::Admin,
-            _ => return Err(RpcError::invalid("invalid job mode")),
+        let source = Source::parse(request)?;
+        artifacts::validate(&request.artifact_globs).map_err(RpcError::invalid)?;
+        let mode = match v1::JobMode::try_from(request.mode) {
+            Ok(v1::JobMode::Plain) => Mode::Plain,
+            Ok(v1::JobMode::Unspecified | v1::JobMode::Sandboxed) => Mode::Sandboxed,
+            Ok(v1::JobMode::Admin) => Mode::Admin,
+            Err(_) => return Err(RpcError::invalid("invalid job mode")),
         };
         let mut env = BTreeMap::new();
-        if let Some(map) = v.get("env").and_then(Value::as_object) {
-            for (key, value) in map {
-                if key.is_empty()
-                    || !key.bytes().enumerate().all(|(index, byte)| {
-                        byte == b'_'
-                            || byte.is_ascii_alphabetic()
-                            || index > 0 && byte.is_ascii_digit()
-                    })
-                {
-                    return Err(RpcError::invalid("invalid environment name"));
-                }
-                let value = value
-                    .as_str()
-                    .ok_or_else(|| RpcError::invalid("invalid environment value"))?;
-                if value.contains('\0') {
-                    return Err(RpcError::invalid("environment contains NUL"));
-                }
-                env.insert(key.clone(), value.to_string());
+        for (key, value) in &request.env {
+            if key.is_empty()
+                || !key.bytes().enumerate().all(|(index, byte)| {
+                    byte == b'_' || byte.is_ascii_alphabetic() || index > 0 && byte.is_ascii_digit()
+                })
+            {
+                return Err(RpcError::invalid("invalid environment name"));
             }
+            if value.contains('\0') {
+                return Err(RpcError::invalid("environment contains NUL"));
+            }
+            env.insert(key.clone(), value.clone());
         }
-        let timeout = v
-            .get("timeout")
-            .and_then(Value::as_str)
-            .and_then(parse_duration)
+        // An unset, zero or over-a-day timeout runs for the default hour.
+        let timeout = request
+            .timeout
+            .and_then(|timeout| Duration::try_from(timeout).ok())
+            .filter(|timeout| !timeout.is_zero() && *timeout <= Duration::from_secs(86400))
             .unwrap_or(Duration::from_secs(3600));
-        let cpu_percent = v
-            .get("limits")
-            .and_then(|v| v.get("cpuPercent"))
-            .and_then(Value::as_u64)
-            .and_then(|n| u32::try_from(n).ok())
-            .unwrap_or(0);
-        let memory_bytes = v
-            .get("limits")
-            .and_then(|v| v.get("memoryBytes"))
-            .and_then(Value::as_str)
-            .and_then(|s| s.parse().ok())
-            .or_else(|| {
-                v.get("limits")
-                    .and_then(|v| v.get("memoryBytes"))
-                    .and_then(Value::as_u64)
-            })
-            .unwrap_or(0);
+        let limits = request.limits.clone().unwrap_or_default();
         Ok(Self {
-            id: id.to_string(),
+            id: request.job_id.clone(),
             command,
             env,
             mode,
             timeout,
-            cpu_percent,
-            memory_bytes,
+            cpu_percent: limits.cpu_percent,
+            memory_bytes: limits.memory_bytes,
             source,
-            artifact_globs,
+            artifact_globs: request.artifact_globs.clone(),
         })
     }
 }
-fn parse_duration(s: &str) -> Option<Duration> {
-    let s = s.strip_suffix('s')?;
-    let seconds: f64 = s.parse().ok()?;
-    if !seconds.is_finite() || seconds <= 0.0 || seconds > 86400.0 {
-        return None;
-    }
-    Some(Duration::from_secs_f64(seconds))
-}
-fn internal(e: serde_json::Error) -> RpcError {
-    RpcError::new(Code::Internal, e.to_string())
+fn event(event: Event) -> v1::JobEvent {
+    v1::JobEvent { event: Some(event) }
 }
 /// How a command that the node did not stop itself ended: a signal nobody on
 /// the node sent is a kill (a resource limit or the OOM killer).
-fn exit_outcome(
-    end: &'static str,
-    status: &std::process::ExitStatus,
-) -> (&'static str, i32, String) {
+fn exit_outcome(end: JobEnd, status: &std::process::ExitStatus) -> (JobEnd, i32, String) {
     // The sandbox helper reports a signal that ends its workload as status 137.
-    let signal = if end == "JOB_END_EXITED" {
+    let signal = if end == JobEnd::Exited {
         #[cfg(unix)]
         let signal = std::os::unix::process::ExitStatusExt::signal(status);
         #[cfg(not(unix))]
@@ -1485,7 +1404,7 @@ fn exit_outcome(
         None
     };
     if let Some(signal) = signal {
-        return ("JOB_END_KILLED", -1, format!("killed by signal {signal}"));
+        return (JobEnd::Killed, -1, format!("killed by signal {signal}"));
     }
     (end, status.code().unwrap_or(-1), String::new())
 }

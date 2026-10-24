@@ -1,9 +1,9 @@
 //! Verified node binary replacement with a restart trial and rollback marker.
 use crate::files::Files;
 use protectorate_fsutil as fsutil;
-use protectorate_wire::{Code, RpcError};
+use protectorate_wire::{v1, Code, RpcError};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -347,15 +347,13 @@ impl Updater {
         Ok(())
     }
 
-    pub fn state(&self) -> io::Result<Option<Value>> {
+    pub fn state(&self) -> io::Result<Option<v1::NodeUpdateState>> {
         let _guard = self.lock.lock().unwrap();
-        Ok(self.load()?.map(|marker| {
-            json!({
-                "phase": marker.phase,
-                "previousVersion": marker.from,
-                "version": marker.to,
-                "attempts": marker.attempts,
-            })
+        Ok(self.load()?.map(|marker| v1::NodeUpdateState {
+            phase: marker.phase,
+            previous_version: marker.from,
+            version: marker.to,
+            attempts: marker.attempts,
         }))
     }
 
@@ -375,7 +373,10 @@ impl Updater {
         self.save(marker)
     }
 
-    pub(crate) fn apply(&self, body: &Value) -> Result<Value, RpcError> {
+    pub(crate) fn apply(
+        &self,
+        body: &v1::ApplyUpdateRequest,
+    ) -> Result<v1::ApplyUpdateResponse, RpcError> {
         let _guard = self.lock.lock().unwrap();
         if self
             .load()
@@ -387,21 +388,11 @@ impl Updater {
                 "a node binary update is still on trial",
             ));
         }
-        let name = body.get("path").and_then(Value::as_str).unwrap_or_default();
-        let staged = self.files.resolve(name)?;
+        let staged = self.files.resolve(&body.path)?;
         if let Some(installed) = &self.installed {
             return self.apply_installed(installed, &staged, body);
         }
-        let expected_size = body
-            .get("size")
-            .and_then(Value::as_str)
-            .and_then(|s| s.parse().ok())
-            .or_else(|| body.get("size").and_then(Value::as_u64))
-            .unwrap_or_default();
-        let expected_sha = body
-            .get("sha256")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let (expected_size, expected_sha) = (body.size, body.sha256.as_str());
         if expected_sha.len() != 64 || !expected_sha.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(RpcError::invalid(
                 "sha256 must be 64 hexadecimal characters",
@@ -435,10 +426,7 @@ impl Updater {
                 ));
             }
         };
-        let expected_version = body
-            .get("expectedVersion")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let expected_version = body.expected_version.as_str();
         if !expected_version.is_empty() && candidate_version != expected_version {
             let _ = fs::remove_file(&candidate);
             return Err(RpcError::new(
@@ -467,17 +455,19 @@ impl Updater {
             tokio::time::sleep(Duration::from_millis(500)).await;
             restart()
         });
-        Ok(
-            json!({"version": candidate_version, "previousVersion":self.version, "restart":"re-exec"}),
-        )
+        Ok(v1::ApplyUpdateResponse {
+            version: candidate_version,
+            previous_version: self.version.clone(),
+            restart: "re-exec".into(),
+        })
     }
 
     fn apply_installed(
         &self,
         installed: &Installed,
         staged: &Path,
-        body: &Value,
-    ) -> Result<Value, RpcError> {
+        body: &v1::ApplyUpdateRequest,
+    ) -> Result<v1::ApplyUpdateResponse, RpcError> {
         #[cfg(not(target_os = "linux"))]
         {
             let _ = (installed, staged, body);
@@ -498,21 +488,11 @@ impl Updater {
                     "installed node update requires a complete release bundle",
                 ));
             }
-            let expected_version = body
-                .get("expectedVersion")
-                .and_then(Value::as_str)
-                .filter(|version| !version.is_empty())
-                .ok_or_else(|| RpcError::invalid("installed release version is required"))?;
-            let expected_sha = body
-                .get("sha256")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let expected_size = body
-                .get("size")
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<u64>().ok())
-                .or_else(|| body.get("size").and_then(Value::as_u64))
-                .unwrap_or_default();
+            let expected_version = body.expected_version.as_str();
+            if expected_version.is_empty() {
+                return Err(RpcError::invalid("installed release version is required"));
+            }
+            let (expected_size, expected_sha) = (body.size, body.sha256.as_str());
             let bundle = verify_bundle(staged, expected_version, expected_size, expected_sha)
                 .map_err(|error| RpcError::new(Code::FailedPrecondition, error.to_string()))?;
             let previous_release = current_pointer(&installed.root).map_err(internal)?;
@@ -577,7 +557,8 @@ impl Updater {
             } else {
                 fsutil::write_file(
                     &prepared.join("release.json"),
-                    &serde_json::to_vec(&json!({"version": expected_version})).map_err(internal)?,
+                    &serde_json::to_vec(&serde_json::json!({"version": expected_version}))
+                        .map_err(internal)?,
                     0o644,
                 )
                 .map_err(internal)?;
@@ -620,9 +601,11 @@ impl Updater {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 restart()
             });
-            Ok(
-                json!({"version":expected_version,"previousVersion":self.version,"restart":"re-exec"}),
-            )
+            Ok(v1::ApplyUpdateResponse {
+                version: expected_version.into(),
+                previous_version: self.version.clone(),
+                restart: "re-exec".into(),
+            })
         }
     }
 }

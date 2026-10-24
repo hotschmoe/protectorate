@@ -1208,20 +1208,18 @@ dependencies = [
 name = "protectorate-node-client"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "getrandom 0.2.17",
  "protectorate-connect-client",
  "protectorate-wire",
  "protectorate-xfer",
- "serde_json",
 ]
 
 [[package]]
 name = "protectorate-node-metrics"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "libc",
+ "protectorate-wire",
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
@@ -1231,13 +1229,11 @@ dependencies = [
 name = "protectorate-node-monitor"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "protectorate-connect-client",
  "protectorate-inventory",
  "protectorate-node-metrics",
  "protectorate-tls",
  "protectorate-wire",
- "serde_json",
 ]
 
 [[package]]

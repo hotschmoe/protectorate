@@ -224,7 +224,7 @@ impl Uninstaller {
         }
     }
 
-    pub(crate) fn schedule(&self) -> serde_json::Value {
+    pub(crate) fn schedule(&self) -> protectorate_wire::v1::UninstallResponse {
         if !self.scheduled.swap(true, Ordering::SeqCst) {
             let plan = self.plan.clone();
             let systemctl = self.systemctl.clone();
@@ -239,6 +239,9 @@ impl Uninstaller {
                 stop();
             });
         }
-        serde_json::json!({"actions":self.plan.actions(),"left":self.plan.left()})
+        protectorate_wire::v1::UninstallResponse {
+            actions: self.plan.actions(),
+            left: self.plan.left(),
+        }
     }
 }

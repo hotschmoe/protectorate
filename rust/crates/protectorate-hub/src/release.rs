@@ -1,22 +1,23 @@
 //! Release lookup, verified staging, and guarded hub restart requests.
-use super::{input, respond, string, Hub};
+use super::Hub;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_release::{self as release, Info, Source};
-use protectorate_wire::{self as wire, Code, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    v1::{self, release_service, UpdatePhase},
+    AuthContext, Call, Code, Result, RpcError, UnaryServer,
+};
+use serde_json::json;
 use std::{fs, sync::Arc};
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let check = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.ReleaseService/CheckRelease",
-        move |request| {
+    server.unary(
+        release_service::CHECK_RELEASE,
+        move |call: Call<v1::CheckReleaseRequest>| {
             let hub = Arc::clone(&check);
             async move {
                 let source = hub.releases.as_ref().ok_or_else(not_configured)?.clone();
-                let body = input(&request)?;
-                let channel = string(&body, "channel").to_owned();
-                let version = string(&body, "version").to_owned();
+                let v1::CheckReleaseRequest { channel, version } = call.request;
                 validate_request(&source, &channel, &version)?;
                 let result = tokio::task::spawn_blocking({
                     let source = Arc::clone(&source);
@@ -44,7 +45,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     }
                     Err(error) => return Err(RpcError::new(Code::Unavailable, error.to_string())),
                 };
-                let can_update = (request.auth.owner || request.auth.device)
+                let can_update = (call.auth.owner || call.auth.device)
                     && (info.version == hub.version
                         || (hub.release_restart.is_some()
                             && std::env::consts::OS == "linux"
@@ -54,24 +55,24 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                                     .ok()
                                     .is_some_and(|name| info.asset_url(&name).is_ok())
                             })));
-                respond(
-                    &request,
-                    json!({"version":info.version,"channel":info.channel,
-                    "notesUrl":info.notes_url,"canUpdate":can_update}),
-                )
+                Ok(v1::ReleaseInfo {
+                    version: info.version,
+                    channel: info.channel,
+                    notes_url: info.notes_url,
+                    can_update,
+                })
             }
         },
     )?;
 
-    server.register_streaming(
-        "/protectorate.v1.ReleaseService/UpdateHub",
-        move |request, sender| {
+    server.stream(
+        release_service::UPDATE_HUB,
+        move |call: Call<v1::UpdateHubRequest>, sender| {
             let hub = Arc::clone(&hub);
             async move {
                 let source = hub.releases.as_ref().ok_or_else(not_configured)?.clone();
-                let body = input(&request)?;
-                let channel = string(&body, "channel").to_owned();
-                let version = string(&body, "version").to_owned();
+                let audit = (&call.auth, call.method.procedure.as_str());
+                let v1::UpdateHubRequest { channel, version } = call.request;
                 validate_request(&source, &channel, &version)?;
                 let _lock = Arc::clone(&hub.release_update_lock)
                     .try_lock_owned()
@@ -115,12 +116,18 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 if restarting && !release::valid_version(&previous) {
                     return Err(RpcError::new(Code::FailedPrecondition, "installed hub has no current release to restore"));
                 }
+                let progress = |phase: UpdatePhase, message: &str| v1::UpdateHubProgress {
+                    phase: phase as i32,
+                    message: message.into(),
+                    version: info.version.clone(),
+                    previous_version: hub.version.clone(),
+                    ..Default::default()
+                };
                 if previous == info.version && !restarting {
-                    send_progress(&request, &sender, json!({
-                        "phase":"UPDATE_PHASE_SKIPPED", "version":info.version,
-                        "previousVersion":hub.version,"message":"hub already runs this release"
-                    })).await?;
-                    record_update(&hub, &request, &info);
+                    sender
+                        .send(&progress(UpdatePhase::Skipped, "hub already runs this release"))
+                        .await?;
+                    record_update(&hub, audit, &info);
                     return Ok(Default::default());
                 }
                 let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, u64, u64)>(8);
@@ -141,34 +148,36 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     _ = sender.cancelled() => return Err(RpcError::new(Code::Canceled, "release update stream closed")),
                     item = rx.recv() => item,
                 } {
-                    send_progress(&request, &sender, json!({
-                        "phase":"UPDATE_PHASE_SENDING","message":name,
-                        "version":info.version,"previousVersion":hub.version,
-                        "sentBytes":sent.to_string(),"totalBytes":total.to_string()
-                    })).await?;
+                    sender
+                        .send(&v1::UpdateHubProgress {
+                            sent_bytes: sent,
+                            total_bytes: total,
+                            ..progress(UpdatePhase::Sending, &name)
+                        })
+                        .await?;
                 }
                 fetch.await.map_err(join_error)?.map_err(|error| {
                     RpcError::new(Code::FailedPrecondition, format!("fetch verified release: {error}"))
                 })?;
-                send_progress(&request, &sender, json!({
-                    "phase":"UPDATE_PHASE_VERIFYING","version":info.version,
-                    "previousVersion":hub.version,"message":"all fleet assets verified"
-                })).await?;
+                sender
+                    .send(&progress(UpdatePhase::Verifying, "all fleet assets verified"))
+                    .await?;
                 if sender.is_cancelled() {
                     return Err(RpcError::new(Code::Canceled, "release update stream closed"));
                 }
                 if restarting {
                     write_trial(&source, &previous, &info.version).map_err(|error| RpcError::new(Code::Internal, format!("prepare hub trial: {error}")))?;
-                    let progress = send_progress(&request, &sender, json!({
-                        "phase":"UPDATE_PHASE_RESTARTING","version":info.version,
-                        "previousVersion":hub.version,
-                        "message":"hub will restart; check GetStatus to confirm the new version"
-                    })).await;
-                    if progress.is_ok() {
-                        record_update(&hub, &request, &info);
+                    let sent = sender
+                        .send(&progress(
+                            UpdatePhase::Restarting,
+                            "hub will restart; check GetStatus to confirm the new version",
+                        ))
+                        .await;
+                    if sent.is_ok() {
+                        record_update(&hub, audit, &info);
                     }
                     if let Some(restart) = &hub.release_restart { restart(); }
-                    progress?;
+                    sent?;
                     return Ok(Default::default());
                 }
                 tokio::task::spawn_blocking({
@@ -182,12 +191,13 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 .await
                 .map_err(join_error)?
                 .map_err(|error| RpcError::new(Code::FailedPrecondition, error.to_string()))?;
-                send_progress(&request, &sender, json!({
-                    "phase":"UPDATE_PHASE_CONFIRMED","version":info.version,
-                    "previousVersion":hub.version,
-                    "message":"fleet assets now match the running hub"
-                })).await?;
-                record_update(&hub, &request, &info);
+                sender
+                    .send(&progress(
+                        UpdatePhase::Confirmed,
+                        "fleet assets now match the running hub",
+                    ))
+                    .await?;
+                record_update(&hub, audit, &info);
                 Ok(Default::default())
             }
         },
@@ -195,12 +205,12 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     Ok(())
 }
 
-fn record_update(hub: &Hub, request: &wire::RpcRequest, info: &Info) {
+fn record_update(hub: &Hub, (auth, procedure): (&AuthContext, &str), info: &Info) {
     hub.audit.write(AuditEntry {
-        actor: request.auth.actor.clone(),
-        token_id: request.auth.token_id.clone(),
-        task: request.auth.task.clone(),
-        procedure: request.method.procedure.clone(),
+        actor: auth.actor.clone(),
+        token_id: auth.token_id.clone(),
+        task: auth.task.clone(),
+        procedure: procedure.into(),
         subject: "hub".into(),
         detail: format!("channel={} version={}", info.channel, info.version),
         outcome: "ok".into(),
@@ -267,18 +277,6 @@ fn publish(hub: &Hub, info: &Info) {
             "channel":info.channel,"release_notes_url":info.notes_url
         }),
     );
-}
-
-async fn send_progress(
-    request: &wire::RpcRequest,
-    sender: &wire::StreamSender,
-    body: Value,
-) -> Result<()> {
-    let bytes = serde_json::to_vec(&body)
-        .map_err(|_| RpcError::new(Code::Internal, "encode release update progress"))?;
-    sender
-        .send(&wire::decode_json(request.method.output(), &bytes)?)
-        .await
 }
 
 fn not_configured() -> RpcError {

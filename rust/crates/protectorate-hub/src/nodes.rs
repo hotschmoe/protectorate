@@ -1,10 +1,15 @@
-use super::{input, respond, string, Hub};
+use super::Hub;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use protectorate_inventory::{Error, Node, CARE, SHARED};
 use protectorate_lease::Entry;
 use protectorate_node_monitor::PollEvent;
 use protectorate_wire::{
-    self as wire, Code, Result, RpcError, RpcRequest, StreamSender, UnaryServer,
+    self as wire,
+    v1::{
+        self, node_agent_service, node_service, AlertKind, InstallPlatform, NodeFreshness,
+        NodeSetupStage, RemoveJobs, RemovePhase,
+    },
+    Call, Code, Result, RpcError, StreamSender, UnaryServer,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -28,7 +33,12 @@ fn hex(bytes: &[u8]) -> String {
 
 /// One-line installers: fetch the CA, check its SHA-256 against the invite,
 /// then fetch and run the installer over TLS pinned to that CA.
-fn install_commands(base: &str, code: &str, name: &str, ca_sha256: &str) -> Vec<Value> {
+fn install_commands(
+    base: &str,
+    code: &str,
+    name: &str,
+    ca_sha256: &str,
+) -> Vec<v1::InstallCommand> {
     let sh_code = super::distribution::shell_word(code);
     let sh_name = super::distribution::shell_word(name);
     let sh_ca = super::distribution::shell_word(&format!("{base}/ca.pem"));
@@ -45,22 +55,32 @@ fn install_commands(base: &str, code: &str, name: &str, ca_sha256: &str) -> Vec<
     let windows = format!(
         "$ErrorActionPreference='Stop'; $h={ps_base}; [Net.ServicePointManager]::SecurityProtocol='Tls12'; [Net.ServicePointManager]::ServerCertificateValidationCallback={{$true}}; $p=Join-Path $env:TEMP ('protectorate-ca-'+[guid]::NewGuid()+'.pem'); (New-Object Net.WebClient).DownloadFile(\"$h/ca.pem\",$p); if((Get-FileHash $p -Algorithm SHA256).Hash -ne '{ca_sha256}'){{throw 'hub CA fingerprint mismatch'}}; $ca=New-Object Security.Cryptography.X509Certificates.X509Certificate2 $p; [Net.ServicePointManager]::ServerCertificateValidationCallback={{param($s,$c,$x,$e) $k=New-Object Security.Cryptography.X509Certificates.X509Chain; $k.ChainPolicy.RevocationMode='NoCheck'; $k.ChainPolicy.VerificationFlags='AllowUnknownCertificateAuthority'; [void]$k.ChainPolicy.ExtraStore.Add($ca); (($e -band 3) -eq 0) -and $k.Build([Security.Cryptography.X509Certificates.X509Certificate2]$c) -and ($k.ChainElements[$k.ChainElements.Count-1].Certificate.Thumbprint -eq $ca.Thumbprint)}}; $env:PROTECTORATE_CA_CERT=$p; $env:PROTECTORATE_JOIN_CODE={ps_code}; $env:PROTECTORATE_NODE_NAME={ps_name}; iex ((New-Object Net.WebClient).DownloadString(\"$h/install.ps1\"))"
     );
+    let command =
+        |platform: InstallPlatform, shell: &str, command: String, note: &str| v1::InstallCommand {
+            platform: platform as i32,
+            shell: shell.into(),
+            command,
+            note: note.into(),
+        };
     vec![
-        json!({
-            "platform": "INSTALL_PLATFORM_WINDOWS", "shell": "Windows PowerShell",
-            "command": windows,
-            "note": "Paste into Windows PowerShell (powershell.exe, not pwsh) as the signed-in user, not as administrator. Installs a logon task in that user's desktop session. x64 and ARM64.",
-        }),
-        json!({
-            "platform": "INSTALL_PLATFORM_LINUX", "shell": "sh",
-            "command": sh("install.sh"),
-            "note": "Paste into a terminal as the user the agent should run as, not root. Needs curl and installs a systemd user unit. To keep it running while logged out, enable linger for that user.",
-        }),
-        json!({
-            "platform": "INSTALL_PLATFORM_TERMUX", "shell": "Termux",
-            "command": sh("install-termux.sh"),
-            "note": "Paste into Termux on Android aarch64. For boot startup, install termux-services, restart Termux, and open Termux:Boot once.",
-        }),
+        command(
+            InstallPlatform::Windows,
+            "Windows PowerShell",
+            windows,
+            "Paste into Windows PowerShell (powershell.exe, not pwsh) as the signed-in user, not as administrator. Installs a logon task in that user's desktop session. x64 and ARM64.",
+        ),
+        command(
+            InstallPlatform::Linux,
+            "sh",
+            sh("install.sh"),
+            "Paste into a terminal as the user the agent should run as, not root. Needs curl and installs a systemd user unit. To keep it running while logged out, enable linger for that user.",
+        ),
+        command(
+            InstallPlatform::Termux,
+            "Termux",
+            sh("install-termux.sh"),
+            "Paste into Termux on Android aarch64. For boot startup, install termux-services, restart Termux, and open Termux:Boot once.",
+        ),
     ]
 }
 
@@ -95,139 +115,141 @@ fn start_drain<'a>(hub: &'a Hub, name: &str) -> Result<Drain<'a>> {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let list = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/ListNodes", move |request| {
+    server.unary(node_service::LIST_NODES, move |_: Call<_>| {
         let hub = Arc::clone(&list);
         async move {
-            let mut nodes = vec![status(&hub, local_node(&hub))];
-            nodes.extend(
-                hub.inventory
-                    .list()
-                    .iter()
-                    .map(|n| status(&hub, node_json(n, false))),
-            );
-            respond(&request, json!({"nodes": nodes}))
+            let mut nodes = vec![status(&hub, local_node(&hub))?];
+            for node in hub.inventory.list() {
+                nodes.push(status(&hub, node_info(&node, false))?);
+            }
+            Ok(v1::ListNodesResponse { nodes })
         }
     })?;
     let get = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/GetNode", move |request| {
-        let hub = Arc::clone(&get);
-        async move {
-            let name = string(&input(&request)?, "name");
-            let node = if name.eq_ignore_ascii_case(&hub.hostname) {
-                local_node(&hub)
-            } else {
-                node_json(&hub.inventory.get(&name).map_err(node_error)?, false)
-            };
-            respond(&request, status(&hub, node))
-        }
-    })?;
-    let add = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/AddNode", move |request| {
-        let hub = Arc::clone(&add);
-        async move {
-            let value = input(&request)?;
-            let raw = value
-                .get("node")
-                .cloned()
-                .ok_or_else(|| RpcError::new(Code::InvalidArgument, "node is required"))?;
-            let node = parse_node(raw)?;
-            let update = value
-                .get("update")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let inventory = Arc::clone(&hub.inventory);
-            let admission = Arc::clone(&hub.node_admission);
-            let draining = Arc::clone(&hub.node_draining);
-            let node = tokio::task::spawn_blocking(move || {
-                let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
-                if draining.lock().unwrap().contains(&node.name) {
-                    return Err(RpcError::new(
-                        Code::FailedPrecondition,
-                        "node is being removed",
-                    ));
-                }
-                inventory.add(node, update).map_err(node_error)
-            })
-            .await
-            .map_err(super::join_error)??;
-            hub.node_monitor.invalidate(&node.name);
-            let monitor = Arc::clone(&hub.node_monitor);
-            let name = node.name.clone();
-            tokio::task::spawn_blocking(move || monitor.poll_node(&name));
-            respond(&request, node_json(&node, false))
-        }
-    })?;
-    let invite = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/InviteNode", move |request| {
-        let hub = Arc::clone(&invite);
-        async move { invite_node(hub, request).await }
-    })?;
-    let join = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/JoinNode", move |request| {
-        let hub = Arc::clone(&join);
-        async move { join_node(hub, request).await }
-    })?;
-    let set_tier = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/SetNodeTier", move |request| {
-        let hub = Arc::clone(&set_tier);
-        async move {
-            let value = input(&request)?;
-            let name = string(&value, "name").trim().to_ascii_lowercase();
-            let tier = string(&value, "tier").trim().to_ascii_lowercase();
-            if tier != SHARED && tier != CARE {
-                return Err(RpcError::new(
-                    Code::InvalidArgument,
-                    "tier must be shared or care",
-                ));
+    server.unary(
+        node_service::GET_NODE,
+        move |call: Call<v1::GetNodeRequest>| {
+            let hub = Arc::clone(&get);
+            async move {
+                let name = call.request.name;
+                let node = if name.eq_ignore_ascii_case(&hub.hostname) {
+                    local_node(&hub)
+                } else {
+                    node_info(&hub.inventory.get(&name).map_err(node_error)?, false)
+                };
+                status(&hub, node)
             }
-            if name == hub.hostname.to_ascii_lowercase() {
-                return Err(RpcError::new(
-                    Code::FailedPrecondition,
-                    "the hub's own node is always shared",
-                ));
-            }
-            let inventory = Arc::clone(&hub.inventory);
-            let admission = Arc::clone(&hub.node_admission);
-            let draining = Arc::clone(&hub.node_draining);
-            let name_for_store = name.clone();
-            let node = tokio::task::spawn_blocking(move || {
-                let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
-                if draining.lock().unwrap().contains(&name_for_store) {
-                    return Err(RpcError::new(
-                        Code::FailedPrecondition,
-                        "node is being removed",
-                    ));
-                }
-                let prev = inventory.get(&name_for_store).map_err(node_error)?;
-                if prev.invited {
-                    return Err(RpcError::new(
-                        Code::FailedPrecondition,
-                        format!("{name_for_store} is invited but has not joined"),
-                    ));
-                }
-                inventory
-                    .set_tier(&name_for_store, &tier)
-                    .map_err(node_error)
-            })
-            .await
-            .map_err(super::join_error)??;
-            hub.emit("node.tier", &name, Value::Null);
-            respond(&request, node_json(&node, false))
-        }
-    })?;
-    let setup = Arc::clone(&hub);
-    server.register_streaming(
-        "/protectorate.v1.NodeService/RemoveNode",
-        move |request, sender| {
-            let hub = Arc::clone(&hub);
-            async move { remove_node(hub, request, sender).await }
         },
     )?;
-    server.register_streaming(
-        "/protectorate.v1.NodeService/WatchNodeSetup",
-        move |request, sender| {
+    let add = Arc::clone(&hub);
+    server.unary(
+        node_service::ADD_NODE,
+        move |call: Call<v1::AddNodeRequest>| {
+            let hub = Arc::clone(&add);
+            async move {
+                let node = call
+                    .request
+                    .node
+                    .map(inventory_node)
+                    .ok_or_else(|| RpcError::new(Code::InvalidArgument, "node is required"))?;
+                let update = call.request.update;
+                let inventory = Arc::clone(&hub.inventory);
+                let admission = Arc::clone(&hub.node_admission);
+                let draining = Arc::clone(&hub.node_draining);
+                let node = tokio::task::spawn_blocking(move || {
+                    let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
+                    if draining.lock().unwrap().contains(&node.name) {
+                        return Err(RpcError::new(
+                            Code::FailedPrecondition,
+                            "node is being removed",
+                        ));
+                    }
+                    inventory.add(node, update).map_err(node_error)
+                })
+                .await
+                .map_err(super::join_error)??;
+                hub.node_monitor.invalidate(&node.name);
+                // Wait for the first poll, so a lease or job asked for right
+                // after AddNode returns sees the node's health.
+                let monitor = Arc::clone(&hub.node_monitor);
+                let name = node.name.clone();
+                tokio::task::spawn_blocking(move || monitor.poll_node(&name))
+                    .await
+                    .map_err(super::join_error)?;
+                Ok(node_info(&node, false))
+            }
+        },
+    )?;
+    let invite = Arc::clone(&hub);
+    server.unary(node_service::INVITE_NODE, move |call: Call<_>| {
+        let hub = Arc::clone(&invite);
+        async move { invite_node(hub, call.request).await }
+    })?;
+    let join = Arc::clone(&hub);
+    server.unary(node_service::JOIN_NODE, move |call: Call<_>| {
+        let hub = Arc::clone(&join);
+        async move { join_node(hub, call.request).await }
+    })?;
+    let set_tier = Arc::clone(&hub);
+    server.unary(
+        node_service::SET_NODE_TIER,
+        move |call: Call<v1::SetNodeTierRequest>| {
+            let hub = Arc::clone(&set_tier);
+            async move {
+                let name = call.request.name.trim().to_ascii_lowercase();
+                let tier = call.request.tier.trim().to_ascii_lowercase();
+                if tier != SHARED && tier != CARE {
+                    return Err(RpcError::new(
+                        Code::InvalidArgument,
+                        "tier must be shared or care",
+                    ));
+                }
+                if name == hub.hostname.to_ascii_lowercase() {
+                    return Err(RpcError::new(
+                        Code::FailedPrecondition,
+                        "the hub's own node is always shared",
+                    ));
+                }
+                let inventory = Arc::clone(&hub.inventory);
+                let admission = Arc::clone(&hub.node_admission);
+                let draining = Arc::clone(&hub.node_draining);
+                let name_for_store = name.clone();
+                let node = tokio::task::spawn_blocking(move || {
+                    let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
+                    if draining.lock().unwrap().contains(&name_for_store) {
+                        return Err(RpcError::new(
+                            Code::FailedPrecondition,
+                            "node is being removed",
+                        ));
+                    }
+                    let prev = inventory.get(&name_for_store).map_err(node_error)?;
+                    if prev.invited {
+                        return Err(RpcError::new(
+                            Code::FailedPrecondition,
+                            format!("{name_for_store} is invited but has not joined"),
+                        ));
+                    }
+                    inventory
+                        .set_tier(&name_for_store, &tier)
+                        .map_err(node_error)
+                })
+                .await
+                .map_err(super::join_error)??;
+                hub.emit("node.tier", &name, Value::Null);
+                Ok(node_info(&node, false))
+            }
+        },
+    )?;
+    let setup = Arc::clone(&hub);
+    server.stream(node_service::REMOVE_NODE, move |call: Call<_>, sender| {
+        let hub = Arc::clone(&hub);
+        async move { remove_node(hub, call.request, sender).await }
+    })?;
+    server.stream(
+        node_service::WATCH_NODE_SETUP,
+        move |call: Call<v1::WatchNodeSetupRequest>, sender| {
             let hub = Arc::clone(&setup);
-            async move { watch_node_setup(hub, request, sender).await }
+            async move { watch_node_setup(hub, call.request.name, sender).await }
         },
     )?;
     Ok(())
@@ -235,41 +257,37 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
 
 async fn watch_node_setup(
     hub: Arc<Hub>,
-    request: RpcRequest,
+    name: String,
     sender: StreamSender,
 ) -> Result<wire::StreamTrailers> {
-    let name = string(&input(&request)?, "name");
     if name.is_empty() {
         return Err(RpcError::invalid("node name is required"));
     }
     hub.inventory.get(&name).map_err(node_error)?;
-    let mut last = None;
+    let mut last = None::<v1::NodeSetupProgress>;
     // A node that just joined is only seen when the hub next polls it. Kick
     // the poll from the watch so the setup flow does not sit at JOINED for a
     // whole poll interval.
     let mut kicked = None::<Instant>;
     loop {
         let node = hub.inventory.get(&name).map_err(node_error)?;
-        let status = status(&hub, node_json(&node, false));
+        let status = status(&hub, node_info(&node, false))?;
         let progress = setup_progress(&hub, &node, status);
-        let stage = string(&progress, "stage").to_owned();
-        let changed = last.as_ref().is_none_or(|previous: &Value| {
-            ["stage", "message", "problems", "notes"]
-                .iter()
-                .any(|field| previous[*field] != progress[*field])
+        let stage = progress.stage();
+        let changed = last.as_ref().is_none_or(|previous| {
+            previous.stage != progress.stage
+                || previous.message != progress.message
+                || previous.problems != progress.problems
+                || previous.notes != progress.notes
         });
         if changed {
-            let bytes = serde_json::to_vec(&progress)
-                .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
-            sender
-                .send(&wire::decode_json(request.method.output(), &bytes)?)
-                .await?;
+            sender.send(&progress).await?;
             last = Some(progress);
         }
-        if stage == "NODE_SETUP_STAGE_READY" {
+        if stage == NodeSetupStage::Ready {
             return Ok(Default::default());
         }
-        if stage != "NODE_SETUP_STAGE_INVITED"
+        if stage != NodeSetupStage::Invited
             && kicked.is_none_or(|at| at.elapsed() >= 3 * SETUP_POLL)
         {
             kicked = Some(Instant::now());
@@ -284,13 +302,18 @@ async fn watch_node_setup(
     }
 }
 
-fn setup_progress(hub: &Hub, node: &Node, status: Value) -> Value {
+fn setup_progress(hub: &Hub, node: &Node, status: v1::NodeStatus) -> v1::NodeSetupProgress {
     let mut problems = Vec::<String>::new();
     let mut notes = Vec::<String>::new();
+    let error = if status.error.is_empty() {
+        None
+    } else {
+        Some(status.error.as_str())
+    };
     let (mut stage, message) = if node.invited {
         if !node.cert_id.is_empty() {
             (
-                "NODE_SETUP_STAGE_JOINED",
+                NodeSetupStage::Joined,
                 format!(
                     "joined; waiting for the hub to reach the agent at {}",
                     node.address
@@ -298,77 +321,68 @@ fn setup_progress(hub: &Hub, node: &Node, status: Value) -> Value {
             )
         } else {
             (
-                "NODE_SETUP_STAGE_INVITED",
+                NodeSetupStage::Invited,
                 "waiting for the machine to run the installer".to_owned(),
             )
         }
-    } else if status["metrics"].is_null() {
-        (
-            "NODE_SETUP_STAGE_JOINED",
-            status["error"]
-                .as_str()
-                .filter(|error| !error.is_empty())
-                .unwrap_or("waiting for the hub to reach the agent")
-                .to_owned(),
-        )
-    } else {
-        let metrics = &status["metrics"];
-        if status["freshness"] != "NODE_FRESHNESS_FRESH" {
+    } else if let Some(metrics) = &status.metrics {
+        if status.freshness() != NodeFreshness::Fresh {
             problems.push(format!(
                 "the hub cannot reach the agent now: {}",
-                status["error"]
-                    .as_str()
-                    .filter(|error| !error.is_empty())
-                    .unwrap_or("no recent poll")
+                error.unwrap_or("no recent poll")
             ));
         }
-        let version = string(metrics, "agentVersion");
-        if !version.is_empty() && version != hub.version {
+        let version = &metrics.agent_version;
+        if !version.is_empty() && *version != hub.version {
             problems.push(format!(
                 "the agent runs {version} and the hub {}: update the node",
                 hub.version
             ));
         }
-        if let Some(warnings) = metrics["warnings"].as_array() {
-            notes.extend(warnings.iter().filter_map(Value::as_str).map(str::to_owned));
+        notes.extend(metrics.warnings.iter().cloned());
+        if problems.is_empty() {
+            (
+                NodeSetupStage::Ready,
+                format!("{}/{}, agent {version}", metrics.os, metrics.arch),
+            )
+        } else {
+            (
+                NodeSetupStage::Attention,
+                "the node answers but needs attention".to_owned(),
+            )
         }
+    } else {
         (
-            if !problems.is_empty() {
-                "NODE_SETUP_STAGE_ATTENTION"
-            } else {
-                "NODE_SETUP_STAGE_READY"
-            },
-            if !problems.is_empty() {
-                "the node answers but needs attention".to_owned()
-            } else {
-                format!(
-                    "{}/{}, agent {version}",
-                    string(metrics, "os"),
-                    string(metrics, "arch")
-                )
-            },
+            NodeSetupStage::Joined,
+            error
+                .unwrap_or("waiting for the hub to reach the agent")
+                .to_owned(),
         )
     };
-    if let Some(alerts) = status["alerts"].as_array() {
-        for alert in alerts {
-            if let Some(message) = alert["message"].as_str() {
-                if node.invited {
-                    problems.push(message.to_owned());
-                } else if alert["kind"] != "ALERT_KIND_UNREACHABLE" {
-                    notes.push(message.to_owned());
-                }
-            }
+    for alert in &status.alerts {
+        if alert.message.is_empty() {
+            continue;
+        }
+        if node.invited {
+            problems.push(alert.message.clone());
+        } else if alert.kind() != AlertKind::Unreachable {
+            notes.push(alert.message.clone());
         }
     }
     if node.invited && !problems.is_empty() {
-        stage = "NODE_SETUP_STAGE_ATTENTION";
+        stage = NodeSetupStage::Attention;
     }
-    json!({"stage":stage,"message":message,"problems":problems,"notes":notes,"status":status})
+    v1::NodeSetupProgress {
+        stage: stage as i32,
+        problems,
+        notes,
+        message,
+        status: Some(status),
+    }
 }
 
-async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResponse> {
-    let body = input(&request)?;
-    let name = string(&body, "name");
+async fn invite_node(hub: Arc<Hub>, body: v1::InviteNodeRequest) -> Result<v1::InviteNodeResponse> {
+    let name = body.name;
     if !valid_invite_name(&name) {
         return Err(RpcError::invalid(
             "name must be a lowercase DNS label, at most 63 characters",
@@ -380,26 +394,22 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
             "this hub has no CA to issue node certificates",
         )
     })?;
-    let tier = body
-        .get("tier")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(SHARED)
-        .to_owned();
+    let tier = if body.tier.is_empty() {
+        SHARED.to_owned()
+    } else {
+        body.tier
+    };
     if tier != SHARED && tier != CARE {
         return Err(RpcError::invalid("tier must be shared or care"));
     }
-    let ttl = match body.get("ttl") {
+    let ttl = match &body.ttl {
         None => Duration::from_secs(3600),
-        some => super::parse_duration(some)?,
+        some => wire::duration(some.as_ref(), "ttl")?,
     };
     if ttl.is_zero() || ttl > Duration::from_secs(24 * 3600) {
         return Err(RpcError::invalid("ttl must be positive and at most 24h"));
     }
-    let base = install_base(
-        &hub,
-        body.get("installUrl").and_then(Value::as_str).unwrap_or(""),
-    )?;
+    let base = install_base(&hub, &body.install_url)?;
     if name == hub.hostname {
         return Err(RpcError::new(
             Code::AlreadyExists,
@@ -445,46 +455,44 @@ async fn invite_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResp
     })
     .await
     .map_err(super::join_error)??;
-    let result = json!({
-        "node": node_json(&node, false),
-        "hubUrl": base,
-        "code": code,
-        "expiresAt": super::unix_timestamp(expires),
-        "installUrl": base,
-        "commands": install_commands(&base, &code, &name, &ca_sha256),
-        "caSha256": ca_sha256,
-    });
+    let result = v1::InviteNodeResponse {
+        node: Some(node_info(&node, false)),
+        hub_url: base.clone(),
+        commands: install_commands(&base, &code, &name, &ca_sha256),
+        code,
+        expires_at: Some(wire::timestamp_millis(expires.saturating_mul(1000))),
+        install_url: base,
+        ca_sha256,
+    };
     hub.node_monitor.invalidate(&name);
     hub.emit("node.invited", &name, Value::Null);
-    respond(&request, result)
+    Ok(result)
 }
 
-async fn join_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcResponse> {
-    let body = input(&request)?;
-    let name = string(&body, "name");
-    let code = string(&body, "code");
+async fn join_node(hub: Arc<Hub>, body: v1::JoinNodeRequest) -> Result<v1::JoinNodeResponse> {
+    let v1::JoinNodeRequest {
+        name,
+        code,
+        public_key,
+        proof,
+        address,
+    } = body;
     let ca = hub.ca.clone().ok_or_else(|| {
         RpcError::new(
             Code::FailedPrecondition,
             "this hub has no CA to issue node certificates",
         )
     })?;
-    let bytes = |field: &str| {
-        STANDARD
-            .decode(string(&body, field))
-            .map_err(|_| RpcError::invalid(format!("{field} must be base64")))
-    };
-    let public_key = bytes("publicKey")?;
     if !protectorate_tls::verify_proof(
         &public_key,
         &protectorate_tls::join_message(&name, &code),
-        &bytes("proof")?,
+        &proof,
     ) {
         return Err(RpcError::invalid(
             "proof must sign the join message with the uncompressed P-256 key",
         ));
     }
-    let address: std::net::SocketAddr = string(&body, "address")
+    let address: std::net::SocketAddr = address
         .parse()
         .map_err(|_| RpcError::invalid("address must be IP:PORT"))?;
     protectorate_tls::check_listen(address)
@@ -525,7 +533,10 @@ async fn join_node(hub: Arc<Hub>, request: RpcRequest) -> Result<wire::RpcRespon
     hub.node_monitor.invalidate(&name);
     let monitor = Arc::clone(&hub.node_monitor);
     tokio::task::spawn_blocking(move || monitor.poll_node(&name));
-    respond(&request, json!({"certificate": certificate}))
+    Ok(v1::JoinNodeResponse {
+        certificate,
+        ca: ca.pem().to_owned(),
+    })
 }
 
 fn valid_invite_name(name: &str) -> bool {
@@ -599,11 +610,10 @@ pub(super) fn validate_install_base(raw: &str) -> Result<String> {
 
 async fn remove_node(
     hub: Arc<Hub>,
-    request: RpcRequest,
+    body: v1::RemoveNodeRequest,
     sender: StreamSender,
 ) -> Result<wire::StreamTrailers> {
-    let body = input(&request)?;
-    let name = string(&body, "name").trim().to_ascii_lowercase();
+    let name = body.name.trim().to_ascii_lowercase();
     if name == hub.hostname {
         return Err(RpcError::new(
             Code::FailedPrecondition,
@@ -612,21 +622,21 @@ async fn remove_node(
     }
     let _drain = start_drain(&hub, &name)?;
     let info = hub.inventory.get(&name).map_err(node_error)?;
-    let jobs = string(&body, "jobs");
-    let wait = super::parse_duration(body.get("waitTimeout"))?;
+    let jobs =
+        RemoveJobs::try_from(body.jobs).map_err(|_| RpcError::invalid("invalid jobs mode"))?;
+    let wait = wire::duration(body.wait_timeout.as_ref(), "wait_timeout")?;
     let wait = if wait.is_zero() {
         DEFAULT_DRAIN_WAIT
     } else {
         wait
     };
     let mut ids = hub.jobs.active_on(&name);
-    match jobs.as_str() {
-        "REMOVE_JOBS_CANCEL" => {
+    match jobs {
+        RemoveJobs::Cancel => {
             if !ids.is_empty() {
                 progress(
-                    &request,
                     &sender,
-                    "REMOVE_PHASE_DRAINING",
+                    RemovePhase::Draining,
                     ids.len(),
                     format!("no new jobs or leases; canceling {}", ids.join(", ")),
                 )
@@ -640,8 +650,8 @@ async fn remove_node(
                     .map_err(super::join_error)??;
             }
         }
-        "REMOVE_JOBS_WAIT" => {}
-        "" | "REMOVE_JOBS_UNSPECIFIED" if !ids.is_empty() => {
+        RemoveJobs::Wait => {}
+        RemoveJobs::Unspecified if !ids.is_empty() => {
             return Err(RpcError::new(
                 Code::FailedPrecondition,
                 format!(
@@ -651,14 +661,12 @@ async fn remove_node(
                 ),
             ));
         }
-        "" | "REMOVE_JOBS_UNSPECIFIED" => {}
-        _ => return Err(RpcError::invalid("invalid jobs mode")),
+        RemoveJobs::Unspecified => {}
     }
     if ids.is_empty() {
         progress(
-            &request,
             &sender,
-            "REMOVE_PHASE_DRAINING",
+            RemovePhase::Draining,
             0,
             "no new jobs or leases; no jobs running",
         )
@@ -673,9 +681,8 @@ async fn remove_node(
             }
             if ids.len() != previous {
                 progress(
-                    &request,
                     &sender,
-                    "REMOVE_PHASE_DRAINING",
+                    RemovePhase::Draining,
                     ids.len(),
                     format!("waiting for {} job(s) to finish", ids.len()),
                 )
@@ -696,16 +703,9 @@ async fn remove_node(
                 _ = sender.cancelled() => return Err(RpcError::new(Code::Canceled, "node removal stream closed")),
             }
         }
-        progress(
-            &request,
-            &sender,
-            "REMOVE_PHASE_DRAINING",
-            0,
-            "no jobs running",
-        )
-        .await?;
+        progress(&sender, RemovePhase::Draining, 0, "no jobs running").await?;
     }
-    if body.get("uninstall").and_then(Value::as_bool) == Some(true) {
+    if body.uninstall {
         let message = if info.invited || !hub.node_monitor.is_fresh(&name, &info.address) {
             "not uninstalled: the node is not reachable now; run `protectorate node uninstall` on the machine".to_owned()
         } else {
@@ -714,10 +714,8 @@ async fn remove_node(
             match tokio::task::spawn_blocking(move || jobs.uninstall_node(&node))
                 .await.map_err(super::join_error)? {
                 Ok(reply) => {
-                    let actions = reply["actions"].as_array().into_iter().flatten()
-                        .filter_map(Value::as_str).collect::<Vec<_>>().join("; ");
-                    let left = reply["left"].as_array().into_iter().flatten()
-                        .filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+                    let actions = reply.actions.join("; ");
+                    let left = reply.left.join(", ");
                     if left.is_empty() { format!("the agent unregisters its startup and stops: {actions}") }
                     else { format!("the agent unregisters its startup and stops: {actions}. Nothing is deleted; left on the machine: {left}") }
                 }
@@ -726,21 +724,14 @@ async fn remove_node(
                 Err(error) => return Err(RpcError::new(error.code, format!("uninstall on {name}: {}", error.message))),
             }
         };
-        progress(&request, &sender, "REMOVE_PHASE_UNINSTALLING", 0, message).await?;
+        progress(&sender, RemovePhase::Uninstalling, 0, message).await?;
     }
     let revoke_message = if info.invited && info.cert_id.is_empty() {
         "the unused join code stops working"
     } else {
         "the node certificate is no longer trusted"
     };
-    progress(
-        &request,
-        &sender,
-        "REMOVE_PHASE_REVOKING",
-        0,
-        revoke_message,
-    )
-    .await?;
+    progress(&sender, RemovePhase::Revoking, 0, revoke_message).await?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -769,22 +760,22 @@ async fn remove_node(
     if released > 0 {
         message.push_str(&format!("; released {released} lease(s) on it"));
     }
-    progress(&request, &sender, "REMOVE_PHASE_REMOVED", 0, message).await?;
+    progress(&sender, RemovePhase::Removed, 0, message).await?;
     Ok(Default::default())
 }
 
 async fn progress(
-    request: &RpcRequest,
     sender: &StreamSender,
-    phase: &str,
+    phase: RemovePhase,
     running: usize,
     message: impl Into<String>,
 ) -> Result<()> {
-    let value = json!({"phase":phase,"runningJobs":running,"message":message.into()});
-    let bytes = serde_json::to_vec(&value)
-        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
     sender
-        .send(&wire::decode_json(request.method.output(), &bytes)?)
+        .send(&v1::RemoveNodeProgress {
+            phase: phase as i32,
+            running_jobs: u32::try_from(running).unwrap_or(u32::MAX),
+            message: message.into(),
+        })
         .await
 }
 
@@ -792,32 +783,35 @@ fn lease_error(error: protectorate_lease::Error) -> RpcError {
     RpcError::new(Code::Internal, error.to_string())
 }
 
-fn parse_node(mut value: Value) -> Result<Node> {
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| RpcError::new(Code::InvalidArgument, "node must be an object"))?;
-    object.remove("local");
-    serde_json::from_value(value)
-        .map_err(|error| RpcError::new(Code::InvalidArgument, error.to_string()))
+/// The inventory record an AddNode request describes; `local` is not stored.
+fn inventory_node(info: v1::NodeInfo) -> Node {
+    Node {
+        name: info.name,
+        address: info.address,
+        os: info.os,
+        arch: info.arch,
+        tags: info.tags,
+        ssh_alias: info.ssh_alias,
+        tier: info.tier,
+        notes: info.notes,
+        invited: info.invited,
+        ..Node::default()
+    }
 }
 
-fn node_json(node: &Node, local: bool) -> Value {
-    let mut out = serde_json::to_value(node).expect("node serialization");
-    if let Some(object) = out.as_object_mut() {
-        for private in [
-            "codeSha256",
-            "codeExpires",
-            "certId",
-            "certExpires",
-            "publicKey",
-        ] {
-            object.remove(private);
-        }
+fn node_info(node: &Node, local: bool) -> v1::NodeInfo {
+    v1::NodeInfo {
+        name: node.name.clone(),
+        address: node.address.clone(),
+        os: node.os.clone(),
+        arch: node.arch.clone(),
+        tags: node.tags.clone(),
+        ssh_alias: node.ssh_alias.clone(),
+        tier: node.tier.clone(),
+        notes: node.notes.clone(),
+        local,
+        invited: node.invited,
     }
-    if local {
-        out["local"] = json!(true);
-    }
-    out
 }
 
 pub(super) fn publish_poll_event(hub: &Arc<Hub>, event: PollEvent) {
@@ -834,16 +828,22 @@ pub(super) fn publish_poll_event(hub: &Arc<Hub>, event: PollEvent) {
         if node.address != event.address {
             return;
         }
-        node_json(&node, false)
+        node_info(&node, false)
     };
-    let status = status(hub, node);
+    let status = match status(hub, node) {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("node {}: status: {}", event.name, error.message);
+            return;
+        }
+    };
     let payload = match event.kind {
         "node.metrics" => {
             renew_if_due(hub, &event.name);
             metrics_summary(&status)
         }
         "node.unreachable" => json!({
-            "error": status["error"],
+            "error": status.error,
             "address": event.address,
         }),
         _ => return,
@@ -851,45 +851,54 @@ pub(super) fn publish_poll_event(hub: &Arc<Hub>, event: PollEvent) {
     hub.emit(event.kind, &event.name, payload);
 }
 
-fn metrics_summary(status: &Value) -> Value {
-    let metrics = &status["metrics"];
-    let mut summary = json!({
-        "freshness": status["freshness"].as_str().unwrap_or_default()
-            .trim_start_matches("NODE_FRESHNESS_").to_ascii_lowercase(),
-        "alerts": status["alerts"].as_array().into_iter().flatten()
-            .filter_map(|alert| alert["kind"].as_str())
-            .map(|kind| kind.trim_start_matches("ALERT_KIND_").to_ascii_lowercase())
-            .collect::<Vec<_>>(),
-        "gpu_count": metrics["gpus"].as_array().map_or(0, Vec::len),
-        "containers": metrics["engine"]["containers"].as_array().map_or(0, Vec::len),
-    });
-    if let Some(cpu) = metrics["cpu"]["usagePercent"].as_f64() {
-        summary["cpu_percent"] = json!(cpu);
-    }
-    if let Some(mem) = metrics["memory"]["usedPercent"].as_f64() {
-        summary["mem_percent"] = json!(mem);
-    }
-    if let Some(worst) = metrics["filesystems"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .reduce(|worst, next| {
-            if next["usedPercent"].as_f64().unwrap_or(0.0)
-                > worst["usedPercent"].as_f64().unwrap_or(0.0)
-            {
-                next
-            } else {
-                worst
-            }
+/// The "node.metrics" event payload.
+fn metrics_summary(status: &v1::NodeStatus) -> Value {
+    let freshness = match status.freshness() {
+        NodeFreshness::Unspecified => String::new(),
+        freshness => freshness
+            .as_str_name()
+            .trim_start_matches("NODE_FRESHNESS_")
+            .to_ascii_lowercase(),
+    };
+    let alerts = status
+        .alerts
+        .iter()
+        .map(|alert| {
+            alert
+                .kind()
+                .as_str_name()
+                .trim_start_matches("ALERT_KIND_")
+                .to_ascii_lowercase()
         })
-    {
-        summary["worst_disk_percent"] = worst["usedPercent"].clone();
-        summary["worst_disk_mount"] = worst["mount"].clone();
+        .collect::<Vec<_>>();
+    let default = v1::NodeMetrics::default();
+    let metrics = status.metrics.as_ref().unwrap_or(&default);
+    let mut summary = json!({
+        "freshness": freshness,
+        "alerts": alerts,
+        "gpu_count": metrics.gpus.len(),
+        "containers": metrics.engine.as_ref().map_or(0, |engine| engine.containers.len()),
+    });
+    if let Some(cpu) = &metrics.cpu {
+        summary["cpu_percent"] = json!(cpu.usage_percent);
+    }
+    if let Some(memory) = &metrics.memory {
+        summary["mem_percent"] = json!(memory.used_percent);
+    }
+    if let Some(worst) = metrics.filesystems.iter().reduce(|worst, next| {
+        if next.used_percent > worst.used_percent {
+            next
+        } else {
+            worst
+        }
+    }) {
+        summary["worst_disk_percent"] = json!(worst.used_percent);
+        summary["worst_disk_mount"] = json!(worst.mount);
     }
     summary
 }
-fn local_node(hub: &Hub) -> Value {
-    node_json(
+fn local_node(hub: &Hub) -> v1::NodeInfo {
+    node_info(
         &Node {
             name: hub.hostname.clone(),
             address: "local".into(),
@@ -901,38 +910,37 @@ fn local_node(hub: &Hub) -> Value {
         true,
     )
 }
-fn status(hub: &Arc<Hub>, node: Value) -> Value {
-    let name = node["name"].as_str().unwrap_or_default();
-    let address = node["address"].as_str().unwrap_or_default();
+fn status(hub: &Arc<Hub>, node: v1::NodeInfo) -> Result<v1::NodeStatus> {
     let mut status = hub
         .node_monitor
-        .status(name, address, node["invited"] == true);
-    if hub
+        .status(&node.name, &node.address, node.invited);
+    status.draining = hub
         .node_draining
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .contains(&name.to_ascii_lowercase())
-    {
-        status["draining"] = json!(true);
-    }
-    if status["metrics"].is_object() {
-        let alerts = resource_alerts(&status["metrics"]);
-        for alert in alerts {
-            push_alert(&mut status, alert);
+        .contains(&node.name.to_ascii_lowercase());
+    if let Some(metrics) = &mut status.metrics {
+        status.alerts.extend(resource_alerts(metrics));
+        if node.local {
+            metrics.sleeves = hub
+                .sleeves
+                .list()
+                .iter()
+                .filter(|row| {
+                    row.state == protectorate_sleeve_registry::State::Running && !row.helper
+                })
+                .map(sleeve)
+                .collect::<Result<_>>()?;
         }
     }
-    if node["local"] == true && status["metrics"].is_object() {
-        let sleeves = hub
-            .sleeves
-            .list()
-            .iter()
-            .filter(|row| row.state == protectorate_sleeve_registry::State::Running && !row.helper)
-            .map(crate::sleeves::sleeve_json)
-            .collect::<Vec<_>>();
-        status["metrics"]["sleeves"] = json!(sleeves);
-    }
-    status["node"] = node;
-    status
+    status.node = Some(node);
+    Ok(status)
+}
+
+fn sleeve(row: &protectorate_sleeve_registry::Record) -> Result<v1::Sleeve> {
+    let bytes = serde_json::to_vec(&crate::sleeves::sleeve_json(row))
+        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    wire::decode(&bytes)
 }
 
 /// Pushes a fresh certificate for the node's own key once its current one
@@ -963,9 +971,9 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
             hub.node_files
                 .internal_client_with_timeout(&node.name, Duration::from_secs(30))
                 .and_then(|client| {
-                    client.call(
-                        "/protectorate.v1.NodeAgentService/RenewCertificate",
-                        &json!({"certificate": certificate}),
+                    client.unary(
+                        node_agent_service::RENEW_CERTIFICATE,
+                        &v1::RenewCertificateRequest { certificate },
                     )
                 })
                 .map_err(|e| e.message)?;
@@ -980,42 +988,33 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
     });
 }
 
-fn push_alert(status: &mut Value, alert: Value) {
-    match status["alerts"].as_array_mut() {
-        Some(existing) => existing.push(alert),
-        None => status["alerts"] = json!([alert]),
-    }
-}
-
-fn percent(metrics: &Value, field: &str) -> f64 {
-    metrics.get(field).and_then(Value::as_f64).unwrap_or(0.0)
-}
-
-fn resource_alerts(metrics: &Value) -> Vec<Value> {
+fn resource_alerts(metrics: &v1::NodeMetrics) -> Vec<v1::NodeAlert> {
     let mut out = Vec::new();
-    for filesystem in metrics["filesystems"].as_array().into_iter().flatten() {
-        let used = percent(filesystem, "usedPercent");
+    for filesystem in &metrics.filesystems {
+        let used = filesystem.used_percent;
         if used < DISK_ALERT_PERCENT {
             continue;
         }
-        let mount = string(filesystem, "mount");
-        out.push(json!({
-            "kind": "ALERT_KIND_DISK_PERCENT",
-            "subject": mount,
-            "message": format!("{mount} is {used:.0}% full"),
-            "value": used,
-            "threshold": DISK_ALERT_PERCENT,
-        }));
+        let mount = &filesystem.mount;
+        out.push(v1::NodeAlert {
+            kind: AlertKind::DiskPercent as i32,
+            subject: mount.clone(),
+            message: format!("{mount} is {used:.0}% full"),
+            value: used,
+            threshold: DISK_ALERT_PERCENT,
+        });
     }
-    let memory = &metrics["memory"];
-    let used = percent(memory, "usedPercent");
-    if memory.is_object() && used >= MEM_ALERT_PERCENT {
-        out.push(json!({
-            "kind": "ALERT_KIND_MEM_PRESSURE",
-            "message": format!("memory is {used:.0}% used"),
-            "value": used,
-            "threshold": MEM_ALERT_PERCENT,
-        }));
+    if let Some(memory) = &metrics.memory {
+        let used = memory.used_percent;
+        if used >= MEM_ALERT_PERCENT {
+            out.push(v1::NodeAlert {
+                kind: AlertKind::MemPressure as i32,
+                message: format!("memory is {used:.0}% used"),
+                value: used,
+                threshold: MEM_ALERT_PERCENT,
+                ..Default::default()
+            });
+        }
     }
     out
 }

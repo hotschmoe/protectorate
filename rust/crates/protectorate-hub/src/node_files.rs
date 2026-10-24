@@ -1,14 +1,14 @@
 //! Relay node file transfers without staging their contents on the hub.
-use super::{input, respond, Hub};
+use super::Hub;
 use protectorate_connect_client::Client;
 use protectorate_inventory::{Inventory, CARE};
 use protectorate_node_monitor::Dialer;
-use protectorate_wire::{self as wire, Code, Result, RpcError, RpcRequest, UnaryServer};
-use serde_json::Value;
+use protectorate_wire::{
+    v1::{node_agent_service, node_service},
+    AuthContext, Call, Code, Result, RpcError, UnaryServer,
+};
 use std::{sync::Arc, time::Duration};
 
-const PUT: &str = "/protectorate.v1.NodeAgentService/PutFile";
-const GET: &str = "/protectorate.v1.NodeAgentService/GetFile";
 const CALL_TIMEOUT: Duration = Duration::from_secs(3600);
 
 pub struct FileRelay {
@@ -26,17 +26,17 @@ impl FileRelay {
         }
     }
 
-    fn client(&self, request: &RpcRequest, name: &str) -> Result<Client> {
-        self.client_with_timeout(request, name, CALL_TIMEOUT)
+    fn client(&self, auth: &AuthContext, name: &str) -> Result<Client> {
+        self.client_with_timeout(auth, name, CALL_TIMEOUT)
     }
 
     pub(super) fn client_with_timeout(
         &self,
-        request: &RpcRequest,
+        auth: &AuthContext,
         name: &str,
         timeout: Duration,
     ) -> Result<Client> {
-        self.client_for_node(Some(request), name, timeout)
+        self.client_for_node(Some(auth), name, timeout)
     }
 
     pub(super) fn internal_client_with_timeout(
@@ -49,7 +49,7 @@ impl FileRelay {
 
     fn client_for_node(
         &self,
-        request: Option<&RpcRequest>,
+        auth: Option<&AuthContext>,
         name: &str,
         timeout: Duration,
     ) -> Result<Client> {
@@ -74,15 +74,10 @@ impl FileRelay {
                 ));
             }
             if info.tier == CARE
-                && request.is_some_and(|request| {
-                    !request.auth.owner
+                && auth.is_some_and(|auth| {
+                    !auth.owner
                         && !protectorate_auth::admin_on(
-                            &request
-                                .auth
-                                .scopes
-                                .iter()
-                                .map(String::as_str)
-                                .collect::<Vec<_>>(),
+                            &auth.scopes.iter().map(String::as_str).collect::<Vec<_>>(),
                             &name,
                         )
                 })
@@ -99,47 +94,31 @@ impl FileRelay {
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let put = Arc::clone(&hub);
-    server.register("/protectorate.v1.NodeService/PutFile", move |request| {
+    server.unary(node_service::PUT_FILE, move |call: Call<_>| {
         let hub = Arc::clone(&put);
         async move {
-            let value = input(&request)?;
-            let name = value
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let client = hub.node_files.client(&request, name)?;
-            let reply = tokio::task::spawn_blocking(move || client.call(PUT, &value))
-                .await
-                .map_err(super::join_error)??;
-            respond(&request, reply)
+            let client = hub.node_files.client(&call.auth, &call.request.name)?;
+            tokio::task::spawn_blocking(move || {
+                client.unary(node_agent_service::PUT_FILE, &call.request)
+            })
+            .await
+            .map_err(super::join_error)?
         }
     })?;
-    server.register_streaming(
-        "/protectorate.v1.NodeService/GetFile",
-        move |request, sender| {
-            let hub = Arc::clone(&hub);
-            async move {
-                let value = input(&request)?;
-                let name = value
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let client = hub.node_files.client(&request, name)?;
-                let output = request.method.output();
-                let handle = tokio::runtime::Handle::current();
-                tokio::task::spawn_blocking(move || {
-                    client.stream(GET, &value, |part| {
-                        let bytes = serde_json::to_vec(&part)
-                            .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
-                        let message = wire::decode_json(output.clone(), &bytes)?;
-                        handle.block_on(sender.send(&message))
-                    })
+    server.stream(node_service::GET_FILE, move |call: Call<_>, sender| {
+        let hub = Arc::clone(&hub);
+        async move {
+            let client = hub.node_files.client(&call.auth, &call.request.name)?;
+            let handle = tokio::runtime::Handle::current();
+            tokio::task::spawn_blocking(move || {
+                client.server_stream(node_agent_service::GET_FILE, &call.request, |part| {
+                    handle.block_on(sender.send(&part))
                 })
-                .await
-                .map_err(super::join_error)??;
-                Ok(Default::default())
-            }
-        },
-    )?;
+            })
+            .await
+            .map_err(super::join_error)??;
+            Ok(Default::default())
+        }
+    })?;
     Ok(())
 }

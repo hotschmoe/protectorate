@@ -1,5 +1,6 @@
 //! Durable node job records. Incomplete records become explicit unknown results on restart.
 use chrono::{DateTime, Utc};
+use protectorate_wire::{self as wire, v1, ReflectMessage};
 use serde_json::{json, Value};
 use std::{
     fs::{self, OpenOptions},
@@ -13,8 +14,8 @@ pub(crate) const MAX_LOG_FILE: u64 = 64 << 20;
 
 pub(crate) struct Recovered {
     pub id: String,
-    pub started: Option<Value>,
-    pub finished: Value,
+    pub started: Option<v1::JobStarted>,
+    pub finished: v1::JobFinished,
     pub finished_at: SystemTime,
     pub log: Vec<u8>,
     pub dir: PathBuf,
@@ -51,11 +52,13 @@ pub(crate) fn replace_log(dir: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 pub(crate) fn write_record(
     dir: &Path,
-    started: Option<&Value>,
-    finished: Option<&Value>,
+    started: Option<&v1::JobStarted>,
+    finished: Option<&v1::JobFinished>,
     finished_at: Option<SystemTime>,
 ) -> io::Result<()> {
     let time = finished_at.map(|time| DateTime::<Utc>::from(time).to_rfc3339());
+    let started = started.map(message_json).transpose()?;
+    let finished = finished.map(message_json).transpose()?;
     let value = json!({"version":1,"started":started,"finished":finished,"finishedAt":time});
     let bytes = serde_json::to_vec(&value).map_err(io::Error::other)?;
     if bytes.len() as u64 > MAX_RECORD {
@@ -94,13 +97,11 @@ pub(crate) fn recover(root: &Path, retention: Duration) -> io::Result<Vec<Recove
         let started = record
             .as_ref()
             .and_then(|record| record.get("started"))
-            .filter(|v| !v.is_null())
-            .cloned();
+            .and_then(json_message::<v1::JobStarted>);
         let finished = record
             .as_ref()
             .and_then(|record| record.get("finished"))
-            .filter(|v| !v.is_null())
-            .cloned();
+            .and_then(json_message::<v1::JobFinished>);
         let at = record
             .as_ref()
             .and_then(|record| record.get("finishedAt"))
@@ -133,7 +134,12 @@ pub(crate) fn recover(root: &Path, retention: Duration) -> io::Result<Vec<Recove
             Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(error),
         };
-        let finished = finished.unwrap_or_else(|| json!({"end":"JOB_END_ERROR","exitCode":-1,"error":"node restarted before job completion; outcome unknown"}));
+        let finished = finished.unwrap_or_else(|| v1::JobFinished {
+            end: v1::JobEnd::Error as i32,
+            exit_code: -1,
+            error: "node restarted before job completion; outcome unknown".into(),
+            run_time: None,
+        });
         write_record(&dir, started.as_ref(), Some(&finished), Some(finished_at))?;
         recovered.push(Recovered {
             id,
@@ -145,4 +151,15 @@ pub(crate) fn recover(root: &Path, retention: Duration) -> io::Result<Vec<Recove
         });
     }
     Ok(recovered)
+}
+
+/// Records keep the job messages as protobuf JSON.
+fn message_json<T: ReflectMessage>(message: &T) -> io::Result<Value> {
+    serde_json::to_value(message.transcode_to_dynamic()).map_err(io::Error::other)
+}
+fn json_message<T: ReflectMessage + Default>(value: &Value) -> Option<T> {
+    if value.is_null() {
+        return None;
+    }
+    wire::decode(&serde_json::to_vec(value).ok()?).ok()
 }
