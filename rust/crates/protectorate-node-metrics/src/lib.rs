@@ -14,7 +14,7 @@ pub mod linux;
 pub mod model;
 pub mod windows;
 
-pub use json::metrics_json;
+pub use json::{metrics_json, metrics_proto};
 pub use model::*;
 
 use std::{

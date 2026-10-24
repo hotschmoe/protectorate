@@ -1220,8 +1220,8 @@ dependencies = [
 name = "protectorate-node-metrics"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "libc",
+ "protectorate-wire",
  "serde",
  "serde_json",
  "windows-sys 0.61.2",

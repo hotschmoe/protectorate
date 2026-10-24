@@ -1,136 +1,153 @@
 use crate::{DiskBucket, NodeMetrics};
-use chrono::{DateTime, SecondsFormat, Utc};
-use serde_json::{json, Value};
-use std::time::{Duration, SystemTime};
+use protectorate_wire::{self as wire, v1, ReflectMessage};
+use serde_json::Value;
 
-fn timestamp(time: SystemTime) -> String {
-    DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Nanos, true)
-}
-fn duration(duration: Duration) -> String {
-    if duration.subsec_nanos() == 0 {
-        format!("{}s", duration.as_secs())
-    } else {
-        format!("{}.{:09}s", duration.as_secs(), duration.subsec_nanos())
+fn disk_bucket(bucket: &DiskBucket) -> v1::DiskBucket {
+    v1::DiskBucket {
+        count: bucket.count,
+        size_bytes: bucket.size_bytes,
+        reclaimable_bytes: bucket.reclaimable_bytes,
     }
 }
-fn disk_bucket(bucket: &DiskBucket) -> Value {
-    json!({
-        "count": bucket.count.to_string(),
-        "sizeBytes": bucket.size_bytes.to_string(),
-        "reclaimableBytes": bucket.reclaimable_bytes.to_string(),
-    })
+
+/// The collector snapshot as the API's NodeMetrics.
+pub fn metrics_proto(m: &NodeMetrics) -> v1::NodeMetrics {
+    v1::NodeMetrics {
+        hostname: m.hostname.clone(),
+        os: m.os.clone(),
+        arch: m.arch.clone(),
+        platform: m.platform.clone(),
+        agent_version: m.agent_version.clone(),
+        uptime_seconds: m.uptime_seconds,
+        collected_at: m.collected_at.map(Into::into),
+        cpu: m.cpu.as_ref().map(|cpu| v1::CpuMetrics {
+            logical_cores: cpu.logical_cores,
+            usage_percent: cpu.usage_percent,
+            load1: cpu.load1,
+            load5: cpu.load5,
+            load15: cpu.load15,
+        }),
+        memory: m.memory.as_ref().map(|memory| v1::MemoryMetrics {
+            total_bytes: memory.total_bytes,
+            used_bytes: memory.used_bytes,
+            available_bytes: memory.available_bytes,
+            used_percent: memory.used_percent,
+            swap_total_bytes: memory.swap_total_bytes,
+            swap_used_bytes: memory.swap_used_bytes,
+            swap_used_percent: memory.swap_used_percent,
+        }),
+        filesystems: m
+            .filesystems
+            .iter()
+            .map(|f| v1::FilesystemMetrics {
+                mount: f.mount.clone(),
+                device: f.device.clone(),
+                fstype: f.fstype.clone(),
+                total_bytes: f.total_bytes,
+                used_bytes: f.used_bytes,
+                free_bytes: f.free_bytes,
+                used_percent: f.used_percent,
+                primary: f.primary,
+            })
+            .collect(),
+        gpus: m
+            .gpus
+            .iter()
+            .map(|gpu| v1::GpuMetrics {
+                index: gpu.index,
+                vendor: gpu.vendor.clone(),
+                name: gpu.name.clone(),
+                utilization_percent: gpu.utilization_percent,
+                memory_used_bytes: gpu.memory_used_bytes,
+                memory_total_bytes: gpu.memory_total_bytes,
+                temperature_celsius: gpu.temperature_celsius,
+                integrated: gpu.integrated,
+                driver: gpu.driver.clone(),
+                bus_id: gpu.bus_id.clone(),
+            })
+            .collect(),
+        engine: m.engine.as_ref().map(|engine| v1::ContainerEngine {
+            kind: engine.kind.clone(),
+            version: engine.version.clone(),
+            disk: engine.disk.as_ref().map(|disk| v1::EngineDiskUsage {
+                images: Some(disk_bucket(&disk.images)),
+                containers: Some(disk_bucket(&disk.containers)),
+                volumes: Some(disk_bucket(&disk.volumes)),
+                build_cache: Some(disk_bucket(&disk.build_cache)),
+            }),
+            disk_measured_at: engine.disk_measured_at.map(Into::into),
+            containers: engine
+                .containers
+                .iter()
+                .map(|container| v1::ContainerMetrics {
+                    id: container.id.clone(),
+                    name: container.name.clone(),
+                    image: container.image.clone(),
+                    state: container.state.clone(),
+                    cpu_percent: container.cpu_percent,
+                    memory_used_bytes: container.memory_used_bytes,
+                    memory_limit_bytes: container.memory_limit_bytes,
+                    memory_percent: container.memory_percent,
+                    writable_layer_bytes: container.writable_layer_bytes,
+                    rootfs_bytes: container.rootfs_bytes,
+                    stats_error: container.stats_error.clone(),
+                    created_at: container.created_at.map(Into::into),
+                })
+                .collect(),
+        }),
+        watch_dirs: m
+            .watch_dirs
+            .iter()
+            .map(|dir| v1::DirSize {
+                path: dir.path.clone(),
+                size_bytes: dir.size_bytes,
+                measured_at: dir.measured_at.map(Into::into),
+                took: Some(wire::proto_duration(dir.took)),
+                complete: dir.complete,
+                error: dir.error.clone(),
+            })
+            .collect(),
+        warnings: m.warnings.clone(),
+        sleeves: m
+            .sleeves
+            .iter()
+            .map(|sleeve| v1::Sleeve {
+                name: if sleeve.name.is_empty() {
+                    sleeve.id.clone()
+                } else {
+                    sleeve.name.clone()
+                },
+                state: match sleeve.state.to_ascii_lowercase().as_str() {
+                    "running" | "sleeve_state_running" => v1::SleeveState::Running,
+                    "exited" | "sleeve_state_exited" => v1::SleeveState::Exited,
+                    _ => v1::SleeveState::Unspecified,
+                } as i32,
+                ..Default::default()
+            })
+            .collect(),
+        npus: m
+            .npus
+            .iter()
+            .map(|npu| v1::AcceleratorMetrics {
+                kind: npu.kind.clone(),
+                vendor: npu.vendor.clone(),
+                name: npu.name.clone(),
+                driver: npu.driver.clone(),
+                utilization_percent: npu.utilization_percent,
+                frequency_hz: npu.frequency_hz,
+                bus_id: npu.bus_id.clone(),
+            })
+            .collect(),
+        jobs: m.jobs.as_ref().map(|jobs| v1::JobIsolation {
+            sandbox: jobs.sandbox.clone(),
+            note: jobs.note.clone(),
+            admin: jobs.admin.clone(),
+        }),
+        ..Default::default()
+    }
 }
-/// Encodes a collector snapshot with the NodeMetrics proto JSON field shape.
+
+/// The snapshot as protobuf JSON, for printing.
 pub fn metrics_json(m: &NodeMetrics) -> Value {
-    let mut out = json!({
-        "hostname": m.hostname, "os": m.os, "arch": m.arch,
-        "platform": m.platform, "agentVersion": m.agent_version,
-        "uptimeSeconds": m.uptime_seconds.to_string(), "warnings": m.warnings,
-        "filesystems": m.filesystems.iter().map(|f| json!({
-            "mount": f.mount, "device": f.device, "fstype": f.fstype,
-            "totalBytes": f.total_bytes.to_string(), "usedBytes": f.used_bytes.to_string(),
-            "freeBytes": f.free_bytes.to_string(), "usedPercent": f.used_percent,
-            "primary": f.primary,
-        })).collect::<Vec<_>>(),
-        "gpus": m.gpus.iter().map(|gpu| {
-            let mut value = json!({
-                "index": gpu.index, "vendor": gpu.vendor, "name": gpu.name,
-                "utilizationPercent": gpu.utilization_percent,
-                "memoryTotalBytes": gpu.memory_total_bytes.to_string(),
-                "temperatureCelsius": gpu.temperature_celsius,
-                "integrated": gpu.integrated, "driver": gpu.driver, "busId": gpu.bus_id,
-            });
-            if let Some(used) = gpu.memory_used_bytes {
-                value["memoryUsedBytes"] = json!(used.to_string());
-            }
-            value
-        }).collect::<Vec<_>>(),
-        "npus": m.npus.iter().map(|npu| json!({
-            "kind": npu.kind, "vendor": npu.vendor, "name": npu.name,
-            "driver": npu.driver, "utilizationPercent": npu.utilization_percent,
-            "frequencyHz": npu.frequency_hz.to_string(), "busId": npu.bus_id,
-        })).collect::<Vec<_>>(),
-        "watchDirs": m.watch_dirs.iter().map(|dir| {
-            let mut value = json!({
-                "path": dir.path, "sizeBytes": dir.size_bytes.to_string(),
-                "took": duration(dir.took), "complete": dir.complete, "error": dir.error,
-            });
-            if let Some(at) = dir.measured_at {
-                value["measuredAt"] = json!(timestamp(at));
-            }
-            value
-        }).collect::<Vec<_>>(),
-        "sleeves": m.sleeves.iter().map(|sleeve| json!({
-            "name": if sleeve.name.is_empty() { &sleeve.id } else { &sleeve.name },
-            "state": match sleeve.state.to_ascii_lowercase().as_str() {
-                "running" | "sleeve_state_running" => "SLEEVE_STATE_RUNNING",
-                "exited" | "sleeve_state_exited" => "SLEEVE_STATE_EXITED",
-                _ => "SLEEVE_STATE_UNSPECIFIED",
-            },
-        })).collect::<Vec<_>>(),
-    });
-    if let Some(time) = m.collected_at {
-        out["collectedAt"] = json!(timestamp(time));
-    }
-    if let Some(cpu) = &m.cpu {
-        let mut value =
-            json!({"logicalCores": cpu.logical_cores, "usagePercent": cpu.usage_percent});
-        if let Some(load) = cpu.load1 {
-            value["load1"] = json!(load);
-        }
-        if let Some(load) = cpu.load5 {
-            value["load5"] = json!(load);
-        }
-        if let Some(load) = cpu.load15 {
-            value["load15"] = json!(load);
-        }
-        out["cpu"] = value;
-    }
-    if let Some(memory) = &m.memory {
-        out["memory"] = json!({
-            "totalBytes": memory.total_bytes.to_string(), "usedBytes": memory.used_bytes.to_string(),
-            "availableBytes": memory.available_bytes.to_string(), "usedPercent": memory.used_percent,
-            "swapTotalBytes": memory.swap_total_bytes.to_string(), "swapUsedBytes": memory.swap_used_bytes.to_string(),
-            "swapUsedPercent": memory.swap_used_percent,
-        });
-    }
-    if let Some(engine) = &m.engine {
-        let mut value = json!({
-            "kind": engine.kind, "version": engine.version,
-            "containers": engine.containers.iter().map(|container| {
-                let mut value = json!({
-                    "id": container.id, "name": container.name, "image": container.image,
-                    "state": container.state, "cpuPercent": container.cpu_percent,
-                    "memoryUsedBytes": container.memory_used_bytes.to_string(),
-                    "memoryLimitBytes": container.memory_limit_bytes.to_string(),
-                    "memoryPercent": container.memory_percent,
-                    "writableLayerBytes": container.writable_layer_bytes.to_string(),
-                    "rootfsBytes": container.rootfs_bytes.to_string(),
-                    "statsError": container.stats_error,
-                });
-                if let Some(at) = container.created_at {
-                    value["createdAt"] = json!(timestamp(at));
-                }
-                value
-            }).collect::<Vec<_>>(),
-        });
-        if let Some(disk) = &engine.disk {
-            value["disk"] = json!({
-                "images": disk_bucket(&disk.images),
-                "containers": disk_bucket(&disk.containers),
-                "volumes": disk_bucket(&disk.volumes),
-                "buildCache": disk_bucket(&disk.build_cache),
-            });
-        }
-        if let Some(at) = engine.disk_measured_at {
-            value["diskMeasuredAt"] = json!(timestamp(at));
-        }
-        out["engine"] = value;
-    }
-    if let Some(jobs) = &m.jobs {
-        out["jobs"] = json!({
-            "sandbox": jobs.sandbox, "note": jobs.note, "admin": jobs.admin,
-        });
-    }
-    out
+    serde_json::to_value(metrics_proto(m).transcode_to_dynamic()).unwrap_or(Value::Null)
 }
