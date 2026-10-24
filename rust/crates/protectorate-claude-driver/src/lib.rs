@@ -11,13 +11,17 @@ use std::{
     collections::{BTreeMap, HashSet},
     io::{BufRead, BufReader, Read, Write},
     process::ChildStdin,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
 
 const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
+const MAX_UNREAD_INPUT: usize = 64 << 20;
 
 #[derive(Default)]
 struct State {
@@ -35,8 +39,49 @@ struct State {
     compact_error: Option<String>,
 }
 
+/// Claude's stdin, written by its own thread. Callers queue lines under
+/// `event_gate` without blocking, so Claude stalling on a full stdout pipe
+/// cannot also stall the stdout reader that waits for that gate.
+struct Input {
+    lines: mpsc::Sender<Vec<u8>>,
+    unread: Arc<AtomicUsize>,
+}
+
+impl Input {
+    fn start(mut stdin: ChildStdin, log: Arc<Log>, kill: KillHandle) -> Self {
+        let (lines, queue) = mpsc::channel::<Vec<u8>>();
+        let unread = Arc::new(AtomicUsize::new(0));
+        let written = Arc::clone(&unread);
+        thread::spawn(move || {
+            for line in queue {
+                if let Err(error) = stdin.write_all(&line) {
+                    let _ = log.append(Event::new(
+                        json!({"error":{"text":format!("write claude stdin: {error}")}}),
+                    ));
+                    kill.kill();
+                    return;
+                }
+                written.fetch_sub(line.len(), Ordering::Relaxed);
+            }
+        });
+        Self { lines, unread }
+    }
+    fn write(&self, value: &Value) -> Result<(), String> {
+        let mut line = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+        line.push(b'\n');
+        let len = line.len();
+        if self.unread.fetch_add(len, Ordering::Relaxed) + len > MAX_UNREAD_INPUT {
+            self.unread.fetch_sub(len, Ordering::Relaxed);
+            return Err("claude is not reading its input".into());
+        }
+        self.lines
+            .send(line)
+            .map_err(|_| "claude stdin is closed".into())
+    }
+}
+
 pub struct Session {
-    stdin: Mutex<ChildStdin>,
+    input: Input,
     event_gate: Mutex<()>,
     state: Mutex<State>,
     changed: Condvar,
@@ -65,7 +110,7 @@ impl Session {
         let stdout = child.take_stdout().ok_or("sandbox did not supply stdout")?;
         let stderr = child.take_stderr().ok_or("sandbox did not supply stderr")?;
         let session = Arc::new(Self {
-            stdin: Mutex::new(stdin),
+            input: Input::start(stdin, Arc::clone(&log), child.kill_handle()),
             event_gate: Mutex::new(()),
             state: Mutex::new(State {
                 session_id,
@@ -133,12 +178,6 @@ impl Session {
         }
         true
     }
-    fn write(&self, value: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        serde_json::to_writer(&mut *stdin, value).map_err(|e| e.to_string())?;
-        stdin.write_all(b"\n").map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())
-    }
     pub fn send(&self, text: &str, from: &str, request_id: &str) -> Result<u64, String> {
         if text.is_empty() || text.len() > 1 << 20 {
             return Err("invalid: message must contain 1 to 1048576 bytes".into());
@@ -151,7 +190,8 @@ impl Session {
         if s.busy || s.compacting || !s.approvals.is_empty() {
             return Err("precondition: Claude requires an idle chat for Send".into());
         }
-        self.write(&json!({"type":"user","message":{"role":"user","content":text}}))?;
+        self.input
+            .write(&json!({"type":"user","message":{"role":"user","content":text}}))?;
         s.busy = true;
         let seq = self.log.append(Event::new(
             json!({"user":{"text":text,"from":from,"requestId":request_id}}),
@@ -170,7 +210,7 @@ impl Session {
         }
         self.log.note_interrupt();
         s.next_control += 1;
-        self.write(
+        self.input.write(
             &json!({"type":"control_request","request_id":format!("int-{}",s.next_control),
             "request":{"subtype":"interrupt"}}),
         )
@@ -187,7 +227,7 @@ impl Session {
         } else {
             json!({"behavior":"deny","message":if note.is_empty() {"denied by user"} else {note}})
         };
-        self.write(&json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":response}}))?;
+        self.input.write(&json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":response}}))?;
         s.approvals.remove(id);
         self.log
             .append(Event::new(
@@ -211,8 +251,9 @@ impl Session {
             s.compact_result = None;
             s.compact_error = None;
         }
-        if let Err(e) =
-            self.write(&json!({"type":"user","message":{"role":"user","content":"/compact"}}))
+        if let Err(e) = self
+            .input
+            .write(&json!({"type":"user","message":{"role":"user","content":"/compact"}}))
         {
             self.state.lock().unwrap().compacting = false;
             return Err(e);
@@ -409,7 +450,7 @@ impl Session {
             let response = json!({"type":"control_response","response":{
                 "subtype":"success","request_id":id,
                 "response":{"behavior":"allow","updatedInput":input}}});
-            if let Err(error) = self.write(&response) {
+            if let Err(error) = self.input.write(&response) {
                 self.log_error(&format!("Claude auto approval: {error}"));
                 self.stop();
                 return;

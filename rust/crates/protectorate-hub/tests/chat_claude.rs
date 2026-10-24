@@ -456,3 +456,128 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     assert_eq!(status, 200, "{killed}");
     server.abort();
 }
+
+/// A Claude that answers a prompt only after flooding stdout with far more
+/// than a pipe holds, before it has read the whole prompt line.
+fn flooding_fake(path: &Path) {
+    let script = r#"#!/usr/bin/python3
+import json,os,sys,threading
+args=sys.argv
+sid=args[args.index('--session-id')+1] if '--session-id' in args else args[args.index('--resume')+1]
+buf=b''; flooded=False
+def emit(x): sys.stdout.write(json.dumps(x)+'\n'); sys.stdout.flush()
+def recv():
+ global buf,flooded
+ while b'\n' not in buf:
+  chunk=os.read(0,4096)
+  if not chunk: raise SystemExit(0)
+  buf+=chunk
+  if not flooded and b'\n' not in buf and len(buf)>=4096:
+   flooded=True; threading.Timer(20,os._exit,[3]).start()
+   for _ in range(256): emit({'type':'system','subtype':'noise','pad':'x'*1024})
+ line,_,buf=buf.partition(b'\n')
+ return json.loads(line)
+while True:
+ m=recv()
+ if m.get('type')=='user':
+  txt=m['message']['content']
+  emit({'type':'system','subtype':'init','session_id':sid})
+  emit({'type':'assistant','message':{'id':'msg-flood','model':'claude-test','content':[{'type':'text','text':'answer: '+str(len(txt))}]}})
+  emit({'type':'result','session_id':sid,'subtype':'success','is_error':False})
+"#;
+    fs::write(path, script).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn claude_prompt_larger_than_a_pipe_while_claude_floods_stdout() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let owner = root.path().join("owner");
+    let work = root.path().join("work");
+    let tools = root.path().join("tools");
+    let runtime = root.path().join("runtime");
+    for dir in [
+        &state,
+        &owner,
+        &work,
+        &tools,
+        &runtime,
+        &state.join("auth/claude"),
+    ] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    fs::write(
+        state.join("auth/claude/.credentials.json"),
+        r#"{"test":"credential"}"#,
+    )
+    .unwrap();
+    let executable = tools.join("claude");
+    flooding_fake(&executable);
+    let hub = Hub::open(&state, "owner-secret", "test")
+        .unwrap()
+        .with_chat_runtime(ChatRuntime::new(ChatLauncher {
+            state_root: state.clone(),
+            user_home: owner,
+            runtime_dir: runtime,
+            helper: env!("CARGO_BIN_EXE_protectorate-hub-sandbox-helper").into(),
+            pi_executable: None,
+            claude_executable: Some(executable),
+            codex_executable: None,
+            codex_tool_roots: Vec::new(),
+            grok_executable: None,
+            grok_tool_roots: Vec::new(),
+            tool_roots: Vec::new(),
+            claude_tool_roots: vec![tools],
+            flutter_sdk_root: None,
+            flutter_cache_lower: None,
+            flutter_tools_lower: None,
+            pub_cache_lower: None,
+            go_mod_cache_lower: None,
+            environment: BTreeMap::new(),
+            tasks_max: 64,
+        }));
+    let (addr, server) = serve(hub).await;
+    let (status, spawned) = call(
+        addr,
+        "SleeveService/SpawnSleeve",
+        json!({"name":"claude-flood","harness":"HARNESS_CLAUDE","workspace":work,"supervised":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{spawned}");
+    let prompt = "x".repeat(200_000);
+    let (status, sent) = tokio::time::timeout(
+        Duration::from_secs(15),
+        call(
+            addr,
+            "ChatService/Send",
+            json!({"sleeve":"claude-flood","text":prompt,"requestId":"claude-flood-0001"}),
+        ),
+    )
+    .await
+    .expect("Send deadlocked against a harness blocked on stdout");
+    assert_eq!(status, 200, "{sent}");
+    let (status, idle) = call(
+        addr,
+        "ChatService/Wait",
+        json!({"sleeve":"claude-flood","until":"WAIT_UNTIL_IDLE","timeout":"10s"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{idle}");
+    let events =
+        protectorate_chatlog::read_all(state.join("sleeves/claude-flood/chat.jsonl")).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e.payload["text"]["delta"] == "answer: 200000"),
+        "{events:?}"
+    );
+    let (status, killed) = call(
+        addr,
+        "SleeveService/KillSleeve",
+        json!({"name":"claude-flood"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{killed}");
+    server.abort();
+}

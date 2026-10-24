@@ -15,10 +15,13 @@ use protectorate_sandbox::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read, Write},
     process::ChildStdin,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +30,7 @@ const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 const GATE_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_UNREAD_INPUT: usize = 64 << 20;
 
 #[derive(Clone)]
 struct Pending {
@@ -50,6 +54,7 @@ struct State {
     next_id: u64,
     prompt_id: Option<u64>,
     per_call: bool,
+    pending: BTreeSet<u64>,
     replies: BTreeMap<u64, Value>,
     approvals: BTreeMap<String, Pending>,
     session_id: String,
@@ -57,8 +62,49 @@ struct State {
     context_window: u64,
 }
 
+/// Grok's stdin, written by its own thread. Callers queue lines under
+/// `event_gate` without blocking, so Grok stalling on a full stdout pipe
+/// cannot also stall the stdout reader that waits for that gate.
+struct Input {
+    lines: mpsc::Sender<Vec<u8>>,
+    unread: Arc<AtomicUsize>,
+}
+
+impl Input {
+    fn start(mut stdin: ChildStdin, log: Arc<Log>, kill: KillHandle) -> Self {
+        let (lines, queue) = mpsc::channel::<Vec<u8>>();
+        let unread = Arc::new(AtomicUsize::new(0));
+        let written = Arc::clone(&unread);
+        thread::spawn(move || {
+            for line in queue {
+                if let Err(error) = stdin.write_all(&line) {
+                    let _ = log.append(Event::new(
+                        json!({"error":{"text":format!("write grok stdin: {error}")}}),
+                    ));
+                    kill.kill();
+                    return;
+                }
+                written.fetch_sub(line.len(), Ordering::Relaxed);
+            }
+        });
+        Self { lines, unread }
+    }
+    fn write(&self, value: &Value) -> Result<(), String> {
+        let mut line = serde_json::to_vec(value).map_err(|error| error.to_string())?;
+        line.push(b'\n');
+        let len = line.len();
+        if self.unread.fetch_add(len, Ordering::Relaxed) + len > MAX_UNREAD_INPUT {
+            self.unread.fetch_sub(len, Ordering::Relaxed);
+            return Err("grok is not reading its input".into());
+        }
+        self.lines
+            .send(line)
+            .map_err(|_| "grok stdin is closed".into())
+    }
+}
+
 pub struct Session {
-    stdin: Mutex<ChildStdin>,
+    input: Input,
     event_gate: Mutex<()>,
     state: Mutex<State>,
     changed: Condvar,
@@ -99,7 +145,7 @@ impl Session {
         let stdout = child.take_stdout().ok_or("sandbox did not supply stdout")?;
         let stderr = child.take_stderr().ok_or("sandbox did not supply stderr")?;
         let session = Arc::new(Self {
-            stdin: Mutex::new(stdin),
+            input: Input::start(stdin, Arc::clone(&log), child.kill_handle()),
             event_gate: Mutex::new(()),
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
@@ -186,7 +232,7 @@ impl Session {
             state.next_id += 1;
             (state.next_id, state.session_id.clone())
         };
-        self.write_json(&json!({
+        self.input.write(&json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": "session/prompt",
@@ -227,13 +273,13 @@ impl Session {
         };
         self.log.note_interrupt();
         for pending in pending.values() {
-            let _ = self.write_json(&json!({
+            let _ = self.input.write(&json!({
                 "jsonrpc": "2.0",
                 "id": pending.rpc_id,
                 "result": {"outcome": {"outcome": "cancelled"}}
             }));
         }
-        self.write_json(&json!({
+        self.input.write(&json!({
             "jsonrpc": "2.0",
             "method": "session/cancel",
             "params": {"sessionId": session_id}
@@ -251,7 +297,7 @@ impl Session {
             .cloned()
             .ok_or_else(|| "invalid: approval is not pending".to_owned())?;
         let outcome = pick_outcome(&pending.options, allow);
-        self.write_json(&json!({
+        self.input.write(&json!({
             "jsonrpc": "2.0",
             "id": pending.rpc_id,
             "result": {"outcome": outcome}
@@ -356,13 +402,22 @@ impl Session {
                 return Err("grok session exited".into());
             }
             state.next_id += 1;
-            state.next_id
+            let id = state.next_id;
+            state.pending.insert(id);
+            id
         };
-        self.write_json(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))?;
+        if let Err(error) = self
+            .input
+            .write(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
+        {
+            self.state.lock().unwrap().pending.remove(&id);
+            return Err(error);
+        }
         let deadline = Instant::now() + timeout;
         loop {
             let mut state = self.state.lock().unwrap();
             if let Some(reply) = state.replies.remove(&id) {
+                state.pending.remove(&id);
                 if let Some(error) = reply.get("error") {
                     let code = error["code"].as_i64().unwrap_or(0);
                     let message = error["message"].as_str().unwrap_or("RPC failed");
@@ -371,10 +426,12 @@ impl Session {
                 return Ok(reply.get("result").cloned().unwrap_or(Value::Null));
             }
             if state.exited {
+                state.pending.remove(&id);
                 return Err("grok exited before replying".into());
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
+                state.pending.remove(&id);
                 drop(state);
                 self.stop();
                 return Err(format!("{method} timed out"));
@@ -382,13 +439,6 @@ impl Session {
             let (next, _) = self.changed.wait_timeout(state, remaining).unwrap();
             drop(next);
         }
-    }
-
-    fn write_json(&self, value: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        serde_json::to_writer(&mut *stdin, value).map_err(|error| error.to_string())?;
-        stdin.write_all(b"\n").map_err(|error| error.to_string())?;
-        stdin.flush().map_err(|error| error.to_string())
     }
 
     fn note_exit<E: std::fmt::Display>(&self, result: &Result<std::process::ExitStatus, E>) {
@@ -451,8 +501,10 @@ impl Session {
                 state.approvals.clear();
                 Some(state.per_call)
             } else {
-                state.replies.insert(id, message.clone());
-                self.changed.notify_all();
+                if state.pending.contains(&id) {
+                    state.replies.insert(id, message.clone());
+                    self.changed.notify_all();
+                }
                 None
             }
         };
@@ -568,7 +620,7 @@ impl Session {
     fn on_request(&self, message: &Value) {
         let method = message["method"].as_str().unwrap_or("");
         if method != "session/request_permission" {
-            let _ = self.write_json(&json!({
+            let _ = self.input.write(&json!({
                 "jsonrpc": "2.0",
                 "id": message["id"],
                 "error": {"code": -32601, "message": format!("method not supported: {method}")}
@@ -576,7 +628,7 @@ impl Session {
             return;
         }
         if !message["params"].is_object() {
-            let _ = self.write_json(&json!({
+            let _ = self.input.write(&json!({
                 "jsonrpc": "2.0",
                 "id": message["id"],
                 "error": {"code": -32602, "message": "invalid params"}

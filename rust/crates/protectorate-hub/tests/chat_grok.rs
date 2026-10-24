@@ -209,3 +209,132 @@ async fn grok_acp_sandbox_gate_approvals_events_and_resume() {
     assert_eq!(status, 200, "{killed}");
     server.abort();
 }
+
+/// A Grok that answers a prompt only after flooding stdout with far more than
+/// a pipe holds, before it has read the whole prompt line.
+fn flooding_fake(path: &Path) {
+    let script = r#"#!/usr/bin/python3
+import json,os,sys,threading
+sid='grok-flood'; gated=False
+buf=b''; flooded=False
+def emit(x): sys.stdout.write(json.dumps(x)+'\n'); sys.stdout.flush()
+def recv():
+ global buf,flooded
+ while b'\n' not in buf:
+  chunk=os.read(0,4096)
+  if not chunk: raise SystemExit(0)
+  buf+=chunk
+  if not flooded and b'\n' not in buf and len(buf)>=4096:
+   flooded=True; threading.Timer(20,os._exit,[3]).start()
+   for _ in range(256): emit({'jsonrpc':'2.0','method':'noise','params':{'pad':'x'*1024}})
+ line,_,buf=buf.partition(b'\n')
+ return json.loads(line)
+while True:
+ m=recv(); mid=m.get('id'); method=m.get('method'); p=m.get('params',{})
+ if method=='initialize':
+  emit({'jsonrpc':'2.0','id':mid,'result':{'protocolVersion':1,'agentCapabilities':{'loadSession':True}}})
+ elif method=='session/new':
+  emit({'jsonrpc':'2.0','id':mid,'result':{'sessionId':sid}})
+ elif method=='session/prompt':
+  text=p['prompt'][0]['text']
+  if gated:
+   emit({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':sid,'update':{'sessionUpdate':'agent_message_chunk','messageId':'m1','content':{'type':'text','text':'answer: '+str(len(text))}}}})
+  gated=True
+  emit({'jsonrpc':'2.0','id':mid,'result':{'stopReason':'end_turn'}})
+"#;
+    fs::write(path, script).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grok_prompt_larger_than_a_pipe_while_grok_floods_stdout() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let owner = root.path().join("owner");
+    let work = root.path().join("work");
+    let tools = root.path().join("tools");
+    let runtime = root.path().join("runtime");
+    for dir in [
+        &state,
+        &owner,
+        &work,
+        &tools,
+        &runtime,
+        &state.join("auth/grok"),
+    ] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    fs::write(
+        state.join("auth/grok/auth.json"),
+        r#"{"test":"credential"}"#,
+    )
+    .unwrap();
+    let executable = tools.join("grok");
+    flooding_fake(&executable);
+    let hub = Hub::open(&state, "owner-secret", "test")
+        .unwrap()
+        .with_chat_runtime(ChatRuntime::new(ChatLauncher {
+            state_root: state.clone(),
+            user_home: owner,
+            runtime_dir: runtime,
+            helper: env!("CARGO_BIN_EXE_protectorate-hub-sandbox-helper").into(),
+            pi_executable: None,
+            claude_executable: None,
+            claude_tool_roots: Vec::new(),
+            codex_executable: None,
+            codex_tool_roots: Vec::new(),
+            grok_executable: Some(executable),
+            grok_tool_roots: vec![tools],
+            tool_roots: Vec::new(),
+            flutter_sdk_root: None,
+            flutter_cache_lower: None,
+            flutter_tools_lower: None,
+            pub_cache_lower: None,
+            go_mod_cache_lower: None,
+            environment: BTreeMap::new(),
+            tasks_max: 64,
+        }));
+    let (addr, server) = serve(hub).await;
+    let (status, spawned) = call(
+        addr,
+        "SleeveService/SpawnSleeve",
+        json!({"name":"grok-flood","harness":"HARNESS_GROK","workspace":work,"supervised":true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{spawned}");
+    let prompt = "x".repeat(200_000);
+    let (status, sent) = tokio::time::timeout(
+        Duration::from_secs(15),
+        call(
+            addr,
+            "ChatService/Send",
+            json!({"sleeve":"grok-flood","text":prompt,"requestId":"grok-flood-0001"}),
+        ),
+    )
+    .await
+    .expect("Send deadlocked against a harness blocked on stdout");
+    assert_eq!(status, 200, "{sent}");
+    let (status, idle) = call(
+        addr,
+        "ChatService/Wait",
+        json!({"sleeve":"grok-flood","until":"WAIT_UNTIL_IDLE","timeout":"10s"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{idle}");
+    let events =
+        protectorate_chatlog::read_all(state.join("sleeves/grok-flood/chat.jsonl")).unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e.payload["text"]["delta"] == "answer: 200000"),
+        "{events:?}"
+    );
+    let (status, killed) = call(
+        addr,
+        "SleeveService/KillSleeve",
+        json!({"name":"grok-flood"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{killed}");
+    server.abort();
+}

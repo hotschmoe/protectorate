@@ -12,13 +12,17 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read, Write},
     process::ChildStdin,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
 
 const MAX_LINE: usize = 4 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
+const MAX_UNREAD_INPUT: usize = 64 << 20;
 
 /// One entry of Pi's `get_available_models` reply.
 #[derive(Deserialize)]
@@ -67,8 +71,49 @@ struct State {
     context_tokens: u64,
 }
 
+/// Pi's stdin, written by its own thread. Callers queue lines under
+/// `event_gate` or the state lock without blocking, so Pi stalling on a full
+/// stdout pipe cannot also stall the stdout reader that waits for them.
+struct Input {
+    lines: mpsc::Sender<Vec<u8>>,
+    unread: Arc<AtomicUsize>,
+}
+
+impl Input {
+    fn start(mut stdin: ChildStdin, log: Arc<Log>, kill: KillHandle) -> Self {
+        let (lines, queue) = mpsc::channel::<Vec<u8>>();
+        let unread = Arc::new(AtomicUsize::new(0));
+        let written = Arc::clone(&unread);
+        thread::spawn(move || {
+            for line in queue {
+                if let Err(error) = stdin.write_all(&line) {
+                    let _ = log.append(Event::new(
+                        json!({"error":{"text":format!("write pi stdin: {error}")}}),
+                    ));
+                    kill.kill();
+                    return;
+                }
+                written.fetch_sub(line.len(), Ordering::Relaxed);
+            }
+        });
+        Self { lines, unread }
+    }
+    fn write(&self, value: &Value) -> Result<(), String> {
+        let mut line = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+        line.push(b'\n');
+        let len = line.len();
+        if self.unread.fetch_add(len, Ordering::Relaxed) + len > MAX_UNREAD_INPUT {
+            self.unread.fetch_sub(len, Ordering::Relaxed);
+            return Err("pi is not reading its input".into());
+        }
+        self.lines
+            .send(line)
+            .map_err(|_| "pi stdin is closed".into())
+    }
+}
+
 pub struct Session {
-    stdin: Mutex<ChildStdin>,
+    input: Input,
     event_gate: Mutex<()>,
     operation: Mutex<()>,
     state: Mutex<State>,
@@ -96,7 +141,7 @@ impl Session {
         let stdout = child.take_stdout().ok_or("sandbox did not supply stdout")?;
         let stderr = child.take_stderr().ok_or("sandbox did not supply stderr")?;
         let session = Arc::new(Self {
-            stdin: Mutex::new(stdin),
+            input: Input::start(stdin, Arc::clone(&log), child.kill_handle()),
             event_gate: Mutex::new(()),
             operation: Mutex::new(()),
             state: Mutex::new(State::default()),
@@ -389,8 +434,8 @@ impl Session {
         compaction
     }
 
-    /// Pi accepts `steer` during a running turn. A write failure never
-    /// records a user message as delivered.
+    /// Pi accepts `steer` during a running turn. A message the input queue
+    /// refuses is never recorded as delivered; a later write failure stops Pi.
     pub fn send(&self, text: &str, from: &str, request_id: &str) -> Result<u64, String> {
         if text.is_empty() || text.len() > 1 << 20 {
             return Err("message must contain 1 to 1048576 bytes".into());
@@ -406,7 +451,8 @@ impl Session {
         state.next_id += 1;
         let id = format!("c{}", state.next_id);
         let command = if state.busy { "steer" } else { "prompt" };
-        self.write(&json!({"id":id,"type":command,"message":text}))?;
+        self.input
+            .write(&json!({"id":id,"type":command,"message":text}))?;
         state.busy = true;
         let result = self.log.append(Event::new(
             json!({"user":{"text":text,"from":from,"requestId":request_id}}),
@@ -424,7 +470,7 @@ impl Session {
             return Ok(());
         }
         self.log.note_interrupt();
-        self.write(&json!({"type":"abort"}))
+        self.input.write(&json!({"type":"abort"}))
     }
 
     pub fn stop(&self) {
@@ -445,13 +491,6 @@ impl Session {
         true
     }
 
-    fn write(&self, message: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        serde_json::to_writer(&mut *stdin, message).map_err(|e| e.to_string())?;
-        stdin.write_all(b"\n").map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())
-    }
-
     fn command(&self, kind: &str, fields: Value, timeout: Duration) -> Result<Value, String> {
         let mut state = self.state.lock().unwrap();
         state.next_id += 1;
@@ -460,7 +499,10 @@ impl Session {
         let mut command = fields.as_object().cloned().unwrap_or_default();
         command.insert("id".into(), json!(id));
         command.insert("type".into(), json!(kind));
-        self.write(&Value::Object(command))?;
+        if let Err(error) = self.input.write(&Value::Object(command)) {
+            state.pending.remove(&id);
+            return Err(error);
+        }
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(reply) = state.replies.remove(&id) {
