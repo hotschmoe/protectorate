@@ -3,7 +3,7 @@ use crate::files::Files;
 use protectorate_fsutil as fsutil;
 use protectorate_wire::{v1, Code, RpcError};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::{symlink, PermissionsExt};
@@ -557,7 +557,8 @@ impl Updater {
             } else {
                 fsutil::write_file(
                     &prepared.join("release.json"),
-                    &serde_json::to_vec(&json!({"version": expected_version})).map_err(internal)?,
+                    &serde_json::to_vec(&serde_json::json!({"version": expected_version}))
+                        .map_err(internal)?,
                     0o644,
                 )
                 .map_err(internal)?;
