@@ -223,50 +223,42 @@ pub(crate) fn event_text(event: &Value) -> String {
 
 const NODE_COLUMNS: &str = "NAME\tOS/ARCH\tVERSION\tCPU\tGPU\tMEM\tDISK\tCONT\tFRESHNESS\tALERTS";
 
-fn token_scopes(token: &Value) -> String {
-    format!(
-        "[{}]",
-        token["scopes"]
-            .as_array()
-            .map(|scopes| scopes
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(" "))
-            .unwrap_or_default()
-    )
+fn token_scopes(token: &v1::TokenInfo) -> String {
+    format!("[{}]", token.scopes.join(" "))
 }
 
-pub(crate) fn token_created_text(response: &Value) -> String {
-    let token = &response["token"];
-    format!("id\t{}\nname\t{}\nscopes\t{}\nexpires\t{}\nsecret\t{}\n\nThis is the only time the secret is shown. Renew it before it expires: protectorate --token-file FILE token renew.\n", text(token,"id"), text(token,"name"), token_scopes(token), local_stamp(text(token, "expiresAt")), text(response,"secret"))
+/// "revoked", "expired" or "active" at `now` in Unix milliseconds.
+fn token_state(token: &v1::TokenInfo, now: i64) -> &'static str {
+    if token.revoked_at.is_some() {
+        "revoked"
+    } else if unix_millis(token.expires_at.as_ref()).is_some_and(|time| time <= now) {
+        "expired"
+    } else {
+        "active"
+    }
 }
 
-pub(crate) fn token_list_text(response: &Value) -> String {
+pub(crate) fn token_created_text(response: &v1::CreateTokenResponse) -> String {
+    let token = response.token.clone().unwrap_or_default();
+    format!("id\t{}\nname\t{}\nscopes\t{}\nexpires\t{}\nsecret\t{}\n\nThis is the only time the secret is shown. Renew it before it expires: protectorate --token-file FILE token renew.\n", token.id, token.name, token_scopes(&token), stamp(token.expires_at.as_ref()), response.secret)
+}
+
+pub(crate) fn token_list_text(response: &v1::ListTokensResponse) -> String {
     let mut out = "ID\tNAME\tSTATE\tEXPIRES\tSCOPES\tTASK\n".to_owned();
-    for token in items(response, "tokens") {
-        let expires = text(&token, "expiresAt");
-        let state = if !token["revokedAt"].is_null() {
-            "revoked"
-        } else if timestamp_millis(&expires).is_some_and(|time| time <= now_millis()) {
-            "expired"
-        } else {
-            "active"
-        };
-        let expires = local_stamp(expires);
-        let task = if text(&token, "task").is_empty() {
+    let now = now_millis();
+    for token in &response.tokens {
+        let task = if token.task.is_empty() {
             "-".into()
         } else {
-            format!("{} (by {})", text(&token, "task"), text(&token, "mintedBy"))
+            format!("{} (by {})", token.task, token.minted_by)
         };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\n",
-            text(&token, "id"),
-            text(&token, "name"),
-            state,
-            expires,
-            token_scopes(&token),
-            task
+            "{}\t{}\t{}\t{}\t{}\t{task}\n",
+            token.id,
+            token.name,
+            token_state(token, now),
+            stamp(token.expires_at.as_ref()),
+            token_scopes(token),
         ));
     }
     out
@@ -343,180 +335,160 @@ pub(crate) fn orchestrator_status_text(status: &Value, now: i64) -> String {
     out
 }
 
-pub(crate) fn token_renewed_text(response: &Value) -> String {
+pub(crate) fn token_renewed_text(response: &v1::RenewTokenResponse) -> String {
     format!(
         "{}\nexpires\t{}\n",
-        text(response, "secret"),
-        local_stamp(text(response, "token.expiresAt"))
+        response.secret,
+        stamp(
+            response
+                .token
+                .as_ref()
+                .and_then(|token| token.expires_at.as_ref())
+        )
     )
 }
 
-pub(crate) fn token_revoked_text(response: &Value) -> String {
-    format!(
-        "revoked {} ({})\n",
-        text(response, "token.id"),
-        text(response, "token.name")
-    )
+pub(crate) fn token_revoked_text(response: &v1::RevokeTokenResponse) -> String {
+    let token = response.token.clone().unwrap_or_default();
+    format!("revoked {} ({})\n", token.id, token.name)
 }
 
 /// `devices ls`: one row per trusted device.
-pub(crate) fn device_list_text(response: &Value) -> String {
+pub(crate) fn device_list_text(response: &v1::ListDevicesResponse) -> String {
     let mut out = "ID\tNAME\tPLATFORM\tLAST USED\tAPPROVED\tAPPROVER\n".to_owned();
-    for device in items(response, "devices") {
-        let last_used = if device["lastUsedAt"].is_null() {
-            "never".into()
-        } else {
-            local_stamp(text(&device, "lastUsedAt"))
+    for device in &response.devices {
+        let last_used = match &device.last_used_at {
+            None => "never".into(),
+            at => stamp(at.as_ref()),
         };
-        let approved = if device["approvedAt"].is_null() {
-            "unknown".into()
-        } else {
-            local_stamp(text(&device, "approvedAt"))
+        let approved = match &device.approved_at {
+            None => "unknown".into(),
+            at => stamp(at.as_ref()),
         };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\n",
-            text(&device, "id"),
-            text(&device, "name"),
-            or_dash(text(&device, "platform")),
-            last_used,
-            approved,
-            or_dash(text(&device, "approvedBy"))
+            "{}\t{}\t{}\t{last_used}\t{approved}\t{}\n",
+            device.id,
+            device.name,
+            or_dash(device.platform.clone()),
+            or_dash(device.approved_by.clone())
         ));
     }
     out
 }
 
 /// `approvals ls`: one row per gated agent call.
-pub(crate) fn approvals_text(response: &Value) -> String {
+pub(crate) fn approvals_text(response: &v1::ListApprovalsResponse) -> String {
     let mut out = "ID\tSTATE\tACTOR\tCALL\tREASON\tEXPIRES\n".to_owned();
-    for approval in items(response, "approvals") {
-        let mut call = text(&approval, "procedure")
+    for approval in &response.approvals {
+        let mut call = approval
+            .procedure
             .trim_start_matches("/protectorate.v1.")
             .to_owned();
-        let subject = text(&approval, "subject");
-        if !subject.is_empty() {
+        if !approval.subject.is_empty() {
             call.push(' ');
-            call.push_str(&subject);
+            call.push_str(&approval.subject);
         }
-        let mut reason = text(&approval, "reason");
-        let detail = text(&approval, "detail");
-        if !detail.is_empty() {
-            reason = format!("{reason}: {detail}");
+        let mut reason = approval.reason.clone();
+        if !approval.detail.is_empty() {
+            reason = format!("{reason}: {}", approval.detail);
         }
         out.push_str(&format!(
             "{}\t{}\t{}\t{call}\t{reason}\t{}\n",
-            text(&approval, "id"),
-            text(&approval, "state")
-                .trim_start_matches("APPROVAL_STATE_")
-                .to_ascii_lowercase(),
-            text(&approval, "actor"),
-            local_stamp(text(&approval, "expiresAt"))
+            approval.id,
+            word(approval.state().as_str_name(), "APPROVAL_STATE_"),
+            approval.actor,
+            stamp(approval.expires_at.as_ref())
         ));
     }
     out
 }
 
 /// `devices pending`: one row per pairing request still awaiting a decision.
-pub(crate) fn device_pending_text(response: &Value) -> String {
+pub(crate) fn device_pending_text(response: &v1::ListDeviceAuthResponse) -> String {
     let mut out = "CODE\tNAME\tPLATFORM\tREQUESTING IP\tEXPIRES\n".to_owned();
-    for request in items(response, "requests") {
-        let expires = if request["expiresAt"].is_null() {
-            "-".into()
-        } else {
-            local_stamp(text(&request, "expiresAt"))
-        };
+    for request in &response.requests {
         out.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\n",
-            text(&request, "userCode"),
-            text(&request, "name"),
-            or_dash(text(&request, "platform")),
-            or_dash(text(&request, "requestingIp")),
-            expires
+            request.user_code,
+            request.name,
+            or_dash(request.platform.clone()),
+            or_dash(request.requesting_ip.clone()),
+            stamp(request.expires_at.as_ref())
         ));
     }
     out
 }
 
 pub(crate) fn grant_admin_text(
-    response: &Value,
+    response: &v1::GrantServiceAdminResponse,
     node: &str,
     out: Option<&std::path::Path>,
 ) -> String {
-    let token = &response["token"];
-    let expires = if token["expiresAt"].is_null() {
-        "never".into()
-    } else {
-        local_stamp(text(token, "expiresAt"))
+    let token = response.token.clone().unwrap_or_default();
+    let expires = match &token.expires_at {
+        None => "never".into(),
+        at => stamp(at.as_ref()),
     };
     let use_command = match out {
         Some(path) => format!("protectorate --token-file {}", path.display()),
-        None => format!(
-            "PROTECTORATE_TOKEN={} protectorate",
-            text(response, "secret")
-        ),
+        None => format!("PROTECTORATE_TOKEN={} protectorate", response.secret),
     };
-    let mut output = format!("grant\t{} ({})\ntask\t{}\nscopes\t{}\nexpires\t{}\n\nUse: {use_command} job run --on {node} [--admin] -- <cmd>\n", text(token,"id"), text(token,"name"), text(token,"task"), token_scopes(token), expires);
+    let mut output = format!("grant\t{} ({})\ntask\t{}\nscopes\t{}\nexpires\t{expires}\n\nUse: {use_command} job run --on {node} [--admin] -- <cmd>\n", token.id, token.name, token.task, token_scopes(&token));
     if out.is_none() {
         output.push_str("This is the only time the secret is shown.\n");
     }
     output
 }
 
-pub(crate) fn audit_entries_text(response: &Value, chronological: bool) -> String {
-    let entries = items(response, "entries");
+pub(crate) fn audit_entries_text(
+    response: &v1::ListAuditEntriesResponse,
+    chronological: bool,
+) -> String {
     let mut output = String::new();
-    for entry in if chronological {
-        Box::new(entries.iter().rev()) as Box<dyn Iterator<Item = &Value>>
+    let entries: Box<dyn Iterator<Item = &v1::AuditEntry>> = if chronological {
+        Box::new(response.entries.iter().rev())
     } else {
-        Box::new(entries.iter())
-    } {
-        let who = text(entry, "actor");
+        Box::new(response.entries.iter())
+    };
+    for entry in entries {
         output.push_str(&format!(
             "{}  {}  {}  {}  {}",
-            local_stamp(text(entry, "time")),
-            who,
-            text(entry, "procedure"),
-            text(entry, "subject"),
-            text(entry, "outcome")
+            stamp(entry.time.as_ref()),
+            entry.actor,
+            entry.procedure,
+            entry.subject,
+            entry.outcome
         ));
-        let code = text(entry, "code");
-        if !code.is_empty() {
-            output.push_str(&format!(" ({code})"));
+        if !entry.code.is_empty() {
+            output.push_str(&format!(" ({})", entry.code));
         }
-        let detail = text(entry, "detail");
-        if !detail.is_empty() {
-            output.push_str(&format!("  {detail}"));
+        if !entry.detail.is_empty() {
+            output.push_str(&format!("  {}", entry.detail));
         }
-        let task = text(entry, "task");
-        if !task.is_empty() {
-            output.push_str(&format!("  [task: {task}]"));
+        if !entry.task.is_empty() {
+            output.push_str(&format!("  [task: {}]", entry.task));
         }
-        let run = text(entry, "runId");
-        if !run.is_empty() {
-            output.push_str(&format!("  [run: {run}]"));
+        if !entry.run_id.is_empty() {
+            output.push_str(&format!("  [run: {}]", entry.run_id));
         }
         output.push('\n');
     }
-    if !chronological {
-        let next = text(response, "nextPageToken");
-        if !next.is_empty() {
-            output.push_str(&format!("next page: {next}\n"));
-        }
+    if !chronological && !response.next_page_token.is_empty() {
+        output.push_str(&format!("next page: {}\n", response.next_page_token));
     }
     output
 }
 
-pub(crate) fn audit_verify_text(report: &Value) -> String {
+pub(crate) fn audit_verify_text(report: &v1::VerifyAuditResponse) -> String {
+    let head = report.head.clone().unwrap_or_default();
     let mut out = format!(
         "audit chain ok: {} entries, head {} {}\n",
-        text(report, "entries"),
-        text(&report["head"], "seq"),
-        text(&report["head"], "hash")
+        report.entries, head.seq, head.hash
     );
-    let beyond = text(report, "beyondHead");
-    if !beyond.is_empty() && beyond != "0" {
+    if report.beyond_head > 0 {
         out.push_str(&format!(
-            "{beyond} entries after the recorded head; the next write records them\n"
+            "{} entries after the recorded head; the next write records them\n",
+            report.beyond_head
         ));
     }
     out
@@ -525,38 +497,37 @@ pub(crate) fn audit_verify_text(report: &Value) -> String {
 /// How many output lines `sleeve show` keeps from an exited session.
 pub(crate) const SHOW_TAIL_LINES: usize = 20;
 
-pub(crate) fn status_text(status: &Value, runtime: Option<&Value>) -> String {
+pub(crate) fn status_text(
+    status: &v1::GetStatusResponse,
+    runtime: Option<&v1::GetSleeveRuntimeResponse>,
+) -> String {
     let mut out = String::new();
-    row(&mut out, "version", text(status, "version"));
-    optional_row(&mut out, "available", text(status, "availableVersion"));
-    optional_row(&mut out, "channel", text(status, "updateChannel"));
-    optional_row(&mut out, "release notes", text(status, "releaseNotesUrl"));
-    row(&mut out, "hostname", text(status, "hostname"));
-    row(&mut out, "platform", platform(status));
+    row(&mut out, "version", status.version.clone());
+    optional_row(&mut out, "available", status.available_version.clone());
+    optional_row(&mut out, "channel", status.update_channel.clone());
+    optional_row(&mut out, "release notes", status.release_notes_url.clone());
+    row(&mut out, "hostname", status.hostname.clone());
+    row(&mut out, "platform", os_arch(&status.os, &status.arch));
     row(
         &mut out,
         "uptime",
-        go_duration(number(status, "uptimeSeconds").unwrap_or_default()),
+        go_duration(status.uptime_seconds as f64),
     );
-    row(&mut out, "started", local_stamp(text(status, "startedAt")));
+    row(&mut out, "started", stamp(status.started_at.as_ref()));
     if let Some(runtime) = runtime {
-        row(&mut out, "sleeve runtime", text(runtime, "runtime"));
-        optional_row(&mut out, "helper", text(runtime, "helperPath"));
-        row(
-            &mut out,
-            "overlays",
-            boolean(runtime, "overlays").to_string(),
-        );
+        row(&mut out, "sleeve runtime", runtime.runtime.clone());
+        optional_row(&mut out, "helper", runtime.helper_path.clone());
+        row(&mut out, "overlays", runtime.overlays.to_string());
     }
     align(&out)
 }
 
-fn quota_freshness(quota: &Value) -> String {
-    match text(quota, "freshness").as_str() {
-        "FRESHNESS_FRESH" => "fresh".into(),
-        "FRESHNESS_STALE" => format!(
+fn quota_freshness(quota: &v1::ProviderQuota) -> String {
+    match quota.freshness() {
+        v1::Freshness::Fresh => "fresh".into(),
+        v1::Freshness::Stale => format!(
             "STALE ({} old)",
-            duration_seconds(quota, "age")
+            seconds(quota.age.as_ref())
                 .map(fmt_minutes)
                 .unwrap_or_else(|| "?".into())
         ),
@@ -564,58 +535,45 @@ fn quota_freshness(quota: &Value) -> String {
     }
 }
 
-pub(crate) fn quota_text(response: &Value) -> String {
+pub(crate) fn quota_text(response: &v1::GetQuotaResponse) -> String {
     let mut out =
         String::from("PROVIDER\tPLAN\tWINDOW\tUSED\tRESETS IN\tPROJ. UNUSED (est.)\tFRESHNESS\n");
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+    let now = now_millis();
     let mut notes = Vec::new();
-    for quota in items(response, "quotas") {
-        let provider = text(&quota, "provider");
-        let plan = or_dash(text(&quota, "plan"));
-        let freshness = quota_freshness(&quota);
-        let windows = items(&quota, "windows");
-        if windows.is_empty() {
+    for quota in &response.quotas {
+        let provider = &quota.provider;
+        let plan = or_dash(quota.plan.clone());
+        let freshness = quota_freshness(quota);
+        if quota.windows.is_empty() {
             out.push_str(&format!("{provider}\t{plan}\t-\t?\t-\t-\t{freshness}\n"));
         }
-        for window in windows {
-            let resets = timestamp_millis(&text(&window, "resetsAt"))
+        for window in &quota.windows {
+            let resets = unix_millis(window.resets_at.as_ref())
                 .map(|at| fmt_minutes((at - now) as f64 / 1000.0))
                 .unwrap_or_else(|| "-".into());
-            let projected = number(&window, "estimatedUnusedPercentAtReset")
+            let projected = window
+                .estimated_unused_percent_at_reset
                 .map(|value| format!("~{value:.0}%"))
                 .unwrap_or_else(|| "-".into());
             out.push_str(&format!(
                 "{provider}\t{plan}\t{}\t{:.1}%\t{resets}\t{projected}\t{freshness}\n",
-                text(&window, "name"),
-                number(&window, "usedPercent").unwrap_or_default()
+                window.name, window.used_percent
             ));
         }
-        for credit in items(&quota, "resets") {
-            let expiration = timestamp_millis(&text(&credit, "expiresAt"))
+        for credit in &quota.resets {
+            let expiration = unix_millis(credit.expires_at.as_ref())
                 .map(|at| format!(", expires in {}", fmt_minutes((at - now) as f64 / 1000.0)))
                 .unwrap_or_default();
             notes.push(format!(
                 "{provider}: {} reset credit(s) [{}]{expiration}",
-                number(&credit, "count").unwrap_or_default() as i64,
-                text(&credit, "kind")
+                credit.count, credit.kind
             ));
         }
-        let models = items(&quota, "models")
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if !models.is_empty() {
-            notes.push(format!("{provider}: models {}", models.join(", ")));
+        if !quota.models.is_empty() {
+            notes.push(format!("{provider}: models {}", quota.models.join(", ")));
         }
-        if !text(&quota, "error").is_empty() {
-            notes.push(format!(
-                "{provider}: last read failed: {}",
-                text(&quota, "error")
-            ));
+        if !quota.error.is_empty() {
+            notes.push(format!("{provider}: last read failed: {}", quota.error));
         }
     }
     if !notes.is_empty() {
@@ -628,33 +586,26 @@ pub(crate) fn quota_text(response: &Value) -> String {
     align(&out)
 }
 
-pub(crate) fn suggest_text(response: &Value) -> String {
+pub(crate) fn suggest_text(response: &v1::SuggestResponse) -> String {
     let mut out = String::from("RANK\tHARNESS\tPICK\tSCORE\tUSABLE\tEXPIRING\tRESETS IN\tREASON\n");
-    for suggestion in items(response, "suggestions") {
-        let percent = |key| {
-            number(&suggestion, key)
+    for suggestion in &response.suggestions {
+        let percent = |value: Option<f64>| {
+            value
                 .map(|value| format!("{value:.0}%"))
                 .unwrap_or_else(|| "-".into())
         };
-        let resets = duration_seconds(&suggestion, "resetsIn")
+        let resets = seconds(suggestion.resets_in.as_ref())
             .map(fmt_minutes)
             .unwrap_or_else(|| "-".into());
         out.push_str(&format!(
-            "{}\t{}\t{}\t{:.1}\t{}\t{}\t{}\t{}\n",
-            number(&suggestion, "rank").unwrap_or_default() as i64,
-            text(&suggestion, "harness")
-                .trim_start_matches("HARNESS_")
-                .to_ascii_lowercase(),
-            if boolean(&suggestion, "recommended") {
-                "yes"
-            } else {
-                "no"
-            },
-            number(&suggestion, "score").unwrap_or_default(),
-            percent("usablePercent"),
-            percent("expiringPercent"),
-            resets,
-            text(&suggestion, "reason")
+            "{}\t{}\t{}\t{:.1}\t{}\t{}\t{resets}\t{}\n",
+            suggestion.rank,
+            word(suggestion.harness().as_str_name(), "HARNESS_"),
+            if suggestion.recommended { "yes" } else { "no" },
+            suggestion.score,
+            percent(suggestion.usable_percent),
+            percent(suggestion.expiring_percent),
+            suggestion.reason
         ));
     }
     align(&out)
@@ -2578,6 +2529,33 @@ where
         Ok(after) => after.as_millis() as i64,
         Err(before) => -(before.duration().as_millis() as i64),
     })
+}
+
+/// Seconds of a protobuf duration; none when absent or negative.
+fn seconds<T: Copy>(value: Option<&T>) -> Option<f64>
+where
+    std::time::Duration: TryFrom<T>,
+{
+    std::time::Duration::try_from(*value?)
+        .ok()
+        .map(|value| value.as_secs_f64())
+}
+
+/// A protobuf enum value name without its type prefix, lowercased; empty
+/// for the unspecified value.
+fn word(name: &str, prefix: &str) -> String {
+    match name.strip_prefix(prefix).unwrap_or(name) {
+        "UNSPECIFIED" => String::new(),
+        rest => rest.to_ascii_lowercase(),
+    }
+}
+
+fn os_arch(os: &str, arch: &str) -> String {
+    if os.is_empty() {
+        "-".to_owned()
+    } else {
+        format!("{os}/{arch}")
+    }
 }
 
 /// A protobuf timestamp in this machine's local time, `-` when absent.

@@ -52,25 +52,7 @@ pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 /// The state home holding this machine's saved device credential.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
-const STATUS: &str = "/protectorate.v1.HubService/GetStatus";
-const GET_QUOTA: &str = "/protectorate.v1.QuotaService/GetQuota";
-const SUGGEST_QUOTA: &str = "/protectorate.v1.QuotaService/Suggest";
-const SLEEVE_RUNTIME: &str = "/protectorate.v1.HubService/GetSleeveRuntime";
-const CREATE_TOKEN: &str = "/protectorate.v1.TokenService/CreateToken";
 const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
-const REVOKE_TOKEN: &str = "/protectorate.v1.TokenService/RevokeToken";
-const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
-const GRANT_ADMIN: &str = "/protectorate.v1.GrantService/Admin";
-const LIST_AUDIT: &str = "/protectorate.v1.AuditService/ListAuditEntries";
-const VERIFY_AUDIT: &str = "/protectorate.v1.AuditService/VerifyAudit";
-const LIST_DEVICES: &str = "/protectorate.v1.DeviceService/ListDevices";
-const LIST_APPROVALS: &str = "/protectorate.v1.ApprovalService/ListApprovals";
-const DECIDE_APPROVAL: &str = "/protectorate.v1.ApprovalService/DecideApproval";
-const LIST_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ListDeviceAuth";
-const APPROVE_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/ApproveDeviceAuth";
-const DENY_DEVICE_AUTH: &str = "/protectorate.v1.DeviceService/DenyDeviceAuth";
-const REVOKE_DEVICE: &str = "/protectorate.v1.DeviceService/RevokeDevice";
-const RENAME_DEVICE: &str = "/protectorate.v1.DeviceService/RenameDevice";
 const LIST_PROJECTS: &str = "/protectorate.v1.DirectoryService/ListProjects";
 const GET_PROJECT: &str = "/protectorate.v1.DirectoryService/GetProject";
 const SUBSCRIBE_EVENTS: &str = "/protectorate.v1.EventService/Subscribe";
@@ -1571,70 +1553,91 @@ fn execute_commands(
             }
         }
         Command::Status => {
-            let status = client.call(STATUS, &json!({}))?;
-            let runtime = match client.call(SLEEVE_RUNTIME, &json!({})) {
-                Ok(value) => Some(value),
+            let status = client.unary(v1::hub_service::GET_STATUS, &v1::GetStatusRequest {})?;
+            let runtime = match client.unary(
+                v1::hub_service::GET_SLEEVE_RUNTIME,
+                &v1::GetSleeveRuntimeRequest {},
+            ) {
+                Ok(runtime) => Some(runtime),
                 Err(error) if error.code == Code::Unimplemented => None,
                 Err(error) => return Err(error),
             };
             if json {
-                value_line(&status)
+                json_line(&status)
             } else {
                 Ok(format::status_text(&status, runtime.as_ref()))
             }
         }
         Command::Quota { refresh } => {
-            let quota = client.call(GET_QUOTA, &json!({"refresh": refresh}))?;
+            let quota = client.unary(
+                v1::quota_service::GET_QUOTA,
+                &v1::GetQuotaRequest { refresh: *refresh },
+            )?;
             if json {
-                value_line(&quota)
+                json_line(&quota)
             } else {
                 Ok(format::quota_text(&quota))
             }
         }
         Command::QuotaSuggest { task_size, refresh } => {
-            let mut request = json!({"refresh": refresh});
+            let mut request = v1::SuggestRequest {
+                refresh: *refresh,
+                ..Default::default()
+            };
             if let Some(size) = task_size {
-                request["taskSize"] = json!(format!("TASK_SIZE_{}", size.to_ascii_uppercase()));
+                let name = format!("TASK_SIZE_{}", size.to_ascii_uppercase());
+                let size = v1::TaskSize::from_str_name(&name)
+                    .ok_or_else(|| RpcError::invalid(format!("unknown task size {size:?}")))?;
+                request.set_task_size(size);
             }
-            let suggestions = client.call(SUGGEST_QUOTA, &request)?;
+            let suggestions = client.unary(v1::quota_service::SUGGEST, &request)?;
             if json {
-                value_line(&suggestions)
+                json_line(&suggestions)
             } else {
                 Ok(format::suggest_text(&suggestions))
             }
         }
         Command::TokenCreate { name, scopes, ttl } => {
-            let issued = client.call(
-                CREATE_TOKEN,
-                &json!({"name":name,"scopes":scopes,"ttl":format_duration(*ttl)}),
+            let issued = client.unary(
+                v1::token_service::CREATE_TOKEN,
+                &v1::CreateTokenRequest {
+                    name: name.clone(),
+                    scopes: scopes.clone(),
+                    ttl: Some(proto_duration(*ttl)),
+                },
             )?;
             if json {
-                value_line(&issued)
+                json_line(&issued)
             } else {
                 Ok(format::token_created_text(&issued))
             }
         }
         Command::TokenList => {
-            let listing = client.call(LIST_TOKENS, &json!({}))?;
+            let listing =
+                client.unary(v1::token_service::LIST_TOKENS, &v1::ListTokensRequest {})?;
             if json {
-                value_line(&listing)
+                json_line(&listing)
             } else {
                 Ok(format::token_list_text(&listing))
             }
         }
         Command::OrchestratorStatus => orchestrator_status(client, json),
         Command::TokenRevoke { id } => {
-            let revoked = client.call(REVOKE_TOKEN, &json!({"id":id}))?;
+            let revoked = client.unary(
+                v1::token_service::REVOKE_TOKEN,
+                &v1::RevokeTokenRequest { id: id.clone() },
+            )?;
             if json {
-                value_line(&revoked)
+                json_line(&revoked)
             } else {
                 Ok(format::token_revoked_text(&revoked))
             }
         }
         Command::TokenRenew => {
-            let renewed = client.call(RENEW_TOKEN, &json!({}))?;
+            let renewed =
+                client.unary(v1::token_service::RENEW_TOKEN, &v1::RenewTokenRequest {})?;
             if json {
-                value_line(&renewed)
+                json_line(&renewed)
             } else {
                 Ok(format::token_renewed_text(&renewed))
             }
@@ -1652,9 +1655,13 @@ fn execute_commands(
                 .as_ref()
                 .map(|path| reserve_grant_file(path))
                 .transpose()?;
-            let issued = client.call(
-                GRANT_ADMIN,
-                &json!({"node":node,"task":task,"ttl":format_duration(*ttl)}),
+            let issued = client.unary(
+                v1::grant_service::ADMIN,
+                &v1::GrantServiceAdminRequest {
+                    node: node.clone(),
+                    ttl: Some(proto_duration(*ttl)),
+                    task: task.clone(),
+                },
             );
             let mut issued = match issued {
                 Ok(issued) => issued,
@@ -1666,74 +1673,83 @@ fn execute_commands(
                     return Err(error);
                 }
             };
-            if let Some(path) = out {
-                let mut file = reserved.take().expect("reserved output file");
-                let saved = write_grant_secret(
-                    &mut file,
-                    path,
-                    issued["secret"].as_str().unwrap_or_default(),
-                );
+            if let (Some(path), Some(mut file)) = (out, reserved.take()) {
+                let saved = write_grant_secret(&mut file, path, &issued.secret);
                 drop(file);
                 if let Err(error) = saved {
                     let _ = std::fs::remove_file(path);
                     return Err(error);
                 }
-                if let Some(object) = issued.as_object_mut() {
-                    object.remove("secret");
-                }
+                issued.secret.clear();
             }
             if json {
-                value_line(&issued)
+                json_line(&issued)
             } else {
                 Ok(format::grant_admin_text(&issued, node, out.as_deref()))
             }
         }
         Command::AuditList(query) => {
-            let page = client.call(LIST_AUDIT, &json!({"limit":query.limit,"pageToken":query.page_token,"actor":query.actor,"procedure":query.procedure,"subject":query.subject,"outcome":query.outcome,"runId":query.run_id}))?;
+            let page = client.unary(
+                v1::audit_service::LIST_AUDIT_ENTRIES,
+                &v1::ListAuditEntriesRequest {
+                    limit: query.limit,
+                    page_token: query.page_token.clone(),
+                    actor: query.actor.clone(),
+                    procedure: query.procedure.clone(),
+                    subject: query.subject.clone(),
+                    outcome: query.outcome.clone(),
+                    run_id: query.run_id.clone(),
+                },
+            )?;
             if json {
                 if query.chronological {
-                    Ok(format::items(&page, "entries")
-                        .iter()
-                        .rev()
-                        .map(value_line)
-                        .collect::<Result<Vec<_>>>()?
-                        .concat())
+                    json_lines(page.entries.iter().rev())
                 } else {
-                    value_line(&page)
+                    json_line(&page)
                 }
             } else {
                 Ok(format::audit_entries_text(&page, query.chronological))
             }
         }
         Command::AuditVerify => {
-            let report = client.call_with_timeout(VERIFY_AUDIT, &json!({}), MAX_WAIT)?;
-            if report["ok"] != true {
+            let report = client.unary_with_timeout(
+                v1::audit_service::VERIFY_AUDIT,
+                &v1::VerifyAuditRequest {},
+                MAX_WAIT,
+            )?;
+            if !report.ok {
                 return Err(RpcError::new(
                     Code::DataLoss,
-                    format!(
-                        "audit chain broken: {}",
-                        report["error"].as_str().unwrap_or_default()
-                    ),
+                    format!("audit chain broken: {}", report.error),
                 ));
             }
             if json {
-                value_line(&report)
+                json_line(&report)
             } else {
                 Ok(format::audit_verify_text(&report))
             }
         }
         Command::ApprovalList { all } => {
-            let approvals = client.call(LIST_APPROVALS, &json!({"all": all}))?;
+            let approvals = client.unary(
+                v1::approval_service::LIST_APPROVALS,
+                &v1::ListApprovalsRequest { all: *all },
+            )?;
             if json {
-                value_line(&approvals)
+                json_line(&approvals)
             } else {
                 Ok(format::approvals_text(&approvals))
             }
         }
         Command::ApprovalDecide { id, approve } => {
-            let response = client.call(DECIDE_APPROVAL, &json!({"id": id, "approve": approve}))?;
+            let response = client.unary(
+                v1::approval_service::DECIDE_APPROVAL,
+                &v1::DecideApprovalRequest {
+                    id: id.clone(),
+                    approve: *approve,
+                },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!(
                     "{} {id}\n",
@@ -1742,49 +1758,72 @@ fn execute_commands(
             }
         }
         Command::DeviceList => {
-            let devices = client.call(LIST_DEVICES, &json!({}))?;
+            let devices =
+                client.unary(v1::device_service::LIST_DEVICES, &v1::ListDevicesRequest {})?;
             if json {
-                value_line(&devices)
+                json_line(&devices)
             } else {
                 Ok(format::device_list_text(&devices))
             }
         }
         Command::DevicePendingList => {
-            let requests = client.call(LIST_DEVICE_AUTH, &json!({}))?;
+            let requests = client.unary(
+                v1::device_service::LIST_DEVICE_AUTH,
+                &v1::ListDeviceAuthRequest {},
+            )?;
             if json {
-                value_line(&requests)
+                json_line(&requests)
             } else {
                 Ok(format::device_pending_text(&requests))
             }
         }
         Command::DeviceApprove { code } => {
-            let response = client.call(APPROVE_DEVICE_AUTH, &json!({"userCode": code}))?;
+            let response = client.unary(
+                v1::device_service::APPROVE_DEVICE_AUTH,
+                &v1::ApproveDeviceAuthRequest {
+                    user_code: code.clone(),
+                },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("approved {code}\n"))
             }
         }
         Command::DeviceDeny { code } => {
-            let response = client.call(DENY_DEVICE_AUTH, &json!({"userCode": code}))?;
+            let response = client.unary(
+                v1::device_service::DENY_DEVICE_AUTH,
+                &v1::DenyDeviceAuthRequest {
+                    user_code: code.clone(),
+                },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("denied {code}\n"))
             }
         }
         Command::DeviceRevoke { id } => {
-            let response = client.call(REVOKE_DEVICE, &json!({"id": id}))?;
+            let response = client.unary(
+                v1::device_service::REVOKE_DEVICE,
+                &v1::RevokeDeviceRequest { id: id.clone() },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("revoked {id}\n"))
             }
         }
         Command::DeviceRename { id, name } => {
-            let response = client.call(RENAME_DEVICE, &json!({"id": id, "name": name}))?;
+            let response = client.unary(
+                v1::device_service::RENAME_DEVICE,
+                &v1::RenameDeviceRequest {
+                    id: id.clone(),
+                    name: name.clone(),
+                },
+            )?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!("renamed {id} to {name}\n"))
             }
@@ -3524,6 +3563,17 @@ pub(crate) fn json_line<T: ReflectMessage>(message: &T) -> Result<String> {
     line.push(b'\n');
     String::from_utf8(line)
         .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
+}
+
+/// One compact protobuf JSON line per message.
+fn json_lines<'a, T: ReflectMessage + 'a>(
+    messages: impl IntoIterator<Item = &'a T>,
+) -> Result<String> {
+    messages
+        .into_iter()
+        .map(json_line)
+        .collect::<Result<Vec<_>>>()
+        .map(|lines| lines.concat())
 }
 
 /// A JSON value the CLI composed itself, as one compact line.
