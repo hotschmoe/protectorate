@@ -301,9 +301,6 @@ fn send(hub: &Hub, from: &str, args: Send) -> Result<(Message, bool)> {
                 })
                 .map_err(super::backlog_error)?;
             hub.mail.set_note_id(&message.id, &note.id).map_err(error)?;
-            if let Some(events) = &hub.note_events {
-                events("note.created", &note);
-            }
             hub.emit("note.created", &note.id, super::note_event_payload(&note));
             message.note_id = note.id;
         }

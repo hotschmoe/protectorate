@@ -299,7 +299,7 @@ impl Log {
         inner.cache.observe(&mut event.payload);
         inner.persist(&event)?;
         inner.last = event.seq;
-        inner.fanout(event.clone());
+        inner.fanout(&event);
         Ok(event)
     }
 
@@ -341,7 +341,7 @@ impl Log {
             time_ms: now_ms(),
             payload: text_payload(&open.id, thinking, delta),
         };
-        inner.fanout(event);
+        inner.fanout(&event);
         Ok(())
     }
 
@@ -490,7 +490,7 @@ impl Inner {
         }
         Ok(())
     }
-    fn fanout(&self, event: Event) {
+    fn fanout(&self, event: &Event) {
         for watcher in self.watchers.values() {
             watcher.push(event.clone());
         }

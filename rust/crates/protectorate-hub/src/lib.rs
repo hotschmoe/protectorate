@@ -63,8 +63,6 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-pub type NoteEventSink = Arc<dyn Fn(&str, &Note) + Send + Sync>;
-
 struct EventBus {
     sequence: AtomicU64,
     sender: tokio::sync::broadcast::Sender<v1::Event>,
@@ -94,6 +92,9 @@ impl EventBus {
     }
 
     fn publish(&self, kind: &str, subject: &str, payload: Value) {
+        if self.sender.receiver_count() == 0 {
+            return;
+        }
         let _ = self.sender.send(self.event(kind, subject, payload));
     }
 }
@@ -174,7 +175,6 @@ pub struct Hub {
     release_restart: Option<Arc<dyn Fn() + Send + Sync>>,
     release_update_lock: Arc<tokio::sync::Mutex<()>>,
     release_last: std::sync::Mutex<Option<(String, String, String)>>,
-    pub note_events: Option<NoteEventSink>,
     events: Arc<EventBus>,
     public_device_auth: bool,
     require_device_peer: bool,
@@ -380,7 +380,6 @@ impl Hub {
             release_restart: None,
             release_update_lock: Arc::new(tokio::sync::Mutex::new(())),
             release_last: std::sync::Mutex::new(None),
-            note_events: None,
             events,
             public_device_auth: false,
             require_device_peer: false,
@@ -418,22 +417,10 @@ impl Hub {
         self
     }
 
-    pub fn with_identity(mut self, store: Arc<IdentityStore>) -> Self {
-        self.identity = store;
-        self
-    }
     /// The lifetime of the capabilities the hub holds for sleeves and Envoy,
     /// which it refreshes at half that age.
     pub fn with_capability_ttl(mut self, ttl: std::time::Duration) -> Self {
         self.capability_ttl = ttl.clamp(std::time::Duration::from_secs(2), identity::MAX_TTL);
-        self
-    }
-    pub fn with_backlog(mut self, store: Arc<BacklogStore>) -> Self {
-        self.backlog = store;
-        self
-    }
-    pub fn with_note_events(mut self, events: NoteEventSink) -> Self {
-        self.note_events = Some(events);
         self
     }
     pub fn with_sessions(mut self, sessions: Arc<SessionManager>) -> Self {
@@ -483,10 +470,6 @@ impl Hub {
     /// hosts, that every sleeve may reach besides its provider and the hub.
     pub fn with_egress_allow(mut self, hosts: Vec<String>) -> Self {
         self.egress_allow = hosts;
-        self
-    }
-    pub fn with_directory(mut self, directory: Arc<Directory>) -> Self {
-        self.directory = directory;
         self
     }
     /// The CA that issues node certificates when nodes join and renew.
@@ -882,9 +865,6 @@ impl Hub {
                         source: sender(&call.auth.actor),
                     })
                     .map_err(backlog_error)?;
-                if let Some(events) = &hub.note_events {
-                    events("note.created", &created);
-                }
                 hub.emit("note.created", &created.id, note_event_payload(&created));
                 Ok(v1::CreateNoteResponse {
                     note: Some(note(&created)),
@@ -912,9 +892,6 @@ impl Hub {
                     )
                     .map_err(backlog_error)?;
                 if changed {
-                    if let Some(events) = &hub.note_events {
-                        events("note.updated", &updated);
-                    }
                     hub.emit("note.updated", &updated.id, note_event_payload(&updated));
                 }
                 Ok(v1::UpdateNoteResponse {
@@ -930,9 +907,6 @@ impl Hub {
                     .backlog
                     .delete(&call.request.id)
                     .map_err(backlog_error)?;
-                if let Some(events) = &hub.note_events {
-                    events("note.deleted", &deleted);
-                }
                 hub.emit("note.deleted", &deleted.id, note_event_payload(&deleted));
                 Ok(v1::DeleteNoteResponse {})
             }

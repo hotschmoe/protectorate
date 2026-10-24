@@ -179,9 +179,6 @@ fn file_release(
         ..Default::default()
     }) {
         Ok(note) => {
-            if let Some(events) = &hub.note_events {
-                events("note.created", &note);
-            }
             hub.emit("note.created", &note.id, super::note_event_payload(&note));
         }
         Err(error) => eprintln!(
