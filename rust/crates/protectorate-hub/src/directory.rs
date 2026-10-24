@@ -1,10 +1,13 @@
 //! Directory RPC projection from the persistent workspace graph.
-use super::{input, respond, string, Hub, NewNote};
+use super::{Hub, NewNote};
 use protectorate_backlog::Filter;
 use protectorate_directory::{self as directory, Change, Edge, Facts, View};
 use protectorate_sleeve_registry::State;
-use protectorate_wire::{Code, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    v1::{self, directory_service},
+    Call, Code, Result, RpcError, UnaryServer,
+};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
@@ -305,70 +308,85 @@ fn names(views: &[View]) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-fn edge_json(edge: &Edge, names: &BTreeMap<&str, &str>) -> Value {
-    json!({
-        "project": edge.project,
-        "display": names.get(edge.project.as_str()).copied().unwrap_or(""),
-        "via": edge.via,
-    })
+fn edge(edge: &Edge, names: &BTreeMap<&str, &str>) -> v1::ProjectEdge {
+    v1::ProjectEdge {
+        project: edge.project.clone(),
+        display: names
+            .get(edge.project.as_str())
+            .copied()
+            .unwrap_or("")
+            .into(),
+        via: edge.via.clone(),
+    }
 }
 
-fn project_json(view: &View, names: &BTreeMap<&str, &str>) -> Value {
+fn project(view: &View, names: &BTreeMap<&str, &str>) -> v1::DirectoryProject {
     let p = &view.project;
-    let mut out = json!({
-        "id": p.id, "name": p.name, "display": p.display, "remote": p.remote,
-        "owners": p.owners.iter().map(|owner| json!({
-            "sleeve": owner.sleeve,
-            "workspace": owner.path.to_string_lossy(),
-            "branch": owner.branch,
-            "head": owner.head,
-        })).collect::<Vec<_>>(),
-        "provides": p.provides,
-        "dependencyCount": p.deps.len(),
-        "dependsOn": view.depends_on.iter().map(|e| edge_json(e, names)).collect::<Vec<_>>(),
-        "dependents": view.dependents.iter().map(|e| edge_json(e, names)).collect::<Vec<_>>(),
-    });
-    if let Some(refs) = &p.refs {
-        out["defaultBranch"] = json!(refs.default);
-        out["latestTag"] = json!(refs.latest_tag());
+    v1::DirectoryProject {
+        id: p.id.clone(),
+        name: p.name.clone(),
+        display: p.display.clone(),
+        remote: p.remote.clone(),
+        owners: p
+            .owners
+            .iter()
+            .map(|owner| v1::ProjectOwner {
+                sleeve: owner.sleeve.clone(),
+                workspace: owner.path.to_string_lossy().into_owned(),
+                branch: owner.branch.clone(),
+                head: owner.head.clone(),
+            })
+            .collect(),
+        provides: p.provides.clone(),
+        dependency_count: p.deps.len().try_into().unwrap_or(u32::MAX),
+        depends_on: view.depends_on.iter().map(|e| edge(e, names)).collect(),
+        dependents: view.dependents.iter().map(|e| edge(e, names)).collect(),
+        default_branch: p
+            .refs
+            .as_ref()
+            .map(|refs| refs.default.clone())
+            .unwrap_or_default(),
+        latest_tag: p
+            .refs
+            .as_ref()
+            .map(|refs| refs.latest_tag().to_owned())
+            .unwrap_or_default(),
     }
-    out
 }
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     start_scanner(&hub);
     let list = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.DirectoryService/ListProjects",
-        move |request| {
+    server.unary(
+        directory_service::LIST_PROJECTS,
+        move |call: Call<v1::ListProjectsRequest>| {
             let hub = Arc::clone(&list);
             async move {
-                let sleeve = string(&input(&request)?, "sleeve");
+                let sleeve = call.request.sleeve;
                 let views = hub.directory.list();
                 let names = names(&views);
-                let projects = views
-                    .iter()
-                    .filter(|v| {
-                        sleeve.is_empty() || v.project.owners.iter().any(|o| o.sleeve == sleeve)
-                    })
-                    .map(|v| project_json(v, &names))
-                    .collect::<Vec<_>>();
-                respond(&request, json!({"projects": projects}))
+                Ok(v1::ListProjectsResponse {
+                    projects: views
+                        .iter()
+                        .filter(|v| {
+                            sleeve.is_empty() || v.project.owners.iter().any(|o| o.sleeve == sleeve)
+                        })
+                        .map(|v| project(v, &names))
+                        .collect(),
+                })
             }
         },
     )?;
-    server.register(
-        "/protectorate.v1.DirectoryService/GetProject",
-        move |request| {
+    server.unary(
+        directory_service::GET_PROJECT,
+        move |call: Call<v1::GetProjectRequest>| {
             let hub = Arc::clone(&hub);
             async move {
-                let project = string(&input(&request)?, "project");
-                let view = hub.directory.get(&project).map_err(error)?;
+                let view = hub.directory.get(&call.request.project).map_err(error)?;
                 let views = hub.directory.list();
-                respond(
-                    &request,
-                    json!({"project": project_json(&view, &names(&views))}),
-                )
+                Ok(v1::GetProjectResponse {
+                    project: Some(project(&view, &names(&views))),
+                })
             }
         },
     )?;
