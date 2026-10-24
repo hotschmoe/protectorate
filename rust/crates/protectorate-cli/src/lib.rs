@@ -31,6 +31,7 @@ pub use args::{parse, Invocation};
 pub use job::RunError;
 pub use protectorate_connect_client::Client;
 use protectorate_connect_client::Credential;
+use protectorate_wire::{proto_duration, v1, ReflectMessage};
 pub use protectorate_wire::{Code, Result, RpcError};
 use serde_json::{json, Value};
 use std::{
@@ -87,10 +88,6 @@ const GET_NOTE: &str = "/protectorate.v1.BacklogService/GetNote";
 const CREATE_NOTE: &str = "/protectorate.v1.BacklogService/CreateNote";
 const UPDATE_NOTE: &str = "/protectorate.v1.BacklogService/UpdateNote";
 const DELETE_NOTE: &str = "/protectorate.v1.BacklogService/DeleteNote";
-const LIST_LEASES: &str = "/protectorate.v1.LeaseService/ListLeases";
-const ACQUIRE_LEASE: &str = "/protectorate.v1.LeaseService/AcquireLease";
-const RENEW_LEASE: &str = "/protectorate.v1.LeaseService/RenewLease";
-const RELEASE_LEASE: &str = "/protectorate.v1.LeaseService/ReleaseLease";
 const LIST_JOBS: &str = "/protectorate.v1.JobService/ListJobs";
 const GET_JOB: &str = "/protectorate.v1.JobService/GetJob";
 const CANCEL_JOB: &str = "/protectorate.v1.JobService/CancelJob";
@@ -1100,7 +1097,7 @@ fn render(
                 |event| {
                     if invocation.json {
                         stdout
-                            .write_all(json_line(&event)?.as_bytes())
+                            .write_all(value_line(&event)?.as_bytes())
                             .map_err(|error| {
                                 RpcError::new(Code::Internal, format!("write chat event: {error}"))
                             })?;
@@ -1121,7 +1118,7 @@ fn render(
         Command::Events => {
             client.stream(SUBSCRIBE_EVENTS, &json!({}), |event| {
                 let line = if invocation.json {
-                    json_line(&event)?
+                    value_line(&event)?
                 } else {
                     format::event_text(&event)
                 };
@@ -1147,7 +1144,7 @@ fn render(
             }
             client.stream(REMOVE_NODE, &request, |progress| {
                 let line = if invocation.json {
-                    json_line(&progress)?
+                    value_line(&progress)?
                 } else {
                     let phase = progress["phase"]
                         .as_str()
@@ -1259,7 +1256,7 @@ fn chat_wait_multi(
             .recv()
             .map_err(|_| RpcError::new(Code::Internal, "chat wait ended early"))??;
         let line = if json {
-            json_line(&response)?
+            value_line(&response)?
         } else {
             format::chat_wait_text(&response)
         };
@@ -1376,7 +1373,7 @@ fn update_nodes(
                 let phase = progress["phase"].as_str().unwrap_or_default();
                 last_phase = phase.to_owned();
                 let line = if json {
-                    json_line(&progress)?
+                    value_line(&progress)?
                 } else {
                     update_line(current, &progress)
                 };
@@ -1564,7 +1561,7 @@ fn execute_commands(
                 client.call(LIST_PROJECTS, &json!({}))?
             };
             if json {
-                json_line(&response)
+                value_line(&response)
             } else if let Some(project) = response.get("project") {
                 Ok(format::project_text(project))
             } else if target.is_some() {
@@ -1581,7 +1578,7 @@ fn execute_commands(
                 Err(error) => return Err(error),
             };
             if json {
-                json_line(&status)
+                value_line(&status)
             } else {
                 Ok(format::status_text(&status, runtime.as_ref()))
             }
@@ -1589,7 +1586,7 @@ fn execute_commands(
         Command::Quota { refresh } => {
             let quota = client.call(GET_QUOTA, &json!({"refresh": refresh}))?;
             if json {
-                json_line(&quota)
+                value_line(&quota)
             } else {
                 Ok(format::quota_text(&quota))
             }
@@ -1601,7 +1598,7 @@ fn execute_commands(
             }
             let suggestions = client.call(SUGGEST_QUOTA, &request)?;
             if json {
-                json_line(&suggestions)
+                value_line(&suggestions)
             } else {
                 Ok(format::suggest_text(&suggestions))
             }
@@ -1612,7 +1609,7 @@ fn execute_commands(
                 &json!({"name":name,"scopes":scopes,"ttl":format_duration(*ttl)}),
             )?;
             if json {
-                json_line(&issued)
+                value_line(&issued)
             } else {
                 Ok(format::token_created_text(&issued))
             }
@@ -1620,7 +1617,7 @@ fn execute_commands(
         Command::TokenList => {
             let listing = client.call(LIST_TOKENS, &json!({}))?;
             if json {
-                json_line(&listing)
+                value_line(&listing)
             } else {
                 Ok(format::token_list_text(&listing))
             }
@@ -1629,7 +1626,7 @@ fn execute_commands(
         Command::TokenRevoke { id } => {
             let revoked = client.call(REVOKE_TOKEN, &json!({"id":id}))?;
             if json {
-                json_line(&revoked)
+                value_line(&revoked)
             } else {
                 Ok(format::token_revoked_text(&revoked))
             }
@@ -1637,7 +1634,7 @@ fn execute_commands(
         Command::TokenRenew => {
             let renewed = client.call(RENEW_TOKEN, &json!({}))?;
             if json {
-                json_line(&renewed)
+                value_line(&renewed)
             } else {
                 Ok(format::token_renewed_text(&renewed))
             }
@@ -1686,7 +1683,7 @@ fn execute_commands(
                 }
             }
             if json {
-                json_line(&issued)
+                value_line(&issued)
             } else {
                 Ok(format::grant_admin_text(&issued, node, out.as_deref()))
             }
@@ -1698,11 +1695,11 @@ fn execute_commands(
                     Ok(format::items(&page, "entries")
                         .iter()
                         .rev()
-                        .map(json_line)
+                        .map(value_line)
                         .collect::<Result<Vec<_>>>()?
                         .concat())
                 } else {
-                    json_line(&page)
+                    value_line(&page)
                 }
             } else {
                 Ok(format::audit_entries_text(&page, query.chronological))
@@ -1720,7 +1717,7 @@ fn execute_commands(
                 ));
             }
             if json {
-                json_line(&report)
+                value_line(&report)
             } else {
                 Ok(format::audit_verify_text(&report))
             }
@@ -1728,7 +1725,7 @@ fn execute_commands(
         Command::ApprovalList { all } => {
             let approvals = client.call(LIST_APPROVALS, &json!({"all": all}))?;
             if json {
-                json_line(&approvals)
+                value_line(&approvals)
             } else {
                 Ok(format::approvals_text(&approvals))
             }
@@ -1736,7 +1733,7 @@ fn execute_commands(
         Command::ApprovalDecide { id, approve } => {
             let response = client.call(DECIDE_APPROVAL, &json!({"id": id, "approve": approve}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!(
                     "{} {id}\n",
@@ -1747,7 +1744,7 @@ fn execute_commands(
         Command::DeviceList => {
             let devices = client.call(LIST_DEVICES, &json!({}))?;
             if json {
-                json_line(&devices)
+                value_line(&devices)
             } else {
                 Ok(format::device_list_text(&devices))
             }
@@ -1755,7 +1752,7 @@ fn execute_commands(
         Command::DevicePendingList => {
             let requests = client.call(LIST_DEVICE_AUTH, &json!({}))?;
             if json {
-                json_line(&requests)
+                value_line(&requests)
             } else {
                 Ok(format::device_pending_text(&requests))
             }
@@ -1763,7 +1760,7 @@ fn execute_commands(
         Command::DeviceApprove { code } => {
             let response = client.call(APPROVE_DEVICE_AUTH, &json!({"userCode": code}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("approved {code}\n"))
             }
@@ -1771,7 +1768,7 @@ fn execute_commands(
         Command::DeviceDeny { code } => {
             let response = client.call(DENY_DEVICE_AUTH, &json!({"userCode": code}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("denied {code}\n"))
             }
@@ -1779,7 +1776,7 @@ fn execute_commands(
         Command::DeviceRevoke { id } => {
             let response = client.call(REVOKE_DEVICE, &json!({"id": id}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("revoked {id}\n"))
             }
@@ -1787,7 +1784,7 @@ fn execute_commands(
         Command::DeviceRename { id, name } => {
             let response = client.call(RENAME_DEVICE, &json!({"id": id, "name": name}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("renamed {id} to {name}\n"))
             }
@@ -1795,7 +1792,7 @@ fn execute_commands(
         Command::NodeList => {
             let nodes = client.call(LIST_NODES, &json!({}))?;
             if json {
-                json_line(&nodes)
+                value_line(&nodes)
             } else {
                 Ok(format::node_list_text(&nodes))
             }
@@ -1803,7 +1800,7 @@ fn execute_commands(
         Command::NodeShow { name } => {
             let node = client.call(GET_NODE, &json!({"name": name}))?;
             if json {
-                json_line(&node)
+                value_line(&node)
             } else {
                 Ok(format::node_show_text(&node))
             }
@@ -1819,7 +1816,7 @@ fn execute_commands(
         } => {
             let node = client.call(ADD_NODE, &json!({"node": {"name": name, "address": address, "sshAlias": ssh_alias, "tier": tier, "tags": tags, "notes": notes}, "update": update}))?;
             if json {
-                json_line(&node)
+                value_line(&node)
             } else {
                 Ok(format!(
                     "added {} ({}, tier {})\n",
@@ -1832,7 +1829,7 @@ fn execute_commands(
         Command::NodeTier { name, tier } => {
             let node = client.call(SET_NODE_TIER, &json!({"name": name, "tier": tier}))?;
             if json {
-                json_line(&node)
+                value_line(&node)
             } else {
                 Ok(format!(
                     "{} is now tier {}\n",
@@ -1857,7 +1854,7 @@ fn execute_commands(
                 }),
             )?;
             if json {
-                json_line(&invite)
+                value_line(&invite)
             } else {
                 let invited_name = invite
                     .get("node")
@@ -1883,7 +1880,7 @@ fn execute_commands(
             let (response, total, wire, elapsed) =
                 transfer::put(client, name, local, remote, *force, *no_compress)?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!(
                     "put\t{name}:{}\nbytes\t{total} ({wire} bytes sent, {elapsed:?})\n",
@@ -1904,7 +1901,7 @@ fn execute_commands(
             let (trailer, wire, elapsed) =
                 transfer::get(client, name, remote, local, *force, *no_compress)?;
             if json {
-                json_line(
+                value_line(
                     &json!({"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped}),
                 )
             } else {
@@ -1933,7 +1930,7 @@ fn execute_commands(
             if json {
                 Ok(format::items(&notes, "notes")
                     .iter()
-                    .map(json_line)
+                    .map(value_line)
                     .collect::<Result<Vec<_>>>()?
                     .concat())
             } else {
@@ -1947,7 +1944,7 @@ fn execute_commands(
                 .filter(|value| !value.is_null())
                 .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))?;
             if json {
-                json_line(note)
+                value_line(note)
             } else {
                 Ok(format::note_text(note))
             }
@@ -2034,7 +2031,7 @@ fn execute_commands(
         Command::BacklogRemove { id } => {
             let response = client.call(DELETE_NOTE, &json!({"id":id}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("deleted\t{id}\n"))
             }
@@ -2056,7 +2053,7 @@ fn execute_commands(
             note_output(&response, json)
         }
         Command::LeaseList => {
-            let leases = client.call(LIST_LEASES, &json!({}))?;
+            let leases = client.unary(v1::lease_service::LIST_LEASES, &v1::ListLeasesRequest {})?;
             if json {
                 json_line(&leases)
             } else {
@@ -2064,13 +2061,29 @@ fn execute_commands(
             }
         }
         Command::LeaseAcquire(spec) => {
-            let mut request = json!({"holder":spec.holder,"ttl":format_duration(spec.ttl),"wait":spec.wait,"priority":spec.priority});
-            if spec.resource.is_empty() {
-                request["selector"] = json!({"os":spec.os,"arch":spec.arch,"minFreeMemoryBytes":spec.min_free_memory_bytes.to_string(),"gpuVramBytes":spec.gpu_vram_bytes.to_string(),"gpu":spec.gpu,"npu":spec.npu});
+            use v1::acquire_lease_request::Target;
+            let target = if spec.resource.is_empty() {
+                Target::Selector(v1::NodeSelector {
+                    os: spec.os.clone(),
+                    arch: spec.arch.clone(),
+                    min_free_memory_bytes: spec.min_free_memory_bytes,
+                    gpu_vram_bytes: spec.gpu_vram_bytes,
+                    gpu: spec.gpu.clone(),
+                    npu: spec.npu.clone(),
+                })
             } else {
-                request["resource"] = json!(spec.resource);
-            }
-            let lease = client.call(ACQUIRE_LEASE, &request)?;
+                Target::Resource(spec.resource.clone())
+            };
+            let lease = client.unary(
+                v1::lease_service::ACQUIRE_LEASE,
+                &v1::AcquireLeaseRequest {
+                    target: Some(target),
+                    holder: spec.holder.clone(),
+                    ttl: Some(proto_duration(spec.ttl)),
+                    wait: spec.wait,
+                    priority: spec.priority,
+                },
+            )?;
             if json {
                 json_line(&lease)
             } else {
@@ -2078,11 +2091,13 @@ fn execute_commands(
             }
         }
         Command::LeaseRenew { id, ttl } => {
-            let mut request = json!({"id": id});
-            if let Some(ttl) = ttl {
-                request["ttl"] = json!(format_duration(*ttl));
-            }
-            let lease = client.call(RENEW_LEASE, &request)?;
+            let lease = client.unary(
+                v1::lease_service::RENEW_LEASE,
+                &v1::RenewLeaseRequest {
+                    id: id.clone(),
+                    ttl: ttl.map(proto_duration),
+                },
+            )?;
             if json {
                 json_line(&lease)
             } else {
@@ -2093,7 +2108,8 @@ fn execute_commands(
             let mut output = String::new();
             let mut failures = Vec::new();
             for id in ids {
-                match client.call(RELEASE_LEASE, &json!({"id": id})) {
+                let request = v1::ReleaseLeaseRequest { id: id.clone() };
+                match client.unary(v1::lease_service::RELEASE_LEASE, &request) {
                     Ok(reply) => {
                         if json {
                             output.push_str(&json_line(&reply)?);
@@ -2125,7 +2141,7 @@ fn execute_commands(
             if json {
                 Ok(format::items(&jobs, "jobs")
                     .iter()
-                    .map(json_line)
+                    .map(value_line)
                     .collect::<Result<Vec<_>>>()?
                     .concat())
             } else {
@@ -2135,7 +2151,7 @@ fn execute_commands(
         Command::JobShow { id } => {
             let job = client.call(GET_JOB, &json!({"id": id}))?;
             if json {
-                json_line(&job)
+                value_line(&job)
             } else {
                 Ok(format::job_text(&job))
             }
@@ -2158,7 +2174,7 @@ fn execute_commands(
                 }),
             )?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::chat_send_text(&response))
             }
@@ -2180,7 +2196,7 @@ fn execute_commands(
                 }),
             )?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::chat_wait_text(&response))
             }
@@ -2196,7 +2212,7 @@ fn execute_commands(
                 &json!({"sleeve": sleeve, "approvalId": approval_id, "allow": allow, "note": note}),
             )?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok("answered\n".into())
             }
@@ -2204,7 +2220,7 @@ fn execute_commands(
         Command::ChatInterrupt { sleeve } => {
             let response = client.call(CHAT_INTERRUPT, &json!({"sleeve": sleeve}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok("interrupted\n".into())
             }
@@ -2212,7 +2228,7 @@ fn execute_commands(
         Command::ChatCompact { sleeve } => {
             let response = client.call(CHAT_COMPACT, &json!({"sleeve": sleeve}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 let compaction = &response["compaction"];
                 let tokens = |field: &str| {
@@ -2237,7 +2253,7 @@ fn execute_commands(
                 .filter(|chat| !chat.is_null())
                 .ok_or_else(|| RpcError::new(Code::FailedPrecondition, "sleeve has no chat"))?;
             if json {
-                json_line(chat)
+                value_line(chat)
             } else {
                 Ok(format::chat_status_text(chat))
             }
@@ -2246,7 +2262,7 @@ fn execute_commands(
             let response =
                 client.call(CHAT_MODELS, &json!({"sleeve": sleeve, "harness": harness}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else if response["supported"].as_bool() != Some(true) {
                 Ok(format!(
                     "{}\n",
@@ -2285,7 +2301,7 @@ fn execute_commands(
                     "summary": summary, "sourceSeq": next_report_seq().to_string()}),
             )?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else if response["dropped"].as_bool() == Some(true) {
                 Ok("dropped: a newer report is already recorded\n".into())
             } else {
@@ -2304,7 +2320,7 @@ fn execute_commands(
         Command::JobCancel { id } => {
             let job = client.call(CANCEL_JOB, &json!({"id": id}))?;
             if json {
-                json_line(&job)
+                value_line(&job)
             } else {
                 Ok(format::job_cancel_text(&job))
             }
@@ -2314,7 +2330,7 @@ fn execute_commands(
             if json {
                 Ok(format::items(&sleeves, "sleeves")
                     .iter()
-                    .map(json_line)
+                    .map(value_line)
                     .collect::<Result<Vec<_>>>()?
                     .concat())
             } else {
@@ -2324,7 +2340,7 @@ fn execute_commands(
         Command::SleeveWorkspaces => {
             let response = client.call(LIST_WORKSPACES, &json!({}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::sleeve_workspaces_text(&response))
             }
@@ -2332,7 +2348,7 @@ fn execute_commands(
         Command::SleeveBrowse { path } => {
             let response = client.call(BROWSE_WORKSPACES, &json!({"path": path}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::sleeve_browse_text(&response))
             }
@@ -2345,7 +2361,7 @@ fn execute_commands(
                 .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))?;
             let tail = exited_pane_tail(client, sleeve);
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::sleeve_text(sleeve, tail.as_deref()))
             }
@@ -2353,7 +2369,7 @@ fn execute_commands(
         Command::SleeveStatus { name, explain } => {
             let response = client.call(GET_TERMINAL_STATUS, &json!({"name": name}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::terminal_status_text(&response, *explain))
             }
@@ -2364,7 +2380,7 @@ fn execute_commands(
                 &json!({"name": name, "dropCaches": drop_caches}),
             )?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("killed\t{name}\n"))
             }
@@ -2382,7 +2398,7 @@ fn execute_commands(
             }
             let response = client.call(&format!("{SLEEVE_SERVICE}{method}"), &request)?;
             if json {
-                return json_line(&response);
+                return value_line(&response);
             }
             Ok(match method {
                 "DiffCheckpoint" => {
@@ -2412,7 +2428,7 @@ fn execute_commands(
         Command::SessionList => {
             let sessions = client.call(LIST_SESSIONS, &json!({}))?;
             if json {
-                json_line(&sessions)
+                value_line(&sessions)
             } else {
                 Ok(format::session_list_text(&sessions))
             }
@@ -2420,7 +2436,7 @@ fn execute_commands(
         Command::SessionNew(spec) => {
             let response = client.call(CREATE_SESSION, &session_new_body(spec))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!(
                     "created\t{}\n",
@@ -2431,7 +2447,7 @@ fn execute_commands(
         Command::SessionKill { name } => {
             let response = client.call(KILL_SESSION, &json!({"name": name}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!("killed\t{name}\n"))
             }
@@ -2439,7 +2455,7 @@ fn execute_commands(
         Command::SessionRespawn { name } => {
             let response = client.call(RESPAWN_SESSION, &json!({"name": name}))?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format!(
                     "respawned\t{}\n",
@@ -2450,7 +2466,7 @@ fn execute_commands(
         Command::SessionCapture { name, lines } => {
             let pane = client.call(CAPTURE_PANE, &json!({"name": name, "lines": lines}))?;
             if json {
-                json_line(&pane)
+                value_line(&pane)
             } else {
                 Ok(pane
                     .get("text")
@@ -2483,7 +2499,7 @@ fn execute_commands(
             }
             let response = client.call(MSG_SEND, &request)?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::msg_send_text(&response))
             }
@@ -2540,7 +2556,7 @@ fn execute_commands(
             if json {
                 Ok(format::items(&response, "threads")
                     .iter()
-                    .map(json_line)
+                    .map(value_line)
                     .collect::<Result<Vec<_>>>()?
                     .concat())
             } else {
@@ -2553,7 +2569,7 @@ fn execute_commands(
                 &json!({"target": target, "timeout": format_duration(*timeout)}),
             )?;
             if json {
-                json_line(&response)
+                value_line(&response)
             } else {
                 Ok(format::msg_wait_text(&response))
             }
@@ -2564,7 +2580,7 @@ fn execute_commands(
 /// What `msg inbox` and `msg thread` print.
 fn mail_list_output(response: &Value, json: bool) -> Result<String> {
     if json {
-        json_line(response)
+        value_line(response)
     } else {
         Ok(format::mail_text(&format::items(response, "messages")))
     }
@@ -2582,7 +2598,7 @@ fn sent_message_output(
         .filter(|value| !value.is_null())
         .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no message"))?;
     if json {
-        json_line(message)
+        value_line(message)
     } else {
         Ok(human(message))
     }
@@ -2853,7 +2869,7 @@ fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
     })?;
     let value = metrics_json(&snapshot);
     if json {
-        json_line(&value)
+        value_line(&value)
     } else {
         Ok(format::local_metrics_text(&value))
     }
@@ -3154,7 +3170,7 @@ fn note_output(response: &Value, json: bool) -> Result<String> {
         .filter(|value| !value.is_null())
         .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no note"))?;
     if json {
-        json_line(note)
+        value_line(note)
     } else {
         Ok(format::note_record_text(note))
     }
@@ -3176,7 +3192,7 @@ fn spawn_sleeve(client: &Client, spawn: &SleeveSpawn, json: bool) -> Result<Stri
         &spawn_body(spawn, &absolute_workspace(&spawn.workspace)?, &brief),
     )?;
     if json {
-        json_line(&response)
+        value_line(&response)
     } else {
         require_sleeve(&response)?;
         Ok(format::sleeve_spawn_text(&response))
@@ -3208,7 +3224,7 @@ fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
         status["token"] = token;
     }
     if json {
-        json_line(&status)
+        value_line(&status)
     } else {
         Ok(format::orchestrator_status_text(&status, now_millis()))
     }
@@ -3217,7 +3233,7 @@ fn orchestrator_status(client: &Client, json: bool) -> Result<String> {
 fn spawn_envoy(client: &Client, envoy: &SleeveEnvoy, json: bool) -> Result<String> {
     let response = client.call(SPAWN_ENVOY, &envoy_body(envoy))?;
     if json {
-        json_line(&response)
+        value_line(&response)
     } else {
         require_sleeve(&response)?;
         Ok(format::sleeve_envoy_text(&response))
@@ -3235,7 +3251,7 @@ fn chat_settings(client: &Client, settings: &ChatSettings, json: bool) -> Result
             .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no sleeve"))?;
         let chat = sleeve.get("chat").cloned().unwrap_or(Value::Null);
         return if json {
-            json_line(&chat)
+            value_line(&chat)
         } else {
             Ok(format::chat_settings_text(&chat))
         };
@@ -3257,7 +3273,7 @@ fn chat_settings(client: &Client, settings: &ChatSettings, json: bool) -> Result
         .cloned()
         .ok_or_else(|| RpcError::new(Code::DataLoss, "hub returned no chat status"))?;
     if json {
-        json_line(&chat)
+        value_line(&chat)
     } else {
         Ok(format::chat_settings_text(&chat))
     }
@@ -3266,7 +3282,7 @@ fn chat_settings(client: &Client, settings: &ChatSettings, json: bool) -> Result
 fn resleeve_sleeve(client: &Client, resleeve: &SleeveResleeve, json: bool) -> Result<String> {
     let response = client.call(RESLEEVE_SLEEVE, &resleeve_body(resleeve))?;
     if json {
-        json_line(&response)
+        value_line(&response)
     } else {
         require_sleeve(&response)?;
         Ok(format::sleeve_resleeve_text(&response))
@@ -3276,7 +3292,7 @@ fn resleeve_sleeve(client: &Client, resleeve: &SleeveResleeve, json: bool) -> Re
 fn prune_sleeves(client: &Client, prune: &SleevePrune, json: bool) -> Result<String> {
     let response = client.call(PRUNE_SLEEVES, &prune_body(prune))?;
     if json {
-        json_line(&response)
+        value_line(&response)
     } else {
         Ok(format::sleeve_prune_text(&response, prune.yes))
     }
@@ -3502,7 +3518,16 @@ fn normalize_path(path: &std::path::Path) -> String {
     out.to_string_lossy().into_owned()
 }
 
-pub(crate) fn json_line(value: &Value) -> Result<String> {
+/// One message as a compact protobuf JSON line.
+pub(crate) fn json_line<T: ReflectMessage>(message: &T) -> Result<String> {
+    let mut line = protectorate_wire::encode(message)?;
+    line.push(b'\n');
+    String::from_utf8(line)
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
+}
+
+/// A JSON value the CLI composed itself, as one compact line.
+pub(crate) fn value_line(value: &Value) -> Result<String> {
     serde_json::to_string(value)
         .map(|line| format!("{line}\n"))
         .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))

@@ -1,7 +1,7 @@
 //! Human output: tab-aligned columns, `-` for empty values and timestamps in
 //! local time.
 use chrono::{Local, LocalResult, TimeZone};
-use protectorate_wire::{Code, Result, RpcError};
+use protectorate_wire::{v1, Code, Result, RpcError};
 use serde_json::Value;
 use std::{
     io::Write,
@@ -1151,42 +1151,35 @@ pub(crate) fn note_record_text(note: &Value) -> String {
     align(&note_line(note))
 }
 
-pub(crate) fn lease_list_text(response: &Value, now: i64) -> String {
-    let leases = items(response, "leases");
+pub(crate) fn lease_list_text(response: &v1::ListLeasesResponse, now: i64) -> String {
     let mut out = String::from("ID\tRESOURCE\tHOLDER\tEXPIRES IN\n");
-    for lease in &leases {
-        let expires = if text(lease, "state") == "LEASE_STATE_QUEUED" {
-            format!("queued #{}", text(lease, "queuePosition"))
+    for lease in &response.leases {
+        let expires = if lease.state() == v1::LeaseState::Queued {
+            format!("queued #{}", lease.queue_position)
         } else {
-            let expires = timestamp_millis(&text(lease, "expiresAt")).unwrap_or(now);
+            let expires = unix_millis(lease.expires_at.as_ref()).unwrap_or(now);
             go_duration((expires - now) as f64 / 1000.0)
         };
-        out.push_str(
-            &[
-                text(lease, "id"),
-                text(lease, "resource"),
-                text(lease, "holder"),
-                expires,
-            ]
-            .join("\t"),
-        );
-        out.push('\n');
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{expires}\n",
+            lease.id, lease.resource, lease.holder
+        ));
     }
     align(&out)
 }
 
-pub(crate) fn lease_text(lease: &Value) -> String {
+pub(crate) fn lease_text(lease: &v1::Lease) -> String {
     let mut out = String::new();
-    if text(lease, "state") == "LEASE_STATE_QUEUED" {
-        row(&mut out, "ticket", text(lease, "id"));
-        row(&mut out, "resource", text(lease, "resource"));
-        row(&mut out, "holder", text(lease, "holder"));
-        row(&mut out, "position", text(lease, "queuePosition"));
+    if lease.state() == v1::LeaseState::Queued {
+        row(&mut out, "ticket", lease.id.clone());
+        row(&mut out, "resource", lease.resource.clone());
+        row(&mut out, "holder", lease.holder.clone());
+        row(&mut out, "position", lease.queue_position.to_string());
     } else {
-        row(&mut out, "lease", text(lease, "id"));
-        row(&mut out, "resource", text(lease, "resource"));
-        row(&mut out, "holder", text(lease, "holder"));
-        row(&mut out, "expires", local_stamp(text(lease, "expiresAt")));
+        row(&mut out, "lease", lease.id.clone());
+        row(&mut out, "resource", lease.resource.clone());
+        row(&mut out, "holder", lease.holder.clone());
+        row(&mut out, "expires", stamp(lease.expires_at.as_ref()));
     }
     align(&out)
 }
@@ -2573,6 +2566,31 @@ fn age_since(raw: String) -> f64 {
         Some(millis) => (now_millis() - millis) as f64 / 1000.0,
         None => 0.0,
     }
+}
+
+/// Unix milliseconds of a protobuf timestamp.
+pub(crate) fn unix_millis<T: Copy>(at: Option<&T>) -> Option<i64>
+where
+    SystemTime: TryFrom<T>,
+{
+    let time = SystemTime::try_from(*at?).ok()?;
+    Some(match time.duration_since(UNIX_EPOCH) {
+        Ok(after) => after.as_millis() as i64,
+        Err(before) => -(before.duration().as_millis() as i64),
+    })
+}
+
+/// A protobuf timestamp in this machine's local time, `-` when absent.
+fn stamp<T: Copy>(at: Option<&T>) -> String
+where
+    SystemTime: TryFrom<T>,
+{
+    unix_millis(at)
+        .and_then(|millis| match Local.timestamp_millis_opt(millis) {
+            LocalResult::Single(time) => Some(time.to_rfc3339()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "-".to_owned())
 }
 
 /// Protobuf JSON timestamps to Unix milliseconds, without a date crate.

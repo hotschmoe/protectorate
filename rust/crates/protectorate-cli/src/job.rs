@@ -113,7 +113,7 @@ pub(crate) fn run_job(
             let summary = format::job_summary_line(&final_job);
             writeln!(stderr, "{summary}").map_err(io_error)?;
             let rendered = if json_mode {
-                super::json_line(&final_job)?
+                super::value_line(&final_job)?
             } else {
                 String::new()
             };

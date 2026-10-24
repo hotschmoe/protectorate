@@ -1,6 +1,6 @@
 //! Owner hub release update. The stream ends before a cross-version guardian
 //! trial completes, so the CLI checks the authenticated listener afterward.
-use crate::{json_line, Client, Code, Result, RpcError};
+use crate::{value_line, Client, Code, Result, RpcError};
 use serde_json::{json, Value};
 use std::{
     io::Write,
@@ -57,7 +57,7 @@ pub(crate) fn run(
             restarting |= phase == "UPDATE_PHASE_RESTARTING";
             skipped |= phase == "UPDATE_PHASE_SKIPPED";
             if as_json {
-                write(output, &json_line(&progress)?)?;
+                write(output, &value_line(&progress)?)?;
             } else if reportable(&progress) {
                 write(
                     output,
@@ -123,7 +123,7 @@ fn confirm(
         match client.call_with_timeout(HUB_STATUS, &json!({}), Duration::from_secs(2)) {
             Ok(status) if status["version"] == target && status["releaseConfirmed"] == true => {
                 if as_json {
-                    write(output, &json_line(&status)?)?;
+                    write(output, &value_line(&status)?)?;
                 } else {
                     write(output, &format!("hub reports {target}\n"))?;
                 }
