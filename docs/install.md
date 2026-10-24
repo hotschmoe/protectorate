@@ -62,10 +62,10 @@ Releases are stored under `${XDG_DATA_HOME:-$HOME/.local/share}/protectorate/rel
 ## Build locally
 
 ```sh
-PROTECTORATE_BUILD_VERSION=vX.Y.Z cargo build --release -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+PROTECTORATE_BUILD_VERSION=vX.Y.Z cargo build --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
 ```
 
-Place the six resulting binaries in one directory with the published platform names (`*-linux-amd64` or `*-linux-arm64`), create `VERSION`, and generate `SHA256SUMS` with `sha256sum`. For a hub, include the Flutter web archive named `protectorate-web-VERSION.tar.gz` in the checksums. Then pass `--bundle-dir /absolute/path`. Installing from local source without a checksum manifest is deliberately unsupported.
+Place the six resulting binaries from `target/dist` in one directory with the published platform names (`*-linux-amd64` or `*-linux-arm64`), create `VERSION`, and generate `SHA256SUMS` with `sha256sum`. For a hub, include the Flutter web archive named `protectorate-web-VERSION.tar.gz` in the checksums. Then pass `--bundle-dir /absolute/path`. Installing from local source without a checksum manifest is deliberately unsupported.
 
 ## Windows node (current user)
 

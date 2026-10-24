@@ -49,10 +49,10 @@ jobs:
       - name: Build Rust Linux arm64 bundle
         run: |
           version=$(git describe --tags --match 'v[0-9]*' --always)
-          PROTECTORATE_BUILD_VERSION="$version" cargo build --locked --release -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+          PROTECTORATE_BUILD_VERSION="$version" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
           mkdir -p dist
           for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
-            cp "target/release/$name" "dist/$name-linux-arm64"
+            cp "target/dist/$name" "dist/$name-linux-arm64"
           done
           test "$(dist/protectorate-rs-linux-arm64 version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$version"
       - uses: actions/upload-artifact@v4
@@ -145,7 +145,7 @@ jobs:
           version=$(git describe --tags --match 'v[0-9]*' --always)
           ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" PROTECTORATE_BUILD_VERSION="$version" bash scripts/build-rust-termux.sh release
           mkdir -p dist
-          cp target/aarch64-linux-android/release/protectorate-rs-termux dist/protectorate-rs-android-arm64
+          cp target/aarch64-linux-android/dist/protectorate-rs-termux dist/protectorate-rs-android-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: rust-android-arm64
@@ -177,12 +177,12 @@ jobs:
           echo "BUILD_VERSION=$version" >> "$GITHUB_ENV"
           echo "Rust package $version" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Build Rust Linux amd64 bundle
-        run: PROTECTORATE_BUILD_VERSION="$BUILD_VERSION" cargo build --locked --release -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+        run: PROTECTORATE_BUILD_VERSION="$BUILD_VERSION" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
       - name: Verify embedded server version
-        run: test "$(target/release/protectorate-rs version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$BUILD_VERSION"
+        run: test "$(target/dist/protectorate-rs version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$BUILD_VERSION"
       - name: Exercise installed Rust bundle
         env:
-          PROTECTORATE_TEST_RUST_BIN_DIR: target/release
+          PROTECTORATE_TEST_RUST_BIN_DIR: target/dist
         run: bash scripts/test-rust-installed-bundle.sh
       - uses: actions/download-artifact@v4
         with:

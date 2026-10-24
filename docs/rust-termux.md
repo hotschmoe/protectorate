@@ -25,7 +25,7 @@ The script uses NDK Clang on x86_64 hosts. On AArch64 hosts, it uses native
 `clang-19` and `llvm-ar-19` with the NDK sysroot. The linked debug binary is
 `target/aarch64-linux-android/debug/protectorate-rs-termux`. API level 24 is
 the build baseline. The release binary is
-`target/aarch64-linux-android/release/protectorate-rs-termux`. NDK versions and
+`target/aarch64-linux-android/dist/protectorate-rs-termux`. NDK versions and
 paths are supplied by the builder; the example version is the one verified on
 the development machine.
 

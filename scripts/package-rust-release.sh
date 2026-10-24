@@ -9,7 +9,7 @@ version=${1:?usage: package-rust-release.sh VERSION}
 [[ "$version" != *-dirty ]] || { echo 'dirty release version' >&2; exit 2; }
 
 dist=${PROTECTORATE_RELEASE_DIST:-dist}
-binary_dir=${PROTECTORATE_RELEASE_BINARY_DIR:-target/release}
+binary_dir=${PROTECTORATE_RELEASE_BINARY_DIR:-target/dist}
 web_dir=${PROTECTORATE_RELEASE_WEB_DIR:-app/build/web}
 [[ -d "$dist" && ! -L "$dist" ]] || { echo "missing dist directory: $dist" >&2; exit 1; }
 [[ -f "$web_dir/index.html" ]] || { echo "missing Flutter web build: $web_dir" >&2; exit 1; }

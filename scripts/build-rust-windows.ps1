@@ -20,13 +20,13 @@ if ($hostTriple -cne $target) {
     throw "Native Windows $Architecture runner required (Rust host: $hostTriple)"
 }
 
-cargo build --locked --release --target $target -p protectorate-node-windows -p protectorate-cli -p protectorate-mcpbridge --bins
+cargo build --locked --profile dist --target $target -p protectorate-node-windows -p protectorate-cli -p protectorate-mcpbridge --bins
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 cargo test --locked --target $target -p protectorate-node-windows -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 New-Item -ItemType Directory -Force -Path dist | Out-Null
-$release = Join-Path (Join-Path "target" $target) "release"
+$release = Join-Path (Join-Path "target" $target) "dist"
 Copy-Item -LiteralPath (Join-Path $release "protectorate-rs-windows.exe") -Destination "dist/protectorate-rs-windows-$Architecture.exe"
 Copy-Item -LiteralPath (Join-Path $release "protectorate.exe") -Destination "dist/protectorate-windows-$Architecture.exe"
 Copy-Item -LiteralPath (Join-Path $release "protectorate-mcpbridge.exe") -Destination "dist/protectorate-mcpbridge-windows-$Architecture.exe"
